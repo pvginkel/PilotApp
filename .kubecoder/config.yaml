@@ -1,6 +1,15 @@
 # The environment for Pilot, the project manager that runs multi-step work
 # across the KubeCoder fleet: the application, and the repos its work touches.
 # Schema: https://kubecoder.home/help/reference/config-yaml/
+#
+# One sidecar rather than `python` + `frontend`: the Playwright harness boots the
+# Flask backend and the SSE gateway per worker
+# (frontend/tests/support/process/servers.ts), so a single command needs both
+# toolsets in the same container.
+#
+# No imageBuilder: both Dockerfiles are built by Jenkins with
+# helmCharts.kaniko(...), and nothing builds an image from inside this
+# environment.
 
 repos:
   # Its spec repo: the design record and the slices. Shared: one clone per
@@ -20,10 +29,24 @@ tools:
   - use: modern-app
 
 services:
-  # Pilot's record lives in PostgreSQL.
+  # Pilot's record lives in PostgreSQL. The backend's default DATABASE_URL
+  # points at localhost:5432/pilot, and `kc project setup` creates that
+  # database and applies the migrations. The test suites never use it: the
+  # backend suite runs on in-memory SQLite and the Playwright harness seeds a
+  # per-worker SQLite file.
   - postgres
 
 ports:
+  - name: frontend
+    port: 3500
+    type: http
+    sslOffload: true
+  - name: backend
+    port: 3501
+    type: http
+  - name: sse-gateway
+    port: 3502
+    type: http
   # The timeline mockup (PilotAppSpecs design/mockup/), served by its
   # serve.py; design/mockup/README.md has the command. `sslOffload` gives it
   # https://mockup.<env-id>.home, which Chrome on Android needs to install it
