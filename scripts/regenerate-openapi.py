@@ -15,7 +15,7 @@ that's what we poll.
 ## Customize for your project
 
 The defaults below assume:
-- A `backend/` subproject started with `poetry run dev` (long-running server).
+- A `backend/` subproject started with `uv run dev` (long-running server).
   The backend's database must already be migrated (`kc project setup` does
   that); this script adds no one-shot prepare step.
 - The OpenAPI spec lives at `/api/docs/openapi.json`.
@@ -105,7 +105,7 @@ def start_backend(port: int, log_path: Path) -> subprocess.Popen[bytes]:
     log_file = open(log_path, "wb")
     try:
         return subprocess.Popen(
-            ["poetry", "run", "dev"],
+            ["uv", "run", "dev"],
             cwd=BACKEND_DIR,
             env=env,
             stdout=log_file,

@@ -3,34 +3,34 @@ projects:
     description: >-
       PilotApp monorepo — orchestration tooling (the suite runner), the
       shared Procfile.dev dev stack, and CI.
-    setup: cexec modern-app poetry install --no-interaction
+    setup: cexec modern-app uv sync --locked
     # The root's own Python only; backend/ and frontend/ lint themselves. The
     # rule set and the Ruff version are pinned in the root pyproject.toml.
-    lint: cexec modern-app poetry run ruff check scripts tools
+    lint: cexec modern-app uv run ruff check scripts tools
     # No `test:` here on purpose. The root project owns `run-suite`
     # (tools/suite_runner), which is CI's single entry point and runs the
     # backend and frontend suites itself — declaring it here would make
     # `kc project test` run both suites two extra times. The per-component
     # verbs below are those same two suites, once each. CI keeps using
-    # `poetry run run-suite` because it also needs the JUnit XML, the retries
+    # `uv run run-suite` because it also needs the JUnit XML, the retries
     # and the ===SUITE_RESULT:=== markers the Jenkinsfile parses.
 
   backend:
     description: >-
       The project manager that runs multi-step work across the KubeCoder fleet — Flask backend.
     setup:
-      - cexec modern-app poetry install --no-interaction
+      - cexec modern-app uv sync --locked
       - "test -f .env || printf 'DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/pilot\\n' > .env"
-      - cexec modern-app poetry run python scripts/init-dev-database.py
-      - cexec modern-app poetry run cli upgrade-db
-    test: cexec modern-app poetry run pytest
+      - cexec modern-app uv run python scripts/init-dev-database.py
+      - cexec modern-app uv run cli upgrade-db
+    test: cexec modern-app uv run pytest
     # The same three checks backend/scripts/check.py runs, and the formatter's
     # check.
     lint:
-      - cexec modern-app poetry run ruff check .
-      - cexec modern-app poetry run ruff format --check .
-      - cexec modern-app poetry run mypy .
-      - cexec modern-app poetry run vulture app/ vulture_whitelist.py --min-confidence 80
+      - cexec modern-app uv run ruff check .
+      - cexec modern-app uv run ruff format --check .
+      - cexec modern-app uv run mypy .
+      - cexec modern-app uv run vulture app/ vulture_whitelist.py --min-confidence 80
 
   frontend:
     description: >-

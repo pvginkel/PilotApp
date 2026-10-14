@@ -1,7 +1,7 @@
 # Vulture whitelist — parameters required by callback/protocol signatures
 # that vulture incorrectly reports as unused.
 #
-# Run vulture with: poetry run vulture app/ vulture_whitelist.py --min-confidence 80
+# Run vulture with: uv run vulture app/ vulture_whitelist.py --min-confidence 80
 
 # SQLAlchemy event listener signatures (before/after_cursor_execute)
 context  # unused variable

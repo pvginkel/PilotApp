@@ -1,7 +1,7 @@
 """Smoke test: the app starts and answers its liveness probe.
 
 Generated once and app-owned, like conftest.py. It gives a fresh app one test,
-so `pytest` does not exit 5 ("no tests collected") and fail `poetry run check`
+so `pytest` does not exit 5 ("no tests collected") and fail `uv run check`
 before the app has tests of its own.
 """
 
