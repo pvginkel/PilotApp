@@ -6,10 +6,6 @@
 # Flask backend and the SSE gateway per worker
 # (frontend/tests/support/process/servers.ts), so a single command needs both
 # toolsets in the same container.
-#
-# No imageBuilder: both Dockerfiles are built by Jenkins with
-# helmCharts.kaniko(...), and nothing builds an image from inside this
-# environment.
 
 repos:
   # Its spec repo: the design record and the slices. Shared: one clone per
@@ -27,6 +23,10 @@ capabilities:
 
 tools:
   - use: modern-app
+
+# Proves PilotApp's Dockerfiles with `kaniko --no-push` before a push hands
+# them to Jenkins, which builds them with helmCharts.kaniko(...).
+imageBuilder: true
 
 services:
   # Pilot's record lives in PostgreSQL. The backend's default DATABASE_URL
