@@ -72,7 +72,9 @@ class ServiceContainer(containers.DeclarativeContainer):
     )
 
     # Auth services - OIDC authentication
-    auth_service = providers.Singleton(AuthService, config=config)
+    auth_service = providers.Singleton(
+        AuthService, config=config, read_role="editor", write_role="editor"
+    )
     oidc_client_service = providers.Singleton(OidcClientService, config=config)
 
     # SSE connection manager (always included - TaskService depends on it)
