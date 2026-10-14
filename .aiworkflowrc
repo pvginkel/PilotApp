@@ -1,0 +1,21 @@
+# What the dev pipeline reads about this project.
+# Schema: ${CLAUDE_PLUGIN_ROOT}/docs/project-contract.md
+
+spec_repo = "../PilotAppSpecs"
+design_philosophy = "docs/change-discipline.md"
+
+[test_phase]
+# The suites, then the dev stack running in this environment: nothing is
+# deployed yet. The deploy slice adds the push, the rollout and the deployed
+# checks to the doc.
+strategy = "docs/slice-test-plan.md"
+
+[doc_phase]
+plan = "docs/slice-doc-plan.md"
+
+[push]
+# Off until there is a deployment to push to: a slice's commits stay in this
+# environment, and the operator pushes. The deploy slice turns it on.
+enabled = false
+
+# No [devlock]: there is no dev instance to occupy.

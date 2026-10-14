@@ -1,12 +1,21 @@
 # PilotApp
 
-The project manager that runs multi-step work across the KubeCoder fleet
+The application behind **Pilot**, the project manager: it owns multi-step work front to end across
+the KubeCoder fleet, and the operator decides and does only what their hands must. One append-only
+timeline per managed project shows its work, its decision documents and their asks; a side chat
+talks to Pilot's brain, a headless Claude Code session in a store environment.
+
+**Nothing is built or deployed yet**: the app is the ModernAppTemplate skeleton, and version 1 is
+planned from the design record in `../PilotAppSpecs/design/` (start at its README). Its
+`features.md` is the version-1 scope, and [`docs/change-discipline.md`](docs/change-discipline.md)
+says how the record binds a change. A decision it leaves open is the operator's to rule, not
+something to settle in code.
 
 ## Repo structure
 
 - **Root** — the `run-suite` orchestrator (`tools/suite_runner/`, CI's single entry point), the
   shared `Procfile.dev` dev stack and its `scripts/dev.py` launcher, and the `Jenkinsfile`.
-- **`backend/`** — the Flask API (Python, uv).
+- **`backend/`** — the Flask API (Python, uv), on PostgreSQL.
 - **`frontend/`** — the React + Vite SPA (TypeScript, pnpm) with TanStack Router/Query, an
   OpenAPI-generated client, and a Playwright E2E suite that boots the backend per worker.
 
@@ -15,6 +24,14 @@ verbs are cwd-bound. The toolchain lives in the `modern-app` sidecar, so ad-hoc 
 commands need `cexec modern-app`. `scripts/dev.py` starts the dev stack and `scripts/dev.py stop`
 stops it from another shell. After a backend API change, `scripts/regenerate-openapi.py --frontend`
 refreshes the frontend's OpenAPI cache and client.
+
+Other repos the work touches, checked out beside this one:
+
+- **`../PilotAppSpecs`**: the spec repo, private: the design record and the slices. A separate git
+  repo and a working tree shared by parallel sessions: commit there separately, and stage files by
+  name, never `git add -A`.
+- **`../PilotDeploy`**: the deploy chart and its per-stage values.
+- **`../PilotProjects`**: the store environment's repo, the brain's skills and no data.
 
 ## Template ownership
 
@@ -32,4 +49,31 @@ template-owned file to add app behaviour; use the extension points instead:
 | Test fixtures | `backend/tests/conftest.py`, `frontend/tests/support/fixtures.ts` |
 | Sidecars CI must wait for | `backend/scripts/wait-for-services.py` (the suite runner calls it) |
 
-If the template lacks an extension point you need, add it to the template first.
+The template repos are not edited from here: what the template gets wrong is fixed in this repo, in
+a commit of its own. Two such edits stand in template-owned files, and a `copier update` that
+conflicts on them resolves to this repo's side: the app is on **uv, not Poetry** (the `Jenkinsfile`,
+`tools/suite_runner/local.py`, `Procfile.dev`, `scripts/dev.py`, `scripts/regenerate-openapi.py`
+and the backend's `Dockerfile` and scripts), and `backend/alembic/env.py` keeps the app's loggers
+when a migration runs in-process.
+
+## Working rules
+
+**Commit straight to `main`, small and often**, in this repo and the spec repo alike.
+
+**This repo is public; the spec repo is private.** No secret or token, and no excerpt of a real
+project, chat or decision document, goes into a commit here. Test fixtures are invented.
+
+## The dev pipeline
+
+Code changes go through the `dev` plugin's slice workflow (`/dev:triage` → `/dev:plan-slice` →
+`/dev:run-slice`), which the operator drives. The project's half of that contract is `.aiworkflowrc`
+and `.kubecoder/project.yaml`; nothing the pipeline reads by machine belongs in this file.
+
+Issue tracking follows the host convention: this project is **`PilotApp`** on the tracker, key
+**`P`**.
+
+## Key documentation
+
+- [`docs/change-discipline.md`](docs/change-discipline.md): the rules every change obeys.
+- [`docs/slice-test-plan.md`](docs/slice-test-plan.md): how a slice is verified.
+- [`docs/slice-doc-plan.md`](docs/slice-doc-plan.md): which doc surfaces a shipped slice updates.
