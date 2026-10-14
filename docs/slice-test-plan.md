@@ -130,11 +130,12 @@ honouring any repo named in `plan.md`'s `## Push holds`, in an order that holds:
    (no client secret, no generated value, no fallback for one), and no excerpt of a real project,
    chat or decision document. One found comes out of the history before the push; it is never
    pushed.
-2. **PilotDeploy before a PilotApp push whose build pins into it.** The build's last stage,
+2. **PilotDeploy first when it adds a pin key the PilotApp build writes.** The build's last stage,
    `cicd.writeVersionPins`, edits `images.pilot` and `images.pilotUI` in PilotDeploy's
    `config/prd/values.yaml` in place, and fails on a key that file on `origin/main` does not
-   already hold. Otherwise push the chart first when the new image needs what the chart adds, the
-   image first when the chart needs the new image, and either when neither does.
+   already hold. Every green build pins, so the rule is about a key the PilotDeploy change adds,
+   not about pinning as such. Otherwise push the chart first when the new image needs what the
+   chart adds, the image first when the chart needs the new image, and either when neither does.
 3. **Rebase, never force.** Every green PilotApp build commits its pins to PilotDeploy's `main`, so
    before a PilotDeploy push, `git -C ../PilotDeploy fetch -q && git -C ../PilotDeploy rebase
    origin/main`. A rejected push means a pin commit landed first: fetch and rebase again. The same
