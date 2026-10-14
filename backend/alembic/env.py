@@ -17,8 +17,11 @@ config = context.config
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
+# Keep the loggers that exist already: a migration run in-process (the test suite's
+# template database) would otherwise switch off every app logger created before it,
+# the access log's included.
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # add your model's MetaData object here
 # for 'autogenerate' support
