@@ -37,9 +37,7 @@ class ServiceContainer(containers.DeclarativeContainer):
     config = providers.Dependency(instance_of=Settings)
     app_config = providers.Dependency(instance_of=AppSettings)
     session_maker = providers.Dependency(instance_of=sessionmaker)
-    db_session = providers.ContextLocalSingleton(
-        session_maker.provided.call()
-    )
+    db_session = providers.ContextLocalSingleton(session_maker.provided.call())
 
     # Testing service - test sessions and content generation
     testing_service = providers.Factory(TestingService)
@@ -62,7 +60,9 @@ class ServiceContainer(containers.DeclarativeContainer):
         TempFileManager,
         lifecycle_coordinator=lifecycle_coordinator,
     )
-    register_for_background_startup(lambda c: c.temp_file_manager().start_cleanup_thread())
+    register_for_background_startup(
+        lambda c: c.temp_file_manager().start_cleanup_thread()
+    )
 
     # Metrics service - background thread for Prometheus metrics
     metrics_service = providers.Singleton(

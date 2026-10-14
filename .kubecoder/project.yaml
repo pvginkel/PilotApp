@@ -24,9 +24,11 @@ projects:
       - cexec modern-app poetry run python scripts/init-dev-database.py
       - cexec modern-app poetry run cli upgrade-db
     test: cexec modern-app poetry run pytest
-    # The same three checks backend/scripts/check.py runs.
+    # The same three checks backend/scripts/check.py runs, and the formatter's
+    # check.
     lint:
       - cexec modern-app poetry run ruff check .
+      - cexec modern-app poetry run ruff format --check .
       - cexec modern-app poetry run mypy .
       - cexec modern-app poetry run vulture app/ vulture_whitelist.py --min-confidence 80
 
