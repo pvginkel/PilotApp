@@ -41,7 +41,11 @@ def register_root_blueprints(app: Flask) -> None:
     Use this for internal endpoints, WebSocket handlers, or other routes
     that should not be nested under the /api URL prefix.
     """
-    pass
+    # The SSE gateway's callback, a root route of the template's, carries its secret in the
+    # query string; the access log masks it. The template has no logging hook, so it is here.
+    from app.access_log import redact_access_log
+
+    redact_access_log()
 
 
 def register_cli_commands(cli: click.Group) -> None:
