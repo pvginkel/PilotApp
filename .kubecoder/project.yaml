@@ -6,7 +6,12 @@ projects:
     setup: cexec modern-app uv sync --locked
     # The root's own Python only; backend/ and frontend/ lint themselves. The
     # rule set and the Ruff version are pinned in the root pyproject.toml.
-    lint: cexec modern-app uv run ruff check scripts tools
+    lint:
+      - cexec modern-app uv run ruff check scripts tools
+      # The architecture-as-code producer CI validates in AaC/PilotApp.
+      # Exit 0 valid, 1 invalid, 2 transport — a 2 is the validation service,
+      # not this repository.
+      - cexec aac-tools arch-validate docs/architecture/*.yaml
     # No `test:` here on purpose. The root project owns `run-suite`
     # (tools/suite_runner), which is CI's single entry point and runs the
     # backend and frontend suites itself — declaring it here would make
