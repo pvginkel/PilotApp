@@ -1,0 +1,34 @@
+# The environment for Pilot, the project manager that runs multi-step work
+# across the KubeCoder fleet: the application, and the repos its work touches.
+# Schema: https://kubecoder.home/help/reference/config-yaml/
+
+repos:
+  # Its spec repo: the design record and the slices. Shared: one clone per
+  # project, mounted into every environment of it, because parallel sessions
+  # read and append to the one working tree.
+  - url: https://github.com/pvginkel/PilotAppSpecs
+    shared: true
+  # Its deploy chart and per-stage configuration.
+  - url: https://github.com/pvginkel/PilotDeploy
+  # The store environment's repo: the brain's skills, no data.
+  - url: https://github.com/pvginkel/PilotProjects
+
+capabilities:
+  github: rw
+
+tools:
+  - use: modern-app
+
+services:
+  # Pilot's record lives in PostgreSQL.
+  - postgres
+
+preamble:
+  instructions: |
+    Pilot's environment: the application (/work/PilotApp), with its
+    design and slices in /work/PilotAppSpecs. Its work also touches
+    /work/PilotDeploy (the deploy chart) and /work/PilotProjects (the
+    store environment's skills).
+
+    /work/PilotAppSpecs is a SHARED working tree: stage files by name
+    there, never `git add -A`.
