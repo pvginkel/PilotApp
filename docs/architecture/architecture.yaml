@@ -1,0 +1,113 @@
+# Architecture artifact of producer `pilot-app`: Pilot's logical architecture. The two products,
+# the surfaces they expose and what they consume. Hand-authored: this file is the source of truth
+# and its ids are minted once. The running instances, their hosts and the Specialization edges to
+# the products below are `pilot-deploy`'s (pvginkel/PilotDeploy).
+#
+# The UI is the product a person opens, so it carries the app's own name: the launcher titles a
+# tile with the label of the product behind the host.
+schemaVersion: "0.1"
+producer: pilot-app
+
+applicationComponents:
+  - id: app:pilot,e80b688e-4132-477e-85fd-3da0dfe34163
+    label: Pilot Backend
+    summary: Backend of Pilot, the project manager for multi-step work across the KubeCoder fleet — a Flask REST API on PostgreSQL behind the Keycloak sign-in and the editor role.
+    introduced: 2026-10-14
+    lifecycle: active
+    stereotype: SoftwareProduct
+    sourceRepository: git:pvginkel/PilotApp
+    stats:
+      image: registry:5000/pilot
+
+  - id: app:pilot-ui,7059ff8a-e581-4466-99e1-3a63a1b9f38c
+    label: Pilot
+    summary: React + Vite single-page web app of Pilot, behind the Keycloak sign-in, served as static assets by NGINX.
+    introduced: 2026-10-14
+    lifecycle: active
+    stereotype: SoftwareProduct
+    sourceRepository: git:pvginkel/PilotApp
+    stats:
+      image: registry:5000/pilot-ui
+
+applicationServices:
+  - id: svc:pilot-api,1a12e768-b197-4e77-a095-f981982bbb8c
+    label: Pilot API
+    summary: HTTP API under /api — the sign-in flow and the signed-in user, background task status, and the SSE gateway's connection callbacks.
+    introduced: 2026-10-14
+    lifecycle: active
+
+  - id: svc:pilot-ui-web,f9841510-a606-4ec5-a417-4c1b96735ee3
+    label: Pilot Web UI
+    summary: Pilot's web UI delivered over HTTP to browsers (static SPA assets served by NGINX).
+    introduced: 2026-10-14
+    lifecycle: active
+
+applicationInterfaces:
+  - id: if:pilot-api-spa,172747fa-7c45-4482-a45c-471bb2ecbf44
+    label: Pilot API (SPA)
+    summary: The API behind the Keycloak session and the editor role, reads included, consumed by the Pilot single-page frontend.
+    introduced: 2026-10-14
+    lifecycle: active
+
+  - id: if:pilot-ui-browser,125ea23d-0c89-48b1-934f-fe871b9f9afc
+    label: Pilot Web UI (browser)
+    summary: HTTP surface delivering the SPA to the browser.
+    introduced: 2026-10-14
+    lifecycle: active
+
+relations:
+  # --- The exposed surface ---
+  - id: rel:pilot-realizes-api
+    source: app:pilot,e80b688e-4132-477e-85fd-3da0dfe34163
+    target: svc:pilot-api,1a12e768-b197-4e77-a095-f981982bbb8c
+    type: Realization
+
+  - id: rel:pilot-api-spa-interface
+    source: if:pilot-api-spa,172747fa-7c45-4482-a45c-471bb2ecbf44
+    target: svc:pilot-api,1a12e768-b197-4e77-a095-f981982bbb8c
+    type: Assignment
+
+  - id: rel:pilot-ui-realizes-web
+    source: app:pilot-ui,7059ff8a-e581-4466-99e1-3a63a1b9f38c
+    target: svc:pilot-ui-web,f9841510-a606-4ec5-a417-4c1b96735ee3
+    type: Realization
+
+  - id: rel:pilot-ui-browser-interface
+    source: if:pilot-ui-browser,125ea23d-0c89-48b1-934f-fe871b9f9afc
+    target: svc:pilot-ui-web,f9841510-a606-4ec5-a417-4c1b96735ee3
+    type: Assignment
+
+  # --- What the frontend consumes ---
+  # The SPA calls the API same-origin; the UI's NGINX proxies /api/ to the backend.
+  - id: rel:pilot-ui-consumes-api
+    source: app:pilot-ui,7059ff8a-e581-4466-99e1-3a63a1b9f38c
+    target: svc:pilot-api,1a12e768-b197-4e77-a095-f981982bbb8c
+    type: Association
+
+  # The SPA holds an event stream on /api/sse/, which the UI's NGINX proxies to the gateway.
+  - id: rel:pilot-ui-consumes-ssegateway
+    source: app:pilot-ui,7059ff8a-e581-4466-99e1-3a63a1b9f38c
+    target: svc:ssegateway,59a7d043-bb0c-4e44-a8b8-3e943338f807
+    type: Association
+
+  # --- What the backend consumes: recipes the deployer resolves ---
+  - id: rel:pilot-consumes-relational-database
+    source: app:pilot,e80b688e-4132-477e-85fd-3da0dfe34163
+    target: cap:relational-database
+    type: Association
+    boundBy: "env:DATABASE_URL"
+
+  # The sign-in, and the editor role every call is gated on.
+  - id: rel:pilot-consumes-iam
+    source: app:pilot,e80b688e-4132-477e-85fd-3da0dfe34163
+    target: cap:iam
+    type: Association
+    boundBy: "env:OIDC_ISSUER_URL"
+
+  # Task and version events to the browsers. The default is the backend's own (app/config.py).
+  - id: rel:pilot-consumes-ssegateway
+    source: app:pilot,e80b688e-4132-477e-85fd-3da0dfe34163
+    target: svc:ssegateway,59a7d043-bb0c-4e44-a8b8-3e943338f807
+    type: Association
+    boundBy: "env:SSE_GATEWAY_URL"
+    boundByDefaultValue: "http://localhost:3502"
