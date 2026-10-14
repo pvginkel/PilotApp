@@ -30,9 +30,11 @@ a store environment, a worker session, YouTrack) until a slice wires it into the
 ## 0. Preconditions
 
 The driver has ff-merged every code phase into the base branch of every repo the slice touched
-(`state.json`'s `bases`). Confirm each tree is clean (`git status --short`) before starting. A
-dirty tree here means an earlier phase left something behind, and that is a finding, not something
-to tidy away.
+(`state.json`'s `bases`). Confirm each code repo's tree is clean (`git status --short`) before
+starting. The spec repo (`../PilotAppSpecs`) is in `bases` too but is not checked: the driver keeps
+the slice's run files (`log.txt`, `state.json`, `run.lock`, `phases/`, `setup/`, `sweeps/`)
+untracked there for the whole run. A dirty code tree here means an earlier phase left something
+behind, and that is a finding, not something to tidy away.
 
 Every verb below runs from the repo root, because `kc project` is cwd-bound.
 
