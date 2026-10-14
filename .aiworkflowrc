@@ -14,8 +14,8 @@ strategy = "docs/slice-test-plan.md"
 plan = "docs/slice-doc-plan.md"
 
 [push]
-# Off until there is a deployment to push to: a slice's commits stay in this
-# environment, and the operator pushes. The deploy slice turns it on.
-enabled = false
+# A slice's test phase pushes what the slice committed, which deploys it to
+# prd at pilot.ginbov.nl; the driver checks that every repo reached origin.
+enabled = true
 
 # No [devlock]: there is no dev instance to occupy.
