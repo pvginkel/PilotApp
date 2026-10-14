@@ -23,6 +23,10 @@ capabilities:
 
 tools:
   - use: modern-app
+  # PilotDeploy's Helm and Terraform gates.
+  - use: iac
+  # Its architecture gates: gen-architecture and arch-validate.
+  - use: aac-tools
 
 # Proves PilotApp's Dockerfiles with `kaniko --no-push` before a push hands
 # them to Jenkins, which builds them with helmCharts.kaniko(...).
@@ -61,6 +65,10 @@ preamble:
     design and slices in /work/PilotAppSpecs. Its work also touches
     /work/PilotDeploy (the deploy chart) and /work/PilotProjects (the
     store environment's skills).
+
+    `cexec modern-app` runs the app's toolchain (uv, pnpm); `cexec iac`
+    (Terraform, Helm, kubectl) and `cexec aac-tools` (gen-architecture,
+    arch-validate) run PilotDeploy's gates.
 
     /work/PilotAppSpecs is a SHARED working tree: stage files by name
     there, never `git add -A`.
