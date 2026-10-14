@@ -23,6 +23,15 @@ services:
   # Pilot's record lives in PostgreSQL.
   - postgres
 
+ports:
+  # The timeline mockup (PilotAppSpecs design/mockup/), served by its
+  # serve.py; design/mockup/README.md has the command. `sslOffload` gives it
+  # https://mockup.<env-id>.home, which Chrome on Android needs to install it
+  # to the home screen.
+  - name: mockup
+    port: 8080
+    sslOffload: true
+
 preamble:
   instructions: |
     Pilot's environment: the application (/work/PilotApp), with its
