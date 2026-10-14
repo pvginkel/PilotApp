@@ -5,9 +5,8 @@ spec_repo = "../PilotAppSpecs"
 design_philosophy = "docs/change-discipline.md"
 
 [test_phase]
-# The suites, then the dev stack running in this environment: nothing is
-# deployed yet. The deploy slice adds the push, the rollout and the deployed
-# checks to the doc.
+# The suites, the dev stack running in this environment, then the push, the
+# rollout of pilot-prd and the checks against the deployed app.
 strategy = "docs/slice-test-plan.md"
 
 [doc_phase]
