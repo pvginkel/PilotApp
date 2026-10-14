@@ -571,8 +571,14 @@
         "operationId": "post__api_sse_callback",
         "parameters": [],
         "responses": {},
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
         "summary": "Handle SSE Gateway connect/disconnect callbacks.",
-        "tags": []
+        "tags": [],
+        "x-required-role": "editor"
       }
     },
     "/api/tasks/{task_id}": {
@@ -591,8 +597,14 @@
           }
         ],
         "responses": {},
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
         "summary": "Remove a completed task from registry.",
-        "tags": []
+        "tags": [],
+        "x-required-role": "editor"
       }
     },
     "/api/tasks/{task_id}/cancel": {
@@ -611,8 +623,14 @@
           }
         ],
         "responses": {},
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
         "summary": "Cancel a running task.",
-        "tags": []
+        "tags": [],
+        "x-required-role": "editor"
       }
     },
     "/api/tasks/{task_id}/status": {
@@ -631,8 +649,14 @@
           }
         ],
         "responses": {},
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
         "summary": "Get current status of a task.",
-        "tags": []
+        "tags": [],
+        "x-required-role": "editor"
       }
     },
     "/api/testing/auth/clear": {
@@ -745,8 +769,14 @@
             "description": "Bad Request"
           }
         },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
         "summary": "Trigger a version event for integration testing.",
-        "tags": []
+        "tags": [],
+        "x-required-role": "editor"
       }
     },
     "/api/testing/logs/stream": {
@@ -755,8 +785,14 @@
         "operationId": "get__api_testing_logs_stream",
         "parameters": [],
         "responses": {},
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
         "summary": "SSE endpoint for streaming backend application logs in real-time.",
-        "tags": []
+        "tags": [],
+        "x-required-role": "editor"
       }
     },
     "/api/testing/sse/task-event": {
@@ -796,8 +832,14 @@
             "description": "Bad Request"
           }
         },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
         "summary": "Send a fake task event to a specific SSE connection for testing.",
-        "tags": []
+        "tags": [],
+        "x-required-role": "editor"
       }
     },
     "/api/testing/tasks/start": {
@@ -837,8 +879,14 @@
             "description": "Bad Request"
           }
         },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
         "summary": "Start a demo or failing task for integration testing.",
-        "tags": []
+        "tags": [],
+        "x-required-role": "editor"
       }
     },
     "/health/drain": {
@@ -969,7 +1017,7 @@
   "tags": [],
   "x-auth-roles": {
     "admin": null,
-    "read": null,
-    "write": null
+    "read": "editor",
+    "write": "editor"
   }
 }
