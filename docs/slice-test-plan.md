@@ -166,7 +166,7 @@ Once `pilot-app` and `pilot-deploy` are registered, `AaC/Architecture` also runs
 `track_build.py` waits for it as their downstream build.
 
 ```bash
-timeout 1200 track_build.py PilotApp --hash "$(git rev-parse HEAD)" --appear-timeout 120 --diagnose
+timeout 1800 track_build.py PilotApp --hash "$(git rev-parse HEAD)" --appear-timeout 120 --diagnose
 timeout 900 track_build.py AaC/PilotApp --hash "$(git rev-parse HEAD)" --appear-timeout 120 --diagnose
 timeout 900 track_build.py AaC/PilotDeploy --hash <the PilotDeploy commit> --appear-timeout 120 --diagnose
 ```
@@ -174,11 +174,14 @@ timeout 900 track_build.py AaC/PilotDeploy --hash <the PilotDeploy commit> --app
 It needs `JENKINS_TOKEN`, which this environment projects, and the deploy repo's clone
 (`../PilotDeploy`), which it fetches to follow the pin commit. Once `PilotApp`'s build is green it
 reads the pin line from the console (`pvginkel/PilotDeploy <sha> pins config/prd/values.yaml.`)
-and waits until `pilot-prd` has rolled that commit: the build takes a few minutes, the roll about
-one more, and the roll deadline is ten minutes, hence the `timeout`. The pin commit started
-`AaC/PilotDeploy`: follow that build too, by the commit the pin line names. While no Application
-follows PilotDeploy (before the first deploy below), pass `--no-follow-argocd`: the pins have
-nothing to roll them yet. Its exit status says where it stopped:
+and waits until `pilot-prd` has rolled that commit. The `timeout` sits above the build (the first
+`PilotApp` build took 270 s, the model app's run near ten minutes), the 120 s Argo CD may take to
+see the pin commit and the ten-minute roll deadline after that, so that a slow roll ends in
+`track_build.py`'s own exit `6` with its diagnosis rather than in `timeout`'s `124` with none. The
+pin commit started `AaC/PilotDeploy`: follow that build too, by the commit the pin line names.
+While no Application follows PilotDeploy (before the first deploy below), pass
+`--no-follow-argocd`: the pins have nothing to roll them yet. Its exit status says where it
+stopped:
 
 | Exit | Meaning | What to do |
 |------|---------|------------|
