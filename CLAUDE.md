@@ -5,16 +5,18 @@ the KubeCoder fleet, and the operator decides and does only what their hands mus
 timeline per managed project shows its work, its decision documents and their asks; a side chat
 talks to Pilot's brain, a headless Claude Code session in a store environment.
 
-**Nothing is built or deployed yet**: the app is the ModernAppTemplate skeleton, and version 1 is
-planned from the design record in `../PilotAppSpecs/design/` (start at its README). Its
-`features.md` is the version-1 scope, and [`docs/change-discipline.md`](docs/change-discipline.md)
-says how the record binds a change. A decision it leaves open is the operator's to rule, not
-something to settle in code.
+**No feature is built yet**: the app is the ModernAppTemplate skeleton, live in production at
+`https://pilot.ginbov.nl`, where every green build of `main` deploys itself
+([`docs/deployment.md`](docs/deployment.md)). Version 1 is planned from the design record in
+`../PilotAppSpecs/design/` (start at its README). Its `features.md` is the version-1 scope, and
+[`docs/change-discipline.md`](docs/change-discipline.md) says how the record binds a change. A
+decision it leaves open is the operator's to rule, not something to settle in code.
 
 ## Repo structure
 
 - **Root** — the `run-suite` orchestrator (`tools/suite_runner/`, CI's single entry point), the
-  shared `Procfile.dev` dev stack and its `scripts/dev.py` launcher, and the `Jenkinsfile`.
+  shared `Procfile.dev` dev stack and its `scripts/dev.py` launcher, the `Jenkinsfile`, and the
+  `Jenkinsfile.architecture` that publishes the hand-authored model in `docs/architecture/`.
 - **`backend/`** — the Flask API (Python, uv), on PostgreSQL.
 - **`frontend/`** — the React + Vite SPA (TypeScript, pnpm) with TanStack Router/Query, an
   OpenAPI-generated client, and a Playwright E2E suite that boots the backend per worker.
@@ -79,3 +81,6 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
 - [`docs/change-discipline.md`](docs/change-discipline.md): the rules every change obeys.
 - [`docs/slice-test-plan.md`](docs/slice-test-plan.md): how a slice is verified.
 - [`docs/slice-doc-plan.md`](docs/slice-doc-plan.md): which doc surfaces a shipped slice updates.
+- [`docs/deployment.md`](docs/deployment.md): how a change reaches production, and what runs there.
+- [`docs/sign-in.md`](docs/sign-in.md): who can use Pilot: the `editor` role the API requires, a
+  signed-in test's session included.

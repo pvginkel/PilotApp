@@ -158,7 +158,7 @@ Each push starts its repo's jobs, and each is followed to its end:
 | Architecture | `AaC/Architecture` |
 | ArgoCDDeploy | `AaC/ArgoCDDeploy` |
 
-Once `pilot-app` and `pilot-deploy` are registered, `AaC/Architecture` also runs after every
+Once `pilot-app` and `pilot-deploy` are registered, `AaC/Architecture` also runs after every green
 `AaC/PilotApp` and `AaC/PilotDeploy` build (an upstream trigger, after a 90 s quiet period);
 `track_build.py` waits for it as their downstream build.
 

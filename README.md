@@ -5,5 +5,7 @@ the operator decides and does only what their hands must. This repository is the
 and slices are in `pvginkel/PilotAppSpecs`, its deploy chart in `pvginkel/PilotDeploy`, and the
 store environment's repository in `pvginkel/PilotProjects`.
 
-**Status**: not built yet. The repository holds the ModernAppTemplate skeleton (Flask on PostgreSQL,
-React + Vite, Playwright), and version 1 is being planned.
+**Status**: no feature built yet. The repository holds the ModernAppTemplate skeleton (Flask on
+PostgreSQL, React + Vite, Playwright), which CI builds and Argo CD deploys to production at
+`https://pilot.ginbov.nl` ([`docs/deployment.md`](docs/deployment.md)), and version 1 is being
+planned.
