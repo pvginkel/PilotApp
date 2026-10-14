@@ -274,11 +274,12 @@ order above decide it; this is how each push is followed.
    or `0` if it had compared the commit already. Either is the expected end when the summary lists
    `releases` as rolled; anything else is a finding.
 5. **The first sync**, which has no pod before it and so no roll check. `pilot-prd` syncs on its
-   own: the PreSync hook (Job `tf-presync-pilot-prd` in `argocd-hooks`) applies PilotDeploy's
+   own: Argo applies the chart's Namespace `pilot-prd` first, before it creates the hook Job; then
+   the PreSync hook (Job `tf-presync-pilot-prd` in `argocd-hooks`) applies PilotDeploy's
    Terraform, which makes Pilot's role and database on `postgres-pas` and writes the Secret
-   `pilot-db` into `pilot-prd`; then the namespace, the secret generators and the ExternalSecrets;
-   then the Deployment, whose init container `migrate` applies the migrations before the backend
-   starts. Follow it:
+   `pilot-db` into `pilot-prd`; then the secret generators and the ExternalSecrets; then the
+   Deployment, whose init container `migrate` applies the migrations before the backend starts.
+   Follow it:
 
    ```bash
    timeout 300 sh -c 'until cexec iac kubectl -n argocd-prd get application pilot-prd -o name; do sleep 5; done'
