@@ -14,6 +14,7 @@ from spectree import Response as SpectreeResponse
 from app.config import Settings
 from app.schemas.testing_auth import (
     ForceErrorQuerySchema,
+    ForceSSECallbackErrorQuerySchema,
     TestSessionCreateSchema,
     TestSessionResponseSchema,
 )
@@ -142,5 +143,32 @@ def force_auth_error(
     testing_service.set_forced_auth_error(query.status)
 
     logger.info("Configured forced auth error: status=%d", query.status)
+
+    return "", 204
+
+
+@testing_auth_bp.route("/sse/force-callback-error", methods=["POST"])
+@public
+@api.validate(query=ForceSSECallbackErrorQuerySchema)
+@inject
+def force_sse_callback_error(
+    testing_service: TestingService = Provide[ServiceContainer.testing_service],
+) -> tuple[str, int]:
+    """Configure the next SSE Gateway connect callback to return a rejection.
+
+    Single-shot: subsequent connect callbacks resume normal behavior.
+
+    Query Parameters:
+        status: HTTP status code to return on the next SSE connect callback.
+            Only 401 or 403 are accepted (validated by the schema).
+
+    Returns:
+        204: Hook armed successfully
+    """
+    query = ForceSSECallbackErrorQuerySchema.model_validate(request.args.to_dict())
+
+    testing_service.set_forced_sse_callback_error(query.status)
+
+    logger.info("Configured forced SSE callback error: status=%d", query.status)
 
     return "", 204

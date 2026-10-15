@@ -92,6 +92,25 @@
         "title": "ForceErrorQuerySchema",
         "type": "object"
       },
+      "ForceSSECallbackErrorQuerySchema.e510e64": {
+        "description": "Query parameters for /api/testing/sse/force-callback-error.",
+        "properties": {
+          "status": {
+            "description": "HTTP status code to return on the next SSE connect callback (401 or 403 only).",
+            "enum": [
+              401,
+              403
+            ],
+            "title": "Status",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "ForceSSECallbackErrorQuerySchema",
+        "type": "object"
+      },
       "HealthResponse.d817ae2": {
         "description": "Health check response.",
         "properties": {
@@ -567,7 +586,7 @@
     },
     "/api/sse/callback": {
       "post": {
-        "description": "This endpoint receives callbacks from the SSE Gateway when clients connect or disconnect. It extracts the request_id from the callback URL and calls SSEConnectionManager, which then notifies observers.\n\nReturns:     200 on success     401 if authentication fails (production only)     400 if payload invalid or request_id missing",
+        "description": "This endpoint receives callbacks from the SSE Gateway when clients connect or disconnect. It extracts the request_id from the callback URL and calls SSEConnectionManager, which then notifies observers.\n\nA connect is accepted only for the identity the API itself would serve: the gateway answers a refused connect with an in-stream `rejected` event and ends the stream.\n\nReturns:     200 on success     401 if authentication fails (production only) or token missing/invalid     403 if the validated principal carries no recognized role     400 if payload invalid or request_id missing",
         "operationId": "post__api_sse_callback",
         "parameters": [],
         "responses": {},
@@ -793,6 +812,32 @@
         "summary": "SSE endpoint for streaming backend application logs in real-time.",
         "tags": [],
         "x-required-role": "editor"
+      }
+    },
+    "/api/testing/sse/force-callback-error": {
+      "post": {
+        "description": "Single-shot: subsequent connect callbacks resume normal behavior.\n\nQuery Parameters:     status: HTTP status code to return on the next SSE connect callback.         Only 401 or 403 are accepted (validated by the schema).\n\nReturns:     204: Hook armed successfully",
+        "operationId": "post__api_testing_sse_force-callback-error",
+        "parameters": [
+          {
+            "description": "HTTP status code to return on the next SSE connect callback (401 or 403 only).",
+            "in": "query",
+            "name": "status",
+            "required": true,
+            "schema": {
+              "description": "HTTP status code to return on the next SSE connect callback (401 or 403 only).",
+              "enum": [
+                401,
+                403
+              ],
+              "title": "Status",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {},
+        "summary": "Configure the next SSE Gateway connect callback to return a rejection.",
+        "tags": []
       }
     },
     "/api/testing/sse/task-event": {
