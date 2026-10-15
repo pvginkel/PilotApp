@@ -3,6 +3,8 @@ import type { ReactNode } from 'react';
 import { isTestMode } from '@/lib/config/test-mode';
 import { emitTestEvent } from '@/lib/test/event-emitter';
 import type { SseTestEvent } from '@/lib/test/test-events';
+import { useToast } from '@/hooks/use-toast';
+import { api } from '@/lib/api/generated/client';
 import { SseContext } from './sse-context-base';
 import type { SseContextValue } from './sse-context-base';
 // Import to ensure test bridge registration (even though module is not used in production)
@@ -12,12 +14,19 @@ interface SseContextProviderProps {
   children: ReactNode;
 }
 
-// Worker message types
+// Single source for the connection-lost toast copy. Referenced from both the
+// non-2xx branch and the catch branch of the rejected-recovery IIFE so the
+// copy stays in lockstep across the two code paths.
+const CONNECTION_LOST_MESSAGE =
+  'Connection to the server was lost. Please refresh the page to reconnect.';
+
+// Worker message types — must mirror the union in `frontend/src/workers/sse-worker.ts`.
 type WorkerMessage =
   | { type: 'connected'; requestId: string; __testEvent?: SseTestEventMetadata }
   | { type: 'event'; event: string; data: unknown; __testEvent?: SseTestEventMetadata }
   | { type: 'disconnected'; reason?: string; __testEvent?: SseTestEventMetadata }
-  | { type: 'error'; error: string; __testEvent?: SseTestEventMetadata };
+  | { type: 'error'; error: string; __testEvent?: SseTestEventMetadata }
+  | { type: 'rejected'; status: number; message: string; __testEvent?: SseTestEventMetadata };
 
 interface SseTestEventMetadata {
   kind: 'sse';
@@ -77,6 +86,20 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
 
   // Internal listener registry: Map<eventName, Set<handler>>
   const listenersRef = useRef(new Map<string, Set<(data: unknown) => void>>());
+
+  // Capture `showError` in a ref so it can be invoked from inside `useCallback`
+  // bodies without putting `showError` in the dep array. ToastProvider rebuilds
+  // its context value on every render, so depending on `showError` would
+  // propagate through `handleWorkerMessage` → `createSharedWorkerConnection` →
+  // the mount `useEffect` and silently rebuild the SharedWorker on every toast
+  // add/remove. The ref pattern mirrors `sseContextRef` in
+  // `deployment-context-provider.tsx`.
+  // Requires ToastProvider as an ancestor (see providers/index.tsx — CoreProviders > SseProviders).
+  const { showError } = useToast();
+  const showErrorRef = useRef(showError);
+  useEffect(() => {
+    showErrorRef.current = showError;
+  }, [showError]);
 
   /**
    * Dispatch an event to all registered handlers for a given event name
@@ -148,6 +171,42 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
         console.debug('SSE disconnected:', message.reason);
         setIsConnected(false);
         break;
+
+      case 'rejected': {
+        // The gateway rejected the SSE connect callback (auth failure). Probe
+        // /api/auth/self to refresh cookies. On 200, drive a fresh worker
+        // reconnect directly (bypassing the public reconnect() callback so the
+        // recovery is independent of any isConnected guard or React render
+        // timing). On 401, the openapi-fetch auth middleware navigates to
+        // login — the provider does NOT add extra 401 logic. Any other failure
+        // surfaces a toast prompting the user to refresh the page.
+        // Log only the structured `status` — the gateway controls the free-text
+        // `message` field (sourced from the backend response body) and we do
+        // not want it echoed verbatim into the browser console.
+        console.debug(`SSE worker reported rejected: status=${message.status}`);
+        setIsConnected(false);
+
+        void (async () => {
+          try {
+            const { response } = await api.GET('/api/auth/self', {
+              credentials: 'include',
+            });
+            if (response.ok) {
+              sharedWorkerRef.current?.port.postMessage({ type: 'reconnect' });
+              return;
+            }
+            if (response.status === 401) {
+              // Auth middleware is already redirecting to login; nothing to do.
+              return;
+            }
+            showErrorRef.current(CONNECTION_LOST_MESSAGE);
+          } catch (error) {
+            console.error('SSE recovery: /api/auth/self failed:', error);
+            showErrorRef.current(CONNECTION_LOST_MESSAGE);
+          }
+        })();
+        break;
+      }
 
       default:
         console.warn('Unknown worker message:', message);
@@ -289,7 +348,14 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
   }, []);
 
   /**
-   * Reconnect SSE (for focus-based reconnection)
+   * Reconnect SSE (for focus-based reconnection).
+   *
+   * The `isConnected` short-circuit is intentional and applies to BOTH the
+   * SharedWorker and direct-EventSource paths: a `window.focus`-driven call on
+   * a healthy connection must not tear it down. The rejection-recovery flow
+   * drives the worker reconnect directly (`handleWorkerMessage('rejected')`),
+   * so it is not subject to this guard — two distinct paths, two distinct
+   * contracts.
    */
   const reconnect = useCallback(() => {
     if (isConnected) {
@@ -297,9 +363,12 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
     }
 
     if (useSharedWorker.current) {
-      if (!sharedWorkerRef.current) {
-        createSharedWorkerConnection();
+      if (sharedWorkerRef.current) {
+        // Worker is alive but the connection is down — ask it to reconnect.
+        sharedWorkerRef.current.port.postMessage({ type: 'reconnect' });
+        return;
       }
+      createSharedWorkerConnection();
       return;
     }
 
@@ -323,6 +392,49 @@ export function SseContextProvider({ children }: SseContextProviderProps) {
       disconnect();
     };
   }, [createSharedWorkerConnection, createDirectConnection, disconnect]);
+
+  // Test-only worker-reconnect bridge.
+  //
+  // Exposes `window.__sseForceWorkerReconnect()` in test mode so Playwright
+  // specs can drive a worker reconnect on a *healthy* connection without
+  // routing through the public `reconnect()` callback (which intentionally
+  // short-circuits on `isConnected === true` so `window.focus` events do not
+  // tear down a healthy connection).
+  //
+  // The bridge is a parallel test-only pathway that posts `{ type: 'reconnect' }`
+  // straight to the SharedWorker port. It does NOT modify `SseContextValue`
+  // (the public interface), and it is a no-op outside test mode and when no
+  // SharedWorker is active. Mirrors the registration pattern used by
+  // `__deploymentSseControls` in `deployment-context-provider.tsx`.
+  useEffect(() => {
+    if (!isTestMode()) {
+      return;
+    }
+
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const globalWindow = window as typeof window & {
+      __sseForceWorkerReconnect?: () => void;
+    };
+
+    const bridge = () => {
+      const port = sharedWorkerRef.current?.port;
+      if (!port) {
+        return;
+      }
+      port.postMessage({ type: 'reconnect' });
+    };
+
+    globalWindow.__sseForceWorkerReconnect = bridge;
+
+    return () => {
+      if (globalWindow.__sseForceWorkerReconnect === bridge) {
+        delete globalWindow.__sseForceWorkerReconnect;
+      }
+    };
+  }, []);
 
   const contextValue: SseContextValue = {
     isConnected,

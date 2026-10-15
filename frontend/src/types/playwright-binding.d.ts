@@ -14,6 +14,8 @@ type PlaywrightEventBinding = TestModeEnabled extends true
 
 type PlaywrightResetDeploymentRequestIdBinding = TestModeEnabled extends true ? () => void : never;
 
+type PlaywrightSseForceWorkerReconnect = TestModeEnabled extends true ? () => void : never;
+
 type DeploymentSseStatus = {
   isConnected: boolean;
   requestId: string | null;
@@ -33,6 +35,7 @@ declare global {
     __playwright_emitTestEvent?: PlaywrightEventBinding;
     __resetDeploymentRequestId?: PlaywrightResetDeploymentRequestIdBinding;
     __deploymentSseControls?: PlaywrightDeploymentSseControls;
+    __sseForceWorkerReconnect?: PlaywrightSseForceWorkerReconnect;
   }
 }
 

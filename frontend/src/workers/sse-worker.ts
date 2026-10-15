@@ -7,6 +7,10 @@
  * uses a single `onmessage` handler to capture everything.
  *
  * When the last tab disconnects, the worker closes the SSE connection.
+ *
+ * When the gateway refuses the stream (its connect callback answered 401/403),
+ * it opens the stream, sends a named `rejected` event and ends it. The worker
+ * treats that as terminal: no auto-reconnect until a tab sends `reconnect`.
  */
 
 // Type definitions for worker messages
@@ -23,11 +27,13 @@ type WorkerMessage =
   | { type: 'connected'; requestId: string; __testEvent?: TestEventMetadata }
   | { type: 'event'; event: string; data: unknown; __testEvent?: TestEventMetadata }
   | { type: 'disconnected'; reason?: string; __testEvent?: TestEventMetadata }
-  | { type: 'error'; error: string; __testEvent?: TestEventMetadata };
+  | { type: 'error'; error: string; __testEvent?: TestEventMetadata }
+  | { type: 'rejected'; status: number; message: string; __testEvent?: TestEventMetadata };
 
 type TabCommand =
   | { type: 'connect'; isTestMode?: boolean }
-  | { type: 'disconnect' };
+  | { type: 'disconnect' }
+  | { type: 'reconnect' };
 
 // Token generation utility (inline version of makeUniqueToken)
 const TOKEN_CHARS = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -50,6 +56,13 @@ const maxRetryDelay = 60000; // 60 seconds
 
 // Cache the last version event so late-joining tabs receive it immediately
 let lastVersionPayload: unknown = null;
+
+// Terminal flag set when the gateway emits a `rejected` SSE event (auth failure).
+// Suppresses the auto-reconnect loop in `EventSource.onerror` until a tab issues
+// an explicit `reconnect` command (after probing /api/auth/self). Cleared in
+// `handleReconnect()` and `handleConnect()` so a fresh connection is not
+// pre-emptively suppressed.
+let rejectedTerminal = false;
 
 /**
  * Broadcast a message to all connected tabs
@@ -220,7 +233,70 @@ function createEventSource(): void {
     closeConnection();
   });
 
+  // The gateway sends `rejected` as a named SSE event with a JSON `data` payload
+  // (`{"status": <code>, "message": "<text>"}`) when the connect callback rejects
+  // with an auth-related status. The stream has opened first, so `onopen` has
+  // already broadcast `connected`. The worker treats this as terminal: close the
+  // EventSource, cancel the retry loop, and broadcast a typed `rejected` message
+  // to every connected tab. The tabs probe `/api/auth/self` and drive a fresh
+  // `reconnect` command if cookies refreshed successfully.
+  eventSource.addEventListener('rejected', (event) => {
+    let status = 0;
+    let message = 'Unknown';
+    try {
+      const payload = JSON.parse((event as MessageEvent).data) as {
+        status?: number;
+        message?: string;
+      };
+      if (typeof payload?.status === 'number') {
+        status = payload.status;
+      }
+      if (typeof payload?.message === 'string') {
+        message = payload.message;
+      }
+    } catch (parseError) {
+      // Preserve the raw wire bytes (truncated) for ops triage. Behaviour is
+      // unchanged: the worker still treats the event as terminal with status=0
+      // and broadcasts `rejected` to tabs.
+      const rawData = typeof (event as MessageEvent).data === 'string'
+        ? (event as MessageEvent).data as string
+        : String((event as MessageEvent).data);
+      const truncated = rawData.length > 200 ? `${rawData.slice(0, 200)}…` : rawData;
+      console.warn(
+        'SSE worker: Failed to parse `rejected` payload:',
+        parseError,
+        'raw:',
+        truncated
+      );
+    }
+
+    rejectedTerminal = true;
+    closeConnection();
+
+    const rejectedMessage: WorkerMessage = {
+      type: 'rejected',
+      status,
+      message,
+    };
+
+    if (hasTestModePorts()) {
+      rejectedMessage.__testEvent = createTestEvent('connection', 'message', 'rejected', {
+        status,
+        message,
+      });
+    }
+
+    broadcast(rejectedMessage);
+  });
+
   eventSource.onerror = (event) => {
+    // After a `rejected` event the EventSource may fire a final `onerror` as
+    // the stream closes. Suppress reconnect scheduling so the auto-reconnect
+    // loop does not fight the auth-recovery flow driven from the tabs.
+    if (rejectedTerminal) {
+      return;
+    }
+
     console.error('SSE worker: EventSource error:', event);
 
     const errorMessage: WorkerMessage = {
@@ -253,6 +329,11 @@ function handleConnect(port: MessagePort, isTestMode = false): void {
   ports.add(port);
 
   if (!eventSource) {
+    // Clear any lingering terminal flag from a prior rejection so the new
+    // EventSource is not pre-emptively suppressed (covers the edge case where
+    // the last tab disconnected after `rejected`, the worker stayed alive,
+    // and a new tab is now connecting).
+    rejectedTerminal = false;
     createEventSource();
   } else if (eventSource.readyState === EventSource.OPEN) {
     // SSE already connected — send connected message to new tab
@@ -292,6 +373,21 @@ function handleConnect(port: MessagePort, isTestMode = false): void {
 }
 
 /**
+ * Handle a `reconnect` tab command.
+ *
+ * Idempotent: closes any extant EventSource (which clears the retry timer,
+ * request id, retry count and cached version payload), clears the terminal
+ * `rejected` flag, then opens a fresh EventSource with a new request id.
+ * Multiple commands arriving close together collapse to a single in-flight
+ * connection because the worker is single-threaded.
+ */
+function handleReconnect(): void {
+  closeConnection();
+  rejectedTerminal = false;
+  createEventSource();
+}
+
+/**
  * Handle tab disconnection
  */
 function handleDisconnect(port: MessagePort): void {
@@ -323,6 +419,10 @@ self.addEventListener('connect', (event) => {
 
       case 'disconnect':
         handleDisconnect(port);
+        break;
+
+      case 'reconnect':
+        handleReconnect();
         break;
 
       default:
