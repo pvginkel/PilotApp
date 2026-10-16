@@ -33,8 +33,9 @@ The judgment, which is how to route a finding, what counts as impact and where w
 brain's: a headless Claude Code session in the store environment, whose skills live in
 `pvginkel/PilotProjects`. The server's own jobs are deterministic: the record, ingest and
 projection, the turn and response streams, the usage limits, push checks, the resume recipe, the
-block DSL's parser and renderer, and starting environments on demand. A change that moves judgment into
-the server is the wrong change, however convenient.
+block DSL's parser and renderer, starting environments on demand, and the waits — matching a
+tracker's posted card transitions, the timer, the batching — which the server fires and only the
+brain closes. A change that moves judgment into the server is the wrong change, however convenient.
 
 ## PostgreSQL is the one record
 
