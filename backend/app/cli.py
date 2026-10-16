@@ -4,6 +4,7 @@ import sys
 
 import click
 from dotenv import load_dotenv
+from sqlalchemy.engine import make_url
 
 from app import create_app
 from app.app import App
@@ -62,7 +63,9 @@ def handle_upgrade_db(
             sys.exit(1)
 
         # Let operator know which database is targeted
-        print(f"Using database: {app.config['SQLALCHEMY_DATABASE_URI']}")
+        # Masked: prd runs upgrade-db as an init container, whose log any reader sees.
+        uri = make_url(app.config["SQLALCHEMY_DATABASE_URI"])
+        print(f"Using database: {uri.render_as_string(hide_password=True)}")
 
         # Safety check for recreate
         if recreate and not confirmed:
@@ -127,7 +130,9 @@ def handle_load_test_data(app: App, confirmed: bool = False) -> None:
             sys.exit(1)
 
         # Let operator know which database is targeted
-        print(f"Using database: {app.config['SQLALCHEMY_DATABASE_URI']}")
+        # Masked: prd runs upgrade-db as an init container, whose log any reader sees.
+        uri = make_url(app.config["SQLALCHEMY_DATABASE_URI"])
+        print(f"Using database: {uri.render_as_string(hide_password=True)}")
 
         # Safety check for confirmation
         if not confirmed:
