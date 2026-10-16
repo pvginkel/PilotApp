@@ -7,8 +7,9 @@ talks to Pilot's brain, a headless Claude Code session in a store environment.
 
 **No feature is built yet**: the app is the ModernAppTemplate skeleton, live in production at
 `https://pilot.ginbov.nl`, where every green build of `main` deploys itself
-([`docs/deployment.md`](docs/deployment.md)). Version 1 is planned from the design record in
-`../PilotAppSpecs/design/` (start at its README). Its `features.md` is the version-1 scope, and
+([`docs/deployment.md`](docs/deployment.md)). Version 1 is built from the design record in
+`../PilotAppSpecs/design/` (start at its README), along the steps of its `implementation-plan.md`.
+Its `features.md` is the version-1 scope, and
 [`docs/change-discipline.md`](docs/change-discipline.md) says how the record binds a change. A
 decision it leaves open is the operator's to rule, not something to settle in code.
 
