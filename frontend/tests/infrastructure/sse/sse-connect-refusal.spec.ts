@@ -20,9 +20,11 @@ type StreamOutcome =
   | { outcome: 'rejected'; status: number; message: string };
 
 /**
- * Open a stream and report how the gateway answered: `accepted` on the first
- * envelope (an accepted stream is sent the current version on connect),
- * `rejected` on the gateway's `rejected` event.
+ * Open a stream and report how the gateway answered: `accepted` on the
+ * gateway's `ready` event, which it sends once the callback has accepted the
+ * stream (the app's own client counts as connected on it too), `rejected` on
+ * its `rejected` event. Not on a first envelope: in a local stage, the tests'
+ * included, the backend sends no version on connect.
  */
 async function openStream(page: Page, timeoutMs = 15000): Promise<StreamOutcome> {
   return page.evaluate(
@@ -42,7 +44,7 @@ async function openStream(page: Page, timeoutMs = 15000): Promise<StreamOutcome>
           resolve(result);
         };
 
-        es.onmessage = () => settle({ outcome: 'accepted' });
+        es.addEventListener('ready', () => settle({ outcome: 'accepted' }));
         es.addEventListener('rejected', event => {
           const { status, message } = JSON.parse((event as MessageEvent).data);
           settle({ outcome: 'rejected', status, message });
