@@ -13,7 +13,8 @@ URI = "postgresql+psycopg://pilot:s3cret-password@db.test/pilot?sslmode=prefer"
 def connected_app(app: Flask, monkeypatch: pytest.MonkeyPatch) -> App:
     assert isinstance(app, App)
     monkeypatch.setattr(cli, "check_db_connection", lambda: True)
-    app.config["SQLALCHEMY_DATABASE_URI"] = URI
+    # The session app serves every later test: undo the URI at teardown.
+    monkeypatch.setitem(app.config, "SQLALCHEMY_DATABASE_URI", URI)
     return app
 
 
