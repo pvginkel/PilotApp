@@ -72,6 +72,16 @@ declarative modern-app build on the library's `modernApp.test`, where the templa
 **This repo is public; the spec repo is private.** No secret or token, and no excerpt of a real
 project, chat or decision document, goes into a commit here. Test fixtures are invented.
 
+**A change to the plan starts as a proposal**, for as long as version 1 is built. The plan is the
+design record in `../PilotAppSpecs/design/`, the implementation plan included, and it is not
+updated ad hoc: the change is first written up as a proposal in `design/proposals/`, and
+`implementation-plan.md` is updated to say when, at the latest, the proposal is handled — before
+the step that would otherwise read the old plan. Handling a proposal means, in order: a pass
+under the `kubecoder:data-modelling` skill, if it touches the data model; an arch design
+(`/dev:arch-design`), if it raises an architectural question; then absorbing it into the plan,
+the feature ledger with it. A ruling made inside a slice's triage, planning or run is the
+pipeline's, recorded as the pipeline records it, not a proposal.
+
 ## The dev pipeline
 
 Code changes go through the `dev` plugin's slice workflow (`/dev:triage` → `/dev:plan-slice` →
