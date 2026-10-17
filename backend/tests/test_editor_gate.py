@@ -2,7 +2,12 @@
 
 The read and the write are the task endpoints on a task that runs until it is
 cancelled, so a request the gate lets through answers 200 and one it refuses
-answers 403 with the task untouched.
+answers 403 with the task untouched. A task answers only the subject that
+started it, so the task runs under the caller's subject: what decides the
+outcome is the caller's role, not the task's owner.
+
+``/api/auth/self`` reads the access token from the cookie only, as the browser
+sends it, never from an Authorization header, so the token tests send it there.
 """
 
 import time
@@ -21,6 +26,9 @@ from app.schemas.task_schema import TaskStatus
 from app.services.base_task import BaseTask, ProgressHandle
 
 
+SUBJECT = "someone"
+
+
 class _Result(BaseModel):
     cancelled: bool
 
@@ -33,7 +41,7 @@ class _RunsUntilCancelled(BaseTask):
 
 def _running_task(app: Flask) -> Generator[str]:
     task = _RunsUntilCancelled()
-    started = app.container.task_service().start_task(task)
+    started = app.container.task_service().start_task(task, caller_subject=SUBJECT)
     try:
         yield started.task_id
     finally:
@@ -70,7 +78,7 @@ class TestTestingSessions:
 
     def _sign_in(self, client: FlaskClient, roles: list[str]) -> None:
         response = client.post(
-            "/api/testing/auth/session", json={"subject": "someone", "roles": roles}
+            "/api/testing/auth/session", json={"subject": SUBJECT, "roles": roles}
         )
         assert response.status_code == 201
 
@@ -106,26 +114,34 @@ class TestOidcTokens:
     """A real token's role is the client role of the app's own audience."""
 
     @pytest.fixture
-    def bearer(self, test_settings: Settings, generate_test_jwt: Any) -> Any:
-        def _bearer(claims: dict[str, Any]) -> dict[str, str]:
+    def token(self, test_settings: Settings, generate_test_jwt: Any) -> Any:
+        def _token(claims: dict[str, Any]) -> str:
             now = int(time.time())
             payload = {
-                "sub": "someone",
+                "sub": SUBJECT,
                 "iss": test_settings.oidc_issuer_url,
                 "aud": test_settings.oidc_audience,
                 "iat": now,
                 "exp": now + 3600,
                 **claims,
             }
-            token = jwt.encode(
+            return jwt.encode(
                 payload,
                 generate_test_jwt.private_key,
                 algorithm="RS256",
                 headers={"kid": "test-key-id"},
             )
-            return {"Authorization": f"Bearer {token}"}
 
-        return _bearer
+        return _token
+
+    @staticmethod
+    def _bearer(token: str) -> dict[str, str]:
+        return {"Authorization": f"Bearer {token}"}
+
+    @staticmethod
+    def _self(client: FlaskClient, token: str, settings: Settings) -> TestResponse:
+        client.set_cookie(settings.oidc_cookie_name, token)
+        return client.get("/api/auth/self")
 
     @pytest.mark.parametrize(
         "claims",
@@ -147,33 +163,36 @@ class TestOidcTokens:
         oidc_app: Flask,
         oidc_client: FlaskClient,
         oidc_task_id: str,
-        bearer: Any,
+        token: Any,
+        test_settings: Settings,
         claims: dict[str, Any],
     ) -> None:
-        headers = bearer(claims)
+        jwt_token = token(claims)
+        headers = self._bearer(jwt_token)
 
         assert _read(oidc_client, oidc_task_id, headers=headers).status_code == 403
         assert _write(oidc_client, oidc_task_id, headers=headers).status_code == 403
         assert _task_status(oidc_app, oidc_task_id) != TaskStatus.CANCELLED
-        assert oidc_client.get("/api/auth/self", headers=headers).status_code == 403
+        assert self._self(oidc_client, jwt_token, test_settings).status_code == 403
 
     def test_token_with_the_clients_editor_role_is_served(
         self,
         oidc_app: Flask,
         oidc_client: FlaskClient,
         oidc_task_id: str,
-        bearer: Any,
+        token: Any,
         test_settings: Settings,
     ) -> None:
-        headers = bearer(
+        jwt_token = token(
             {"resource_access": {test_settings.oidc_audience: {"roles": ["editor"]}}}
         )
+        headers = self._bearer(jwt_token)
 
         assert _read(oidc_client, oidc_task_id, headers=headers).status_code == 200
         assert _write(oidc_client, oidc_task_id, headers=headers).status_code == 200
         assert _task_status(oidc_app, oidc_task_id) == TaskStatus.CANCELLED
 
-        me = oidc_client.get("/api/auth/self", headers=headers)
+        me = self._self(oidc_client, jwt_token, test_settings)
         assert me.status_code == 200
         assert me.get_json()["roles"] == ["editor"]
 
