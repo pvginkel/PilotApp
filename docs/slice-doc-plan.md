@@ -49,6 +49,19 @@ and the dev workflow Pilot drives in the AIWorkflow repo. This phase edits none 
 that changed a surface they depend on, or anything a deployment has to follow, names it in the
 close-out report so the operator can file the change against its owner.
 
+### 6. The feature ledger
+
+`../PilotAppSpecs/design/feature-ledger.md` is where the delivery of every feature in `features.md`
+stands: a row per feature and sub-feature, the slices of `implementation-plan.md` §3 that build it,
+its status. **Every slice owes this surface**, whatever else it changed. From the diff and the
+slice's acceptance criteria, for each row that names the slice: shipped in full and this was its
+last slice, `delivered <date>`; shipped, with other slices still to come, `partial`. A feature the
+slice planned but did not ship is never left `planned` under a closed slice and never ticked: take
+it out of the slice's Features cell in §3 (`(not …)`), set the row `unplanned`, and say in its note
+which slice left it out and that the close-out report names it, so the close-out session can place
+or drop it. `python3 ../PilotAppSpecs/design/tools/check_ledger.py` lists what is owed and what
+disagrees; it is a gate below.
+
 ## What "up to date" means here
 
 **State the design as it is**, as implemented, not as the slice planned it. Where the
@@ -67,6 +80,7 @@ and no secret: examples are invented.
 
 ```bash
 kc project build      # unchanged and green: the doc phase must not have moved code
+python3 ../PilotAppSpecs/design/tools/check_ledger.py   # 0 errors: the feature ledger agrees with the record
 ```
 
 Check that relative links resolve. Then commit. If the design record or the slice's own folder in
@@ -75,5 +89,6 @@ tree shared by parallel sessions, so stage files by name.
 
 ## When there is little to do
 
-A slice that changed no design, no convention and no reader-facing surface owes nothing here, and
-saying so plainly is the correct outcome. Do not invent doc work to fill the phase.
+A slice that changed no design, no convention and no reader-facing surface owes nothing here but
+the feature ledger, and saying so plainly is the correct outcome. Do not invent doc work to fill
+the phase.

@@ -11,7 +11,10 @@ talks to Pilot's brain, a headless Claude Code session in a store environment.
 `../PilotAppSpecs/design/` (start at its README), along the steps of its `implementation-plan.md`.
 Its `features.md` is the version-1 scope, and
 [`docs/change-discipline.md`](docs/change-discipline.md) says how the record binds a change. A
-decision it leaves open is the operator's to rule, not something to settle in code.
+decision it leaves open is the operator's to rule, not something to settle in code. Delivery is
+tracked per feature in the record's `feature-ledger.md`, and that is not optional: every slice's doc
+phase ticks it ([`docs/slice-doc-plan.md`](docs/slice-doc-plan.md) §6), and an edit to it, to
+`features.md` or to the plan's §3 ends with `design/tools/check_ledger.py` green.
 
 ## Repo structure
 
