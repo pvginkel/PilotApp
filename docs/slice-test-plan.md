@@ -403,8 +403,9 @@ POD=$(cexec iac kubectl -n pilot-prd get pods -l app.kubernetes.io/name=pilot -o
    grep -o 'id="kc-form-login"\|kc-error-message\|Client not found\.\|Invalid parameter: [a-z_]*' tmp/kc-login.html | sort -u
    ```
 
-   The login route builds its redirect from configuration alone, without asking Keycloak (and
-   answers `400` without its `redirect` parameter), so the `302` proves the configuration and only
+   The login route builds its redirect from configuration and the origin the request came in on
+   (the `redirect_uri` is that origin's callback), without asking Keycloak (and answers `400`
+   without its `redirect` parameter), so the `302` proves the configuration and only
    Keycloak's answer proves the client: a client that does not exist, or a redirect URI it does not
    register, answers `400` with `kc-error-message` ("Client not found.", "Invalid parameter:
    redirect_uri"). The page title, "Sign in to Homelab", is the same on both, so it is no marker.
