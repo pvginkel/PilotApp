@@ -29,15 +29,15 @@ tools:
   - use: aac-tools
 
 # Proves PilotApp's Dockerfiles with `kaniko --no-push` before a push hands
-# them to Jenkins, which builds them with helmCharts.kaniko(...).
+# them to Jenkins, which builds them with helmCharts.kaniko2(...).
 imageBuilder: true
 
 services:
   # Pilot's record lives in PostgreSQL. The backend's default DATABASE_URL
   # points at localhost:5432/pilot, and `kc project setup` creates that
-  # database and applies the migrations. The test suites never use it: the
-  # backend suite runs on in-memory SQLite and the Playwright harness seeds a
-  # per-worker SQLite file.
+  # database and applies the migrations. The backend suite and Playwright (a
+  # clone of a seed database per worker) create their own databases on the
+  # same server (TEST_DATABASE_ADMIN_URL) and never touch the dev one.
   - postgres
 
 ports:
