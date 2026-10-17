@@ -4,7 +4,9 @@ Service code calls :func:`after_commit` to schedule a callback — an outbound
 notification, a cache purge, a pipeline trigger — that must only happen once
 the request's database writes are durable. The ``teardown_request`` handler in
 ``create_app()`` runs the callbacks after a successful commit and drops them on
-rollback, then clears them either way.
+rollback, then clears them either way. Off the request path,
+``app.database.scoped_session`` (and ``BaseSessionTask``, which uses it) does
+the same for its own commit.
 
 The callbacks live in a ``ContextVar``, not Flask's ``g``, so service code
 stays Flask-free. Registering the same callback twice in one request runs it
@@ -23,7 +25,10 @@ _callbacks: contextvars.ContextVar[tuple[Callable[[], None], ...]] = contextvars
 
 
 def after_commit(callback: Callable[[], None]) -> None:
-    """Run ``callback`` once the current request's transaction has committed."""
+    """Run ``callback`` once the current transaction has committed.
+
+    That is the request's, or the ``scoped_session`` block's off the request path.
+    """
     callbacks = _callbacks.get()
     if callback not in callbacks:
         _callbacks.set((*callbacks, callback))

@@ -1,9 +1,12 @@
-"""The SSE Gateway connect callback admits only the identity the API serves.
+"""The SSE Gateway connect callback admits only Pilot's `editor`.
 
-A refused connect answers 401 (no or invalid token) or 403 (no `editor`) before
-the connection is registered, so a refused stream never receives an event. The
-gateway forwards the browser's headers in the callback payload, so the tests
-put the token there, not in the test client's cookie jar.
+The callback itself (401 for a missing or invalid token, the testing hook,
+disconnects, the local admin) is the template's and tested there. These are
+Pilot's role cases: the app reads and writes as `editor` alone, so a caller
+without it is refused 403 before the connection is registered, and a refused
+stream never receives an event. The gateway forwards the browser's headers in
+the callback payload, so the tests put the token there, not in the test
+client's cookie jar.
 """
 
 from collections.abc import Generator
@@ -91,19 +94,6 @@ def local(app: Flask) -> Generator[_Callback]:
 
 
 class TestWithOidc:
-    def test_no_token_is_refused_401(self, oidc: _Callback) -> None:
-        oidc.assert_refused(oidc.connect("req-none"), 401, "req-none")
-
-    @pytest.mark.parametrize(
-        "flaw", ["expired", "invalid_signature", "invalid_issuer", "invalid_audience"]
-    )
-    def test_invalid_token_is_refused_401(
-        self, oidc: _Callback, generate_test_jwt: Any, flaw: str
-    ) -> None:
-        token = generate_test_jwt(roles=["editor"], **{flaw: True})
-
-        oidc.assert_refused(oidc.connect("req-bad", _cookie(token)), 401, "req-bad")
-
     @pytest.mark.parametrize("roles", [[], ["admin"], ["reader"]])
     def test_token_without_editor_is_refused_403(
         self, oidc: _Callback, generate_test_jwt: Any, roles: list[str]
@@ -112,18 +102,12 @@ class TestWithOidc:
 
         oidc.assert_refused(oidc.connect("req-role", _cookie(token)), 403, "req-role")
 
-    @pytest.mark.parametrize("carrier", ["cookie", "bearer"])
     def test_editor_token_is_accepted_and_bound(
-        self, oidc: _Callback, generate_test_jwt: Any, carrier: str
+        self, oidc: _Callback, generate_test_jwt: Any
     ) -> None:
         token = generate_test_jwt(subject="editor-user", roles=["editor"])
-        headers = (
-            _cookie(token)
-            if carrier == "cookie"
-            else {"Authorization": f"Bearer {token}"}
-        )
 
-        response = oidc.connect("req-ok", headers)
+        response = oidc.connect("req-ok", _cookie(token))
 
         assert response.status_code == 200
         assert response.get_json() == {}
@@ -147,15 +131,8 @@ class TestWithOidc:
 
 
 class TestWithoutOidc:
-    def test_no_session_is_accepted_as_local_user(self, local: _Callback) -> None:
-        response = local.connect("req-local")
-
-        assert response.status_code == 200
-        assert response.get_json() == {}
-        assert local.subject_of("req-local") == "local-user"
-
     def test_test_session_without_editor_is_refused_403(self, local: _Callback) -> None:
-        token = local.session_token(roles=[])
+        token = local.session_token(roles=["admin"])
 
         local.assert_refused(local.connect("req-ts", _cookie(token)), 403, "req-ts")
 
@@ -168,66 +145,3 @@ class TestWithoutOidc:
 
         assert response.status_code == 200
         assert local.subject_of("req-ts-ok") == "session-editor"
-
-    def test_unknown_session_token_is_accepted_as_local_user(
-        self, local: _Callback
-    ) -> None:
-        response = local.connect("req-stale", _cookie("test-session-gone"))
-
-        assert response.status_code == 200
-        assert local.subject_of("req-stale") == "local-user"
-
-
-class TestForcedRejectionHook:
-    """The testing-only single-shot hook refuses the next connect, whoever it is."""
-
-    @pytest.mark.parametrize("status", [401, 403])
-    def test_armed_hook_refuses_an_editor(
-        self, oidc: _Callback, generate_test_jwt: Any, status: int
-    ) -> None:
-        oidc.app.container.testing_service().set_forced_sse_callback_error(status)
-        token = generate_test_jwt(roles=["editor"])
-
-        oidc.assert_refused(
-            oidc.connect("req-forced", _cookie(token)), status, "req-forced"
-        )
-
-    def test_hook_is_consumed_once(
-        self, oidc: _Callback, generate_test_jwt: Any
-    ) -> None:
-        oidc.app.container.testing_service().set_forced_sse_callback_error(401)
-        token = generate_test_jwt(subject="editor-user", roles=["editor"])
-
-        assert oidc.connect("req-once-1", _cookie(token)).status_code == 401
-        assert oidc.connect("req-once-2", _cookie(token)).status_code == 200
-        assert oidc.subject_of("req-once-2") == "editor-user"
-
-    def test_endpoint_arms_the_hook(self, local: _Callback) -> None:
-        armed = local.client.post("/api/testing/sse/force-callback-error?status=403")
-        assert armed.status_code == 204
-
-        local.assert_refused(local.connect("req-armed"), 403, "req-armed")
-
-    def test_endpoint_rejects_other_statuses(self, local: _Callback) -> None:
-        armed = local.client.post("/api/testing/sse/force-callback-error?status=500")
-        assert armed.status_code == 400
-
-        assert local.connect("req-unarmed").status_code == 200
-
-
-def test_disconnect_unregisters_the_connection(local: _Callback) -> None:
-    assert local.connect("req-gone").status_code == 200
-
-    response = local.client.post(
-        "/api/sse/callback",
-        json={
-            "action": "disconnect",
-            "reason": "client_closed",
-            "token": "gw-req-gone",
-            "request": _connect_payload("req-gone")["request"],
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.get_json() == {}
-    assert not local.manager.has_connection("req-gone")

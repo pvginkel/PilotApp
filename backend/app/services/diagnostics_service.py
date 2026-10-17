@@ -65,7 +65,7 @@ class DiagnosticsService:
     """Service for collecting request and query performance diagnostics.
 
     When enabled, this service:
-    - Times every HTTP request and exposes histograms by endpoint
+    - Splits each request's time into database and Python time, by endpoint
     - Counts queries per request to detect N+1 issues
     - Times individual queries to find slow queries
     - Logs warnings for slow requests and queries
@@ -87,14 +87,8 @@ class DiagnosticsService:
 
     def _init_metrics(self) -> None:
         """Initialize Prometheus metric collectors."""
-        # Request-level metrics
-        self.request_duration_seconds = Histogram(
-            'http_request_duration_seconds',
-            'HTTP request duration in seconds',
-            ['method', 'endpoint', 'status'],
-            buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
-        )
-
+        # Request-level metrics. Request count and duration are always on, in
+        # app.utils.http_metrics; these break a request down further.
         self.request_query_count = Histogram(
             'http_request_query_count',
             'Number of database queries per HTTP request',
@@ -198,17 +192,11 @@ class DiagnosticsService:
         # Get endpoint name (use rule if available, else path)
         endpoint = request.endpoint or request.path
         method = request.method
-        status = str(response.status_code)
 
-        duration_s = diag.request_duration_ms / 1000
         query_time_s = diag.total_query_time_ms / 1000
         python_time_s = diag.python_time_ms / 1000
 
         # Record Prometheus metrics
-        self.request_duration_seconds.labels(
-            method=method, endpoint=endpoint, status=status
-        ).observe(duration_s)
-
         self.request_query_count.labels(
             method=method, endpoint=endpoint
         ).observe(diag.query_count)

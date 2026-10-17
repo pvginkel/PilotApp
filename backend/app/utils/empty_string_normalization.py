@@ -9,6 +9,9 @@ This ensures:
 1. Data consistency - prevents both NULL and empty string for "no value"
 2. Data integrity - required fields with empty strings are caught by NOT NULL constraints
 3. Query simplification - only need to check IS NULL instead of multiple conditions
+
+A column where an empty string means something opts out with
+``mapped_column(..., info={"allow_empty": True})``.
 """
 
 from typing import Any
@@ -36,6 +39,9 @@ def normalize_empty_strings(mapper: Any, connection: Any, target: Any) -> None:
 
     # Process each column
     for column in columns:
+        if column.info.get("allow_empty"):
+            continue
+
         # Only process String and Text columns
         if isinstance(column.type, String | Text):
             # Get current value

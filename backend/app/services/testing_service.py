@@ -30,7 +30,7 @@ class TestingService:
     # Forced error status for /api/auth/self (single-shot)
     _forced_auth_error: int | None = None
 
-    # Forced error status for the next SSE Gateway connect callback (single-shot)
+    # Forced refusal status for the next SSE Gateway connect callback (single-shot)
     _forced_sse_callback_error: int | None = None
 
     # ── Test session management ──────────────────────────────────────
@@ -125,10 +125,10 @@ class TestingService:
         return error
 
     def set_forced_sse_callback_error(self, status_code: int) -> None:
-        """Set a forced error for the next SSE Gateway connect callback.
+        """Make the next SSE Gateway connect callback refuse the connection.
 
         Args:
-            status_code: HTTP status code to return (401 or 403)
+            status_code: HTTP status code to refuse with (401 or 403)
         """
         TestingService._forced_sse_callback_error = status_code
         logger.info("Set forced SSE callback error: status=%d", status_code)

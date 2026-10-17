@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING, Any, Protocol
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.database import scoped_session
+
 if TYPE_CHECKING:
     from app.services.container import ServiceContainer
 
@@ -90,8 +92,11 @@ class BaseSessionTask(BaseTask):
         """
         Execute the task with a database session and progress reporting.
 
+        The session commits when execute_session() returns and rolls back when
+        it raises; after_commit() callbacks run after the commit (see
+        scoped_session).
+
         Args:
-            db_session: Database session object
             progress_handle: Interface for sending progress updates to clients
             **kwargs: Task-specific parameters
 
@@ -101,21 +106,8 @@ class BaseSessionTask(BaseTask):
         Raises:
             Exception: Any task-specific exceptions that should be reported as failures
         """
-
-        session = self.container.db_session()
-
-        try:
-            result = self.execute_session(session, progress_handle, **kwargs)
-            session.commit()
-
-        except Exception:
-            session.rollback()
-            raise
-
-        finally:
-            self.container.db_session.reset()
-
-        return result
+        with scoped_session(self.container) as session:
+            return self.execute_session(session, progress_handle, **kwargs)
 
     @abstractmethod
     def execute_session(self, session: Session, progress_handle: ProgressHandle, **kwargs: Any) -> BaseModel:

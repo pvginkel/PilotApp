@@ -15,11 +15,10 @@ if TYPE_CHECKING:
 # access to the values within the .ini file in use.
 config = context.config
 
-# Interpret the config file for Python logging.
-# This line sets up loggers basically.
-# Keep the loggers that exist already: a migration run in-process (the test suite's
-# template database) would otherwise switch off every app logger created before it,
-# the access log's included.
+# Interpret the config file for Python logging. Keep the loggers that exist
+# already: fileConfig() disables them by default, which silences the app's
+# own loggers for the rest of a process that migrates in-process (the test
+# suites do).
 if config.config_file_name is not None:
     fileConfig(config.config_file_name, disable_existing_loggers=False)
 

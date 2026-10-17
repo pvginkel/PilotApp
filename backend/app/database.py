@@ -2,16 +2,28 @@
 
 import logging
 import re
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from sqlalchemy import MetaData, text
-from sqlalchemy.engine import Engine
-
-from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
+from sqlalchemy import MetaData, text
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session
+
+from alembic import command
 from app.config import Settings
 from app.extensions import db
+from app.services.health_service import CheckResult, CheckStatus
+from app.utils.after_commit import (
+    clear_after_commit_callbacks,
+    run_after_commit_callbacks,
+)
+
+if TYPE_CHECKING:
+    from app.services.container import ServiceContainer
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +43,51 @@ def init_db() -> None:
 
     # Create all tables (only if they don't exist)
     db.create_all()
+
+
+@contextmanager
+def scoped_session(container: "ServiceContainer") -> Generator[Session]:
+    """Give work off the request path (a task, a thread, a CLI command) a session.
+
+    Commits on a clean exit and rolls back on an exception, as the request
+    teardown in ``create_app()`` does, and likewise runs the
+    ``after_commit()`` callbacks only once the commit succeeded. The session is
+    always closed and the container's provider reset: ``db_session.reset()``
+    alone leaves the session open, its connection idle in transaction until
+    the garbage collector gets to it.
+
+    Not for use inside a request, whose session is the same provider.
+    """
+    session: Session = container.db_session()
+    try:
+        try:
+            yield session
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+            container.db_session.reset()
+        run_after_commit_callbacks()
+    finally:
+        clear_after_commit_callbacks()
+
+
+@contextmanager
+def scoped_savepoint(session: Session) -> Generator[None]:
+    """Wrap a block in a SAVEPOINT: released on a clean exit, rolled back on an exception.
+
+    The outer transaction stays intact either way, so a loop can give each
+    item its own savepoint and carry on past the items that fail.
+    """
+    nested = session.begin_nested()
+    try:
+        yield
+        nested.commit()
+    except Exception:
+        nested.rollback()
+        raise
 
 
 def check_db_connection() -> bool:
@@ -78,49 +135,59 @@ def get_current_revision() -> str | None:
 def get_pending_migrations() -> list[str]:
     """Get list of pending migration revisions.
 
-    Optimized version that reduces queries by reusing connection and catching exceptions.
+    Errors propagate: a broken Alembic setup or an unreachable database must not
+    read as "up to date". The readiness check reports them as its failure.
     """
-    try:
-        config = _get_alembic_config()
+    config = _get_alembic_config()
 
-        with db.engine.connect() as connection:
-            config.attributes["connection"] = connection
-            script = ScriptDirectory.from_config(config)
+    with db.engine.connect() as connection:
+        config.attributes["connection"] = connection
+        script = ScriptDirectory.from_config(config)
 
-            # Get current revision (optimized to use single query)
-            current_rev = get_current_revision()
+        # Get current revision (optimized to use single query)
+        current_rev = get_current_revision()
 
-            # Get head revision from script directory (no DB query, just reads migration files)
-            head_rev = script.get_current_head()
+        # Get head revision from script directory (no DB query, just reads migration files)
+        head_rev = script.get_current_head()
 
-            if not head_rev:
-                return []
+        if not head_rev:
+            return []
 
-            if not current_rev:
-                # No migrations applied yet, return all from base to head
-                revisions = []
-                for rev in script.walk_revisions(base="base", head=head_rev):
-                    if rev.revision != head_rev:  # Don't include head twice
-                        revisions.append(rev.revision)
-                revisions.reverse()  # Want chronological order
-                revisions.append(head_rev)
-                return revisions
-
-            if current_rev == head_rev:
-                return []  # Up to date
-
-            # Get pending revisions between current and head
+        if not current_rev:
+            # No migrations applied yet, return all from base to head
             revisions = []
-            for rev in script.walk_revisions(base=current_rev, head=head_rev):
-                if rev.revision != current_rev:  # Don't include current
+            for rev in script.walk_revisions(base="base", head=head_rev):
+                if rev.revision != head_rev:  # Don't include head twice
                     revisions.append(rev.revision)
-
             revisions.reverse()  # Want chronological order
+            revisions.append(head_rev)
             return revisions
 
-    except Exception:
-        # On any error, treat as no pending migrations (fail safe)
-        return []
+        if current_rev == head_rev:
+            return []  # Up to date
+
+        # Get pending revisions between current and head
+        revisions = []
+        for rev in script.walk_revisions(base=current_rev, head=head_rev):
+            if rev.revision != current_rev:  # Don't include current
+                revisions.append(rev.revision)
+
+        revisions.reverse()  # Want chronological order
+        return revisions
+
+
+def check_readiness() -> CheckResult:
+    """Readiness check: the database answers and no migration is pending.
+
+    A failing migration lookup raises, and the health service reports the
+    exception as the check's error.
+    """
+    if not check_db_connection():
+        return CheckResult(CheckStatus.ERROR, "connection failed")
+    pending = get_pending_migrations()
+    if pending:
+        return CheckResult(CheckStatus.ERROR, f"{len(pending)} migrations pending")
+    return CheckResult(CheckStatus.OK)
 
 
 def drop_all_tables() -> None:
@@ -131,9 +198,6 @@ def drop_all_tables() -> None:
 
     # Drop all tables
     metadata.drop_all(bind=db.engine)
-
-    # Clear SQLAlchemy metadata cache
-    db.metadata.clear()
 
 
 def _get_migration_info(script_dir: ScriptDirectory, revision: str) -> tuple[str, str]:
@@ -178,33 +242,6 @@ def upgrade_database(recreate: bool = False) -> list[tuple[str, str]]:
     Returns:
         List of (revision, description) tuples for applied migrations
     """
-    engine = db.engine
-    is_sqlite = engine.dialect.name == "sqlite"
-
-    if recreate and is_sqlite:
-        # SQLite does not support many ALTER operations required by Alembic migrations.
-        # Instead, drop and recreate the schema using SQLAlchemy metadata directly.
-        print("SQLite detected - rebuilding schema using SQLAlchemy metadata")
-        metadata = MetaData()
-        metadata.reflect(bind=engine)
-
-        if metadata.tables:
-            print("Dropping all existing tables...")
-            metadata.drop_all(bind=engine)
-            print("All tables dropped")
-        else:
-            print("No existing tables found to drop")
-
-        # Ensure models are registered before create_all (create_app imports them already).
-        db.create_all()
-        config = _get_alembic_config()
-        with engine.connect() as connection:
-            config.attributes["connection"] = connection
-            command.stamp(config, "head")
-        print("Alembic version stamped to head")
-        print("Database schema created with SQLAlchemy metadata")
-        return []
-
     config = _get_alembic_config()
     applied_migrations: list[tuple[str, str]] = []
 
