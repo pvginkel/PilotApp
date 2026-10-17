@@ -27,9 +27,13 @@ phase ticks it ([`docs/slice-doc-plan.md`](docs/slice-doc-plan.md) §6), and an 
 
 Everything builds through `kc project build|test|lint|setup`, run **from the repo root** — those
 verbs are cwd-bound. The toolchain lives in the `modern-app` sidecar, so ad-hoc `uv`/`pnpm`
-commands need `cexec modern-app`. `scripts/dev.py` starts the dev stack and `scripts/dev.py stop`
-stops it from another shell. After a backend API change, `scripts/regenerate-openapi.py --frontend`
-refreshes the frontend's OpenAPI cache and client.
+commands need `cexec modern-app`. The root and `backend/` are two uv projects, each with its own
+`uv.lock`, and both locks are committed, because CI and the image sync `--locked`.
+`scripts/dev.py` starts the dev stack and `scripts/dev.py stop` stops it from another shell. After
+a backend API change, `scripts/regenerate-openapi.py --frontend` refreshes the frontend's OpenAPI
+cache and client; a backend test fails while the committed cache is stale.
+`cexec modern-app python3 scripts/check_updates.py` reports the dependencies with a newer release,
+major, minor and patch, in every component it finds.
 
 Other repos the work touches, checked out beside this one:
 
@@ -64,6 +68,19 @@ when a migration runs in-process, `backend/app/cli.py` masks the password where 
 database URL (MAT-13), and the **`Jenkinsfile`** is the estate pipeline guide's
 declarative modern-app build on the library's `modernApp.test`, where the template's is a scripted
 `podTemplate`/`node` file the library no longer builds.
+
+## Architecture model
+
+PilotApp is a producer in the estate's federated architecture model. Its model is hand-authored in
+`docs/architecture/*.yaml`. `Jenkinsfile.architecture`, the job `AaC/PilotApp`, validates it
+against the architecture service on every push and archives it for AaC/Architecture to collect;
+`kc project lint` validates it too (`arch-validate`, in the `aac-tools` sidecar).
+
+The model is kept current centrally, not from here: the central architecture update in
+`pvginkel/Architecture` (`tooling/fleet.py update`) reads the commits since the model last changed
+and commits what they change in it. Nothing needs to run here after a change.
+
+`Jenkinsfile.architecture` is the app's own, and `copier update` leaves it alone.
 
 ## Working rules
 

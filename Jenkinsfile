@@ -41,13 +41,28 @@ pipeline {
         stage('Test') {
             steps {
                 script {
+                    // The services are containers in the Job's pod and start with the suite, so the
+                    // suite runner waits for them (backend/scripts/wait-for-services.py).
+                    // PostgreSQL is a sidecar so that both suites, pytest and Playwright, have a
+                    // server to create and drop their databases on, at the default
+                    // TEST_DATABASE_ADMIN_URL. Its major version is production's.
                     modernApp.test(
                         job: 'pilot-validation',
                         install: 'uv sync --locked --no-dev',
                         run: 'uv run --no-sync',
                         suites: ['backend', 'frontend'],
-                        services: [],
-                        env: [:],
+                        services: [
+                            [name: 'postgres', image: 'postgres:18-trixie', env: [
+                                POSTGRES_PASSWORD: 'postgres',
+                            ]],
+                        ],
+                        env: [
+                            // CI is the tst tier; under testing STAGE would default to local-tst.
+                            STAGE: 'tst',
+                            // The library fixes run-suite's flags, so the suite runner's pnpm store
+                            // cache is switched on here instead of with --build-cache.
+                            BUILD_CACHE: 'true',
+                        ],
                         secrets: [],
                     )
                 }
