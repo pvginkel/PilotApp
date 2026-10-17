@@ -28,11 +28,11 @@ an account without it cannot use Pilot.
   check runs only when a stream opens, so a stream already open stays open after its token
   expires.
 
-On a `rejected` event the UI's shared worker stops reconnecting and asks `/api/auth/self`, which
-refreshes an expired token: on `200` it opens a new stream, on `401` it goes to the login page, and
-on anything else it shows a "connection lost" message. A browser without `SharedWorker`, and the
-Vite dev server, use a plain `EventSource` instead, which does not act on `rejected` and keeps
-retrying on its own.
+On a `rejected` event the UI stops reconnecting and asks `/api/auth/self`, which refreshes an
+expired token: on `200` it opens a new stream, on `401` it goes to the login page, and on anything
+else it shows a "connection lost" message. The shared worker and the plain `EventSource` that a
+browser without `SharedWorker` and the Vite dev server use both recover this way, and neither
+retries in a loop.
 
 ## Without sign-in
 

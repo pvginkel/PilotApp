@@ -7,10 +7,10 @@
  * EventSource from the page, through the Vite proxy, so the callback sees the
  * browser's session cookie exactly as the app's own stream does.
  *
- * The app's recovery from `rejected` (the SharedWorker's terminal state, the
- * provider's /api/auth/self probe and reconnect) runs only in a production
- * build; this suite serves the Vite dev server, where the provider always
- * takes the direct EventSource path.
+ * These are Pilot's role cases: the app reads and writes as `editor` alone.
+ * The refusal itself and the app's recovery from `rejected` (the /api/auth/self
+ * probe, the login redirect, the toast) are the template's, tested in
+ * `sse-auth-recovery.spec.ts`.
  */
 import type { Page } from '@playwright/test';
 import { test, expect } from '../../support/fixtures';
@@ -69,24 +69,5 @@ test.describe('SSE connect refusal', () => {
     const result = await openStream(page);
 
     expect(result).toEqual({ outcome: 'accepted' });
-  });
-
-  test('the forced callback error refuses the next stream only', async ({
-    page,
-    frontendUrl,
-    backendUrl,
-    auth,
-    deploymentSse,
-  }) => {
-    await auth.createSession({ roles: ['editor'] });
-    await page.goto(frontendUrl);
-    // Let the app's own stream connect first, so it does not consume the hook.
-    await deploymentSse.ensureConnected();
-
-    const armed = await page.request.post(`${backendUrl}/api/testing/sse/force-callback-error?status=401`);
-    expect(armed.status()).toBe(204);
-
-    expect(await openStream(page)).toMatchObject({ outcome: 'rejected', status: 401 });
-    expect(await openStream(page)).toEqual({ outcome: 'accepted' });
   });
 });
