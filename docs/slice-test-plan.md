@@ -86,7 +86,7 @@ done
 Then the stack's own checks, each expected to answer `200`:
 
 ```bash
-curl -s -m 10 http://localhost:3501/health/readyz      # "ready": true, database connected, sse_gateway ok
+curl -s -m 10 http://localhost:3501/health/readyz      # "status": "ok": checks.database and checks.sse_gateway "ok"
 curl -s -m 10 -o /dev/null -w '%{http_code}\n' http://localhost:3500/
 curl -s -m 10 http://localhost:3500/api/auth/self      # through the Vite proxy; the dev stack runs without OIDC, as "Local Admin"
 curl -s -m 10 http://localhost:3502/readyz             # the SSE gateway
@@ -340,8 +340,9 @@ POD=$(cexec iac kubectl -n pilot-prd get pods -l app.kubernetes.io/name=pilot -o
 
    The backend's log is the pod's: `cexec iac kubectl -n pilot-prd logs $POD -c backend`.
 
-3. **The backend's readiness, on the pod's IP.** `200` with `"ready": true`, the database
-   connected with no migration pending, and the SSE gateway reachable:
+3. **The backend's readiness, on the pod's IP.** `200` with `"status": "ok"`: `checks.database`
+   `ok` (connected, no migration pending) and `checks.sse_gateway` `ok`. A `200` alone is not
+   enough: an unreachable gateway is not critical, and readyz answers it `200` `"degraded"`:
 
    ```bash
    IP=$(cexec iac kubectl -n pilot-prd get pod $POD -o jsonpath='{.status.podIP}')
