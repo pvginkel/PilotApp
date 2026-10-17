@@ -60,14 +60,10 @@ template-owned file to add app behaviour; use the extension points instead:
 | Sidecars CI must wait for | `backend/scripts/wait-for-services.py` (the suite runner calls it) |
 
 The template repos are not edited from here: what the template gets wrong is fixed in this repo, in
-a commit of its own. Four such edits stand in template-owned files, and a `copier update` that
-conflicts on them resolves to this repo's side: the app is on **uv, not Poetry**
-(`tools/suite_runner/local.py`, `Procfile.dev`, `scripts/dev.py`, `scripts/regenerate-openapi.py`
-and the backend's `Dockerfile` and scripts), `backend/alembic/env.py` keeps the app's loggers
-when a migration runs in-process, `backend/app/cli.py` masks the password where it prints the
-database URL (MAT-13), and the **`Jenkinsfile`** is the estate pipeline guide's
-declarative modern-app build on the library's `modernApp.test`, where the template's is a scripted
-`podTemplate`/`node` file the library no longer builds.
+a commit of its own, and listed here as a standing edit, so that a `copier update` that conflicts on
+it resolves to this repo's side. None stands today: uv, the migration that keeps the app's loggers,
+the masked database URL in `backend/app/cli.py` (MAT-13) and the declarative `Jenkinsfile` on the
+library's `modernApp.test` are the template's own since root v0.2.0 and backend v0.14.0.
 
 ## Architecture model
 
