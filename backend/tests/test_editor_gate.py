@@ -25,7 +25,6 @@ from app.config import Settings
 from app.schemas.task_schema import TaskStatus
 from app.services.base_task import BaseTask, ProgressHandle
 
-
 SUBJECT = "someone"
 
 
