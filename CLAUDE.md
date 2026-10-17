@@ -79,7 +79,8 @@ updated ad hoc: the change is first written up as a proposal in `design/proposal
 the step that would otherwise read the old plan. Handling a proposal means, in order: a pass
 under the `kubecoder:data-modelling` skill, if it touches the data model; an arch design
 (`/dev:arch-design`), if it raises an architectural question; then absorbing it into the plan,
-the feature ledger with it. A ruling made inside a slice's triage, planning or run is the
+the feature ledger with it. Once absorbed, the proposal is deleted, and the plan's line naming it
+goes with it. A ruling made inside a slice's triage, planning or run is the
 pipeline's, recorded as the pipeline records it, not a proposal.
 
 ## The dev pipeline
