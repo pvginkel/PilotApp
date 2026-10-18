@@ -502,6 +502,31 @@ class TestParse:
         assert [fault.line for fault in document.faults] == [3]
         assert document.front_matter.title is None
 
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "{default: Oak, answer: Pine, by: agent}",
+            "{default: Oak,\n answer: Pine}",
+            "{}",
+        ],
+    )
+    def test_a_body_in_flow_style_is_held(self, body: str) -> None:
+        document = parse(f"# Pick\n\n```question id=Q1\n{body}\n```\n")
+
+        assert document.faults == (
+            Fault(
+                4,
+                "block Q1: the body is a flow mapping:"
+                " write each key on a line of its own",
+            ),
+        )
+        assert document.blocks[0].lines == {}
+
+    def test_the_front_matter_in_flow_style_is_read(self) -> None:
+        document = parse("---\n{title: Tent, summary: two nights}\n---\n")
+
+        assert (document.front_matter.title, document.faults) == ("Tent", ())
+
     def test_an_escaped_line_break_is_read(self) -> None:
         document = parse('```question id=Q1\nanswer: "x\\u2028y"\nby: ada\n```\n')
 

@@ -26,6 +26,7 @@ from app.exceptions import InvalidOperationException
 _STR = "tag:yaml.org,2002:str"
 _MAP = "tag:yaml.org,2002:map"
 _UNBOUNDED = 2**31
+_FENCE_PROOF_INDENT = 4
 
 
 @dataclass(frozen=True)
@@ -288,24 +289,31 @@ def _time(moment: datetime) -> str:
 
 def _render(entries: Sequence[tuple[str, str]]) -> list[str]:
     """`key: value` lines a reader with no implicit typing reads back as the
-    strings written: plain where YAML allows it, a literal block over several
-    lines, double-quoted and escaped where a value holds a character YAML
-    breaks a line at and the file does not."""
+    strings written, each value trimmed as the reader trims it: plain where
+    YAML allows it, a literal block over several lines, double-quoted and
+    escaped where a value holds a character YAML breaks a line at and the file
+    does not. A literal block's lines stand four spaces in from its key, past
+    the three a closing fence may have."""
     lines: list[str] = []
     for key, value in entries:
+        trimmed = value.strip()
         style = (
             '"'
-            if any(char in YAML_LINE_BREAKS for char in value)
+            if any(char in YAML_LINE_BREAKS for char in trimmed)
             else "|"
-            if "\n" in value
+            if "\n" in trimmed
             else None
         )
         node = yaml.MappingNode(
             _MAP,
-            [(yaml.ScalarNode(_STR, key), yaml.ScalarNode(_STR, value, style=style))],
+            [(yaml.ScalarNode(_STR, key), yaml.ScalarNode(_STR, trimmed, style=style))],
         )
         written = yaml.serialize(
-            node, Dumper=yaml.BaseDumper, width=_UNBOUNDED, allow_unicode=True
+            node,
+            Dumper=yaml.BaseDumper,
+            width=_UNBOUNDED,
+            allow_unicode=True,
+            indent=_FENCE_PROOF_INDENT,
         )
         lines.extend(written.split("\n")[:-1])
     return lines

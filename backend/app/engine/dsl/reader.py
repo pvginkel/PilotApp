@@ -312,7 +312,9 @@ def _block(
 ) -> Block:
     prefix = f"block {local_id}: "
     text = "\n".join(_dedent(line, indent) for line in body)
-    entries = _mapping(text, fence.first + 1, f"{prefix}the body", faults)
+    entries = _mapping(
+        text, fence.first + 1, f"{prefix}the body", faults, block_style=True
+    )
     if entries is None:
         return Block(local_id=local_id, kind=kind, fence=fence, lines={})
     taken = _DEFINITION_KEYS[kind] + ANSWER_KEYS
@@ -420,11 +422,17 @@ _Entries = dict[str, tuple[yaml.Node, Span]]
 
 
 def _mapping(
-    text: str, first_line: int, subject: str, faults: list[Fault]
+    text: str,
+    first_line: int,
+    subject: str,
+    faults: list[Fault],
+    *,
+    block_style: bool = False,
 ) -> _Entries | None:
     """The YAML mapping `text` holds, each key with its value and the file
-    lines it covers; none, with a fault, when it holds no mapping. An empty
-    text is an empty mapping."""
+    lines it covers; none, with a fault, when it holds no mapping, or, with
+    `block_style`, a flow mapping, whose keys share lines. An empty text is an
+    empty mapping."""
     lines = text.split("\n")
     for index, content in enumerate(lines):
         brk = next((char for char in content if char in YAML_LINE_BREAKS), None)
@@ -456,6 +464,14 @@ def _mapping(
     if not isinstance(node, yaml.MappingNode):
         faults.append(
             Fault(first_line + node.start_mark.line, f"{subject} is not a YAML mapping")
+        )
+        return None
+    if block_style and node.flow_style:
+        faults.append(
+            Fault(
+                first_line + node.start_mark.line,
+                f"{subject} is a flow mapping: write each key on a line of its own",
+            )
         )
         return None
     entries: _Entries = {}

@@ -224,8 +224,45 @@ class TestWriteAnswer:
             note="Too dark.\n\nAsk ben: he has samples.",
         )
 
-        assert "note: |-\n  Too dark.\n\n  Ask ben: he has samples.\n" in written
+        assert "note: |-\n    Too dark.\n\n    Ask ben: he has samples.\n" in written
         assert parse(written).blocks[0].note == "Too dark.\n\nAsk ben: he has samples."
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "Ran it:\n```\nok\n```",
+            "a\n````\nb",
+            "a\n```js\nb\n```",
+            "a\n~~~\nb",
+            "line\n\n\n",
+            "\n\nafter two blank lines",
+        ],
+    )
+    @pytest.mark.parametrize("fence", ["", "   "])
+    def test_a_value_over_several_lines_reads_back_as_written(
+        self, value: str, fence: str
+    ) -> None:
+        text = f"{fence}```question id=Q1\n{fence}default: Oak\n{fence}```\n\nAfter.\n"
+
+        written = write_answer(
+            text,
+            "Q1",
+            answer=value,
+            by="ada",
+            at=AT,
+            via=AnswerChannel.CHAT,
+            note=value,
+        )
+
+        document = parse(written)
+        assert document.faults == ()
+        [block] = document.blocks
+        assert (block.answer, block.note, block.via) == (
+            value.strip(),
+            value.strip(),
+            "chat",
+        )
+        assert written.endswith(f"{fence}via: chat\n{fence}```\n\nAfter.\n")
 
     @pytest.mark.parametrize("char", [" ", " ", "\x85", "\r"])
     def test_a_value_holding_a_yaml_line_break_is_escaped_on_one_line(
@@ -421,6 +458,28 @@ class TestWriteDone:
         )
 
         assert written.endswith("by: ben\nnote: Receipt 4471.\n```\n")
+
+    def test_a_paste_back_holding_a_fence_stays_in_the_block(self) -> None:
+        text = "# Shed\n\n```action id=A1\ncheck: the drill is back\n```\n\nAfter.\n"
+
+        written = write_done(text, "A1", by="ben", at=AT, note="Ran it:\n```\nok\n```")
+
+        assert written == (
+            "# Shed\n\n```action id=A1\ncheck: the drill is back\n"
+            "done: 2026-10-12T09:40:00Z\nby: ben\nnote: |-\n    Ran it:\n    ```\n"
+            "    ok\n    ```\n```\n\nAfter.\n"
+        )
+        assert parse(written).blocks[0].note == "Ran it:\n```\nok\n```"
+
+    def test_a_paste_back_ending_in_blank_lines_is_written_trimmed(self) -> None:
+        written = write_done(
+            "```action id=A1\n```\n", "A1", by="ben", at=AT, note="Receipt 4471.\n\n\n"
+        )
+
+        assert written == (
+            "```action id=A1\ndone: 2026-10-12T09:40:00Z\nby: ben\n"
+            "note: Receipt 4471.\n```\n"
+        )
 
     def test_a_block_the_text_lacks_is_refused(self) -> None:
         with pytest.raises(InvalidOperationException) as raised:

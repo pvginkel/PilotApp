@@ -1,0 +1,29 @@
+{
+  "rule": "held (reader): a block body in flow style, whose keys share a line",
+  "parse": {
+    "title": "Which shelf for the plants?",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "D1",
+        "kind": "decision",
+        "fence": [3, 5]
+      },
+      {
+        "id": "Q1",
+        "kind": "question",
+        "fence": [7, 10]
+      }
+    ]
+  },
+  "faults": [
+    {
+      "line": 4,
+      "message": "block D1: the body is a flow mapping: write each key on a line of its own"
+    },
+    {
+      "line": 8,
+      "message": "block Q1: the body is a flow mapping: write each key on a line of its own"
+    }
+  ]
+}
