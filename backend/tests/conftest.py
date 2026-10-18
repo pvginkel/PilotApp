@@ -10,12 +10,17 @@ the same name. To change the settings the test apps are built from, replace
 session-scoped, because the app is, and a replacement keeps that scope.
 """
 
+from collections.abc import Generator
+
 import pytest
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
+from app.engine.bus import EngineEvent
 from app.models import Document, Environment, Item, Project, User
 from app.models.reference import DocumentRole, SessionState, UserKind
+from app.services.container import ServiceContainer
+from app.utils.after_commit import clear_after_commit_callbacks
 
 # Import all infrastructure fixtures
 from tests.conftest_infrastructure import *  # noqa: F403
@@ -99,3 +104,22 @@ def draft_document(session: DbSession, project: Project) -> Document:
     session.add(draft)
     session.flush()
     return draft
+
+
+@pytest.fixture
+def engine_events(container: ServiceContainer) -> Generator[list[EngineEvent]]:
+    """Every event the engine's bus delivers during the test, in order.
+
+    The bus delivers once a commit runs the ``after_commit()`` callbacks: a
+    request's teardown, or ``scoped_session(container)``. Callbacks a test
+    leaves uncommitted are dropped at both ends.
+    """
+    events: list[EngineEvent] = []
+    bus = container.engine_bus()
+    clear_after_commit_callbacks()
+    bus.subscribe(events.append)
+    try:
+        yield events
+    finally:
+        bus.unsubscribe(events.append)
+        clear_after_commit_callbacks()

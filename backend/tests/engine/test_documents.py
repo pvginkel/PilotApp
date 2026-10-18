@@ -1,0 +1,859 @@
+"""Documents born in the record and published with their derived caches."""
+
+from datetime import UTC, datetime
+
+import pytest
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session as DbSession
+
+from app import models
+from app.database import scoped_session
+from app.engine.bus import EngineEvent, TreeHashMoved
+from app.engine.paths import sha256_hex
+from app.exceptions import InvalidOperationException
+from app.models import (
+    Block,
+    BlockOption,
+    Document,
+    DocumentVersion,
+    Environment,
+    Item,
+    PlanTask,
+    Project,
+    SaveError,
+    User,
+)
+from app.models.reference import (
+    AnswerChannel,
+    BlockKind,
+    DocumentRole,
+    ErrorKind,
+    TaskStatus,
+    VersionCause,
+)
+from app.services.container import ServiceContainer
+
+ONE_DECISION = """---
+title: Which tent for the trip?
+step: build
+summary: Two nights at the lake.
+urgent: true
+for: ada
+---
+
+The forecast says rain on the second night.
+
+```decision id=D1
+options:
+  - Dome: sleeps four
+  - Tunnel: sleeps six
+recommend: Dome
+```
+"""
+
+ANSWERED = """# Which tent for the trip?
+
+```decision id=D1
+options:
+  - Dome: sleeps four
+  - Tunnel: sleeps six
+recommend: Dome
+answer: Tunnel
+by: ada
+at: 2026-10-12T09:40:00Z
+note: The cousins are coming.
+```
+
+```question id=Q1
+default: The lake car park
+answer: deferred
+by: agent
+at: 2026-10-12T10:00:00Z
+to: build
+note: Ask once the route is fixed.
+```
+
+```action id=A1
+answer: deferred
+by: agent
+to: plan
+```
+"""
+
+CONFIRMATION = """# Ship the order form on Friday?
+
+```decision id=C1
+type: confirmation
+because: irreversible
+proposal: Ship the order form on Friday
+check: the form loads at /order
+```
+"""
+
+QUESTION = "# Where?\n\n```question id=Q1\ndefault: The lake\n```\n"
+
+ACTION_DONE = """# Put the tent in the car
+
+```action id=A1
+options: [Works, "Doesn't"]
+done: 2026-10-12T11:00:00Z
+by: ada
+via: chat
+```
+"""
+
+BROKEN = "```decision id=D1\noptions:\n  - Dome\n"
+
+
+@pytest.fixture
+def build_task(session: DbSession, project: Project) -> PlanTask:
+    """The task `build` of ``project``'s plan."""
+    task = PlanTask(
+        project_id=project.id,
+        task_id="build",
+        position=1,
+        title="Build the camp",
+        status_code=TaskStatus.PENDING,
+    )
+    session.add(task)
+    session.flush()
+    return task
+
+
+def _blocks(session: DbSession, document_id: object) -> list[Block]:
+    return list(
+        session.scalars(
+            select(Block)
+            .where(Block.document_id == document_id)
+            .order_by(Block.position)
+        )
+    )
+
+
+def _options(session: DbSession, block: Block) -> list[BlockOption]:
+    return list(
+        session.scalars(
+            select(BlockOption)
+            .where(BlockOption.block_id == block.id)
+            .order_by(BlockOption.position)
+        )
+    )
+
+
+def _versions(session: DbSession, document: Document) -> list[DocumentVersion]:
+    return list(
+        session.scalars(
+            select(DocumentVersion)
+            .where(DocumentVersion.document_id == document.id)
+            .order_by(DocumentVersion.number)
+        )
+    )
+
+
+def _agent(session: DbSession) -> User:
+    return session.scalars(select(User).where(User.handle == "agent")).one()
+
+
+class TestDocumentServiceBirth:
+    def test_a_draft_is_born_empty(
+        self, session: DbSession, container: ServiceContainer, project: Project
+    ) -> None:
+        draft = container.document_service().bear_draft(project)
+
+        assert draft.path == "project.md"
+        assert draft.project_id == project.id
+        assert draft.role_code is DocumentRole.DRAFT
+        assert draft.published_text == ""
+        assert draft.published_hash == sha256_hex("")
+        assert draft.published_at is not None
+        assert draft.ingested_text is None
+        [version] = _versions(session, draft)
+        assert (version.number, version.cause_code) == (1, VersionCause.BORN)
+        assert (version.text, version.hash) == ("", sha256_hex(""))
+        assert version.session_id is None
+        assert project.name is None
+
+    def test_a_templated_draft_names_the_project(
+        self, container: ServiceContainer, project: Project
+    ) -> None:
+        container.document_service().bear_draft(
+            project, "---\ntitle: Badge colours\n---\n"
+        )
+
+        assert project.name == "Badge colours"
+
+    def test_a_project_has_one_draft(
+        self, container: ServiceContainer, project: Project
+    ) -> None:
+        documents = container.document_service()
+        documents.bear_draft(project)
+
+        with pytest.raises(IntegrityError) as raised:
+            documents.bear_draft(project)
+
+        # The second draft's path and role are each the first's.
+        assert raised.value.orig.diag.constraint_name in {
+            "uq_documents_project_path",
+            "uq_documents_project_role",
+        }
+
+    def test_the_handbook_names_nothing(
+        self, session: DbSession, container: ServiceContainer, project: Project
+    ) -> None:
+        handbook = container.document_service().bear_handbook(
+            project, "# Working here\n\nKeep it short.\n"
+        )
+
+        assert handbook.path == "handbook.md"
+        assert handbook.role_code is DocumentRole.HANDBOOK
+        assert handbook.published_text == "# Working here\n\nKeep it short.\n"
+        assert [v.cause_code for v in _versions(session, handbook)] == [
+            VersionCause.BORN
+        ]
+        assert project.name is None
+
+    def test_a_prose_item_is_born_with_the_next_seq(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        documents = container.document_service()
+        first = documents.bear_item(project, "notice", "The palette", project_session)
+        second = documents.bear_item(
+            project, "decision", "Which colour?", project_session
+        )
+
+        assert (first.seq, second.seq) == (1, 2)
+        assert (first.kind_code, first.title) == ("notice", "The palette")
+        assert first.created_by_session_id == project_session.id
+        assert first.created_by_user_id is None
+        document = session.get_one(Document, second.id)
+        assert document.path == "items/2-which-colour.md"
+        assert document.project_id is None
+        assert document.published_text == ""
+        [version] = _versions(session, document)
+        assert version.cause_code is VersionCause.BORN
+        assert version.session_id == project_session.id
+
+    def test_an_items_number_is_not_zero_filled(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        session.add(
+            Item(
+                project_id=project.id,
+                seq=9,
+                kind_code="notice",
+                title="An earlier notice",
+                created_by_session_id=project_session.id,
+            )
+        )
+        session.flush()
+
+        item = container.document_service().bear_item(
+            project, "notice", "The palette", project_session
+        )
+
+        assert item.seq == 10
+        assert session.get_one(Document, item.id).path == "items/10-the-palette.md"
+
+    @pytest.mark.parametrize(
+        ("title", "path"),
+        [
+            ("TheTVDB v4 or TVmaze?", "items/1-thetvdb-v4-or-tvmaze.md"),
+            ("Crème brûlée — twice", "items/1-creme-brulee-twice.md"),
+            ("¿?", "items/1.md"),
+            (
+                "The quick brown fox jumps over the lazy dog and keeps on running away",
+                "items/1-the-quick-brown-fox-jumps-over-the-lazy-dog-and-keeps-on.md",
+            ),
+            (
+                "the quick brown fox jumps over the lazy dog and keeps on runner",
+                "items/1-the-quick-brown-fox-jumps-over-the-lazy-dog-and-keeps-on.md",
+            ),
+            ("x" * 80, f"items/1-{'x' * 60}.md"),
+        ],
+    )
+    def test_an_items_file_is_named_by_its_title(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        title: str,
+        path: str,
+    ) -> None:
+        item = container.document_service().bear_item(
+            project, "notice", title, project_session
+        )
+
+        assert session.get_one(Document, item.id).path == path
+
+    @pytest.mark.parametrize("kind", ["work", "card_wait", "opening", "palette"])
+    def test_only_a_prose_kind_pilot_adds_is_born(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        kind: str,
+    ) -> None:
+        with pytest.raises(InvalidOperationException) as raised:
+            container.document_service().bear_item(
+                project, kind, "The palette", project_session
+            )
+
+        assert raised.value.message == (
+            f"Cannot add a {kind} item to project {project.id}"
+            f" because {kind} is not a kind of prose item Pilot adds"
+        )
+        assert session.scalar(select(func.count()).select_from(Item)) == 0
+
+    def test_an_item_born_with_its_text_reads_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+        project_session: models.Session,
+        build_task: PlanTask,
+    ) -> None:
+        item = container.document_service().bear_item(
+            project, "notice", "Tent", project_session, ONE_DECISION
+        )
+
+        assert item.kind_code == "decision"
+        assert item.title == "Which tent for the trip?"
+        assert (item.plan_task_id, item.urgent, item.for_user_id) == (
+            "build",
+            True,
+            person.id,
+        )
+        assert session.get_one(Document, item.id).summary == "Two nights at the lake."
+        assert [b.local_id for b in _blocks(session, item.id)] == ["D1"]
+
+    def test_the_opening_is_a_persons_words_under_its_given_title(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+    ) -> None:
+        words = "---\ntitle: Something else\n---\n# A heading\n\nWe need a badge.\n"
+        opening = container.document_service().bear_opening(
+            project, "Badge colours", person, words
+        )
+
+        assert (opening.seq, opening.kind_code) == (1, "opening")
+        assert opening.title == "Badge colours"
+        assert opening.created_by_user_id == person.id
+        assert opening.created_by_session_id is None
+        document = session.get_one(Document, opening.id)
+        assert document.path == "items/1-badge-colours.md"
+        assert document.published_text == words
+        assert document.summary is None
+        [version] = _versions(session, document)
+        assert version.session_id is None
+
+    def test_a_born_text_with_a_fault_is_refused(
+        self, session: DbSession, container: ServiceContainer, project: Project
+    ) -> None:
+        with pytest.raises(InvalidOperationException) as raised:
+            container.document_service().bear_draft(project, BROKEN)
+
+        assert raised.value.message.startswith(
+            f"Cannot publish draft-{project.number}/project.md because its text"
+            " holds a fault: line 1: a fence opened with ``` is not closed"
+        )
+        assert session.scalar(select(func.count()).select_from(Document)) == 0
+
+    def test_an_item_born_with_a_fault_is_not_minted(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        with pytest.raises(InvalidOperationException) as raised:
+            container.document_service().bear_item(
+                project, "decision", "Which tent?", project_session, BROKEN
+            )
+
+        assert raised.value.message.startswith(
+            f"Cannot publish draft-{project.number}/items/1-which-tent.md"
+        )
+        session.flush()
+        assert session.scalar(select(func.count()).select_from(Item)) == 0
+
+    def test_a_drafts_birth_moves_its_path_after_the_commit(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+    ) -> None:
+        with scoped_session(container):
+            container.document_service().bear_draft(project)
+            assert engine_events == []
+
+        assert engine_events == [
+            TreeHashMoved(f"draft-{project.number}/project.md", sha256_hex(""))
+        ]
+
+    def test_the_handbooks_birth_moves_its_path_alone(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+    ) -> None:
+        with scoped_session(container):
+            container.document_service().bear_handbook(project, "Keep it short.\n")
+
+        assert engine_events == [
+            TreeHashMoved(
+                f"draft-{project.number}/handbook.md", sha256_hex("Keep it short.\n")
+            )
+        ]
+
+    def test_an_items_birth_moves_its_path_and_the_timeline(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        with scoped_session(container):
+            container.document_service().bear_item(
+                project, "notice", "The palette", project_session
+            )
+
+        folder = f"draft-{project.number}"
+        assert engine_events == [
+            TreeHashMoved(f"{folder}/items/1-the-palette.md", sha256_hex("")),
+            TreeHashMoved(
+                f"{folder}/timeline.json",
+                container.view_service().timeline(project).hash,
+            ),
+        ]
+
+
+class TestDocumentServicePublish:
+    def test_publish_sets_the_published_text_and_cuts_no_version(
+        self, session: DbSession, container: ServiceContainer, project: Project
+    ) -> None:
+        documents = container.document_service()
+        draft = documents.bear_draft(project)
+        born_at = draft.published_at
+
+        documents.publish(draft, "Some prose.\n")
+
+        assert draft.published_text == "Some prose.\n"
+        assert draft.published_hash == sha256_hex("Some prose.\n")
+        assert born_at is not None and draft.published_at is not None
+        assert draft.published_at > born_at
+        assert draft.ingested_text is None
+        assert len(_versions(session, draft)) == 1
+
+    def test_a_publish_moves_the_documents_tree_hash(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+    ) -> None:
+        documents = container.document_service()
+        draft = documents.bear_draft(project)
+        with scoped_session(container):
+            pass
+        engine_events.clear()
+
+        with scoped_session(container):
+            documents.publish(draft, "Some prose.\n")
+            assert engine_events == []
+
+        assert engine_events == [
+            TreeHashMoved(
+                f"draft-{project.number}/project.md", sha256_hex("Some prose.\n")
+            )
+        ]
+
+    def test_a_publish_of_the_same_text_moves_nothing(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+    ) -> None:
+        documents = container.document_service()
+        draft = documents.bear_draft(project, "Some prose.\n")
+        with scoped_session(container):
+            pass
+        engine_events.clear()
+
+        with scoped_session(container):
+            documents.publish(draft, "Some prose.\n")
+
+        assert engine_events == []
+
+    def test_a_held_path_keeps_its_tree_hash(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        documents = container.document_service()
+        draft = documents.bear_draft(project)
+        draft.ingested_text = BROKEN
+        draft.ingested_hash = sha256_hex(BROKEN)
+        draft.ingested_at = datetime.now(UTC)
+        session.add(
+            SaveError(
+                environment_id=environment.id,
+                path=f"draft-{project.number}/project.md",
+                kind_code=ErrorKind.PARSE,
+                line=1,
+                message="a fence opened with ``` is not closed",
+            )
+        )
+        with scoped_session(container):
+            pass
+        engine_events.clear()
+
+        with scoped_session(container):
+            documents.publish(draft, "Some prose.\n")
+
+        assert draft.published_text == "Some prose.\n"
+        assert engine_events == []
+
+    def test_a_text_with_a_fault_is_not_published(
+        self, container: ServiceContainer, project: Project
+    ) -> None:
+        documents = container.document_service()
+        draft = documents.bear_draft(project, "Some prose.\n")
+
+        with pytest.raises(InvalidOperationException):
+            documents.publish(draft, BROKEN)
+
+        assert draft.published_text == "Some prose.\n"
+
+    def test_the_drafts_title_names_the_project(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+    ) -> None:
+        documents = container.document_service()
+        draft = documents.bear_draft(project)
+        folder = f"draft-{project.number}"
+
+        def published(text: str) -> list[str]:
+            with scoped_session(container):
+                pass
+            engine_events.clear()
+            with scoped_session(container):
+                documents.publish(draft, text)
+            return [e.path for e in engine_events if isinstance(e, TreeHashMoved)]
+
+        assert published("---\ntitle: Badge colours\n---\nProse.\n") == [
+            f"{folder}/project.md",
+            f"{folder}/timeline.json",
+        ]
+        assert project.name == "Badge colours"
+        assert published("# Badges\n\nProse.\n") == [
+            f"{folder}/project.md",
+            f"{folder}/timeline.json",
+        ]
+        assert project.name == "Badges"
+        assert published("# Badges\n\nMore prose.\n") == [f"{folder}/project.md"]
+        assert published("Prose.\n") == [
+            f"{folder}/project.md",
+            f"{folder}/timeline.json",
+        ]
+        assert project.name is None
+
+    def test_an_items_caches_follow_its_front_matter(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+        project_session: models.Session,
+        build_task: PlanTask,
+    ) -> None:
+        documents = container.document_service()
+        item = documents.bear_item(project, "notice", "Tent", project_session)
+        document = session.get_one(Document, item.id)
+
+        documents.publish(document, ONE_DECISION)
+
+        assert item.title == "Which tent for the trip?"
+        assert item.plan_task_id == "build"
+        assert item.urgent is True
+        assert item.for_user_id == person.id
+        assert document.summary == "Two nights at the lake."
+
+        documents.publish(document, ONE_DECISION.split("---\n", 2)[2])
+
+        assert item.plan_task_id is None
+        assert item.urgent is False
+        assert item.for_user_id is None
+        assert document.summary is None
+
+    def test_a_text_without_a_title_keeps_the_items_title(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        documents = container.document_service()
+        item = documents.bear_item(project, "notice", "The palette", project_session)
+        document = session.get_one(Document, item.id)
+
+        documents.publish(document, "Blue and green.\n")
+        assert item.title == "The palette"
+
+        documents.publish(document, "# Two colours\n\nBlue and green.\n")
+        assert item.title == "Two colours"
+
+        documents.publish(document, "Blue and green.\n")
+        assert item.title == "Two colours"
+
+    @pytest.mark.parametrize(
+        ("text", "kind"),
+        [
+            ("Blue and green.\n", "notice"),
+            (ONE_DECISION.split("---\n", 2)[2], "decision"),
+            (QUESTION, "question"),
+            (ACTION_DONE, "action"),
+            (CONFIRMATION, "confirmation"),
+            (ANSWERED, "document"),
+        ],
+    )
+    def test_an_items_kind_follows_its_blocks(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+        project_session: models.Session,
+        build_task: PlanTask,
+        text: str,
+        kind: str,
+    ) -> None:
+        documents = container.document_service()
+        item = documents.bear_item(project, "notice", "The palette", project_session)
+
+        documents.publish(session.get_one(Document, item.id), text)
+
+        assert item.kind_code == kind
+
+    def test_the_openings_item_is_fixed_at_birth(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+        build_task: PlanTask,
+    ) -> None:
+        documents = container.document_service()
+        opening = documents.bear_opening(
+            project, "Badge colours", person, "We need a badge.\n"
+        )
+
+        documents.publish(session.get_one(Document, opening.id), ONE_DECISION)
+
+        assert (opening.kind_code, opening.title) == ("opening", "Badge colours")
+        assert (opening.plan_task_id, opening.urgent, opening.for_user_id) == (
+            None,
+            False,
+            None,
+        )
+        assert session.get_one(Document, opening.id).summary is None
+
+    def test_the_timeline_moves_with_what_it_shows(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        documents = container.document_service()
+        item = documents.bear_item(project, "notice", "The palette", project_session)
+        document = session.get_one(Document, item.id)
+        path = f"draft-{project.number}/items/1-the-palette.md"
+        with scoped_session(container):
+            pass
+        engine_events.clear()
+
+        with scoped_session(container):
+            documents.publish(document, "# Two colours\n")
+        assert engine_events == [
+            TreeHashMoved(path, sha256_hex("# Two colours\n")),
+            TreeHashMoved(
+                f"draft-{project.number}/timeline.json",
+                container.view_service().timeline(project).hash,
+            ),
+        ]
+
+        engine_events.clear()
+        with scoped_session(container):
+            documents.publish(document, "# Two colours\n\nBlue and green.\n")
+        assert engine_events == [
+            TreeHashMoved(path, sha256_hex("# Two colours\n\nBlue and green.\n"))
+        ]
+
+
+class TestDocumentServiceBlocks:
+    def test_blocks_are_read_from_the_text(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+        build_task: PlanTask,
+    ) -> None:
+        draft = container.document_service().bear_draft(project, ANSWERED)
+
+        decision, question, action = _blocks(session, draft.id)
+        assert (decision.local_id, decision.position, decision.kind_code) == (
+            "D1",
+            1,
+            BlockKind.DECISION,
+        )
+        assert decision.answer == "Tunnel"
+        assert decision.answered_by_user_id == person.id
+        assert decision.answered_at == datetime(2026, 10, 12, 9, 40, tzinfo=UTC)
+        assert decision.note == "The cousins are coming."
+        assert decision.via_code is AnswerChannel.APP
+        assert decision.deferred_to_task_id is None
+        assert [
+            (o.label, o.text, o.recommended) for o in _options(session, decision)
+        ] == [
+            ("Dome", "sleeps four", True),
+            ("Tunnel", "sleeps six", False),
+        ]
+        assert (question.kind_code, question.default_value) == (
+            BlockKind.QUESTION,
+            "The lake car park",
+        )
+        assert question.answer == "deferred"
+        assert question.answered_by_user_id == _agent(session).id
+        assert question.via_code is None
+        assert question.deferred_to_task_id == "build"
+        assert (action.position, action.answer) == (3, "deferred")
+        assert action.deferred_to_task_id is None
+        assert _options(session, action) == []
+
+    def test_a_confirmation_keeps_its_reason_and_its_check(
+        self, session: DbSession, container: ServiceContainer, project: Project
+    ) -> None:
+        draft = container.document_service().bear_draft(project, CONFIRMATION)
+
+        [block] = _blocks(session, draft.id)
+        assert block.confirmation is True
+        assert block.because_code == "irreversible"
+        assert block.proposal == "Ship the order form on Friday"
+        # F30.8 is Later: `check` is kept and nothing acts on it.
+        assert block.check_text == "the form loads at /order"
+        assert block.answer is None
+
+    def test_an_actions_done_is_read(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+    ) -> None:
+        draft = container.document_service().bear_draft(project, ACTION_DONE)
+
+        [block] = _blocks(session, draft.id)
+        assert block.done_at == datetime(2026, 10, 12, 11, 0, tzinfo=UTC)
+        assert block.answered_by_user_id == person.id
+        assert block.via_code is AnswerChannel.CHAT
+        assert [(o.label, o.text) for o in _options(session, block)] == [
+            ("Works", None),
+            ("Doesn't", None),
+        ]
+
+    def test_blocks_are_rewritten_in_place(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+        build_task: PlanTask,
+    ) -> None:
+        documents = container.document_service()
+        draft = documents.bear_draft(project, ANSWERED)
+        ids = {b.local_id: b.id for b in _blocks(session, draft.id)}
+        question = ANSWERED.split("```question", 1)[1].split("```\n", 1)[0]
+        decision = ANSWERED.split("```decision", 1)[1].split("```\n", 1)[0]
+        reordered = (
+            f"```question{question}```\n\n"
+            f"```decision{decision.replace('answer: Tunnel', 'answer: Dome')}```\n"
+        )
+
+        documents.publish(draft, reordered)
+
+        rows = _blocks(session, draft.id)
+        assert [(b.local_id, b.position) for b in rows] == [("Q1", 1), ("D1", 2)]
+        assert [b.id for b in rows] == [ids["Q1"], ids["D1"]]
+        assert rows[1].answer == "Dome"
+        assert session.get(Block, ids["A1"]) is None
+
+    def test_a_dropped_block_goes_with_its_options(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+        build_task: PlanTask,
+    ) -> None:
+        documents = container.document_service()
+        draft = documents.bear_draft(project, ANSWERED)
+        decision = _blocks(session, draft.id)[0]
+
+        documents.publish(draft, QUESTION)
+
+        assert [b.local_id for b in _blocks(session, draft.id)] == ["Q1"]
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(BlockOption)
+                .where(BlockOption.block_id == decision.id)
+            )
+            == 0
+        )
+
+    def test_options_are_rewritten_only_when_they_change(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+        build_task: PlanTask,
+    ) -> None:
+        documents = container.document_service()
+        draft = documents.bear_draft(project, ANSWERED)
+        decision = _blocks(session, draft.id)[0]
+        kept = [o.id for o in _options(session, decision)]
+
+        documents.publish(draft, ANSWERED.replace("by: ada", "by: ada\nvia: chat"))
+        assert [o.id for o in _options(session, decision)] == kept
+
+        documents.publish(
+            draft, ANSWERED.replace("recommend: Dome", "recommend: Tunnel")
+        )
+        options = _options(session, decision)
+        assert [(o.label, o.recommended) for o in options] == [
+            ("Dome", False),
+            ("Tunnel", True),
+        ]
+        assert not set(kept) & {o.id for o in options}
