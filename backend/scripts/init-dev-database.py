@@ -4,13 +4,16 @@
 The Postgres sidecar starts empty, so a fresh clone has no database for
 `DATABASE_URL` to point at and `cli upgrade-db` fails before it can run a
 migration. This creates it (and nothing else) — schema is Alembic's job.
+It creates it in production's locale, as the test suites create theirs.
 
 It reads DATABASE_URL as the app does: the environment, then .env, then the
 app's default. `kc project setup` seeds .env before it runs this, so the
 database it creates is the one `cli upgrade-db` migrates.
 
-Idempotent: an existing database is left untouched. The test suites never
-call this: they create their own databases (tests/conftest_infrastructure.py).
+Idempotent: an existing database is left untouched, and one in another
+locale is reported, not recreated: drop it and run this again. The test suites
+never call this: they create their own databases
+(tests/conftest_infrastructure.py).
 """
 
 from __future__ import annotations
@@ -28,6 +31,13 @@ DEFAULT_DATABASE_URL = "postgresql+psycopg://postgres:postgres@localhost:5432/pi
 
 # Database that always exists, used to issue the CREATE DATABASE.
 MAINTENANCE_DATABASE = "postgres"
+
+# Production's locale: the clusters are initialised with ICU 'und' and C. The
+# server's default (libc en_US.utf8 on the sidecar) sorts text differently.
+# Keep in step with _DATABASE_LOCALE in tests/conftest_infrastructure.py.
+DATABASE_LOCALE = (
+    "ENCODING 'UTF8' LOCALE_PROVIDER icu ICU_LOCALE 'und' LC_COLLATE 'C' LC_CTYPE 'C'"
+)
 
 _BACKEND_DIR = Path(__file__).resolve().parent.parent
 
@@ -54,15 +64,23 @@ def main() -> int:
     )
 
     with psycopg.connect(maintenance_url, autocommit=True) as conn:
-        exists = conn.execute(
-            "SELECT 1 FROM pg_database WHERE datname = %s", (database,)
+        existing = conn.execute(
+            "SELECT datlocprovider, datcollate FROM pg_database WHERE datname = %s",
+            (database,),
         ).fetchone()
-        if exists:
+        if existing:
             print(f"Database '{database}' already exists")
+            provider, collate = existing
+            if provider != "i" or collate != "C":
+                print(
+                    f"Database '{database}' is not in production's locale (ICU 'und', "
+                    "C): drop it and run this again to recreate it",
+                    file=sys.stderr,
+                )
             return 0
 
         # No parameter binding for identifiers in DDL.
-        conn.execute(f'CREATE DATABASE "{database}"')
+        conn.execute(f'CREATE DATABASE "{database}" TEMPLATE template0 {DATABASE_LOCALE}')
         print(f"Created database '{database}'")
 
     return 0
