@@ -94,7 +94,8 @@ is stored nowhere.
   `created` is the record's, and a save's is ignored. `ticket` must match the setting
   `TICKET_ID_PATTERN` whole (by default `[A-Z][A-Z0-9_]*-[1-9][0-9]*`). A task needs `id`, `title`
   and `status`, a note `id`, `summary` and `content`; no two tasks share an id, nor two notes. A
-  ref names a block of one of the project's items: the draft's blocks are no item's.
+  ref names a block of one of the project's items, never one of the draft's, which are no item's
+  (D001): a draft save may drop any of its blocks, since no note can name one.
 - **Writing.** The tasks take the save's order. A task the save leaves out is removed: it keeps
   its row, title and status, and comes back when a later save holds it again. A note is matched to
   the open note of its id wherever the save puts it, so a note moved to another task stays the same
