@@ -58,6 +58,12 @@ ports:
   - name: mockup
     port: 8080
     sslOffload: true
+  # The chat mockup (PilotAppSpecs design/chat-mockup/): Vite's dev server in
+  # the modern-app sidecar; design/chat-mockup/README.md has the command.
+  # `sslOffload` for the phone, as the timeline mockup's.
+  - name: chat-mockup
+    port: 8081
+    sslOffload: true
 
 preamble:
   instructions: |
