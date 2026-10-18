@@ -1,0 +1,21 @@
+{
+  "rule": "held: `step` naming no task of the project",
+  "parse": {
+    "front_matter": {
+      "span": [1, 4],
+      "lines": {
+        "title": [2, 2],
+        "step": [3, 3]
+      },
+      "title": "Plan the launch",
+      "step": "launch"
+    },
+    "title": "Plan the launch"
+  },
+  "faults": [
+    {
+      "line": 3,
+      "message": "front matter: `step: launch` names no task of the project"
+    }
+  ]
+}

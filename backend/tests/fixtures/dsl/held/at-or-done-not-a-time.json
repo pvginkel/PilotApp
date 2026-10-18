@@ -1,0 +1,43 @@
+{
+  "rule": "held: `at` or `done` not a time",
+  "parse": {
+    "title": "Clean the oven",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "A1",
+        "kind": "action",
+        "fence": [3, 6],
+        "lines": {
+          "done": [4, 4],
+          "by": [5, 5]
+        },
+        "by": "ada",
+        "via": "app"
+      },
+      {
+        "id": "Q1",
+        "kind": "question",
+        "fence": [8, 12],
+        "lines": {
+          "answer": [9, 9],
+          "by": [10, 10],
+          "at": [11, 11]
+        },
+        "answer": "Monday",
+        "by": "ben",
+        "via": "app"
+      }
+    ]
+  },
+  "faults": [
+    {
+      "line": 4,
+      "message": "block A1: `done: last night` is not a time"
+    },
+    {
+      "line": 11,
+      "message": "block Q1: `at: 2026-10-12` is not a time"
+    }
+  ]
+}

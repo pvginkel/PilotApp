@@ -1,0 +1,28 @@
+{
+  "rule": "accepted: unknown front-matter keys, kept and ignored",
+  "parse": {
+    "front_matter": {
+      "span": [1, 7],
+      "lines": {
+        "title": [2, 2],
+        "project": [3, 3],
+        "tags": [4, 4],
+        "owner": [5, 6]
+      },
+      "title": "Rename the menu's sections"
+    },
+    "title": "Rename the menu's sections",
+    "blocks": [
+      {
+        "id": "Q1",
+        "kind": "question",
+        "fence": [9, 11],
+        "lines": {
+          "default": [10, 10]
+        },
+        "default": "Breads, Cakes, Drinks"
+      }
+    ]
+  },
+  "faults": []
+}

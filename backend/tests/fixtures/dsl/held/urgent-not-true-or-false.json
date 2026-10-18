@@ -1,0 +1,20 @@
+{
+  "rule": "held (reader): `urgent` other than true or false",
+  "parse": {
+    "front_matter": {
+      "span": [1, 4],
+      "lines": {
+        "title": [2, 2],
+        "urgent": [3, 3]
+      },
+      "title": "The oven is out"
+    },
+    "title": "The oven is out"
+  },
+  "faults": [
+    {
+      "line": 3,
+      "message": "front matter: `urgent: very` is not true or false"
+    }
+  ]
+}

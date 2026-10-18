@@ -1,0 +1,24 @@
+{
+  "rule": "held: the draft's `slug` present and invalid or taken",
+  "facts": {
+    "document": "draft"
+  },
+  "parse": {
+    "front_matter": {
+      "span": [1, 4],
+      "lines": {
+        "title": [2, 2],
+        "slug": [3, 3]
+      },
+      "title": "Crumb ordering",
+      "slug": "Crumb_Orders"
+    },
+    "title": "Crumb ordering"
+  },
+  "faults": [
+    {
+      "line": 3,
+      "message": "front matter: `slug: Crumb_Orders` is not lower-case letters, digits and hyphens"
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "rule": "held (reader): a list or a mapping where one value is wanted",
+  "parse": {
+    "front_matter": {
+      "span": [1, 5],
+      "lines": {
+        "title": [2, 4]
+      }
+    },
+    "blocks": [
+      {
+        "id": "D1",
+        "kind": "decision",
+        "fence": [7, 11],
+        "lines": {
+          "proposal": [8, 9],
+          "answer": [10, 10]
+        }
+      }
+    ]
+  },
+  "faults": [
+    {
+      "line": 2,
+      "message": "front matter: `title` is not a single value"
+    },
+    {
+      "line": 8,
+      "message": "block D1: `proposal` is not a single value"
+    },
+    {
+      "line": 10,
+      "message": "block D1: `answer` is not a single value"
+    }
+  ]
+}

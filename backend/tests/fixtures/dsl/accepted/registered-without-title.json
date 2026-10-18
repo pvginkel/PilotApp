@@ -1,0 +1,13 @@
+{
+  "rule": "accepted: a registered document with neither title nor heading",
+  "parse": {
+    "blocks": [
+      {
+        "id": "Q1",
+        "kind": "question",
+        "fence": [3, 4]
+      }
+    ]
+  },
+  "faults": []
+}

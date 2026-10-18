@@ -1,0 +1,47 @@
+{
+  "rule": "accepted: CRLF line endings",
+  "parse": {
+    "front_matter": {
+      "span": [1, 3],
+      "lines": {
+        "title": [2, 2]
+      },
+      "title": "Which printer for the labels?"
+    },
+    "title": "Which printer for the labels?",
+    "blocks": [
+      {
+        "id": "D1",
+        "kind": "decision",
+        "fence": [5, 16],
+        "lines": {
+          "options": [6, 8],
+          "recommend": [9, 9],
+          "answer": [10, 10],
+          "by": [11, 11],
+          "at": [12, 12],
+          "note": [13, 15]
+        },
+        "options": [
+          {
+            "label": "Thermal",
+            "text": "no ink, fades in a year",
+            "recommended": true,
+            "line": 7
+          },
+          {
+            "label": "Laser",
+            "text": "sharp, needs a stand",
+            "line": 8
+          }
+        ],
+        "answer": "Laser",
+        "by": "ada",
+        "at": "2026-10-12T09:40:00+00:00",
+        "note": "The labels must last.\nTwo years at least.",
+        "via": "app"
+      }
+    ]
+  },
+  "faults": []
+}

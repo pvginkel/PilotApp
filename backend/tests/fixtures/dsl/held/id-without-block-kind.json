@@ -1,0 +1,17 @@
+{
+  "rule": "held: `id=` on a fence that is not a block",
+  "parse": {
+    "title": "Not blocks",
+    "title_heading_line": 1
+  },
+  "faults": [
+    {
+      "line": 3,
+      "message": "a fence with `id=` is not a block: `notice` is not decision, question or action"
+    },
+    {
+      "line": 7,
+      "message": "a fence with `id=` is not a block: `yaml` is not decision, question or action"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "rule": "accepted (reader): an empty document",
+  "parse": {},
+  "faults": []
+}

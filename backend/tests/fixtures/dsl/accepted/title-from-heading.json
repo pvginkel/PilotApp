@@ -1,0 +1,38 @@
+{
+  "rule": "accepted: the first ATX heading as the title when `title` is absent",
+  "facts": {
+    "document": "own_item"
+  },
+  "parse": {
+    "front_matter": {
+      "span": [1, 3],
+      "lines": {
+        "step": [2, 2]
+      },
+      "step": "build"
+    },
+    "title": "Which flour supplier?",
+    "title_heading_line": 11,
+    "blocks": [
+      {
+        "id": "D1",
+        "kind": "decision",
+        "fence": [15, 19],
+        "lines": {
+          "options": [16, 18]
+        },
+        "options": [
+          {
+            "label": "Mill North",
+            "line": 17
+          },
+          {
+            "label": "Mill South",
+            "line": 18
+          }
+        ]
+      }
+    ]
+  },
+  "faults": []
+}

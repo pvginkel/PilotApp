@@ -1,0 +1,19 @@
+{
+  "rule": "accepted (reader): an answer without `by`",
+  "parse": {
+    "title": "Which day for the delivery?",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "Q1",
+        "kind": "question",
+        "fence": [3, 5],
+        "lines": {
+          "answer": [4, 4]
+        },
+        "answer": "Tuesday"
+      }
+    ]
+  },
+  "faults": []
+}

@@ -1,0 +1,35 @@
+{
+  "rule": "held: `options` not a list",
+  "parse": {
+    "title": "Which oven?",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "D1",
+        "kind": "decision",
+        "fence": [3, 5],
+        "lines": {
+          "options": [4, 4]
+        }
+      },
+      {
+        "id": "A1",
+        "kind": "action",
+        "fence": [7, 10],
+        "lines": {
+          "options": [8, 9]
+        }
+      }
+    ]
+  },
+  "faults": [
+    {
+      "line": 4,
+      "message": "block D1: `options` is not a list"
+    },
+    {
+      "line": 8,
+      "message": "block A1: `options` is not a list"
+    }
+  ]
+}

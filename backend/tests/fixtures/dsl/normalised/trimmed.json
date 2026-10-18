@@ -1,0 +1,46 @@
+{
+  "rule": "normalised: labels and values trimmed",
+  "parse": {
+    "front_matter": {
+      "span": [1, 4],
+      "lines": {
+        "title": [2, 2],
+        "step": [3, 3]
+      },
+      "title": "Which oven?",
+      "step": "build"
+    },
+    "title": "Which oven?",
+    "blocks": [
+      {
+        "id": "D1",
+        "kind": "decision",
+        "fence": [6, 14],
+        "lines": {
+          "options": [7, 9],
+          "recommend": [10, 10],
+          "answer": [11, 11],
+          "by": [12, 12],
+          "note": [13, 13]
+        },
+        "options": [
+          {
+            "label": "Deck",
+            "text": "stone floor",
+            "line": 8
+          },
+          {
+            "label": "Convection",
+            "recommended": true,
+            "line": 9
+          }
+        ],
+        "answer": "Deck",
+        "by": "ada",
+        "note": "Fine.",
+        "via": "app"
+      }
+    ]
+  },
+  "faults": []
+}

@@ -1,0 +1,31 @@
+{
+  "rule": "never a fault: prose the skill would call bad",
+  "parse": {
+    "blocks": [
+      {
+        "id": "D1",
+        "kind": "decision",
+        "fence": [1, 5],
+        "lines": {
+          "options": [2, 4]
+        },
+        "options": [
+          {
+            "label": "A",
+            "line": 3
+          },
+          {
+            "label": "B",
+            "line": 4
+          }
+        ]
+      },
+      {
+        "id": "D2",
+        "kind": "decision",
+        "fence": [6, 7]
+      }
+    ]
+  },
+  "faults": []
+}

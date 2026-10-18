@@ -1,0 +1,28 @@
+{
+  "rule": "never a fault: the draft's `slug` missing",
+  "facts": {
+    "document": "draft"
+  },
+  "parse": {
+    "front_matter": {
+      "span": [1, 3],
+      "lines": {
+        "title": [2, 2]
+      },
+      "title": "A bakery's ordering app"
+    },
+    "title": "A bakery's ordering app",
+    "blocks": [
+      {
+        "id": "Q1",
+        "kind": "question",
+        "fence": [7, 9],
+        "lines": {
+          "default": [8, 8]
+        },
+        "default": "Crumb"
+      }
+    ]
+  },
+  "faults": []
+}

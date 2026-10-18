@@ -1,0 +1,17 @@
+{
+  "rule": "held: a block kind in the wrong case",
+  "parse": {
+    "title": "Two asks in the wrong case",
+    "title_heading_line": 1
+  },
+  "faults": [
+    {
+      "line": 3,
+      "message": "`Decision` is not a block kind: write `decision`"
+    },
+    {
+      "line": 7,
+      "message": "`ACTION` is not a block kind: write `action`"
+    }
+  ]
+}

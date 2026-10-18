@@ -1,0 +1,54 @@
+{
+  "rule": "accepted: an option as a bare label or `- Label: one line`",
+  "parse": {
+    "title": "Which oven for the second shift?",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "D1",
+        "kind": "decision",
+        "fence": [3, 9],
+        "lines": {
+          "options": [4, 7],
+          "recommend": [8, 8]
+        },
+        "options": [
+          {
+            "label": "Deck",
+            "text": "stone floor, slow to heat",
+            "line": 5
+          },
+          {
+            "label": "Convection",
+            "recommended": true,
+            "line": 6
+          },
+          {
+            "label": "Rack: two trolleys",
+            "text": "a quoted label with a colon",
+            "line": 7
+          }
+        ]
+      },
+      {
+        "id": "A1",
+        "kind": "action",
+        "fence": [11, 13],
+        "lines": {
+          "options": [12, 12]
+        },
+        "options": [
+          {
+            "label": "Works",
+            "line": 12
+          },
+          {
+            "label": "Doesn't",
+            "line": 12
+          }
+        ]
+      }
+    ]
+  },
+  "faults": []
+}

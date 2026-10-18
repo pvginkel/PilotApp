@@ -1,0 +1,28 @@
+{
+  "rule": "accepted: a fence closed by the same character and at least the same length",
+  "parse": {
+    "title": "Close the till at nine?",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "Q1",
+        "kind": "question",
+        "fence": [3, 5],
+        "lines": {
+          "default": [4, 4]
+        },
+        "default": "nine"
+      },
+      {
+        "id": "A1",
+        "kind": "action",
+        "fence": [7, 13],
+        "lines": {
+          "note": [8, 12]
+        },
+        "note": "Run it as\n```\nmake labels\n```"
+      }
+    ]
+  },
+  "faults": []
+}

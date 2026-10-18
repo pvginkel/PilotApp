@@ -1,0 +1,33 @@
+{
+  "rule": "held: two blocks with one id",
+  "parse": {
+    "title": "Two asks, one id",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "Q1",
+        "kind": "question",
+        "fence": [3, 5],
+        "lines": {
+          "default": [4, 4]
+        },
+        "default": "Monday"
+      },
+      {
+        "id": "Q1",
+        "kind": "question",
+        "fence": [7, 9],
+        "lines": {
+          "default": [8, 8]
+        },
+        "default": "Tuesday"
+      }
+    ]
+  },
+  "faults": [
+    {
+      "line": 7,
+      "message": "duplicate block id Q1"
+    }
+  ]
+}

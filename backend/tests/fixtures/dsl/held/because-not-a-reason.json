@@ -1,0 +1,28 @@
+{
+  "rule": "held: `because` outside Confirmation Reason",
+  "parse": {
+    "title": "Push the release?",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "C1",
+        "kind": "decision",
+        "fence": [3, 7],
+        "lines": {
+          "type": [4, 4],
+          "because": [5, 5],
+          "proposal": [6, 6]
+        },
+        "confirmation": true,
+        "because": "hunch",
+        "proposal": "Push the release to production"
+      }
+    ]
+  },
+  "faults": [
+    {
+      "line": 5,
+      "message": "block C1: `because: hunch` is not a confirmation reason (auto-pilot-off, rider, irreversible, product-hold, self-approval); the reasons are in `reference.json`"
+    }
+  ]
+}

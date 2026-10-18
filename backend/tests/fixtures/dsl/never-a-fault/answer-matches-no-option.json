@@ -1,0 +1,36 @@
+{
+  "rule": "never a fault: an `answer` that matches no option",
+  "parse": {
+    "title": "Which oven?",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "D1",
+        "kind": "decision",
+        "fence": [3, 11],
+        "lines": {
+          "options": [4, 6],
+          "recommend": [7, 7],
+          "answer": [8, 8],
+          "by": [9, 9],
+          "via": [10, 10]
+        },
+        "options": [
+          {
+            "label": "Deck",
+            "line": 5
+          },
+          {
+            "label": "Convection",
+            "recommended": true,
+            "line": 6
+          }
+        ],
+        "answer": "Neither; rent one for a month first",
+        "by": "ada",
+        "via": "chat"
+      }
+    ]
+  },
+  "faults": []
+}

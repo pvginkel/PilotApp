@@ -1,0 +1,35 @@
+{
+  "rule": "held (DB 153): `options` beside `proposal`",
+  "parse": {
+    "title": "Which oven?",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "D1",
+        "kind": "decision",
+        "fence": [3, 8],
+        "lines": {
+          "proposal": [4, 4],
+          "options": [5, 7]
+        },
+        "proposal": "Buy the convection oven",
+        "options": [
+          {
+            "label": "Deck",
+            "line": 6
+          },
+          {
+            "label": "Convection",
+            "line": 7
+          }
+        ]
+      }
+    ]
+  },
+  "faults": [
+    {
+      "line": 5,
+      "message": "block D1: `options` beside `proposal`"
+    }
+  ]
+}

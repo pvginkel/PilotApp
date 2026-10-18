@@ -1,0 +1,87 @@
+{
+  "rule": "normalised: `via` absent read as `app` for a person's line",
+  "parse": {
+    "title": "Who answered how",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "Q1",
+        "kind": "question",
+        "fence": [3, 6],
+        "lines": {
+          "answer": [4, 4],
+          "by": [5, 5]
+        },
+        "answer": "Monday",
+        "by": "ada",
+        "via": "app"
+      },
+      {
+        "id": "Q2",
+        "kind": "question",
+        "fence": [8, 11],
+        "lines": {
+          "answer": [9, 9],
+          "by": [10, 10]
+        },
+        "answer": "Tuesday",
+        "by": "agent"
+      },
+      {
+        "id": "Q3",
+        "kind": "question",
+        "fence": [13, 17],
+        "lines": {
+          "answer": [14, 14],
+          "by": [15, 15],
+          "via": [16, 16]
+        },
+        "answer": "Wednesday",
+        "by": "ben",
+        "via": "chat"
+      },
+      {
+        "id": "D4",
+        "kind": "decision",
+        "fence": [19, 26],
+        "lines": {
+          "options": [20, 21],
+          "recommend": [22, 22],
+          "answer": [23, 23],
+          "by": [24, 24],
+          "via": [25, 25]
+        },
+        "options": [
+          {
+            "label": "Deck",
+            "recommended": true,
+            "line": 21
+          }
+        ],
+        "answer": "Deck",
+        "by": "ada",
+        "via": "recommended"
+      },
+      {
+        "id": "C5",
+        "kind": "decision",
+        "fence": [28, 35],
+        "lines": {
+          "type": [29, 29],
+          "because": [30, 30],
+          "proposal": [31, 31],
+          "answer": [32, 32],
+          "by": [33, 33],
+          "via": [34, 34]
+        },
+        "confirmation": true,
+        "because": "auto-pilot-off",
+        "proposal": "Push the fix",
+        "answer": "Yes",
+        "by": "ada",
+        "via": "autopilot"
+      }
+    ]
+  },
+  "faults": []
+}

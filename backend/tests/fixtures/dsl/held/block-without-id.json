@@ -1,0 +1,21 @@
+{
+  "rule": "held: a block without `id`",
+  "parse": {
+    "title": "Three asks without ids",
+    "title_heading_line": 1
+  },
+  "faults": [
+    {
+      "line": 3,
+      "message": "a decision block without `id=<id>`"
+    },
+    {
+      "line": 7,
+      "message": "a question block without `id=<id>`"
+    },
+    {
+      "line": 10,
+      "message": "an action block without `id=<id>`"
+    }
+  ]
+}

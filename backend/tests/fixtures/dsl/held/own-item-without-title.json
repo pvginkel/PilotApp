@@ -1,0 +1,25 @@
+{
+  "rule": "held: a Pilot's-own one-block item with neither `title` nor a first heading",
+  "facts": {
+    "document": "own_item"
+  },
+  "parse": {
+    "blocks": [
+      {
+        "id": "Q1",
+        "kind": "question",
+        "fence": [3, 5],
+        "lines": {
+          "default": [4, 4]
+        },
+        "default": "Monday"
+      }
+    ]
+  },
+  "faults": [
+    {
+      "line": null,
+      "message": "the item has no title: give it `title` in the front matter or a first heading"
+    }
+  ]
+}

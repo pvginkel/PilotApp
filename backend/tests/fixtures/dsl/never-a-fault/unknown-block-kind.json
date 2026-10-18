@@ -1,0 +1,8 @@
+{
+  "rule": "never a fault: a block kind the record does not know",
+  "parse": {
+    "title": "Not blocks, and no faults",
+    "title_heading_line": 1
+  },
+  "faults": []
+}

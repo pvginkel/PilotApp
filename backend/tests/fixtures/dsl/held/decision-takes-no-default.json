@@ -1,0 +1,30 @@
+{
+  "rule": "held: a key a kind does not take",
+  "parse": {
+    "title": "Open on Sundays?",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "D1",
+        "kind": "decision",
+        "fence": [3, 7],
+        "lines": {
+          "proposal": [4, 4],
+          "default": [5, 5],
+          "ask": [6, 6]
+        },
+        "proposal": "Open on Sundays from ten"
+      }
+    ]
+  },
+  "faults": [
+    {
+      "line": 5,
+      "message": "block D1: a decision takes no `default`"
+    },
+    {
+      "line": 6,
+      "message": "block D1: a decision takes no `ask`"
+    }
+  ]
+}

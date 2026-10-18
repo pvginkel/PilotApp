@@ -1,0 +1,21 @@
+{
+  "rule": "held: `for` naming no handle",
+  "parse": {
+    "front_matter": {
+      "span": [1, 4],
+      "lines": {
+        "title": [2, 2],
+        "for": [3, 3]
+      },
+      "title": "For the night shift",
+      "for": "carol"
+    },
+    "title": "For the night shift"
+  },
+  "faults": [
+    {
+      "line": 3,
+      "message": "front matter: `for: carol` names no handle"
+    }
+  ]
+}

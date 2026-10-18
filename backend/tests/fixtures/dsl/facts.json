@@ -1,0 +1,9 @@
+{
+  "document": "registered_item",
+  "handles": ["agent", "ada", "ben"],
+  "plan_task_ids": ["build", "verify"],
+  "removed_task_ids": ["spike"],
+  "confirmation_reasons": ["auto-pilot-off", "rider", "irreversible", "product-hold", "self-approval"],
+  "taken_slugs": ["harbour"],
+  "published_to": {}
+}

@@ -1,0 +1,25 @@
+{
+  "rule": "held: `recommend` beside `proposal`",
+  "parse": {
+    "title": "Which oven?",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "D1",
+        "kind": "decision",
+        "fence": [3, 6],
+        "lines": {
+          "proposal": [4, 4],
+          "recommend": [5, 5]
+        },
+        "proposal": "Buy the convection oven"
+      }
+    ]
+  },
+  "faults": [
+    {
+      "line": 5,
+      "message": "block D1: `recommend` beside `proposal`"
+    }
+  ]
+}

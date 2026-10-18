@@ -1,0 +1,8 @@
+{
+  "rule": "accepted (reader): a first line `---` with no closing one opens no front matter",
+  "parse": {
+    "title": "Weekend hours",
+    "title_heading_line": 4
+  },
+  "faults": []
+}

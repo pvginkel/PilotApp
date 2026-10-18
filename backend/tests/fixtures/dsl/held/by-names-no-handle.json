@@ -1,0 +1,27 @@
+{
+  "rule": "held: `by` naming no handle",
+  "parse": {
+    "title": "Rename the menu?",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "Q1",
+        "kind": "question",
+        "fence": [3, 6],
+        "lines": {
+          "answer": [4, 4],
+          "by": [5, 5]
+        },
+        "answer": "Breads first",
+        "by": "carol",
+        "via": "app"
+      }
+    ]
+  },
+  "faults": [
+    {
+      "line": 5,
+      "message": "block Q1: `by: carol` names no handle"
+    }
+  ]
+}

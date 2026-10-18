@@ -1,0 +1,37 @@
+{
+  "rule": "accepted: a front matter block at the top",
+  "parse": {
+    "front_matter": {
+      "span": [1, 7],
+      "lines": {
+        "title": [2, 2],
+        "step": [3, 3],
+        "summary": [4, 4],
+        "urgent": [5, 5],
+        "for": [6, 6]
+      },
+      "title": "Ship the order form on Friday?",
+      "summary": "Whether the order form goes out before the weekend rush.",
+      "step": "build",
+      "urgent": true,
+      "for": "ben"
+    },
+    "title": "Ship the order form on Friday?",
+    "blocks": [
+      {
+        "id": "C1",
+        "kind": "decision",
+        "fence": [11, 15],
+        "lines": {
+          "type": [12, 12],
+          "because": [13, 13],
+          "proposal": [14, 14]
+        },
+        "confirmation": true,
+        "because": "irreversible",
+        "proposal": "Ship the order form on Friday"
+      }
+    ]
+  },
+  "faults": []
+}

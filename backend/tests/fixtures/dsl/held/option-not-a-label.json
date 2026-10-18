@@ -1,0 +1,42 @@
+{
+  "rule": "held: an option that is not a label with at most one line",
+  "parse": {
+    "title": "Which oven?",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "D1",
+        "kind": "decision",
+        "fence": [3, 13],
+        "lines": {
+          "options": [4, 12]
+        },
+        "options": [
+          {
+            "label": "Convection",
+            "text": "a fan oven",
+            "line": 12
+          }
+        ]
+      }
+    ]
+  },
+  "faults": [
+    {
+      "line": 5,
+      "message": "block D1: option 1 is not a label with at most one line"
+    },
+    {
+      "line": 7,
+      "message": "block D1: option 2 is not a label with at most one line"
+    },
+    {
+      "line": 8,
+      "message": "block D1: option 3 is not a label with at most one line"
+    },
+    {
+      "line": 11,
+      "message": "block D1: option 4 is not a label with at most one line"
+    }
+  ]
+}

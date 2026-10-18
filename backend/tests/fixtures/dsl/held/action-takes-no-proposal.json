@@ -1,0 +1,40 @@
+{
+  "rule": "held: a key a kind does not take",
+  "parse": {
+    "title": "Clean the oven",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "A1",
+        "kind": "action",
+        "fence": [3, 9],
+        "lines": {
+          "proposal": [4, 4],
+          "recommend": [5, 5],
+          "default": [6, 6],
+          "options": [7, 8]
+        },
+        "options": [
+          {
+            "label": "Works",
+            "line": 8
+          }
+        ]
+      }
+    ]
+  },
+  "faults": [
+    {
+      "line": 4,
+      "message": "block A1: an action takes no `proposal`"
+    },
+    {
+      "line": 5,
+      "message": "block A1: an action takes no `recommend`"
+    },
+    {
+      "line": 6,
+      "message": "block A1: an action takes no `default`"
+    }
+  ]
+}

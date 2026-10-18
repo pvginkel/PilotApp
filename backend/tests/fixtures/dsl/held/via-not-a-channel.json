@@ -1,0 +1,28 @@
+{
+  "rule": "held (reader): `via` naming no Answer Channel",
+  "parse": {
+    "title": "Which day?",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "Q1",
+        "kind": "question",
+        "fence": [3, 7],
+        "lines": {
+          "answer": [4, 4],
+          "by": [5, 5],
+          "via": [6, 6]
+        },
+        "answer": "Monday",
+        "by": "ada",
+        "via": "app"
+      }
+    ]
+  },
+  "faults": [
+    {
+      "line": 6,
+      "message": "block Q1: `via: email` is not chat, recommended or autopilot"
+    }
+  ]
+}

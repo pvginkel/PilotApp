@@ -1,0 +1,26 @@
+{
+  "rule": "held: `answer: deferred` without `to`",
+  "parse": {
+    "title": "Rename the menu?",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "Q1",
+        "kind": "question",
+        "fence": [3, 6],
+        "lines": {
+          "answer": [4, 4],
+          "by": [5, 5]
+        },
+        "answer": "deferred",
+        "by": "agent"
+      }
+    ]
+  },
+  "faults": [
+    {
+      "line": 4,
+      "message": "block Q1: `answer: deferred` without `to`"
+    }
+  ]
+}

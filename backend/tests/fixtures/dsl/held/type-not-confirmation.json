@@ -1,0 +1,27 @@
+{
+  "rule": "held (reader): `type` other than `confirmation`",
+  "parse": {
+    "title": "Push the release?",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "C1",
+        "kind": "decision",
+        "fence": [3, 7],
+        "lines": {
+          "type": [4, 4],
+          "proposal": [5, 5],
+          "because": [6, 6]
+        },
+        "because": "irreversible",
+        "proposal": "Push the release to production"
+      }
+    ]
+  },
+  "faults": [
+    {
+      "line": 4,
+      "message": "block C1: `type: confirm` is not `confirmation`"
+    }
+  ]
+}

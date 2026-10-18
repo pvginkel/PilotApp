@@ -1,0 +1,13 @@
+{
+  "rule": "held: a fence opened and not closed",
+  "parse": {
+    "title": "Order cut-off",
+    "title_heading_line": 1
+  },
+  "faults": [
+    {
+      "line": 3,
+      "message": "a fence opened with ``` is not closed"
+    }
+  ]
+}

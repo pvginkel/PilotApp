@@ -1,0 +1,42 @@
+{
+  "rule": "normalised: option order and block order as written",
+  "parse": {
+    "title": "Three asks, as written",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "Q2",
+        "kind": "question",
+        "fence": [3, 4]
+      },
+      {
+        "id": "D1",
+        "kind": "decision",
+        "fence": [6, 11],
+        "lines": {
+          "options": [7, 10]
+        },
+        "options": [
+          {
+            "label": "Zebra",
+            "line": 8
+          },
+          {
+            "label": "Apple",
+            "line": 9
+          },
+          {
+            "label": "Mango",
+            "line": 10
+          }
+        ]
+      },
+      {
+        "id": "A3",
+        "kind": "action",
+        "fence": [13, 14]
+      }
+    ]
+  },
+  "faults": []
+}

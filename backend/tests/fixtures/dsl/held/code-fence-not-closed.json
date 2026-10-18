@@ -1,0 +1,20 @@
+{
+  "rule": "held: a fence opened and not closed",
+  "parse": {
+    "title": "Restart the till",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "A1",
+        "kind": "action",
+        "fence": [3, 4]
+      }
+    ]
+  },
+  "faults": [
+    {
+      "line": 6,
+      "message": "a fence opened with ~~~ is not closed"
+    }
+  ]
+}

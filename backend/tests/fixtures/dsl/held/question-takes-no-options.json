@@ -1,0 +1,48 @@
+{
+  "rule": "held: a key a kind does not take",
+  "parse": {
+    "title": "Which day?",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "Q1",
+        "kind": "question",
+        "fence": [3, 12],
+        "lines": {
+          "options": [4, 6],
+          "recommend": [7, 7],
+          "proposal": [8, 8],
+          "type": [9, 9],
+          "because": [10, 10],
+          "check": [11, 11]
+        }
+      }
+    ]
+  },
+  "faults": [
+    {
+      "line": 4,
+      "message": "block Q1: a question takes no `options`"
+    },
+    {
+      "line": 7,
+      "message": "block Q1: a question takes no `recommend`"
+    },
+    {
+      "line": 8,
+      "message": "block Q1: a question takes no `proposal`"
+    },
+    {
+      "line": 9,
+      "message": "block Q1: a question takes no `type`"
+    },
+    {
+      "line": 10,
+      "message": "block Q1: a question takes no `because`"
+    },
+    {
+      "line": 11,
+      "message": "block Q1: a question takes no `check`"
+    }
+  ]
+}

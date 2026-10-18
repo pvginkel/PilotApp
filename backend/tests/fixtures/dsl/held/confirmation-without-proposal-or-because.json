@@ -1,0 +1,41 @@
+{
+  "rule": "held: `type: confirmation` without `proposal` or `because`",
+  "parse": {
+    "title": "Push the release?",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "C1",
+        "kind": "decision",
+        "fence": [3, 6],
+        "lines": {
+          "type": [4, 4],
+          "because": [5, 5]
+        },
+        "confirmation": true,
+        "because": "irreversible"
+      },
+      {
+        "id": "C2",
+        "kind": "decision",
+        "fence": [8, 11],
+        "lines": {
+          "type": [9, 9],
+          "proposal": [10, 10]
+        },
+        "confirmation": true,
+        "proposal": "Push the release to production"
+      }
+    ]
+  },
+  "faults": [
+    {
+      "line": 4,
+      "message": "block C1: a confirmation without `proposal`"
+    },
+    {
+      "line": 9,
+      "message": "block C2: a confirmation without `because`"
+    }
+  ]
+}

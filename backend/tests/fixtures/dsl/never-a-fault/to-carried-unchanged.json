@@ -1,0 +1,34 @@
+{
+  "rule": "never a fault: a `to` carried unchanged from the published text",
+  "facts": {
+    "published_to": {
+      "D1": "spike"
+    }
+  },
+  "parse": {
+    "title": "Try the second supplier?",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "D1",
+        "kind": "decision",
+        "fence": [3, 10],
+        "lines": {
+          "proposal": [4, 4],
+          "answer": [5, 5],
+          "by": [6, 6],
+          "at": [7, 7],
+          "to": [8, 8],
+          "note": [9, 9]
+        },
+        "proposal": "Try the second flour supplier",
+        "answer": "deferred",
+        "by": "agent",
+        "at": "2026-10-12T09:30:00+00:00",
+        "note": "The spike has left the plan; the deferral stays where it was.",
+        "to": "spike"
+      }
+    ]
+  },
+  "faults": []
+}

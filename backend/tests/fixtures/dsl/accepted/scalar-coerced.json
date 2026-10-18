@@ -1,0 +1,78 @@
+{
+  "rule": "accepted: a scalar where a string is wanted, coerced",
+  "parse": {
+    "title": "How many loaves per tray?",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "D1",
+        "kind": "decision",
+        "fence": [3, 13],
+        "lines": {
+          "options": [4, 8],
+          "recommend": [9, 9],
+          "answer": [10, 10],
+          "by": [11, 11],
+          "at": [12, 12]
+        },
+        "options": [
+          {
+            "label": "2",
+            "line": 5
+          },
+          {
+            "label": "3",
+            "text": "tighter, one more per bake",
+            "recommended": true,
+            "line": 6
+          },
+          {
+            "label": "Yes",
+            "line": 7
+          },
+          {
+            "label": "No",
+            "line": 8
+          }
+        ],
+        "answer": "2",
+        "by": "ada",
+        "at": "2026-10-12T12:34:00+00:00",
+        "via": "app"
+      },
+      {
+        "id": "Q1",
+        "kind": "question",
+        "fence": [15, 19],
+        "lines": {
+          "default": [16, 16],
+          "answer": [17, 17],
+          "by": [18, 18]
+        },
+        "default": "2026-10-12",
+        "answer": "No",
+        "by": "ben",
+        "via": "app"
+      },
+      {
+        "id": "C1",
+        "kind": "decision",
+        "fence": [21, 27],
+        "lines": {
+          "type": [22, 22],
+          "because": [23, 23],
+          "proposal": [24, 24],
+          "answer": [25, 25],
+          "by": [26, 26]
+        },
+        "confirmation": true,
+        "because": "rider",
+        "proposal": "Bake the extra tray",
+        "answer": "Yes",
+        "by": "ada",
+        "via": "app"
+      }
+    ]
+  },
+  "faults": []
+}

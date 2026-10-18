@@ -23,6 +23,7 @@ dependencies = [
     "pyjwt>=2.11.0,<3",
     "cryptography>=46.0.4,<47",
     "httpx>=0.28.1,<0.29",
+    "pyyaml>=6.0.3,<7",
 ]
 
 [project.scripts]
@@ -42,6 +43,7 @@ dev = [
     "types-waitress>=3.0.1.20250801,<4",
     "vulture>=2.14,<3",
     "watchdog[watchmedo]>=6.0.0,<7",
+    "types-pyyaml>=6.0.12,<7",
 ]
 
 # Only app/ is a package; run.py and scripts/ are reached through the editable

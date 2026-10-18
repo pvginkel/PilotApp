@@ -1,0 +1,29 @@
+{
+  "rule": "held: a block whose body is not a YAML mapping",
+  "parse": {
+    "title": "Pick the bread list",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "D1",
+        "kind": "decision",
+        "fence": [3, 6]
+      },
+      {
+        "id": "Q1",
+        "kind": "question",
+        "fence": [8, 10]
+      }
+    ]
+  },
+  "faults": [
+    {
+      "line": 4,
+      "message": "block D1: the body is not a YAML mapping"
+    },
+    {
+      "line": 9,
+      "message": "block Q1: the body is not a YAML mapping"
+    }
+  ]
+}

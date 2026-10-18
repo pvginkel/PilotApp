@@ -1,0 +1,16 @@
+{
+  "rule": "held (reader): front matter that is not a YAML mapping",
+  "parse": {
+    "front_matter": {
+      "span": [1, 3]
+    },
+    "title": "Heading",
+    "title_heading_line": 5
+  },
+  "faults": [
+    {
+      "line": 2,
+      "message": "the front matter is not a YAML mapping: while parsing a flow sequence, expected ',' or ']', but got '<stream end>'"
+    }
+  ]
+}

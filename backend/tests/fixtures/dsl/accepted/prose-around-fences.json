@@ -1,0 +1,32 @@
+{
+  "rule": "accepted: Markdown around the fences, never parsed",
+  "parse": {
+    "title": "Which cache for the price list?",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "D1",
+        "kind": "decision",
+        "fence": [12, 17],
+        "lines": {
+          "options": [13, 15],
+          "recommend": [16, 16]
+        },
+        "options": [
+          {
+            "label": "Memory",
+            "text": "in the process, lost on restart",
+            "recommended": true,
+            "line": 14
+          },
+          {
+            "label": "Redis",
+            "text": "a sidecar, kept across restarts",
+            "line": 15
+          }
+        ]
+      }
+    ]
+  },
+  "faults": []
+}

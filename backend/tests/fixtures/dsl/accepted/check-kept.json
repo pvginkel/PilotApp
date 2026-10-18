@@ -1,0 +1,30 @@
+{
+  "rule": "Later: `check` parsed and kept, never acted on",
+  "parse": {
+    "title": "Push the order form",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "D1",
+        "kind": "decision",
+        "fence": [3, 6],
+        "lines": {
+          "proposal": [4, 4],
+          "check": [5, 5]
+        },
+        "proposal": "Push the order form to production",
+        "check": "the form loads at /order"
+      },
+      {
+        "id": "A1",
+        "kind": "action",
+        "fence": [8, 10],
+        "lines": {
+          "check": [9, 9]
+        },
+        "check": "the label printer prints a test page"
+      }
+    ]
+  },
+  "faults": []
+}

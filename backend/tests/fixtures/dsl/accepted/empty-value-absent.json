@@ -1,0 +1,20 @@
+{
+  "rule": "accepted (reader): a key with an empty value reads as absent",
+  "parse": {
+    "title": "Opening hours",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "Q1",
+        "kind": "question",
+        "fence": [3, 7],
+        "lines": {
+          "default": [4, 4],
+          "answer": [5, 5],
+          "to": [6, 6]
+        }
+      }
+    ]
+  },
+  "faults": []
+}

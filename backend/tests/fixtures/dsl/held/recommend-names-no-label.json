@@ -1,0 +1,46 @@
+{
+  "rule": "held: `recommend` naming no label",
+  "parse": {
+    "title": "Which oven?",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "D1",
+        "kind": "decision",
+        "fence": [3, 8],
+        "lines": {
+          "options": [4, 6],
+          "recommend": [7, 7]
+        },
+        "options": [
+          {
+            "label": "Deck",
+            "line": 5
+          },
+          {
+            "label": "Convection",
+            "line": 6
+          }
+        ]
+      },
+      {
+        "id": "D2",
+        "kind": "decision",
+        "fence": [10, 12],
+        "lines": {
+          "recommend": [11, 11]
+        }
+      }
+    ]
+  },
+  "faults": [
+    {
+      "line": 7,
+      "message": "block D1: `recommend: Rack` names no option"
+    },
+    {
+      "line": 11,
+      "message": "block D2: `recommend: Deck` names no option"
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "rule": "held: a written `to` naming neither `plan` nor a task in the plan",
+  "parse": {
+    "title": "Rename the menu?",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "Q1",
+        "kind": "question",
+        "fence": [3, 7],
+        "lines": {
+          "answer": [4, 4],
+          "by": [5, 5],
+          "to": [6, 6]
+        },
+        "answer": "deferred",
+        "by": "agent",
+        "to": "launch"
+      },
+      {
+        "id": "A1",
+        "kind": "action",
+        "fence": [9, 13],
+        "lines": {
+          "answer": [10, 10],
+          "by": [11, 11],
+          "to": [12, 12]
+        },
+        "answer": "deferred",
+        "by": "agent",
+        "to": "spike"
+      }
+    ]
+  },
+  "faults": [
+    {
+      "line": 6,
+      "message": "block Q1: `to: launch` names neither `plan` nor a task in the plan"
+    },
+    {
+      "line": 12,
+      "message": "block A1: `to: spike` names neither `plan` nor a task in the plan"
+    }
+  ]
+}

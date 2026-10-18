@@ -1,0 +1,16 @@
+{
+  "rule": "accepted (decision 19): `step` naming a task removed from the plan, still the project's",
+  "parse": {
+    "front_matter": {
+      "span": [1, 4],
+      "lines": {
+        "title": [2, 2],
+        "step": [3, 3]
+      },
+      "title": "Tidy the spike's notes",
+      "step": "spike"
+    },
+    "title": "Tidy the spike's notes"
+  },
+  "faults": []
+}

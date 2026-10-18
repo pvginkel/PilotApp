@@ -1,0 +1,8 @@
+{
+  "rule": "accepted: a block quoted inside a longer fence is no block",
+  "parse": {
+    "title": "How a block is written",
+    "title_heading_line": 1
+  },
+  "faults": []
+}

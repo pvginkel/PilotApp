@@ -1,0 +1,17 @@
+{
+  "rule": "accepted: no front matter",
+  "parse": {
+    "blocks": [
+      {
+        "id": "Q1",
+        "kind": "question",
+        "fence": [3, 5],
+        "lines": {
+          "default": [4, 4]
+        },
+        "default": "Monday"
+      }
+    ]
+  },
+  "faults": []
+}

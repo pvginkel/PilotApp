@@ -1,0 +1,29 @@
+{
+  "rule": "accepted: whitespace around `id=`",
+  "parse": {
+    "title": "Three asks",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "D1",
+        "kind": "decision",
+        "fence": [3, 5],
+        "lines": {
+          "proposal": [4, 4]
+        },
+        "proposal": "Keep the menu as it is"
+      },
+      {
+        "id": "Q1",
+        "kind": "question",
+        "fence": [7, 8]
+      },
+      {
+        "id": "A1",
+        "kind": "action",
+        "fence": [10, 11]
+      }
+    ]
+  },
+  "faults": []
+}

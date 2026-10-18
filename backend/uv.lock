@@ -885,6 +885,7 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "pyjwt" },
     { name = "python-dotenv" },
+    { name = "pyyaml" },
     { name = "requests" },
     { name = "spectree" },
     { name = "waitress" },
@@ -898,6 +899,7 @@ dev = [
     { name = "pytest-cov" },
     { name = "ruff" },
     { name = "types-flask-cors" },
+    { name = "types-pyyaml" },
     { name = "types-requests" },
     { name = "types-waitress" },
     { name = "vulture" },
@@ -920,6 +922,7 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.1.0,<3" },
     { name = "pyjwt", specifier = ">=2.11.0,<3" },
     { name = "python-dotenv", specifier = ">=1.0.0,<2" },
+    { name = "pyyaml", specifier = ">=6.0.3,<7" },
     { name = "requests", specifier = ">=2.31.0,<3" },
     { name = "spectree", specifier = ">=2.0.0,<3" },
     { name = "waitress", specifier = ">=3.0.0,<4" },
@@ -933,6 +936,7 @@ dev = [
     { name = "pytest-cov", specifier = ">=7.0.0,<8" },
     { name = "ruff", specifier = ">=0.15.0,<0.16" },
     { name = "types-flask-cors", specifier = ">=6.0.0,<7" },
+    { name = "types-pyyaml", specifier = ">=6.0.12,<7" },
     { name = "types-requests", specifier = ">=2.31.0,<3" },
     { name = "types-waitress", specifier = ">=3.0.1.20250801,<4" },
     { name = "vulture", specifier = ">=2.14,<3" },
@@ -1420,6 +1424,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/76/95/d019181bd47dc32de454ebab4ff2f1cba09d1807da7823522e92b2d8a579/types_flask_cors-6.0.3.20260712.tar.gz", hash = "sha256:05d6dd4c49e2e8e64076b84caf6389d51327e9c4f3a37d4ccf0278b5b0d8daa1", size = 10231, upload-time = "2026-07-12T05:14:23.55Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ba/bc/88f077fde1b3139b714e99db06ed592ecf4fa1b6cbfb54eec50a966f7ecb/types_flask_cors-6.0.3.20260712-py3-none-any.whl", hash = "sha256:308ecfa65c17abc59edbed74258d24099c82f5e94cb1bc4f3016313df4e5e4f0", size = 9939, upload-time = "2026-07-12T05:14:22.64Z" },
+]
+
+[[package]]
+name = "types-pyyaml"
+version = "6.0.12.20260906"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/90/6e/abec85b9013db5b934b0280a6dd104904d84f7bcbaab2e2f3def87ac7463/types_pyyaml-6.0.12.20260906.tar.gz", hash = "sha256:f59c1cc05010b833d2d72287bbaa72610106b28d42d89a907313117faba85212", size = 18649, upload-time = "2026-09-06T06:35:35.362Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/15/c0/fc0644b7ddcfb969e95845837143cb5173ddd6e06ee4ba5fc493cd9329b7/types_pyyaml-6.0.12.20260906-py3-none-any.whl", hash = "sha256:bca893ff0d51df5c9053137d5d0e6ccd36e939a196356f1d5c16372422f5137b", size = 21282, upload-time = "2026-09-06T06:35:34.372Z" },
 ]
 
 [[package]]
