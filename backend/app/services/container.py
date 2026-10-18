@@ -22,6 +22,7 @@ from app.services.metrics_service import MetricsService
 from app.services.oidc_client_service import OidcClientService
 from app.services.sse_connection_manager import SSEConnectionManager
 from app.services.task_service import TaskService
+from app.services.test_data_service import TestDataService
 from app.services.testing_service import TestingService
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
 from app.utils.temp_file_manager import TempFileManager
@@ -144,6 +145,15 @@ class ServiceContainer(containers.DeclarativeContainer):
         db=db_session,
         document_service=document_service,
         view_service=view_service,
+    )
+
+    # The dev stack's seed, loaded by `cli load-test-data`
+    test_data_service = providers.Factory(
+        TestDataService,
+        db=db_session,
+        document_service=document_service,
+        record_service=record_service,
+        plan_service=plan_service,
     )
 
 

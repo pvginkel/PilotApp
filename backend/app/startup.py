@@ -17,6 +17,8 @@ from __future__ import annotations
 import click
 from flask import Blueprint, Flask
 
+from app.app import App
+from app.database import scoped_session
 from app.services.container import ServiceContainer
 
 
@@ -58,6 +60,11 @@ def post_migration_hook(app: Flask) -> None:
     pass
 
 
-def load_test_data_hook(app: Flask) -> None:
-    """Load test fixtures after database recreation."""
-    pass
+def load_test_data_hook(app: App) -> None:
+    """Load the invented record (`TestDataService`) after database recreation."""
+    print("Loading the invented record...")
+    with scoped_session(app.container):
+        counts = app.container.test_data_service().load_all()
+    print("Test data loaded:")
+    for entity, count in counts.items():
+        print(f"   - {count} {entity}")
