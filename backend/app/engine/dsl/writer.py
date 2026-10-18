@@ -269,7 +269,8 @@ def _answer_spans(block: Block) -> dict[str, Span]:
 
 def _mapping_end(block: Block) -> int:
     """The line after which the end of the block's mapping lies: its last
-    key's last line, or the opening fence's line in a block with no key."""
+    key's last line, or the line before the closing fence in a block with no
+    key."""
     return max(
         (span.last for span in block.lines.values()), default=block.fence.last - 1
     )
