@@ -11,6 +11,7 @@ from app.config import Settings
 from app.engine.bus import EngineBus
 from app.engine.documents import DocumentService
 from app.engine.ingest import IngestService
+from app.engine.plan import PlanService
 from app.engine.record import RecordService
 from app.engine.tree import TreeService
 from app.engine.views import ViewService
@@ -114,8 +115,13 @@ class ServiceContainer(containers.DeclarativeContainer):
     # The engine (design 1 §0): one bus per process, its services per session
     engine_bus = providers.Singleton(EngineBus)
     view_service = providers.Factory(ViewService, db=db_session, engine_bus=engine_bus)
+    plan_service = providers.Factory(
+        PlanService,
+        db=db_session,
+        ticket_id_pattern=app_config.provided.ticket_id_pattern,
+    )
     tree_service = providers.Factory(
-        TreeService, db=db_session, view_service=view_service
+        TreeService, db=db_session, view_service=view_service, plan_service=plan_service
     )
     document_service = providers.Factory(
         DocumentService,
@@ -131,6 +137,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         tree_service=tree_service,
         view_service=view_service,
         document_service=document_service,
+        plan_service=plan_service,
     )
     record_service = providers.Factory(
         RecordService,

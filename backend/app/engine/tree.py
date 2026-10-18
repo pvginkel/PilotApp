@@ -7,7 +7,8 @@ from dataclasses import dataclass
 from sqlalchemy import exists, or_, select
 from sqlalchemy.orm import Session
 
-from app.engine.paths import REFERENCE, TIMELINE, attachment_path, tree_path
+from app.engine.paths import PLAN, REFERENCE, TIMELINE, attachment_path, tree_path
+from app.engine.plan import PlanService
 from app.engine.views import Rendering, ViewService
 from app.exceptions import RecordNotFoundException
 from app.models import Attachment, Document, Item, Project, SaveError
@@ -35,6 +36,14 @@ class TreeDocument:
     item: Item | None
 
 
+@dataclass(frozen=True)
+class TreePlan:
+    """A project's `plan.json`, rendered from its rows and parsed back into
+    them (design 1 §6.2)."""
+
+    project: Project
+
+
 class TreeService:
     """What the store's tree must hold, path by path.
 
@@ -43,13 +52,17 @@ class TreeService:
     Environment holds the error.
     """
 
-    def __init__(self, db: Session, view_service: ViewService) -> None:
+    def __init__(
+        self, db: Session, view_service: ViewService, plan_service: PlanService
+    ) -> None:
         self.db = db
         self.view_service = view_service
+        self.plan_service = plan_service
 
-    def resolve(self, path: str) -> TreeDocument | TreeFile:
+    def resolve(self, path: str) -> TreeDocument | TreePlan | TreeFile:
         """What `path`, from the tree's root, names among the paths the store
-        syncs: a Document, or a read-only path with its projection. Refused
+        syncs: a Document, a project's plan, or a read-only path with its
+        projection. Refused
         for any other path: a stray file's, a folder no project has, an
         archived project's (design 1 §5.3 step 1, §5.5)."""
         if path == REFERENCE:
@@ -59,6 +72,8 @@ class TreeService:
         if project is not None:
             if rest == TIMELINE:
                 return _file(self.view_service.timeline(project))
+            if rest == PLAN:
+                return TreePlan(project)
             attachment = _ATTACHMENT.fullmatch(rest)
             if attachment is not None:
                 copy = self.db.scalars(
@@ -90,6 +105,8 @@ class TreeService:
         resolved = self.resolve(path)
         if isinstance(resolved, TreeFile):
             return resolved
+        if isinstance(resolved, TreePlan):
+            return _file(self.plan_service.render(resolved.project))
         document = resolved.document
         held = self.held(resolved.project, document)
         text = document.ingested_text if held else document.published_text
@@ -98,13 +115,17 @@ class TreeService:
         return TreeFile(text.encode(), _tree_hash(document, held))
 
     def held(self, project: Project, document: Document) -> bool:
-        """Whether the path's latest save is held: a `parse` Save Error
-        stands on it."""
+        """Whether the document's latest save is held."""
+        return self.held_path(tree_path(project, document.path))
+
+    def held_path(self, path: str) -> bool:
+        """Whether the latest save of `path`, from the tree's root, is held:
+        a `parse` Save Error stands on it."""
         return bool(
             self.db.scalar(
                 select(
                     exists().where(
-                        SaveError.path == tree_path(project, document.path),
+                        SaveError.path == path,
                         SaveError.kind_code == ErrorKind.PARSE,
                     )
                 )
@@ -145,6 +166,7 @@ class TreeService:
             for path, document in documents.items()
         }
         hashes[tree_path(project, TIMELINE)] = self.view_service.timeline(project).hash
+        hashes[tree_path(project, PLAN)] = self.plan_service.render(project).hash
         for attachment in self.db.scalars(
             select(Attachment).where(Attachment.project_id == project.id)
         ):

@@ -2,6 +2,7 @@
 and the faults (design 1 §5.3, §6), driven as the sidecar drives it."""
 
 import hashlib
+import json
 import threading
 import time
 import uuid
@@ -10,7 +11,7 @@ from datetime import UTC, datetime
 import pytest
 from flask import Flask
 from psycopg.errors import LockNotAvailable
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy import text as sql
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session as DbSession
@@ -28,6 +29,7 @@ from app.engine.bus import (
 from app.engine.documents import DocumentService
 from app.engine.ingest import Ingested
 from app.engine.paths import sha256_hex
+from app.engine.tree import TreeFile
 from app.exceptions import RecordNotFoundException
 from app.extensions import db
 from app.models import (
@@ -88,6 +90,33 @@ options:
 
 ANSWERED_AT = datetime(2026, 10, 12, 9, 40, tzinfo=UTC)
 
+PLAN = (
+    json.dumps(
+        {
+            "ticket": "MD-8",
+            "repo": "pvginkel/MyDownloads",
+            "tasks": [
+                {
+                    "id": "fix",
+                    "title": "Fix the client for v4",
+                    "status": "in_progress",
+                    "notes": [],
+                }
+            ],
+            "notes": [],
+        },
+        indent=2,
+    )
+    + "\n"
+)
+"""A plan as the engine renders it."""
+
+COMPACT_PLAN = json.dumps(json.loads(PLAN))
+
+MISSPELT_PLAN = '{"tickets": "MD-9"}\n'
+
+MISSPELT = dsl.Fault(None, "`tickets` is not a key of the plan")
+
 
 def _ingest(
     container: ServiceContainer,
@@ -147,7 +176,6 @@ class TestIngestServicePaths:
             "{folder}",
             "{folder}/",
             "{folder}/notes.md",
-            "{folder}/plan.json",
             "{folder}/attachments/1/missing.png",
             "{folder}/items/1-which-tent.md",
         ],
@@ -1147,6 +1175,236 @@ def _write_answer(container: ServiceContainer, document: Document) -> None:
         )
 
 
+class TestIngestServicePlan:
+    """Design 1 §5.3 step 3: a save of `plan.json` writes the rows, or holds
+    and changes nothing; no text of it is stored."""
+
+    def test_a_canonical_save_writes_the_rows_and_needs_no_write(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        base = container.plan_service().render(project).hash
+
+        answer = _ingest(container, _plan_path(project), PLAN, environment, base=base)
+
+        assert answer == Ingested(
+            content=None, hash=sha256_hex(PLAN), stale=False, held=False, faults=()
+        )
+        assert project.ticket == "MD-8"
+        fix = session.get_one(PlanTask, (project.id, "fix"))
+        assert (fix.position, fix.status_code) == (1, TaskStatus.IN_PROGRESS)
+        assert _errors(session) == []
+
+    def test_a_save_in_another_formatting_is_answered_canonical(
+        self, container: ServiceContainer, project: Project, environment: Environment
+    ) -> None:
+        base = container.plan_service().render(project).hash
+
+        answer = _ingest(
+            container, _plan_path(project), COMPACT_PLAN, environment, base=base
+        )
+
+        assert answer == Ingested(
+            content=PLAN.encode(),
+            hash=sha256_hex(PLAN),
+            stale=False,
+            held=False,
+            faults=(),
+        )
+
+    def test_a_held_save_changes_nothing_and_acknowledges_its_hash(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        path = _plan_path(project)
+        _ingest(container, path, PLAN, environment)
+        documents = session.scalar(select(func.count()).select_from(Document))
+
+        answer = _ingest(
+            container, path, MISSPELT_PLAN, environment, base=sha256_hex(PLAN)
+        )
+
+        assert answer == Ingested(
+            content=None,
+            hash=sha256_hex(MISSPELT_PLAN),
+            stale=False,
+            held=True,
+            faults=(MISSPELT,),
+        )
+        assert _errors(session) == [
+            (environment.id, path, ErrorKind.PARSE, None, MISSPELT.message)
+        ]
+        assert project.ticket == "MD-8"
+        assert session.get_one(PlanTask, (project.id, "fix")).removed_at is None
+        assert container.tree_service().read(path) == TreeFile(
+            PLAN.encode(), sha256_hex(PLAN)
+        )
+        assert session.scalar(select(func.count()).select_from(Document)) == documents
+
+    def test_each_save_replaces_the_paths_parse_errors(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        path = _plan_path(project)
+        draft = f"draft-{project.number}/project.md"
+        other = Environment(id="example-env-2", name="Example-2", exempt=False)
+        session.add(other)
+        session.add_all(
+            SaveError(
+                environment_id=other.id,
+                path=error_path,
+                kind_code=ErrorKind.PARSE,
+                message="an old fault",
+            )
+            for error_path in (path, draft)
+        )
+        session.flush()
+
+        _ingest(container, path, '{"tasks": 1, "notes": 2}', environment)
+        _ingest(container, path, MISSPELT_PLAN, environment)
+        assert _errors(session) == [
+            (other.id, draft, ErrorKind.PARSE, None, "an old fault"),
+            (environment.id, path, ErrorKind.PARSE, None, MISSPELT.message),
+        ]
+        _ingest(container, path, PLAN, environment)
+        assert _errors(session) == [
+            (other.id, draft, ErrorKind.PARSE, None, "an old fault")
+        ]
+
+    def test_a_base_other_than_the_rendering_is_stale(
+        self, container: ServiceContainer, project: Project, environment: Environment
+    ) -> None:
+        path = _plan_path(project)
+
+        assert _ingest(container, path, PLAN, environment).stale
+        _ingest(container, path, MISSPELT_PLAN, environment, base=sha256_hex(PLAN))
+        # No text of a plan save is stored, so the tree hash stays the
+        # rendering's while the save is held: a fix-up's base is stale.
+        fix_up = _ingest(
+            container, path, PLAN, environment, base=sha256_hex(MISSPELT_PLAN)
+        )
+        assert fix_up == Ingested(
+            content=None, hash=sha256_hex(PLAN), stale=True, held=False, faults=()
+        )
+
+    def test_an_archived_projects_plan_is_not_synced(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        project.archived = True
+        session.flush()
+
+        with pytest.raises(RecordNotFoundException):
+            _ingest(container, _plan_path(project), PLAN, environment)
+        assert session.scalars(select(PlanTask)).all() == []
+
+
+class TestIngestServicePlanEvents:
+    def test_a_save_moves_the_plans_tree_hash_alone(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        path = _plan_path(project)
+
+        _ingest(container, path, PLAN, environment)
+
+        # timeline.json shows nothing a plan save writes, and the plan is no
+        # document: no *modified*.
+        assert engine_events == [TreeHashMoved(path, sha256_hex(PLAN))]
+
+    def test_a_held_save_raises_its_errors(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        path = _plan_path(project)
+
+        _ingest(container, path, MISSPELT_PLAN, environment)
+
+        assert engine_events == [ErrorsRaised(project.id, path)]
+
+    def test_a_clean_save_after_a_held_one_resolves_its_errors(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        path = _plan_path(project)
+        _ingest(container, path, PLAN, environment)
+        _ingest(container, path, MISSPELT_PLAN, environment)
+        engine_events.clear()
+
+        _ingest(container, path, COMPACT_PLAN, environment)
+
+        assert engine_events == [ErrorsResolved(project.id, path)]
+
+    def test_a_save_that_changes_nothing_raises_nothing(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        path = _plan_path(project)
+        _ingest(container, path, PLAN, environment)
+        engine_events.clear()
+
+        _ingest(container, path, COMPACT_PLAN, environment)
+
+        assert engine_events == []
+
+
+class TestIngestServicePlanSequences:
+    """The agent writes `plan.json`, through the fake sidecar."""
+
+    def test_a_save_in_another_formatting_comes_back_canonical(
+        self, fake_sidecar: FakeSidecar, project: Project
+    ) -> None:
+        path = _plan_path(project)
+
+        fake_sidecar.save(path, COMPACT_PLAN)
+
+        assert fake_sidecar.text(path) == PLAN
+        assert fake_sidecar.shadow[path] == sha256_hex(PLAN)
+        assert fake_sidecar.drain() == []
+
+    def test_a_held_save_stays_on_disk_as_written(
+        self, fake_sidecar: FakeSidecar, project: Project
+    ) -> None:
+        path = _plan_path(project)
+        fake_sidecar.save(path, PLAN)
+        fake_sidecar.drain()
+
+        answer = fake_sidecar.save(path, MISSPELT_PLAN)
+
+        assert answer.held
+        assert fake_sidecar.text(path) == MISSPELT_PLAN
+        assert fake_sidecar.shadow[path] == sha256_hex(MISSPELT_PLAN)
+        assert fake_sidecar.drain() == []
+
+
+def _plan_path(project: Project) -> str:
+    return f"draft-{project.number}/plan.json"
+
+
 ENVIRONMENT_ID = "example-env-1"
 
 
@@ -1284,6 +1542,39 @@ class TestIngestServiceRowLock:
         )
         with scoped_session(committed_app.container) as session:
             assert session.get_one(Document, document_id).published_text == merged
+
+    def test_a_plan_save_waits_for_the_projects_row(self, committed_app: Flask) -> None:
+        path, document_id = _committed_handbook(committed_app)
+        path = path.replace("handbook.md", "plan.json")
+        container = committed_app.container
+        with committed_app.app_context():
+            engine = db.engine
+        with scoped_session(container) as session:
+            project_id = session.get_one(Document, document_id).project_id
+
+        with engine.connect() as holder:
+            # As for a document's row: only the save's own lock conflicts.
+            holder.execute(
+                sql("SELECT id FROM projects WHERE id = :id FOR KEY SHARE"),
+                {"id": project_id},
+            )
+            with (
+                pytest.raises(OperationalError) as raised,
+                scoped_session(container) as session,
+            ):
+                session.execute(sql("SET LOCAL lock_timeout = '200ms'"))
+                container.ingest_service().ingest(
+                    path,
+                    PLAN.encode(),
+                    None,
+                    session.get_one(Environment, ENVIRONMENT_ID),
+                    None,
+                )
+            holder.rollback()
+
+        assert isinstance(raised.value.orig, LockNotAvailable)
+        with scoped_session(container) as session:
+            assert session.scalars(select(PlanTask)).all() == []
 
 
 def _wait_for_a_lock_wait(app: Flask) -> None:

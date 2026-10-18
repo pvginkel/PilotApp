@@ -57,7 +57,7 @@ class ViewService:
     def reference(self) -> Rendering:
         """The reference values the agent writes from a closed list."""
         kinds = self.db.scalars(select(ItemKind).order_by(ItemKind.code))
-        return _render(
+        return render_json(
             {
                 "readonly": READONLY,
                 "confirmation_reasons": [
@@ -109,7 +109,7 @@ class ViewService:
                 if user_id is not None
             }
         )
-        return _render(
+        return render_json(
             {
                 "readonly": READONLY,
                 "project": {
@@ -150,7 +150,9 @@ class ViewService:
         )
 
 
-def _render(data: dict[str, Any]) -> Rendering:
+def render_json(data: dict[str, Any]) -> Rendering:
+    """A file of the tree rendered from the rows: two-space indent, and a
+    newline."""
     text = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
     return Rendering(text, sha256_hex(text))
 
@@ -165,7 +167,7 @@ def _item(
     done = None
     if item.done_at is not None:
         done = {
-            "at": _time(item.done_at),
+            "at": utc_time(item.done_at),
             "cause": item.done_cause_code,
             "by": None
             if item.done_by_user_id is None
@@ -181,7 +183,7 @@ def _item(
         "urgent": item.urgent,
         "for": None if item.for_user_id is None else handles[item.for_user_id],
         "summary": summary,
-        "created_at": _time(item.created_at),
+        "created_at": utc_time(item.created_at),
         "done": done,
         "attachments": attachments,
     }
@@ -198,5 +200,6 @@ def _source(attachment: Attachment) -> str | None:
     return f"{attachment.source_environment_id}:{attachment.source_path}"
 
 
-def _time(moment: datetime) -> str:
+def utc_time(moment: datetime) -> str:
+    """A time as the files write it: UTC, to the second."""
     return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")

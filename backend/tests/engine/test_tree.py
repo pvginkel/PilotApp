@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.engine.paths import sha256_hex
-from app.engine.tree import TreeDocument, TreeFile
+from app.engine.tree import TreeDocument, TreeFile, TreePlan
 from app.exceptions import RecordNotFoundException
 from app.models import Attachment, Document, Environment, Project, SaveError
 from app.models.reference import AttachmentSource, ErrorKind, ProjectState
@@ -85,13 +85,14 @@ class TestTreeService:
 
         assert container.tree_service().hash(project, draft) == sha256_hex("")
 
-    def test_a_drafts_folder_holds_its_draft_and_timeline(
+    def test_a_drafts_folder_holds_its_draft_plan_and_timeline(
         self, container: ServiceContainer, project: Project
     ) -> None:
         container.document_service().bear_draft(project)
         folder = f"draft-{project.number}"
 
         assert container.tree_service().hashes(project) == {
+            f"{folder}/plan.json": container.plan_service().render(project).hash,
             f"{folder}/project.md": sha256_hex(""),
             f"{folder}/timeline.json": container.view_service().timeline(project).hash,
         }
@@ -129,6 +130,7 @@ class TestTreeService:
             )
         )
         session.flush()
+        container.plan_service().save(project, b'{"ticket": "MD-8"}')
 
         hashes = container.tree_service().hashes(project)
 
@@ -139,6 +141,7 @@ class TestTreeService:
             "badge-colours/handbook.md": sha256_hex("Keep it short.\n"),
             "badge-colours/items/1-the-palette.md": sha256_hex(_HELD),
             "badge-colours/items/2-which-colour.md": sha256_hex(""),
+            "badge-colours/plan.json": container.plan_service().render(project).hash,
             "badge-colours/project.md": sha256_hex("# Badges\n"),
             "badge-colours/timeline.json": container.view_service()
             .timeline(project)
@@ -161,6 +164,7 @@ class TestTreeService:
         documents.bear_item(project, "notice", "The palette", project_session)
 
         assert set(container.tree_service().hashes(other)) == {
+            f"draft-{other.number}/plan.json",
             f"draft-{other.number}/project.md",
             f"draft-{other.number}/timeline.json",
         }
@@ -193,6 +197,13 @@ class TestTreeServicePaths:
         assert container.tree_service().resolve(
             "badge-colours/items/1-the-palette.md"
         ) == TreeDocument(project, session.get_one(Document, item.id), item)
+
+    def test_the_plan_names_its_project(
+        self, container: ServiceContainer, project: Project
+    ) -> None:
+        assert container.tree_service().resolve(
+            f"draft-{project.number}/plan.json"
+        ) == TreePlan(project)
 
     def test_the_views_name_their_renderings(
         self, container: ServiceContainer, project: Project
@@ -241,7 +252,6 @@ class TestTreeServicePaths:
             "{folder}",
             "{folder}/handbook.md",
             "{folder}/notes.md",
-            "{folder}/plan.json",
             "{folder}/attachments/3/palette.md",
             "{folder}/attachments/x/palette.md",
         ],
@@ -291,6 +301,34 @@ class TestTreeServicePaths:
         session.flush()
         assert tree.read(path) == TreeFile(_HELD.encode(), sha256_hex(_HELD))
         assert tree.held(project, draft)
+
+    def test_read_gives_the_plans_rendering(
+        self, container: ServiceContainer, project: Project
+    ) -> None:
+        container.plan_service().save(project, b'{"ticket": "MD-8"}')
+        plan = container.plan_service().render(project)
+
+        assert container.tree_service().read(
+            f"draft-{project.number}/plan.json"
+        ) == TreeFile(plan.text.encode(), plan.hash)
+
+    def test_held_path_is_a_parse_error_standing_on_the_path(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        path = f"draft-{project.number}/plan.json"
+        tree = container.tree_service()
+        session.add(_error(environment, path, ErrorKind.REVERTED))
+        session.add(_error(environment, f"draft-{project.number}/project.md"))
+        session.flush()
+
+        assert not tree.held_path(path)
+        session.add(_error(environment, path))
+        session.flush()
+        assert tree.held_path(path)
 
     def test_read_gives_a_read_only_paths_projection(
         self, container: ServiceContainer, project: Project

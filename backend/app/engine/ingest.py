@@ -2,6 +2,7 @@
 path of the store's tree, gated, merged by ownership and published, in one
 transaction that holds the document's row."""
 
+import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -18,7 +19,8 @@ from app.engine.bus import (
 )
 from app.engine.documents import OPENING, DocumentService
 from app.engine.paths import sha256_hex
-from app.engine.tree import TreeDocument, TreeFile, TreeService
+from app.engine.plan import PlanService
+from app.engine.tree import TreeDocument, TreeFile, TreePlan, TreeService
 from app.engine.views import ViewService
 from app.models import Document, Environment, Item, PlanTask, Project, SaveError, User
 from app.models import Session as AgentSession
@@ -35,9 +37,11 @@ class Ingested:
     """What the file put answers (design 1 §5.1).
 
     `content` is the bytes the file must now hold, none when the save is
-    them; `hash` the path's tree hash; `stale` whether the base hash was not
-    the path's tree hash when the save came. `faults` are those the save
-    raised on the path: `parse` faults when it is `held`, else `reverted`.
+    them; `hash` the path's tree hash, but a held `plan.json` save's own,
+    which the answer acknowledges (design 1 §5.3 step 3); `stale` whether the
+    base hash was not the path's tree hash when the save came. `faults` are
+    those the save raised on the path: `parse` faults when it is `held`, else
+    `reverted`.
     """
 
     content: bytes | None
@@ -55,12 +59,14 @@ class IngestService:
         tree_service: TreeService,
         view_service: ViewService,
         document_service: DocumentService,
+        plan_service: PlanService,
     ) -> None:
         self.db = db
         self.engine_bus = engine_bus
         self.tree_service = tree_service
         self.view_service = view_service
         self.document_service = document_service
+        self.plan_service = plan_service
 
     def ingest(
         self,
@@ -77,10 +83,11 @@ class IngestService:
         none while that is not known (design 1 §7).
 
         A read-only path stores nothing and is answered with its projection.
-        A document's save is stored as its ingest and held on any fault, else
-        merged by ownership against the published text and published; its
-        faults replace the path's `parse` Save Errors. Refused for a path the
-        store does not sync.
+        A save of `plan.json` writes the plan's rows, or on any fault changes
+        nothing, and is stored nowhere. A document's save is stored as its
+        ingest and held on any fault, else merged by ownership against the
+        published text and published. Either's faults replace the path's
+        `parse` Save Errors. Refused for a path the store does not sync.
         """
         resolved = self.tree_service.resolve(path)
         if isinstance(resolved, TreeFile):
@@ -91,8 +98,51 @@ class IngestService:
                 held=False,
                 faults=(),
             )
+        if isinstance(resolved, TreePlan):
+            return self._ingest_plan(
+                path, resolved.project, content, base_hash, environment
+            )
         return self._ingest_document(
             path, resolved, content, base_hash, environment, session
+        )
+
+    def _ingest_plan(
+        self,
+        path: str,
+        project: Project,
+        content: bytes,
+        base_hash: str | None,
+        environment: Environment,
+    ) -> Ingested:
+        """Design 1 §5.3 step 3: the rows written and the answer the canonical
+        rendering when it differs from the save; or, held, nothing changed and
+        the save's hash acknowledged, the tree hash staying the rendering's."""
+        self.plan_service.lock(project)
+        tree = self.plan_service.render(project)
+        held_before = self.tree_service.held_path(path)
+        self._clear(path)
+        faults = self.plan_service.save(project, content)
+        if faults:
+            self._raise(environment, path, ErrorKind.PARSE, faults)
+            self.engine_bus.emit(ErrorsRaised(project.id, path))
+            return Ingested(
+                content=None,
+                hash=hashlib.sha256(content).hexdigest(),
+                stale=base_hash != tree.hash,
+                held=True,
+                faults=tuple(faults),
+            )
+        canonical = self.plan_service.render(project)
+        if canonical.hash != tree.hash:
+            self.engine_bus.emit(TreeHashMoved(path, canonical.hash))
+        if held_before:
+            self.engine_bus.emit(ErrorsResolved(project.id, path))
+        return Ingested(
+            content=_unless(canonical.text.encode(), content),
+            hash=canonical.hash,
+            stale=base_hash != tree.hash,
+            held=False,
+            faults=(),
         )
 
     def _ingest_document(
@@ -111,11 +161,7 @@ class IngestService:
 
         text, faults = _decoded(content)
         self._store(document, text, session)
-        self.db.execute(
-            delete(SaveError).where(
-                SaveError.path == path, SaveError.kind_code == ErrorKind.PARSE
-            )
-        )
+        self._clear(path)
         kind = _kind(document, item)
         faults = sorted(
             [
@@ -163,6 +209,15 @@ class IngestService:
         if session is not None and document.writing_session_id != session.id:
             document.writing_session_id = session.id
             document.writing_since = now
+
+    def _clear(self, path: str) -> None:
+        """The path's `parse` Save Errors, in every Environment, go: the save
+        replaces them with its own."""
+        self.db.execute(
+            delete(SaveError).where(
+                SaveError.path == path, SaveError.kind_code == ErrorKind.PARSE
+            )
+        )
 
     def _raise(
         self,

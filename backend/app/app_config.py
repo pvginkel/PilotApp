@@ -4,14 +4,17 @@ This module implements app-specific configuration that is separate from the
 infrastructure configuration in config.py.
 """
 
+import re
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.config import dump_config_for_logging
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+_TICKET_ID_PATTERN = r"[A-Z][A-Z0-9_]*-[1-9][0-9]*"
 
 
 class AppEnvironment(BaseSettings):
@@ -24,6 +27,11 @@ class AppEnvironment(BaseSettings):
         extra="ignore",
     )
 
+    TICKET_ID_PATTERN: str = Field(
+        default=_TICKET_ID_PATTERN,
+        description="Regular expression a whole ticket id matches (F91)",
+    )
+
 
 class AppSettings(BaseModel):
     """Application-specific settings.
@@ -33,6 +41,9 @@ class AppSettings(BaseModel):
     """
 
     model_config = ConfigDict(from_attributes=True)
+
+    ticket_id_pattern: re.Pattern[str] = re.compile(_TICKET_ID_PATTERN)
+    """What a ticket id matches whole: `plan.json`'s `ticket` (F57.1, F91)."""
 
     def dump_for_logging(self) -> dict[str, str]:
         """Every setting, for the boot log, with the Sensitive ones as ``***``."""
@@ -45,4 +56,4 @@ class AppSettings(BaseModel):
         """Load app settings from environment variables."""
         if env is None:
             env = AppEnvironment()
-        return cls()
+        return cls(ticket_id_pattern=re.compile(env.TICKET_ID_PATTERN))
