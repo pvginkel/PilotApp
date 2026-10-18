@@ -1,0 +1,13 @@
+{
+  "rule": "splice: `note`, `via` and `to` where given, in that order, after `answer`, `by`, `at`",
+  "write": {
+    "op": "answer",
+    "block": "Q1",
+    "answer": "deferred",
+    "by": "ben",
+    "at": "2026-10-12T09:40:00Z",
+    "via": "chat",
+    "note": "After the gate is rehung.",
+    "to": "build"
+  }
+}

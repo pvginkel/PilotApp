@@ -1,0 +1,5 @@
+{
+  "rule": "merge: the record's lines the save leaves unchanged stay where the save has them",
+  "document": "registered_item",
+  "reverted": []
+}

@@ -1,0 +1,11 @@
+{
+  "rule": "splice: a person's answer at the end of the block's mapping: `answer`, `by`, `at`",
+  "write": {
+    "op": "answer",
+    "block": "D1",
+    "answer": "Pine",
+    "by": "ada",
+    "at": "2026-10-12T09:40:00Z",
+    "via": "app"
+  }
+}

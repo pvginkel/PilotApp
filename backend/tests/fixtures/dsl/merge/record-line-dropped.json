@@ -1,0 +1,14 @@
+{
+  "rule": "merge: a record-owned line the save dropped is restored",
+  "document": "registered_item",
+  "reverted": [
+    {
+      "line": 17,
+      "message": "block D1: `at:` is the record's, ada's answer; reverted"
+    },
+    {
+      "line": 18,
+      "message": "block D1: `note:` is the record's, ada's answer; reverted"
+    }
+  ]
+}

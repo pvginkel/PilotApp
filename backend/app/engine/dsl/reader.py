@@ -17,6 +17,7 @@ from enum import StrEnum
 import yaml
 
 from app.engine.dsl.document import (
+    AnswerChannel,
     Block,
     BlockKind,
     Fault,
@@ -50,9 +51,18 @@ _DEFINITION_KEYS = {
 }
 _ARTICLE = {BlockKind.DECISION: "a", BlockKind.QUESTION: "a", BlockKind.ACTION: "an"}
 
-# `app` is written as no `via` line (DB Answer Channel); an explicit one reads
-# the same.
-_CHANNELS = ("app", "chat", "recommended", "autopilot")
+# An explicit `via: app` reads as the line's absence.
+_CHANNELS = frozenset(AnswerChannel)
+
+YAML_LINE_BREAKS = {
+    "\r": ("a carriage return", "\\r"),
+    "\x85": ("U+0085", "\\x85"),
+    "\u2028": ("U+2028", "\\u2028"),
+    "\u2029": ("U+2029", "\\u2029"),
+}
+"""The characters YAML breaks a line at and the file does not, each with its
+name and its escape in a double-quoted value. A body or a front matter that
+holds one raw is held, so every line YAML counts is a line of the file."""
 
 _FENCE = re.compile(r"(?P<indent> {0,3})(?P<marker>`{3,}|~{3,})(?P<info>.*)")
 _HEADING = re.compile(r" {0,3}#{1,6}(?:[ \t]+(?P<text>.*?))?(?:[ \t]+#+)?[ \t]*")
@@ -62,6 +72,7 @@ _TIME = re.compile(
     r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?"
 )
 _SLUG = re.compile(r"[a-z0-9-]+")
+_BLOCK_SCALAR_HEADER = re.compile(r"[|>][-+0-9]*")
 
 
 class DocumentKind(StrEnum):
@@ -414,6 +425,19 @@ def _mapping(
     """The YAML mapping `text` holds, each key with its value and the file
     lines it covers; none, with a fault, when it holds no mapping. An empty
     text is an empty mapping."""
+    lines = text.split("\n")
+    for index, content in enumerate(lines):
+        brk = next((char for char in content if char in YAML_LINE_BREAKS), None)
+        if brk is not None:
+            name, escape = YAML_LINE_BREAKS[brk]
+            faults.append(
+                Fault(
+                    first_line + index,
+                    f"{subject} holds {name}, which YAML reads as a line break:"
+                    f" write it as `{escape}` in a double-quoted value",
+                )
+            )
+            return None
     try:
         node = yaml.compose(text, Loader=yaml.BaseLoader)
     except yaml.MarkedYAMLError as error:
@@ -443,10 +467,32 @@ def _mapping(
         if key.value in entries:
             faults.append(Fault(line, f"{subject} has `{key.value}` twice"))
             return None
-        end = value.end_mark
-        last = first_line + (end.line if end.column > 0 else end.line - 1)
+        last = first_line + _last_line(value, lines)
         entries[key.value] = (value, Span(line, max(line, last)))
     return entries
+
+
+def _last_line(node: yaml.Node, lines: list[str]) -> int:
+    """The index in `lines` of a value's last line: a block list or mapping
+    ends with its last entry, and a `|` or `>` scalar with its last line that
+    is not blank, unless it keeps its trailing blank lines (`+`). YAML's end
+    mark lies past the blank and comment lines that follow."""
+    if (
+        isinstance(node, yaml.SequenceNode | yaml.MappingNode)
+        and not node.flow_style
+        and node.value
+    ):
+        last = node.value[-1]
+        return _last_line(last[1] if isinstance(last, tuple) else last, lines)
+    end = node.end_mark
+    index = end.line if end.column > 0 else end.line - 1
+    if isinstance(node, yaml.ScalarNode) and node.style in ("|", ">"):
+        start = node.start_mark
+        header = _BLOCK_SCALAR_HEADER.match(lines[start.line], start.column)
+        if header is None or "+" not in header[0]:
+            while index > start.line and not lines[index].strip():
+                index -= 1
+    return index
 
 
 def _dedent(line: str, indent: int) -> str:

@@ -1,0 +1,18 @@
+{
+  "rule": "merge: blocks dropped from a save that keeps none are restored at its end",
+  "document": "registered_item",
+  "reverted": [
+    {
+      "line": 12,
+      "message": "block D1: only the draft's blocks may be removed; restored"
+    },
+    {
+      "line": 23,
+      "message": "block Q1: only the draft's blocks may be removed; restored"
+    },
+    {
+      "line": 30,
+      "message": "block A1: only the draft's blocks may be removed; restored"
+    }
+  ]
+}

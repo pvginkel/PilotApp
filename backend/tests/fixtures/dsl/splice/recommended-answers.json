@@ -1,0 +1,8 @@
+{
+  "rule": "splice: Done's recommended answers, `via: recommended`, never an action's",
+  "write": {
+    "op": "recommended",
+    "by": "ada",
+    "at": "2026-10-12T09:40:00Z"
+  }
+}

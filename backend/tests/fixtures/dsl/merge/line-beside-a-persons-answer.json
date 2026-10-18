@@ -1,0 +1,10 @@
+{
+  "rule": "merge: a line the agent adds to a person's answer is dropped",
+  "document": "registered_item",
+  "reverted": [
+    {
+      "line": 15,
+      "message": "block D1: `via:` beside ada's answer is the record's to write; dropped"
+    }
+  ]
+}

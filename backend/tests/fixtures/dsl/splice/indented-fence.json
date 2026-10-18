@@ -1,0 +1,11 @@
+{
+  "rule": "splice: the lines written take the indentation of the block's mapping",
+  "write": {
+    "op": "answer",
+    "block": "Q1",
+    "answer": "Copper",
+    "by": "ada",
+    "at": "2026-10-12T09:40:00Z",
+    "via": "app"
+  }
+}

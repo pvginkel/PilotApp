@@ -1,0 +1,12 @@
+{
+  "rule": "splice: a value is written as the reader reads it back: plain, quoted, or a literal block over several lines",
+  "write": {
+    "op": "answer",
+    "block": "D1",
+    "answer": "Neither: oil it",
+    "by": "ben",
+    "at": "2026-10-12T09:40:00Z",
+    "via": "chat",
+    "note": "Said in the chat:\nthe oil is in the shed."
+  }
+}

@@ -246,7 +246,9 @@ class TestConformanceCorpus:
 
 
 class TestPurity:
-    def test_the_library_imports_only_the_standard_library_and_yaml(self) -> None:
+    def test_the_library_imports_only_the_standard_library_yaml_and_exceptions(
+        self,
+    ) -> None:
         package = Path(dsl.__file__).parent
         imported: set[str] = set()
         for module in package.glob("*.py"):
@@ -262,6 +264,7 @@ class TestPurity:
             if name.split(".")[0]
             not in {"re", "collections", "dataclasses", "datetime", "enum", "yaml"}
             and not name.startswith("app.engine.dsl")
+            and name != "app.exceptions"
         }
         assert foreign == set()
 
@@ -431,6 +434,81 @@ class TestParse:
         assert lines["note"] == Span(6, 8)
         assert lines["by"] == Span(9, 9)
         assert document.blocks[0].note == "first\nsecond"
+
+    def test_a_list_s_span_ends_at_its_last_entry(self) -> None:
+        document = parse(
+            "```decision id=D1\noptions:\n  - Oak\n  - Pine:\n      sanded\n\n"
+            "# ask about the varnish\nanswer: Oak\n```\n"
+        )
+
+        assert document.blocks[0].lines["options"] == Span(2, 5)
+
+    def test_a_flow_list_s_span_ends_at_its_closing_bracket(self) -> None:
+        document = parse("```decision id=D1\noptions: [Oak,\n  Pine]\n\n```\n")
+
+        assert document.blocks[0].lines["options"] == Span(2, 3)
+
+    def test_a_block_scalar_s_span_ends_at_its_last_line_that_is_not_blank(
+        self,
+    ) -> None:
+        document = parse(
+            "```question id=Q1\ndefault: |\n  two coats\n\n  then wax\n\n\n"
+            "answer: wax\n```\n"
+        )
+
+        assert document.blocks[0].lines["default"] == Span(2, 5)
+
+    def test_a_kept_block_scalar_s_span_takes_its_trailing_blank_lines(self) -> None:
+        document = parse(
+            "```question id=Q1\ndefault: |+\n  two coats\n\n\nanswer: x\n```\n"
+        )
+
+        assert document.blocks[0].lines["default"] == Span(2, 5)
+        assert document.blocks[0].lines["answer"] == Span(6, 6)
+
+    def test_a_front_matter_key_s_span_ends_at_its_value_s_last_line(self) -> None:
+        document = parse(
+            "---\nsummary: >\n  Two nights.\n\n# draft\ntitle: Tent\n---\n"
+        )
+
+        assert document.front_matter.lines["summary"] == Span(2, 3)
+
+    @pytest.mark.parametrize(
+        ("char", "name", "escape"),
+        [
+            ("\u2028", "U+2028", "\\u2028"),
+            ("\u2029", "U+2029", "\\u2029"),
+            ("\x85", "U+0085", "\\x85"),
+            ("\r", "a carriage return", "\\r"),
+        ],
+    )
+    def test_a_raw_line_break_yaml_reads_and_the_file_does_not_holds_the_body(
+        self, char: str, name: str, escape: str
+    ) -> None:
+        document = parse(f'```question id=Q1\ndefault: a\nanswer: "x{char}y"\n```\n')
+
+        assert document.faults == (
+            Fault(
+                3,
+                f"block Q1: the body holds {name}, which YAML reads as a line break:"
+                f" write it as `{escape}` in a double-quoted value",
+            ),
+        )
+        assert document.blocks[0].lines == {}
+
+    def test_a_raw_line_break_holds_the_front_matter(self) -> None:
+        document = parse("---\ntitle: Tent\nsummary: two\u2028nights\n---\n")
+
+        assert [fault.line for fault in document.faults] == [3]
+        assert document.front_matter.title is None
+
+    def test_an_escaped_line_break_is_read(self) -> None:
+        document = parse('```question id=Q1\nanswer: "x\\u2028y"\nby: ada\n```\n')
+
+        [block] = document.blocks
+        assert block.answer == "x\u2028y"
+        assert block.lines["by"] == Span(3, 3)
+        assert document.faults == ()
 
     def test_a_first_line_of_dashes_without_a_closing_one_is_prose(self) -> None:
         document = parse("---\ntitle: Not front matter\n\n# Heading\n")

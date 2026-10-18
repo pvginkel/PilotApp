@@ -1,0 +1,14 @@
+{
+  "rule": "merge: a dropped block with no kept block before it goes before the next kept one, and with none kept, at the end",
+  "document": "handbook",
+  "reverted": [
+    {
+      "line": 10,
+      "message": "block D1: only the draft's blocks may be removed; restored"
+    },
+    {
+      "line": 28,
+      "message": "block A1: only the draft's blocks may be removed; restored"
+    }
+  ]
+}

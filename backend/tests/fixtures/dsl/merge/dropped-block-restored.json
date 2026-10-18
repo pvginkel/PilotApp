@@ -1,0 +1,10 @@
+{
+  "rule": "merge: a block the save dropped is restored whole, after the block before it",
+  "document": "registered_item",
+  "reverted": [
+    {
+      "line": 21,
+      "message": "block Q1: only the draft's blocks may be removed; restored"
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "rule": "merge: a person's lines the record does not hold are dropped",
+  "document": "registered_item",
+  "reverted": [
+    {
+      "line": 29,
+      "message": "block A1: `done:` is ben's answer, which the record does not hold; dropped"
+    },
+    {
+      "line": 29,
+      "message": "block A1: `by:` is ben's answer, which the record does not hold; dropped"
+    }
+  ]
+}

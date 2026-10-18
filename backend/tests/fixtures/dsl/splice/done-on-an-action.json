@@ -1,0 +1,9 @@
+{
+  "rule": "splice: Done on an action writes `done` and `by`",
+  "write": {
+    "op": "done",
+    "block": "A1",
+    "by": "ben",
+    "at": "2026-10-12T09:40:00Z"
+  }
+}

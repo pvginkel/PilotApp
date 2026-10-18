@@ -1,0 +1,5 @@
+{
+  "rule": "merge: the agent's own `by: agent` lines from the save, as written",
+  "document": "registered_item",
+  "reverted": []
+}

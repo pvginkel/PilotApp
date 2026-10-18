@@ -3,6 +3,7 @@ database, Flask or the app's services, and takes what it validates against as
 values."""
 
 from app.engine.dsl.document import (
+    AnswerChannel,
     Block,
     BlockKind,
     Fault,
@@ -21,21 +22,38 @@ from app.engine.dsl.reader import (
     parse,
     validate,
 )
+from app.engine.dsl.writer import (
+    Merge,
+    clear_answer,
+    merge,
+    recommendation,
+    write_answer,
+    write_done,
+    write_recommended,
+)
 
 __all__ = [
     "AGENT",
     "ANSWER_KEYS",
     "DEFERRED",
     "PLAN",
+    "AnswerChannel",
     "Block",
     "BlockKind",
     "DocumentKind",
     "Facts",
     "Fault",
     "FrontMatter",
+    "Merge",
     "Option",
     "ParsedDocument",
     "Span",
+    "clear_answer",
+    "merge",
     "parse",
+    "recommendation",
     "validate",
+    "write_answer",
+    "write_done",
+    "write_recommended",
 ]

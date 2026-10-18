@@ -1,0 +1,20 @@
+{
+  "rule": "held (reader): a character YAML breaks a line at and the file does not",
+  "parse": {
+    "title": "Which shelf for the plants?",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "D1",
+        "kind": "decision",
+        "fence": [3, 10]
+      }
+    ]
+  },
+  "faults": [
+    {
+      "line": 9,
+      "message": "block D1: the body holds U+2028, which YAML reads as a line break: write it as `\\u2028` in a double-quoted value"
+    }
+  ]
+}

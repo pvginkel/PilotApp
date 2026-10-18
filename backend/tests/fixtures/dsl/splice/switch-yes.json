@@ -1,0 +1,11 @@
+{
+  "rule": "splice: the switch's `Yes`, `via: autopilot`, by the person",
+  "write": {
+    "op": "answer",
+    "block": "C1",
+    "answer": "Yes",
+    "by": "ada",
+    "at": "2026-10-12T09:40:00Z",
+    "via": "autopilot"
+  }
+}

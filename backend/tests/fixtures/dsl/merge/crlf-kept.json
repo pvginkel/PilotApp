@@ -1,0 +1,10 @@
+{
+  "rule": "merge: the save's own line endings, a restored line's among them",
+  "document": "registered_item",
+  "reverted": [
+    {
+      "line": 15,
+      "message": "block D1: `answer:` is the record's, ada's answer; reverted"
+    }
+  ]
+}

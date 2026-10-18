@@ -1,0 +1,11 @@
+{
+  "rule": "splice: a person's answer replaces Pilot's `by: agent` line, its `to` and `note` with it",
+  "write": {
+    "op": "answer",
+    "block": "D1",
+    "answer": "Grey",
+    "by": "ada",
+    "at": "2026-10-12T09:40:00Z",
+    "via": "app"
+  }
+}

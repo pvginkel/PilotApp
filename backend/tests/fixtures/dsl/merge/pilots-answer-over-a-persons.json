@@ -1,0 +1,22 @@
+{
+  "rule": "merge: the agent's answer over a person's is reverted",
+  "document": "registered_item",
+  "reverted": [
+    {
+      "line": 15,
+      "message": "block D1: `answer:` is the record's, ada's answer; reverted"
+    },
+    {
+      "line": 16,
+      "message": "block D1: `by:` is the record's, ada's answer; reverted"
+    },
+    {
+      "line": 17,
+      "message": "block D1: `at:` is the record's, ada's answer; reverted"
+    },
+    {
+      "line": 18,
+      "message": "block D1: `note:` is the record's, ada's answer; reverted"
+    }
+  ]
+}

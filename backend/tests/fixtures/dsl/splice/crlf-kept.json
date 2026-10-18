@@ -1,0 +1,11 @@
+{
+  "rule": "splice: the lines written take the text's own line ending",
+  "write": {
+    "op": "answer",
+    "block": "D1",
+    "answer": "Warm",
+    "by": "ben",
+    "at": "2026-10-12T09:40:00Z",
+    "via": "app"
+  }
+}

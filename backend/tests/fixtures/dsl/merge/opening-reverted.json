@@ -1,0 +1,10 @@
+{
+  "rule": "merge: every line of the opening is the record's (DB 162)",
+  "document": "opening",
+  "reverted": [
+    {
+      "line": 3,
+      "message": "the opening is the record's: the save is reverted"
+    }
+  ]
+}

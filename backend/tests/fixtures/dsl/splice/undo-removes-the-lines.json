@@ -1,0 +1,7 @@
+{
+  "rule": "splice: undo removes the answer lines and restores nothing",
+  "write": {
+    "op": "undo",
+    "block": "Q1"
+  }
+}

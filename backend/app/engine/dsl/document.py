@@ -17,6 +17,16 @@ class BlockKind(StrEnum):
     ACTION = "action"
 
 
+class AnswerChannel(StrEnum):
+    """How a person's answer reached the record (DB Answer Channel); `app` is
+    written as no `via` line."""
+
+    APP = "app"
+    CHAT = "chat"
+    RECOMMENDED = "recommended"
+    AUTOPILOT = "autopilot"
+
+
 @dataclass(frozen=True)
 class Span:
     """The lines from `first` to `last`, both included."""
@@ -67,6 +77,11 @@ class Block:
     via: str | None = None
     to: str | None = None
     done: datetime | None = None
+
+    @property
+    def answered(self) -> bool:
+        """An `answer`, `deferred` included, or `done` (DB Block)."""
+        return self.answer is not None or self.done is not None
 
 
 @dataclass(frozen=True)

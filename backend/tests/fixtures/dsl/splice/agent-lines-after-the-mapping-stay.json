@@ -1,0 +1,11 @@
+{
+  "rule": "splice: the blank and comment lines after the block's last key stay where they are",
+  "write": {
+    "op": "answer",
+    "block": "D1",
+    "answer": "Oak",
+    "by": "ada",
+    "at": "2026-10-12T09:40:00Z",
+    "via": "app"
+  }
+}
