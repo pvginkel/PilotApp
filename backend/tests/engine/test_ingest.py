@@ -520,6 +520,101 @@ class TestIngestServiceGate:
         assert not answer.held
         assert draft.published_text == DRAFT
 
+    def test_an_open_projects_own_slug_is_no_fault(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        draft = _bear_draft(container, project, DRAFT)
+        _open(session, project, "badges")
+        save = "---\ntitle: Badge palette\nslug: badges\n---\n"
+
+        answer = _ingest(container, "badges/project.md", save, environment)
+
+        assert not answer.held
+        assert draft.published_text == save
+
+    def test_an_own_items_one_block_needs_a_title(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+    ) -> None:
+        with scoped_session(container):
+            item = container.document_service().bear_item(
+                project, "decision", "Which tent?", project_session, ANSWERED
+            )
+        save = ANSWERED.replace("# Which tent?\n\n", "")
+
+        answer = _ingest(
+            container,
+            f"draft-{project.number}/items/1-which-tent.md",
+            save,
+            environment,
+        )
+
+        assert answer.held
+        assert answer.faults == (
+            dsl.Fault(
+                None,
+                "the item has no title: give it `title` in the front matter"
+                " or a first heading",
+            ),
+        )
+        assert session.get_one(Document, item.id).published_text == ANSWERED
+
+    @pytest.mark.parametrize(
+        ("because", "faults"),
+        [
+            ("irreversible", ()),
+            (
+                "hurry",
+                (
+                    dsl.Fault(
+                        5,
+                        "block C1: `because: hurry` is not a confirmation reason"
+                        " (auto-pilot-off, irreversible, product-hold, rider,"
+                        " self-approval); the reasons are in `reference.json`",
+                    ),
+                ),
+            ),
+        ],
+    )
+    def test_a_confirmations_reason_is_one_the_record_holds(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+        because: str,
+        faults: tuple[dsl.Fault, ...],
+    ) -> None:
+        with scoped_session(container):
+            item = container.document_service().bear_item(
+                project, "decision", "Ship the badges?", project_session
+            )
+        save = (
+            "# Ship the badges?\n\n```decision id=C1\ntype: confirmation\n"
+            f"because: {because}\nproposal: Ship the badges on Friday\n```\n"
+        )
+
+        answer = _ingest(
+            container,
+            f"draft-{project.number}/items/1-ship-the-badges.md",
+            save,
+            environment,
+        )
+
+        assert answer.held is bool(faults)
+        assert answer.faults == faults
+        published = session.get_one(Document, item.id).published_text
+        assert published == ("" if faults else save)
+
     @pytest.mark.parametrize(
         "answer_lines",
         [
