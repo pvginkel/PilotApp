@@ -67,8 +67,8 @@ class _Callback:
 
     def assert_refused(self, response: Any, status: int, request_id: str) -> None:
         assert response.status_code == status
-        error = "Unauthorized" if status == 401 else "Forbidden"
-        assert response.get_json() == {"error": error}
+        code = "AUTHENTICATION_REQUIRED" if status == 401 else "AUTHORIZATION_FAILED"
+        assert response.get_json()["code"] == code
         self.on_connect.assert_not_called()
         assert not self.manager.has_connection(request_id)
 
