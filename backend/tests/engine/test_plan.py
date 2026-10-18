@@ -535,6 +535,9 @@ class TestPlanServiceFaults:
                 [NOT_TEXT],
             ),
             (b'{"\\u0000": 1}', [NOT_TEXT]),
+            # A repeated key no row holds is not quoted as twice in one object.
+            (b'{"\\u0000": 1, "\\u0000": 2}', [NOT_TEXT]),
+            (b'{"tasks": [{"\\ud800": 1, "\\ud800": 2}]}', [NOT_TEXT]),
             (
                 b'{"notes": [{"id": "n1", "summary": "s", "content": "c",'
                 b' "refs": ["\\udfff"]}]}',

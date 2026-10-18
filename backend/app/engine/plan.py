@@ -24,6 +24,7 @@ _NOTE_KEYS = ("id", "summary", "content", "refs", "created")
 _STATUSES = "pending, in_progress or done"
 # What a JSON escape can write and no PostgreSQL `text` holds.
 _UNSTORABLE = re.compile(r"[\x00\ud800-\udfff]")
+_NOT_TEXT = "the plan is not text: a string holds `\\u0000` or an unpaired surrogate"
 
 
 @dataclass(frozen=True)
@@ -317,10 +318,7 @@ class _Reader:
             self.faults.append(error.fault)
             return None
         if not _storable(data):
-            self._fault(
-                "the plan is not text: a string holds `\\u0000` or an unpaired"
-                " surrogate"
-            )
+            self._fault(_NOT_TEXT)
             return None
         if not isinstance(data, dict):
             self._fault("the plan is not a JSON object")
@@ -437,10 +435,13 @@ class _Reader:
 
 def _object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     """A JSON object; one that repeats a key is unreadable, since the last
-    value would silently win."""
+    value would silently win. A repeated key no row holds is not text: the
+    fault quotes no such key."""
     data: dict[str, Any] = {}
     for key, value in pairs:
         if key in data:
+            if _UNSTORABLE.search(key):
+                raise _Unreadable(dsl.Fault(None, _NOT_TEXT))
             raise _Unreadable(
                 dsl.Fault(None, f"the plan has `{key}` twice in one object")
             )
