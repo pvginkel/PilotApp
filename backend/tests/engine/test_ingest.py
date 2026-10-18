@@ -710,6 +710,11 @@ class TestIngestServiceGate:
         [
             (b"Caf\xe9 au lait.\n", 1, "Caf� au lait.\n"),
             (b"One.\nTw\x00o.\n", 2, "One.\nTw�o.\n"),
+            # The fault stands at the first bad byte, a NUL before the
+            # sequence that is not UTF-8.
+            (b"A\x00\nB\n\xe9\n", 1, "A�\nB\n�\n"),
+            # A truncated sequence is replaced whole.
+            (b"One.\na\xe2\x82b\n", 2, "One.\na�b\n"),
         ],
     )
     def test_bytes_that_are_not_text_are_held_replaced(
@@ -736,8 +741,8 @@ class TestIngestServiceGate:
             faults=(
                 dsl.Fault(
                     line,
-                    "the file is not UTF-8 text: each byte that is not, and each"
-                    " NUL, is replaced by U+FFFD",
+                    "the file is not UTF-8 text: each sequence that is not, and"
+                    " each NUL, is replaced by U+FFFD",
                 ),
             ),
         )

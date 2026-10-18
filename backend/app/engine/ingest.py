@@ -27,7 +27,7 @@ from app.models import Session as AgentSession
 from app.models.reference import DocumentRole, ErrorKind
 
 _NOT_TEXT = (
-    "the file is not UTF-8 text: each byte that is not, and each NUL,"
+    "the file is not UTF-8 text: each sequence that is not, and each NUL,"
     " is replaced by U+FFFD"
 )
 
@@ -274,17 +274,18 @@ class IngestService:
 
 def _decoded(content: bytes) -> tuple[str, list[dsl.Fault]]:
     """The save's text, and a fault at the first of its bytes PostgreSQL's
-    `text` cannot hold: bytes that are not UTF-8, and NUL. Each of those is
+    `text` cannot hold: a sequence that is not UTF-8, or NUL. Each of those is
     replaced by U+FFFD."""
+    nul = content.find(b"\x00")
+    first = None if nul < 0 else nul
     try:
         text = content.decode()
     except UnicodeDecodeError as error:
-        line = content.count(b"\n", 0, error.start) + 1
+        first = error.start if first is None else min(first, error.start)
         text = content.decode(errors="replace")
-    else:
-        if "\x00" not in text:
-            return text, []
-        line = text.count("\n", 0, text.index("\x00")) + 1
+    if first is None:
+        return text, []
+    line = content.count(b"\n", 0, first) + 1
     return text.replace("\x00", "�"), [dsl.Fault(line, _NOT_TEXT)]
 
 
