@@ -180,6 +180,11 @@ class RecordService:
         a `done` Document Version of the published text and the item's mark.
         Refused while a block has neither. Pilot's Done is on a document it
         settled whole, every block answered (decision 42)."""
+        if self.db.get_one(ItemKind, item.kind_code).form != PROSE:
+            raise InvalidOperationException(
+                f"mark item {item.id} done",
+                f"a {item.kind_code} item is not done by Done",
+            )
         document = self.db.get_one(Document, item.id)
         project, _ = self._locked(document)
         operation = f"mark {tree_path(project, document.path)} done"
@@ -224,6 +229,11 @@ class RecordService:
         self._mark_by_kind(item, user, REVIEW, "Reviewed")
 
     def _mark_by_kind(self, item: Item, user: User, kind: str, mark: str) -> None:
+        if self.db.get_one(ItemKind, item.kind_code).form != PROSE:
+            raise InvalidOperationException(
+                f"mark item {item.id} {mark}",
+                f"a {item.kind_code} item is not marked {mark}",
+            )
         document = self.db.get_one(Document, item.id)
         project, _ = self._locked(document)
         operation = f"mark {tree_path(project, document.path)} {mark}"

@@ -231,6 +231,22 @@ def _done(item: Item) -> tuple[datetime | None, str | None, uuid.UUID | None]:
     return item.done_at, item.done_cause_code, item.done_by_user_id
 
 
+def _textless(
+    session: DbSession, project: Project, project_session: models.Session, kind: str
+) -> Item:
+    """An open item of `kind`, a work or wait item, which has no Document."""
+    item = Item(
+        project_id=project.id,
+        seq=1,
+        kind_code=kind,
+        title="Build the camp",
+        created_by_session_id=project_session.id,
+    )
+    session.add(item)
+    session.flush()
+    return item
+
+
 class TestRecordServiceAnswer:
     def test_a_persons_answer_is_spliced_and_published(
         self,
@@ -1189,6 +1205,24 @@ class TestRecordServiceDone:
 
         assert refused.value.cause == "a decision item is not done by Done"
 
+    @pytest.mark.parametrize("kind", ["work", "card_wait"])
+    def test_done_is_refused_on_an_item_without_text(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+        kind: str,
+    ) -> None:
+        item = _textless(session, project, project_session, kind)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.record_service().done(item, person)
+
+        assert refused.value.cause == f"a {kind} item is not done by Done"
+        assert _done(item) == (None, None, None)
+
     def test_done_on_a_done_document_is_refused(
         self,
         session: DbSession,
@@ -1270,6 +1304,32 @@ class TestRecordServiceMarks:
         item, _ = _bear(
             session, container, project, project_session, kind, "The palette", text
         )
+
+        with pytest.raises(InvalidOperationException) as refused:
+            getattr(container.record_service(), mark)(item, person)
+
+        assert refused.value.cause == cause
+        assert _done(item) == (None, None, None)
+
+    @pytest.mark.parametrize(
+        ("kind", "mark", "cause"),
+        [
+            ("work", "read", "a work item is not marked Read"),
+            ("card_wait", "reviewed", "a card_wait item is not marked Reviewed"),
+        ],
+    )
+    def test_a_mark_on_an_item_without_text_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+        kind: str,
+        mark: str,
+        cause: str,
+    ) -> None:
+        item = _textless(session, project, project_session, kind)
 
         with pytest.raises(InvalidOperationException) as refused:
             getattr(container.record_service(), mark)(item, person)
