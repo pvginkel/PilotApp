@@ -6,10 +6,12 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from flask import Flask
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
+from app.app import App
 from app.engine import dsl
 from app.engine.tree import TreeDocument, TreePlan
 from app.exceptions import InvalidOperationException
@@ -40,6 +42,7 @@ from app.models.reference import (
 )
 from app.services import test_data_service
 from app.services.container import ServiceContainer
+from app.startup import load_test_data_hook
 
 
 @pytest.fixture
@@ -414,16 +417,28 @@ class TestTestDataService:
         assert len(saved) == 14
 
     def test_a_plan_with_a_fault_seeds_nothing(
-        self, container: ServiceContainer, monkeypatch: pytest.MonkeyPatch
+        self,
+        app: Flask,
+        session: DbSession,
+        container: ServiceContainer,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        assert isinstance(app, App)
         monkeypatch.setattr(
             test_data_service, "TASKS", [("scope", "Agree the scope", "finished")]
         )
 
+        # `cli load-test-data`'s hook: the people, the projects and their
+        # documents are written before the plan faults.
         with pytest.raises(InvalidOperationException) as raised:
-            container.test_data_service().load_all()
+            load_test_data_hook(app)
 
         assert raised.value.operation == "seed the plan of project recipe-box"
         assert "`status: finished` is not pending, in_progress or done" in (
             raised.value.cause
         )
+        assert (
+            session.scalars(select(User).where(User.kind_code == UserKind.PERSON)).all()
+            == []
+        )
+        assert session.scalars(select(Project)).all() == []
