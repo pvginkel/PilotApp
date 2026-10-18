@@ -62,11 +62,10 @@ template-owned file to add app behaviour; use the extension points instead:
 
 The template repos are not edited from here: what the template gets wrong is fixed in this repo, in
 a commit of its own, and listed here as a standing edit, so that a `copier update` that conflicts on
-it resolves to this repo's side. One stands today: `backend/scripts/init-dev-database.py` creates
-the dev database in production's locale (ICU `und`, `C`), as the test suites create theirs, and
-reports an existing one in another locale. uv, the migration that keeps the app's loggers, the
-masked database URL in `backend/app/cli.py` and the declarative `Jenkinsfile` on the library's
-`modernApp.test` are the template's own since root v0.2.0 and backend v0.14.0.
+it resolves to this repo's side. None stands today. uv, the migration that keeps the app's loggers,
+the masked database URL in `backend/app/cli.py` and the declarative `Jenkinsfile` on the library's
+`modernApp.test` are the template's own since root v0.2.0 and backend v0.14.0, and
+`backend/scripts/init-dev-database.py` (production's locale) since backend v0.15.0.
 
 ## Architecture model
 
