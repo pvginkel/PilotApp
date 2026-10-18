@@ -1,5 +1,6 @@
 """User: Pilot's row, written by the revisions, and what a row must hold."""
 
+import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -63,10 +64,12 @@ class TestUser:
 
         assert violated_constraint(session) == "ck_users_agent_handle"
 
+    # Each breaks one rule: a capital, then an underscore.
+    @pytest.mark.parametrize("handle", ["Grace-e", "grace_e"])
     def test_a_handle_is_lower_case_letters_digits_and_hyphens(
-        self, session: Session
+        self, session: Session, handle: str
     ) -> None:
-        session.add(_person(handle="Grace_E"))
+        session.add(_person(handle=handle))
 
         assert violated_constraint(session) == "ck_users_handle"
 

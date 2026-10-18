@@ -1,8 +1,10 @@
 """Project, Project Member and Project Transition: what a row must hold."""
 
+import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+import pytest
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.models import Project, ProjectMember, ProjectTransition, User
@@ -20,6 +22,20 @@ class TestProject:
         assert project.archived is False
         assert project.autopilot is False
         assert project.created_at is not None
+
+    def test_the_database_makes_a_new_project_a_draft(
+        self, session: Session, person: User
+    ) -> None:
+        """The revision's server defaults, which the model's own hide."""
+        row = session.execute(
+            text(
+                "INSERT INTO projects (id, created_by_user_id) VALUES (:id, :user)"
+                " RETURNING state_code, archived, autopilot"
+            ),
+            {"id": uuid.uuid4(), "user": person.id},
+        ).one()
+
+        assert tuple(row) == ("draft", False, False)
 
     def test_numbers_count_up(self, session: Session, person: User) -> None:
         first = Project(created_by_user_id=person.id)
@@ -52,11 +68,13 @@ class TestProject:
 
         assert project.slug == "fix-the-client"
 
+    # Each breaks one rule: a capital, then an underscore.
+    @pytest.mark.parametrize("slug", ["Fix-the-client", "fix_the_client"])
     def test_a_slug_is_lower_case_letters_digits_and_hyphens(
-        self, session: Session, project: Project
+        self, session: Session, project: Project, slug: str
     ) -> None:
         project.state_code = ProjectState.OPEN
-        project.slug = "Fix_the_client"
+        project.slug = slug
 
         assert violated_constraint(session) == "ck_projects_slug"
 
