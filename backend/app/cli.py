@@ -26,8 +26,14 @@ def cli(ctx: click.Context) -> None:
 
 
 @cli.command()
-@click.option("--recreate", is_flag=True, help="Drop all tables first, then run all migrations from scratch")
-@click.option("--yes-i-am-sure", is_flag=True, help="Required safety flag when using --recreate")
+@click.option(
+    "--recreate",
+    is_flag=True,
+    help="Drop all tables first, then run all migrations from scratch",
+)
+@click.option(
+    "--yes-i-am-sure", is_flag=True, help="Required safety flag when using --recreate"
+)
 @click.pass_context
 def upgrade_db(ctx: click.Context, recreate: bool, yes_i_am_sure: bool) -> None:
     """Apply database migrations."""
@@ -39,7 +45,11 @@ def upgrade_db(ctx: click.Context, recreate: bool, yes_i_am_sure: bool) -> None:
 
 
 @cli.command()
-@click.option("--yes-i-am-sure", is_flag=True, help="Required safety flag to confirm database recreation")
+@click.option(
+    "--yes-i-am-sure",
+    is_flag=True,
+    help="Required safety flag to confirm database recreation",
+)
 @click.pass_context
 def load_test_data(ctx: click.Context, yes_i_am_sure: bool) -> None:
     """Recreate database and load fixed test data."""
@@ -51,7 +61,9 @@ def load_test_data(ctx: click.Context, yes_i_am_sure: bool) -> None:
 
 def _database_for_display(app: App) -> str:
     """The database URL without its password, to tell the operator the target."""
-    return make_url(app.config["SQLALCHEMY_DATABASE_URI"]).render_as_string(hide_password=True)
+    return make_url(app.config["SQLALCHEMY_DATABASE_URI"]).render_as_string(
+        hide_password=True
+    )
 
 
 def _refuse_on_prd(app: App, action: str) -> None:

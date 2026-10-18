@@ -80,10 +80,11 @@ class BaseTask(ABC):
         """Check if the task has been cancelled."""
         return self._cancelled.is_set()
 
+
 class BaseSessionTask(BaseTask):
     """Abstract base class for tasks that require a database session."""
 
-    def __init__(self, container: 'ServiceContainer'):
+    def __init__(self, container: "ServiceContainer"):
         super().__init__()
 
         self.container = container
@@ -110,7 +111,9 @@ class BaseSessionTask(BaseTask):
             return self.execute_session(session, progress_handle, **kwargs)
 
     @abstractmethod
-    def execute_session(self, session: Session, progress_handle: ProgressHandle, **kwargs: Any) -> BaseModel:
+    def execute_session(
+        self, session: Session, progress_handle: ProgressHandle, **kwargs: Any
+    ) -> BaseModel:
         """
         Execute the task logic with a database session.
 

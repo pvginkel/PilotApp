@@ -55,12 +55,16 @@ def normalize_empty_strings(mapper: Any, connection: Any, target: Any) -> None:
 
 # Register event listeners for all models that inherit from db.Model
 @event.listens_for(db.Model, "before_insert", propagate=True)
-def normalize_empty_strings_on_insert(mapper: Any, connection: Any, target: Any) -> None:
+def normalize_empty_strings_on_insert(
+    mapper: Any, connection: Any, target: Any
+) -> None:
     """Handle empty string normalization before insert operations."""
     normalize_empty_strings(mapper, connection, target)
 
 
 @event.listens_for(db.Model, "before_update", propagate=True)
-def normalize_empty_strings_on_update(mapper: Any, connection: Any, target: Any) -> None:
+def normalize_empty_strings_on_update(
+    mapper: Any, connection: Any, target: Any
+) -> None:
     """Handle empty string normalization before update operations."""
     normalize_empty_strings(mapper, connection, target)

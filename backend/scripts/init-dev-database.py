@@ -26,8 +26,10 @@ from urllib.parse import urlsplit, urlunsplit
 import psycopg
 from dotenv import load_dotenv
 
-# Keep in step with Settings.database_url in app/config.py.
-DEFAULT_DATABASE_URL = "postgresql+psycopg://postgres:postgres@localhost:5432/pilot"
+DEFAULT_DATABASE_URL = (
+    # Keep in step with Settings.database_url in app/config.py.
+    "postgresql+psycopg://postgres:postgres@localhost:5432/pilot"
+)
 
 # Database that always exists, used to issue the CREATE DATABASE.
 MAINTENANCE_DATABASE = "postgres"
@@ -54,7 +56,9 @@ def main() -> int:
 
     database = parts.path.lstrip("/")
     if not database:
-        print(f"No database name in DATABASE_URL (host {parts.hostname})", file=sys.stderr)
+        print(
+            f"No database name in DATABASE_URL (host {parts.hostname})", file=sys.stderr
+        )
         return 1
 
     # psycopg wants a plain postgresql:// conninfo, not SQLAlchemy's
@@ -80,7 +84,9 @@ def main() -> int:
             return 0
 
         # No parameter binding for identifiers in DDL.
-        conn.execute(f'CREATE DATABASE "{database}" TEMPLATE template0 {DATABASE_LOCALE}')
+        conn.execute(
+            f'CREATE DATABASE "{database}" TEMPLATE template0 {DATABASE_LOCALE}'
+        )
         print(f"Created database '{database}'")
 
     return 0

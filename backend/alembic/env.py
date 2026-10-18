@@ -80,7 +80,9 @@ def run_migrations_online() -> None:
     # Reuse externally provided connection (e.g., in tests) when available
     existing_connection = config.attributes.get("connection")
     if existing_connection is not None:
-        context.configure(connection=existing_connection, target_metadata=target_metadata)
+        context.configure(
+            connection=existing_connection, target_metadata=target_metadata
+        )
         with context.begin_transaction():
             context.run_migrations()
         return

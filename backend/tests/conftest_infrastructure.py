@@ -231,7 +231,9 @@ def _create_test_app(settings: Settings, app_settings: AppSettings) -> Flask:
     app's.
     """
     _clear_prometheus_registry()
-    return create_app(settings, app_settings=app_settings, skip_background_services=True)
+    return create_app(
+        settings, app_settings=app_settings, skip_background_services=True
+    )
 
 
 def _dispose_app(app: Flask) -> None:
@@ -265,7 +267,11 @@ def _api_wiring_probe() -> tuple[Any, Any, Any] | None:
         return None
     for patched in patched_callables:
         function = patched.patched
-        if function is not None and function.__module__.startswith("app.api") and patched.injections:
+        if (
+            function is not None
+            and function.__module__.startswith("app.api")
+            and patched.injections
+        ):
             argument, provider = next(iter(patched.injections.items()))
             return patched, argument, provider
     return None
@@ -344,7 +350,9 @@ class RunDatabases:
         revision that fails stops the run here.
         """
         self._connection.execute(
-            text(f'CREATE DATABASE "{self.template}" TEMPLATE template0 {_DATABASE_LOCALE}')
+            text(
+                f'CREATE DATABASE "{self.template}" TEMPLATE template0 {_DATABASE_LOCALE}'
+            )
         )
         template_app = _create_test_app(
             settings.model_copy(update={"database_url": _database_url(self.template)}),
@@ -369,13 +377,17 @@ class RunDatabases:
     def drop(self, url: str) -> None:
         """Drop one of the run's databases, connections and all."""
         database = make_url(url).database
-        self._connection.execute(text(f'DROP DATABASE IF EXISTS "{database}" WITH (FORCE)'))
+        self._connection.execute(
+            text(f'DROP DATABASE IF EXISTS "{database}" WITH (FORCE)')
+        )
 
     def close(self) -> None:
         """Drop every database of the run, and end its connection."""
         try:
             for name in self._database_names(self.prefix):
-                self._connection.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+                self._connection.execute(
+                    text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+                )
         finally:
             self._connection.close()
             self._engine.dispose()
@@ -383,7 +395,9 @@ class RunDatabases:
     def _database_names(self, prefix: str) -> list[str]:
         return list(
             self._connection.execute(
-                text("SELECT datname FROM pg_database WHERE starts_with(datname, :prefix)"),
+                text(
+                    "SELECT datname FROM pg_database WHERE starts_with(datname, :prefix)"
+                ),
                 {"prefix": prefix},
             ).scalars()
         )
@@ -414,7 +428,9 @@ def app(
     rolled back. What services keep in memory, such as the task service's
     tasks, lives for the whole run: a test cleans up what it starts.
     """
-    settings = test_settings.model_copy(update={"database_url": run_databases.clone("main")})
+    settings = test_settings.model_copy(
+        update={"database_url": run_databases.clone("main")}
+    )
     application = _create_test_app(settings, test_app_settings)
     # create_app() wired app.api to it.
     application._test_wiring_probe = _api_wiring_probe()  # type: ignore[attr-defined]
@@ -442,7 +458,9 @@ def session_app_isolation(app: Flask) -> Generator[None]:
     starts.
     """
     _ensure_wired(app)
-    overrides = [(provider, provider.overridden) for provider in app.container.traverse()]
+    overrides = [
+        (provider, provider.overridden) for provider in app.container.traverse()
+    ]
 
     yield
 
@@ -638,8 +656,12 @@ def generate_test_jwt(test_settings: Settings) -> Any:
 
         payload = {
             "sub": subject,
-            "iss": "https://wrong.example.com" if invalid_issuer else test_settings.oidc_issuer_url,
-            "aud": "wrong-client-id" if invalid_audience else test_settings.oidc_client_id,
+            "iss": "https://wrong.example.com"
+            if invalid_issuer
+            else test_settings.oidc_issuer_url,
+            "aud": "wrong-client-id"
+            if invalid_audience
+            else test_settings.oidc_client_id,
             "exp": exp,
             "iat": now,
             "realm_access": {"roles": roles},
@@ -651,9 +673,15 @@ def generate_test_jwt(test_settings: Settings) -> Any:
             payload["name"] = name
 
         # Use wrong key if invalid_signature requested
-        signing_key = rsa.generate_private_key(public_exponent=65537, key_size=2048) if invalid_signature else private_key
+        signing_key = (
+            rsa.generate_private_key(public_exponent=65537, key_size=2048)
+            if invalid_signature
+            else private_key
+        )
 
-        token = jwt.encode(payload, signing_key, algorithm="RS256", headers={"kid": "test-key-id"})
+        token = jwt.encode(
+            payload, signing_key, algorithm="RS256", headers={"kid": "test-key-id"}
+        )
         return token
 
     # Attach keys for test verification
@@ -678,11 +706,13 @@ def oidc_app(
     with the rest. Keeps httpx.get and PyJWKClient mocks active so that
     AuthService can discover endpoints and validate tokens throughout the test.
     """
-    settings = test_settings.model_copy(update={
-        "database_url": app.config["SQLALCHEMY_DATABASE_URI"],
-        "oidc_enabled": True,
-        "oidc_client_secret": "test-secret",
-    })
+    settings = test_settings.model_copy(
+        update={
+            "database_url": app.config["SQLALCHEMY_DATABASE_URI"],
+            "oidc_enabled": True,
+            "oidc_client_secret": "test-secret",
+        }
+    )
 
     with patch("httpx.get") as mock_get:
         mock_response = MagicMock()

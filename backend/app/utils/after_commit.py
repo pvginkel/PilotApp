@@ -19,8 +19,8 @@ from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
-_callbacks: contextvars.ContextVar[tuple[Callable[[], None], ...]] = contextvars.ContextVar(
-    "after_commit_callbacks", default=()
+_callbacks: contextvars.ContextVar[tuple[Callable[[], None], ...]] = (
+    contextvars.ContextVar("after_commit_callbacks", default=())
 )
 
 
