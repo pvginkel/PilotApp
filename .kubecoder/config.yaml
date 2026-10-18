@@ -27,6 +27,8 @@ tools:
   - use: iac
   # Its architecture gates: gen-architecture and arch-validate.
   - use: aac-tools
+  # The sync sidecar (slice 003) is Go: Go and golangci-lint.
+  - use: go
 
 # Proves PilotApp's Dockerfiles with `kaniko --no-push` before a push hands
 # them to Jenkins, which builds them with helmCharts.kaniko2(...).
