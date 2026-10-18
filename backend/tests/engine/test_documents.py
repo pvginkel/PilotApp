@@ -1005,3 +1005,246 @@ class TestDocumentServiceLock:
             assert draft.published_text == "x"
             assert owner.name == "Palette"
             assert item.title == "Colours"
+
+
+class TestDocumentServiceOwner:
+    def test_a_project_documents_owner_is_its_project(
+        self, container: ServiceContainer, project: Project
+    ) -> None:
+        draft = container.document_service().bear_draft(project)
+
+        assert container.document_service().owner(draft) == (project, None)
+
+    def test_a_prose_items_owner_is_its_project_and_item(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        documents = container.document_service()
+        item = documents.bear_item(project, "notice", "The palette", project_session)
+
+        assert documents.owner(session.get_one(Document, item.id)) == (project, item)
+
+
+class TestDocumentServiceVersions:
+    def test_a_version_is_numbered_after_the_highest(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        documents = container.document_service()
+        draft = documents.bear_draft(project, "# Badges\n")
+        documents.publish(draft, "# Badge colours\n")
+
+        documents.cut_version(draft, VersionCause.TURN, project_session.id)
+        documents.cut_version(draft, VersionCause.DONE)
+
+        assert [
+            (version.number, version.cause_code, version.text, version.session_id)
+            for version in _versions(session, draft)
+        ] == [
+            (1, VersionCause.BORN, "# Badges\n", None),
+            (2, VersionCause.TURN, "# Badge colours\n", project_session.id),
+            (3, VersionCause.DONE, "# Badge colours\n", None),
+        ]
+        assert _versions(session, draft)[2].hash == sha256_hex("# Badge colours\n")
+
+
+def _save(
+    container: ServiceContainer,
+    environment: Environment,
+    path: str,
+    text: str,
+    run: models.Session,
+) -> None:
+    container.ingest_service().ingest(path, text.encode(), None, environment, run)
+
+
+class TestDocumentServiceTurnEnded:
+    def test_a_turn_end_clears_the_writing_and_versions_what_moved(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+    ) -> None:
+        documents = container.document_service()
+        draft = documents.bear_draft(project, "# Badges\n")
+        _save(
+            container,
+            environment,
+            f"draft-{project.number}/project.md",
+            "# Badge colours\n",
+            project_session,
+        )
+        assert draft.writing_session_id == project_session.id
+
+        held = documents.turn_ended(project_session)
+
+        assert held == []
+        assert (draft.writing_session_id, draft.writing_since) == (None, None)
+        assert [
+            (version.number, version.cause_code, version.text, version.session_id)
+            for version in _versions(session, draft)
+        ] == [
+            (1, VersionCause.BORN, "# Badges\n", None),
+            (2, VersionCause.TURN, "# Badge colours\n", project_session.id),
+        ]
+
+    def test_no_version_where_the_published_hash_did_not_move(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+    ) -> None:
+        documents = container.document_service()
+        draft = documents.bear_draft(project, "# Badges\n")
+        _save(
+            container,
+            environment,
+            f"draft-{project.number}/project.md",
+            "# Badges\n",
+            project_session,
+        )
+
+        assert documents.turn_ended(project_session) == []
+
+        assert draft.writing_session_id is None
+        assert len(_versions(session, draft)) == 1
+
+    def test_a_record_write_since_the_last_version_is_versioned(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        documents = container.document_service()
+        text = "# Badges\n\n```question id=Q1\ndefault: Blue\n```\n"
+        draft = documents.bear_draft(project, text)
+        _save(
+            container,
+            environment,
+            f"draft-{project.number}/project.md",
+            text,
+            project_session,
+        )
+        container.record_service().answer(draft, "Q1", person, "Green")
+
+        documents.turn_ended(project_session)
+
+        assert [
+            (version.cause_code, version.text) for version in _versions(session, draft)
+        ] == [(VersionCause.BORN, text), (VersionCause.TURN, draft.published_text)]
+
+    def test_a_held_path_is_returned_and_not_versioned(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+    ) -> None:
+        documents = container.document_service()
+        draft = documents.bear_draft(project, "# Badges\n")
+        item = documents.bear_item(project, "notice", "The palette", project_session)
+        handbook = documents.bear_handbook(project)
+        folder = f"draft-{project.number}"
+        _save(container, environment, f"{folder}/project.md", BROKEN, project_session)
+        _save(
+            container,
+            environment,
+            f"{folder}/items/1-the-palette.md",
+            BROKEN,
+            project_session,
+        )
+        _save(
+            container, environment, f"{folder}/handbook.md", "Short.\n", project_session
+        )
+
+        held = documents.turn_ended(project_session)
+
+        assert held == [f"{folder}/items/1-the-palette.md", f"{folder}/project.md"]
+        assert [len(_versions(session, draft)), len(_versions(session, handbook))] == [
+            1,
+            2,
+        ]
+        assert len(_versions(session, session.get_one(Document, item.id))) == 1
+        assert {
+            document.writing_session_id
+            for document in (draft, handbook, session.get_one(Document, item.id))
+        } == {None}
+
+    def test_another_sessions_documents_are_left_as_they_are(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+    ) -> None:
+        other = models.Session(
+            project_id=project.id,
+            environment_id=environment.id,
+            kind_code="work",
+            cwd="/work/Example",
+            token_hash="2" * 64,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(other)
+        session.flush()
+        documents = container.document_service()
+        draft = documents.bear_draft(project, "# Badges\n")
+        handbook = documents.bear_handbook(project)
+        folder = f"draft-{project.number}"
+        _save(
+            container,
+            environment,
+            f"{folder}/project.md",
+            "# Palette\n",
+            project_session,
+        )
+        _save(container, environment, f"{folder}/handbook.md", BROKEN, other)
+        writing_since = handbook.writing_since
+
+        assert documents.turn_ended(project_session) == []
+
+        assert draft.writing_session_id is None
+        assert (handbook.writing_session_id, handbook.writing_since) == (
+            other.id,
+            writing_since,
+        )
+        assert len(_versions(session, handbook)) == 1
+
+    def test_a_second_turn_end_finds_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+    ) -> None:
+        documents = container.document_service()
+        draft = documents.bear_draft(project, "# Badges\n")
+        _save(
+            container,
+            environment,
+            f"draft-{project.number}/project.md",
+            BROKEN,
+            project_session,
+        )
+        assert documents.turn_ended(project_session) == [
+            f"draft-{project.number}/project.md"
+        ]
+
+        assert documents.turn_ended(project_session) == []
+        assert len(_versions(session, draft)) == 1

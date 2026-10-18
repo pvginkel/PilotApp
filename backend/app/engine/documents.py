@@ -1,5 +1,5 @@
-"""Documents: born in the record, and published with their derived caches
-(TD §7.1.3, DB §7.4, design 1 §7).
+"""Documents: born in the record, published with their derived caches, and
+versioned at a turn's end (TD §7.1.3, §7.1.8, DB §7.4, design 1 §7).
 
 `publish()` is the one way a published text changes in the record (DB 172):
 an agent's merged save and the record's own writes go through it.
@@ -105,7 +105,7 @@ class DocumentService:
         """Publish `text` as the document's truth and rebuild every cache read
         from it, in the transaction. Refused for a text with a fault: only a
         parseable text is published (F78)."""
-        project, item = self._owner(document)
+        project, item = self.owner(document)
         parsed = self._parse(project, document, text)
         tree_hash = self.tree_service.hash(project, document)
         shown = self._shown(project, item, document)
@@ -129,10 +129,75 @@ class DocumentService:
             .with_for_update()
             .execution_options(populate_existing=True)
         ).one()
-        project, item = self._owner(document)
+        project, item = self.owner(document)
         self.db.refresh(project)
         if item is not None:
             self.db.refresh(item)
+
+    def cut_version(
+        self,
+        document: Document,
+        cause: VersionCause,
+        session_id: uuid.UUID | None = None,
+    ) -> None:
+        """A Document Version of the published text, numbered after the
+        document's highest; `session_id` the Session it is of, if any."""
+        number = (
+            self.db.scalar(
+                select(func.max(DocumentVersion.number)).where(
+                    DocumentVersion.document_id == document.id
+                )
+            )
+            or 0
+        ) + 1
+        self.db.add(
+            DocumentVersion(
+                document_id=document.id,
+                number=number,
+                cause_code=cause,
+                text=document.published_text,
+                hash=document.published_hash,
+                session_id=session_id,
+            )
+        )
+        self.db.flush()
+
+    def turn_ended(self, session: AgentSession) -> list[str]:
+        """Turn ended for `session` (design 1 §7): the writing columns of the
+        documents it was writing cleared, a `turn` Version cut of each whose
+        published hash moved since its last Version (DB 172), and the paths
+        of those whose latest save is held returned, from the tree's root."""
+        documents = self.db.scalars(
+            select(Document)
+            .where(Document.writing_session_id == session.id)
+            .order_by(Document.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).all()
+        held: list[str] = []
+        for document in documents:
+            document.writing_session_id = None
+            document.writing_since = None
+            last = self.db.scalars(
+                select(DocumentVersion.hash)
+                .where(DocumentVersion.document_id == document.id)
+                .order_by(DocumentVersion.number.desc())
+                .limit(1)
+            ).one()
+            if document.published_hash != last:
+                self.cut_version(document, VersionCause.TURN, session.id)
+            project, _ = self.owner(document)
+            if self.tree_service.held(project, document):
+                held.append(tree_path(project, document.path))
+        self.db.flush()
+        return sorted(held)
+
+    def owner(self, document: Document) -> tuple[Project, Item | None]:
+        """The document's Project, and its Item for a Prose Item."""
+        if document.project_id is not None:
+            return self.db.get_one(Project, document.project_id), None
+        item = self.db.get_one(Item, document.id)
+        return self.db.get_one(Project, item.project_id), item
 
     def _bear_project_document(
         self, project: Project, role: DocumentRole, path: str, text: str
@@ -182,17 +247,7 @@ class DocumentService:
         self._set_published(document, text)
         self.db.add(document)
         self.db.flush()
-        self.db.add(
-            DocumentVersion(
-                document_id=document.id,
-                number=1,
-                cause_code=VersionCause.BORN,
-                text=text,
-                hash=document.published_hash,
-                session_id=session_id,
-            )
-        )
-        self.db.flush()
+        self.cut_version(document, VersionCause.BORN, session_id)
         self._rebuild(project, item, document, parsed)
         self.engine_bus.emit(
             TreeHashMoved(
@@ -200,12 +255,6 @@ class DocumentService:
                 self.tree_service.hash(project, document),
             )
         )
-
-    def _owner(self, document: Document) -> tuple[Project, Item | None]:
-        if document.project_id is not None:
-            return self.db.get_one(Project, document.project_id), None
-        item = self.db.get_one(Item, document.id)
-        return self.db.get_one(Project, item.project_id), item
 
     def _parse(
         self, project: Project, document: Document, text: str
