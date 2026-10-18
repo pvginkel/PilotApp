@@ -5,7 +5,8 @@ the KubeCoder fleet, and the operator decides and does only what their hands mus
 timeline per managed project shows its work, its decision documents and their asks; a side chat
 talks to Pilot's brain, a headless Claude Code session in a store environment.
 
-**No feature is built yet**: the app is the ModernAppTemplate skeleton, live in production at
+**No route or screen of Pilot's own exists yet**: the app is the ModernAppTemplate skeleton with the
+record's schema and the engine behind it (`backend/app/engine/`), live in production at
 `https://pilot.ginbov.nl`, where every green build of `main` deploys itself
 ([`docs/deployment.md`](docs/deployment.md)). Version 1 is built from the design record in
 `../PilotAppSpecs/design/` (start at its README), along the steps of its `implementation-plan.md`.
@@ -115,3 +116,7 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
 - [`docs/deployment.md`](docs/deployment.md): how a change reaches production, and what runs there.
 - [`docs/sign-in.md`](docs/sign-in.md): who can use Pilot: the `editor` role the API requires, a
   signed-in test's session included.
+- [`docs/record.md`](docs/record.md), [`docs/block-dsl.md`](docs/block-dsl.md),
+  [`docs/projection.md`](docs/projection.md), [`docs/engine.md`](docs/engine.md): the record's
+  schema and the dev seed, the block DSL, the store's tree and its files, and the engine between
+  them.

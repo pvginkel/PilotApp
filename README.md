@@ -5,7 +5,10 @@ the operator decides and does only what their hands must. This repository is the
 and slices are in `pvginkel/PilotAppSpecs`, its deploy chart in `pvginkel/PilotDeploy`, and the
 store environment's repository in `pvginkel/PilotProjects`.
 
-**Status**: no feature built yet. The repository holds the ModernAppTemplate skeleton (Flask on
-PostgreSQL, React + Vite, Playwright), which CI builds and Argo CD deploys to production at
-`https://pilot.ginbov.nl` ([`docs/deployment.md`](docs/deployment.md)), and version 1 is being
-planned.
+**Status**: version 1 is being built, and none of it is reachable yet. The record's schema and the
+engine behind it are in: the block DSL, the parse gate and the merge by ownership, the record's own
+writes, and the rendered `timeline.json`, `reference.json` and `plan.json`
+([`docs/engine.md`](docs/engine.md)). No route or screen serves them yet. The rest is the
+ModernAppTemplate skeleton (Flask on PostgreSQL, React + Vite, Playwright), which CI builds and
+Argo CD deploys to production at `https://pilot.ginbov.nl`
+([`docs/deployment.md`](docs/deployment.md)).

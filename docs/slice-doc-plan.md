@@ -80,8 +80,12 @@ and no secret: examples are invented.
 
 ```bash
 kc project build      # unchanged and green: the doc phase must not have moved code
-python3 ../PilotAppSpecs/design/tools/check_ledger.py   # 0 errors: the feature ledger agrees with the record
+python3 ../PilotAppSpecs/design/tools/check_ledger.py   # 0 errors but the rows this slice ticked: the feature ledger agrees with the record
 ```
+
+The ledger check counts a slice as shipped once its folder is in `slices/completed/`, where the
+run moves it when the slice completes, after this phase. Until then, its only errors are the rows
+the slice ticked, each saying that the slice has not shipped.
 
 Check that relative links resolve. Then commit. If the design record or the slice's own folder in
 `../PilotAppSpecs` needs anything, commit there separately: it is a separate git repo, and a working

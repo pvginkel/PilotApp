@@ -99,7 +99,13 @@ machine sees it uses that URL.
 Then the slice's own checks: every acceptance criterion in `verification.json` that the suites did
 not settle and that the stack can show, exercised against it through the API, or through the UI
 with Playwright. The data a check writes is invented and goes into this environment's own dev
-database, which nothing else reads.
+database, which nothing else reads. A check that wants projects, items and a plan to work on loads
+the dev seed first, an invented record ([`record.md`](record.md)); the command recreates the
+database from the migrations:
+
+```bash
+cexec modern-app sh -c 'cd backend && uv run cli load-test-data --yes-i-am-sure'
+```
 
 **Stop the stack** from another shell, and confirm it is down:
 
