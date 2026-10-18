@@ -10,14 +10,14 @@ from app.models import Attachment, Environment, Item, ItemAttachment, Project, S
 from app.models.reference import AttachmentSource
 from tests.support.database import violated_constraint
 
-_CONTENT = b"# Survey\n\nThe two providers compared.\n"
+_CONTENT = b"# Palette\n\nThe two colours compared.\n"
 
 
 def _draft_copy(project: Project, **overrides: object) -> Attachment:
     values: dict[str, object] = {
         "project_id": project.id,
         "batch": 1,
-        "title": "Survey",
+        "title": "Palette",
         "filename": "project.md",
         "content_type": "text/markdown",
         "size": len(_CONTENT),
@@ -51,10 +51,10 @@ class TestAttachment:
     ) -> None:
         copy = _draft_copy(
             project,
-            filename="docs/survey.md",
+            filename="docs/palette.md",
             source_code=AttachmentSource.FILE,
             source_environment_id=environment.id,
-            source_path="/work/Example/docs/survey.md",
+            source_path="/work/Example/docs/palette.md",
             created_by_session_id=project_session.id,
         )
         session.add(copy)
@@ -75,7 +75,7 @@ class TestAttachment:
     ) -> None:
         source: dict[str, object] = {
             "source_environment_id": environment.id,
-            "source_path": "/work/Example/docs/survey.md",
+            "source_path": "/work/Example/docs/palette.md",
             "created_by_session_id": project_session.id,
         }
         del source[missing]

@@ -80,7 +80,7 @@ def item(session: DbSession, project: Project, project_session: models.Session) 
         project_id=project.id,
         seq=1,
         kind_code="decision",
-        title="Which provider?",
+        title="Which colour for the badge?",
         created_by_session_id=project_session.id,
     )
     session.add(entry)

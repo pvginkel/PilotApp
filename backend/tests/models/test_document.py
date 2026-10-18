@@ -16,7 +16,7 @@ _HASH = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 def _prose_document(item: Item, **overrides: object) -> Document:
     values: dict[str, object] = {
         "id": item.id,
-        "path": f"items/{item.seq}-which-provider.md",
+        "path": f"items/{item.seq}-badge-colour.md",
     }
     values.update(overrides)
     return Document(**values)
@@ -56,9 +56,9 @@ class TestDocument:
     ) -> None:
         document = _prose_document(
             item,
-            summary="TheTVDB or TVmaze for the show search.",
+            summary="Blue or green for the badge.",
             source_environment_id=environment.id,
-            source_path="/work/Example/docs/survey.md",
+            source_path="/work/Example/docs/palette.md",
         )
         session.add(document)
         session.flush()
@@ -124,7 +124,7 @@ class TestDocument:
     def test_a_source_is_an_environment_and_a_path(
         self, session: DbSession, item: Item
     ) -> None:
-        session.add(_prose_document(item, source_path="/work/Example/survey.md"))
+        session.add(_prose_document(item, source_path="/work/Example/palette.md"))
 
         assert violated_constraint(session) == "ck_documents_source"
 
@@ -133,7 +133,7 @@ class TestDocument:
             _prose_document(
                 item,
                 source_environment_id="no-such-env",
-                source_path="/work/Example/survey.md",
+                source_path="/work/Example/palette.md",
             )
         )
 

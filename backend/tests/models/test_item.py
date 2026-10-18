@@ -53,7 +53,7 @@ class TestItem:
                 project_id=project.id,
                 seq=1,
                 kind_code="decision",
-                title="Which provider?",
+                title="Which colour for the badge?",
                 created_by_user_id=person.id,
             )
         )

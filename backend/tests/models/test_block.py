@@ -40,7 +40,7 @@ class TestBlock:
             answer="Yes",
             answered_by_user_id=person.id,
             via_code=AnswerChannel.CHAT,
-            note="Agreed on the rest.",
+            note="Fine by me.",
         )
         session.add(block)
         session.flush()
@@ -121,7 +121,7 @@ class TestBlock:
     def test_a_task_is_named_only_by_a_deferral(
         self, session: DbSession, draft_document: Document
     ) -> None:
-        session.add(_block(draft_document, answer="v4", deferred_to_task_id="fix"))
+        session.add(_block(draft_document, answer="Blue", deferred_to_task_id="fix"))
 
         assert violated_constraint(session) == "ck_blocks_deferred_to"
 
@@ -138,11 +138,11 @@ class TestBlockOption:
                 BlockOption(
                     block_id=block.id,
                     position=1,
-                    label="v4",
-                    text="one key, same provider, about 2 h",
+                    label="Blue",
+                    text="matches the logo, about an hour",
                     recommended=True,
                 ),
-                BlockOption(block_id=block.id, position=2, label="TVmaze"),
+                BlockOption(block_id=block.id, position=2, label="Green"),
             ]
         )
         session.flush()
@@ -154,8 +154,8 @@ class TestBlockOption:
         ).all()
 
         assert rows == [
-            ("v4", "one key, same provider, about 2 h", True),
-            ("TVmaze", None, False),
+            ("Blue", "matches the logo, about an hour", True),
+            ("Green", None, False),
         ]
 
     def test_options_go_with_their_block(

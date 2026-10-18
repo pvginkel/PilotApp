@@ -13,7 +13,7 @@ class TestSaveError:
     ) -> None:
         fault = SaveError(
             environment_id=environment.id,
-            path="draft-1/items/2-which-provider.md",
+            path="draft-1/items/2-badge-colour.md",
             kind_code=ErrorKind.PARSE,
             line=14,
             message="block D1: options is not a list",
