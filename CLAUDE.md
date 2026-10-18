@@ -38,7 +38,8 @@ major, minor and patch, in every component it finds.
 
 Other repos the work touches, checked out beside this one:
 
-- **`../PilotAppSpecs`**: the spec repo, private: the design record and the slices. A separate git
+- **`../PilotAppSpecs`**: the spec repo, private: the design record, the decision index
+  (`decisions.md`), the decisions taken for now (`considerations.md`) and the slices. A separate git
   repo and a working tree shared by parallel sessions: commit there separately, and stage files by
   name, never `git add -A`.
 - **`../PilotDeploy`**: the deploy chart and its per-stage values.
@@ -95,8 +96,12 @@ the step that would otherwise read the old plan. Handling a proposal means, in o
 under the `kubecoder:data-modelling` skill, if it touches the data model; an arch design
 (`/dev:arch-design`), if it raises an architectural question; then absorbing it into the plan,
 the feature ledger with it. Once absorbed, the proposal is deleted, and the plan's line naming it
-goes with it. A ruling made inside a slice's triage, planning or run is the
-pipeline's, recorded as the pipeline records it, not a proposal.
+goes with it.
+
+**Every other decision is a row in the spec repo's `decisions.md`**, whose head has the rules: a
+ruling made inside a slice's triage, planning or run (the slice's doc phase lands it), one on an
+item of `understanding.md` §5, one taken in a session of its own. A decision taken for now goes into
+`considerations.md` beside it instead, until the plan's step 15 rules it for good.
 
 ## The dev pipeline
 

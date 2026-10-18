@@ -22,13 +22,22 @@ The change discipline, this plan and the slice testing strategy live here too. A
 what they describe (a service that is now runnable, a live check that is now written, a deployment
 that now exists) updates them.
 
-### 2. The design record
+### 2. The decisions and the design record
 
-A slice that changes a ruling, settles an item on `understanding.md` §5's open list, or delivers
-something `features.md` names differently from how it is written there, updates the design record
-in `../PilotAppSpecs/design/`: the ruling into `understanding.md` or `feed-model.md`, the open item
-off §5, `features.md` brought in line. Only what the operator ruled goes in; a divergence nobody
-ruled on is named in the close-out report instead.
+A decision the operator ruled in the slice's triage, planning or run, an item of
+`understanding.md` §5's open list settled among them, is a row in `../PilotAppSpecs/decisions.md`,
+per the rules at its head: its text in the topic doc here that describes what the slice built, the
+row pointing there, and a passage of the design record it overrules marked `(→ DNNN)`. A pending
+row the slice built moves the same way, its text out of *Pending decisions*. **Take the id by
+reading `decisions.md` at append time**, never from a number the plan or the slice folder names:
+the spec repo is one working tree shared by parallel sessions, and a duplicate id is not
+self-correcting. A doc here cites a decision by its bare id, with no link, and states what it rules
+in its own words.
+
+Beyond those markers, the design record changes through a proposal, not here. What this pass owes
+it besides is the settled item off §5, and `features.md` brought in line where the slice delivers
+something it names differently. Only what the operator ruled goes in; a divergence nobody ruled on is named in the
+close-out report instead.
 
 ### 3. `README.md`
 

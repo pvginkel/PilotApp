@@ -15,8 +15,10 @@ topic docs beside this one.
   *Decided out*, is not built, and neither is the groundwork for one because it looked cheap while
   passing: it is a question for the operator.
 - **The rulings are decisions, not suggestions**: `understanding.md` §2, `feed-model.md`,
-  `tech-design-options.md` §7 and `ui-conventions.md`. A plan or an implementation that disagrees
-  with one is wrong, however convenient.
+  `tech-design-options.md` §7 and `ui-conventions.md`; the rows of the spec repo's `decisions.md`,
+  which win where they disagree with those; and the decisions taken for now in its
+  `considerations.md`. A plan or an implementation that disagrees with one is wrong, however
+  convenient.
 - **An open item is the operator's to rule.** `understanding.md` §5 is the one open list. A slice
   that meets one of its items stops and asks; it does not settle the question in code.
 
