@@ -4,7 +4,9 @@
   // covers them, and adding them would show every file twice in the explorer.
   "folders": [
     { "path": "." },
-    { "path": "../PilotAppSpecs" }
+    { "path": "../PilotAppSpecs" },
+    { "path": "../PilotProjects" },
+    { "path": "../PilotDeploy" }
   ],
   // Only the repo's own dev runner needs a task. Starting a Claude session and
   // every `kc project` verb are commands the KubeCoder VS Code extension already
