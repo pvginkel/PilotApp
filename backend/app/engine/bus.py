@@ -1,12 +1,15 @@
 """The engine's bus: typed, in-process, and delivered only once the
 transaction that caused an event has committed (design 1 §5.4)."""
 
+import logging
 import threading
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 
 from app.utils.after_commit import after_commit
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -78,7 +81,11 @@ class EngineBus:
         with self._lock:
             subscribers = tuple(self._subscribers)
         for subscriber in subscribers:
-            subscriber(event)
+            # A subscriber that fails keeps the event from no other.
+            try:
+                subscriber(event)
+            except Exception:
+                logger.exception("subscriber %r failed on %r", subscriber, event)
 
 
 @dataclass(frozen=True)

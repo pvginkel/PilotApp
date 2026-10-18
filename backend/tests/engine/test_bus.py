@@ -72,6 +72,35 @@ class TestEngineBus:
         assert engine_events == [MOVED]
         assert other == [MOVED]
 
+    def test_a_failing_subscriber_keeps_the_event_from_no_other(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        bus = container.engine_bus()
+        other: list[EngineEvent] = []
+
+        def fail(event: EngineEvent) -> None:
+            raise RuntimeError("the subscriber fails")
+
+        bus.subscribe(fail)
+        bus.subscribe(other.append)
+        try:
+            with scoped_session(container):
+                bus.emit(MOVED)
+        finally:
+            bus.unsubscribe(other.append)
+            bus.unsubscribe(fail)
+
+        assert engine_events == [MOVED]
+        assert other == [MOVED]
+        [failure] = [
+            record for record in caplog.records if record.name == "app.engine.bus"
+        ]
+        assert failure.exc_info is not None
+        assert str(failure.exc_info[1]) == "the subscriber fails"
+
     def test_an_unsubscribed_subscriber_receives_nothing(
         self, container: ServiceContainer, engine_events: list[EngineEvent]
     ) -> None:
