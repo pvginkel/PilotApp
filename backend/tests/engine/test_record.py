@@ -314,6 +314,23 @@ class TestRecordServiceAnswer:
             person.id,
         )
 
+    def test_an_answer_to_the_openings_one_block_leaves_it_open(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+    ) -> None:
+        opening = container.document_service().bear_opening(
+            project, "Which tent?", person, DECISION
+        )
+        document = session.get_one(Document, opening.id)
+
+        container.record_service().answer(document, "D1", person, "Tunnel")
+
+        assert _block(session, document, "D1").answered_at is not None
+        assert _done(opening) == (None, None, None)
+
     def test_an_answer_in_a_document_leaves_the_item_open(
         self,
         session: DbSession,
@@ -467,6 +484,12 @@ class TestRecordServiceAnswer:
                 "`to: gone` names neither `plan` nor a task in the plan",
                 id="removed-task",
             ),
+            pytest.param(
+                "deferred",
+                "elsewhere",
+                "`to: elsewhere` names neither `plan` nor a task in the plan",
+                id="another-projects-task",
+            ),
             pytest.param("deferred", None, "`deferred` names no `to`", id="no-to"),
             pytest.param(
                 "Green", "t1", "`to` goes with `deferred` alone", id="to-not-deferred"
@@ -486,6 +509,10 @@ class TestRecordServiceAnswer:
     ) -> None:
         _task(session, project, "t1")
         _task(session, project, "gone", removed=True)
+        other = Project(created_by_user_id=person.id)
+        session.add(other)
+        session.flush()
+        _task(session, other, "elsewhere")
         draft = container.document_service().bear_draft(project, QUESTION_DRAFT)
 
         with pytest.raises(InvalidOperationException) as refused:
