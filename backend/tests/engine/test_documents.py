@@ -3,7 +3,9 @@
 from datetime import UTC, datetime
 
 import pytest
+from flask import Flask
 from sqlalchemy import func, select
+from sqlalchemy import text as sql
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DbSession
 
@@ -12,6 +14,7 @@ from app.database import scoped_session
 from app.engine.bus import EngineEvent, TreeHashMoved
 from app.engine.paths import sha256_hex
 from app.exceptions import InvalidOperationException
+from app.extensions import db
 from app.models import (
     Block,
     BlockOption,
@@ -29,7 +32,9 @@ from app.models.reference import (
     BlockKind,
     DocumentRole,
     ErrorKind,
+    SessionState,
     TaskStatus,
+    UserKind,
     VersionCause,
 )
 from app.services.container import ServiceContainer
@@ -934,3 +939,69 @@ class TestDocumentServiceBlocks:
             ("Tunnel", True),
         ]
         assert not set(kept) & {o.id for o in options}
+
+
+class TestDocumentServiceLock:
+    def test_lock_reads_the_document_and_its_owner_as_committed(
+        self, committed_app: Flask
+    ) -> None:
+        container = committed_app.container
+        with scoped_session(container) as session:
+            person = User(
+                kind_code=UserKind.PERSON,
+                subject="subject-ada",
+                handle="ada",
+                name="Ada Example",
+                avatar_slot=1,
+            )
+            session.add(person)
+            session.flush()
+            project = Project(created_by_user_id=person.id)
+            session.add(project)
+            session.add(Environment(id="example-env-1", name="Example-1", exempt=False))
+            session.flush()
+            run = models.Session(
+                project_id=project.id,
+                environment_id="example-env-1",
+                kind_code="work",
+                cwd="/work/Example",
+                token_hash="1" * 64,
+                state_code=SessionState.RUNNING,
+            )
+            session.add(run)
+            session.flush()
+            documents = container.document_service()
+            draft_id = documents.bear_draft(project, "# Badges\n").id
+            item_id = documents.bear_item(project, "notice", "The palette", run).id
+
+        with committed_app.app_context():
+            engine = db.engine
+        with scoped_session(container) as session:
+            draft = session.get_one(Document, draft_id)
+            item = session.get_one(Item, item_id)
+            owner = session.get_one(Project, draft.project_id)
+            with engine.begin() as other:
+                other.execute(
+                    sql(
+                        "UPDATE documents SET published_text = 'x', published_hash = 'x'"
+                        " WHERE id = :id"
+                    ),
+                    {"id": draft_id},
+                )
+                other.execute(
+                    sql("UPDATE projects SET name = 'Palette' WHERE id = :id"),
+                    {"id": owner.id},
+                )
+                other.execute(
+                    sql("UPDATE items SET title = 'Colours' WHERE id = :id"),
+                    {"id": item_id},
+                )
+            assert owner.name == "Badges"
+
+            documents = container.document_service()
+            documents.lock(draft)
+            documents.lock(session.get_one(Document, item_id))
+
+            assert draft.published_text == "x"
+            assert owner.name == "Palette"
+            assert item.title == "Colours"

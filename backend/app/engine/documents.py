@@ -119,6 +119,21 @@ class DocumentService:
         if self._shown(project, item, document) != shown:
             self.view_service.timeline_moved(project)
 
+    def lock(self, document: Document) -> None:
+        """Hold the document's row until the transaction ends, so that two
+        writes of one document never interleave (TD §8.5), and re-read the
+        document and its owner's caches as the lock found them."""
+        self.db.scalars(
+            select(Document)
+            .where(Document.id == document.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).one()
+        project, item = self._owner(document)
+        self.db.refresh(project)
+        if item is not None:
+            self.db.refresh(item)
+
     def _bear_project_document(
         self, project: Project, role: DocumentRole, path: str, text: str
     ) -> Document:

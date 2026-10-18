@@ -10,6 +10,7 @@ from app.app_config import AppSettings
 from app.config import Settings
 from app.engine.bus import EngineBus
 from app.engine.documents import DocumentService
+from app.engine.ingest import IngestService
 from app.engine.tree import TreeService
 from app.engine.views import ViewService
 from app.services.auth_service import AuthService
@@ -121,6 +122,14 @@ class ServiceContainer(containers.DeclarativeContainer):
         engine_bus=engine_bus,
         tree_service=tree_service,
         view_service=view_service,
+    )
+    ingest_service = providers.Factory(
+        IngestService,
+        db=db_session,
+        engine_bus=engine_bus,
+        tree_service=tree_service,
+        view_service=view_service,
+        document_service=document_service,
     )
 
 

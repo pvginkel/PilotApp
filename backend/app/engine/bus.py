@@ -2,6 +2,7 @@
 transaction that caused an event has committed (design 1 §5.4)."""
 
 import threading
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -20,6 +21,32 @@ class TreeHashMoved(EngineEvent):
 
     path: str
     hash: str
+
+
+@dataclass(frozen=True)
+class DocumentModified(EngineEvent):
+    """An agent's save of a document was ingested, published or held (design
+    1 §7); the record's own writes raise none."""
+
+    project_id: uuid.UUID
+    path: str
+
+
+@dataclass(frozen=True)
+class ErrorsRaised(EngineEvent):
+    """A save of the path was held: `parse` Save Errors stand on it, that
+    save's."""
+
+    project_id: uuid.UUID
+    path: str
+
+
+@dataclass(frozen=True)
+class ErrorsResolved(EngineEvent):
+    """The path's last `parse` Save Error is gone."""
+
+    project_id: uuid.UUID
+    path: str
 
 
 Subscriber = Callable[[EngineEvent], None]

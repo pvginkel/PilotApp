@@ -1,0 +1,1213 @@
+"""The engine's side of the file put: the parse gate, the merge by ownership
+and the faults (design 1 §5.3, §6), driven as the sidecar drives it."""
+
+import hashlib
+import threading
+import time
+import uuid
+from datetime import UTC, datetime
+
+import pytest
+from flask import Flask
+from psycopg.errors import LockNotAvailable
+from sqlalchemy import select
+from sqlalchemy import text as sql
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import Session as DbSession
+
+from app import models
+from app.database import scoped_session
+from app.engine import dsl
+from app.engine.bus import (
+    DocumentModified,
+    EngineEvent,
+    ErrorsRaised,
+    ErrorsResolved,
+    TreeHashMoved,
+)
+from app.engine.documents import DocumentService
+from app.engine.ingest import Ingested
+from app.engine.paths import sha256_hex
+from app.exceptions import RecordNotFoundException
+from app.extensions import db
+from app.models import (
+    Attachment,
+    Block,
+    Document,
+    Environment,
+    PlanTask,
+    Project,
+    SaveError,
+    User,
+)
+from app.models.reference import (
+    AttachmentSource,
+    ErrorKind,
+    ProjectState,
+    TaskStatus,
+    UserKind,
+)
+from app.services.container import ServiceContainer
+from tests.support.fake_sidecar import FakeSidecar
+
+DRAFT = "---\ntitle: Badge colours\n---\n\nWhich colours for the badges?\n"
+
+RETITLED = "---\ntitle: Badge palette\n---\n\nWhich colours for the badges?\n"
+
+BROKEN = "```decision id=D1\noptions:\n  - Dome\n"
+
+UNANSWERED = """# Which tent?
+
+```decision id=D1
+options:
+  - Dome
+  - Tunnel
+```
+"""
+
+ANSWERED = """# Which tent?
+
+```decision id=D1
+options:
+  - Dome
+  - Tunnel
+answer: Dome
+by: ada
+at: 2026-10-12T09:40:00Z
+```
+"""
+
+HANDBOOK = """Keep it short.
+
+```decision id=D1
+options:
+  - Dome
+  - Tunnel
+```
+"""
+
+ANSWERED_AT = datetime(2026, 10, 12, 9, 40, tzinfo=UTC)
+
+
+def _ingest(
+    container: ServiceContainer,
+    path: str,
+    content: str | bytes,
+    environment: Environment,
+    base: str | None = None,
+    session: models.Session | None = None,
+) -> Ingested:
+    data = content.encode() if isinstance(content, str) else content
+    with scoped_session(container):
+        return container.ingest_service().ingest(path, data, base, environment, session)
+
+
+def _bear_draft(container: ServiceContainer, project: Project, text: str) -> Document:
+    with scoped_session(container):
+        return container.document_service().bear_draft(project, text)
+
+
+def _errors(session: DbSession) -> list[tuple[str, str, ErrorKind, int | None, str]]:
+    return [
+        (error.environment_id, error.path, error.kind_code, error.line, error.message)
+        for error in session.scalars(select(SaveError).order_by(SaveError.id))
+    ]
+
+
+def _task(
+    session: DbSession, project: Project, task_id: str, *, removed: bool = False
+) -> PlanTask:
+    task = PlanTask(
+        project_id=project.id,
+        task_id=task_id,
+        position=None if removed else 1,
+        title=f"Task {task_id}",
+        status_code=TaskStatus.PENDING,
+        removed_at=datetime.now(UTC) if removed else None,
+    )
+    session.add(task)
+    session.flush()
+    return task
+
+
+def _open(session: DbSession, project: Project, slug: str) -> None:
+    project.slug = slug
+    project.state_code = ProjectState.OPEN
+    session.flush()
+
+
+class TestIngestServicePaths:
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "draft-999999/project.md",
+            "badge-colours/project.md",
+            "project.md",
+            "",
+            "{folder}",
+            "{folder}/",
+            "{folder}/notes.md",
+            "{folder}/plan.json",
+            "{folder}/attachments/1/missing.png",
+            "{folder}/items/1-which-tent.md",
+        ],
+    )
+    def test_a_path_the_store_does_not_sync_stores_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        path: str,
+    ) -> None:
+        draft = _bear_draft(container, project, DRAFT)
+        path = path.format(folder=f"draft-{project.number}")
+
+        with pytest.raises(RecordNotFoundException) as raised:
+            _ingest(container, path, "Some prose.\n", environment)
+
+        assert raised.value.message == f"Path {path} was not found"
+        assert draft.ingested_text is None
+        assert _errors(session) == []
+
+    def test_an_archived_projects_folder_is_not_synced(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _bear_draft(container, project, DRAFT)
+        project.archived = True
+        session.flush()
+
+        with pytest.raises(RecordNotFoundException):
+            _ingest(container, f"draft-{project.number}/project.md", DRAFT, environment)
+
+    def test_an_open_projects_folder_is_its_slug(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        draft = _bear_draft(container, project, DRAFT)
+        _open(session, project, "badge-colours")
+
+        _ingest(container, "badge-colours/project.md", RETITLED, environment)
+        assert draft.published_text == RETITLED
+        with pytest.raises(RecordNotFoundException):
+            _ingest(
+                container, f"draft-{project.number}/project.md", RETITLED, environment
+            )
+
+    def test_the_timeline_is_answered_with_its_projection(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        draft = _bear_draft(container, project, DRAFT)
+        timeline = container.view_service().timeline(project)
+
+        answer = _ingest(
+            container,
+            f"draft-{project.number}/timeline.json",
+            '{"edited": true}\n',
+            environment,
+            base=timeline.hash,
+        )
+
+        assert answer == Ingested(
+            content=timeline.text.encode(),
+            hash=timeline.hash,
+            stale=False,
+            held=False,
+            faults=(),
+        )
+        assert draft.ingested_text is None
+        assert _errors(session) == []
+
+    def test_reference_json_is_answered_with_its_projection(
+        self, session: DbSession, container: ServiceContainer, environment: Environment
+    ) -> None:
+        reference = container.view_service().reference()
+
+        answer = _ingest(container, "reference.json", "{}\n", environment)
+
+        assert answer == Ingested(
+            content=reference.text.encode(),
+            hash=reference.hash,
+            stale=True,
+            held=False,
+            faults=(),
+        )
+        assert _errors(session) == []
+
+    def test_an_attachment_is_answered_with_its_copy(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        content = b"# Palette\n"
+        session.add(
+            Attachment(
+                project_id=project.id,
+                batch=2,
+                title="Palette",
+                filename="palette.md",
+                content_type="text/markdown",
+                size=len(content),
+                sha256=hashlib.sha256(content).hexdigest(),
+                content=content,
+                source_code=AttachmentSource.DRAFT,
+                copied_at=datetime.now(UTC),
+            )
+        )
+        session.flush()
+
+        answer = _ingest(
+            container,
+            f"draft-{project.number}/attachments/2/palette.md",
+            "# Palette, edited\n",
+            environment,
+        )
+
+        assert answer.content == content
+        assert answer.hash == hashlib.sha256(content).hexdigest()
+        assert _errors(session) == []
+
+    def test_a_read_only_save_of_its_projection_needs_no_write(
+        self, container: ServiceContainer, project: Project, environment: Environment
+    ) -> None:
+        timeline = container.view_service().timeline(project)
+
+        answer = _ingest(
+            container,
+            f"draft-{project.number}/timeline.json",
+            timeline.text,
+            environment,
+            base=timeline.hash,
+        )
+
+        assert answer.content is None
+
+
+class TestIngestServiceGate:
+    def test_a_clean_save_is_stored_and_published(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        draft = _bear_draft(container, project, DRAFT)
+
+        answer = _ingest(
+            container,
+            f"draft-{project.number}/project.md",
+            RETITLED,
+            environment,
+            base=sha256_hex(DRAFT),
+        )
+
+        assert answer == Ingested(
+            content=None,
+            hash=sha256_hex(RETITLED),
+            stale=False,
+            held=False,
+            faults=(),
+        )
+        assert draft.ingested_text == RETITLED
+        assert draft.ingested_hash == sha256_hex(RETITLED)
+        assert draft.ingested_at is not None
+        assert draft.published_text == RETITLED
+        assert draft.published_hash == sha256_hex(RETITLED)
+        assert project.name == "Badge palette"
+        assert _errors(session) == []
+
+    def test_a_save_with_a_fault_is_held(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        draft = _bear_draft(container, project, ANSWERED)
+        published_at = draft.published_at
+        path = f"draft-{project.number}/project.md"
+        save = RETITLED + BROKEN
+
+        answer = _ingest(container, path, save, environment, base=sha256_hex(ANSWERED))
+
+        assert answer == Ingested(
+            content=None,
+            hash=sha256_hex(save),
+            stale=False,
+            held=True,
+            faults=(dsl.Fault(6, "a fence opened with ``` is not closed"),),
+        )
+        assert draft.ingested_text == save
+        assert draft.published_text == ANSWERED
+        assert draft.published_hash == sha256_hex(ANSWERED)
+        assert draft.published_at == published_at
+        assert project.name == "Which tent?"
+        assert [block.answer for block in session.scalars(select(Block))] == ["Dome"]
+        assert _errors(session) == [
+            (
+                environment.id,
+                path,
+                ErrorKind.PARSE,
+                6,
+                "a fence opened with ``` is not closed",
+            )
+        ]
+
+    def test_every_fault_of_a_held_save_stands(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _bear_draft(container, project, DRAFT)
+        save = (
+            "---\nfor: nobody\n---\n\n"
+            "```decision id=D1\noptions: 3\n```\n\n"
+            "```question id=Q1\nby: nobody\n```\n"
+        )
+
+        answer = _ingest(
+            container, f"draft-{project.number}/project.md", save, environment
+        )
+
+        assert answer.faults == (
+            dsl.Fault(2, "front matter: `for: nobody` names no handle"),
+            dsl.Fault(6, "block D1: `options` is not a list"),
+            dsl.Fault(10, "block Q1: `by: nobody` names no handle"),
+        )
+        assert [(kind, line) for _, _, kind, line, _ in _errors(session)] == [
+            (ErrorKind.PARSE, 2),
+            (ErrorKind.PARSE, 6),
+            (ErrorKind.PARSE, 10),
+        ]
+
+    def test_each_save_replaces_the_paths_parse_errors(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        draft = _bear_draft(container, project, DRAFT)
+        path = f"draft-{project.number}/project.md"
+
+        for lead in ("", "Intro.\n\n", "Intro.\n\nMore.\n\n"):
+            _ingest(container, path, lead + BROKEN, environment)
+
+        assert [line for _, _, _, line, _ in _errors(session)] == [5]
+        _ingest(container, path, RETITLED, environment)
+        assert _errors(session) == []
+        assert draft.published_text == RETITLED
+
+    def test_a_save_leaves_reverted_errors_and_other_paths_standing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _bear_draft(container, project, DRAFT)
+        path = f"draft-{project.number}/project.md"
+        handbook = f"draft-{project.number}/handbook.md"
+        other = Environment(id="example-env-2", name="Example-2", exempt=False)
+        session.add(other)
+        session.flush()
+        _ingest(container, path, BROKEN, other)
+        session.add_all(
+            SaveError(
+                environment_id=environment.id,
+                path=error_path,
+                kind_code=kind,
+                line=1,
+                message="a fault",
+            )
+            for error_path, kind in (
+                (path, ErrorKind.REVERTED),
+                (handbook, ErrorKind.PARSE),
+            )
+        )
+        session.flush()
+
+        _ingest(container, path, RETITLED, environment)
+
+        assert [(env, p, kind) for env, p, kind, _, _ in _errors(session)] == [
+            (environment.id, path, ErrorKind.REVERTED),
+            (environment.id, handbook, ErrorKind.PARSE),
+        ]
+
+    @pytest.mark.parametrize(
+        ("front_matter", "fault"),
+        [
+            (
+                "step: nowhere",
+                "front matter: `step: nowhere` names no task of the project",
+            ),
+            ("for: nobody", "front matter: `for: nobody` names no handle"),
+            (
+                "slug: Badge Colours",
+                "front matter: `slug: Badge Colours` is not lower-case letters,"
+                " digits and hyphens",
+            ),
+            ("slug: tents", "front matter: `slug: tents` is taken by another project"),
+        ],
+    )
+    def test_a_front_matter_reference_naming_nothing_holds_the_save(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+        environment: Environment,
+        front_matter: str,
+        fault: str,
+    ) -> None:
+        other = Project(created_by_user_id=person.id)
+        session.add(other)
+        session.flush()
+        _open(session, other, "tents")
+        draft = _bear_draft(container, project, DRAFT)
+        save = f"---\ntitle: Badge palette\n{front_matter}\n---\n"
+
+        answer = _ingest(
+            container, f"draft-{project.number}/project.md", save, environment
+        )
+
+        assert answer.held
+        assert answer.faults == (dsl.Fault(3, fault),)
+        assert draft.published_text == DRAFT
+
+    def test_references_the_record_holds_are_no_fault(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _task(session, project, "build", removed=True)
+        draft = _bear_draft(container, project, DRAFT)
+        save = "---\ntitle: Badges\nstep: build\nfor: ada\nslug: badges\n---\n"
+
+        answer = _ingest(
+            container, f"draft-{project.number}/project.md", save, environment
+        )
+
+        assert not answer.held
+        assert draft.published_text == save
+
+    def test_the_drafts_missing_slug_is_no_fault(
+        self, container: ServiceContainer, project: Project, environment: Environment
+    ) -> None:
+        draft = _bear_draft(container, project, "")
+
+        answer = _ingest(
+            container, f"draft-{project.number}/project.md", DRAFT, environment
+        )
+
+        assert not answer.held
+        assert draft.published_text == DRAFT
+
+    @pytest.mark.parametrize(
+        "answer_lines",
+        [
+            "answer: deferred\nby: agent\nto: build\n",
+            "answer: deferred\nby: ada\nat: 2026-10-12T09:40:00Z\nto: build\n",
+        ],
+    )
+    def test_a_to_carried_unchanged_is_not_checked_again(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        answer_lines: str,
+    ) -> None:
+        published = (
+            f"# Where?\n\n```question id=Q1\ndefault: The lake\n{answer_lines}```\n"
+        )
+        task = _task(session, project, "build")
+        draft = _bear_draft(container, project, published)
+        task.position = None
+        task.removed_at = datetime.now(UTC)
+        session.flush()
+        save = published.replace("# Where?", "# Where do we camp?")
+
+        answer = _ingest(
+            container, f"draft-{project.number}/project.md", save, environment
+        )
+
+        assert not answer.held
+        assert draft.published_text == save
+
+    def test_a_to_the_save_changes_is_checked_against_the_plan(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        published = "```question id=Q1\nanswer: deferred\nby: agent\nto: build\n```\n"
+        _task(session, project, "build")
+        _task(session, project, "pack", removed=True)
+        draft = _bear_draft(container, project, published)
+
+        answer = _ingest(
+            container,
+            f"draft-{project.number}/project.md",
+            published.replace("to: build", "to: pack"),
+            environment,
+        )
+
+        assert answer.faults == (
+            dsl.Fault(
+                4, "block Q1: `to: pack` names neither `plan` nor a task in the plan"
+            ),
+        )
+        assert draft.published_text == published
+
+    @pytest.mark.parametrize(
+        ("content", "line", "text"),
+        [
+            (b"Caf\xe9 au lait.\n", 1, "Caf� au lait.\n"),
+            (b"One.\nTw\x00o.\n", 2, "One.\nTw�o.\n"),
+        ],
+    )
+    def test_bytes_that_are_not_text_are_held_replaced(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        content: bytes,
+        line: int,
+        text: str,
+    ) -> None:
+        draft = _bear_draft(container, project, DRAFT)
+
+        answer = _ingest(
+            container, f"draft-{project.number}/project.md", content, environment
+        )
+
+        assert answer == Ingested(
+            content=text.encode(),
+            hash=sha256_hex(text),
+            stale=True,
+            held=True,
+            faults=(
+                dsl.Fault(
+                    line,
+                    "the file is not UTF-8 text: each byte that is not, and each"
+                    " NUL, is replaced by U+FFFD",
+                ),
+            ),
+        )
+        assert draft.ingested_text == text
+        assert draft.published_text == DRAFT
+
+
+class TestIngestServiceStale:
+    def test_a_base_of_the_published_hash_is_not_stale(
+        self, container: ServiceContainer, project: Project, environment: Environment
+    ) -> None:
+        _bear_draft(container, project, DRAFT)
+
+        answer = _ingest(
+            container,
+            f"draft-{project.number}/project.md",
+            RETITLED,
+            environment,
+            base=sha256_hex(DRAFT),
+        )
+
+        assert not answer.stale
+
+    def test_no_base_is_stale(
+        self, container: ServiceContainer, project: Project, environment: Environment
+    ) -> None:
+        _bear_draft(container, project, DRAFT)
+
+        answer = _ingest(
+            container, f"draft-{project.number}/project.md", DRAFT, environment
+        )
+
+        assert answer.stale
+        assert answer.content is None
+
+    def test_a_fix_up_of_a_held_save_is_not_stale(
+        self, container: ServiceContainer, project: Project, environment: Environment
+    ) -> None:
+        _bear_draft(container, project, DRAFT)
+        path = f"draft-{project.number}/project.md"
+        held = _ingest(container, path, BROKEN, environment, base=sha256_hex(DRAFT))
+
+        answer = _ingest(container, path, RETITLED, environment, base=held.hash)
+
+        assert held.hash == sha256_hex(BROKEN)
+        assert not answer.stale
+
+    def test_the_published_hash_is_stale_while_the_path_is_held(
+        self, container: ServiceContainer, project: Project, environment: Environment
+    ) -> None:
+        _bear_draft(container, project, DRAFT)
+        path = f"draft-{project.number}/project.md"
+        _ingest(container, path, BROKEN, environment, base=sha256_hex(DRAFT))
+
+        answer = _ingest(container, path, RETITLED, environment, base=sha256_hex(DRAFT))
+
+        assert answer.stale
+
+
+class TestIngestServiceMerge:
+    def test_a_record_line_the_save_changes_is_reverted(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        draft = _bear_draft(container, project, ANSWERED)
+        path = f"draft-{project.number}/project.md"
+        save = ANSWERED.replace("answer: Dome", "answer: Tunnel")
+
+        answer = _ingest(container, path, save, environment, base=sha256_hex(ANSWERED))
+
+        message = "block D1: `answer:` is the record's, ada's answer; reverted"
+        assert answer == Ingested(
+            content=ANSWERED.encode(),
+            hash=sha256_hex(ANSWERED),
+            stale=False,
+            held=False,
+            faults=(dsl.Fault(7, message),),
+        )
+        assert draft.ingested_text == save
+        assert draft.published_text == ANSWERED
+        assert _errors(session) == [
+            (environment.id, path, ErrorKind.REVERTED, 7, message)
+        ]
+
+    def test_a_block_a_non_draft_drops_is_restored(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        with scoped_session(container):
+            handbook = container.document_service().bear_handbook(project, HANDBOOK)
+
+        answer = _ingest(
+            container,
+            f"draft-{project.number}/handbook.md",
+            "Keep it shorter.\n",
+            environment,
+        )
+
+        restored = HANDBOOK.replace("Keep it short.", "Keep it shorter.")
+        assert answer.content == restored.encode()
+        assert answer.faults == (
+            dsl.Fault(3, "block D1: only the draft's blocks may be removed; restored"),
+        )
+        assert handbook.published_text == restored
+
+    def test_a_block_the_draft_drops_goes(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        draft = _bear_draft(container, project, ANSWERED)
+
+        answer = _ingest(
+            container,
+            f"draft-{project.number}/project.md",
+            "# Which tent?\n",
+            environment,
+        )
+
+        assert answer.content is None
+        assert answer.faults == ()
+        assert draft.published_text == "# Which tent?\n"
+        assert list(session.scalars(select(Block))) == []
+
+    def test_an_agent_edit_of_the_opening_is_reverted(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+        environment: Environment,
+    ) -> None:
+        with scoped_session(container):
+            opening = container.document_service().bear_opening(
+                project, "Badges", person, "We need badges.\n"
+            )
+        path = f"draft-{project.number}/items/1-badges.md"
+
+        answer = _ingest(container, path, "We need badges soon.\n", environment)
+
+        assert answer.content == b"We need badges.\n"
+        assert answer.faults == (
+            dsl.Fault(1, "the opening is the record's: the save is reverted"),
+        )
+        assert session.get_one(Document, opening.id).published_text == (
+            "We need badges.\n"
+        )
+
+    def test_the_writing_columns_take_the_saves_session(
+        self,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+    ) -> None:
+        draft = _bear_draft(container, project, DRAFT)
+        path = f"draft-{project.number}/project.md"
+
+        _ingest(container, path, BROKEN, environment, session=project_session)
+        since = draft.writing_since
+        _ingest(container, path, RETITLED, environment, session=project_session)
+
+        assert draft.ingested_session_id == project_session.id
+        assert draft.writing_session_id == project_session.id
+        assert since is not None
+        assert draft.writing_since == since
+
+    def test_a_save_with_no_session_writes_none(
+        self, container: ServiceContainer, project: Project, environment: Environment
+    ) -> None:
+        draft = _bear_draft(container, project, DRAFT)
+
+        _ingest(container, f"draft-{project.number}/project.md", RETITLED, environment)
+
+        assert draft.ingested_session_id is None
+        assert draft.writing_session_id is None
+        assert draft.writing_since is None
+
+
+class TestIngestServiceEvents:
+    def test_a_clean_save_moves_its_path_and_what_the_timeline_shows(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _bear_draft(container, project, DRAFT)
+        engine_events.clear()
+        path = f"draft-{project.number}/project.md"
+
+        _ingest(container, path, RETITLED, environment)
+
+        assert engine_events == [
+            TreeHashMoved(path, sha256_hex(RETITLED)),
+            TreeHashMoved(
+                f"draft-{project.number}/timeline.json",
+                container.view_service().timeline(project).hash,
+            ),
+            DocumentModified(project.id, path),
+        ]
+
+    def test_a_held_save_moves_its_path_to_the_ingest(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _bear_draft(container, project, DRAFT)
+        engine_events.clear()
+        path = f"draft-{project.number}/project.md"
+
+        _ingest(container, path, BROKEN, environment)
+        first = list(engine_events)
+        engine_events.clear()
+        _ingest(container, path, BROKEN, environment)
+
+        assert first == [
+            TreeHashMoved(path, sha256_hex(BROKEN)),
+            DocumentModified(project.id, path),
+            ErrorsRaised(project.id, path),
+        ]
+        assert engine_events == [
+            DocumentModified(project.id, path),
+            ErrorsRaised(project.id, path),
+        ]
+
+    def test_a_clean_save_after_a_held_one_resolves_its_errors(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _bear_draft(container, project, DRAFT)
+        path = f"draft-{project.number}/project.md"
+        _ingest(container, path, BROKEN, environment)
+        engine_events.clear()
+
+        _ingest(container, path, DRAFT, environment)
+
+        assert engine_events == [
+            TreeHashMoved(path, sha256_hex(DRAFT)),
+            DocumentModified(project.id, path),
+            ErrorsResolved(project.id, path),
+        ]
+
+    def test_a_save_that_changes_nothing_is_modified_alone(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _bear_draft(container, project, DRAFT)
+        engine_events.clear()
+        path = f"draft-{project.number}/project.md"
+
+        _ingest(container, path, DRAFT, environment)
+
+        assert engine_events == [DocumentModified(project.id, path)]
+
+    def test_a_read_only_save_raises_nothing(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _ingest(container, f"draft-{project.number}/timeline.json", "{}\n", environment)
+
+        assert engine_events == []
+
+
+class TestIngestServiceSequences:
+    """Design 1 §5.8's sequences, through the fake sidecar."""
+
+    def test_the_agent_writes_a_file(
+        self,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        with scoped_session(container):
+            container.document_service().bear_item(
+                project, "decision", "Which tent?", project_session, ANSWERED
+            )
+        path = f"draft-{project.number}/items/1-which-tent.md"
+        timeline = f"draft-{project.number}/timeline.json"
+        assert fake_sidecar.drain() == [path, timeline]
+        edited = ANSWERED.replace("# Which tent?", "# Which tent for the lake?")
+
+        answer = fake_sidecar.save(path, edited)
+
+        assert answer == Ingested(
+            content=None, hash=sha256_hex(edited), stale=False, held=False, faults=()
+        )
+        assert fake_sidecar.drain() == [timeline]
+        assert fake_sidecar.text(path) == edited
+        assert fake_sidecar.text(timeline) == (
+            container.view_service().timeline(project).text
+        )
+
+    def test_a_reverted_line_is_written_back(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+    ) -> None:
+        with scoped_session(container):
+            container.document_service().bear_item(
+                project, "decision", "Which tent?", project_session, ANSWERED
+            )
+        fake_sidecar.drain()
+        path = f"draft-{project.number}/items/1-which-tent.md"
+
+        answer = fake_sidecar.save(path, ANSWERED.replace("by: ada", "by: agent"))
+
+        assert answer.content == ANSWERED.encode()
+        assert fake_sidecar.text(path) == ANSWERED
+        assert fake_sidecar.shadow[path] == sha256_hex(ANSWERED)
+        assert _errors(session) == [
+            (
+                environment.id,
+                path,
+                ErrorKind.REVERTED,
+                8,
+                "block D1: `by:` is the record's, ada's answer; reverted",
+            )
+        ]
+        assert fake_sidecar.drain() == []
+
+    def test_the_records_write_reaches_the_file(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        with scoped_session(container):
+            item = container.document_service().bear_item(
+                project, "decision", "Which tent?", project_session, UNANSWERED
+            )
+        fake_sidecar.drain()
+        path = f"draft-{project.number}/items/1-which-tent.md"
+
+        _write_answer(container, session.get_one(Document, item.id))
+
+        assert fake_sidecar.drain() == [path]
+        assert fake_sidecar.text(path) == ANSWERED
+
+    def test_a_record_write_while_held_rides_the_next_clean_save(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        with scoped_session(container):
+            item = container.document_service().bear_item(
+                project, "decision", "Which tent?", project_session, UNANSWERED
+            )
+        fake_sidecar.drain()
+        path = f"draft-{project.number}/items/1-which-tent.md"
+        broken = UNANSWERED + "\n```question id=Q1\n"
+        assert fake_sidecar.save(path, broken).held
+
+        _write_answer(container, session.get_one(Document, item.id))
+        assert fake_sidecar.drain() == []
+        assert fake_sidecar.text(path) == broken
+        fixed = UNANSWERED.replace("# Which tent?\n", "# Which tent?\n\nRain is due.\n")
+        answer = fake_sidecar.save(path, fixed)
+
+        merged = ANSWERED.replace("# Which tent?\n", "# Which tent?\n\nRain is due.\n")
+        assert answer.stale is False
+        assert answer.held is False
+        assert answer.content == merged.encode()
+        assert fake_sidecar.text(path) == merged
+        assert [fault.line for fault in answer.faults] == [9, 10, 11]
+
+    def test_a_save_behind_a_projection_in_flight_is_stale_and_merged(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        with scoped_session(container):
+            item = container.document_service().bear_item(
+                project, "decision", "Which tent?", project_session, UNANSWERED
+            )
+        fake_sidecar.drain()
+        path = f"draft-{project.number}/items/1-which-tent.md"
+        _write_answer(container, session.get_one(Document, item.id))
+
+        edited = UNANSWERED.replace(
+            "# Which tent?\n", "# Which tent?\n\nRain is due.\n"
+        )
+        answer = fake_sidecar.save(path, edited)
+        fake_sidecar.drain()
+
+        merged = ANSWERED.replace("# Which tent?\n", "# Which tent?\n\nRain is due.\n")
+        assert answer.stale is True
+        assert answer.content == merged.encode()
+        assert fake_sidecar.text(path) == merged
+
+
+def _write_answer(container: ServiceContainer, document: Document) -> None:
+    """The record's write of ada's answer to D1, as P7's answer write splices
+    it."""
+    assert document.published_text is not None
+    with scoped_session(container):
+        container.document_service().publish(
+            document,
+            dsl.write_answer(
+                document.published_text,
+                "D1",
+                answer="Dome",
+                by="ada",
+                at=ANSWERED_AT,
+                via=dsl.AnswerChannel.APP,
+            ),
+        )
+
+
+ENVIRONMENT_ID = "example-env-1"
+
+
+def _committed_handbook(app: Flask) -> tuple[str, uuid.UUID]:
+    """A draft project with its handbook, committed: the handbook's path and
+    its id."""
+    container = app.container
+    with scoped_session(container) as session:
+        person = User(
+            kind_code=UserKind.PERSON,
+            subject="subject-ada",
+            handle="ada",
+            name="Ada Example",
+            avatar_slot=1,
+        )
+        session.add(person)
+        session.flush()
+        project = Project(created_by_user_id=person.id)
+        session.add(project)
+        session.add(Environment(id=ENVIRONMENT_ID, name="Example-1", exempt=False))
+        session.flush()
+        handbook = container.document_service().bear_handbook(project, HANDBOOK)
+        return f"draft-{project.number}/handbook.md", handbook.id
+
+
+def _save(app: Flask, path: str, content: str) -> Ingested:
+    container = app.container
+    with scoped_session(container) as session:
+        return container.ingest_service().ingest(
+            path,
+            content.encode(),
+            sha256_hex(HANDBOOK),
+            session.get_one(Environment, ENVIRONMENT_ID),
+            None,
+        )
+
+
+class _Save(threading.Thread):
+    def __init__(self, app: Flask, path: str, content: str) -> None:
+        super().__init__()
+        self.app, self.path, self.content = app, path, content
+        self.answer: Ingested | None = None
+        self.error: Exception | None = None
+
+    def run(self) -> None:
+        try:
+            self.answer = _save(self.app, self.path, self.content)
+        except Exception as error:
+            self.error = error
+
+
+class TestIngestServiceRowLock:
+    """Two saves of one document never interleave (TD §8.5)."""
+
+    def test_an_ingest_waits_for_the_documents_row(self, committed_app: Flask) -> None:
+        path, document_id = _committed_handbook(committed_app)
+        container = committed_app.container
+        with committed_app.app_context():
+            engine = db.engine
+
+        with engine.connect() as holder:
+            # FOR KEY SHARE conflicts with the ingest's FOR UPDATE and not with
+            # the UPDATE that writes its ingest: only the lock the ingest takes
+            # before it reads waits on it.
+            holder.execute(
+                sql("SELECT id FROM documents WHERE id = :id FOR KEY SHARE"),
+                {"id": document_id},
+            )
+            with (
+                pytest.raises(OperationalError) as raised,
+                scoped_session(container) as session,
+            ):
+                session.execute(sql("SET LOCAL lock_timeout = '200ms'"))
+                container.ingest_service().ingest(
+                    path,
+                    b"Keep it shorter.\n",
+                    sha256_hex(HANDBOOK),
+                    session.get_one(Environment, ENVIRONMENT_ID),
+                    None,
+                )
+            holder.rollback()
+
+        assert isinstance(raised.value.orig, LockNotAvailable)
+        with scoped_session(container) as session:
+            assert session.get_one(Document, document_id).ingested_text is None
+
+    def test_two_saves_from_one_base_serialize(
+        self, committed_app: Flask, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        path, document_id = _committed_handbook(committed_app)
+        adds_q1 = HANDBOOK + "\n```question id=Q1\ndefault: The lake\n```\n"
+        edits_prose = HANDBOOK.replace("Keep it short.", "Keep it shorter.")
+        first = _Save(committed_app, path, adds_q1)
+        second = _Save(committed_app, path, edits_prose)
+        holding, release = threading.Event(), threading.Event()
+        lock = DocumentService.lock
+
+        def held_lock(self: DocumentService, document: Document) -> None:
+            lock(self, document)
+            if threading.current_thread() is first:
+                holding.set()
+                assert release.wait(5)
+
+        monkeypatch.setattr(DocumentService, "lock", held_lock)
+        first.start()
+        try:
+            assert holding.wait(5)
+            second.start()
+            _wait_for_a_lock_wait(committed_app)
+        finally:
+            release.set()
+            first.join(5)
+            second.join(5)
+
+        assert first.error is None
+        assert second.error is None
+        assert first.answer == Ingested(
+            content=None,
+            hash=sha256_hex(adds_q1),
+            stale=False,
+            held=False,
+            faults=(),
+        )
+        merged = adds_q1.replace("Keep it short.", "Keep it shorter.")
+        assert second.answer == Ingested(
+            content=merged.encode(),
+            hash=sha256_hex(merged),
+            stale=True,
+            held=False,
+            faults=(
+                dsl.Fault(
+                    9, "block Q1: only the draft's blocks may be removed; restored"
+                ),
+            ),
+        )
+        with scoped_session(committed_app.container) as session:
+            assert session.get_one(Document, document_id).published_text == merged
+
+
+def _wait_for_a_lock_wait(app: Flask) -> None:
+    """Return once a backend of the app's database waits on a lock."""
+    with app.app_context():
+        engine = db.engine
+    deadline = time.perf_counter() + 5
+    with engine.connect() as connection:
+        while True:
+            waiting = connection.execute(
+                sql(
+                    "SELECT count(*) FROM pg_stat_activity"
+                    " WHERE datname = current_database()"
+                    " AND wait_event_type = 'Lock'"
+                )
+            ).scalar_one()
+            # pg_stat_activity is read once per transaction.
+            connection.rollback()
+            if waiting:
+                return
+            assert time.perf_counter() < deadline, "no save waited on the lock"
+            threading.Event().wait(0.01)

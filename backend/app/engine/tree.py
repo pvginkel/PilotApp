@@ -1,12 +1,38 @@
-"""The tree hash of every path a project's folder holds (design 1 §5.2)."""
+"""The store's tree as the record sees it (design 1 §5.1, §5.2): what each
+path names, the bytes it must hold, and their tree hash."""
+
+import re
+from dataclasses import dataclass
 
 from sqlalchemy import exists, or_, select
 from sqlalchemy.orm import Session
 
-from app.engine.paths import TIMELINE, attachment_path, tree_path
-from app.engine.views import ViewService
+from app.engine.paths import REFERENCE, TIMELINE, attachment_path, tree_path
+from app.engine.views import Rendering, ViewService
+from app.exceptions import RecordNotFoundException
 from app.models import Attachment, Document, Item, Project, SaveError
 from app.models.reference import ErrorKind
+
+_DRAFT_FOLDER = re.compile(r"draft-(?P<number>[1-9][0-9]*)")
+_ATTACHMENT = re.compile(r"attachments/(?P<batch>[1-9][0-9]*)/(?P<filename>[^/]+)")
+
+
+@dataclass(frozen=True)
+class TreeFile:
+    """The bytes a path must hold, and their hash."""
+
+    content: bytes
+    hash: str
+
+
+@dataclass(frozen=True)
+class TreeDocument:
+    """A path that is a Document of a project's folder; `item` is its Prose
+    Item, none for a Project Document."""
+
+    project: Project
+    document: Document
+    item: Item | None
 
 
 class TreeService:
@@ -21,18 +47,74 @@ class TreeService:
         self.db = db
         self.view_service = view_service
 
-    def hash(self, project: Project, document: Document) -> str:
-        """A document's tree hash: its published hash, or its ingested hash
-        while the path's latest save is held."""
-        held = self.db.scalar(
-            select(
-                exists().where(
-                    SaveError.path == tree_path(project, document.path),
-                    SaveError.kind_code == ErrorKind.PARSE,
+    def resolve(self, path: str) -> TreeDocument | TreeFile:
+        """What `path`, from the tree's root, names among the paths the store
+        syncs: a Document, or a read-only path with its projection. Refused
+        for any other path: a stray file's, a folder no project has, an
+        archived project's (design 1 §5.3 step 1, §5.5)."""
+        if path == REFERENCE:
+            return _file(self.view_service.reference())
+        folder, _, rest = path.partition("/")
+        project = self._project(folder)
+        if project is not None:
+            if rest == TIMELINE:
+                return _file(self.view_service.timeline(project))
+            attachment = _ATTACHMENT.fullmatch(rest)
+            if attachment is not None:
+                copy = self.db.scalars(
+                    select(Attachment).where(
+                        Attachment.project_id == project.id,
+                        Attachment.batch == int(attachment["batch"]),
+                        Attachment.filename == attachment["filename"],
+                    )
+                ).one_or_none()
+                if copy is not None:
+                    return TreeFile(copy.content, copy.sha256)
+            found = self.db.execute(
+                select(Document, Item)
+                .outerjoin(Item, Item.id == Document.id)
+                .where(
+                    Document.path == rest,
+                    or_(
+                        Document.project_id == project.id,
+                        Item.project_id == project.id,
+                    ),
+                )
+            ).one_or_none()
+            if found is not None:
+                return TreeDocument(project, found[0], found[1])
+        raise RecordNotFoundException("Path", path)
+
+    def read(self, path: str) -> TreeFile:
+        """The bytes `path` must hold in the tree, and their tree hash."""
+        resolved = self.resolve(path)
+        if isinstance(resolved, TreeFile):
+            return resolved
+        document = resolved.document
+        held = self.held(resolved.project, document)
+        text = document.ingested_text if held else document.published_text
+        # Every document is born published, and a held save has its ingest.
+        assert text is not None
+        return TreeFile(text.encode(), _tree_hash(document, held))
+
+    def held(self, project: Project, document: Document) -> bool:
+        """Whether the path's latest save is held: a `parse` Save Error
+        stands on it."""
+        return bool(
+            self.db.scalar(
+                select(
+                    exists().where(
+                        SaveError.path == tree_path(project, document.path),
+                        SaveError.kind_code == ErrorKind.PARSE,
+                    )
                 )
             )
         )
-        return _tree_hash(document, bool(held))
+
+    def hash(self, project: Project, document: Document) -> str:
+        """A document's tree hash: its published hash, or its ingested hash
+        while the path's latest save is held."""
+        return _tree_hash(document, self.held(project, document))
 
     def hashes(self, project: Project) -> dict[str, str]:
         """Every path of the project's folder with its tree hash, the paths
@@ -68,6 +150,22 @@ class TreeService:
         ):
             hashes[tree_path(project, attachment_path(attachment))] = attachment.sha256
         return dict(sorted(hashes.items()))
+
+    def _project(self, folder: str) -> Project | None:
+        """The syncing project whose folder is `folder` (DB decision 1)."""
+        draft = _DRAFT_FOLDER.fullmatch(folder)
+        named = (
+            Project.slug == folder
+            if draft is None
+            else (Project.number == int(draft["number"])) & Project.slug.is_(None)
+        )
+        return self.db.scalars(
+            select(Project).where(named, Project.archived.is_(False))
+        ).one_or_none()
+
+
+def _file(rendering: Rendering) -> TreeFile:
+    return TreeFile(rendering.text.encode(), rendering.hash)
 
 
 def _tree_hash(document: Document, held: bool) -> str:

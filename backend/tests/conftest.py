@@ -24,6 +24,7 @@ from app.utils.after_commit import clear_after_commit_callbacks
 
 # Import all infrastructure fixtures
 from tests.conftest_infrastructure import *  # noqa: F403
+from tests.support.fake_sidecar import FakeSidecar
 
 
 @pytest.fixture
@@ -104,6 +105,21 @@ def draft_document(session: DbSession, project: Project) -> Document:
     session.add(draft)
     session.flush()
     return draft
+
+
+@pytest.fixture
+def fake_sidecar(
+    container: ServiceContainer, environment: Environment
+) -> Generator[FakeSidecar]:
+    """The store's sidecar, ``environment``'s, with an empty tree; the
+    events it drains are those the bus delivers during the test."""
+    clear_after_commit_callbacks()
+    sidecar = FakeSidecar(container, environment)
+    try:
+        yield sidecar
+    finally:
+        sidecar.close()
+        clear_after_commit_callbacks()
 
 
 @pytest.fixture
