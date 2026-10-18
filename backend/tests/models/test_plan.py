@@ -1,11 +1,19 @@
-"""Plan Task and Plan Note: what a row must hold."""
+"""Plan Task, Plan Note and Plan Note Reference: what a row must hold."""
 
 from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
-from app.models import PlanNote, PlanTask, Project, User
-from app.models.reference import TaskStatus
+from app.models import (
+    Block,
+    Document,
+    PlanNote,
+    PlanNoteReference,
+    PlanTask,
+    Project,
+    User,
+)
+from app.models.reference import BlockKind, TaskStatus
 from tests.support.database import violated_constraint
 
 
@@ -108,3 +116,45 @@ class TestPlanNote:
         session.flush()
 
         assert struck.id != again.id
+
+
+class TestPlanNoteReference:
+    def _block(self, session: Session, document: Document) -> Block:
+        block = Block(
+            document_id=document.id,
+            local_id="A1",
+            position=1,
+            kind_code=BlockKind.ACTION,
+            answer="deferred",
+            deferred_to_task_id="fix",
+        )
+        session.add(block)
+        session.flush()
+        return block
+
+    def test_a_note_names_a_block(
+        self, session: Session, project: Project, draft_document: Document
+    ) -> None:
+        note = _note(project)
+        session.add(note)
+        session.flush()
+        block = self._block(session, draft_document)
+        reference = PlanNoteReference(plan_note_id=note.id, block_id=block.id)
+        session.add(reference)
+        session.flush()
+
+        assert reference.block_id == block.id
+
+    def test_a_note_names_a_block_once(
+        self, session: Session, project: Project, draft_document: Document
+    ) -> None:
+        note = _note(project)
+        session.add(note)
+        session.flush()
+        block = self._block(session, draft_document)
+        session.add(PlanNoteReference(plan_note_id=note.id, block_id=block.id))
+        session.flush()
+        session.expunge_all()
+        session.add(PlanNoteReference(plan_note_id=note.id, block_id=block.id))
+
+        assert violated_constraint(session) == "plan_note_references_pkey"

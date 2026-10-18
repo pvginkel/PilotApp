@@ -1,4 +1,7 @@
-"""Plan Task and Plan Note (DB §2.1): the plan's rows, `plan.json` their file."""
+"""Plan Task, Plan Note (DB §2.1) and Plan Note Reference (DB §2.2).
+
+The plan's rows; `plan.json` is their file.
+"""
 
 import uuid
 from datetime import datetime
@@ -86,3 +89,19 @@ class PlanNote(db.Model):  # type: ignore[name-defined]
         DateTime(timezone=True), server_default=func.now()
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PlanNoteReference(db.Model):  # type: ignore[name-defined]
+    """A Plan Note's naming of one Block, an entry of the note's `refs`.
+
+    The Block is of the note's Project (DB assertion 211), which no key can
+    reach from the Block's row: the engine checks it (DB assertion 213).
+    """
+
+    __tablename__ = "plan_note_references"
+    __table_args__ = (Index("ix_plan_note_references_block_id", "block_id"),)
+
+    plan_note_id: Mapped[int] = mapped_column(
+        ForeignKey("plan_notes.id"), primary_key=True
+    )
+    block_id: Mapped[int] = mapped_column(ForeignKey("blocks.id"), primary_key=True)
