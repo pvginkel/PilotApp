@@ -46,6 +46,7 @@ from app.models.reference import (
     AttachmentSource,
     ErrorKind,
     ProjectState,
+    SessionState,
     TaskStatus,
     UserKind,
 )
@@ -917,6 +918,37 @@ class TestIngestServiceMerge:
         assert draft.writing_session_id == project_session.id
         assert since is not None
         assert draft.writing_since == since
+
+    def test_a_save_of_another_session_takes_the_writing_columns(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+    ) -> None:
+        later = models.Session(
+            project_id=project.id,
+            environment_id=environment.id,
+            kind_code="work",
+            cwd="/work/Example",
+            token_hash="2" * 64,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(later)
+        session.flush()
+        draft = _bear_draft(container, project, DRAFT)
+        path = f"draft-{project.number}/project.md"
+
+        _ingest(container, path, BROKEN, environment, session=project_session)
+        since = draft.writing_since
+        _ingest(container, path, RETITLED, environment, session=later)
+
+        assert draft.ingested_session_id == later.id
+        assert draft.writing_session_id == later.id
+        assert since is not None
+        assert draft.writing_since is not None
+        assert draft.writing_since > since
 
     def test_a_save_with_no_session_writes_none(
         self, container: ServiceContainer, project: Project, environment: Environment
