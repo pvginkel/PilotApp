@@ -117,6 +117,10 @@ MISSPELT_PLAN = '{"tickets": "MD-9"}\n'
 
 MISSPELT = dsl.Fault(None, "`tickets` is not a key of the plan")
 
+NOT_TEXT = dsl.Fault(
+    None, "the plan is not text: a string holds `\\u0000` or an unpaired surrogate"
+)
+
 
 def _ingest(
     container: ServiceContainer,
@@ -1278,6 +1282,29 @@ class TestIngestServicePlan:
         _ingest(container, path, PLAN, environment)
         assert _errors(session) == [
             (other.id, draft, ErrorKind.PARSE, None, "an old fault")
+        ]
+
+    def test_a_save_of_text_no_row_can_hold_is_held(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        path = _plan_path(project)
+        save = '{"\\u0000": "Fi\\ud800x"}\n'
+
+        answer = _ingest(container, path, save, environment)
+
+        assert answer == Ingested(
+            content=None,
+            hash=sha256_hex(save),
+            stale=True,
+            held=True,
+            faults=(NOT_TEXT,),
+        )
+        assert _errors(session) == [
+            (environment.id, path, ErrorKind.PARSE, None, NOT_TEXT.message)
         ]
 
     def test_a_base_other_than_the_rendering_is_stale(

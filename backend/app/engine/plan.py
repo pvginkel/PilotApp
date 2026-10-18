@@ -22,6 +22,8 @@ _PLAN_KEYS = ("ticket", "repo", "tasks", "notes")
 _TASK_KEYS = ("id", "title", "status", "notes")
 _NOTE_KEYS = ("id", "summary", "content", "refs", "created")
 _STATUSES = "pending, in_progress or done"
+# What a JSON escape can write and no PostgreSQL `text` holds.
+_UNSTORABLE = re.compile(r"[\x00\ud800-\udfff]")
 
 
 @dataclass(frozen=True)
@@ -298,6 +300,7 @@ class _Reader:
                 content.decode(),
                 object_pairs_hook=_object,
                 parse_constant=_constant,
+                parse_int=_integer,
             )
         except UnicodeDecodeError:
             self._fault("the plan is not UTF-8 text")
@@ -307,8 +310,17 @@ class _Reader:
                 dsl.Fault(error.lineno, f"the plan is not JSON: {error.msg}")
             )
             return None
+        except RecursionError:
+            self._fault("the plan is nested too deep to read")
+            return None
         except _Unreadable as error:
             self.faults.append(error.fault)
+            return None
+        if not _storable(data):
+            self._fault(
+                "the plan is not text: a string holds `\\u0000` or an unpaired"
+                " surrogate"
+            )
             return None
         if not isinstance(data, dict):
             self._fault("the plan is not a JSON object")
@@ -440,6 +452,36 @@ def _constant(name: str) -> Any:
     raise _Unreadable(
         dsl.Fault(None, f"the plan is not JSON: `{name}` is no JSON value")
     )
+
+
+def _integer(digits: str) -> int:
+    try:
+        return int(digits)
+    except ValueError:
+        # `int()` takes no more digits than `sys.get_int_max_str_digits()`.
+        raise _Unreadable(
+            dsl.Fault(
+                None,
+                f"the plan holds a number of {len(digits.lstrip('-'))} digits,"
+                " too long to read",
+            )
+        ) from None
+
+
+def _storable(data: Any) -> bool:
+    """Whether every key and string of the save is text a row holds."""
+    pending = [data]
+    while pending:
+        value = pending.pop()
+        if isinstance(value, str):
+            if _UNSTORABLE.search(value):
+                return False
+        elif isinstance(value, dict):
+            pending.extend(value)
+            pending.extend(value.values())
+        elif isinstance(value, list):
+            pending.extend(value)
+    return True
 
 
 def _json(value: Any) -> str:

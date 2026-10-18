@@ -42,6 +42,8 @@ options:
 
 CREATED = datetime(2026, 10, 12, 12, 34, tzinfo=UTC)
 
+NOT_TEXT = "the plan is not text: a string holds `\\u0000` or an unpaired surrogate"
+
 
 def _save(container: ServiceContainer, project: Project, data: Any) -> list[str]:
     """The messages of a save's faults; `data` is JSON's, or the bytes."""
@@ -472,6 +474,17 @@ class TestPlanServiceSave:
         assert note.created_at.year != 2020
         assert project.ticket == "MD-8"
 
+    def test_a_surrogate_pair_escape_is_read_as_its_character(
+        self, session: DbSession, container: ServiceContainer, project: Project
+    ) -> None:
+        save = (
+            b'{"tasks": [{"id": "fix", "title": "Tent \\ud83c\\udfd5",'
+            b' "status": "done"}]}'
+        )
+
+        assert _save(container, project, save) == []
+        assert _task(session, project, "fix").title == "Tent \N{CAMPING}"
+
     def test_removing_a_task_whose_notes_are_struck_is_no_fault(
         self, session: DbSession, container: ServiceContainer, project: Project
     ) -> None:
@@ -510,6 +523,33 @@ class TestPlanServiceFaults:
         ("save", "messages"),
         [
             (b"\xff{}", ["the plan is not UTF-8 text"]),
+            # Text no row and no Save Error can hold, in a value or a key.
+            (
+                b'{"tasks": [{"id": "fix", "title": "Fi\\u0000x",'
+                b' "status": "pending"}]}',
+                [NOT_TEXT],
+            ),
+            (
+                b'{"tasks": [{"id": "fix", "title": "Fi\\ud800x",'
+                b' "status": "pending"}]}',
+                [NOT_TEXT],
+            ),
+            (b'{"\\u0000": 1}', [NOT_TEXT]),
+            (
+                b'{"notes": [{"id": "n1", "summary": "s", "content": "c",'
+                b' "refs": ["\\udfff"]}]}',
+                [NOT_TEXT],
+            ),
+            pytest.param(
+                b'{"ticket": ' + b"1" * 5000 + b"}",
+                ["the plan holds a number of 5000 digits, too long to read"],
+                id="a-number-too-long",
+            ),
+            pytest.param(
+                b"[" * 100000 + b"]" * 100000,
+                ["the plan is nested too deep to read"],
+                id="nested-too-deep",
+            ),
             (b'{"tasks": [', ["the plan is not JSON: Expecting value"]),
             (b'{"tasks": NaN}', ["the plan is not JSON: `NaN` is no JSON value"]),
             (
