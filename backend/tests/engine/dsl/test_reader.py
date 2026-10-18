@@ -90,6 +90,9 @@ FACTS = Facts(
 )
 
 
+NOT_TEXT = "{} is not text: a key or value holds NUL or an unpaired surrogate"
+
+
 def _facts(**overrides: Any) -> Facts:
     values = {name: getattr(FACTS, name) for name in Facts.__dataclass_fields__}
     values.update(overrides)
@@ -534,6 +537,52 @@ class TestParse:
         assert block.answer == "x\u2028y"
         assert block.lines["by"] == Span(3, 3)
         assert document.faults == ()
+
+    @pytest.mark.parametrize("escape", ["\\0", "\\x00", "\\u0000", "\\ud800"])
+    def test_an_escape_no_row_holds_holds_the_body(self, escape: str) -> None:
+        document = parse(
+            f'```decision id=D1\noptions:\n  - Tunnel\n  - "Dome{escape}"\n```\n'
+        )
+
+        assert document.faults == (Fault(4, NOT_TEXT.format("block D1: the body")),)
+        assert document.blocks[0].options == ()
+
+    def test_an_escape_no_row_holds_in_a_key_holds_the_body(self) -> None:
+        document = parse('```decision id=D1\n"opt\\0": Dome\n```\n')
+
+        assert document.faults == (Fault(2, NOT_TEXT.format("block D1: the body")),)
+
+    def test_an_escape_no_row_holds_holds_the_front_matter(self) -> None:
+        document = parse('---\nsummary: two\ntitle: "Tent\\0"\n---\n')
+
+        assert document.faults == (Fault(3, NOT_TEXT.format("the front matter")),)
+        assert document.front_matter.title is None
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            pytest.param("options: " + "[" * 3000 + "]" * 3000, id="flow"),
+            pytest.param(
+                "options:\n" + "\n".join("  " * depth + "  -" for depth in range(3000)),
+                id="block",
+            ),
+            pytest.param("options: &x\n  - *x", id="alias-of-itself"),
+        ],
+    )
+    def test_a_body_nested_too_deep_is_held(self, body: str) -> None:
+        document = parse(f"```decision id=D1\n{body}\n```\n")
+
+        assert document.faults == (
+            Fault(2, "block D1: the body is nested too deep to read"),
+        )
+        assert document.blocks[0].lines == {}
+
+    def test_a_front_matter_nested_too_deep_is_held(self) -> None:
+        document = parse("---\ntitle: " + "[" * 3000 + "]" * 3000 + "\n---\n")
+
+        assert document.faults == (
+            Fault(2, "the front matter is nested too deep to read"),
+        )
 
     def test_a_first_line_of_dashes_without_a_closing_one_is_prose(self) -> None:
         document = parse("---\ntitle: Not front matter\n\n# Heading\n")

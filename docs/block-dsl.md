@@ -113,7 +113,9 @@ The faults of the text itself:
   blocks with one id;
 - a body or a front matter that is no YAML mapping; a body in flow style (`{…}`); a key written
   twice; a raw U+0085, U+2028, U+2029 or carriage return within a line of a body or the front
-  matter, which YAML would read as a line break;
+  matter, which YAML would read as a line break; a key or a value a double-quoted escape writes
+  NUL or an unpaired surrogate into, which no row holds; a body or a front matter nested too deep
+  to read, an alias of a list or mapping inside itself among them;
 - a key the block's kind does not take; a list or a mapping where one value is wanted; `options`
   that is no list, or an entry that is no label with at most one line; `options` or `recommend`
   beside `proposal`; `recommend` naming no option;

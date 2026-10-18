@@ -1,0 +1,23 @@
+{
+  "rule": "held (reader): a key or value an escape writes NUL or an unpaired surrogate into",
+  "parse": {
+    "title": "Which tent?",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "D1",
+        "kind": "decision",
+        "fence": [
+          3,
+          7
+        ]
+      }
+    ]
+  },
+  "faults": [
+    {
+      "line": 5,
+      "message": "block D1: the body is not text: a key or value holds NUL or an unpaired surrogate"
+    }
+  ]
+}

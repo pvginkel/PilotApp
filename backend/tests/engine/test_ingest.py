@@ -707,6 +707,46 @@ class TestIngestServiceGate:
         assert draft.published_text == published
 
     @pytest.mark.parametrize(
+        ("content", "fault"),
+        [
+            pytest.param(
+                UNANSWERED.replace("  - Dome\n", '  - "Dome\\0"\n'),
+                dsl.Fault(
+                    5,
+                    "block D1: the body is not text: a key or value holds NUL or"
+                    " an unpaired surrogate",
+                ),
+                id="not-text",
+            ),
+            pytest.param(
+                "```decision id=D1\noptions: " + "[" * 3000 + "]" * 3000 + "\n```\n",
+                dsl.Fault(2, "block D1: the body is nested too deep to read"),
+                id="nested-too-deep",
+            ),
+        ],
+    )
+    def test_a_save_the_reader_cannot_read_is_held(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        content: str,
+        fault: dsl.Fault,
+    ) -> None:
+        draft = _bear_draft(container, project, DRAFT)
+        path = f"draft-{project.number}/project.md"
+
+        answer = _ingest(container, path, content, environment)
+
+        assert (answer.held, answer.faults) == (True, (fault,))
+        assert _errors(session) == [
+            (environment.id, path, ErrorKind.PARSE, fault.line, fault.message)
+        ]
+        assert draft.ingested_text == content
+        assert draft.published_text == DRAFT
+
+    @pytest.mark.parametrize(
         ("content", "line", "text"),
         [
             (b"Caf\xe9 au lait.\n", 1, "Caf� au lait.\n"),

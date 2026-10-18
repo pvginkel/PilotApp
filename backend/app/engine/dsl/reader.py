@@ -64,6 +64,9 @@ YAML_LINE_BREAKS = {
 name and its escape in a double-quoted value. A body or a front matter that
 holds one raw is held, so every line YAML counts is a line of the file."""
 
+_UNSTORABLE = re.compile(r"[\x00\ud800-\udfff]")
+"""What a double-quoted YAML escape can write and no PostgreSQL `text` holds."""
+
 _FENCE = re.compile(r"(?P<indent> {0,3})(?P<marker>`{3,}|~{3,})(?P<info>.*)")
 _HEADING = re.compile(r" {0,3}#{1,6}(?:[ \t]+(?P<text>.*?))?(?:[ \t]+#+)?[ \t]*")
 _LOCAL_ID = re.compile(r"id\s*=\s*(?P<id>\S+)")
@@ -433,6 +436,18 @@ def _mapping(
     lines it covers; none, with a fault, when it holds no mapping, or, with
     `block_style`, a flow mapping, whose keys share lines. An empty text is an
     empty mapping."""
+    try:
+        return _read_mapping(text, first_line, subject, faults, block_style)
+    except RecursionError:
+        # PyYAML composes, and `_last_line` reads, a level per call: a value
+        # nested thousands deep, or holding an alias of itself, has no end.
+        faults.append(Fault(first_line, f"{subject} is nested too deep to read"))
+        return None
+
+
+def _read_mapping(
+    text: str, first_line: int, subject: str, faults: list[Fault], block_style: bool
+) -> _Entries | None:
     lines = text.split("\n")
     for index, content in enumerate(lines):
         brk = next((char for char in content if char in YAML_LINE_BREAKS), None)
@@ -474,6 +489,16 @@ def _mapping(
             )
         )
         return None
+    unstorable = _unstorable(node)
+    if unstorable is not None:
+        faults.append(
+            Fault(
+                first_line + unstorable.start_mark.line,
+                f"{subject} is not text: a key or value holds NUL or an unpaired"
+                " surrogate",
+            )
+        )
+        return None
     entries: _Entries = {}
     for key, value in node.value:
         line = first_line + key.start_mark.line
@@ -486,6 +511,27 @@ def _mapping(
         last = first_line + _last_line(value, lines)
         entries[key.value] = (value, Span(line, max(line, last)))
     return entries
+
+
+def _unstorable(node: yaml.Node) -> yaml.ScalarNode | None:
+    """The first scalar, key or value, that holds what no row holds; each node
+    is read once, so an alias is not followed again."""
+    pending: list[yaml.Node] = [node]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, yaml.ScalarNode):
+            if _UNSTORABLE.search(current.value):
+                return current
+        elif isinstance(current, yaml.SequenceNode):
+            pending.extend(reversed(current.value))
+        elif isinstance(current, yaml.MappingNode):
+            for key, value in reversed(current.value):
+                pending.extend((value, key))
+    return None
 
 
 def _last_line(node: yaml.Node, lines: list[str]) -> int:

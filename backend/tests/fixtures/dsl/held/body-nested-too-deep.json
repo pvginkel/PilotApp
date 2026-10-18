@@ -1,0 +1,23 @@
+{
+  "rule": "held (reader): a body or front matter nested deeper than the reader reads",
+  "parse": {
+    "title": "Which tent?",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "D1",
+        "kind": "decision",
+        "fence": [
+          3,
+          5
+        ]
+      }
+    ]
+  },
+  "faults": [
+    {
+      "line": 4,
+      "message": "block D1: the body is nested too deep to read"
+    }
+  ]
+}
