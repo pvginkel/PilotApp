@@ -126,7 +126,10 @@ class DocumentService:
             id=uuid.uuid4(), path=path, project_id=project.id, role_code=role
         )
         parsed = self._parse(project, document, text)
+        shown = self._shown(project, None, document)
         self._bear(project, None, document, text, parsed, None)
+        if self._shown(project, None, document) != shown:
+            self.view_service.timeline_moved(project)
         return document
 
     def _bear_item(

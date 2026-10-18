@@ -405,6 +405,25 @@ class TestDocumentServiceBirth:
             TreeHashMoved(f"draft-{project.number}/project.md", sha256_hex(""))
         ]
 
+    def test_a_titled_drafts_birth_moves_the_timeline(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+    ) -> None:
+        text = "---\ntitle: Badge colours\n---\n"
+        with scoped_session(container):
+            container.document_service().bear_draft(project, text)
+
+        folder = f"draft-{project.number}"
+        assert engine_events == [
+            TreeHashMoved(f"{folder}/project.md", sha256_hex(text)),
+            TreeHashMoved(
+                f"{folder}/timeline.json",
+                container.view_service().timeline(project).hash,
+            ),
+        ]
+
     def test_the_handbooks_birth_moves_its_path_alone(
         self,
         container: ServiceContainer,
@@ -707,6 +726,64 @@ class TestDocumentServicePublish:
             documents.publish(document, "# Two colours\n\nBlue and green.\n")
         assert engine_events == [
             TreeHashMoved(path, sha256_hex("# Two colours\n\nBlue and green.\n"))
+        ]
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            pytest.param(
+                "# The palette\n\n```question id=Q1\ndefault: Blue\n```\n", id="kind"
+            ),
+            pytest.param("# Two colours\n\nBlue and green.\n", id="title"),
+            pytest.param(
+                "---\nstep: build\n---\n# The palette\n\nBlue and green.\n", id="step"
+            ),
+            pytest.param(
+                "---\nurgent: true\n---\n# The palette\n\nBlue and green.\n",
+                id="urgent",
+            ),
+            pytest.param(
+                "---\nfor: ada\n---\n# The palette\n\nBlue and green.\n", id="for"
+            ),
+            pytest.param(
+                "---\nsummary: Two colours.\n---\n# The palette\n\nBlue and green.\n",
+                id="summary",
+            ),
+        ],
+    )
+    def test_each_cache_the_timeline_shows_moves_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        project_session: models.Session,
+        build_task: PlanTask,
+        text: str,
+    ) -> None:
+        documents = container.document_service()
+        item = documents.bear_item(
+            project,
+            "notice",
+            "The palette",
+            project_session,
+            "# The palette\n\nBlue and green.\n",
+        )
+        document = session.get_one(Document, item.id)
+        with scoped_session(container):
+            pass
+        engine_events.clear()
+
+        with scoped_session(container):
+            documents.publish(document, text)
+
+        folder = f"draft-{project.number}"
+        assert engine_events == [
+            TreeHashMoved(f"{folder}/items/1-the-palette.md", sha256_hex(text)),
+            TreeHashMoved(
+                f"{folder}/timeline.json",
+                container.view_service().timeline(project).hash,
+            ),
         ]
 
 
