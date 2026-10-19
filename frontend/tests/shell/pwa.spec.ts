@@ -4,8 +4,9 @@
  * request under /api/.
  */
 
-import type { Page } from '@playwright/test';
+import type { BrowserContext, Page } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
+import { expectConsoleError } from '../support/helpers';
 
 const UNREACHABLE = 'Pilot is unreachable. Try again when you are back on the network.';
 
@@ -19,6 +20,12 @@ async function controlled(page: Page): Promise<void> {
       );
     }
   });
+}
+
+/** Takes the network down; a request the page has in flight then fails in its console. */
+async function goOffline(page: Page, context: BrowserContext): Promise<void> {
+  await expectConsoleError(page, /net::ERR_INTERNET_DISCONNECTED/);
+  await context.setOffline(true);
 }
 
 /** A PNG's width and height as a manifest's `sizes` writes them, from its IHDR chunk. */
@@ -85,7 +92,7 @@ test.describe('The PWA shell', () => {
   test('answers a navigation with one line while the network is down', async ({ context, page, shell }) => {
     await controlled(page);
 
-    await context.setOffline(true);
+    await goOffline(page, context);
     await page.reload();
     await expect(page).toHaveTitle('Pilot');
     await expect(page.locator('body')).toHaveText(UNREACHABLE);
@@ -101,7 +108,7 @@ test.describe('The PWA shell', () => {
     expect((await page.goto('/profile'))!.fromServiceWorker()).toBe(true);
     expect((await page.goto('/api/people/self'))!.fromServiceWorker()).toBe(false);
 
-    await context.setOffline(true);
+    await goOffline(page, context);
     await expect(page.goto('/api/people/self')).rejects.toThrow('net::ERR_INTERNET_DISCONNECTED');
   });
 });
