@@ -26,6 +26,8 @@ class TestLoadTestDataHook:
         load_test_data_hook(app)
 
         assert session.scalars(select(Project.slug).order_by(Project.slug)).all() == [
+            "bike-log",
+            "photo-album",
             "recipe-box",
             None,
         ]
@@ -36,5 +38,5 @@ class TestLoadTestDataHook:
         # The bus delivers once the seed's transaction committed.
         assert TreeHashMoved("recipe-box/project.md", draft_hash) in engine_events
         out = capsys.readouterr().out
-        assert "   - 2 projects\n" in out
-        assert "   - 9 items\n" in out
+        assert "   - 4 projects\n" in out
+        assert "   - 11 items\n" in out

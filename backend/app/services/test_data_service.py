@@ -1,5 +1,7 @@
-"""The dev stack's seed: an invented record, which `cli load-test-data` loads
-into the dev database and into the seed every Playwright worker clones.
+"""The invented record: the dev stack's seed, which `cli load-test-data`
+loads into the dev database and into the seed every Playwright worker clones,
+and the people, environments and projects a spec makes through
+`/api/testing/` (TEST-6).
 
 Documents, the record's writes and the plan go through the engine's own
 operations, so the seed is a record the engine could have produced. The rows
@@ -11,6 +13,7 @@ invented: this repository is public.
 
 import hashlib
 import json
+import uuid
 from datetime import datetime
 from typing import Any
 
@@ -21,7 +24,12 @@ from app.engine.documents import DocumentService
 from app.engine.plan import PlanService
 from app.engine.record import RecordService
 from app.engine.views import utc_time
-from app.exceptions import InvalidOperationException
+from app.exceptions import (
+    InvalidOperationException,
+    RecordNotFoundException,
+    ResourceConflictException,
+    ValidationException,
+)
 from app.models import (
     Attachment,
     Block,
@@ -45,9 +53,15 @@ from app.models.reference import (
     TransitionKind,
     UserKind,
 )
+from app.schemas.testing_record import InventedProjectCreateSchema
+from app.services.auth_service import AuthContext
+from app.services.people_service import PeopleService
 
 SLUG = "recipe-box"
 """The open project's slug; the draft beside it has none."""
+
+FINISHED_SLUG = "bike-log"
+ARCHIVED_SLUG = "photo-album"
 
 ENVIRONMENT_ID = "example-recipes-1"
 
@@ -272,6 +286,58 @@ TASKS = [
 
 REMOVED_TASK = ("spike", "Try a static site generator", "pending")
 
+BIKES_DRAFT = """---
+slug: bike-log
+---
+
+# Bike repair log
+
+What was fixed on which bike, and when each chain was last oiled.
+"""
+
+BIKES_HANDBOOK = """# Handbook
+
+- The code is in the `bike-log` repository.
+"""
+
+BIKES_OPENING = """# Bike repair log
+
+The notebook in the shed is full. Let's keep the repairs somewhere we can
+search.
+"""
+
+BIKES_TASKS = [
+    ("page", "Build the log's page", "done"),
+    ("notebook", "Type up the shed notebook", "done"),
+]
+
+ALBUM_DRAFT = """---
+slug: photo-album
+---
+
+# Photo album
+
+The scanned family photos, sorted by year and captioned.
+"""
+
+ALBUM_HANDBOOK = """# Handbook
+
+- The code is in the `photo-album` repository.
+"""
+
+ALBUM_OPENING = """# Photo album
+
+The scans sit in one folder with camera names. Let's sort them by year.
+"""
+
+ALBUM_TASKS = [
+    ("sort", "Sort the scans by year", "in_progress"),
+    ("caption", "Caption the photos", "pending"),
+]
+
+NOTICE_TEXT = "# {title}\n"
+"""An open item a spec asks for: a notice, open until read."""
+
 
 class TestDataService:
     def __init__(
@@ -280,11 +346,13 @@ class TestDataService:
         document_service: DocumentService,
         record_service: RecordService,
         plan_service: PlanService,
+        people_service: PeopleService,
     ) -> None:
         self.db = db
         self.document_service = document_service
         self.record_service = record_service
         self.plan_service = plan_service
+        self.people_service = people_service
 
     def load_all(self) -> dict[str, int]:
         """Seed the record into an empty database, in the caller's
@@ -299,17 +367,8 @@ class TestDataService:
         self.document_service.bear_draft(garden, GARDEN_DRAFT)
 
         recipes = self._project(ada, SLUG, now)
-        self.db.add_all(
-            [
-                ProjectMember(project_id=recipes.id, user_id=ben.id, joined_at=now),
-                ProjectTransition(
-                    project_id=recipes.id,
-                    kind_code=TransitionKind.OPENED,
-                    at=now,
-                    by_user_id=ada.id,
-                ),
-            ]
-        )
+        self.db.add(ProjectMember(project_id=recipes.id, user_id=ben.id, joined_at=now))
+        self._transitions(recipes, ada, now, TransitionKind.OPENED)
         self.document_service.bear_draft(recipes, RECIPE_DRAFT)
         self.document_service.bear_handbook(recipes, HANDBOOK)
         environment = Environment(id=ENVIRONMENT_ID, name="Recipes-1", exempt=False)
@@ -327,7 +386,7 @@ class TestDataService:
         self.db.add(session)
         self.db.flush()
 
-        self._save_plan(recipes, [*TASKS, REMOVED_TASK], {})
+        self._save_plan(recipes, "RB-12", "recipe-box", [*TASKS, REMOVED_TASK], {})
 
         stamp = utc_time(now)
         self.document_service.bear_opening(recipes, "Recipe box", ada, OPENING)
@@ -364,6 +423,8 @@ class TestDataService:
 
         self._save_plan(
             recipes,
+            "RB-12",
+            "recipe-box",
             TASKS,
             {
                 "build": [
@@ -396,6 +457,35 @@ class TestDataService:
             },
         )
 
+        bikes = self._project(ben, FINISHED_SLUG, now)
+        self.db.add(ProjectMember(project_id=bikes.id, user_id=ada.id, joined_at=now))
+        self.document_service.bear_draft(bikes, BIKES_DRAFT)
+        self.document_service.bear_handbook(bikes, BIKES_HANDBOOK)
+        self.document_service.bear_opening(bikes, "Bike repair log", ben, BIKES_OPENING)
+        self._save_plan(bikes, "BL-3", "bike-log", BIKES_TASKS, {})
+        # Finish turns auto pilot off at its instant, by its person (DB 171).
+        self._transitions(
+            bikes,
+            ben,
+            now,
+            TransitionKind.OPENED,
+            TransitionKind.AUTOPILOT_ON,
+            TransitionKind.FINISHED,
+            TransitionKind.AUTOPILOT_OFF,
+        )
+        bikes.state_code = ProjectState.FINISHED
+
+        album = self._project(ada, ARCHIVED_SLUG, now)
+        self.document_service.bear_draft(album, ALBUM_DRAFT)
+        self.document_service.bear_handbook(album, ALBUM_HANDBOOK)
+        self.document_service.bear_opening(album, "Photo album", ada, ALBUM_OPENING)
+        self._save_plan(album, "PA-1", "photo-album", ALBUM_TASKS, {})
+        self._transitions(
+            album, ada, now, TransitionKind.OPENED, TransitionKind.ARCHIVED
+        )
+        album.archived = True
+        self.db.flush()
+
         return {
             "users": self._count(User, User.kind_code == UserKind.PERSON),
             "projects": self._count(Project),
@@ -406,6 +496,174 @@ class TestDataService:
             "plan notes": self._count(PlanNote),
             "attachments": self._count(Attachment),
         }
+
+    def person(self, handle: str, name: str | None) -> User:
+        """A person on the record as the handle step puts one, under a
+        subject no one signs in with; the handle is the name without one.
+
+        Raises:
+            ValidationException: the handle is not lower-case letters, digits
+                and hyphens.
+            InvalidOperationException: the handle is Pilot's or another
+                person's.
+        """
+        return self.people_service.choose_handle(
+            AuthContext(
+                subject=f"invented-{uuid.uuid4()}", email=None, name=name, roles=set()
+            ),
+            handle,
+        )
+
+    def environment(self, environment_id: str, name: str) -> Environment:
+        """An environment Pilot has touched.
+
+        Raises:
+            ResourceConflictException: an environment has the id.
+        """
+        if self.db.get(Environment, environment_id) is not None:
+            raise ResourceConflictException("Environment", environment_id)
+        environment = Environment(id=environment_id, name=name, exempt=False)
+        self.db.add(environment)
+        self.db.flush()
+        return environment
+
+    def project(self, spec: InventedProjectCreateSchema) -> Project:
+        """A project in the standing `spec` gives, made now by its first
+        member: the transitions to that standing, its members in order, its
+        draft titled by its name and its plan; with an environment, a session
+        there that adds its open items, notices.
+
+        Raises:
+            ValidationException: a finished project with auto pilot on, a
+                member named twice, open items without an environment, or a
+                plan with a fault.
+            RecordNotFoundException: a member is no person, or no environment
+                has the id.
+        """
+        operation = "make the project"
+        if spec.state is ProjectState.FINISHED and spec.autopilot:
+            raise ValidationException(
+                f"Cannot {operation} because a finished project has auto pilot off"
+            )
+        if len(set(spec.members)) < len(spec.members):
+            raise ValidationException(
+                f"Cannot {operation} because a member is named twice"
+            )
+        if spec.open_items and spec.environment_id is None:
+            raise ValidationException(
+                f"Cannot {operation} because its open items need a session's "
+                "environment, and no environment_id is given"
+            )
+        people = [self._invented_member(handle) for handle in spec.members]
+        environment = None
+        if spec.environment_id is not None:
+            environment = self.db.get(Environment, spec.environment_id)
+            if environment is None:
+                raise RecordNotFoundException("Environment", spec.environment_id)
+
+        now = self.db.scalar(select(func.now()))
+        assert now is not None
+        project_id = uuid.uuid4()
+        draft = spec.state is ProjectState.DRAFT
+        project = Project(
+            id=project_id,
+            slug=None if draft else f"project-{project_id.hex[:12]}",
+            state_code=spec.state,
+            archived=spec.archived,
+            autopilot=spec.autopilot,
+            created_by_user_id=people[0].id,
+            created_at=now,
+        )
+        self.db.add(project)
+        self.db.flush()
+        for person in people:
+            self.db.add(
+                ProjectMember(project_id=project.id, user_id=person.id, joined_at=now)
+            )
+            # One flush each: at one instant, the ids keep the joining order.
+            self.db.flush()
+        kinds = [
+            kind
+            for kind, written in (
+                (TransitionKind.OPENED, not draft),
+                (TransitionKind.FINISHED, spec.state is ProjectState.FINISHED),
+                (TransitionKind.AUTOPILOT_ON, spec.autopilot),
+                (TransitionKind.ARCHIVED, spec.archived),
+            )
+            if written
+        ]
+        self._transitions(project, people[0], now, *kinds)
+        self.document_service.bear_draft(
+            project, "" if spec.name is None else f"# {spec.name}\n"
+        )
+        faults = self.plan_service.save(
+            project,
+            _plan_json(
+                spec.ticket,
+                spec.repo,
+                [
+                    {
+                        "id": task.id,
+                        "title": task.title,
+                        "status": task.status.value,
+                        "notes": [note.model_dump() for note in task.notes],
+                    }
+                    for task in spec.tasks
+                ],
+                [note.model_dump() for note in spec.notes],
+            ),
+        )
+        if faults:
+            raise ValidationException(
+                f"Cannot {operation} because its plan has a fault: "
+                + "; ".join(fault.message for fault in faults)
+            )
+        if environment is not None:
+            session = self._session(project, environment, now)
+            for number in range(1, spec.open_items + 1):
+                title = f"Notice {number}"
+                self.document_service.bear_item(
+                    project, "notice", title, session, NOTICE_TEXT.format(title=title)
+                )
+        return project
+
+    def _invented_member(self, handle: str) -> User:
+        person = self.db.scalars(
+            select(User).where(User.handle == handle, User.kind_code == UserKind.PERSON)
+        ).first()
+        if person is None:
+            raise RecordNotFoundException("Person", handle)
+        return person
+
+    def _session(
+        self, project: Project, environment: Environment, now: datetime
+    ) -> AgentSession:
+        """An idle work session of `project` in `environment`."""
+        session = AgentSession(
+            project_id=project.id,
+            environment_id=environment.id,
+            kind_code="work",
+            cwd="/work/Invented",
+            token_hash=hashlib.sha256(project.id.bytes).hexdigest(),
+            state_code=SessionState.IDLE,
+            started_at=now,
+        )
+        self.db.add(session)
+        self.db.flush()
+        return session
+
+    def _transitions(
+        self, project: Project, by: User, at: datetime, *kinds: TransitionKind
+    ) -> None:
+        """The transitions of `kinds`, in their order, at one instant."""
+        for kind in kinds:
+            self.db.add(
+                ProjectTransition(
+                    project_id=project.id, kind_code=kind, at=at, by_user_id=by.id
+                )
+            )
+            # One flush each: at one instant, the ids keep `kinds`' order.
+            self.db.flush()
 
     def _person(self, handle: str, name: str, avatar_slot: int) -> User:
         user = User(
@@ -484,15 +742,17 @@ class TestDataService:
     def _save_plan(
         self,
         project: Project,
+        ticket: str,
+        repo: str,
         tasks: list[tuple[str, str, str]],
         notes: dict[str | None, list[dict[str, Any]]],
     ) -> None:
         """Save `plan.json` as the agent would, `notes` by task id, the
         plan's own under none: a task left out is removed."""
-        plan = {
-            "ticket": "RB-12",
-            "repo": "recipe-box",
-            "tasks": [
+        plan = _plan_json(
+            ticket,
+            repo,
+            [
                 {
                     "id": task_id,
                     "title": title,
@@ -501,9 +761,9 @@ class TestDataService:
                 }
                 for task_id, title, status in tasks
             ],
-            "notes": notes.get(None, []),
-        }
-        faults = self.plan_service.save(project, json.dumps(plan).encode())
+            notes.get(None, []),
+        )
+        faults = self.plan_service.save(project, plan)
         if faults:
             raise InvalidOperationException(
                 f"seed the plan of project {project.slug}",
@@ -514,6 +774,19 @@ class TestDataService:
         return (
             self.db.scalar(select(func.count()).select_from(model).where(*where)) or 0
         )
+
+
+def _plan_json(
+    ticket: str | None,
+    repo: str | None,
+    tasks: list[dict[str, Any]],
+    notes: list[dict[str, Any]],
+) -> bytes:
+    """A save of `plan.json`: the ticket, the repo, the tasks with their
+    notes, and the plan's own notes."""
+    return json.dumps(
+        {"ticket": ticket, "repo": repo, "tasks": tasks, "notes": notes}
+    ).encode()
 
 
 def _note(

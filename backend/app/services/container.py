@@ -22,6 +22,7 @@ from app.services.link_service import LinkService
 from app.services.metrics_service import MetricsService
 from app.services.oidc_client_service import OidcClientService
 from app.services.people_service import PeopleService
+from app.services.project_service import ProjectService
 from app.services.sse_connection_manager import SSEConnectionManager
 from app.services.sync_service import SyncService
 from app.services.sync_stream_service import SyncStreamService
@@ -177,13 +178,20 @@ class ServiceContainer(containers.DeclarativeContainer):
     people_service = providers.Factory(PeopleService, db=db_session)
     link_service = providers.Factory(LinkService, db=db_session)
 
-    # The dev stack's seed, loaded by `cli load-test-data`
+    # The projects as the signed-in person reads them (F1, F2, F3)
+    project_service = providers.Factory(
+        ProjectService, db=db_session, people_service=people_service
+    )
+
+    # The invented record: the dev stack's seed, loaded by `cli
+    # load-test-data`, and the states a spec makes through /api/testing/
     test_data_service = providers.Factory(
         TestDataService,
         db=db_session,
         document_service=document_service,
         record_service=record_service,
         plan_service=plan_service,
+        people_service=people_service,
     )
 
 

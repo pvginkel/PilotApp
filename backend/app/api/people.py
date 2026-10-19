@@ -7,11 +7,10 @@ from dependency_injector.wiring import Provide, inject
 from flask import Blueprint, request
 from spectree import Response as SpectreeResponse
 
-from app.exceptions import AuthenticationException
+from app.api.caller import caller
 from app.models import User
 from app.schemas.common import ApiErrorResponseSchema
 from app.schemas.people import HandleChoiceSchema, SelfResponseSchema
-from app.services.auth_service import AuthContext
 from app.services.container import ServiceContainer
 from app.services.people_service import (
     PeopleService,
@@ -19,17 +18,9 @@ from app.services.people_service import (
     initials,
     token_name,
 )
-from app.utils.auth import get_auth_context
 from app.utils.spectree_config import api
 
 people_bp = Blueprint("people", __name__, url_prefix="/people")
-
-
-def _caller() -> AuthContext:
-    auth_context = get_auth_context()
-    if auth_context is None:
-        raise AuthenticationException("No valid token provided")
-    return auth_context
 
 
 def _person(person: User) -> SelfResponseSchema:
@@ -65,7 +56,7 @@ def get_self(
         401: No one is signed in
         403: The caller lacks the editor role
     """
-    auth = _caller()
+    auth = caller()
     person = people_service.record_sign_in(auth)
     if person is not None:
         return _person(person).model_dump()
@@ -104,5 +95,5 @@ def choose_handle(
         409: The handle is Pilot's or another person's, or the caller has one
     """
     choice = HandleChoiceSchema.model_validate(request.get_json())
-    person = people_service.choose_handle(_caller(), choice.handle)
+    person = people_service.choose_handle(caller(), choice.handle)
     return _person(person).model_dump(), 201

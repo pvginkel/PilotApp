@@ -34,9 +34,11 @@ def register_blueprints(api_bp: Blueprint, app: Flask) -> None:
     if not api_bp._got_registered_once:
         from app.api.links import links_bp
         from app.api.people import people_bp
+        from app.api.projects import projects_bp
 
         api_bp.register_blueprint(links_bp)
         api_bp.register_blueprint(people_bp)
+        api_bp.register_blueprint(projects_bp)
 
 
 def register_error_handlers(app: Flask) -> None:
@@ -51,8 +53,11 @@ def register_root_blueprints(app: Flask) -> None:
     from app.api.sync import sync_bp
     from app.api.testing_sync import testing_sync_bp
 
+    from app.api.testing_record import testing_record_bp
+
     app.register_blueprint(sync_bp)
     app.register_blueprint(testing_sync_bp)
+    app.register_blueprint(testing_record_bp)
 
 
 def register_cli_commands(cli: click.Group) -> None:

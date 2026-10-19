@@ -2,6 +2,7 @@
 operations where the engine writes it (slice 002 P9)."""
 
 import json
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -14,7 +15,12 @@ from app import models
 from app.app import App
 from app.engine import dsl
 from app.engine.tree import TreeDocument, TreePlan
-from app.exceptions import InvalidOperationException
+from app.exceptions import (
+    InvalidOperationException,
+    RecordNotFoundException,
+    ResourceConflictException,
+    ValidationException,
+)
 from app.models import (
     Attachment,
     Block,
@@ -40,6 +46,7 @@ from app.models.reference import (
     UserKind,
     VersionCause,
 )
+from app.schemas.testing_record import InventedProjectCreateSchema
 from app.services import test_data_service
 from app.services.container import ServiceContainer
 from app.startup import load_test_data_hook
@@ -81,6 +88,32 @@ def _block(session: DbSession, item: Item, local_id: str) -> Block:
     ).one()
 
 
+def _transitions(
+    session: DbSession, project: Project
+) -> list[tuple[TransitionKind, uuid.UUID]]:
+    return [
+        (transition.kind_code, transition.by_user_id)
+        for transition in session.scalars(
+            select(ProjectTransition)
+            .where(ProjectTransition.project_id == project.id)
+            .order_by(ProjectTransition.at, ProjectTransition.id)
+        )
+    ]
+
+
+def _members(session: DbSession, project: Project) -> list[uuid.UUID]:
+    """The open memberships' people, in the order they joined."""
+    return list(
+        session.scalars(
+            select(ProjectMember.user_id)
+            .where(
+                ProjectMember.project_id == project.id, ProjectMember.left_at.is_(None)
+            )
+            .order_by(ProjectMember.joined_at, ProjectMember.id)
+        )
+    )
+
+
 def _plan(container: ServiceContainer, project: Project) -> dict[str, Any]:
     plan: dict[str, Any] = json.loads(container.plan_service().render(project).text)
     return plan
@@ -90,11 +123,11 @@ class TestTestDataService:
     def test_load_all_counts_the_rows_it_seeded(self, counts: dict[str, int]) -> None:
         assert counts == {
             "users": 2,
-            "projects": 2,
-            "items": 9,
-            "documents": 12,
+            "projects": 4,
+            "items": 11,
+            "documents": 18,
             "blocks": 13,
-            "plan tasks": 6,
+            "plan tasks": 10,
             "plan notes": 3,
             "attachments": 1,
         }
@@ -172,6 +205,49 @@ class TestTestDataService:
         }
         assert members.keys() == {ada.id, ben.id}
         assert members[ada.id] == recipes.created_at
+
+    def test_a_finished_project_with_its_history(
+        self, counts: dict[str, int], container: ServiceContainer, session: DbSession
+    ) -> None:
+        bikes = _project(session, test_data_service.FINISHED_SLUG)
+        ada, ben = _user(session, "ada"), _user(session, "ben")
+
+        assert (bikes.name, bikes.state_code, bikes.archived, bikes.autopilot) == (
+            "Bike repair log",
+            ProjectState.FINISHED,
+            False,
+            False,
+        )
+        assert (bikes.ticket, bikes.repo) == ("BL-3", "bike-log")
+        assert _transitions(session, bikes) == [
+            (TransitionKind.OPENED, ben.id),
+            (TransitionKind.AUTOPILOT_ON, ben.id),
+            (TransitionKind.FINISHED, ben.id),
+            (TransitionKind.AUTOPILOT_OFF, ben.id),
+        ]
+        assert _members(session, bikes) == [ben.id, ada.id]
+        assert {task["status"] for task in _plan(container, bikes)["tasks"]} == {"done"}
+        assert [item.kind_code for item in _items(session, bikes)] == ["opening"]
+
+    def test_an_archived_project_as_it_was_left(
+        self, counts: dict[str, int], container: ServiceContainer, session: DbSession
+    ) -> None:
+        album = _project(session, test_data_service.ARCHIVED_SLUG)
+        ada = _user(session, "ada")
+
+        assert (album.name, album.state_code, album.archived) == (
+            "Photo album",
+            ProjectState.OPEN,
+            True,
+        )
+        assert _transitions(session, album) == [
+            (TransitionKind.OPENED, ada.id),
+            (TransitionKind.ARCHIVED, ada.id),
+        ]
+        assert _members(session, album) == [ada.id]
+        assert [
+            (task["id"], task["status"]) for task in _plan(container, album)["tasks"]
+        ] == [("sort", "in_progress"), ("caption", "pending")]
 
     def test_prose_items_of_every_kind(
         self, counts: dict[str, int], session: DbSession
@@ -399,7 +475,10 @@ class TestTestDataService:
         environment = session.get_one(Environment, test_data_service.ENVIRONMENT_ID)
         tree = container.tree_service()
         saved: list[str] = []
-        for project in session.scalars(select(Project)):
+        # An archived project's folder is out of the tree.
+        for project in session.scalars(
+            select(Project).where(Project.archived.is_(False))
+        ):
             for path, tree_hash in tree.hashes(project).items():
                 if not isinstance(tree.resolve(path), TreeDocument | TreePlan):
                     continue
@@ -414,7 +493,7 @@ class TestTestDataService:
                 ), path
                 saved.append(path)
 
-        assert len(saved) == 14
+        assert len(saved) == 18
 
     def test_a_plan_with_a_fault_seeds_nothing(
         self,
@@ -442,3 +521,238 @@ class TestTestDataService:
             == []
         )
         assert session.scalars(select(Project)).all() == []
+
+
+def _spec(**spec: Any) -> InventedProjectCreateSchema:
+    spec.setdefault("members", ["ada"])
+    return InventedProjectCreateSchema.model_validate(spec)
+
+
+class TestPerson:
+    def test_a_person_takes_the_lowest_free_slot(
+        self, container: ServiceContainer, person: User
+    ) -> None:
+        ben = container.test_data_service().person("ben", "Ben Example")
+
+        assert (ben.kind_code, ben.handle, ben.name, ben.avatar_slot) == (
+            UserKind.PERSON,
+            "ben",
+            "Ben Example",
+            2,
+        )
+        assert ben.subject is not None and ben.subject.startswith("invented-")
+
+    def test_without_a_name_the_handle_is_the_name(
+        self, container: ServiceContainer
+    ) -> None:
+        assert container.test_data_service().person("ben", None).name == "ben"
+
+    def test_the_handle_steps_refusals_hold(
+        self, container: ServiceContainer, person: User
+    ) -> None:
+        service = container.test_data_service()
+
+        with pytest.raises(ValidationException):
+            service.person("Ben", None)
+        with pytest.raises(InvalidOperationException) as taken:
+            service.person("ada", None)
+        with pytest.raises(InvalidOperationException) as pilots:
+            service.person("agent", None)
+
+        assert taken.value.cause == "another person has it"
+        assert pilots.value.cause == "it is Pilot's"
+
+
+class TestEnvironment:
+    def test_an_environment_pilot_has_touched(
+        self, container: ServiceContainer, session: DbSession
+    ) -> None:
+        container.test_data_service().environment("example-env-2", "Example-2")
+
+        environment = session.get_one(Environment, "example-env-2")
+        assert (environment.name, environment.exempt) == ("Example-2", False)
+
+    def test_an_id_taken_is_refused(
+        self, container: ServiceContainer, environment: Environment
+    ) -> None:
+        with pytest.raises(ResourceConflictException):
+            container.test_data_service().environment(environment.id, "Again")
+
+
+@pytest.mark.usefixtures("person")
+class TestProject:
+    @pytest.mark.parametrize(
+        ("standing", "kinds"),
+        [
+            ({"state": "draft"}, []),
+            ({"state": "open"}, [TransitionKind.OPENED]),
+            (
+                {"state": "finished"},
+                [TransitionKind.OPENED, TransitionKind.FINISHED],
+            ),
+            (
+                {"state": "open", "autopilot": True},
+                [TransitionKind.OPENED, TransitionKind.AUTOPILOT_ON],
+            ),
+            ({"state": "draft", "archived": True}, [TransitionKind.ARCHIVED]),
+            (
+                {"state": "finished", "archived": True},
+                [
+                    TransitionKind.OPENED,
+                    TransitionKind.FINISHED,
+                    TransitionKind.ARCHIVED,
+                ],
+            ),
+        ],
+    )
+    def test_the_transitions_lead_to_the_standing(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        standing: dict[str, Any],
+        kinds: list[TransitionKind],
+    ) -> None:
+        ada = _user(session, "ada")
+
+        project = container.test_data_service().project(_spec(name="Made", **standing))
+
+        assert _transitions(session, project) == [(kind, ada.id) for kind in kinds]
+        assert (
+            project.state_code.value,
+            project.archived,
+            project.autopilot,
+        ) == (
+            standing["state"],
+            standing.get("archived", False),
+            standing.get("autopilot", False),
+        )
+        assert (project.slug is None) == (standing["state"] == "draft")
+
+    def test_the_members_in_order_the_first_its_creator(
+        self, container: ServiceContainer, session: DbSession
+    ) -> None:
+        service = container.test_data_service()
+        ben = service.person("ben", "Ben Example")
+        ada = _user(session, "ada")
+
+        project = service.project(_spec(members=["ben", "ada"]))
+
+        assert _members(session, project) == [ben.id, ada.id]
+        assert project.created_by_user_id == ben.id
+
+    def test_the_draft_is_titled_by_the_name(
+        self, container: ServiceContainer, session: DbSession
+    ) -> None:
+        service = container.test_data_service()
+
+        named = service.project(_spec(name="Recipe box", state="draft"))
+        unnamed = service.project(_spec(state="draft"))
+
+        assert (named.name, unnamed.name) == ("Recipe box", None)
+        assert (
+            session.scalars(
+                select(Document.published_text).where(Document.project_id == named.id)
+            ).one()
+            == "# Recipe box\n"
+        )
+
+    def test_the_plan_with_its_steps_and_notes(
+        self, container: ServiceContainer
+    ) -> None:
+        project = container.test_data_service().project(
+            _spec(
+                ticket="RB-12",
+                repo="pvginkel/RecipeBox",
+                tasks=[
+                    {"id": "scope", "title": "Agree the scope", "status": "done"},
+                    {
+                        "id": "build",
+                        "title": "Build it",
+                        "status": "in_progress",
+                        "notes": [{"id": "n1", "summary": "S", "content": "C"}],
+                    },
+                ],
+                notes=[{"id": "print", "summary": "Print", "content": "Later"}],
+            )
+        )
+        plan = _plan(container, project)
+
+        assert (plan["ticket"], plan["repo"]) == ("RB-12", "pvginkel/RecipeBox")
+        assert [
+            (task["id"], task["status"], [note["id"] for note in task["notes"]])
+            for task in plan["tasks"]
+        ] == [("scope", "done", []), ("build", "in_progress", ["n1"])]
+        assert [note["id"] for note in plan["notes"]] == ["print"]
+
+    def test_open_items_are_notices_a_session_added(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = container.test_data_service().project(
+            _spec(open_items=2, environment_id=environment.id)
+        )
+        run = session.scalars(
+            select(models.Session).where(models.Session.project_id == project.id)
+        ).one()
+
+        assert [
+            (item.kind_code, item.title, item.done_at, item.created_by_session_id)
+            for item in _items(session, project)
+        ] == [
+            ("notice", "Notice 1", None, run.id),
+            ("notice", "Notice 2", None, run.id),
+        ]
+        assert run.environment_id == environment.id
+
+    @pytest.mark.parametrize(
+        ("spec", "message"),
+        [
+            (
+                {"state": "finished", "autopilot": True},
+                "Cannot make the project because a finished project has auto pilot off",
+            ),
+            (
+                {"members": ["ada", "ada"]},
+                "Cannot make the project because a member is named twice",
+            ),
+            (
+                {"open_items": 1},
+                "Cannot make the project because its open items need a session's"
+                " environment, and no environment_id is given",
+            ),
+            (
+                {"ticket": "not a ticket"},
+                "Cannot make the project because its plan has a fault:"
+                " `ticket: not a ticket` is not a ticket id",
+            ),
+        ],
+    )
+    def test_a_spec_out_of_the_record_is_refused(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        spec: dict[str, Any],
+        message: str,
+    ) -> None:
+        with pytest.raises(ValidationException) as raised:
+            container.test_data_service().project(_spec(**spec))
+
+        assert raised.value.message == message
+
+    @pytest.mark.parametrize(
+        ("spec", "message"),
+        [
+            ({"members": ["nobody"]}, "Person nobody was not found"),
+            ({"members": ["agent"]}, "Person agent was not found"),
+            ({"environment_id": "nowhere"}, "Environment nowhere was not found"),
+        ],
+    )
+    def test_what_is_not_on_the_record_is_not_found(
+        self, container: ServiceContainer, spec: dict[str, Any], message: str
+    ) -> None:
+        with pytest.raises(RecordNotFoundException) as raised:
+            container.test_data_service().project(_spec(**spec))
+
+        assert raised.value.message == message

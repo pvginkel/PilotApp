@@ -221,6 +221,329 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "InventedEnvironmentSchema.6d6b324": {
+        "description": "An environment of the record, by its KubeCoder id and its name.",
+        "properties": {
+          "id": {
+            "description": "The KubeCoder environment id",
+            "examples": [
+              "example-env-1"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "The environment's name",
+            "examples": [
+              "Example-1"
+            ],
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "InventedEnvironmentSchema",
+        "type": "object"
+      },
+      "InventedPersonCreateSchema.6d6b324": {
+        "description": "A person put on the record as the handle step puts one, never signed in.",
+        "properties": {
+          "handle": {
+            "description": "The person's handle",
+            "examples": [
+              "ben"
+            ],
+            "title": "Handle",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The full name; the handle stands as the name when null",
+            "examples": [
+              "Ben Example"
+            ],
+            "title": "Name"
+          }
+        },
+        "required": [
+          "handle"
+        ],
+        "title": "InventedPersonCreateSchema",
+        "type": "object"
+      },
+      "InventedPersonSchema.6d6b324": {
+        "properties": {
+          "avatar_slot": {
+            "description": "The palette slot the person took",
+            "examples": [
+              2
+            ],
+            "title": "Avatar Slot",
+            "type": "integer"
+          },
+          "handle": {
+            "examples": [
+              "ben"
+            ],
+            "title": "Handle",
+            "type": "string"
+          },
+          "name": {
+            "examples": [
+              "Ben Example"
+            ],
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "handle",
+          "name",
+          "avatar_slot"
+        ],
+        "title": "InventedPersonSchema",
+        "type": "object"
+      },
+      "InventedProjectCreateSchema.6d6b324": {
+        "description": "A project in the standing given, its transitions written by its first\nmember when it was made.",
+        "properties": {
+          "archived": {
+            "default": false,
+            "title": "Archived",
+            "type": "boolean"
+          },
+          "autopilot": {
+            "default": false,
+            "description": "Auto pilot on; a finished project has it off",
+            "title": "Autopilot",
+            "type": "boolean"
+          },
+          "environment_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The environment the session adding the open items runs in",
+            "examples": [
+              "example-env-1"
+            ],
+            "title": "Environment Id"
+          },
+          "members": {
+            "description": "The members' handles, in the order they joined; the first created the project",
+            "examples": [
+              [
+                "ada",
+                "ben"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Members",
+            "type": "array"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The draft's title, the project's name; a draft without one when null",
+            "examples": [
+              "Recipe box"
+            ],
+            "title": "Name"
+          },
+          "notes": {
+            "description": "The plan's own open notes",
+            "items": {
+              "$ref": "#/components/schemas/InventedProjectCreateSchema.6d6b324.InventedNoteSchema"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "open_items": {
+            "default": 0,
+            "description": "How many open notices a session of the project adds",
+            "minimum": 0,
+            "title": "Open Items",
+            "type": "integer"
+          },
+          "repo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The plan's repository",
+            "examples": [
+              "pvginkel/RecipeBox"
+            ],
+            "title": "Repo"
+          },
+          "state": {
+            "$ref": "#/components/schemas/InventedProjectCreateSchema.6d6b324.ProjectState",
+            "default": "open"
+          },
+          "tasks": {
+            "description": "The plan's steps, in order",
+            "items": {
+              "$ref": "#/components/schemas/InventedProjectCreateSchema.6d6b324.InventedTaskSchema"
+            },
+            "title": "Tasks",
+            "type": "array"
+          },
+          "ticket": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The plan's ticket id",
+            "examples": [
+              "RB-12"
+            ],
+            "title": "Ticket"
+          }
+        },
+        "required": [
+          "members"
+        ],
+        "title": "InventedProjectCreateSchema",
+        "type": "object"
+      },
+      "InventedProjectCreateSchema.6d6b324.InventedNoteSchema": {
+        "description": "An open note on a step or on the plan.",
+        "properties": {
+          "content": {
+            "examples": [
+              "Ben chose one column."
+            ],
+            "title": "Content",
+            "type": "string"
+          },
+          "id": {
+            "examples": [
+              "card-layout"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "summary": {
+            "examples": [
+              "Cards are one column"
+            ],
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "summary",
+          "content"
+        ],
+        "title": "InventedNoteSchema",
+        "type": "object"
+      },
+      "InventedProjectCreateSchema.6d6b324.InventedTaskSchema": {
+        "description": "A step of the plan.",
+        "properties": {
+          "id": {
+            "examples": [
+              "build"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "notes": {
+            "items": {
+              "$ref": "#/components/schemas/InventedProjectCreateSchema.6d6b324.InventedNoteSchema"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/InventedProjectCreateSchema.6d6b324.TaskStatus"
+          },
+          "title": {
+            "examples": [
+              "Build the recipe card page"
+            ],
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "status"
+        ],
+        "title": "InventedTaskSchema",
+        "type": "object"
+      },
+      "InventedProjectCreateSchema.6d6b324.ProjectState": {
+        "enum": [
+          "draft",
+          "open",
+          "finished"
+        ],
+        "title": "ProjectState",
+        "type": "string"
+      },
+      "InventedProjectCreateSchema.6d6b324.TaskStatus": {
+        "enum": [
+          "pending",
+          "in_progress",
+          "done"
+        ],
+        "title": "TaskStatus",
+        "type": "string"
+      },
+      "InventedProjectSchema.6d6b324": {
+        "properties": {
+          "id": {
+            "description": "The project's id",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "InventedProjectSchema",
+        "type": "object"
+      },
       "LinksResponseSchema.d9d9a05": {
         "description": "The deployment's link settings and the record's environments.",
         "properties": {
@@ -307,6 +630,468 @@
           "name"
         ],
         "title": "EnvironmentNameSchema",
+        "type": "object"
+      },
+      "ProjectHeadSchema.e86ccd6": {
+        "description": "What a project's head, its popovers and its menu read.",
+        "properties": {
+          "archived": {
+            "description": "Whether the project is archived",
+            "title": "Archived",
+            "type": "boolean"
+          },
+          "autopilot": {
+            "description": "Whether auto pilot is on",
+            "title": "Autopilot",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "The project's id",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "member": {
+            "description": "Whether the signed-in person is a member of the project",
+            "title": "Member",
+            "type": "boolean"
+          },
+          "members": {
+            "description": "The members, in the order they joined",
+            "items": {
+              "$ref": "#/components/schemas/ProjectHeadSchema.e86ccd6.MemberSchema"
+            },
+            "title": "Members",
+            "type": "array"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The draft's title; null while the draft has none",
+            "examples": [
+              "Recipe box"
+            ],
+            "title": "Name"
+          },
+          "notes": {
+            "description": "The plan's own open notes",
+            "items": {
+              "$ref": "#/components/schemas/ProjectHeadSchema.e86ccd6.PlanNoteSchema"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "open_items": {
+            "description": "The project's open items, the opening not counted: those Finish closes unanswered",
+            "examples": [
+              3
+            ],
+            "title": "Open Items",
+            "type": "integer"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/ProjectHeadSchema.e86ccd6.PlanProgressSchema"
+          },
+          "repo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The repository, from the plan; null when it has none",
+            "examples": [
+              "pvginkel/RecipeBox"
+            ],
+            "title": "Repo"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ProjectHeadSchema.e86ccd6.ProjectState",
+            "description": "The project's state"
+          },
+          "tasks": {
+            "description": "The plan's steps, in order",
+            "items": {
+              "$ref": "#/components/schemas/ProjectHeadSchema.e86ccd6.PlanTaskSchema"
+            },
+            "title": "Tasks",
+            "type": "array"
+          },
+          "ticket": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The ticket id, from the plan; null when it has none",
+            "examples": [
+              "RB-12"
+            ],
+            "title": "Ticket"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "ticket",
+          "repo",
+          "state",
+          "archived",
+          "autopilot",
+          "member",
+          "members",
+          "progress",
+          "tasks",
+          "notes",
+          "open_items"
+        ],
+        "title": "ProjectHeadSchema",
+        "type": "object"
+      },
+      "ProjectHeadSchema.e86ccd6.MemberSchema": {
+        "description": "A member, as an avatar draws them (F106, F132).",
+        "properties": {
+          "avatar_slot": {
+            "description": "The avatar's palette slot, from 1",
+            "examples": [
+              1
+            ],
+            "title": "Avatar Slot",
+            "type": "integer"
+          },
+          "handle": {
+            "description": "The member's handle",
+            "examples": [
+              "ada"
+            ],
+            "title": "Handle",
+            "type": "string"
+          },
+          "initials": {
+            "description": "The avatar's initials",
+            "examples": [
+              "AE"
+            ],
+            "title": "Initials",
+            "type": "string"
+          },
+          "name": {
+            "description": "The full name, the avatar's tooltip",
+            "examples": [
+              "Ada Example"
+            ],
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "handle",
+          "name",
+          "initials",
+          "avatar_slot"
+        ],
+        "title": "MemberSchema",
+        "type": "object"
+      },
+      "ProjectHeadSchema.e86ccd6.PlanNoteSchema": {
+        "description": "An open note the agent keeps on a step or on the plan.",
+        "properties": {
+          "content": {
+            "examples": [
+              "Ben chose one column, the ingredients above the method."
+            ],
+            "title": "Content",
+            "type": "string"
+          },
+          "id": {
+            "description": "The note's id in `plan.json`",
+            "examples": [
+              "card-layout"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "summary": {
+            "examples": [
+              "Cards are one column"
+            ],
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "summary",
+          "content"
+        ],
+        "title": "PlanNoteSchema",
+        "type": "object"
+      },
+      "ProjectHeadSchema.e86ccd6.PlanProgressSchema": {
+        "description": "Where the plan stands, as the head's step and a tab's status line read it.",
+        "properties": {
+          "done": {
+            "description": "The plan's steps done",
+            "examples": [
+              2
+            ],
+            "title": "Done",
+            "type": "integer"
+          },
+          "in_progress": {
+            "description": "The titles of the steps in progress, in the plan's order",
+            "examples": [
+              [
+                "Build the recipe card page"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "In Progress",
+            "type": "array"
+          },
+          "total": {
+            "description": "The plan's steps, removed ones not counted",
+            "examples": [
+              5
+            ],
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "done",
+          "total",
+          "in_progress"
+        ],
+        "title": "PlanProgressSchema",
+        "type": "object"
+      },
+      "ProjectHeadSchema.e86ccd6.PlanTaskSchema": {
+        "description": "A step of the plan, with its open notes.",
+        "properties": {
+          "id": {
+            "description": "The step's id in `plan.json`",
+            "examples": [
+              "build"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "notes": {
+            "description": "The step's open notes",
+            "items": {
+              "$ref": "#/components/schemas/ProjectHeadSchema.e86ccd6.PlanNoteSchema"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ProjectHeadSchema.e86ccd6.TaskStatus",
+            "description": "The step's status"
+          },
+          "title": {
+            "examples": [
+              "Build the recipe card page"
+            ],
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "status",
+          "notes"
+        ],
+        "title": "PlanTaskSchema",
+        "type": "object"
+      },
+      "ProjectHeadSchema.e86ccd6.ProjectState": {
+        "enum": [
+          "draft",
+          "open",
+          "finished"
+        ],
+        "title": "ProjectState",
+        "type": "string"
+      },
+      "ProjectHeadSchema.e86ccd6.TaskStatus": {
+        "enum": [
+          "pending",
+          "in_progress",
+          "done"
+        ],
+        "title": "TaskStatus",
+        "type": "string"
+      },
+      "ProjectListQuerySchema.e86ccd6": {
+        "description": "Which of the two lists: the project list, or the archived projects.",
+        "properties": {
+          "archived": {
+            "default": false,
+            "description": "True for the archived projects; false for every other",
+            "title": "Archived",
+            "type": "boolean"
+          }
+        },
+        "title": "ProjectListQuerySchema",
+        "type": "object"
+      },
+      "ProjectListResponseSchema.e86ccd6": {
+        "description": "The projects of one list, in the order they were created.",
+        "properties": {
+          "projects": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectListResponseSchema.e86ccd6.ProjectTabSchema"
+            },
+            "title": "Projects",
+            "type": "array"
+          }
+        },
+        "required": [
+          "projects"
+        ],
+        "title": "ProjectListResponseSchema",
+        "type": "object"
+      },
+      "ProjectListResponseSchema.e86ccd6.PlanProgressSchema": {
+        "description": "Where the plan stands, as the head's step and a tab's status line read it.",
+        "properties": {
+          "done": {
+            "description": "The plan's steps done",
+            "examples": [
+              2
+            ],
+            "title": "Done",
+            "type": "integer"
+          },
+          "in_progress": {
+            "description": "The titles of the steps in progress, in the plan's order",
+            "examples": [
+              [
+                "Build the recipe card page"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "In Progress",
+            "type": "array"
+          },
+          "total": {
+            "description": "The plan's steps, removed ones not counted",
+            "examples": [
+              5
+            ],
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "done",
+          "total",
+          "in_progress"
+        ],
+        "title": "PlanProgressSchema",
+        "type": "object"
+      },
+      "ProjectListResponseSchema.e86ccd6.ProjectState": {
+        "enum": [
+          "draft",
+          "open",
+          "finished"
+        ],
+        "title": "ProjectState",
+        "type": "string"
+      },
+      "ProjectListResponseSchema.e86ccd6.ProjectTabSchema": {
+        "description": "What a project's tab in the list shows.",
+        "properties": {
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the project finished; null unless its state is finished",
+            "title": "Finished At"
+          },
+          "id": {
+            "description": "The project's id",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "member": {
+            "description": "Whether the signed-in person is a member of the project",
+            "title": "Member",
+            "type": "boolean"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The draft's title; null while the draft has none",
+            "examples": [
+              "Recipe box"
+            ],
+            "title": "Name"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/ProjectListResponseSchema.e86ccd6.PlanProgressSchema"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ProjectListResponseSchema.e86ccd6.ProjectState",
+            "description": "The project's state"
+          },
+          "ticket": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The ticket id, from the plan; null when it has none",
+            "examples": [
+              "RB-12"
+            ],
+            "title": "Ticket"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "ticket",
+          "state",
+          "finished_at",
+          "member",
+          "progress"
+        ],
+        "title": "ProjectTabSchema",
         "type": "object"
       },
       "ReadyzResponse.d817ae2": {
@@ -1585,6 +2370,154 @@
         "x-required-role": "editor"
       }
     },
+    "/api/projects": {
+      "get": {
+        "description": "Returns:     200: The projects, in the order they were created     400: `archived` is not a boolean     401: No one is signed in     403: The caller lacks the editor role",
+        "operationId": "get__api_projects",
+        "parameters": [
+          {
+            "description": "True for the archived projects; false for every other",
+            "in": "query",
+            "name": "archived",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "True for the archived projects; false for every other",
+              "title": "Archived",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectListResponseSchema.e86ccd6"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read the project list's tabs, or with `archived` the archived projects'.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/projects/{project_id}": {
+      "get": {
+        "description": "Returns:     200: The project's head     401: No one is signed in     403: The caller lacks the editor role     404: No project has the id",
+        "operationId": "get__api_projects_{project_id}",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectHeadSchema.e86ccd6"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read a project's head: its standing, its members and its plan.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
     "/api/sse/stream": {
       "get": {
         "description": "Accepted only for a caller the API would serve a GET, and refused before the connection is registered, so a refused stream never receives an event and never counts in the connection metrics.\n\nQuery Parameters:     request_id: The browser's stream ID; a new stream with the same one         replaces the old\n\nReturns:     200 ``text/event-stream``: ``ready`` and the events, or ``rejected``",
@@ -2199,6 +3132,63 @@
         "x-required-role": "editor"
       }
     },
+    "/api/testing/environments": {
+      "post": {
+        "description": "Returns:     201: The environment     400: The id or the name is missing     409: An environment has the id",
+        "operationId": "post__api_testing_environments",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventedEnvironmentSchema.6d6b324"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventedEnvironmentSchema.6d6b324"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Put an environment Pilot has touched on the record.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
     "/api/testing/logs/stream": {
       "get": {
         "description": "Streams logs from all loggers at INFO level and above. Each log entry is formatted as structured JSON with correlation ID when available.\n\nEvent Types:     - log: Application log entries     - connection_open: Sent when client connects     - heartbeat: Sent every 30 seconds for keepalive",
@@ -2211,6 +3201,130 @@
           }
         ],
         "summary": "SSE endpoint for streaming backend application logs in real-time.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/people": {
+      "post": {
+        "description": "Returns:     201: The person, with the avatar slot they took     400: The handle is not lower-case letters, digits and hyphens     409: The handle is Pilot's or another person's",
+        "operationId": "post__api_testing_people",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventedPersonCreateSchema.6d6b324"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventedPersonSchema.6d6b324"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Put a person on the record as the handle step does, under a subject no one signs in with.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/projects": {
+      "post": {
+        "description": "Returns:     201: The project's id     400: A finished project with auto pilot on, a member named twice,         open items without an environment, or a plan with a fault     404: A member is no person, or no environment has the id     409: The name makes a draft text with a fault",
+        "operationId": "post__api_testing_projects",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventedProjectCreateSchema.6d6b324"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventedProjectSchema.6d6b324"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Make a project in the standing given, made now by its first member.",
         "tags": [],
         "x-required-role": "editor"
       }
