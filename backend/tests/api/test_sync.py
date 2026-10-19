@@ -3,22 +3,39 @@ store's sidecar is written against, pinned beside the protocol's version."""
 
 import json
 import logging
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 import pytest
 from dependency_injector import providers
 from flask import Flask
 from flask.testing import FlaskClient
+from prometheus_client.metrics import MetricWrapperBase
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
+from werkzeug.test import TestResponse
 
 from app import models
 from app.database import scoped_session
-from app.engine.bus import ErrorsResolved
+from app.engine.bus import (
+    DocumentModified,
+    EngineEvent,
+    ErrorsResolved,
+    ManifestChanged,
+    TreeHashMoved,
+)
 from app.engine.paths import sha256_hex
 from app.models import Document, Environment, Project, SaveError, User
 from app.models.reference import ErrorKind, ProjectState
 from app.services.container import ServiceContainer
 from app.services.sync_service import SYNC_PROTOCOL_MAX, SYNC_PROTOCOL_MIN
+from app.services.sync_stream_service import (
+    STREAM_CONNECTED,
+    STREAM_CONNECTS_TOTAL,
+    SyncStreamService,
+)
+from app.utils.lifecycle_coordinator import LifecycleCoordinator
 from tests.support.fake_sidecar import (
     STORE_ENVIRONMENT_ID,
     STRAY,
@@ -75,13 +92,69 @@ COMPACT_PLAN = json.dumps(
 
 HASH = "a" * 64
 
+EVENTS = "/api/sync/events"
+
 ROUTES = [
     ("PUT", "/api/sync/files/reference.json"),
     ("GET", "/api/sync/files/reference.json"),
     ("POST", "/api/sync/manifest"),
+    ("GET", EVENTS),
 ]
 """Each sync route, at a path that resolves; `_call`'s body is valid for
 each."""
+
+HEARTBEAT = ": heartbeat\n\n"
+
+MANIFEST = "event: manifest\ndata: {}\n\n"
+
+
+def _hello(manifest_hash: str) -> str:
+    return (
+        'event: hello\ndata: {"protocol": {"min": 1, "max": 1}, '
+        f'"manifest_hash": "{manifest_hash}"}}\n\n'
+    )
+
+
+def _change(path: str, hash: str) -> str:
+    return f'event: change\ndata: {{"path": "{path}", "hash": "{hash}"}}\n\n'
+
+
+@contextmanager
+def _stream(client: FlaskClient) -> Iterator[Iterator[str]]:
+    """The change stream as the sidecar opens it, a frame at a time; leaving
+    the block is the sidecar going."""
+    response = client.get(EVENTS, headers=sync_headers(), buffered=False)
+    assert response.status_code == 200
+    assert response.mimetype == "text/event-stream"
+    assert response.headers["Cache-Control"] == "no-cache"
+    try:
+        yield (chunk.decode() for chunk in response.response)
+    finally:
+        response.close()
+
+
+def _sample(metric: MetricWrapperBase, name: str) -> float:
+    for family in metric.collect():
+        for sample in family.samples:
+            if sample.name == name:
+                return sample.value
+    return 0.0
+
+
+def _stream_counts() -> tuple[float, float]:
+    return (
+        _sample(STREAM_CONNECTS_TOTAL, "pilot_sync_stream_connects_total"),
+        _sample(STREAM_CONNECTED, "pilot_sync_stream_connected"),
+    )
+
+
+def _own_streams(
+    container: ServiceContainer, coordinator: LifecycleCoordinator, **options: int
+) -> None:
+    """The stream route's streams, for this test, on a service of their own
+    whose shutdown is not the app's."""
+    streams = SyncStreamService(container.engine_bus(), coordinator, **options)
+    container.sync_stream_service.override(providers.Object(streams))
 
 
 def _pilot_headers(response: object) -> dict[str, str]:
@@ -97,7 +170,7 @@ def _configure(container: ServiceContainer, **changes: object) -> None:
 
 def _call(
     client: FlaskClient, method: str, url: str, headers: dict[str, str]
-) -> object:
+) -> TestResponse:
     return client.open(
         url,
         method=method,
@@ -268,7 +341,8 @@ class TestSyncGate:
     def test_the_first_call_through_makes_the_stores_environment(
         self, session: DbSession, client: FlaskClient, method: str, url: str
     ) -> None:
-        assert _call(client, method, url, sync_headers()).status_code == 200
+        with _call(client, method, url, sync_headers()) as response:
+            assert response.status_code == 200
 
         store = session.get_one(Environment, STORE_ENVIRONMENT_ID)
         assert (store.name, store.exempt) == (STORE_ENVIRONMENT_ID, False)
@@ -767,6 +841,7 @@ class TestManifestSequences:
         container: ServiceContainer,
         fake_sidecar: FakeSidecar,
         project: Project,
+        engine_events: list[EngineEvent],
     ) -> None:
         path = f"draft-{project.number}/plan.json"
         _bear_draft(container, project)
@@ -779,7 +854,7 @@ class TestManifestSequences:
         assert [entry["path"] for entry in answer["write_down"]] == [path]
         assert fake_sidecar.text(path) == rendering.text
         assert not container.tree_service().held_path(path)
-        assert fake_sidecar.events[-1] == ErrorsResolved(project.id, path)
+        assert engine_events[-1] == ErrorsResolved(project.id, path)
         _assert_in_step(container, fake_sidecar)
 
     def test_an_overflow_sends_up_every_change_and_reconciles(
@@ -806,4 +881,204 @@ class TestManifestSequences:
             f"draft-{project.number}/timeline.json"
         ]
         assert answer["send_up"] == []
+        _assert_in_step(container, fake_sidecar)
+
+
+class TestEvents:
+    """`GET /api/sync/events` (design 1 §5.4)."""
+
+    def test_hello_comes_first_with_the_range_and_the_manifest_hash(
+        self, container: ServiceContainer, client: FlaskClient, project: Project
+    ) -> None:
+        _bear_draft(container, project)
+        manifest_hash = container.sync_service().manifest_hash()
+
+        with _stream(client) as frames:
+            assert next(frames) == _hello(manifest_hash)
+            assert next(frames) == HEARTBEAT
+
+    def test_a_change_follows_every_tree_hash_moved_once_committed(
+        self,
+        container: ServiceContainer,
+        client: FlaskClient,
+        project: Project,
+        project_session: models.Session,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        with _stream(client) as frames:
+            next(frames)
+            path = _bear_item(container, project, project_session, ANSWERED)
+            moved = [
+                event for event in engine_events if isinstance(event, TreeHashMoved)
+            ]
+
+            assert [event.path for event in moved] == [
+                path,
+                f"draft-{project.number}/timeline.json",
+            ]
+            assert [next(frames) for _ in moved] == [
+                _change(event.path, event.hash) for event in moved
+            ]
+            assert next(frames) == HEARTBEAT
+
+    def test_a_rolled_back_transaction_sends_nothing(
+        self, container: ServiceContainer, client: FlaskClient
+    ) -> None:
+        with _stream(client) as frames:
+            next(frames)
+            with pytest.raises(RuntimeError), scoped_session(container):
+                container.engine_bus().emit(TreeHashMoved("draft-1/project.md", HASH))
+                raise RuntimeError("the transaction fails")
+
+            assert next(frames) == HEARTBEAT
+
+    def test_the_manifest_event_is_a_manifest(
+        self, container: ServiceContainer, client: FlaskClient
+    ) -> None:
+        with _stream(client) as frames:
+            next(frames)
+            with scoped_session(container):
+                container.engine_bus().emit(ManifestChanged())
+
+            assert next(frames) == MANIFEST
+            assert next(frames) == HEARTBEAT
+
+    def test_the_document_events_are_not_the_streams(
+        self, container: ServiceContainer, client: FlaskClient, project: Project
+    ) -> None:
+        with _stream(client) as frames:
+            next(frames)
+            with scoped_session(container):
+                container.engine_bus().emit(
+                    DocumentModified(project.id, "draft-1/project.md")
+                )
+
+            assert next(frames) == HEARTBEAT
+
+    def test_an_idle_stream_writes_a_heartbeat_comment(
+        self, container: ServiceContainer, client: FlaskClient
+    ) -> None:
+        heartbeat = container.app_config().sync_heartbeat_seconds
+
+        with _stream(client) as frames:
+            next(frames)
+            started = time.perf_counter()
+
+            assert next(frames) == HEARTBEAT
+            assert time.perf_counter() - started >= heartbeat
+            assert next(frames) == HEARTBEAT
+
+    def test_the_stream_ends_on_prepare_shutdown_and_lets_no_new_one_in(
+        self, container: ServiceContainer, client: FlaskClient
+    ) -> None:
+        coordinator = LifecycleCoordinator(graceful_shutdown_timeout=1)
+        _own_streams(container, coordinator)
+
+        with _stream(client) as frames:
+            assert next(frames).startswith("event: hello\n")
+            coordinator.shutdown()
+
+            assert next(frames, None) is None
+        with _stream(client) as frames:
+            assert next(frames, None) is None
+
+    def test_a_stream_that_falls_behind_ends_and_never_blocks_the_commit(
+        self, container: ServiceContainer, client: FlaskClient
+    ) -> None:
+        coordinator = LifecycleCoordinator(graceful_shutdown_timeout=1)
+        _own_streams(container, coordinator, queue_max_events=2)
+
+        with _stream(client) as frames:
+            next(frames)
+            with scoped_session(container):
+                for number in range(3):
+                    container.engine_bus().emit(
+                        TreeHashMoved(f"draft-{number + 1}/project.md", HASH)
+                    )
+
+            assert next(frames, None) is None
+
+    def test_connects_and_the_open_stream_are_observed(
+        self, client: FlaskClient
+    ) -> None:
+        connects, connected = _stream_counts()
+
+        with _stream(client) as frames:
+            next(frames)
+            assert _stream_counts() == (connects + 1, connected + 1)
+
+        assert _stream_counts() == (connects + 1, connected)
+
+    def test_a_refused_stream_is_the_status_itself(self, client: FlaskClient) -> None:
+        headers = {**sync_headers()}
+        del headers["Authorization"]
+        connects = _stream_counts()
+
+        response = client.get(EVENTS, headers=headers)
+
+        assert response.status_code == 401
+        assert response.mimetype == "application/json"
+        assert _stream_counts() == connects
+
+
+class TestEventsSequences:
+    """Design 1 §5.8, the change stream through the fake sidecar."""
+
+    def test_a_connect_takes_hello_then_reconciles(
+        self,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+    ) -> None:
+        _bear_draft(container, project)
+        manifest_hash = container.sync_service().manifest_hash()
+
+        fake_sidecar.connect()
+
+        assert fake_sidecar.hello == {
+            "protocol": {"min": SYNC_PROTOCOL_MIN, "max": SYNC_PROTOCOL_MAX},
+            "manifest_hash": manifest_hash,
+        }
+        assert fake_sidecar.drain() == []
+        _assert_in_step(container, fake_sidecar)
+
+    def test_the_sidecars_own_write_echoes_back_ignored(
+        self,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+    ) -> None:
+        draft = _bear_draft(container, project)
+        fake_sidecar.connect()
+
+        fake_sidecar.save(draft, RETITLED)
+
+        assert fake_sidecar.drain() == [f"draft-{project.number}/timeline.json"]
+        _assert_in_step(container, fake_sidecar)
+
+    def test_a_manifest_event_reconciles(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        client: FlaskClient,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+        person: User,
+    ) -> None:
+        other = Project(created_by_user_id=person.id)
+        session.add(other)
+        session.flush()
+        _bear_draft(container, project)
+        _bear_draft(container, other)
+        fake_sidecar.connect()
+        fake_sidecar.drain()
+        with scoped_session(container):
+            other.archived = True
+        assert fake_sidecar.drain() == []
+
+        assert client.post("/api/testing/sync/manifest").status_code == 204
+        fake_sidecar.drain()
+
+        archived = f"draft-{other.number}/"
+        assert not [path for path in fake_sidecar.tree if path.startswith(archived)]
         _assert_in_step(container, fake_sidecar)

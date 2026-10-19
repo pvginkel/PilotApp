@@ -1,7 +1,8 @@
 """The store's sync (design 1 §5): the gate every sync call passes, the file
-put and get, and the manifest reconcile, moving the engine's values over the
-wire."""
+put and get, the manifest reconcile and its hash, moving the engine's values
+over the wire."""
 
+import hashlib
 import hmac
 import logging
 import re
@@ -149,6 +150,18 @@ class SyncService:
         """The bytes `path`, from the tree's root, must hold, and their tree
         hash."""
         return self.tree_service.read(path)
+
+    def manifest_hash(self) -> str:
+        """The hash of the manifest as it stands, which the change stream's
+        `hello` carries: the sha256 of its entries in path order, each its
+        path, its tree hash and `1` for read-only or `0`, separated by NUL
+        bytes and ended by a newline, in UTF-8."""
+        digest = hashlib.sha256()
+        for entry in self.tree_service.manifest():
+            digest.update(
+                f"{entry.path}\0{entry.hash}\0{int(entry.readonly)}\n".encode()
+            )
+        return digest.hexdigest()
 
     def reconcile(self, tree: dict[str, str], shadow: dict[str, str]) -> Reconciled:
         """The manifest, and what the sidecar does to its tree to match it,

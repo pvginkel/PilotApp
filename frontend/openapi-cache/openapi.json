@@ -782,6 +782,70 @@
         "title": "TestSessionResponseSchema",
         "type": "object"
       },
+      "TestingSyncAnswerRequestSchema.05888e5": {
+        "description": "A person's answer to a block of a document of the store's tree.",
+        "properties": {
+          "answer": {
+            "description": "An option's label, or free words",
+            "examples": [
+              "Gas"
+            ],
+            "title": "Answer",
+            "type": "string"
+          },
+          "block": {
+            "description": "The block's id",
+            "examples": [
+              "Q1"
+            ],
+            "title": "Block",
+            "type": "string"
+          },
+          "path": {
+            "description": "The document's path, from the tree's root",
+            "examples": [
+              "recipe-box/items/3-which-oven.md"
+            ],
+            "title": "Path",
+            "type": "string"
+          },
+          "user": {
+            "description": "The handle of the person who answers",
+            "title": "User",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "block",
+          "answer",
+          "user"
+        ],
+        "title": "TestingSyncAnswerRequestSchema",
+        "type": "object"
+      },
+      "TestingSyncAnswerResponseSchema.05888e5": {
+        "description": "The document's path and the tree hash it holds once answered.",
+        "properties": {
+          "hash": {
+            "description": "The path's tree hash",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Hash",
+            "type": "string"
+          },
+          "path": {
+            "description": "The document's path, from the tree's root",
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "hash"
+        ],
+        "title": "TestingSyncAnswerResponseSchema",
+        "type": "object"
+      },
       "UiSetupResponseSchema.630d3b9": {
         "description": "What the frontend needs to know about the deployment it runs against.",
         "properties": {
@@ -997,6 +1061,16 @@
         "parameters": [],
         "responses": {},
         "summary": "The browser's SSE stream.",
+        "tags": []
+      }
+    },
+    "/api/sync/events": {
+      "get": {
+        "description": "`hello` first, `{protocol: {min, max}, manifest_hash}`; then a `change`, `{path, hash}`, for every tree hash that moved once its transaction has committed, and a `manifest`, `{}`, whenever the set of syncing projects changed; a heartbeat comment after `SYNC_HEARTBEAT_SECONDS` idle. No `id:` field: the sidecar's hashes are its cursor. Ends on shutdown, and when the stream falls too far behind. Refused with 401, 403 or 426 as every sync call is.",
+        "operationId": "get__api_sync_events",
+        "parameters": [],
+        "responses": {},
+        "summary": "The store's change stream (design 1 §5.4): `text/event-stream`.",
         "tags": []
       }
     },
@@ -1650,6 +1724,91 @@
         "summary": "Send a fake task event to a specific SSE connection for testing.",
         "tags": [],
         "x-required-role": "editor"
+      }
+    },
+    "/api/testing/sync/answer": {
+      "post": {
+        "description": "Returns:     200: The document's path and its tree hash once answered     404: No document at the path, or no user with the handle     409: The record refuses the answer",
+        "operationId": "post__api_testing_sync_answer",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestingSyncAnswerRequestSchema.05888e5"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestingSyncAnswerResponseSchema.05888e5"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "A person's answer to a block of a document, as the UI gives it: the record writes the file, and the store's change stream says so once committed.",
+        "tags": []
+      }
+    },
+    "/api/testing/sync/manifest": {
+      "post": {
+        "description": "",
+        "operationId": "post__api_testing_sync_manifest",
+        "parameters": [],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "summary": "Raise the `manifest` event, as a change to the set of syncing projects does: every change stream carries a `manifest` once committed.",
+        "tags": []
       }
     },
     "/api/testing/tasks/start": {

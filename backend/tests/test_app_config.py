@@ -32,6 +32,7 @@ class TestAppSettings:
 
         assert (settings.sync_token, settings.store_environment_id) == ("", "")
         assert settings.sync_put_max_bytes == 2 * 1024 * 1024
+        assert settings.sync_heartbeat_seconds == 15.0
 
     def test_load_reads_the_sync_from_the_environment(self) -> None:
         settings = AppSettings.load(
@@ -39,6 +40,7 @@ class TestAppSettings:
                 SYNC_TOKEN="example-token",
                 STORE_ENVIRONMENT_ID="example-env-1",
                 SYNC_PUT_MAX_BYTES=1024,
+                SYNC_HEARTBEAT_SECONDS=2.5,
             )
         )
 
@@ -46,11 +48,16 @@ class TestAppSettings:
             settings.sync_token,
             settings.store_environment_id,
             settings.sync_put_max_bytes,
-        ) == ("example-token", "example-env-1", 1024)
+            settings.sync_heartbeat_seconds,
+        ) == ("example-token", "example-env-1", 1024, 2.5)
 
     def test_load_refuses_a_put_limit_below_one_byte(self) -> None:
         with pytest.raises(ValueError):
             AppEnvironment(SYNC_PUT_MAX_BYTES=0)
+
+    def test_load_refuses_a_heartbeat_that_is_not_positive(self) -> None:
+        with pytest.raises(ValueError):
+            AppEnvironment(SYNC_HEARTBEAT_SECONDS=0)
 
     def test_the_settings_are_logged_with_the_token_masked(self) -> None:
         settings = AppSettings(
@@ -62,4 +69,5 @@ class TestAppSettings:
             "sync_token": "***",
             "store_environment_id": "'example-env-1'",
             "sync_put_max_bytes": "2097152",
+            "sync_heartbeat_seconds": "15.0",
         }

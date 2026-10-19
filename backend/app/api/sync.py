@@ -1,5 +1,5 @@
 """The store sidecar's sync routes (design 1 §5.1): the store's tree, path by
-path and whole, under the store's bearer.
+path and whole, and its change stream, under the store's bearer.
 
 Registered on the app, not on `api_bp`, so the OIDC gate never sees them:
 the bearer is the store, and every call passes the gate below first.
@@ -7,6 +7,8 @@ the bearer is the store, and every call passes the gate below first.
 
 import logging
 import re
+from collections.abc import Generator
+from queue import Empty
 from typing import Any
 
 from dependency_injector.wiring import Provide, inject
@@ -14,25 +16,32 @@ from flask import Blueprint, Response, g, jsonify, request
 from spectree import Response as SpectreeResponse
 
 from app.app_config import AppSettings
+from app.engine.bus import TreeHashMoved
 from app.engine.tree import ManifestEntry
 from app.exceptions import SyncProtocolUnsupportedException, ValidationException
 from app.schemas.common import ApiErrorResponseSchema
 from app.schemas.sync_schema import (
+    SyncChangeSchema,
+    SyncHelloSchema,
     SyncManifestEntrySchema,
     SyncManifestRequestSchema,
     SyncManifestResponseSchema,
     SyncProtocolRangeSchema,
 )
 from app.services.container import ServiceContainer
-from app.services.sync_service import SyncService
+from app.services.sync_service import SYNC_PROTOCOL_MAX, SYNC_PROTOCOL_MIN, SyncService
+from app.services.sync_stream_service import SyncEvent, SyncStream, SyncStreamService
 from app.utils.auth import public
 from app.utils.spectree_config import api
+from app.utils.sse_utils import create_sse_response, format_sse_event
 
 logger = logging.getLogger(__name__)
 
 sync_bp = Blueprint("sync", __name__, url_prefix="/api/sync")
 
 _HASH = re.compile(r"[0-9a-f]{64}")
+
+HEARTBEAT_FRAME = ": heartbeat\n\n"
 
 
 @sync_bp.before_request
@@ -162,6 +171,78 @@ def reconcile(
         delete=answer.delete,
     )
     return jsonify(response.model_dump()), 200
+
+
+@sync_bp.route("/events", methods=["GET"])
+@public
+# No `@api.validate`: its response check reads the whole body, which a stream
+# never ends.
+@inject
+def events(
+    sync_service: SyncService = Provide[ServiceContainer.sync_service],
+    sync_stream_service: SyncStreamService = Provide[
+        ServiceContainer.sync_stream_service
+    ],
+    app_settings: AppSettings = Provide[ServiceContainer.app_config],
+) -> Response:
+    """The store's change stream (design 1 §5.4): `text/event-stream`.
+
+    `hello` first, `{protocol: {min, max}, manifest_hash}`; then a `change`,
+    `{path, hash}`, for every tree hash that moved once its transaction has
+    committed, and a `manifest`, `{}`, whenever the set of syncing projects
+    changed; a heartbeat comment after `SYNC_HEARTBEAT_SECONDS` idle. No
+    `id:` field: the sidecar's hashes are its cursor. Ends on shutdown, and
+    when the stream falls too far behind. Refused with 401, 403 or 426 as
+    every sync call is.
+    """
+    hello = SyncHelloSchema(
+        protocol=SyncProtocolRangeSchema(min=SYNC_PROTOCOL_MIN, max=SYNC_PROTOCOL_MAX),
+        manifest_hash=sync_service.manifest_hash(),
+    )
+    stream = sync_stream_service.open()
+    response = create_sse_response(
+        _frames(
+            sync_stream_service,
+            stream,
+            format_sse_event("hello", hello.model_dump()),
+            app_settings.sync_heartbeat_seconds,
+        )
+    )
+    # A body that never starts never runs the generator's `finally`.
+    response.call_on_close(lambda: sync_stream_service.close(stream))
+    return response
+
+
+def _frames(
+    sync_stream_service: SyncStreamService,
+    stream: SyncStream,
+    hello: str,
+    heartbeat_seconds: float,
+) -> Generator[str]:
+    """The stream's body. It runs once Flask has popped the request context,
+    so it touches the stream alone: no request, session or container."""
+    try:
+        if stream.ended:
+            return
+        yield hello
+        while True:
+            try:
+                event = stream.next_event(heartbeat_seconds)
+            except Empty:
+                yield HEARTBEAT_FRAME
+                continue
+            if event is None:
+                return
+            yield _frame(event)
+    finally:
+        sync_stream_service.close(stream)
+
+
+def _frame(event: SyncEvent) -> str:
+    if isinstance(event, TreeHashMoved):
+        change = SyncChangeSchema(path=event.path, hash=event.hash)
+        return format_sse_event("change", change.model_dump())
+    return format_sse_event("manifest", {})
 
 
 def _entry(entry: ManifestEntry) -> SyncManifestEntrySchema:

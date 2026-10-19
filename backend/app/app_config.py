@@ -45,6 +45,11 @@ class AppEnvironment(BaseSettings):
         gt=0,
         description="Largest file a sync PUT takes, in bytes; a larger one gets 413",
     )
+    SYNC_HEARTBEAT_SECONDS: float = Field(
+        default=15.0,
+        gt=0,
+        description="Seconds the sync change stream stays idle before a heartbeat comment",
+    )
 
 
 class AppSettings(BaseModel):
@@ -70,6 +75,10 @@ class AppSettings(BaseModel):
     sync_put_max_bytes: int = 2 * 1024 * 1024
     """The largest body a sync PUT takes."""
 
+    sync_heartbeat_seconds: float = 15.0
+    """How long the sync change stream stays idle before it writes a heartbeat
+    comment (design 1 §5.1)."""
+
     def dump_for_logging(self) -> dict[str, str]:
         """Every setting, for the boot log, with the Sensitive ones as ``***``."""
         return dump_config_for_logging(self)
@@ -86,4 +95,5 @@ class AppSettings(BaseModel):
             sync_token=env.SYNC_TOKEN,
             store_environment_id=env.STORE_ENVIRONMENT_ID,
             sync_put_max_bytes=env.SYNC_PUT_MAX_BYTES,
+            sync_heartbeat_seconds=env.SYNC_HEARTBEAT_SECONDS,
         )

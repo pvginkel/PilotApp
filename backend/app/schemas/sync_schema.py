@@ -53,3 +53,21 @@ class SyncManifestResponseSchema(BaseModel):
     delete: list[str] = Field(
         ..., description="Paths synced that the manifest no longer lists"
     )
+
+
+class SyncHelloSchema(BaseModel):
+    """The change stream's first event."""
+
+    protocol: SyncProtocolRangeSchema = Field(
+        ..., description="The protocol versions the server accepts"
+    )
+    manifest_hash: Sha256 = Field(
+        ..., description="The hash of the manifest as the stream opened"
+    )
+
+
+class SyncChangeSchema(BaseModel):
+    """A change event: the tree hash of a path moved."""
+
+    path: str = Field(..., description="The path, from the tree's root")
+    hash: Sha256 = Field(..., description="The tree hash it moved to")

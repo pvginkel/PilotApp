@@ -52,6 +52,12 @@ class ErrorsResolved(EngineEvent):
     path: str
 
 
+@dataclass(frozen=True)
+class ManifestChanged(EngineEvent):
+    """The set of syncing projects changed (design 1 §5.4, decision 24): the
+    manifest lists other folders."""
+
+
 Subscriber = Callable[[EngineEvent], None]
 
 

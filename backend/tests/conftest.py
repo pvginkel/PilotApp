@@ -40,7 +40,12 @@ from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID, SYNC_TOKEN, FakeSid
 def test_app_settings() -> AppSettings:
     """The app settings, with the store's sync configured as the fake sidecar
     calls it."""
-    return AppSettings(sync_token=SYNC_TOKEN, store_environment_id=STORE_ENVIRONMENT_ID)
+    # The fake sidecar reads its change stream up to a heartbeat.
+    return AppSettings(
+        sync_token=SYNC_TOKEN,
+        store_environment_id=STORE_ENVIRONMENT_ID,
+        sync_heartbeat_seconds=0.01,
+    )
 
 
 @pytest.fixture
@@ -125,13 +130,14 @@ def draft_document(session: DbSession, project: Project) -> Document:
 
 @pytest.fixture
 def fake_sidecar(
-    client: FlaskClient, container: ServiceContainer
+    client: FlaskClient, environment: Environment
 ) -> Generator[FakeSidecar]:
     """The store's sidecar, with an empty tree, calling the sync routes
-    through ``client``; the events it drains are those the bus delivers
-    during the test."""
+    through ``client``; its change stream is open from the start, so it
+    drains what the engine's bus delivers during the test."""
     clear_after_commit_callbacks()
-    sidecar = FakeSidecar(client, container.engine_bus())
+    sidecar = FakeSidecar(client)
+    sidecar.listen()
     try:
         yield sidecar
     finally:

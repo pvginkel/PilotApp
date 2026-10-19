@@ -1,10 +1,12 @@
 """The fake sidecar (design 1 §11): the store's tree and the sidecar's shadow
 as dicts, the real sync routes driven through Flask's test client as the
-store's sidecar drives them, with its bearer and the three headers, the change
-events the bus delivers applied as the sidecar applies them, and the manifest
-reconcile run as the sidecar runs it."""
+store's sidecar drives them, with its bearer and the three headers, its change
+stream read between steps and applied as the sidecar applies it, and the
+manifest reconcile run as the sidecar runs it."""
 
 import hashlib
+import json
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote
@@ -12,7 +14,6 @@ from urllib.parse import quote
 from flask.testing import FlaskClient
 from werkzeug.test import TestResponse
 
-from app.engine.bus import EngineBus, EngineEvent, TreeHashMoved
 from app.services.sync_service import SYNC_PROTOCOL_MAX
 
 SYNC_TOKEN = "example-sync-token"
@@ -43,22 +44,32 @@ class FakeSidecar:
     `tree`: path to bytes, the paths from the tree's root.
 
     `shadow` holds each path's hash as last synced. `notes` holds the local
-    notes the hook prints, by path. `events` is every event the bus delivered
-    since the sidecar started, in order.
+    notes the hook prints, by path. `hello` is the change stream's first
+    event, as it last opened.
     """
 
-    def __init__(self, client: FlaskClient, bus: EngineBus) -> None:
+    def __init__(self, client: FlaskClient) -> None:
         self.client = client
-        self.bus = bus
         self.tree: dict[str, bytes] = {}
         self.shadow: dict[str, str] = {}
         self.notes: dict[str, str] = {}
-        self.events: list[EngineEvent] = []
-        self._drained = 0
-        bus.subscribe(self.events.append)
+        self.hello: dict[str, Any] | None = None
+        self._stream: TestResponse | None = None
+        self._frames: Iterator[str] | None = None
 
     def close(self) -> None:
-        self.bus.unsubscribe(self.events.append)
+        """The change stream drops, if it is open."""
+        if self._stream is not None:
+            self._stream.close()
+        self._stream = None
+        self._frames = None
+
+    def events(self) -> TestResponse:
+        """`GET /api/sync/events` as the sidecar sends it, read a frame at a
+        time; closing it is the sidecar going."""
+        return self.client.get(
+            "/api/sync/events", headers=sync_headers(), buffered=False
+        )
 
     def put(self, path: str, content: bytes, base_hash: str | None) -> TestResponse:
         """`PUT /api/sync/files/<path>` as the sidecar sends it."""
@@ -128,8 +139,23 @@ class FakeSidecar:
         assert answer is not None, f"{path} is not a path of the record"
         return answer
 
+    def listen(self) -> None:
+        """The sidecar opens its change stream, dropping the one it held, and
+        takes its `hello`."""
+        self.close()
+        response = self.events()
+        assert response.status_code == 200, response.get_data(as_text=True)
+        self._stream = response
+        self._frames = (chunk.decode() for chunk in response.response)
+        event = self._next_event()
+        assert event is not None and event[0] == "hello", event
+        self.hello = event[1]
+
     def connect(self) -> dict[str, Any]:
-        """The sidecar (re)connects: it reconciles (design 1 §5.8)."""
+        """The sidecar (re)connects: it opens its change stream, takes its
+        `hello`, and reconciles (design 1 §5.8). Returns the reconcile's
+        answer."""
+        self.listen()
         return self.reconcile()
 
     def overflow(self) -> dict[str, Any]:
@@ -160,25 +186,36 @@ class FakeSidecar:
         return answer
 
     def drain(self) -> list[str]:
-        """Apply the change events delivered since the last drain: fetch and
-        write each path whose hash differs from the shadow; an event of the
-        sidecar's own write is ignored. Returns the paths fetched, in
-        order."""
+        """Apply what the change stream carried since the last drain, up to
+        its heartbeat: fetch and write each `change`'s path whose hash
+        differs from the shadow, the sidecar's own write echoed back
+        ignored, and reconcile on `manifest`. Returns the paths fetched for
+        `change`s, in order."""
         fetched: list[str] = []
-        while self._drained < len(self.events):
-            event = self.events[self._drained]
-            self._drained += 1
-            if not isinstance(event, TreeHashMoved):
-                continue
-            if self.shadow.get(event.path) == event.hash:
-                continue
-            self._fetch(event.path)
-            fetched.append(event.path)
+        while (event := self._next_event()) is not None:
+            name, data = event
+            if name == "manifest":
+                self.reconcile()
+            elif self.shadow.get(data["path"]) != data["hash"]:
+                self._fetch(data["path"])
+                fetched.append(data["path"])
         return fetched
 
     def text(self, path: str) -> str:
         """What the agent reads at `path`."""
         return self.tree[path].decode()
+
+    def _next_event(self) -> tuple[str, dict[str, Any]] | None:
+        """The change stream's next event, its name and its data; none at a
+        heartbeat, when nothing is left to read."""
+        assert self._frames is not None, "the change stream is not open"
+        frame = next(self._frames, None)
+        assert frame is not None, "the change stream ended"
+        if frame.startswith(":"):
+            return None
+        fields = dict(line.split(": ", 1) for line in frame.strip("\n").split("\n"))
+        assert set(fields) == {"event", "data"}, frame
+        return fields["event"], json.loads(fields["data"])
 
     def _fetch(self, path: str) -> None:
         """Write the bytes `path` must hold, as the server answers them, and

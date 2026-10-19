@@ -445,3 +445,31 @@ class TestSyncService:
         _sync(container).reconcile({}, {})
 
         assert _reconciles() == before + 2
+
+    def test_manifest_hash_hashes_the_manifests_entries_in_path_order(
+        self, container: ServiceContainer, project: Project
+    ) -> None:
+        with scoped_session(container):
+            container.document_service().bear_draft(project, "# Badges\n")
+        manifest = container.tree_service().manifest()
+        listing = "".join(
+            f"{entry.path}\0{entry.hash}\0{int(entry.readonly)}\n" for entry in manifest
+        )
+
+        assert len(manifest) == 4
+        assert _sync(container).manifest_hash() == sha256_hex(listing)
+
+    def test_manifest_hash_moves_with_the_manifest(
+        self, container: ServiceContainer, project: Project
+    ) -> None:
+        with scoped_session(container):
+            container.document_service().bear_draft(project, "# Badges\n")
+        first = _sync(container).manifest_hash()
+        with scoped_session(container):
+            project.archived = True
+
+        assert _sync(container).manifest_hash() != first
+        reference = container.view_service().reference().hash
+        assert _sync(container).manifest_hash() == sha256_hex(
+            "\0".join(["reference.json", reference, "1"]) + "\n"
+        )

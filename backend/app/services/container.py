@@ -22,9 +22,11 @@ from app.services.metrics_service import MetricsService
 from app.services.oidc_client_service import OidcClientService
 from app.services.sse_connection_manager import SSEConnectionManager
 from app.services.sync_service import SyncService
+from app.services.sync_stream_service import SyncStreamService
 from app.services.task_service import TaskService
 from app.services.test_data_service import TestDataService
 from app.services.testing_service import TestingService
+from app.services.testing_sync_service import TestingSyncService
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
 from app.utils.temp_file_manager import TempFileManager
 
@@ -153,6 +155,18 @@ class ServiceContainer(containers.DeclarativeContainer):
         db=db_session,
         app_settings=app_config,
         ingest_service=ingest_service,
+        tree_service=tree_service,
+    )
+    sync_stream_service = providers.Singleton(
+        SyncStreamService,
+        engine_bus=engine_bus,
+        lifecycle_coordinator=lifecycle_coordinator,
+    )
+    testing_sync_service = providers.Factory(
+        TestingSyncService,
+        db=db_session,
+        engine_bus=engine_bus,
+        record_service=record_service,
         tree_service=tree_service,
     )
 
