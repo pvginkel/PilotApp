@@ -75,7 +75,6 @@ def plan_progress(tasks: Iterable[PlanTask]) -> PlanProgress:
 
 
 _VERBS = {
-    TransitionKind.OPENED: "open",
     TransitionKind.FINISHED: "finish",
     TransitionKind.REOPENED: "reopen",
     TransitionKind.ARCHIVED: "archive",
@@ -298,7 +297,7 @@ class ProjectService:
                 project.autopilot = True
             case TransitionKind.AUTOPILOT_OFF:
                 project.autopilot = False
-            case TransitionKind.OPENED | TransitionKind.REOPENED:
+            case TransitionKind.REOPENED:
                 project.state_code = ProjectState.OPEN
 
     def _membership(self, project: Project, person: User) -> ProjectMember | None:
@@ -347,8 +346,6 @@ def _refusal(project: Project, kind: TransitionKind) -> str | None:
     none: a kind follows from the standing it leaves (DB 170), an archived
     project takes Bring back alone (D012), and auto pilot is an open project's
     (F2.6, F4.1)."""
-    if kind is TransitionKind.OPENED:
-        return "a project opens at Create project"
     if kind is TransitionKind.BROUGHT_BACK:
         return None if project.archived else "it is not archived"
     if project.archived:

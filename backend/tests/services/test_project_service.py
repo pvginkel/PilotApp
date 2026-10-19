@@ -608,11 +608,6 @@ class TestTransition:
     @pytest.mark.parametrize(
         ("spec", "kind", "cause"),
         [
-            (
-                {"state": "draft"},
-                TransitionKind.OPENED,
-                "a project opens at Create project",
-            ),
             ({"state": "draft"}, TransitionKind.FINISHED, "it is a draft"),
             ({"state": "finished"}, TransitionKind.FINISHED, "it is finished already"),
             ({"state": "draft"}, TransitionKind.REOPENED, "it is not finished"),
