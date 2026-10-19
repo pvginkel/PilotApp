@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -118,5 +119,46 @@ func TestCheckOfAReadOnlyViewWrittenPostsTheViewsHash(t *testing.T) {
 	settle()
 	if puts := s.taken(); len(puts) != 0 {
 		t.Fatalf("took %v: a view sent up", puts)
+	}
+}
+
+func TestWritesARecordMoveOverAWriteToAReadOnlyView(t *testing.T) {
+	s := newServer(t)
+	tree := t.TempDir()
+	view := filepath.Join(tree, "reference.json")
+	s.view("reference.json", "{}")
+	running := start(t, s, tree, t.TempDir())
+
+	// The agent writes the view while its move is fetched.
+	fetching, written := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	s.fetches(func(string) {
+		once.Do(func() {
+			close(fetching)
+			select {
+			case <-written:
+			case <-s.quit:
+			}
+		})
+	})
+	s.view("reference.json", `{"v": 2}`)
+	running.stream.send(t, change("reference.json", `{"v": 2}`))
+	<-fetching
+	writeOver(t, view, `{"edited": true}`)
+	close(written)
+
+	eventually(t, "the move written", func() bool { return holds(view, `{"v": 2}`) })
+	settle()
+	if !holds(view, `{"v": 2}`) {
+		t.Fatalf("the view holds %q", read(t, view))
+	}
+	if got := modeOf(t, view); got != 0o444 {
+		t.Errorf("written with mode %v", got)
+	}
+	if puts := s.taken(); len(puts) != 0 {
+		t.Fatalf("took %v: a view sent up", puts)
+	}
+	if note := running.noted("reference.json"); note != revertNote {
+		t.Fatalf("noted %q", note)
 	}
 }

@@ -59,7 +59,8 @@ type checkPost struct {
 // server plays the sync routes as design 1 §5.1 shapes them, over a record
 // of its own: files, path to the bytes it must hold, those in views
 // read-only. A PUT is answered with respond, 204 by default, and the record
-// takes what it answered; a GET answers the record; a manifest is answered
+// takes what it answered; a GET answers the record once fetching is told of
+// it; a manifest is answered
 // by design 1 §5.5's rule over the record, amended by reconciling; a check
 // is answered by checking, its path agreed and no error by default; the
 // change stream is accepted unless opening answers its attempt otherwise,
@@ -84,6 +85,7 @@ type server struct {
 	reconciling func(posted, protocol.Reconciled) protocol.Reconciled
 	checking    func(checkPost) protocol.CheckAnswer
 	opening     func(attempt int) (status int, body string)
+	fetching    func(path string)
 }
 
 // stream is a change stream the server holds open: the test sends it
@@ -105,7 +107,8 @@ func newServer(t *testing.T) *server {
 		checking: func(checkPost) protocol.CheckAnswer {
 			return protocol.CheckAnswer{Checked: true, Errors: []protocol.SaveError{}, HomelessDeferrals: []protocol.HomelessDeferral{}}
 		},
-		opening: func(int) (int, string) { return 0, "" },
+		opening:  func(int) (int, string) { return 0, "" },
+		fetching: func(string) {},
 	}
 	httpServer := httptest.NewServer(http.HandlerFunc(s.serve))
 	t.Cleanup(httpServer.Close)
@@ -131,6 +134,13 @@ func (s *server) answeringChecks(checking func(checkPost) protocol.CheckAnswer) 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.checking = checking
+}
+
+// fetches is told of each GET, by path, before it is answered.
+func (s *server) fetches(fetching func(path string)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.fetching = fetching
 }
 
 // opens answers the change stream's attempts, each counted from 1: a status
@@ -273,6 +283,10 @@ func (s *server) put(w http.ResponseWriter, r *http.Request, path string) {
 func (s *server) get(w http.ResponseWriter, path string) {
 	s.mu.Lock()
 	s.gets = append(s.gets, path)
+	fetching := s.fetching
+	s.mu.Unlock()
+	fetching(path)
+	s.mu.Lock()
 	content, ok := s.files[path]
 	s.mu.Unlock()
 	if !ok {

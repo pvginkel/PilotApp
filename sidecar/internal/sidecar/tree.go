@@ -175,8 +175,9 @@ func (t *tree) unsynced(path string) (bool, fs.FileMode, error) {
 // download fetches the bytes path must hold and writes them, the shadow
 // first, so the watch's echo of the write hashes as synced; a read-only view
 // is written with the view's mode. A file holding bytes that never synced
-// keeps them: they go up, and the answer carries the record's. The caller
-// holds path.
+// keeps them: they go up, and the answer carries the record's. A read-only
+// view the shadow holds sends nothing up (upload), so a write to it is
+// written over and noted as its revert is. The caller holds path.
 func (t *tree) download(ctx context.Context, path string) {
 	content, err := t.client.Get(ctx, path)
 	switch {
@@ -195,11 +196,14 @@ func (t *tree) download(ctx context.Context, path string) {
 		t.logger.Error("cannot read a file of the tree", "path", path, "error", err)
 		return
 	}
-	if unsynced {
+	view := t.view(path)
+	_, synced := t.shadow.Hash(path)
+	reverted := unsynced && view && synced
+	if unsynced && !reverted {
 		t.logger.Info("changed on disk since it synced: left for its upload", "path", path)
 		return
 	}
-	if t.view(path) {
+	if view {
 		mode = viewMode
 	}
 	name := t.name(path)
@@ -216,6 +220,10 @@ func (t *tree) download(ctx context.Context, path string) {
 		return
 	}
 	t.notes.clear(path)
+	if reverted {
+		t.notes.once(path, revertNote)
+		t.logger.Info("a read-only view was written: re-projected", "path", path)
+	}
 	t.logger.Info("written down", "path", path, "hash", protocol.Hash(content))
 }
 
