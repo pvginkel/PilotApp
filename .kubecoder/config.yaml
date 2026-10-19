@@ -20,6 +20,13 @@ repos:
 capabilities:
   github: rw
 
+secrets:
+  # Pilot's KubeCoder client token for kubecoder-dev.home, the controller the
+  # local live check of docs/slice-test-plan.md runs a real turn against. A
+  # name the backend does not read: the check hands it to the dev stack as
+  # CONTROLLER_TOKEN, and nothing else sees it under that name.
+  PILOT_DEV_CONTROLLER_TOKEN: pilot-kubecoder-dev-token
+
 tools:
   - use: modern-app
   # PilotDeploy's Helm and Terraform gates.
