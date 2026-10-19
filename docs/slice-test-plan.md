@@ -25,8 +25,11 @@ Two things follow from production being the only instance:
   together both deploy, and the later image holds both.
 
 What the checks cannot show from here is reported as *not verified*: the site from outside the
-LAN (step 4.5), a signed-in session, and anything that needs the real fleet (a KubeCoder controller,
-a store environment, a worker session, YouTrack) until a slice wires it into the deployment.
+LAN (step 4.5), a signed-in session, and anything that needs a part of the fleet no slice has wired
+into the deployment yet (a store environment, YouTrack). The KubeCoder controller is wired: what
+Pilot does with it is proven on a real turn against KubeCoder's dev stage (§2, the fleet's live
+check), and production shows only that its backend reaches its controller (step 4.3), since no
+check there starts anything.
 
 ## 0. Preconditions
 
@@ -127,6 +130,164 @@ per step and `5 of 5 passed`, and exits 0 only then. On exit, SIGTERM included, 
 `backend/.env` back byte for byte and waits for the backend to restart on it. A stack that is not
 up fails it at once; a failed run keeps its `/tmp/pilot-sync-proof-*` directory, the binary's log
 in it.
+
+**The fleet's live check.** A slice that changes how Pilot works the KubeCoder fleet (the
+controller's client, the fleet stream, an environment's start or stop, a session's start, send or
+relay) proves it on one real turn against KubeCoder's dev stage, `https://kubecoder-dev.home`, with
+the stack up; a check of the slice's own that needs the fleet rides on the same turn. The dev stage
+is a KubeCoder instance of its own, not production, and its `pvginkel/KubeCoderTestRepo`
+environments are there for checks like this one: the check starts one, and Pilot stops it. Its
+waits come to 25 minutes at most (the environment's start and the turn 20, the timer's stop 5), so
+a slice that runs it starts the stack with `timeout 2700` rather than `timeout 900`. Without the
+token in this environment, or with the dev controller down, nothing below runs, and everything it
+would prove is *not verified*:
+
+```bash
+[ -n "$PILOT_DEV_CONTROLLER_TOKEN" ] && echo "token present"
+curl -s -m 10 -o /dev/null -w '%{http_code}\n' https://kubecoder-dev.home/readyz     # 200
+```
+
+Every step keeps what the next one reads in `tmp/fleet/`, since a shell variable does not outlive
+its command:
+
+1. **The dev backend in testing mode, on the dev controller**, by the switch the sync's live proof
+   makes (`scripts/sync-live-proof.py`), not a second one: settings appended to `backend/.env`,
+   which the backend restarts on (`backend/scripts/dev-watch.sh`) and whose last line for a key wins
+   (python-dotenv), and the file's original bytes written back in step 6, whatever happened before
+   it. `FLASK_ENV=testing` opens the testing routes. The token is `PILOT_DEV_CONTROLLER_TOKEN`,
+   which this environment projects from its secret catalog (`.kubecoder/config.yaml`) and the
+   backend never reads by that name: it goes into the file as `CONTROLLER_TOKEN` and is never
+   printed; the backend's start logs its settings with the token as `***`.
+   `ENVIRONMENT_STOP_AFTER_SECONDS=60` shortens the shutdown timer to fit the check.
+   `CONTROLLER_CA_FILE` stays unset: the `modern-app` container's `REQUESTS_CA_BUNDLE` is the system
+   bundle, which holds the homelab root. The dev seed goes in first, for a project to start the
+   session for:
+
+   ```bash
+   cexec modern-app sh -c 'cd backend && uv run cli load-test-data --yes-i-am-sure'
+   mkdir -p tmp/fleet && rm -f tmp/fleet/*
+   if [ -e backend/.env ]; then cp backend/.env tmp/fleet/env.orig; else touch tmp/fleet/no-env; fi
+   DB=$(sed -n 's/^DATABASE_URL=postgresql+psycopg:/postgresql:/p' tmp/fleet/env.orig 2>/dev/null | tail -1)
+   echo "${DB:-postgresql://postgres:postgres@localhost:5432/pilot}" > tmp/fleet/db
+   { echo; echo FLASK_ENV=testing; echo CONTROLLER_URL=https://kubecoder-dev.home
+     printf 'CONTROLLER_TOKEN=%s\n' "$PILOT_DEV_CONTROLLER_TOKEN"; echo ENVIRONMENT_STOP_AFTER_SECONDS=60; } >> backend/.env
+   SECONDS=0; until curl -s -m 5 http://localhost:3501/health/readyz | grep -q '"controller"' || [ $SECONDS -ge 90 ]; do sleep 1; done
+   curl -s -m 10 http://localhost:3501/health/readyz                                   # checks.controller.status "ok"
+   curl -s -m 10 http://localhost:3501/metrics | grep '^pilot_fleet_stream_connected'  # 1.0
+   grep 'Fleet stream connected' logs/backend.log | tail -1                            # "<n> environments listed"
+   ```
+
+   The `controller` check appears once the backend has restarted with a controller; its `ok` is the
+   controller's `/readyz`, which asks for no token. The connect line and the gauge at `1` are what
+   show the token works: the fleet consumer's list of the controller's environments is
+   authenticated.
+
+2. **An environment**: one of `pvginkel/KubeCoderTestRepo` that the controller lists `stopped` and
+   not exempt (`capabilities.capacityExempt.enabled` false), since Pilot's timer never stops an
+   exempt one. None listed is *not verified*:
+
+   ```bash
+   curl -s -m 15 -H "Authorization: Bearer $PILOT_DEV_CONTROLLER_TOKEN" https://kubecoder-dev.home/environments |
+     python3 -c 'import json, sys; print(*[e["envId"] for e in json.load(sys.stdin)["items"] if e["repo"] == "pvginkel/KubeCoderTestRepo" and e["status"] == "stopped" and not e["capabilities"]["capacityExempt"]["enabled"]][:1])' > tmp/fleet/env-id
+   cat tmp/fleet/env-id
+   ```
+
+3. **A session there, started by Pilot and watched.** The SSE stream is held first, as a browser
+   holds it. The testing route `POST /api/testing/sessions` starts a `work` Session for an existing
+   Project the way the server does: the Session `starting`, the environment's start (answered `202`,
+   so `server_started_at` is set), the headless create in `cwd`, then the brief as Turn 1. No route
+   lists projects, so the id comes from the database. The subscribe follows the route's `201`:
+
+   ```bash
+   timeout 1500 curl -sN 'http://localhost:3501/api/sse/stream?request_id=fleet-check' > tmp/fleet/sse &
+   timeout 30 sh -c 'until grep -q "^event: ready" tmp/fleet/sse; do sleep 0.5; done'
+   psql "$(cat tmp/fleet/db)" -Atc 'select id from projects order by number limit 1' > tmp/fleet/project
+   printf '{"project_id": "%s", "environment_id": "%s", "cwd": "/work/KubeCoderTestRepo", "brief": "%s"}' \
+     "$(cat tmp/fleet/project)" "$(cat tmp/fleet/env-id)" \
+     "List the files at the root of this repository, then say in one sentence how many there are." > tmp/fleet/start.json
+   curl -s -m 30 -w '\n%{http_code}\n' -X POST http://localhost:3501/api/testing/sessions \
+     -H 'Content-Type: application/json' -d @tmp/fleet/start.json | tee tmp/fleet/started   # {"id": ...} 201
+   sed -n 's/.*"id": *"\([^"]*\)".*/\1/p' tmp/fleet/started > tmp/fleet/session
+   curl -s -m 10 -o /dev/null -w '%{http_code}\n' -X POST "http://localhost:3501/api/sessions/$(cat tmp/fleet/session)/stream" \
+     -H 'Content-Type: application/json' -d '{"request_id": "fleet-check", "view": "fleet-check"}'   # 204
+   ```
+
+   Then the current line, read once a second until the turn has ended. It runs as long as the
+   environment's start and the turn, up to 20 minutes, so it goes in the background:
+
+   ```bash
+   SID=$(cat tmp/fleet/session); SECONDS=0
+   until psql "$(cat tmp/fleet/db)" -Atc "select state_code, current_line from sessions where id = '$SID'" | tee -a tmp/fleet/lines |
+     grep -Eq '^(idle|stopped|failed|ended)\|' || [ $SECONDS -ge 1200 ]; do sleep 1; done
+   uniq tmp/fleet/lines
+   ```
+
+   It moves through `starting` lines whose `text` is `Starting <environment name>…`, then
+   `Creating the session…`, then `running` with `thinking`, `working` (with the `step` of a tool call) and
+   `writing`, and ends `idle|` with nothing after the bar: `current_line` null at the turn's end. A
+   Session that ends `failed` failed the check; its `server` records say why (step 4).
+
+4. **The records, read back and seen live.** The records route pages them from `seq` 1; the SSE
+   stream carried the ones written after the subscribe as `record` frames, and the main thread's
+   block starts and text deltas as `partial` frames:
+
+   ```bash
+   curl -s -m 10 "http://localhost:3501/api/sessions/$(cat tmp/fleet/session)/records?limit=1000" > tmp/fleet/records.json
+   python3 - <<'EOF'
+   import collections, json
+   page = json.load(open("tmp/fleet/records.json"))
+   records = {r["seq"]: r for r in page["records"]}
+   print("records", len(records), "| numbered 1..n:", sorted(records) == list(range(1, len(records) + 1)), "| ended:", page["ended"])
+   print("kinds", dict(collections.Counter(r["kind"] for r in records.values())))
+   claude = [r for r in records.values() if r["kind"] == "claude"]
+   print("raw offsets rising:", [r["raw_offset"] for r in claude] == sorted({r["raw_offset"] for r in claude}))
+   print("stream_event lines stored:", sum(isinstance(r["payload"], dict) and r["payload"].get("type") == "stream_event" for r in claude))
+   frames = [json.loads(line[6:]) for line in open("tmp/fleet/sse") if line.startswith("data: {")]
+   frames = [f["payload"] for f in frames if f.get("type") == "session"]
+   live = [f["data"] for f in frames if f["frame"] == "record"]
+   seqs = [r["seq"] for r in live]
+   print("live records", len(live), "| consecutive to the last:", bool(seqs) and seqs == list(range(seqs[0], max(records) + 1)))
+   print("live as read back:", all((r["kind"], r.get("payload")) == (records[r["seq"]]["kind"], records[r["seq"]].get("payload")) for r in live))
+   print("partials", sum(f["frame"] == "partial" for f in frames), "| end", sum(f["frame"] == "end" for f in frames))
+   EOF
+   ```
+
+   Every `True`, `ended` false; the kinds `server` (the start's phases), `claude` and one `result`,
+   and no `send`, since the brief has no author; no `stream_event` line stored; partials above `0`;
+   no `end`, since an `idle` Session's stream goes on.
+
+5. **Pilot's shutdown timer stops the environment.** The turn's end arms it (`Armed the shutdown
+   of environment <id>, due <iso>`), and the first scheduler tick past the due time
+   (`SCHEDULER_TICK_SECONDS`, 10) stops it (`Stopped environment <id>, due <iso>`), clearing
+   `server_started_at` and `stop_due_at`. The controller then reports it `stopping` or `stopped`:
+
+   ```bash
+   ENV=$(cat tmp/fleet/env-id); SECONDS=0
+   until grep -q "Stopped environment $ENV" logs/backend.log || [ $SECONDS -ge 300 ]; do sleep 2; done
+   grep -E "(Armed the shutdown of|Stopped) environment $ENV" logs/backend.log
+   psql "$(cat tmp/fleet/db)" -Atc "select server_started_at, stop_due_at, last_state from environments where id = '$ENV'"   # ||stopping or ||stopped
+   curl -s -m 15 -H "Authorization: Bearer $PILOT_DEV_CONTROLLER_TOKEN" "https://kubecoder-dev.home/environments/$ENV" |
+     python3 -c 'import json, sys; print(json.load(sys.stdin)["status"])'
+   ```
+
+   No `Stopped environment` line within the 5 minutes fails this step, a finding. The environment
+   is then stopped through the controller, as cleanup only, never as the step's pass:
+
+   ```bash
+   curl -s -m 15 -o /dev/null -w '%{http_code}\n' -X POST -H "Authorization: Bearer $PILOT_DEV_CONTROLLER_TOKEN" \
+     "https://kubecoder-dev.home/environments/$(cat tmp/fleet/env-id)/stop"   # 200 or 202
+   ```
+
+6. **The backend put back**, whatever happened before, once the environment the check started is
+   stopped: `backend/.env`'s original bytes written back, the backend restarted on them (which ends
+   the SSE stream), and the token found in none of the logs and files the check wrote:
+
+   ```bash
+   if [ -e tmp/fleet/no-env ]; then rm -f backend/.env; else cp tmp/fleet/env.orig backend/.env && cmp backend/.env tmp/fleet/env.orig && echo "backend/.env restored"; fi
+   SECONDS=0; until r=$(curl -s -m 5 http://localhost:3501/health/readyz) && [ -n "$r" ] && ! printf '%s' "$r" | grep -q '"controller"' || [ $SECONDS -ge 90 ]; do sleep 1; done
+   echo "$r"                                                                                # no controller check
+   grep -cF -- "$PILOT_DEV_CONTROLLER_TOKEN" logs/backend.log /tmp/pilot-dev.log tmp/fleet/*   # 0 each
+   ```
 
 **Stop the stack** from another shell, and confirm it is down:
 
@@ -232,8 +393,11 @@ timeout 900 track_build.py --deploy PilotDeploy main "$(git -C ../PilotDeploy re
 **Every roll of a running pod is watched from before its push until the old pod is gone.**
 `pilot-prd` rolls by starting the new pod beside the old one (`RollingUpdate`, `maxSurge: 1`,
 `maxUnavailable: 0`), and retires the old pod only once the new one is ready. Each of the old pod's
-containers goes on serving for 15 s after its termination starts, then the backend drains (its
-`preStop` calls `/health/drain`); its termination grace is 90 s, so it is gone within 90 s. This
+containers goes on serving for 15 s after its termination starts, then the backend drains: its
+`preStop` calls `/health/drain` and waits for it 40 s at most, and the drain stops the backend's
+long-lived jobs (the fleet stream, the relays, the timers) within `GRACEFUL_SHUTDOWN_TIMEOUT`,
+20 s. Nothing drains to completion: a relay cut mid-turn is resumed by the new pod. The termination
+grace is 70 s (15 + 40 + 15), so the old pod is gone within 70 s. This
 environment reads prd but cannot roll it (its kubeconfig is read-only outside `development`), so
 the check rides the roll a push causes: a PilotApp push, whose build pins new images, and a
 PilotDeploy push that changes the pod template (`chart/templates/deployment.yaml`, or a value it
@@ -366,8 +530,11 @@ POD=$(cexec iac kubectl -n pilot-prd get pods -l app.kubernetes.io/name=pilot -o
 
    The backend's log is the pod's: `cexec iac kubectl -n pilot-prd logs $POD -c backend`.
 
-3. **The backend's readiness, on the pod's IP.** `200` with `"status": "ok"`: `checks.database`
-   `ok` (connected, no migration pending):
+3. **The backend's readiness, on the pod's IP, and its fleet stream.** `200` with `"status":
+   "ok"`: `checks.database` `ok` (connected, no migration pending) and `checks.controller` `ok` (the
+   controller's `/readyz` answers, verified against the homelab root the chart mounts). The
+   `controller` check is not critical: a controller that does not answer reads `"status":
+   "degraded"`, still `200`, and is a finding here:
 
    ```bash
    IP=$(cexec iac kubectl -n pilot-prd get pod $POD -o jsonpath='{.status.podIP}')
@@ -379,16 +546,26 @@ POD=$(cexec iac kubectl -n pilot-prd get pods -l app.kubernetes.io/name=pilot -o
    ready backend or not (ElectronicsInventory's `https://parts.ginbov.nl/health/readyz` does today:
    `200`, `text/html`). This pod reaches pod IPs directly.
 
-4. **The secrets.** Four ExternalSecrets, each `SecretSynced` and ready: `pilot-oidc` (from
-   `openbao-prd`, `eso/prd/pilot/prd/oidc`) and the generated `pilot-secret-key`,
-   `pilot-drain-auth` and `pilot-sse-callback`:
+   The controller's `/readyz` asks for no token. What shows the token works is the fleet
+   consumer's connect line in the backend's log, `Fleet stream connected; <n> environments listed`,
+   `<n>` the production controller's environments: its list of them is authenticated. A `Loop fleet
+   raised; restarting in <n> s` after it is the stream dropping and the supervisor reopening it; one
+   that keeps coming is a finding:
+
+   ```bash
+   cexec iac kubectl -n pilot-prd logs $POD -c backend | grep -E 'Fleet stream connected|Loop fleet'
+   ```
+
+4. **The secrets.** Four ExternalSecrets, each `SecretSynced` and ready: `pilot-oidc` and
+   `pilot-kubecoder` (from `openbao-prd`, `eso/prd/pilot/prd/oidc` and
+   `eso/prd/pilot/prd/kubecoder`) and the generated `pilot-secret-key` and `pilot-drain-auth`:
 
    ```bash
    cexec iac kubectl -n pilot-prd get externalsecrets
    ```
 
-   The Secrets themselves are unreadable here: the running backend (step 3's database connection,
-   step 6's sign-in redirect) is what shows they reached it.
+   The Secrets themselves are unreadable here: the running backend (step 3's database connection and
+   fleet stream, step 6's sign-in redirect) is what shows they reached it.
 
 5. **The public site and its certificate.** `200`, curl exit `0`, against a bundle of the public
    CAs alone; the certificate a public CA's (Let's Encrypt), for `pilot.ginbov.nl`; the Service
