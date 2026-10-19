@@ -1,7 +1,8 @@
-"""The sync service: the gate's refusals and the store's Environment, and the
-put's metrics (design 1 §5.1, §5.7)."""
+"""The sync service: the gate's refusals and the store's Environment, the
+put's metrics, and the manifest reconcile (design 1 §5.1, §5.5, §5.7)."""
 
 import json
+import logging
 
 import pytest
 from dependency_injector import providers
@@ -11,9 +12,10 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.database import scoped_session
+from app.engine.bus import EngineEvent, ErrorsResolved
 from app.engine.ingest import PathKind
 from app.engine.paths import sha256_hex
-from app.engine.tree import TreeFile
+from app.engine.tree import ManifestEntry, TreeFile
 from app.exceptions import (
     AuthenticationException,
     AuthorizationException,
@@ -25,7 +27,9 @@ from app.services.container import ServiceContainer
 from app.services.sync_service import (
     FAULTS_TOTAL,
     INGEST_SECONDS,
+    RECONCILES_TOTAL,
     STALE_PUTS_TOTAL,
+    Reconciled,
     SyncService,
 )
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID, SYNC_TOKEN
@@ -50,6 +54,8 @@ PLAN = json.dumps({"ticket": "MD-8", "tasks": [], "notes": []})
 
 MISSPELT_PLAN = '{"tickets": "MD-9"}\n'
 
+HASH = "a" * 64
+
 
 def _sample(metric: MetricWrapperBase, name: str, **labels: str) -> float:
     for family in metric.collect():
@@ -71,6 +77,10 @@ def _faults(kind: str) -> float:
 
 def _stale_puts() -> float:
     return _sample(STALE_PUTS_TOTAL, "pilot_sync_stale_puts_total")
+
+
+def _reconciles() -> float:
+    return _sample(RECONCILES_TOTAL, "pilot_sync_reconciles_total")
 
 
 def _sync(container: ServiceContainer) -> SyncService:
@@ -321,3 +331,117 @@ class TestSyncService:
     ) -> None:
         with pytest.raises(RecordNotFoundException):
             _sync(container).get("example/notes.md")
+
+    def test_reconcile_answers_the_three_lists_by_one_rule(
+        self,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        item = _bear_item(container, project, project_session)
+        folder = f"draft-{project.number}"
+        manifest = container.tree_service().manifest()
+        hashes = {entry.path: entry.hash for entry in manifest}
+        # The item as synced, an older timeline as synced, the plan gone from
+        # disk, and in the shadow a path of a folder no longer synced.
+        tree = {
+            item: hashes[item],
+            f"{folder}/timeline.json": HASH,
+            "reference.json": hashes["reference.json"],
+        }
+        shadow = {**tree, "old-project/project.md": HASH}
+
+        answer = _sync(container).reconcile(tree, shadow)
+
+        assert answer == Reconciled(
+            manifest=manifest,
+            send_up=[],
+            write_down=[
+                entry
+                for entry in manifest
+                if entry.path in (f"{folder}/plan.json", f"{folder}/timeline.json")
+            ],
+            delete=["old-project/project.md"],
+        )
+        assert answer.write_down[1] == ManifestEntry(
+            f"{folder}/timeline.json", hashes[f"{folder}/timeline.json"], True
+        )
+
+    def test_reconcile_lists_a_file_the_record_never_bore_nowhere(
+        self, container: ServiceContainer, project: Project
+    ) -> None:
+        stray = f"draft-{project.number}/notes.md"
+        tree = {entry.path: entry.hash for entry in container.tree_service().manifest()}
+
+        answer = _sync(container).reconcile({**tree, stray: HASH}, tree)
+
+        assert (answer.send_up, answer.write_down, answer.delete) == ([], [], [])
+
+    def test_reconcile_logs_what_was_not_sent_up_and_acts_on_nothing(
+        self,
+        container: ServiceContainer,
+        caplog: pytest.LogCaptureFixture,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        item = _bear_item(container, project, project_session)
+        tree = {entry.path: entry.hash for entry in container.tree_service().manifest()}
+        on_disk = sha256_hex(ANSWERED.replace("Dome", "Tunnel"))
+
+        with caplog.at_level(logging.WARNING):
+            answer = _sync(container).reconcile({**tree, item: on_disk}, tree)
+
+        assert answer.send_up == [item]
+        assert [entry.path for entry in answer.write_down] == [item]
+        assert f"had not sent up {item}" in caplog.text
+        assert container.tree_service().read(item).content == ANSWERED.encode()
+
+    def test_reconcile_leaves_a_held_document_whose_disk_holds_its_ingest(
+        self,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        item = _bear_item(container, project, project_session)
+        sync = _sync(container)
+        sync.admit(BEARER, STORE_ENVIRONMENT_ID, "1")
+        held = sync.put(item, BROKEN.encode(), sha256_hex(ANSWERED))
+        tree = {entry.path: entry.hash for entry in container.tree_service().manifest()}
+
+        answer = sync.reconcile(tree, tree)
+
+        assert tree[item] == held.hash == sha256_hex(BROKEN)
+        assert answer.write_down == []
+        assert container.tree_service().held_path(item)
+
+    def test_reconcile_writes_a_held_plan_down_canonical_and_resolves_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+    ) -> None:
+        path = f"draft-{project.number}/plan.json"
+        with scoped_session(container):
+            sync = _sync(container)
+            sync.admit(BEARER, STORE_ENVIRONMENT_ID, "1")
+            held = sync.put(path, MISSPELT_PLAN.encode(), None)
+        tree = {entry.path: entry.hash for entry in container.tree_service().manifest()}
+        engine_events.clear()
+
+        with scoped_session(container):
+            answer = _sync(container).reconcile({**tree, path: held.hash}, tree)
+
+        assert answer.write_down == [
+            ManifestEntry(path, container.plan_service().render(project).hash, False)
+        ]
+        assert session.scalars(select(SaveError)).all() == []
+        assert engine_events == [ErrorsResolved(project.id, path)]
+
+    def test_every_reconcile_is_counted(self, container: ServiceContainer) -> None:
+        before = _reconciles()
+
+        _sync(container).reconcile({}, {})
+        _sync(container).reconcile({}, {})
+
+        assert _reconciles() == before + 2

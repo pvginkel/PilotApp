@@ -1,9 +1,12 @@
-"""The store's sync (design 1 §5): the gate every sync call passes, and the
-file put and get, moving the engine's values over the wire."""
+"""The store's sync (design 1 §5): the gate every sync call passes, the file
+put and get, and the manifest reconcile, moving the engine's values over the
+wire."""
 
 import hmac
+import logging
 import re
 import time
+from dataclasses import dataclass
 from typing import Literal
 
 from prometheus_client import Counter, Histogram
@@ -12,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.app_config import AppSettings
 from app.engine.ingest import Ingested, IngestService, PathKind
-from app.engine.tree import TreeFile, TreeService
+from app.engine.tree import ManifestEntry, TreeFile, TreeService
 from app.exceptions import (
     AuthenticationException,
     AuthorizationException,
@@ -43,10 +46,27 @@ STALE_PUTS_TOTAL = Counter(
     "pilot_sync_stale_puts_total",
     "Sync PUTs whose base hash was not the path's tree hash",
 )
+RECONCILES_TOTAL = Counter(
+    "pilot_sync_reconciles_total",
+    "Manifest reconciles of the store's tree",
+)
+
+logger = logging.getLogger(__name__)
 
 Outcome = Literal["published", "held", "reverted", "readonly"]
 
 _VERSION = re.compile(r"[0-9]+")
+
+
+@dataclass(frozen=True)
+class Reconciled:
+    """What the manifest reconcile answers (design 1 §5.5 step 2), each list
+    in path order."""
+
+    manifest: list[ManifestEntry]
+    send_up: list[str]
+    write_down: list[ManifestEntry]
+    delete: list[str]
 
 
 class SyncService:
@@ -129,6 +149,43 @@ class SyncService:
         """The bytes `path`, from the tree's root, must hold, and their tree
         hash."""
         return self.tree_service.read(path)
+
+    def reconcile(self, tree: dict[str, str], shadow: dict[str, str]) -> Reconciled:
+        """The manifest, and what the sidecar does to its tree to match it,
+        given the hash of each path on disk and of each path as it last
+        synced it (design 1 §5.5 step 2).
+
+        `write_down` is every path of the manifest whose tree hash is not the
+        one on disk, `delete` every path synced that the manifest does not
+        list. `send_up` is every path of the manifest whose hash on disk is
+        not the one last synced: the sidecar sends those up before it asks,
+        so the list is a cross-check, logged and never acted on. A file the
+        record never bore is in neither the manifest nor the shadow, and so
+        in no list.
+        """
+        manifest = self.tree_service.manifest()
+        listed = {entry.path for entry in manifest}
+        write_down = [entry for entry in manifest if tree.get(entry.path) != entry.hash]
+        delete = sorted(set(shadow) - listed)
+        send_up = sorted(
+            path
+            for path, disk_hash in tree.items()
+            if path in listed and shadow.get(path) != disk_hash
+        )
+        self.ingest_service.write_down(entry.path for entry in write_down)
+        RECONCILES_TOTAL.inc()
+        logger.info(
+            "Sync reconcile: %d paths listed, %d to write down, %d to delete",
+            len(manifest),
+            len(write_down),
+            len(delete),
+        )
+        if send_up:
+            logger.warning(
+                "Sync reconcile: the store's sidecar had not sent up %s",
+                ", ".join(send_up),
+            )
+        return Reconciled(manifest, send_up, write_down, delete)
 
 
 def _outcome(answer: Ingested) -> Outcome:

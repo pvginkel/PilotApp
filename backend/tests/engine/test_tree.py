@@ -1,4 +1,5 @@
-"""The tree hash of every path a project's folder holds (design 1 §5.2)."""
+"""The tree hash of every path a project's folder holds (design 1 §5.2), and
+the manifest of every path the store syncs (§5.5)."""
 
 import hashlib
 from datetime import UTC, datetime
@@ -8,7 +9,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.engine.paths import sha256_hex
-from app.engine.tree import TreeDocument, TreeFile, TreePlan
+from app.engine.tree import ManifestEntry, TreeDocument, TreeFile, TreePlan
 from app.exceptions import RecordNotFoundException
 from app.models import Attachment, Document, Environment, Project, SaveError
 from app.models.reference import AttachmentSource, ErrorKind, ProjectState
@@ -167,6 +168,93 @@ class TestTreeService:
             f"draft-{other.number}/plan.json",
             f"draft-{other.number}/project.md",
             f"draft-{other.number}/timeline.json",
+        }
+
+
+class TestTreeServiceManifest:
+    def test_the_manifest_is_every_syncing_folder_and_the_reference(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+    ) -> None:
+        documents = container.document_service()
+        documents.bear_draft(project, "# Badges\n")
+        held = documents.bear_item(project, "notice", "The palette", project_session)
+        _ingest(session.get_one(Document, held.id), _HELD)
+        folder = f"draft-{project.number}"
+        session.add(_error(environment, f"{folder}/items/1-the-palette.md"))
+        content = b"# Palette\n"
+        session.add(
+            Attachment(
+                project_id=project.id,
+                batch=1,
+                title="Palette",
+                filename="palette.md",
+                content_type="text/markdown",
+                size=len(content),
+                sha256=hashlib.sha256(content).hexdigest(),
+                content=content,
+                source_code=AttachmentSource.DRAFT,
+                copied_at=datetime.now(UTC),
+            )
+        )
+        opened = Project(created_by_user_id=project.created_by_user_id)
+        archived = Project(created_by_user_id=project.created_by_user_id)
+        session.add_all([opened, archived])
+        session.flush()
+        documents.bear_draft(opened, "# Recipes\n")
+        opened.slug = "recipe-box"
+        opened.state_code = ProjectState.OPEN
+        documents.bear_draft(archived, "# Old\n")
+        archived.archived = True
+        session.flush()
+        views = container.view_service()
+        plans = container.plan_service()
+
+        manifest = container.tree_service().manifest()
+
+        assert manifest == [
+            ManifestEntry(
+                f"{folder}/attachments/1/palette.md",
+                hashlib.sha256(content).hexdigest(),
+                True,
+            ),
+            ManifestEntry(f"{folder}/items/1-the-palette.md", sha256_hex(_HELD), False),
+            ManifestEntry(f"{folder}/plan.json", plans.render(project).hash, False),
+            ManifestEntry(f"{folder}/project.md", sha256_hex("# Badges\n"), False),
+            ManifestEntry(
+                f"{folder}/timeline.json", views.timeline(project).hash, True
+            ),
+            ManifestEntry("recipe-box/plan.json", plans.render(opened).hash, False),
+            ManifestEntry("recipe-box/project.md", sha256_hex("# Recipes\n"), False),
+            ManifestEntry(
+                "recipe-box/timeline.json", views.timeline(opened).hash, True
+            ),
+            ManifestEntry("reference.json", views.reference().hash, True),
+        ]
+
+    def test_with_no_project_the_manifest_is_the_reference(
+        self, container: ServiceContainer
+    ) -> None:
+        reference = container.view_service().reference()
+
+        assert container.tree_service().manifest() == [
+            ManifestEntry("reference.json", reference.hash, True)
+        ]
+
+    def test_a_folders_hashes_are_its_manifest_entries(
+        self, container: ServiceContainer, project: Project
+    ) -> None:
+        container.document_service().bear_draft(project, "# Badges\n")
+        tree = container.tree_service()
+
+        assert tree.hashes(project) == {
+            entry.path: entry.hash
+            for entry in tree.manifest()
+            if entry.path != "reference.json"
         }
 
 

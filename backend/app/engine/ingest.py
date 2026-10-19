@@ -1,8 +1,10 @@
 """The engine's side of the file put (design 1 §5.3): an agent's save of a
 path of the store's tree, gated, merged by ownership and published, in one
-transaction that holds the document's row."""
+transaction that holds the document's row; and what the reconcile's write-down
+does to a held `plan.json` (§5.5 step 2)."""
 
 import hashlib
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -19,7 +21,7 @@ from app.engine.bus import (
     TreeHashMoved,
 )
 from app.engine.documents import OPENING, DocumentService
-from app.engine.paths import sha256_hex
+from app.engine.paths import PLAN, sha256_hex
 from app.engine.plan import PlanService
 from app.engine.tree import TreeDocument, TreeFile, TreePlan, TreeService
 from app.engine.views import ViewService
@@ -117,6 +119,28 @@ class IngestService:
         return self._ingest_document(
             path, resolved, content, base_hash, environment, session
         )
+
+    def write_down(self, paths: Iterable[str]) -> None:
+        """The reconcile writes `paths`, from the tree's root, down from the
+        record (design 1 §5.5 step 2). A held `plan.json` among them is
+        written down canonical, so the save that raised its `parse` Save
+        Errors leaves the disk and they go with it: the one case where a
+        projection clears errors."""
+        plans = [path for path in paths if path.partition("/")[2] == PLAN]
+        held = self.db.scalars(
+            select(SaveError.path)
+            .where(SaveError.kind_code == ErrorKind.PARSE, SaveError.path.in_(plans))
+            .distinct()
+            .order_by(SaveError.path)
+        ).all()
+        for path in held:
+            resolved = self.tree_service.resolve(path)
+            assert isinstance(resolved, TreePlan)
+            self.plan_service.lock(resolved.project)
+            # A clean save of the plan that took the lock first cleared them.
+            if self.tree_service.held_path(path):
+                self._clear(path)
+                self.engine_bus.emit(ErrorsResolved(resolved.project.id, path))
 
     def _ingest_plan(
         self,

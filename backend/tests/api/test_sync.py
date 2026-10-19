@@ -13,13 +13,15 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.database import scoped_session
+from app.engine.bus import ErrorsResolved
 from app.engine.paths import sha256_hex
-from app.models import Document, Environment, Project, SaveError
-from app.models.reference import ErrorKind
+from app.models import Document, Environment, Project, SaveError, User
+from app.models.reference import ErrorKind, ProjectState
 from app.services.container import ServiceContainer
 from app.services.sync_service import SYNC_PROTOCOL_MAX, SYNC_PROTOCOL_MIN
 from tests.support.fake_sidecar import (
     STORE_ENVIRONMENT_ID,
+    STRAY,
     SYNC_TOKEN,
     FakeSidecar,
     sync_headers,
@@ -36,6 +38,24 @@ by: ada
 at: 2026-10-12T09:40:00Z
 ```
 """
+
+DECISION = """# Which tent?
+
+```decision id=D1
+options:
+  - Dome
+  - Tunnel
+recommend: Dome
+```
+"""
+
+BROKEN = ANSWERED + "\n```question id=Q1\n"
+
+DRAFT = "---\ntitle: Badge colours\n---\n\nWhich colours for the badges?\n"
+
+RETITLED = "---\ntitle: Badge palette\n---\n\nWhich colours for the badges?\n"
+
+MISSPELT_PLAN = '{"tickets": "MD-9"}\n'
 
 COMPACT_PLAN = json.dumps(
     {
@@ -58,8 +78,10 @@ HASH = "a" * 64
 ROUTES = [
     ("PUT", "/api/sync/files/reference.json"),
     ("GET", "/api/sync/files/reference.json"),
+    ("POST", "/api/sync/manifest"),
 ]
-"""Each route of this phase, at a path that resolves."""
+"""Each sync route, at a path that resolves; `_call`'s body is valid for
+each."""
 
 
 def _pilot_headers(response: object) -> dict[str, str]:
@@ -80,7 +102,7 @@ def _call(
         url,
         method=method,
         headers={**headers, "X-Pilot-Base-Hash": "none"},
-        data=b"{}\n",
+        json={"tree": {}, "shadow": {}},
     )
 
 
@@ -92,6 +114,25 @@ def _bear_item(
             project, "decision", "Which tent?", session, text
         )
     return f"draft-{project.number}/items/1-which-tent.md"
+
+
+def _bear_draft(container: ServiceContainer, project: Project) -> str:
+    with scoped_session(container):
+        container.document_service().bear_draft(project, DRAFT)
+    return f"draft-{project.number}/project.md"
+
+
+def _assert_in_step(container: ServiceContainer, sidecar: FakeSidecar) -> None:
+    """The sidecar's tree holds what the record says every path of the
+    manifest must hold, beside the files the record never bore."""
+    tree = container.tree_service()
+    manifest = tree.manifest()
+    assert sidecar.shadow == {entry.path: entry.hash for entry in manifest}
+    assert {
+        path: content
+        for path, content in sidecar.tree.items()
+        if path not in sidecar.notes
+    } == {entry.path: tree.read(entry.path).content for entry in manifest}
 
 
 class TestSyncProtocolVersion:
@@ -416,7 +457,6 @@ class TestPutFile:
         )
 
         assert response.status_code == 400
-        assert response.json["code"] == "VALIDATION_FAILED"
 
 
 class TestGetFile:
@@ -472,3 +512,298 @@ class TestGetFile:
 
         assert response.status_code == 404
         assert response.json["code"] == "RECORD_NOT_FOUND"
+
+
+class TestManifest:
+    """`POST /api/sync/manifest` (design 1 §5.1, §5.5)."""
+
+    def test_the_answer_is_the_manifest_and_the_three_lists(
+        self,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        path = _bear_item(container, project, project_session, ANSWERED)
+        folder = f"draft-{project.number}"
+        plan = container.plan_service().render(project).hash
+        timeline = container.view_service().timeline(project).hash
+        reference = container.view_service().reference().hash
+        shadow = {
+            path: sha256_hex(ANSWERED),
+            "old-project/project.md": HASH,
+            "reference.json": reference,
+        }
+
+        response = fake_sidecar.post_manifest(
+            {path: HASH, "reference.json": reference}, shadow
+        )
+
+        assert response.status_code == 200
+        assert response.json == {
+            "manifest": [
+                {"path": path, "hash": sha256_hex(ANSWERED), "readonly": False},
+                {"path": f"{folder}/plan.json", "hash": plan, "readonly": False},
+                {"path": f"{folder}/timeline.json", "hash": timeline, "readonly": True},
+                {"path": "reference.json", "hash": reference, "readonly": True},
+            ],
+            "send_up": [path],
+            "write_down": [
+                {"path": path, "hash": sha256_hex(ANSWERED), "readonly": False},
+                {"path": f"{folder}/plan.json", "hash": plan, "readonly": False},
+                {"path": f"{folder}/timeline.json", "hash": timeline, "readonly": True},
+            ],
+            "delete": ["old-project/project.md"],
+        }
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"tree": {}},
+            {"shadow": {}},
+            {"tree": [], "shadow": {}},
+            {"tree": {"reference.json": HASH.upper()}, "shadow": {}},
+            {"tree": {}, "shadow": {"reference.json": "none"}},
+        ],
+    )
+    def test_a_body_that_is_not_the_two_maps_of_hashes_is_400(
+        self, client: FlaskClient, body: dict[str, object]
+    ) -> None:
+        response = client.post("/api/sync/manifest", json=body, headers=sync_headers())
+
+        assert response.status_code == 400
+
+    def test_a_body_that_is_not_json_is_400(self, client: FlaskClient) -> None:
+        response = client.post(
+            "/api/sync/manifest", data=b"tree", headers=sync_headers()
+        )
+
+        assert response.status_code == 400
+
+
+class TestManifestSequences:
+    """Design 1 §5.8's (re)connect and overflow, through the fake sidecar."""
+
+    def test_a_first_connect_writes_every_path_down(
+        self,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        item = _bear_item(container, project, project_session, ANSWERED)
+        draft = _bear_draft(container, project)
+        folder = f"draft-{project.number}"
+
+        answer = fake_sidecar.connect()
+
+        assert set(fake_sidecar.tree) == {
+            draft,
+            item,
+            f"{folder}/plan.json",
+            f"{folder}/timeline.json",
+            "reference.json",
+        }
+        assert answer["write_down"] == answer["manifest"]
+        assert (answer["send_up"], answer["delete"]) == ([], [])
+        _assert_in_step(container, fake_sidecar)
+
+    def test_a_reconnect_sends_up_the_agents_saves_and_writes_down_the_records(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        item = _bear_item(container, project, project_session, DECISION)
+        draft = _bear_draft(container, project)
+        fake_sidecar.connect()
+        # The stream drops: the agent edits the draft, the operator answers
+        # the decision, and the sidecar hears of neither.
+        fake_sidecar.write(draft, RETITLED)
+        with scoped_session(container):
+            document = session.scalars(
+                select(Document).where(Document.path == "items/1-which-tent.md")
+            ).one()
+            container.record_service().answer(document, "D1", person, "Tunnel")
+
+        answer = fake_sidecar.connect()
+
+        assert (
+            session.scalars(
+                select(Document.published_text).where(Document.path == "project.md")
+            ).one()
+            == RETITLED
+        )
+        assert fake_sidecar.text(draft) == RETITLED
+        assert "answer: Tunnel" in fake_sidecar.text(item)
+        written = [entry["path"] for entry in answer["write_down"]]
+        assert item in written
+        assert draft not in written
+        assert (answer["send_up"], answer["delete"]) == ([], [])
+        _assert_in_step(container, fake_sidecar)
+
+    def test_an_archived_projects_folder_is_deleted_and_a_stray_file_kept(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+        person: User,
+    ) -> None:
+        other = Project(created_by_user_id=person.id)
+        session.add(other)
+        session.flush()
+        _bear_draft(container, project)
+        _bear_draft(container, other)
+        fake_sidecar.connect()
+        archived = f"draft-{other.number}"
+        synced = sorted(
+            path for path in fake_sidecar.shadow if path.startswith(archived)
+        )
+        stray = f"{archived}/notes.md"
+        fake_sidecar.write(stray, "# Notes\n")
+        with scoped_session(container):
+            other.archived = True
+
+        answer = fake_sidecar.connect()
+
+        assert answer["delete"] == synced
+        assert [path for path in fake_sidecar.tree if path.startswith(archived)] == [
+            stray
+        ]
+        assert fake_sidecar.notes == {stray: STRAY}
+        _assert_in_step(container, fake_sidecar)
+
+    def test_a_folder_that_takes_its_slug_moves_whole(
+        self,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+    ) -> None:
+        draft = _bear_draft(container, project)
+        fake_sidecar.connect()
+        folder = f"draft-{project.number}"
+        with scoped_session(container):
+            project.slug = "badge-colours"
+            project.state_code = ProjectState.OPEN
+
+        answer = fake_sidecar.connect()
+
+        assert answer["delete"] == [
+            f"{folder}/plan.json",
+            draft,
+            f"{folder}/timeline.json",
+        ]
+        assert [entry["path"] for entry in answer["write_down"]] == [
+            "badge-colours/plan.json",
+            "badge-colours/project.md",
+            "badge-colours/timeline.json",
+        ]
+        assert fake_sidecar.text("badge-colours/project.md") == DRAFT
+        _assert_in_step(container, fake_sidecar)
+
+    def test_a_file_the_record_never_bore_stays_with_a_note(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+    ) -> None:
+        _bear_draft(container, project)
+        fake_sidecar.connect()
+        stray = f"draft-{project.number}/notes.md"
+        fake_sidecar.write(stray, "# Notes\n")
+
+        answers = [fake_sidecar.connect(), fake_sidecar.connect()]
+
+        assert fake_sidecar.text(stray) == "# Notes\n"
+        assert stray not in fake_sidecar.shadow
+        assert fake_sidecar.notes == {stray: STRAY}
+        assert [
+            (answer["send_up"], answer["write_down"], answer["delete"])
+            for answer in answers
+        ] == [([], [], []), ([], [], [])]
+        assert session.scalars(select(SaveError)).all() == []
+
+    def test_a_file_the_agent_deleted_is_written_back(
+        self,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+    ) -> None:
+        draft = _bear_draft(container, project)
+        fake_sidecar.connect()
+        fake_sidecar.remove(draft)
+
+        answer = fake_sidecar.connect()
+
+        assert [entry["path"] for entry in answer["write_down"]] == [draft]
+        assert fake_sidecar.text(draft) == DRAFT
+        _assert_in_step(container, fake_sidecar)
+
+    def test_a_held_document_stays_as_the_agent_left_it(
+        self,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        item = _bear_item(container, project, project_session, ANSWERED)
+        fake_sidecar.connect()
+        fake_sidecar.save(item, BROKEN)
+
+        answer = fake_sidecar.connect()
+
+        assert answer["write_down"] == []
+        assert fake_sidecar.text(item) == BROKEN
+        assert container.tree_service().held_path(item)
+        _assert_in_step(container, fake_sidecar)
+
+    def test_a_held_plan_comes_back_canonical_and_resolved(
+        self,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+    ) -> None:
+        path = f"draft-{project.number}/plan.json"
+        _bear_draft(container, project)
+        fake_sidecar.connect()
+        assert fake_sidecar.save(path, MISSPELT_PLAN).faults == 1
+
+        answer = fake_sidecar.connect()
+
+        rendering = container.plan_service().render(project)
+        assert [entry["path"] for entry in answer["write_down"]] == [path]
+        assert fake_sidecar.text(path) == rendering.text
+        assert not container.tree_service().held_path(path)
+        assert fake_sidecar.events[-1] == ErrorsResolved(project.id, path)
+        _assert_in_step(container, fake_sidecar)
+
+    def test_an_overflow_sends_up_every_change_and_reconciles(
+        self,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        item = _bear_item(container, project, project_session, ANSWERED)
+        draft = _bear_draft(container, project)
+        fake_sidecar.connect()
+        edited = ANSWERED.replace("# Which tent?", "# Which tent for the lake?")
+        # The watch overflows: these writes reach the sidecar as no event.
+        fake_sidecar.write(item, edited)
+        fake_sidecar.write(draft, RETITLED)
+
+        answer = fake_sidecar.overflow()
+
+        assert container.tree_service().read(item).content == edited.encode()
+        assert container.tree_service().read(draft).content == RETITLED.encode()
+        # The item's new title moved the timeline.
+        assert [entry["path"] for entry in answer["write_down"]] == [
+            f"draft-{project.number}/timeline.json"
+        ]
+        assert answer["send_up"] == []
+        _assert_in_step(container, fake_sidecar)

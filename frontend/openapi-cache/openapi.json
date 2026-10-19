@@ -293,6 +293,107 @@
         "title": "ReadinessCheckSchema",
         "type": "object"
       },
+      "SyncManifestRequestSchema.19c06e7": {
+        "description": "The store's tree as its sidecar sees it, posted for the reconcile; the\npaths from the tree's root.",
+        "properties": {
+          "shadow": {
+            "additionalProperties": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "description": "Each path the sidecar has synced, with the hash it synced",
+            "title": "Shadow",
+            "type": "object"
+          },
+          "tree": {
+            "additionalProperties": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "description": "Each file on disk, with the hash of its bytes",
+            "title": "Tree",
+            "type": "object"
+          }
+        },
+        "required": [
+          "tree",
+          "shadow"
+        ],
+        "title": "SyncManifestRequestSchema",
+        "type": "object"
+      },
+      "SyncManifestResponseSchema.19c06e7": {
+        "description": "The manifest, and what the sidecar does to its tree to match it, each\nlist in path order.",
+        "properties": {
+          "delete": {
+            "description": "Paths synced that the manifest no longer lists",
+            "items": {
+              "type": "string"
+            },
+            "title": "Delete",
+            "type": "array"
+          },
+          "manifest": {
+            "description": "Every path the store syncs",
+            "items": {
+              "$ref": "#/components/schemas/SyncManifestResponseSchema.19c06e7.SyncManifestEntrySchema"
+            },
+            "title": "Manifest",
+            "type": "array"
+          },
+          "send_up": {
+            "description": "Paths of the manifest changed on disk since they were synced",
+            "items": {
+              "type": "string"
+            },
+            "title": "Send Up",
+            "type": "array"
+          },
+          "write_down": {
+            "description": "Paths of the manifest the file on disk does not hold",
+            "items": {
+              "$ref": "#/components/schemas/SyncManifestResponseSchema.19c06e7.SyncManifestEntrySchema"
+            },
+            "title": "Write Down",
+            "type": "array"
+          }
+        },
+        "required": [
+          "manifest",
+          "send_up",
+          "write_down",
+          "delete"
+        ],
+        "title": "SyncManifestResponseSchema",
+        "type": "object"
+      },
+      "SyncManifestResponseSchema.19c06e7.SyncManifestEntrySchema": {
+        "description": "A path the store syncs.",
+        "properties": {
+          "hash": {
+            "description": "The tree hash: what the file must hold",
+            "title": "Hash",
+            "type": "string"
+          },
+          "path": {
+            "description": "The path, from the tree's root",
+            "title": "Path",
+            "type": "string"
+          },
+          "readonly": {
+            "description": "Whether the path is a read-only view",
+            "title": "Readonly",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "hash",
+          "readonly"
+        ],
+        "title": "SyncManifestEntrySchema",
+        "type": "object"
+      },
       "SyncProtocolRangeSchema.19c06e7": {
         "description": "The protocol versions the server accepts, both ends included: a 426's\nbody.",
         "properties": {
@@ -1057,6 +1158,77 @@
           }
         },
         "summary": "The store's save of a file of its tree (design 1 §5.3).",
+        "tags": []
+      }
+    },
+    "/api/sync/manifest": {
+      "post": {
+        "description": "",
+        "operationId": "post__api_sync_manifest",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SyncManifestRequestSchema.19c06e7"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncManifestResponseSchema.19c06e7"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "426": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncProtocolRangeSchema.19c06e7"
+                }
+              }
+            },
+            "description": "Upgrade Required"
+          }
+        },
+        "summary": "The manifest reconcile (design 1 §5.5 step 2): the store's tree as its sidecar sees it in, the manifest and the three lists that make the tree match it out.",
         "tags": []
       }
     },

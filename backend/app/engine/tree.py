@@ -16,6 +16,8 @@ from app.models.reference import ErrorKind
 
 _DRAFT_FOLDER = re.compile(r"draft-(?P<number>[1-9][0-9]*)")
 _ATTACHMENT = re.compile(r"attachments/(?P<batch>[1-9][0-9]*)/(?P<filename>[^/]+)")
+_SYNCING = Project.archived.is_(False)
+"""The projects whose folders the store syncs (design 1 §5.5)."""
 
 
 @dataclass(frozen=True)
@@ -34,6 +36,16 @@ class TreeDocument:
     project: Project
     document: Document
     item: Item | None
+
+
+@dataclass(frozen=True)
+class ManifestEntry:
+    """A path the store syncs, with its tree hash and whether it is a
+    read-only view (design 1 §5.5, §8)."""
+
+    path: str
+    hash: str
+    readonly: bool
 
 
 @dataclass(frozen=True)
@@ -140,6 +152,20 @@ class TreeService:
     def hashes(self, project: Project) -> dict[str, str]:
         """Every path of the project's folder with its tree hash, the paths
         from the tree's root."""
+        return {entry.path: entry.hash for entry in self._folder(project)}
+
+    def manifest(self) -> list[ManifestEntry]:
+        """Every path the store syncs, in path order: `reference.json` at the
+        tree's root, and every path of every syncing project's folder
+        (design 1 §5.5)."""
+        entries = [ManifestEntry(REFERENCE, self.view_service.reference().hash, True)]
+        for project in self.db.scalars(select(Project).where(_SYNCING)).all():
+            entries.extend(self._folder(project))
+        return sorted(entries, key=lambda entry: entry.path)
+
+    def _folder(self, project: Project) -> list[ManifestEntry]:
+        """Every path of the project's folder, from the tree's root, in path
+        order; its `timeline.json` and attachments are read-only."""
         documents = {
             tree_path(project, document.path): document
             for document in self.db.scalars(
@@ -161,17 +187,33 @@ class TreeService:
                 )
             )
         )
-        hashes = {
-            path: _tree_hash(document, path in held)
+        entries = [
+            ManifestEntry(path, _tree_hash(document, path in held), False)
             for path, document in documents.items()
-        }
-        hashes[tree_path(project, TIMELINE)] = self.view_service.timeline(project).hash
-        hashes[tree_path(project, PLAN)] = self.plan_service.render(project).hash
-        for attachment in self.db.scalars(
-            select(Attachment).where(Attachment.project_id == project.id)
-        ):
-            hashes[tree_path(project, attachment_path(attachment))] = attachment.sha256
-        return dict(sorted(hashes.items()))
+        ]
+        entries.append(
+            ManifestEntry(
+                tree_path(project, TIMELINE),
+                self.view_service.timeline(project).hash,
+                True,
+            )
+        )
+        entries.append(
+            ManifestEntry(
+                tree_path(project, PLAN), self.plan_service.render(project).hash, False
+            )
+        )
+        entries.extend(
+            ManifestEntry(
+                tree_path(project, attachment_path(attachment)),
+                attachment.sha256,
+                True,
+            )
+            for attachment in self.db.scalars(
+                select(Attachment).where(Attachment.project_id == project.id)
+            )
+        )
+        return sorted(entries, key=lambda entry: entry.path)
 
     def _project(self, folder: str) -> Project | None:
         """The syncing project whose folder is `folder` (DB decision 1)."""
@@ -181,9 +223,7 @@ class TreeService:
             if draft is None
             else (Project.number == int(draft["number"])) & Project.slug.is_(None)
         )
-        return self.db.scalars(
-            select(Project).where(named, Project.archived.is_(False))
-        ).one_or_none()
+        return self.db.scalars(select(Project).where(named, _SYNCING)).one_or_none()
 
 
 def _file(rendering: Rendering) -> TreeFile:

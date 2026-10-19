@@ -1534,6 +1534,72 @@ class TestIngestServicePlanSequences:
         assert fake_sidecar.drain() == []
 
 
+class TestIngestServiceWriteDown:
+    """What the reconcile's write-down does to the record (design 1 §5.5 step
+    2)."""
+
+    def test_a_held_plan_written_down_resolves_its_errors(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        path = _plan_path(project)
+        _ingest(container, path, MISSPELT_PLAN, environment)
+        engine_events.clear()
+
+        with scoped_session(container):
+            container.ingest_service().write_down([path])
+
+        assert _errors(session) == []
+        assert engine_events == [ErrorsResolved(project.id, path)]
+
+    def test_a_held_document_written_down_keeps_its_errors(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _bear_draft(container, project, DRAFT)
+        path = f"draft-{project.number}/project.md"
+        _ingest(container, path, BROKEN, environment)
+        errors = _errors(session)
+        engine_events.clear()
+
+        with scoped_session(container):
+            container.ingest_service().write_down([path])
+
+        assert errors
+        assert _errors(session) == errors
+        assert engine_events == []
+
+    def test_a_plan_not_held_or_not_written_down_is_left_as_it_is(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        held = Project(created_by_user_id=project.created_by_user_id)
+        session.add(held)
+        session.flush()
+        _ingest(container, _plan_path(held), MISSPELT_PLAN, environment)
+        errors = _errors(session)
+        engine_events.clear()
+
+        with scoped_session(container):
+            container.ingest_service().write_down([_plan_path(project)])
+
+        assert errors
+        assert _errors(session) == errors
+        assert engine_events == []
+
+
 def _plan_path(project: Project) -> str:
     return f"draft-{project.number}/plan.json"
 
@@ -1710,6 +1776,35 @@ class TestIngestServiceRowLock:
         assert isinstance(raised.value.orig, LockNotAvailable)
         with scoped_session(container) as session:
             assert session.scalars(select(PlanTask)).all() == []
+
+    def test_a_write_down_waits_for_the_projects_row(
+        self, committed_app: Flask
+    ) -> None:
+        path, document_id = _committed_handbook(committed_app)
+        path = path.replace("handbook.md", "plan.json")
+        container = committed_app.container
+        with committed_app.app_context():
+            engine = db.engine
+        _save(committed_app, path, MISSPELT_PLAN)
+        with scoped_session(container) as session:
+            project_id = session.get_one(Document, document_id).project_id
+
+        with engine.connect() as holder:
+            holder.execute(
+                sql("SELECT id FROM projects WHERE id = :id FOR UPDATE"),
+                {"id": project_id},
+            )
+            with (
+                pytest.raises(OperationalError) as raised,
+                scoped_session(container) as session,
+            ):
+                session.execute(sql("SET LOCAL lock_timeout = '200ms'"))
+                container.ingest_service().write_down([path])
+            holder.rollback()
+
+        assert isinstance(raised.value.orig, LockNotAvailable)
+        with scoped_session(container) as session:
+            assert container.tree_service().held_path(path)
 
 
 def _wait_for_a_lock_wait(app: Flask) -> None:

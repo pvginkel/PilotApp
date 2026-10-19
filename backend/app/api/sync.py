@@ -1,5 +1,5 @@
 """The store sidecar's sync routes (design 1 §5.1): the store's tree, path by
-path, under the store's bearer.
+path and whole, under the store's bearer.
 
 Registered on the app, not on `api_bp`, so the OIDC gate never sees them:
 the bearer is the store, and every call passes the gate below first.
@@ -14,9 +14,15 @@ from flask import Blueprint, Response, g, jsonify, request
 from spectree import Response as SpectreeResponse
 
 from app.app_config import AppSettings
+from app.engine.tree import ManifestEntry
 from app.exceptions import SyncProtocolUnsupportedException, ValidationException
 from app.schemas.common import ApiErrorResponseSchema
-from app.schemas.sync_schema import SyncProtocolRangeSchema
+from app.schemas.sync_schema import (
+    SyncManifestEntrySchema,
+    SyncManifestRequestSchema,
+    SyncManifestResponseSchema,
+    SyncProtocolRangeSchema,
+)
 from app.services.container import ServiceContainer
 from app.services.sync_service import SyncService
 from app.utils.auth import public
@@ -125,6 +131,42 @@ def get_file(
         status=200,
         headers={"X-Pilot-Hash": file.hash},
         mimetype="application/octet-stream",
+    )
+
+
+@sync_bp.route("/manifest", methods=["POST"])
+@public
+@api.validate(
+    json=SyncManifestRequestSchema,
+    resp=SpectreeResponse(
+        HTTP_200=SyncManifestResponseSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_426=SyncProtocolRangeSchema,
+    ),
+)
+@inject
+def reconcile(
+    sync_service: SyncService = Provide[ServiceContainer.sync_service],
+) -> Any:
+    """The manifest reconcile (design 1 §5.5 step 2): the store's tree as
+    its sidecar sees it in, the manifest and the three lists that make the
+    tree match it out."""
+    body = SyncManifestRequestSchema.model_validate(request.get_json())
+    answer = sync_service.reconcile(body.tree, body.shadow)
+    response = SyncManifestResponseSchema(
+        manifest=[_entry(entry) for entry in answer.manifest],
+        send_up=answer.send_up,
+        write_down=[_entry(entry) for entry in answer.write_down],
+        delete=answer.delete,
+    )
+    return jsonify(response.model_dump()), 200
+
+
+def _entry(entry: ManifestEntry) -> SyncManifestEntrySchema:
+    return SyncManifestEntrySchema(
+        path=entry.path, hash=entry.hash, readonly=entry.readonly
     )
 
 
