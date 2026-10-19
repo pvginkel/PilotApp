@@ -101,6 +101,7 @@ class FakeEnvironment:
     """What a start brings it to at once; None leaves it `starting`."""
     unreachable: bool = False
     capped: bool = False
+    unprojectable: bool = False
     sessions_created: int = 0
 
     def to_json(self) -> dict[str, Any]:
@@ -275,6 +276,7 @@ class FakeController:
             "restart": self.restart,
             "unreachable": self.unreachable,
             "capped": self.capped,
+            "unprojectable": self.unprojectable,
             "busy": self.busy,
             "play": self.play,
             "finish": self.finish,
@@ -374,6 +376,13 @@ class FakeController:
         the environment is exempt."""
         with self._changed:
             self._environment(env_id).capped = on
+
+    @validate_call
+    def unprojectable(self, env_id: str, on: bool = True) -> None:
+        """The controller cannot describe the environment: its list names it
+        under `unprojectable` rather than among its items."""
+        with self._changed:
+            self._environment(env_id).unprojectable = on
 
     @validate_call
     def busy(self, env_id: str, name: str) -> None:
@@ -509,8 +518,10 @@ class FakeController:
 
     def _list_environments(self, request: Request) -> Response:
         with self._changed:
-            items = [e.to_json() for e in self._environments.values()]
-        return _json({"items": items, "unprojectable": []})
+            environments = self._environments.values()
+            items = [e.to_json() for e in environments if not e.unprojectable]
+            unprojectable = [e.env_id for e in environments if e.unprojectable]
+        return _json({"items": items, "unprojectable": unprojectable})
 
     def _get_environment(self, request: Request, env_id: str) -> Response:
         wait = request.args.get("wait", "none")

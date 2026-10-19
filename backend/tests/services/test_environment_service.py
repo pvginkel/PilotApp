@@ -1,0 +1,762 @@
+"""Environments on demand and the shutdown timer (design 2 §13.2, §13.3; F88.1,
+F73.1; V05).
+
+The three rules that protect the most: an environment Pilot did not start is
+never stopped, nor an exempt one, nor one where a Session runs or starts
+(`TestShutdownTimer`, `test_..._is_never_stopped`)."""
+
+import threading
+import uuid
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
+import pytest
+from flask import Flask
+from sqlalchemy import select, text, update
+from sqlalchemy.orm import Session
+from werkzeug.wrappers import Request, Response
+
+from app.core_exceptions import ExternalServiceException
+from app.database import scoped_session
+from app.models import Environment, Project, User
+from app.models import Session as AgentSession
+from app.models.reference import SessionState, UserKind
+from app.services.container import ServiceContainer
+from app.services.controller_client import (
+    ControllerClient,
+    ControllerProblem,
+    ControllerProblemType,
+)
+from app.services.environment_service import (
+    SHUTDOWN_TIMER,
+    EnvironmentService,
+    EnvironmentStartFailed,
+)
+from app.services.fake_controller import FakeController
+from tests.support.fake_controller import ServedFakeController, client_of
+from tests.support.supervisor import WAIT_SECONDS, Supervise, listening, wait_until
+
+STOP_AFTER = timedelta(minutes=30)
+ENV = "env-a"
+
+
+@pytest.fixture
+def environments(
+    container: ServiceContainer,
+    controller_client: ControllerClient,
+    supervise: Supervise,
+) -> EnvironmentService:
+    supervisor, _ = supervise(container)
+    return EnvironmentService(
+        container=container,
+        supervisor=supervisor,
+        stop_after_seconds=STOP_AFTER.total_seconds(),
+    )
+
+
+def _row(db: Session, env_id: str = ENV) -> Environment | None:
+    return db.scalars(
+        select(Environment)
+        .where(Environment.id == env_id)
+        .execution_options(populate_existing=True)
+    ).one_or_none()
+
+
+def _environment(
+    db: Session,
+    env_id: str = ENV,
+    *,
+    started: bool = True,
+    due: datetime | None = None,
+    exempt: bool = False,
+) -> Environment:
+    """An environment's row; `started` as Pilot's own start leaves it."""
+    row = Environment(
+        id=env_id,
+        name=env_id.title(),
+        exempt=exempt,
+        last_state="running",
+        server_started_at=datetime.now(UTC) - timedelta(hours=1) if started else None,
+        stop_due_at=due,
+    )
+    db.add(row)
+    db.flush()
+    return row
+
+
+def _agent_session(
+    db: Session, project: Project, state: SessionState, env_id: str = ENV
+) -> AgentSession:
+    run = AgentSession(
+        project_id=project.id,
+        environment_id=env_id,
+        kind_code="work",
+        cwd="/work/Example",
+        token_hash=uuid.uuid4().hex,
+        state_code=state,
+    )
+    db.add(run)
+    db.flush()
+    return run
+
+
+def _overdue() -> datetime:
+    return datetime.now(UTC) - timedelta(minutes=1)
+
+
+def _armed_around(row: Environment | None, before: datetime) -> bool:
+    assert row is not None and row.stop_due_at is not None
+    return before + STOP_AFTER <= row.stop_due_at <= datetime.now(UTC) + STOP_AFTER
+
+
+def _stops(fake: FakeController, env_id: str = ENV) -> list[str]:
+    return [call for call in fake.calls if call == f"POST /environments/{env_id}/stop"]
+
+
+class TestEnsureEnvironment:
+    def test_the_first_touch_makes_the_row_from_the_controllers_report(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        fake_controller.add_environment(
+            ENV, name="Alpha", status="running", exempt=True
+        )
+        before = datetime.now(UTC)
+
+        environments.ensure_environment(ENV)
+
+        row = _row(session)
+        assert row is not None
+        assert (row.name, row.last_state, row.exempt) == ("Alpha", "running", True)
+        assert row.last_seen_at is not None and row.last_seen_at >= before
+        assert row.server_started_at is None
+        assert row.stop_due_at is None
+
+    def test_an_unnamed_environment_is_named_by_its_id(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        fake_controller.add_environment(ENV)
+
+        environments.ensure_environment(ENV)
+
+        row = _row(session)
+        assert row is not None and row.name == ENV
+
+    def test_a_row_pilot_has_is_left_as_it_is(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        _environment(session, started=False)
+        fake_controller.add_environment(ENV, name="Renamed", status="stopped")
+
+        environments.ensure_environment(ENV)
+
+        row = _row(session)
+        assert row is not None and (row.name, row.last_state) == ("Env-A", "running")
+        assert fake_controller.calls == []
+
+    def test_an_environment_the_controller_lacks_is_not_found(
+        self, environments: EnvironmentService, session: Session
+    ) -> None:
+        with pytest.raises(ControllerProblem) as raised:
+            environments.ensure_environment(ENV)
+
+        assert raised.value.problem_type is ControllerProblemType.NOT_FOUND
+        assert _row(session) is None
+
+
+class TestStart:
+    def test_a_start_answered_202_marks_the_environment_pilots(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        fake_controller.add_environment(ENV, status="stopped")
+        before = datetime.now(UTC)
+
+        settled = environments.start(ENV)
+
+        assert settled.status == "running"
+        row = _row(session)
+        assert row is not None and row.server_started_at is not None
+        assert row.server_started_at >= before
+        assert fake_controller.calls == [
+            f"GET /environments/{ENV}",
+            f"POST /environments/{ENV}/start",
+            f"GET /environments/{ENV}?wait=settled&waitMs=3600000",
+        ]
+
+    def test_a_start_answered_200_marks_nothing(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        fake_controller.add_environment(ENV, status="running")
+
+        settled = environments.start(ENV)
+
+        assert settled.status == "running"
+        row = _row(session)
+        assert row is not None
+        assert row.server_started_at is None
+        assert row.stop_due_at is None
+
+    def test_a_start_that_settles_with_nothing_there_arms_the_timer(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        fake_controller.add_environment(ENV, status="stopped")
+        before = datetime.now(UTC)
+
+        environments.start(ENV)
+
+        assert _armed_around(_row(session), before)
+
+    def test_a_start_for_a_session_starting_there_arms_nothing(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+        project: Project,
+    ) -> None:
+        fake_controller.add_environment(ENV, status="stopped")
+        environments.ensure_environment(ENV)
+        _agent_session(session, project, SessionState.STARTING)
+
+        environments.start(ENV)
+
+        row = _row(session)
+        assert row is not None and row.server_started_at is not None
+        assert row.stop_due_at is None
+
+    def test_admission_blocked_is_the_starts_failure(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        fake_controller.add_environment(ENV, status="stopped")
+        fake_controller.capped(ENV)
+
+        with pytest.raises(EnvironmentStartFailed, match="refused it") as raised:
+            environments.start(ENV)
+
+        assert raised.value.env_id == ENV
+        assert isinstance(raised.value.__cause__, ControllerProblem)
+        row = _row(session)
+        assert row is not None and row.server_started_at is None
+        assert fake_controller.calls[-1] == f"POST /environments/{ENV}/start"
+
+    @pytest.mark.parametrize("settles", ["error", "stopped"])
+    def test_a_wait_that_ends_on_error_or_stopped_is_the_starts_failure(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+        settles: Any,
+    ) -> None:
+        fake_controller.add_environment(ENV, status="stopped")
+        fake_controller.settle_starts(ENV, settles)
+        before = datetime.now(UTC)
+
+        with pytest.raises(EnvironmentStartFailed, match=f"it settled {settles}"):
+            environments.start(ENV)
+
+        # Pilot started it: the timer is armed so that it is stopped.
+        row = _row(session)
+        assert row is not None and row.server_started_at is not None
+        assert _armed_around(row, before)
+
+    def test_another_conflict_is_the_controllers_problem(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+    ) -> None:
+        fake_controller.add_environment(ENV, status="deleting")
+
+        with pytest.raises(ControllerProblem) as raised:
+            environments.start(ENV)
+
+        assert not isinstance(raised.value, EnvironmentStartFailed)
+        assert raised.value.problem_type is ControllerProblemType.CONFLICT
+
+    def test_the_mark_commits_before_the_wait(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        supervise: Supervise,
+    ) -> None:
+        container = committed_app.container
+        service = _service(container, supervise)
+        fake_controller.add_environment(ENV, status="stopped")
+        fake_controller.settle_starts(ENV, None)
+
+        outcome = _in_thread(lambda: service.start(ENV))
+        wait_until(
+            lambda: _committed(container, "server_started_at") is not None,
+            "marked Pilot's",
+        )
+        assert outcome.thread.is_alive()
+        fake_controller.set_status(ENV, "running")
+
+        assert outcome.result().status == "running"
+
+    def test_a_wait_that_runs_out_is_a_failure_of_the_controller(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        supervise: Supervise,
+    ) -> None:
+        container = committed_app.container
+        service = _service(container, supervise)
+        fake_controller.add_environment(ENV, status="stopped")
+        fake_controller.settle_starts(ENV, None)
+
+        outcome = _in_thread(lambda: service.start(ENV))
+        wait_until(
+            lambda: any("wait=settled" in call for call in fake_controller.calls),
+            "waiting",
+        )
+        # Ends the held wait with the environment still starting, as its time
+        # running out does; the server keeps serving.
+        FakeController.close(fake_controller)
+
+        with pytest.raises(ExternalServiceException) as raised:
+            outcome.result()
+        assert not isinstance(raised.value, EnvironmentStartFailed)
+        assert "still starting when the wait ran out" in str(raised.value)
+
+
+class TestArmShutdownTimer:
+    def test_it_arms_an_environment_pilot_started_with_nothing_running_there(
+        self, environments: EnvironmentService, session: Session, project: Project
+    ) -> None:
+        _environment(session)
+        _agent_session(session, project, SessionState.IDLE)
+        _agent_session(session, project, SessionState.ENDED)
+        before = datetime.now(UTC)
+
+        environments.arm_shutdown_timer(session, ENV)
+
+        assert _armed_around(_row(session), before)
+
+    def test_a_turns_end_renews_the_deadline(
+        self, environments: EnvironmentService, session: Session
+    ) -> None:
+        _environment(session, due=datetime.now(UTC) + timedelta(minutes=1))
+        before = datetime.now(UTC)
+
+        environments.arm_shutdown_timer(session, ENV)
+
+        assert _armed_around(_row(session), before)
+
+    @pytest.mark.parametrize(
+        ("started", "exempt", "state"),
+        [
+            (False, False, None),
+            (True, True, None),
+            (True, False, SessionState.RUNNING),
+            (True, False, SessionState.STARTING),
+        ],
+        ids=["not-pilots", "exempt", "a-session-running", "a-session-starting"],
+    )
+    def test_it_never_arms_what_is_not_the_servers_to_stop(
+        self,
+        environments: EnvironmentService,
+        session: Session,
+        project: Project,
+        started: bool,
+        exempt: bool,
+        state: SessionState | None,
+    ) -> None:
+        _environment(session, started=started, exempt=exempt)
+        if state is not None:
+            _agent_session(session, project, state)
+
+        environments.arm_shutdown_timer(session, ENV)
+
+        row = _row(session)
+        assert row is not None and row.stop_due_at is None
+
+    def test_two_sessions_ending_at_once_leave_it_armed(
+        self, committed_app: Flask, supervise: Supervise
+    ) -> None:
+        container = committed_app.container
+        service = _service(container, supervise)
+        with scoped_session(container) as db:
+            _environment(db)
+            project = _project(db)
+            first_id = _agent_session(db, project, SessionState.RUNNING).id
+            second_id = _agent_session(db, project, SessionState.RUNNING).id
+        maker = container.session_maker()
+        first, second = maker(), maker()
+        try:
+            # Each Session's turn ends in a transaction of its own, which arms
+            # the timer before it commits.
+            _end_turn(first, first_id)
+            service.arm_shutdown_timer(first, ENV)
+            _end_turn(second, second_id)
+            arming = _in_thread(lambda: _arm_and_commit(service, second))
+            wait_until(lambda: _lock_waits(container) == 1, "waiting on the row")
+
+            # The first saw the second Session still running.
+            assert _committed(container, "stop_due_at") is None
+            first.commit()
+            arming.result()
+        finally:
+            first.close()
+            second.close()
+
+        assert _committed(container, "stop_due_at") is not None
+
+
+class TestClearShutdownTimer:
+    def test_a_session_starting_there_clears_the_deadline(
+        self, environments: EnvironmentService, session: Session
+    ) -> None:
+        _environment(session, due=datetime.now(UTC) + timedelta(minutes=1))
+
+        environments.clear_shutdown_timer(session, ENV)
+
+        row = _row(session)
+        assert row is not None
+        assert row.stop_due_at is None
+        assert row.server_started_at is not None
+
+
+class TestShutdownTimer:
+    def test_it_is_a_timer_that_needs_the_controller(
+        self, app: Flask, supervise: Supervise
+    ) -> None:
+        supervisor, coordinator = supervise(app.container, controller_configured=False)
+        EnvironmentService(
+            container=app.container, supervisor=supervisor, stop_after_seconds=60
+        )
+
+        with listening("app.services.supervisor") as log:
+            coordinator.fire_startup()
+
+        assert log.matching(r"No controller configured.*") == [
+            "No controller configured (CONTROLLER_URL unset): the jobs and timers "
+            f"that need one do not start ({SHUTDOWN_TIMER})"
+        ]
+
+    def test_it_stops_an_overdue_environment_pilot_started(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        fake_controller.add_environment(ENV, status="running")
+        _environment(session, due=_overdue())
+
+        environments.run_shutdown_timer(session)
+
+        assert fake_controller.environment(ENV).status == "stopped"
+        assert _stops(fake_controller) == [f"POST /environments/{ENV}/stop"]
+        row = _row(session)
+        assert row is not None
+        assert (row.stop_due_at, row.server_started_at) == (None, None)
+
+    def test_it_leaves_one_not_yet_due(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        fake_controller.add_environment(ENV, status="running")
+        due = datetime.now(UTC) + timedelta(minutes=1)
+        _environment(session, due=due)
+
+        environments.run_shutdown_timer(session)
+
+        assert fake_controller.calls == []
+        row = _row(session)
+        assert row is not None and row.stop_due_at == due
+
+    def test_an_environment_pilot_did_not_start_is_never_stopped(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        fake_controller.add_environment(ENV, status="running")
+        environments.start(ENV)  # answered 200: running already
+        row = _row(session)
+        assert row is not None and row.stop_due_at is None
+        # Even a deadline the timer never sets does not stop it.
+        row.stop_due_at = _overdue()
+        session.flush()
+
+        environments.run_shutdown_timer(session)
+
+        assert _stops(fake_controller) == []
+        assert fake_controller.environment(ENV).status == "running"
+
+    def test_an_exempt_environment_is_never_stopped(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        fake_controller.add_environment(ENV, status="stopped", exempt=True)
+        environments.start(ENV)  # answered 202: Pilot started it
+        row = _row(session)
+        assert row is not None and row.server_started_at is not None
+        assert row.stop_due_at is None
+        row.stop_due_at = _overdue()
+        session.flush()
+
+        environments.run_shutdown_timer(session)
+
+        assert _stops(fake_controller) == []
+        assert fake_controller.environment(ENV).status == "running"
+
+    @pytest.mark.parametrize("state", [SessionState.RUNNING, SessionState.STARTING])
+    def test_an_environment_where_a_session_runs_is_never_stopped(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+        project: Project,
+        state: SessionState,
+    ) -> None:
+        fake_controller.add_environment(ENV, status="running")
+        _environment(session, due=_overdue())
+        _agent_session(session, project, state)
+
+        environments.run_shutdown_timer(session)
+
+        assert _stops(fake_controller) == []
+        assert fake_controller.environment(ENV).status == "running"
+
+    def test_it_arms_what_a_restart_left_unarmed(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+        project: Project,
+    ) -> None:
+        # A restart between the last Session's end and its arm.
+        _environment(session)
+        _agent_session(session, project, SessionState.IDLE)
+        _environment(session, "env-busy")
+        _agent_session(session, project, SessionState.RUNNING, "env-busy")
+        _environment(session, "env-exempt", exempt=True)
+        _environment(session, "env-not-pilots", started=False)
+        before = datetime.now(UTC)
+
+        environments.run_shutdown_timer(session)
+
+        assert _armed_around(_row(session), before)
+        for env_id in ("env-busy", "env-exempt", "env-not-pilots"):
+            row = _row(session, env_id)
+            assert row is not None and row.stop_due_at is None, env_id
+        assert fake_controller.calls == []
+
+    def test_a_session_start_that_failed_leaves_its_environment_stopped(
+        self,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        supervise: Supervise,
+        session: Session,
+        project: Project,
+    ) -> None:
+        # Review r1, B2: the start Pilot made for a Session whose start then
+        # fails (F125). No time to stand idle, so the next tick is overdue.
+        service = EnvironmentService(
+            container=container,
+            supervisor=supervise(container)[0],
+            stop_after_seconds=0,
+        )
+        fake_controller.add_environment(ENV, status="stopped")
+        service.ensure_environment(ENV)
+        starting = _agent_session(session, project, SessionState.STARTING)
+        service.start(ENV)
+        row = _row(session)
+        assert row is not None and row.stop_due_at is None
+
+        starting.state_code = SessionState.FAILED
+        session.flush()
+        service.arm_shutdown_timer(session, ENV)
+        row = _row(session)
+        assert row is not None and row.stop_due_at is not None
+        service.run_shutdown_timer(session)
+
+        assert fake_controller.environment(ENV).status == "stopped"
+        row = _row(session)
+        assert row is not None
+        assert (row.stop_due_at, row.server_started_at) == (None, None)
+
+    def test_an_environment_the_controller_no_longer_has_is_cleared(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        _environment(session, due=_overdue())
+
+        environments.run_shutdown_timer(session)
+
+        assert _stops(fake_controller) == [f"POST /environments/{ENV}/stop"]
+        row = _row(session)
+        assert row is not None
+        assert (row.stop_due_at, row.server_started_at) == (None, None)
+
+    def test_a_stop_the_controller_refuses_keeps_the_deadline(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        fake_controller.add_environment(ENV, status="deleting")
+        due = _overdue()
+        _environment(session, due=due)
+
+        with pytest.raises(ControllerProblem) as raised:
+            environments.run_shutdown_timer(session)
+
+        assert raised.value.problem_type is ControllerProblemType.CONFLICT
+        row = _row(session)
+        assert row is not None and row.stop_due_at == due
+
+    def test_two_ticks_at_once_stop_an_environment_once(
+        self, committed_app: Flask, supervise: Supervise
+    ) -> None:
+        container = committed_app.container
+        fake = _StopHook()
+        try:
+            client_of(container, fake)
+            service = _service(container, supervise)
+            fake.add_environment(ENV, status="running")
+            with scoped_session(container) as db:
+                _environment(db, due=_overdue())
+            other: list[_Outcome] = []
+
+            def other_tick() -> None:
+                # Another process's tick, while this one holds the row.
+                other.append(_in_thread(lambda: _tick(container, service)))
+                other[0].result()
+
+            fake.during_stop = other_tick
+            _tick(container, service)
+        finally:
+            fake.close()
+
+        assert _stops(fake) == [f"POST /environments/{ENV}/stop"]
+        assert _committed(container, "server_started_at") is None
+
+
+class _Outcome:
+    def __init__(self, run: Callable[[], Any]) -> None:
+        self._value: Any = None
+        self._error: BaseException | None = None
+        self.thread = threading.Thread(target=self._run, args=(run,), daemon=True)
+        self.thread.start()
+
+    def _run(self, run: Callable[[], Any]) -> None:
+        try:
+            self._value = run()
+        except BaseException as error:
+            self._error = error
+
+    def result(self) -> Any:
+        self.thread.join(WAIT_SECONDS)
+        assert not self.thread.is_alive(), "the thread did not finish"
+        if self._error is not None:
+            raise self._error
+        return self._value
+
+
+def _in_thread(run: Callable[[], Any]) -> _Outcome:
+    return _Outcome(run)
+
+
+class _StopHook(ServedFakeController):
+    """The fake, running `during_stop` once while it answers a stop."""
+
+    def __init__(self) -> None:
+        super().__init__(keepalive_seconds=0.2)
+        self.during_stop: Callable[[], None] | None = None
+
+    def _stop(self, request: Request, env_id: str) -> Response:
+        hook, self.during_stop = self.during_stop, None
+        if hook is not None:
+            hook()
+        return super()._stop(request, env_id)
+
+
+def _service(container: ServiceContainer, supervise: Supervise) -> EnvironmentService:
+    return EnvironmentService(
+        container=container,
+        supervisor=supervise(container)[0],
+        stop_after_seconds=STOP_AFTER.total_seconds(),
+    )
+
+
+def _tick(container: ServiceContainer, service: EnvironmentService) -> None:
+    with scoped_session(container) as db:
+        service.run_shutdown_timer(db)
+
+
+def _project(db: Session) -> Project:
+    person = User(
+        kind_code=UserKind.PERSON,
+        subject="subject-ada",
+        handle="ada",
+        name="Ada Example",
+        avatar_slot=1,
+    )
+    db.add(person)
+    db.flush()
+    project = Project(created_by_user_id=person.id)
+    db.add(project)
+    db.flush()
+    return project
+
+
+def _end_turn(db: Session, session_id: uuid.UUID) -> None:
+    db.execute(
+        update(AgentSession)
+        .where(AgentSession.id == session_id)
+        .values(state_code=SessionState.IDLE)
+    )
+
+
+def _arm_and_commit(service: EnvironmentService, db: Session) -> None:
+    service.arm_shutdown_timer(db, ENV)
+    db.commit()
+
+
+def _committed(container: ServiceContainer, column: str) -> Any:
+    """The committed value of the environment's column; None with no row."""
+    with scoped_session(container) as db:
+        row = _row(db)
+        return None if row is None else getattr(row, column)
+
+
+def _lock_waits(container: ServiceContainer) -> int:
+    """The connections of the app's database waiting on a lock."""
+    with scoped_session(container) as db:
+        waits: int = db.scalar(
+            text(
+                "SELECT count(*) FROM pg_stat_activity"
+                " WHERE datname = current_database() AND wait_event_type = 'Lock'"
+            )
+        )
+        return waits

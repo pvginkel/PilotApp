@@ -5,11 +5,10 @@ import logging
 import re
 import threading
 import time
-from collections.abc import Callable, Generator
+from collections.abc import Generator
 
 import pytest
 from flask import Flask
-from prometheus_client.metrics import MetricWrapperBase
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -26,9 +25,13 @@ from app.services.supervisor import (
     Supervisor,
 )
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
-
-# The longest a test waits for a thread to get somewhere.
-WAIT_SECONDS = 5.0
+from tests.support.supervisor import (
+    WAIT_SECONDS,
+    LogWaiter,
+    Supervise,
+    listening,
+    metric_value,
+)
 
 SUPERVISOR_LOGGER = "app.services.supervisor"
 
@@ -53,97 +56,13 @@ class _Calls:
             return list(self.items)
 
 
-class _LogWaiter(logging.Handler):
-    """The supervisor's log records; a test waits for a message that matches a
-    pattern."""
-
-    def __init__(self) -> None:
-        super().__init__(logging.INFO)
-        self._condition = threading.Condition()
-        self._messages: list[str] = []
-        self.records: list[logging.LogRecord] = []
-
-    def emit(self, record: logging.LogRecord) -> None:
-        with self._condition:
-            self._messages.append(record.getMessage())
-            self.records.append(record)
-            self._condition.notify_all()
-
-    def wait_for(self, pattern: str, count: int = 1) -> None:
-        with self._condition:
-            assert self._condition.wait_for(
-                lambda: len(self.matching(pattern)) >= count, WAIT_SECONDS
-            ), f"no {count} of {pattern!r} in {self._messages}"
-
-    def matching(self, pattern: str) -> list[str]:
-        with self._condition:
-            return [m for m in self._messages if re.fullmatch(pattern, m)]
-
-
 @pytest.fixture
-def supervisor_log() -> Generator[_LogWaiter]:
-    waiter = _LogWaiter()
-    logger = logging.getLogger(SUPERVISOR_LOGGER)
-    level = logger.level
-    logger.setLevel(logging.INFO)
-    logger.addHandler(waiter)
-    try:
+def supervisor_log() -> Generator[LogWaiter]:
+    with listening(SUPERVISOR_LOGGER) as waiter:
         yield waiter
-    finally:
-        logger.removeHandler(waiter)
-        logger.setLevel(level)
 
 
-type Supervise = Callable[..., tuple[Supervisor, LifecycleCoordinator]]
-
-
-@pytest.fixture
-def supervise() -> Generator[Supervise]:
-    """Builds a supervisor on a lifecycle coordinator of its own, whose
-    shutdown the teardown runs if the test did not."""
-    coordinators: list[LifecycleCoordinator] = []
-
-    def build(
-        container: ServiceContainer,
-        *,
-        controller_configured: bool = True,
-        tick: float = 0.05,
-        backoff: tuple[float, float] = (0.05, 0.2),
-        budget: int = 20,
-    ) -> tuple[Supervisor, LifecycleCoordinator]:
-        coordinator = LifecycleCoordinator(graceful_shutdown_timeout=budget)
-        coordinators.append(coordinator)
-        supervisor = Supervisor(
-            container=container,
-            lifecycle_coordinator=coordinator,
-            controller_configured=controller_configured,
-            scheduler_tick_seconds=tick,
-            restart_backoff_initial_seconds=backoff[0],
-            restart_backoff_max_seconds=backoff[1],
-        )
-        return supervisor, coordinator
-
-    yield build
-
-    for coordinator in coordinators:
-        if not coordinator.is_shutting_down():
-            coordinator.shutdown()
-
-
-def _value(metric: MetricWrapperBase, **labels: str) -> float:
-    """A metric's value for these labels; 0 before the first."""
-    return next(
-        (
-            sample.value
-            for family in metric.collect()
-            for sample in family.samples
-            if sample.labels == labels and not sample.name.endswith("_created")
-        ),
-        0.0,
-    )
-
-
-def _restart_delays(log: _LogWaiter, name: str) -> list[float]:
+def _restart_delays(log: LogWaiter, name: str) -> list[float]:
     pattern = rf"Loop {re.escape(name)} raised; restarting in ([0-9.]+) s"
     return [
         float(match.group(1))
@@ -162,7 +81,7 @@ class TestSupervisorStartup:
         self,
         committed_app: Flask,
         supervise: Supervise,
-        supervisor_log: _LogWaiter,
+        supervisor_log: LogWaiter,
     ) -> None:
         supervisor, coordinator = supervise(committed_app.container)
         calls = _Calls()
@@ -233,7 +152,7 @@ class TestSupervisorStartup:
 
 class TestSupervisorLoops:
     def test_a_key_runs_one_live_loop(
-        self, app: Flask, supervise: Supervise, supervisor_log: _LogWaiter
+        self, app: Flask, supervise: Supervise, supervisor_log: LogWaiter
     ) -> None:
         supervisor, coordinator = supervise(app.container)
         supervisor.register_job("keyed", needs_controller=False)
@@ -250,20 +169,20 @@ class TestSupervisorLoops:
         assert not supervisor.start_loop("keyed", loop, key=1)
         assert supervisor.start_loop("keyed", loop, key=2)
         calls.wait_for(2)
-        assert _value(JOB_UP, job="keyed") == 2
+        assert metric_value(JOB_UP, job="keyed") == 2
 
         release.set()
         supervisor_log.wait_for(r"Loop keyed:1 ended")
         supervisor_log.wait_for(r"Loop keyed:2 ended")
         assert calls.items == ["keyed:1", "keyed:2"]
-        assert _value(JOB_UP, job="keyed") == 0
+        assert metric_value(JOB_UP, job="keyed") == 0
 
         # The key is free once its loop has ended.
         assert supervisor.start_loop("keyed", loop, key=1)
         assert calls.wait_for(3)[2] == "keyed:1"
 
     def test_a_loop_that_returns_ended_on_purpose(
-        self, app: Flask, supervise: Supervise, supervisor_log: _LogWaiter
+        self, app: Flask, supervise: Supervise, supervisor_log: LogWaiter
     ) -> None:
         supervisor, coordinator = supervise(app.container)
         supervisor.register_job("once", needs_controller=False)
@@ -275,11 +194,11 @@ class TestSupervisorLoops:
         supervisor_log.wait_for(r"Loop once ended")
         assert calls.items == ["once"]
         assert supervisor_log.matching(r"Loop once started") == ["Loop once started"]
-        assert _value(JOB_RESTARTS_TOTAL, job="once") == 0
-        assert _value(JOB_UP, job="once") == 0
+        assert metric_value(JOB_RESTARTS_TOTAL, job="once") == 0
+        assert metric_value(JOB_UP, job="once") == 0
 
     def test_a_loop_that_raises_restarts_with_doubling_backoff_to_its_cap(
-        self, app: Flask, supervise: Supervise, supervisor_log: _LogWaiter
+        self, app: Flask, supervise: Supervise, supervisor_log: LogWaiter
     ) -> None:
         supervisor, coordinator = supervise(app.container, backoff=(0.05, 0.2))
         supervisor.register_job("flaky", needs_controller=False)
@@ -298,11 +217,11 @@ class TestSupervisorLoops:
         assert delays == [0.05, 0.1, 0.2, 0.2, 0.2]
         gaps = [later - earlier for earlier, later in itertools.pairwise(started)]
         assert all(gap >= delay for gap, delay in zip(gaps, delays, strict=True)), gaps
-        assert _value(JOB_RESTARTS_TOTAL, job="flaky") == 5
-        assert _value(JOB_UP, job="flaky") == 0
+        assert metric_value(JOB_RESTARTS_TOTAL, job="flaky") == 5
+        assert metric_value(JOB_UP, job="flaky") == 0
 
     def test_a_run_as_long_as_the_cap_resets_the_backoff(
-        self, app: Flask, supervise: Supervise, supervisor_log: _LogWaiter
+        self, app: Flask, supervise: Supervise, supervisor_log: LogWaiter
     ) -> None:
         supervisor, coordinator = supervise(app.container, backoff=(0.05, 0.2))
         supervisor.register_job("steady", needs_controller=False)
@@ -322,7 +241,7 @@ class TestSupervisorLoops:
         assert _restart_delays(supervisor_log, "steady") == [0.05, 0.1, 0.05]
 
     def test_the_backoff_starts_at_one_second(
-        self, app: Flask, supervisor_log: _LogWaiter
+        self, app: Flask, supervisor_log: LogWaiter
     ) -> None:
         coordinator = LifecycleCoordinator(graceful_shutdown_timeout=20)
         supervisor = Supervisor(
@@ -350,7 +269,7 @@ class TestSupervisorLoops:
         assert started[1] - started[0] >= 1.0
 
     def test_the_restart_is_logged_with_its_error(
-        self, app: Flask, supervise: Supervise, supervisor_log: _LogWaiter
+        self, app: Flask, supervise: Supervise, supervisor_log: LogWaiter
     ) -> None:
         supervisor, coordinator = supervise(app.container)
         supervisor.register_job("relay", needs_controller=False)
@@ -420,9 +339,11 @@ class TestSupervisorTimers:
         ids = _environment_ids(committed_app.container)
         assert {"written-1", "written-2"} <= ids
         assert not {id_ for id_ in ids if id_.startswith("failing-")}
-        assert _value(TIMER_RUNS_TOTAL, timer="failing-timer", outcome="error") >= 2
-        assert _value(TIMER_RUNS_TOTAL, timer="failing-timer", outcome="ok") == 0
-        assert _value(TIMER_RUNS_TOTAL, timer="writing-timer", outcome="ok") >= 2
+        assert (
+            metric_value(TIMER_RUNS_TOTAL, timer="failing-timer", outcome="error") >= 2
+        )
+        assert metric_value(TIMER_RUNS_TOTAL, timer="failing-timer", outcome="ok") == 0
+        assert metric_value(TIMER_RUNS_TOTAL, timer="writing-timer", outcome="ok") >= 2
         errors = [r for r in caplog.records if r.name == SUPERVISOR_LOGGER]
         assert errors
         assert {r.getMessage() for r in errors} == {"Timer failing-timer raised"}
@@ -470,7 +391,7 @@ class TestSupervisorShutdown:
         self,
         app: Flask,
         supervise: Supervise,
-        supervisor_log: _LogWaiter,
+        supervisor_log: LogWaiter,
         controller_client: ControllerClient,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
@@ -525,7 +446,7 @@ class TestSupervisorShutdown:
         assert not supervisor.start_loop("queued", lambda handle: calls.add("late"))
 
     def test_a_loop_waiting_for_startup_is_dropped_at_shutdown(
-        self, app: Flask, supervise: Supervise, supervisor_log: _LogWaiter
+        self, app: Flask, supervise: Supervise, supervisor_log: LogWaiter
     ) -> None:
         supervisor, coordinator = supervise(app.container)
         supervisor.register_job("never", needs_controller=False)
@@ -601,7 +522,7 @@ class TestSupervisorShutdown:
 
 class TestSupervisorWithoutController:
     def test_the_jobs_that_need_a_controller_do_not_start(
-        self, app: Flask, supervise: Supervise, supervisor_log: _LogWaiter
+        self, app: Flask, supervise: Supervise, supervisor_log: LogWaiter
     ) -> None:
         supervisor, coordinator = supervise(app.container, controller_configured=False)
         calls = _Calls()
@@ -640,7 +561,7 @@ class TestSupervisorWithoutController:
         ]
 
     def test_with_a_controller_they_start_and_nothing_is_said(
-        self, app: Flask, supervise: Supervise, supervisor_log: _LogWaiter
+        self, app: Flask, supervise: Supervise, supervisor_log: LogWaiter
     ) -> None:
         supervisor, coordinator = supervise(app.container, controller_configured=True)
         calls = _Calls()

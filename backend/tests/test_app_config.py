@@ -117,6 +117,24 @@ class TestAppSettings:
         with pytest.raises(ValidationError, match="SCHEDULER_TICK_SECONDS"):
             AppEnvironment(_env_file=None, SCHEDULER_TICK_SECONDS=0)
 
+    def test_an_environment_stands_idle_thirty_minutes_by_default(self) -> None:
+        settings = AppSettings.load(AppEnvironment(_env_file=None))
+
+        assert settings.environment_stop_after_seconds == 1800
+
+    def test_load_reads_the_environments_stop_after_from_the_environment(
+        self,
+    ) -> None:
+        settings = AppSettings.load(
+            AppEnvironment(_env_file=None, ENVIRONMENT_STOP_AFTER_SECONDS=90)
+        )
+
+        assert settings.environment_stop_after_seconds == 90
+
+    def test_load_refuses_a_stop_after_that_is_not_positive(self) -> None:
+        with pytest.raises(ValidationError, match="ENVIRONMENT_STOP_AFTER_SECONDS"):
+            AppEnvironment(_env_file=None, ENVIRONMENT_STOP_AFTER_SECONDS=0)
+
     def test_the_controller_token_is_hidden_in_the_log(self) -> None:
         settings = AppSettings(
             controller_url="https://controller.example", controller_token="a-token"
@@ -144,6 +162,7 @@ class TestAppSettings:
             "controller_token": "***",
             "controller_ca_file": "None",
             "scheduler_tick_seconds": repr(10.0),
+            "environment_stop_after_seconds": repr(1800),
         }
 
     def test_the_link_settings_are_unset_by_default(self) -> None:
@@ -206,4 +225,5 @@ class TestAppSettings:
             "controller_token": "***",
             "controller_ca_file": repr(None),
             "scheduler_tick_seconds": repr(10.0),
+            "environment_stop_after_seconds": repr(1800.0),
         }

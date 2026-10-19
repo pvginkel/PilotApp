@@ -21,6 +21,7 @@ from collections.abc import Generator
 
 import pytest
 from dependency_injector import providers
+from flask import Flask
 from flask.testing import FlaskClient
 from sqlalchemy.orm import Session as DbSession
 
@@ -31,13 +32,19 @@ from app.models import Document, Environment, Item, Project, User
 from app.models.reference import DocumentRole, SessionState, UserKind
 from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerClient
-from app.services.health_service import HealthService
+from app.services.supervisor import Supervisor
 from app.utils.after_commit import clear_after_commit_callbacks
+from app.utils.lifecycle_coordinator import LifecycleCoordinator
 
 # Import all infrastructure fixtures
 from tests.conftest_infrastructure import *  # noqa: F403
-from tests.support.fake_controller import FAKE_CONTROLLER_TOKEN, ServedFakeController
+from tests.support.fake_controller import (
+    FAKE_CONTROLLER_TOKEN,
+    ServedFakeController,
+    client_of,
+)
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID, SYNC_TOKEN, FakeSidecar
+from tests.support.supervisor import Supervise
 
 
 @pytest.fixture(scope="session")
@@ -184,14 +191,47 @@ def controller_client(
     container: ServiceContainer, fake_controller: ServedFakeController
 ) -> ControllerClient:
     """The real client, talking to ``fake_controller``: the container's client
-    for the test. Its readiness check is on a health service of its own."""
-    client = ControllerClient(
-        base_url=fake_controller.url,
-        token=FAKE_CONTROLLER_TOKEN,
-        health_service=HealthService(
-            lifecycle_coordinator=container.lifecycle_coordinator(),
-            settings=container.config(),
-        ),
-    )
-    container.controller_client.override(providers.Object(client))
-    return client
+    for the test."""
+    return client_of(container, fake_controller)
+
+
+@pytest.fixture
+def committed_controller_client(
+    committed_app: Flask, fake_controller: ServedFakeController
+) -> ControllerClient:
+    """The real client, talking to ``fake_controller``: ``committed_app``'s
+    container's client."""
+    return client_of(committed_app.container, fake_controller)
+
+
+@pytest.fixture
+def supervise() -> Generator[Supervise]:
+    """Builds a supervisor on a lifecycle coordinator of its own, whose
+    shutdown the teardown runs if the test did not."""
+    coordinators: list[LifecycleCoordinator] = []
+
+    def build(
+        container: ServiceContainer,
+        *,
+        controller_configured: bool = True,
+        tick: float = 0.05,
+        backoff: tuple[float, float] = (0.05, 0.2),
+        budget: int = 20,
+    ) -> tuple[Supervisor, LifecycleCoordinator]:
+        coordinator = LifecycleCoordinator(graceful_shutdown_timeout=budget)
+        coordinators.append(coordinator)
+        supervisor = Supervisor(
+            container=container,
+            lifecycle_coordinator=coordinator,
+            controller_configured=controller_configured,
+            scheduler_tick_seconds=tick,
+            restart_backoff_initial_seconds=backoff[0],
+            restart_backoff_max_seconds=backoff[1],
+        )
+        return supervisor, coordinator
+
+    yield build
+
+    for coordinator in coordinators:
+        if not coordinator.is_shutting_down():
+            coordinator.shutdown()

@@ -1,8 +1,9 @@
-"""The container's start of the controller's client (design 2 §14; V12), and its
-supervisor (design 2 §7)."""
+"""The container's start of the controller's client (design 2 §14; V12), its
+supervisor (design 2 §7), and the jobs registered on it (design 2 §13)."""
 
 import logging
 import threading
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -12,15 +13,20 @@ from sqlalchemy.orm import Session
 from app import create_app
 from app.app_config import AppSettings
 from app.config import Settings
+from app.database import scoped_session
 from app.exceptions import ConfigurationError
+from app.models import Environment
 from app.services.container import ServiceContainer, start_controller_client
+from app.services.environment_service import EnvironmentService
+from app.services.fleet_consumer import FleetConsumer
 from app.services.supervisor import Supervisor
 from tests.conftest_infrastructure import (
     _clear_prometheus_registry,
     _create_test_app,
     _dispose_app,
 )
-from tests.support.fake_controller import ServedFakeController
+from tests.support.fake_controller import ServedFakeController, client_of
+from tests.support.supervisor import wait_until
 from tests.support.tls import invent_ca
 
 
@@ -190,3 +196,60 @@ class TestSupervisorWiring:
             "No controller configured (CONTROLLER_URL unset): the jobs and timers "
             "that need one do not start (fleet)" in caplog.messages
         ) is said
+
+
+class TestEnvironmentWiring:
+    def test_the_fleet_consumer_and_the_shutdown_timer_run_from_startup(
+        self, committed_app: Flask, fake_controller: ServedFakeController
+    ) -> None:
+        container = committed_app.container
+        container.app_config.override(
+            AppSettings(
+                controller_url=fake_controller.url,
+                scheduler_tick_seconds=0.05,
+                environment_stop_after_seconds=0.01,
+            )
+        )
+        client_of(container, fake_controller)
+        fake_controller.add_environment("env-pilots", status="running")
+        fake_controller.add_environment("env-other", status="running")
+        with scoped_session(container) as db:
+            db.add_all(
+                [
+                    # Pilot started it, and nothing runs there: a restart lost
+                    # its arm.
+                    Environment(
+                        id="env-pilots",
+                        name="Pilot's",
+                        exempt=False,
+                        server_started_at=datetime.now(UTC),
+                    ),
+                    Environment(id="env-other", name="Other", exempt=False),
+                ]
+            )
+        assert isinstance(container.fleet_consumer(), FleetConsumer)
+        assert isinstance(container.environment_service(), EnvironmentService)
+        coordinator = container.lifecycle_coordinator()
+
+        coordinator.fire_startup()
+        try:
+            wait_until(
+                lambda: fake_controller.environment("env-pilots").status == "stopped",
+                "stopped by the timer",
+            )
+            wait_until(
+                lambda: _last_state(container, "env-pilots") == "stopped",
+                "its state frame applied",
+            )
+        finally:
+            coordinator.shutdown()
+
+        assert fake_controller.environment("env-other").status == "running"
+        assert _last_state(container, "env-other") == "running"
+
+
+def _last_state(container: ServiceContainer, env_id: str) -> str | None:
+    with scoped_session(container) as db:
+        environment = db.get(Environment, env_id)
+        assert environment is not None
+        return environment.last_state

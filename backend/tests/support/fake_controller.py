@@ -3,9 +3,13 @@
 import threading
 from pathlib import Path
 
+from dependency_injector import providers
 from werkzeug.serving import make_server
 
+from app.services.container import ServiceContainer
+from app.services.controller_client import ControllerClient
 from app.services.fake_controller import FakeController
+from app.services.health_service import HealthService
 from tests.support.tls import InventedCa
 
 FAKE_CONTROLLER_TOKEN = "fake-controller-token"
@@ -44,3 +48,20 @@ class ServedFakeController(FakeController):
         self._server.shutdown()
         self._server.server_close()
         self._thread.join()
+
+
+def client_of(
+    container: ServiceContainer, fake_controller: ServedFakeController
+) -> ControllerClient:
+    """The real client on ``fake_controller``, made ``container``'s client. Its
+    readiness check is on a health service of its own."""
+    client = ControllerClient(
+        base_url=fake_controller.url,
+        token=FAKE_CONTROLLER_TOKEN,
+        health_service=HealthService(
+            lifecycle_coordinator=container.lifecycle_coordinator(),
+            settings=container.config(),
+        ),
+    )
+    container.controller_client.override(providers.Object(client))
+    return client

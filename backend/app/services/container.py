@@ -18,7 +18,9 @@ from app.engine.views import ViewService
 from app.exceptions import ConfigurationError
 from app.services.auth_service import AuthService
 from app.services.controller_client import ControllerClient
+from app.services.environment_service import EnvironmentService
 from app.services.fake_controller import FakeController
+from app.services.fleet_consumer import FleetConsumer
 from app.services.frontend_version_service import FrontendVersionService
 from app.services.health_service import HealthService
 from app.services.link_service import LinkService
@@ -124,6 +126,21 @@ class ServiceContainer(containers.DeclarativeContainer):
         scheduler_tick_seconds=app_config.provided.scheduler_tick_seconds,
     )
     register_for_background_startup(lambda c: c.supervisor())
+
+    # The fleet consumer keeps the Environment rows current; the environment
+    # service starts environments and runs the shutdown timer (design 2 §13).
+    # Each registers its job on the supervisor when built, before STARTUP.
+    fleet_consumer = providers.Singleton(
+        FleetConsumer, container=__self__, supervisor=supervisor
+    )
+    register_for_background_startup(lambda c: c.fleet_consumer())
+    environment_service = providers.Singleton(
+        EnvironmentService,
+        container=__self__,
+        supervisor=supervisor,
+        stop_after_seconds=app_config.provided.environment_stop_after_seconds,
+    )
+    register_for_background_startup(lambda c: c.environment_service())
 
     # Temp file manager
     temp_file_manager = providers.Singleton(

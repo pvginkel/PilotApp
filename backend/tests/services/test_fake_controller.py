@@ -61,6 +61,7 @@ class TestFakeController:
             "restart",
             "unreachable",
             "capped",
+            "unprojectable",
             "busy",
             "play",
             "finish",
@@ -95,6 +96,18 @@ class TestFakeController:
         assert response.status_code == 422
         assert response.headers["Content-Type"] == "application/problem+json"
         assert response.get_json()["type"] == "validation-error"
+
+    def test_an_unprojectable_environment_is_listed_as_such(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.add_environment("env-1")
+        fake.add_environment("env-2")
+
+        http.post("/fake/unprojectable", json={"env_id": "env-1"})
+
+        listing = http.get("/environments", headers=BEARER).get_json()
+        assert [item["envId"] for item in listing["items"]] == ["env-2"]
+        assert listing["unprojectable"] == ["env-1"]
 
     def test_a_verb_on_an_unknown_environment_is_not_found(self, http: Client) -> None:
         response = http.post("/fake/restart", json={"env_id": "env-9"})
