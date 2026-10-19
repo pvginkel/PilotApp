@@ -554,25 +554,29 @@ class Proof:
         imports = self.tree.find(IMPORT_PLAN)
         mark = self.log.mark()
         self.link.cut()
-        until(
-            "pilot-sync sees the stream drop",
-            lambda: self.log.find("the change stream dropped: reconnecting", mark),
-        )
-        line = b"- A line the live proof wrote while the connection was down.\n"
-        self.tree.write(HANDBOOK, (self.tree.read(HANDBOOK) or b"") + line)
-        answer = "Photograph it and type it the same week"
-        record_hash = self.store.answer(imports, "Q1", answer, "ben")
-        time.sleep(2.0)
-        expect(
-            line not in self.store.record(HANDBOOK)[1],
-            "the tree's edit crossed while the connection was down",
-        )
-        expect(
-            self.tree.hash(imports) != record_hash,
-            "the record's edit crossed while the connection was down",
-        )
-        reopened = self.log.mark()
-        self.link.restore()
+        # Restored whatever happens while it is cut, so a failure here is
+        # this step's alone.
+        try:
+            until(
+                "pilot-sync sees the stream drop",
+                lambda: self.log.find("the change stream dropped: reconnecting", mark),
+            )
+            line = b"- A line the live proof wrote while the connection was down.\n"
+            self.tree.write(HANDBOOK, (self.tree.read(HANDBOOK) or b"") + line)
+            answer = "Photograph it and type it the same week"
+            record_hash = self.store.answer(imports, "Q1", answer, "ben")
+            time.sleep(2.0)
+            expect(
+                line not in self.store.record(HANDBOOK)[1],
+                "the tree's edit crossed while the connection was down",
+            )
+            expect(
+                self.tree.hash(imports) != record_hash,
+                "the record's edit crossed while the connection was down",
+            )
+            reopened = self.log.mark()
+        finally:
+            self.link.restore()
         until(
             "the change stream reopens",
             lambda: self.log.find("the change stream is open", reopened),
@@ -629,6 +633,8 @@ def prove(work: Path, environment: str) -> bool:
     link: Link | None = None
     passed = 0
     steps = 5
+    # The closing checks and the put-back, apart from the steps.
+    closed = True
     try:
         binary = work / "pilot-sync"
         run(
@@ -694,7 +700,7 @@ def prove(work: Path, environment: str) -> bool:
         say("  pilot-sync stopped on SIGTERM, exit 0")
     except (Failure, *UNREACHABLE) as failure:
         say(f"FAIL: {failure}")
-        passed = -1
+        closed = False
     finally:
         if sidecar is not None and sidecar.poll() is None:
             sidecar.kill()
@@ -710,10 +716,10 @@ def prove(work: Path, environment: str) -> bool:
                 )
             except Failure as failure:
                 say(f"FAIL: {failure}")
-                passed = -1
+                closed = False
     say()
-    say(f"{max(passed, 0)} of {steps} passed")
-    return passed == steps
+    say(f"{passed} of {steps} passed")
+    return closed and passed == steps
 
 
 def main() -> int:
