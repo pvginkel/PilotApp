@@ -685,6 +685,61 @@ class TestRelay:
             lines + lines, first_offsets + second_offsets
         )
 
+    def test_an_earlier_turn_whose_result_a_send_discarded_ends_with_the_next(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        idle: models.Session,
+        person: User,
+    ) -> None:
+        lines = raw_turn("turn_text")
+        first = _send(relays, session, idle, "One", author=person)
+        first_offsets = _turn_of(fake_controller, controller_session, lines)
+        # The first turn's relay dropped after three lines. Before its rerun,
+        # the next send's `202` discards the first turn's held result.
+        for offset, payload in _recorded(lines, first_offsets)[:3]:
+            container.session_record_service().append(
+                idle.id,
+                RecordKind.CLAUDE,
+                payload=payload,
+                turn_id=first.id,
+                raw_offset=offset,
+                controller_session=controller_session,
+            )
+        clear_after_commit_callbacks()
+        second = _send(relays, session, idle, "Two", author=person)
+        assert second.error is None
+        second_offsets = _turn_of(fake_controller, controller_session, lines)
+
+        _relay(relays, idle)
+
+        assert first.ended_at is not None and first.error is None
+        assert second.ended_at is not None
+        assert idle.state_code == SessionState.IDLE
+        assert idle.current_line is None
+        assert (idle.turns, idle.turn_started_at, idle.turn_ended_at) == (
+            2,
+            second.started_at,
+            second.ended_at,
+        )
+        assert _row(session).stop_due_at is not None
+        stored = _records(session, idle.id)
+        assert [
+            (s.turn, s.record.raw_offset)
+            for s in stored
+            if s.record.kind_code == RecordKind.RESULT
+        ] == [(2, second_offsets[-1])]
+        # The raw stream marks no boundary between turns: what the first turn
+        # printed after the drop falls in the second.
+        turns = [s.turn for s in stored if s.record.kind_code == RecordKind.CLAUDE]
+        assert turns == [1] * 3 + [2] * (len(turns) - 3)
+        assert _claude(session, idle.id) == _recorded(
+            lines + lines, first_offsets + second_offsets
+        )
+
     def test_the_turns_end_cuts_its_documents_versions(
         self,
         session: DbSession,

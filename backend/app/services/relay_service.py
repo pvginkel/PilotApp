@@ -351,7 +351,10 @@ class RelayService:
 
         A later Turn in flight is a send the controller accepted once this
         turn's result was out, committed first: the Session stays `running`
-        for it, its current line that send's."""
+        for it, its current line that send's. An earlier Turn still open lost
+        its `result` to this turn's send, as the controller holds a turn's
+        result only until the next send: it ends here, with no `result`
+        record."""
         with scoped_session(self._container) as db:
             records = self._records(db)
             session = records.lock_session(opening.session_id)
@@ -369,6 +372,14 @@ class RelayService:
                 turn.ended_at = datetime.now(UTC)
                 if frame.is_error:
                     turn.error = frame.result or _TURN_FAILED
+                for earlier in db.scalars(
+                    select(Turn).where(
+                        Turn.session_id == opening.session_id,
+                        Turn.ended_at.is_(None),
+                        Turn.seq < turn.seq,
+                    )
+                ):
+                    earlier.ended_at = turn.ended_at
                 following = _turn_in_flight(db, opening.session_id)
                 if following is None:
                     _refresh_turns(db, session, turn)
