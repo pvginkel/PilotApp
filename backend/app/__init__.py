@@ -149,7 +149,7 @@ def create_app(
     register_error_handlers(app)
 
     # The database is set up here, so its readiness check registers here.
-    # Services register their own checks (S3, the SSE gateway).
+    # Services register their own checks (S3).
     from app import database as _database_module
 
     container.health_service().register_check(
@@ -187,11 +187,6 @@ def create_app(
     from app.api.testing_sse import testing_sse_bp
 
     app.register_blueprint(testing_sse_bp)
-
-    # Register SSE Gateway callback blueprint
-    from app.api.sse import sse_bp
-
-    app.register_blueprint(sse_bp)
 
     # Register testing auth endpoints (runtime check handles access control)
     from app.api.testing_auth import testing_auth_bp
