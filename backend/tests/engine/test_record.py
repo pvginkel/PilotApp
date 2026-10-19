@@ -1637,7 +1637,8 @@ class TestRecordServiceSequences:
         fake_sidecar.drain()
         path = f"draft-{project.number}/items/1-camp-plan.md"
         broken = TWO_ASKS + "\n```question id=Q2\n"
-        assert fake_sidecar.save(path, broken).held
+        fake_sidecar.save(path, broken)
+        assert container.tree_service().held_path(path)
         document = session.get_one(Document, item.id)
 
         with scoped_session(container):
@@ -1653,7 +1654,7 @@ class TestRecordServiceSequences:
         answer = fake_sidecar.save(path, fixed)
 
         merged = answered.replace("# Camp plan\n", "# Camp plan\n\nRain is due.\n")
-        assert answer.held is False
+        assert not container.tree_service().held_path(path)
         assert answer.content == merged.encode()
         assert fake_sidecar.text(path) == merged
         assert document.published_text == merged

@@ -1,4 +1,5 @@
-"""App settings: the ticket id pattern (F91), deployment configuration."""
+"""App settings: the ticket id pattern (F91), the store's sync, deployment
+configuration."""
 
 import re
 
@@ -26,7 +27,39 @@ class TestAppSettings:
         with pytest.raises(re.error):
             AppSettings.load(AppEnvironment(TICKET_ID_PATTERN="(MD"))
 
-    def test_the_pattern_is_logged_as_it_stands(self) -> None:
-        assert AppSettings().dump_for_logging() == {
-            "ticket_id_pattern": repr(re.compile(r"[A-Z][A-Z0-9_]*-[1-9][0-9]*"))
+    def test_the_sync_refuses_every_call_by_default(self) -> None:
+        settings = AppSettings()
+
+        assert (settings.sync_token, settings.store_environment_id) == ("", "")
+        assert settings.sync_put_max_bytes == 2 * 1024 * 1024
+
+    def test_load_reads_the_sync_from_the_environment(self) -> None:
+        settings = AppSettings.load(
+            AppEnvironment(
+                SYNC_TOKEN="example-token",
+                STORE_ENVIRONMENT_ID="example-env-1",
+                SYNC_PUT_MAX_BYTES=1024,
+            )
+        )
+
+        assert (
+            settings.sync_token,
+            settings.store_environment_id,
+            settings.sync_put_max_bytes,
+        ) == ("example-token", "example-env-1", 1024)
+
+    def test_load_refuses_a_put_limit_below_one_byte(self) -> None:
+        with pytest.raises(ValueError):
+            AppEnvironment(SYNC_PUT_MAX_BYTES=0)
+
+    def test_the_settings_are_logged_with_the_token_masked(self) -> None:
+        settings = AppSettings(
+            sync_token="example-token", store_environment_id="example-env-1"
+        )
+
+        assert settings.dump_for_logging() == {
+            "ticket_id_pattern": repr(re.compile(r"[A-Z][A-Z0-9_]*-[1-9][0-9]*")),
+            "sync_token": "***",
+            "store_environment_id": "'example-env-1'",
+            "sync_put_max_bytes": "2097152",
         }

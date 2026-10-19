@@ -79,3 +79,17 @@ class ValidationException(BusinessLogicException):
 
     def __init__(self, message: str) -> None:
         super().__init__(message, error_code="VALIDATION_FAILED")
+
+
+class SyncProtocolUnsupportedException(BusinessLogicException):
+    """Raised when a sync call speaks a protocol version outside the range the
+    server accepts; answered 426 with the range (design 1 §5.1)."""
+
+    def __init__(self, version: str | None, minimum: int, maximum: int) -> None:
+        self.minimum = minimum
+        self.maximum = maximum
+        message = (
+            f"Cannot sync because protocol version {version!r} is outside"
+            f" {minimum} to {maximum}"
+        )
+        super().__init__(message, error_code="SYNC_PROTOCOL_UNSUPPORTED")

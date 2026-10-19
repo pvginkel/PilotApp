@@ -20,9 +20,11 @@ Without one the suite passes where ``.env`` sets it, and fails in CI.
 from collections.abc import Generator
 
 import pytest
+from flask.testing import FlaskClient
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
+from app.app_config import AppSettings
 from app.engine.bus import EngineEvent
 from app.models import Document, Environment, Item, Project, User
 from app.models.reference import DocumentRole, SessionState, UserKind
@@ -31,7 +33,14 @@ from app.utils.after_commit import clear_after_commit_callbacks
 
 # Import all infrastructure fixtures
 from tests.conftest_infrastructure import *  # noqa: F403
-from tests.support.fake_sidecar import FakeSidecar
+from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID, SYNC_TOKEN, FakeSidecar
+
+
+@pytest.fixture(scope="session")
+def test_app_settings() -> AppSettings:
+    """The app settings, with the store's sync configured as the fake sidecar
+    calls it."""
+    return AppSettings(sync_token=SYNC_TOKEN, store_environment_id=STORE_ENVIRONMENT_ID)
 
 
 @pytest.fixture
@@ -60,8 +69,8 @@ def project(session: DbSession, person: User) -> Project:
 
 @pytest.fixture
 def environment(session: DbSession) -> Environment:
-    """An environment Pilot has touched."""
-    touched = Environment(id="example-env-1", name="Example-1", exempt=False)
+    """An environment Pilot has touched: the store's."""
+    touched = Environment(id=STORE_ENVIRONMENT_ID, name="Example-1", exempt=False)
     session.add(touched)
     session.flush()
     return touched
@@ -116,12 +125,13 @@ def draft_document(session: DbSession, project: Project) -> Document:
 
 @pytest.fixture
 def fake_sidecar(
-    container: ServiceContainer, environment: Environment
+    client: FlaskClient, container: ServiceContainer
 ) -> Generator[FakeSidecar]:
-    """The store's sidecar, ``environment``'s, with an empty tree; the
-    events it drains are those the bus delivers during the test."""
+    """The store's sidecar, with an empty tree, calling the sync routes
+    through ``client``; the events it drains are those the bus delivers
+    during the test."""
     clear_after_commit_callbacks()
-    sidecar = FakeSidecar(container, environment)
+    sidecar = FakeSidecar(client, container.engine_bus())
     try:
         yield sidecar
     finally:

@@ -38,12 +38,11 @@ def register_error_handlers(app: Flask) -> None:
 
 
 def register_root_blueprints(app: Flask) -> None:
-    """Register app-specific blueprints directly on the app (not under /api prefix).
+    """Register app-specific blueprints directly on the app, outside api_bp's
+    OIDC gate: the store sidecar's sync routes, under the store's bearer."""
+    from app.api.sync import sync_bp
 
-    Use this for internal endpoints, WebSocket handlers, or other routes
-    that should not be nested under the /api URL prefix.
-    """
-    pass
+    app.register_blueprint(sync_bp)
 
 
 def register_cli_commands(cli: click.Group) -> None:

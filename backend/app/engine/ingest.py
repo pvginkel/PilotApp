@@ -5,6 +5,7 @@ transaction that holds the document's row."""
 import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import StrEnum
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -32,18 +33,28 @@ _NOT_TEXT = (
 )
 
 
+class PathKind(StrEnum):
+    """What a path of the tree names."""
+
+    DOCUMENT = "document"
+    PLAN = "plan"
+    VIEW = "view"
+    """A read-only path: a rendered view, or an attachment."""
+
+
 @dataclass(frozen=True)
 class Ingested:
     """What the file put answers (design 1 §5.1).
 
-    `content` is the bytes the file must now hold, none when the save is
-    them; `hash` the path's tree hash, but a held `plan.json` save's own,
-    which the answer acknowledges (design 1 §5.3 step 3); `stale` whether the
-    base hash was not the path's tree hash when the save came. `faults` are
-    those the save raised on the path: `parse` faults when it is `held`, else
-    `reverted`.
+    `kind` is what the path names; `content` the bytes the file must now
+    hold, none when the save is them; `hash` the path's tree hash, but a
+    held `plan.json` save's own, which the answer acknowledges (design 1 §5.3
+    step 3); `stale` whether the base hash was not the path's tree hash when
+    the save came. `faults` are those the save raised on the path: `parse`
+    faults when it is `held`, else `reverted`.
     """
 
+    kind: PathKind
     content: bytes | None
     hash: str
     stale: bool
@@ -92,6 +103,7 @@ class IngestService:
         resolved = self.tree_service.resolve(path)
         if isinstance(resolved, TreeFile):
             return Ingested(
+                kind=PathKind.VIEW,
                 content=_unless(resolved.content, content),
                 hash=resolved.hash,
                 stale=base_hash != resolved.hash,
@@ -126,6 +138,7 @@ class IngestService:
             self._raise(environment, path, ErrorKind.PARSE, faults)
             self.engine_bus.emit(ErrorsRaised(project.id, path))
             return Ingested(
+                kind=PathKind.PLAN,
                 content=None,
                 hash=hashlib.sha256(content).hexdigest(),
                 stale=base_hash != tree.hash,
@@ -138,6 +151,7 @@ class IngestService:
         if held_before:
             self.engine_bus.emit(ErrorsResolved(project.id, path))
         return Ingested(
+            kind=PathKind.PLAN,
             content=_unless(canonical.text.encode(), content),
             hash=canonical.hash,
             stale=base_hash != tree.hash,
@@ -190,6 +204,7 @@ class IngestService:
         elif held_before:
             self.engine_bus.emit(ErrorsResolved(project.id, path))
         return Ingested(
+            kind=PathKind.DOCUMENT,
             content=_unless(tree_text.encode(), content),
             hash=moved,
             stale=base_hash != tree_hash,

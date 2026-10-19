@@ -293,6 +293,27 @@
         "title": "ReadinessCheckSchema",
         "type": "object"
       },
+      "SyncProtocolRangeSchema.19c06e7": {
+        "description": "The protocol versions the server accepts, both ends included: a 426's\nbody.",
+        "properties": {
+          "max": {
+            "description": "The newest protocol version accepted",
+            "title": "Max",
+            "type": "integer"
+          },
+          "min": {
+            "description": "The oldest protocol version accepted",
+            "title": "Min",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "min",
+          "max"
+        ],
+        "title": "SyncProtocolRangeSchema",
+        "type": "object"
+      },
       "TaskActionResponse.70db092": {
         "description": "Response when a task is cancelled or removed.",
         "properties": {
@@ -875,6 +896,167 @@
         "parameters": [],
         "responses": {},
         "summary": "The browser's SSE stream.",
+        "tags": []
+      }
+    },
+    "/api/sync/files/{path}": {
+      "get": {
+        "description": "",
+        "operationId": "get__api_sync_files_{path}",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "format": "path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "426": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncProtocolRangeSchema.19c06e7"
+                }
+              }
+            },
+            "description": "Upgrade Required"
+          }
+        },
+        "summary": "The bytes a file of the store's tree must hold, with their hash as `X-Pilot-Hash`. 404 for a path of no syncing project.",
+        "tags": []
+      },
+      "put": {
+        "description": "Headers: `X-Pilot-Base-Hash`, the hash the sidecar last synced for the path, or `none`. The body is the file's bytes, at most `SYNC_PUT_MAX_BYTES`.\n\nAnswers 204 when the file needs no change, 200 with the bytes it must now hold when it does; either with `X-Pilot-Hash`, the hash the file holds once answered, and `X-Pilot-Faults`, the count of Save Errors the save raised on the path, and `X-Pilot-Stale: true` when the base hash was not the path's tree hash. 404 for a path of no syncing project.",
+        "operationId": "put__api_sync_files_{path}",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "format": "path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "426": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncProtocolRangeSchema.19c06e7"
+                }
+              }
+            },
+            "description": "Upgrade Required"
+          }
+        },
+        "summary": "The store's save of a file of its tree (design 1 §5.3).",
         "tags": []
       }
     },

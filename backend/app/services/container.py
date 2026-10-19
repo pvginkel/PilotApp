@@ -21,6 +21,7 @@ from app.services.health_service import HealthService
 from app.services.metrics_service import MetricsService
 from app.services.oidc_client_service import OidcClientService
 from app.services.sse_connection_manager import SSEConnectionManager
+from app.services.sync_service import SyncService
 from app.services.task_service import TaskService
 from app.services.test_data_service import TestDataService
 from app.services.testing_service import TestingService
@@ -144,6 +145,15 @@ class ServiceContainer(containers.DeclarativeContainer):
         db=db_session,
         document_service=document_service,
         view_service=view_service,
+    )
+
+    # The store's sync: the gate and the wire side of the engine (design 1 §5)
+    sync_service = providers.Factory(
+        SyncService,
+        db=db_session,
+        app_settings=app_config,
+        ingest_service=ingest_service,
+        tree_service=tree_service,
     )
 
     # The dev stack's seed, loaded by `cli load-test-data`

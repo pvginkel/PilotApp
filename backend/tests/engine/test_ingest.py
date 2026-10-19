@@ -27,7 +27,7 @@ from app.engine.bus import (
     TreeHashMoved,
 )
 from app.engine.documents import DocumentService
-from app.engine.ingest import Ingested
+from app.engine.ingest import Ingested, PathKind
 from app.engine.paths import sha256_hex
 from app.engine.tree import TreeFile
 from app.exceptions import RecordNotFoundException
@@ -51,7 +51,7 @@ from app.models.reference import (
     UserKind,
 )
 from app.services.container import ServiceContainer
-from tests.support.fake_sidecar import FakeSidecar
+from tests.support.fake_sidecar import FakeSidecar, Put
 
 DRAFT = "---\ntitle: Badge colours\n---\n\nWhich colours for the badges?\n"
 
@@ -253,6 +253,7 @@ class TestIngestServicePaths:
         )
 
         assert answer == Ingested(
+            kind=PathKind.VIEW,
             content=timeline.text.encode(),
             hash=timeline.hash,
             stale=False,
@@ -270,6 +271,7 @@ class TestIngestServicePaths:
         answer = _ingest(container, "reference.json", "{}\n", environment)
 
         assert answer == Ingested(
+            kind=PathKind.VIEW,
             content=reference.text.encode(),
             hash=reference.hash,
             stale=True,
@@ -348,6 +350,7 @@ class TestIngestServiceGate:
         )
 
         assert answer == Ingested(
+            kind=PathKind.DOCUMENT,
             content=None,
             hash=sha256_hex(RETITLED),
             stale=False,
@@ -377,6 +380,7 @@ class TestIngestServiceGate:
         answer = _ingest(container, path, save, environment, base=sha256_hex(ANSWERED))
 
         assert answer == Ingested(
+            kind=PathKind.DOCUMENT,
             content=None,
             hash=sha256_hex(save),
             stale=False,
@@ -775,6 +779,7 @@ class TestIngestServiceGate:
         )
 
         assert answer == Ingested(
+            kind=PathKind.DOCUMENT,
             content=text.encode(),
             hash=sha256_hex(text),
             stale=True,
@@ -859,6 +864,7 @@ class TestIngestServiceMerge:
 
         message = "block D1: `answer:` is the record's, ada's answer; reverted"
         assert answer == Ingested(
+            kind=PathKind.DOCUMENT,
             content=ANSWERED.encode(),
             hash=sha256_hex(ANSWERED),
             stale=False,
@@ -1119,8 +1125,8 @@ class TestIngestServiceSequences:
 
         answer = fake_sidecar.save(path, edited)
 
-        assert answer == Ingested(
-            content=None, hash=sha256_hex(edited), stale=False, held=False, faults=()
+        assert answer == Put(
+            status=204, content=None, hash=sha256_hex(edited), stale=False, faults=0
         )
         assert fake_sidecar.drain() == [timeline]
         assert fake_sidecar.text(path) == edited
@@ -1195,7 +1201,8 @@ class TestIngestServiceSequences:
         fake_sidecar.drain()
         path = f"draft-{project.number}/items/1-which-tent.md"
         broken = UNANSWERED + "\n```question id=Q1\n"
-        assert fake_sidecar.save(path, broken).held
+        fake_sidecar.save(path, broken)
+        assert container.tree_service().held_path(path)
 
         _write_answer(container, session.get_one(Document, item.id))
         assert fake_sidecar.drain() == []
@@ -1205,10 +1212,15 @@ class TestIngestServiceSequences:
 
         merged = ANSWERED.replace("# Which tent?\n", "# Which tent?\n\nRain is due.\n")
         assert answer.stale is False
-        assert answer.held is False
+        assert not container.tree_service().held_path(path)
         assert answer.content == merged.encode()
         assert fake_sidecar.text(path) == merged
-        assert [fault.line for fault in answer.faults] == [9, 10, 11]
+        assert answer.faults == 3
+        assert [(kind, line) for _, _, kind, line, _ in _errors(session)] == [
+            (ErrorKind.REVERTED, 9),
+            (ErrorKind.REVERTED, 10),
+            (ErrorKind.REVERTED, 11),
+        ]
 
     def test_a_save_behind_a_projection_in_flight_is_stale_and_merged(
         self,
@@ -1272,7 +1284,12 @@ class TestIngestServicePlan:
         answer = _ingest(container, _plan_path(project), PLAN, environment, base=base)
 
         assert answer == Ingested(
-            content=None, hash=sha256_hex(PLAN), stale=False, held=False, faults=()
+            kind=PathKind.PLAN,
+            content=None,
+            hash=sha256_hex(PLAN),
+            stale=False,
+            held=False,
+            faults=(),
         )
         assert project.ticket == "MD-8"
         fix = session.get_one(PlanTask, (project.id, "fix"))
@@ -1289,6 +1306,7 @@ class TestIngestServicePlan:
         )
 
         assert answer == Ingested(
+            kind=PathKind.PLAN,
             content=PLAN.encode(),
             hash=sha256_hex(PLAN),
             stale=False,
@@ -1312,6 +1330,7 @@ class TestIngestServicePlan:
         )
 
         assert answer == Ingested(
+            kind=PathKind.PLAN,
             content=None,
             hash=sha256_hex(MISSPELT_PLAN),
             stale=False,
@@ -1374,6 +1393,7 @@ class TestIngestServicePlan:
         answer = _ingest(container, path, save, environment)
 
         assert answer == Ingested(
+            kind=PathKind.PLAN,
             content=None,
             hash=sha256_hex(save),
             stale=True,
@@ -1397,7 +1417,12 @@ class TestIngestServicePlan:
             container, path, PLAN, environment, base=sha256_hex(MISSPELT_PLAN)
         )
         assert fix_up == Ingested(
-            content=None, hash=sha256_hex(PLAN), stale=True, held=False, faults=()
+            kind=PathKind.PLAN,
+            content=None,
+            hash=sha256_hex(PLAN),
+            stale=True,
+            held=False,
+            faults=(),
         )
 
     def test_an_archived_projects_plan_is_not_synced(
@@ -1491,7 +1516,10 @@ class TestIngestServicePlanSequences:
         assert fake_sidecar.drain() == []
 
     def test_a_held_save_stays_on_disk_as_written(
-        self, fake_sidecar: FakeSidecar, project: Project
+        self,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
     ) -> None:
         path = _plan_path(project)
         fake_sidecar.save(path, PLAN)
@@ -1499,7 +1527,8 @@ class TestIngestServicePlanSequences:
 
         answer = fake_sidecar.save(path, MISSPELT_PLAN)
 
-        assert answer.held
+        assert (answer.status, answer.faults) == (204, 1)
+        assert container.tree_service().held_path(path)
         assert fake_sidecar.text(path) == MISSPELT_PLAN
         assert fake_sidecar.shadow[path] == sha256_hex(MISSPELT_PLAN)
         assert fake_sidecar.drain() == []
@@ -1626,6 +1655,7 @@ class TestIngestServiceRowLock:
         assert first.error is None
         assert second.error is None
         assert first.answer == Ingested(
+            kind=PathKind.DOCUMENT,
             content=None,
             hash=sha256_hex(adds_q1),
             stale=False,
@@ -1634,6 +1664,7 @@ class TestIngestServiceRowLock:
         )
         merged = adds_q1.replace("Keep it short.", "Keep it shorter.")
         assert second.answer == Ingested(
+            kind=PathKind.DOCUMENT,
             content=merged.encode(),
             hash=sha256_hex(merged),
             stale=True,
