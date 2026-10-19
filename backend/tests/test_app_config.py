@@ -2,6 +2,7 @@
 deployment configuration."""
 
 import re
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -60,24 +61,44 @@ class TestAppSettings:
         with pytest.raises(ValueError):
             AppEnvironment(SYNC_HEARTBEAT_SECONDS=0)
 
-    def test_load_reads_the_controller_from_the_environment(self) -> None:
+    def test_load_reads_the_controller_from_the_environment(
+        self, tmp_path: Path
+    ) -> None:
+        ca_file = tmp_path / "ca.pem"
+        ca_file.write_text("a CA's certificate")
+
         settings = AppSettings.load(
             AppEnvironment(
                 CONTROLLER_URL="https://controller.example",
                 CONTROLLER_TOKEN="a-token",
+                CONTROLLER_CA_FILE=str(ca_file),
             )
         )
 
         assert settings.controller_url == "https://controller.example"
         assert settings.controller_token == "a-token"
+        assert settings.controller_ca_file == ca_file
+
+    def test_load_refuses_a_ca_file_that_is_not_there(self, tmp_path: Path) -> None:
+        with pytest.raises(ValidationError, match="controller_ca_file"):
+            AppSettings.load(
+                AppEnvironment(
+                    _env_file=None, CONTROLLER_CA_FILE=str(tmp_path / "missing.pem")
+                )
+            )
 
     def test_an_empty_controller_url_is_no_controller(self) -> None:
         settings = AppSettings.load(
-            AppEnvironment(CONTROLLER_URL="", CONTROLLER_TOKEN="")
+            AppEnvironment(
+                CONTROLLER_URL="",
+                CONTROLLER_TOKEN="",
+                CONTROLLER_CA_FILE="",
+            )
         )
 
         assert settings.controller_url is None
         assert settings.controller_token == ""
+        assert settings.controller_ca_file is None
 
     def test_the_controller_token_is_hidden_in_the_log(self) -> None:
         settings = AppSettings(
@@ -104,6 +125,7 @@ class TestAppSettings:
             "environment_link_base_url": "None",
             "controller_url": "None",
             "controller_token": "***",
+            "controller_ca_file": "None",
         }
 
     def test_the_link_settings_are_unset_by_default(self) -> None:
@@ -164,4 +186,5 @@ class TestAppSettings:
             "environment_link_base_url": "None",
             "controller_url": "None",
             "controller_token": "***",
+            "controller_ca_file": repr(None),
         }

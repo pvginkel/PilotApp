@@ -98,6 +98,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         base_url=app_config.provided.controller_url,
         token=app_config.provided.controller_token,
         health_service=health_service,
+        ca_file=app_config.provided.controller_ca_file,
     )
     register_for_background_startup(lambda c: start_controller_client(c))
 

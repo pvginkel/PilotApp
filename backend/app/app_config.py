@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, FilePath, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.config import Sensitive, dump_config_for_logging
@@ -73,6 +73,13 @@ class AppEnvironment(BaseSettings):
         default="",
         description="Pilot's named client credential at the KubeCoder controller",
     )
+    CONTROLLER_CA_FILE: str = Field(
+        default="",
+        description=(
+            "A PEM file of the CAs that verify the controller's certificate; "
+            "empty leaves it to requests' own trust"
+        ),
+    )
 
 
 class AppSettings(BaseModel):
@@ -133,6 +140,10 @@ class AppSettings(BaseModel):
     controller_token: Annotated[str, Sensitive] = ""
     """Pilot's named client credential at the controller."""
 
+    controller_ca_file: FilePath | None = None
+    """The CAs that verify the controller's certificate, PEM; None leaves it to
+    requests' own trust."""
+
     def dump_for_logging(self) -> dict[str, str]:
         """Every setting, for the boot log, with the Sensitive ones as ``***``."""
         return dump_config_for_logging(self)
@@ -154,4 +165,7 @@ class AppSettings(BaseModel):
             environment_link_base_url=env.ENVIRONMENT_LINK_BASE_URL or None,
             controller_url=env.CONTROLLER_URL or None,
             controller_token=env.CONTROLLER_TOKEN,
+            controller_ca_file=(
+                Path(env.CONTROLLER_CA_FILE) if env.CONTROLLER_CA_FILE else None
+            ),
         )

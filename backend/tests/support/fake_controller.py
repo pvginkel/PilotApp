@@ -6,6 +6,7 @@ from pathlib import Path
 from werkzeug.serving import make_server
 
 from app.services.fake_controller import FakeController
+from tests.support.tls import InventedCa
 
 FAKE_CONTROLLER_TOKEN = "fake-controller-token"
 
@@ -20,12 +21,19 @@ def raw_turn(name: str) -> list[str]:
 
 class ServedFakeController(FakeController):
     """The fake, served on a free port of 127.0.0.1 by a thread of its own;
-    `url` is its base URL."""
+    `url` is its base URL. With `tls` it serves HTTPS under that authority's
+    certificate."""
 
-    def __init__(self, keepalive_seconds: float) -> None:
+    def __init__(self, keepalive_seconds: float, tls: InventedCa | None = None) -> None:
         super().__init__(FAKE_CONTROLLER_TOKEN, keepalive_seconds)
-        self._server = make_server("127.0.0.1", 0, self, threaded=True)
-        self.url = f"http://127.0.0.1:{self._server.server_port}"
+        ssl_context = None
+        if tls is not None:
+            ssl_context = (str(tls.cert_file), str(tls.key_file))
+        self._server = make_server(
+            "127.0.0.1", 0, self, threaded=True, ssl_context=ssl_context
+        )
+        scheme = "http" if tls is None else "https"
+        self.url = f"{scheme}://127.0.0.1:{self._server.server_port}"
         self._thread = threading.Thread(
             target=self._server.serve_forever, name="fake-controller", daemon=True
         )

@@ -5,6 +5,7 @@ import threading
 import time
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -33,6 +34,7 @@ from tests.support.fake_controller import (
     ServedFakeController,
     raw_turn,
 )
+from tests.support.tls import InventedCa, invent_ca
 
 ENV = "example-env-1"
 
@@ -1084,3 +1086,69 @@ class TestControllerClient:
 
         assert result.status is CheckStatus.ERROR
         assert result.detail == "the controller answered 503"
+
+
+class TestControllerTls:
+    """The controller's certificate is verified against `ca_file`: the homelab's
+    authority signs `kubecoder.home`'s, and no public root does."""
+
+    @pytest.fixture
+    def authority(self, tmp_path: Path) -> InventedCa:
+        return invent_ca(tmp_path)
+
+    @pytest.fixture
+    def tls_controller(self, authority: InventedCa) -> Iterator[ServedFakeController]:
+        fake = ServedFakeController(keepalive_seconds=0.2, tls=authority)
+        try:
+            yield fake
+        finally:
+            fake.close()
+
+    def test_a_controller_its_ca_file_vouches_for_is_reached(
+        self,
+        app: Flask,
+        authority: InventedCa,
+        tls_controller: ServedFakeController,
+        health_service: HealthService,
+    ) -> None:
+        tls_controller.add_environment(ENV, name="Example", status="running")
+        client = ControllerClient(
+            tls_controller.url,
+            FAKE_CONTROLLER_TOKEN,
+            health_service,
+            ca_file=authority.ca_file,
+        )
+
+        environments = client.list_environments().items
+        with client.open_fleet_stream() as stream:
+            seed = next(iter(stream))
+        with app.app_context():
+            body, _ = health_service.check_readyz()
+
+        assert [environment.env_id for environment in environments] == [ENV]
+        assert seed == SessionsFrame(env_id=ENV, sessions=())
+        assert body["checks"]["controller"]["status"] == "ok"
+
+    @pytest.mark.parametrize(
+        "ca_file", ["none", "another-authority"], ids=["default-trust", "another-ca"]
+    )
+    def test_a_certificate_its_ca_file_does_not_vouch_for_is_refused(
+        self,
+        tmp_path: Path,
+        tls_controller: ServedFakeController,
+        health_service: HealthService,
+        ca_file: str,
+    ) -> None:
+        other = None
+        if ca_file == "another-authority":
+            directory = tmp_path / "other"
+            directory.mkdir()
+            other = invent_ca(directory).ca_file
+        client = ControllerClient(
+            tls_controller.url, FAKE_CONTROLLER_TOKEN, health_service, ca_file=other
+        )
+
+        with pytest.raises(ExternalServiceException) as caught:
+            client.list_environments()
+
+        assert "CERTIFICATE_VERIFY_FAILED" in caught.value.cause

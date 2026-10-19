@@ -13,6 +13,7 @@ import threading
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 from types import TracebackType
 from typing import Any, Literal
 from urllib.parse import quote
@@ -389,10 +390,15 @@ class ControllerClient:
     """
 
     def __init__(
-        self, base_url: str, token: str, health_service: HealthService
+        self,
+        base_url: str,
+        token: str,
+        health_service: HealthService,
+        ca_file: Path | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._headers = {"Authorization": f"Bearer {token}"}
+        self._verify: str | bool = str(ca_file) if ca_file is not None else True
         # Not critical: Pilot serves its record without the controller.
         health_service.register_check(
             "controller", self.check_readiness, critical=False
@@ -401,7 +407,9 @@ class ControllerClient:
     def check_readiness(self) -> CheckResult:
         """Readiness check: the controller answers its own `/readyz`."""
         response = requests.get(
-            f"{self._base_url}/readyz", timeout=_READINESS_TIMEOUT_SECONDS
+            f"{self._base_url}/readyz",
+            timeout=_READINESS_TIMEOUT_SECONDS,
+            verify=self._verify,
         )
         if response.status_code != 200:
             return CheckResult(
@@ -609,6 +617,7 @@ class ControllerClient:
                 headers=self._headers,
                 timeout=(_CONNECT_TIMEOUT_SECONDS, timeout),
                 stream=stream,
+                verify=self._verify,
             )
         except requests.RequestException as error:
             raise ExternalServiceException(

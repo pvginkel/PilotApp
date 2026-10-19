@@ -1,5 +1,7 @@
 """The container's start of the controller's client (design 2 §14; V12)."""
 
+from pathlib import Path
+
 import pytest
 from flask import Flask
 
@@ -14,6 +16,7 @@ from tests.conftest_infrastructure import (
     _dispose_app,
 )
 from tests.support.fake_controller import ServedFakeController
+from tests.support.tls import invent_ca
 
 
 def _container(settings: Settings, app_settings: AppSettings) -> ServiceContainer:
@@ -86,6 +89,29 @@ class TestStartControllerClient:
         start_controller_client(container)
 
         assert "controller" in _checks(app, container)
+
+    def test_the_client_verifies_the_controller_against_its_ca_file(
+        self, app: Flask, test_settings: Settings, tmp_path: Path
+    ) -> None:
+        authority = invent_ca(tmp_path)
+        tls_controller = ServedFakeController(keepalive_seconds=0.2, tls=authority)
+        try:
+            container = _container(
+                test_settings,
+                AppSettings(
+                    controller_url=tls_controller.url,
+                    controller_ca_file=authority.ca_file,
+                ),
+            )
+
+            start_controller_client(container)
+
+            assert _checks(app, container)["controller"] == {
+                "status": "ok",
+                "critical": False,
+            }
+        finally:
+            tls_controller.close()
 
     def test_a_production_server_without_a_controller_does_not_start(
         self, test_settings: Settings
