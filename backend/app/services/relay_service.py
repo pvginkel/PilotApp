@@ -347,7 +347,11 @@ class RelayService:
         offset of the stream's last raw frame, the Turn ended, the Session
         `idle` (`stopped` when interrupted) with no current line, and the
         engine's turn end. After the commit, the environment's shutdown timer
-        is armed if nothing runs there."""
+        is armed if nothing runs there.
+
+        A later Turn in flight is a send the controller accepted once this
+        turn's result was out, committed first: the Session stays `running`
+        for it, its current line that send's."""
         with scoped_session(self._container) as db:
             records = self._records(db)
             session = records.lock_session(opening.session_id)
@@ -365,11 +369,15 @@ class RelayService:
                 turn.ended_at = datetime.now(UTC)
                 if frame.is_error:
                     turn.error = frame.result or _TURN_FAILED
-                _refresh_turns(db, session, turn)
-                session.state_code = (
-                    SessionState.STOPPED if frame.interrupted else SessionState.IDLE
-                )
-                session.current_line = None
+                following = _turn_in_flight(db, opening.session_id)
+                if following is None:
+                    _refresh_turns(db, session, turn)
+                    session.state_code = (
+                        SessionState.STOPPED if frame.interrupted else SessionState.IDLE
+                    )
+                    session.current_line = None
+                else:
+                    session.current_line = at_send(None, following.started_at)
                 self._container.document_service().turn_ended(session)
         if not ended:
             # Another process's relay ended the turn.
@@ -392,12 +400,7 @@ def _opening(db: Session, session_id: uuid.UUID) -> _Opening | None:
     session = db.get_one(AgentSession, session_id)
     if session.state_code != SessionState.RUNNING or session.controller_session is None:
         return None
-    # A failed send's Turn, ended at once, may come after the one in flight.
-    turn = db.scalars(
-        select(Turn)
-        .where(Turn.session_id == session_id, Turn.ended_at.is_(None))
-        .order_by(Turn.seq.desc())
-    ).first()
+    turn = _turn_in_flight(db, session_id)
     if turn is None:
         return None
     position = stream_position(db, session_id)
@@ -413,6 +416,16 @@ def _opening(db: Session, session_id: uuid.UUID) -> _Opening | None:
         offset=position.raw_offset if position is not None and resumed else 0,
         current_line=session.current_line,
     )
+
+
+def _turn_in_flight(db: Session, session_id: uuid.UUID) -> Turn | None:
+    """The Session's latest Turn with no `ended_at`; a failed send's Turn,
+    ended at once, may come after it."""
+    return db.scalars(
+        select(Turn)
+        .where(Turn.session_id == session_id, Turn.ended_at.is_(None))
+        .order_by(Turn.seq.desc())
+    ).first()
 
 
 def _in_flight(db: Session, turn_id: int) -> bool:

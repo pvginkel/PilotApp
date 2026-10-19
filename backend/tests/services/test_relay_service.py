@@ -628,6 +628,63 @@ class TestRelay:
         assert idle.turns == 1
         assert idle.current_line is None
 
+    def test_a_send_committed_before_the_turns_end_keeps_the_session_running(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        idle: models.Session,
+        person: User,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        lines = raw_turn("turn_text")
+        first = _send(relays, session, idle, "One", author=person)
+        first_offsets = _turn_of(fake_controller, controller_session, lines)
+        sent: list[Turn] = []
+        end_turn = relays._end_turn
+
+        def send_first(*args: Any) -> None:
+            # The controller's session is idle once its result is out: the
+            # next send's `202` and commit come before the relay ends the turn.
+            sent.append(_send(relays, session, idle, "Two", author=person))
+            end_turn(*args)
+
+        monkeypatch.setattr(relays, "_end_turn", send_first)
+        _relay(relays, idle)
+        monkeypatch.undo()
+
+        [second] = sent
+        assert first.ended_at is not None
+        assert second.error is None and second.ended_at is None
+        assert idle.state_code == SessionState.RUNNING
+        assert idle.current_line == {
+            "state": "thinking",
+            "since": second.started_at.isoformat(),
+        }
+        assert (idle.turns, idle.turn_started_at, idle.turn_ended_at) == (
+            2,
+            second.started_at,
+            None,
+        )
+        assert _row(session).stop_due_at is None
+
+        # The send's run again relays the next turn from the first's end.
+        second_offsets = _turn_of(fake_controller, controller_session, lines)
+        _relay(relays, idle)
+
+        assert second.ended_at is not None
+        assert idle.state_code == SessionState.IDLE
+        results = [
+            (stored.turn, stored.record.raw_offset)
+            for stored in _records(session, idle.id)
+            if stored.record.kind_code == RecordKind.RESULT
+        ]
+        assert results == [(1, first_offsets[-1]), (2, second_offsets[-1])]
+        assert _claude(session, idle.id) == _recorded(
+            lines + lines, first_offsets + second_offsets
+        )
+
     def test_the_turns_end_cuts_its_documents_versions(
         self,
         session: DbSession,
