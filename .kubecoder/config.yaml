@@ -3,9 +3,8 @@
 # Schema: https://kubecoder.home/help/reference/config-yaml/
 #
 # One sidecar rather than `python` + `frontend`: the Playwright harness boots the
-# Flask backend and the SSE gateway per worker
-# (frontend/tests/support/process/servers.ts), so a single command needs both
-# toolsets in the same container.
+# Flask backend per worker (frontend/tests/support/process/servers.ts), so a
+# single command needs both toolsets in the same container.
 
 repos:
   # Its spec repo: the design record and the slices. Shared: one clone per
@@ -49,9 +48,6 @@ ports:
     sslOffload: true
   - name: backend
     port: 3501
-    type: http
-  - name: sse-gateway
-    port: 3502
     type: http
   # The timeline mockup (PilotAppSpecs design/mockup/), served by its
   # serve.py; design/mockup/README.md has the command. `sslOffload` gives it

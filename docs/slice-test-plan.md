@@ -64,21 +64,21 @@ needs this checkout beside it, and a registry repo the slice changed in `/work/s
 
 ## 2. The local live check
 
-The dev stack is the backend (Flask, debug mode) on 3501, the Vite dev server on 3500 and the SSE
-gateway on 3502, all in the `modern-app` tool container, against the `pilot` database on the
-environment's PostgreSQL sidecar. `scripts/dev.py` starts all three; it runs until stopped, so start
+The dev stack is the backend (Flask, debug mode) on 3501, which serves the SSE stream too, and the
+Vite dev server on 3500, both in the `modern-app` tool container, against the `pilot` database on
+the environment's PostgreSQL sidecar. `scripts/dev.py` starts both; it runs until stopped, so start
 it in the background under a timeout:
 
 ```bash
 timeout 900 scripts/dev.py > /tmp/pilot-dev.log 2>&1 &
 ```
 
-Wait for the three ports with a socket connect, not with `curl`: the gateway's stream never ends,
-and a `curl` against it burns its whole timeout.
+Wait for the two ports with a socket connect, not with `curl` on the SSE stream: it never ends, and
+a `curl` against it burns its whole timeout.
 
 ```bash
 for i in $(seq 1 60); do
-  python3 -c "import socket; [socket.create_connection(('localhost', p), 1).close() for p in (3500, 3501, 3502)]" 2>/dev/null && break
+  python3 -c "import socket; [socket.create_connection(('localhost', p), 1).close() for p in (3500, 3501)]" 2>/dev/null && break
   sleep 1
 done
 ```
@@ -86,10 +86,9 @@ done
 Then the stack's own checks, each expected to answer `200`:
 
 ```bash
-curl -s -m 10 http://localhost:3501/health/readyz      # "status": "ok": checks.database and checks.sse_gateway "ok"
+curl -s -m 10 http://localhost:3501/health/readyz      # "status": "ok": checks.database "ok"
 curl -s -m 10 -o /dev/null -w '%{http_code}\n' http://localhost:3500/
 curl -s -m 10 http://localhost:3500/api/auth/self      # through the Vite proxy; the dev stack runs without OIDC, as "Local Admin"
-curl -s -m 10 http://localhost:3502/readyz             # the SSE gateway
 ```
 
 The frontend is also published at the `frontend` URL `kc env describe` lists
@@ -111,8 +110,8 @@ cexec modern-app sh -c 'cd backend && uv run cli load-test-data --yes-i-am-sure'
 
 ```bash
 scripts/dev.py stop          # prints "dev stack stopped"
-python3 -c "import socket; print([p for p in (3500, 3501, 3502) if socket.socket().connect_ex(('localhost', p)) == 0])"   # []
-cexec modern-app ps -eo pid,ppid,etime,args --no-headers   # read it: no honcho, flask, vite or ssegateway left
+python3 -c "import socket; print([p for p in (3500, 3501) if socket.socket().connect_ex(('localhost', p)) == 0])"   # []
+cexec modern-app ps -eo pid,ppid,etime,args --no-headers   # read it: no honcho, flask or vite left
 ```
 
 Never stop it by killing the background job or the `cexec` client: the services run in sessions of
@@ -254,12 +253,11 @@ While Argo CD has no `pilot-prd` (`cexec iac kubectl -n argocd-prd get applicati
 answers `NotFound`), a slice's push takes Pilot live, and the order is fixed. Steps 1 to 3 of the
 order above decide it; this is how each push is followed.
 
-1. **PilotDeploy**, with `images.pilot`, `images.pilotUI` and `images.sseGateway` in
-   `config/prd/values.yaml`. Follow its `AaC/PilotDeploy` build to green. Until
-   `AaC/Architecture` has collected `pilot-app`, that build's console carries two `gap:` lines
-   (`app:pilot` and `app:pilot-ui` resolve to no producer); they are expected, and the model is
-   whole from the first `AaC/PilotDeploy` build after that collection, which only a later
-   PilotDeploy push starts.
+1. **PilotDeploy**, with `images.pilot` and `images.pilotUI` in `config/prd/values.yaml`. Follow
+   its `AaC/PilotDeploy` build to green. Until `AaC/Architecture` has collected `pilot-app`, that
+   build's console carries two `gap:` lines (`app:pilot` and `app:pilot-ui` resolve to no
+   producer); they are expected, and the model is whole from the first `AaC/PilotDeploy` build
+   after that collection, which only a later PilotDeploy push starts.
 2. **PilotApp.** Follow `PilotApp` with `--no-follow-argocd` and `AaC/PilotApp` to green, then the
    pin commit: `git -C ../PilotDeploy fetch -q && git -C ../PilotDeploy show
    origin/main:config/prd/values.yaml` pins both images to `:<n>`, `<n>` the build's number, and
@@ -330,8 +328,8 @@ POD=$(cexec iac kubectl -n pilot-prd get pods -l app.kubernetes.io/name=pilot -o
    cexec iac kubectl get namespace pilot-prd -o jsonpath='{.metadata.annotations.argocd\.argoproj\.io/tracking-id}{"\n"}'
    ```
 
-2. **The pod and its images.** One pod, `3/3 Running`; `migrate` terminated `Completed`; `backend`,
-   `ui` and `sse-gateway` ready with no restarts; `pilot` and `pilot-ui` at `:<n>`, `<n>` the
+2. **The pod and its images.** One pod, `2/2 Running`; `migrate` terminated `Completed`; `backend`
+   and `ui` ready with no restarts; `pilot` and `pilot-ui` at `:<n>`, `<n>` the
    latest green `PilotApp` build, and each `imageID` the digest the registry holds for that tag:
 
    ```bash
@@ -347,8 +345,7 @@ POD=$(cexec iac kubectl -n pilot-prd get pods -l app.kubernetes.io/name=pilot -o
    The backend's log is the pod's: `cexec iac kubectl -n pilot-prd logs $POD -c backend`.
 
 3. **The backend's readiness, on the pod's IP.** `200` with `"status": "ok"`: `checks.database`
-   `ok` (connected, no migration pending) and `checks.sse_gateway` `ok`. A `200` alone is not
-   enough: an unreachable gateway is not critical, and readyz answers it `200` `"degraded"`:
+   `ok` (connected, no migration pending):
 
    ```bash
    IP=$(cexec iac kubectl -n pilot-prd get pod $POD -o jsonpath='{.status.podIP}')

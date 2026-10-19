@@ -21,7 +21,11 @@ follows PilotDeploy's `main` and syncs on its own, pruning what the chart no lon
 commit therefore rolls the pod: the new pod starts beside the old one, which is retired once the new
 one is ready. A PilotDeploy commit that changes the chart or its values deploys the same way.
 
-The SSE gateway's image, `images.sseGateway`, is pinned by hand: no build writes it.
+Until PilotDeploy drops them, the chart still renders the retired SSE gateway: an `sse-gateway`
+container, its hand-pinned image `images.sseGateway` and its generated callback secret
+`pilot-sse-callback`. Nothing routes to it since the backend serves the SSE stream (backend
+template v0.16.0), and they go from PilotDeploy, step 11 of that release's sync in
+ModernAppTemplate's `changelog.md`. The rest of this page describes the chart without them.
 
 ## What runs
 
@@ -30,8 +34,8 @@ namespace `pilot-prd`:
 
 - **Deployment `pilot`**, one pod. Its init container `migrate` applies the database migrations
   (`python -m app.cli upgrade-db`) to completion before the pod's containers start: `backend` (the
-  Flask API, port 3501), `ui` (the SPA's nginx, port 3500, which proxies `/api/sse/` to the gateway
-  and the rest of `/api/` to the backend) and `sse-gateway` (port 3502).
+  Flask API and the SSE stream, port 3501) and `ui` (the SPA's nginx, port 3500, which proxies
+  `/api/` to the backend).
 - **Service `pilot`**, port 80 to the UI. Its annotations `nginx.webathome.org/server-name:
   pilot.ginbov.nl` and `nginx.webathome.org/is-public: "true"` have the estate's front door serve it
   as a public site, over HTTPS with a Let's Encrypt certificate. Prometheus scrapes the backend's
@@ -53,9 +57,9 @@ PilotApp and PilotDeploy are public repositories, so no secret is committed to e
 - **The Keycloak client's id and secret** are the operator's to write, to OpenBao at
   `eso/prd/pilot/prd/oidc` (`client_id`, `client_secret`). The ExternalSecret `pilot-oidc` brings
   them into the namespace through the `openbao-prd` store.
-- **Flask's `SECRET_KEY`, the drain endpoint's `DRAIN_AUTH_KEY` and the SSE gateway's callback
-  secret** are generated in the cluster, once, by External Secrets `Password` generators, into the
-  Secrets `pilot-secret-key`, `pilot-drain-auth` and `pilot-sse-callback`.
+- **Flask's `SECRET_KEY` and the drain endpoint's `DRAIN_AUTH_KEY`** are generated in the
+  cluster, once, by External Secrets `Password` generators, into the Secrets `pilot-secret-key` and
+  `pilot-drain-auth`.
 - **The database password** is Terraform's (above).
 
 A secret a later feature needs comes the same way: a value from outside the cluster is an OpenBao

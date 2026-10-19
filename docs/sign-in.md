@@ -20,13 +20,13 @@ an account without it cannot use Pilot.
 - **Roles come from the token's realm roles and its client roles** for the audience
   (`resource_access.<audience>`; with `OIDC_AUDIENCE` unset the audience is the client id). A realm
   role named `editor` passes too.
-- **The event stream `/api/sse/stream` has the same gate.** The UI's nginx proxies it to the SSE
-  gateway, which opens a stream only after the backend's connect callback (`/api/sse/callback`)
-  accepts it. The callback reads the token the browser sent, from the access-token cookie or an
-  `Authorization` header, and answers `401` with no valid token and `403` to a token without
-  `editor`. The gateway turns that refusal into a `rejected` event on the stream and ends it. The
-  check runs only when a stream opens, so a stream already open stays open after its token
-  expires.
+- **The event stream `/api/sse/stream` has the same gate.** The backend serves it, and the UI's
+  nginx proxies it with the rest of `/api/`. It reads the token from the access-token cookie, the
+  one an `EventSource` sends, and refreshes an expired one from the refresh cookie. It refuses in
+  the stream, since an `EventSource` does not reconnect a non-`200`: a `200` with one `rejected`
+  event, status `401` with no valid token and `403` to a token without `editor`, and the stream
+  ends, never registered. The check runs only when a stream opens, so a stream already open stays
+  open after its token expires.
 
 On a `rejected` event the UI stops reconnecting and asks `/api/auth/self`, which refreshes an
 expired token: on `200` it opens a new stream, on `401` it goes to the login page, and on anything
