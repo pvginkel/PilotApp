@@ -9,6 +9,6 @@ from flask.testing import FlaskClient
 
 
 def test_liveness_answers(client: FlaskClient) -> None:
-    # Not readyz: readiness includes checks a unit test has no process for,
-    # such as the SSE gateway.
+    # Not readyz: readiness includes checks of services a unit test may have
+    # no process for.
     assert client.get("/health/healthz").status_code == 200
