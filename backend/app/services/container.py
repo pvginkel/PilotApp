@@ -28,6 +28,8 @@ from app.services.metrics_service import MetricsService
 from app.services.oidc_client_service import OidcClientService
 from app.services.people_service import PeopleService
 from app.services.project_service import ProjectService
+from app.services.session_record_service import SessionRecordService
+from app.services.session_stream_service import SessionStreamService
 from app.services.sse_connection_manager import SSEConnectionManager
 from app.services.supervisor import Supervisor
 from app.services.sync_service import SyncService
@@ -169,6 +171,17 @@ class ServiceContainer(containers.DeclarativeContainer):
         SSEConnectionManager,
         lifecycle_coordinator=lifecycle_coordinator,
         queue_max_frames=config.provided.sse_queue_max_frames,
+    )
+
+    # A Session's records and its hubs, the live frames on the browsers'
+    # connections (design 2 §10, §11)
+    session_stream_service = providers.Singleton(
+        SessionStreamService,
+        container=__self__,
+        sse_connection_manager=sse_connection_manager,
+    )
+    session_record_service = providers.Factory(
+        SessionRecordService, db=db_session, session_streams=session_stream_service
     )
 
     # Task service - in-memory task management

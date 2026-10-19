@@ -127,6 +127,9 @@ class SessionRecord(db.Model):  # type: ignore[name-defined]
     """
 
     __tablename__ = "session_records"
+    # `at` comes back with the insert, so no refresh reads the table outside
+    # the one read function (design 2 §11.4).
+    __mapper_args__ = {"eager_defaults": True}
     __table_args__ = (
         UniqueConstraint("session_id", "seq"),
         ForeignKeyConstraint(
