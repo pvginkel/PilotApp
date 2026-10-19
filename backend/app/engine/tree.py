@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 
 from sqlalchemy import exists, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 
 from app.engine.paths import PLAN, REFERENCE, TIMELINE, attachment_path, tree_path
 from app.engine.plan import PlanService
@@ -210,7 +210,10 @@ class TreeService:
                 True,
             )
             for attachment in self.db.scalars(
-                select(Attachment).where(Attachment.project_id == project.id)
+                # Its hash, not its bytes: the content stays in the database.
+                select(Attachment)
+                .where(Attachment.project_id == project.id)
+                .options(defer(Attachment.content))
             )
         )
         return sorted(entries, key=lambda entry: entry.path)
