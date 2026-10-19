@@ -1,5 +1,6 @@
 """The sync service: the gate's refusals and the store's Environment, the
-put's metrics, and the manifest reconcile (design 1 §5.1, §5.5, §5.7)."""
+put's metrics, the manifest reconcile, and the hook's check (design 1 §5.1,
+§5.5, §5.6, §5.7)."""
 
 import json
 import logging
@@ -23,12 +24,15 @@ from app.exceptions import (
     SyncProtocolUnsupportedException,
 )
 from app.models import Environment, Project, SaveError
+from app.models.reference import ErrorKind
 from app.services.container import ServiceContainer
 from app.services.sync_service import (
     FAULTS_TOTAL,
+    HOOK_WAIT_SECONDS,
     INGEST_SECONDS,
     RECONCILES_TOTAL,
     STALE_PUTS_TOTAL,
+    CheckedError,
     Reconciled,
     SyncService,
 )
@@ -81,6 +85,25 @@ def _stale_puts() -> float:
 
 def _reconciles() -> float:
     return _sample(RECONCILES_TOTAL, "pilot_sync_reconciles_total")
+
+
+def _hook_waits() -> tuple[float, float]:
+    return (
+        _sample(HOOK_WAIT_SECONDS, "pilot_sync_hook_wait_seconds_count"),
+        _sample(HOOK_WAIT_SECONDS, "pilot_sync_hook_wait_seconds_sum"),
+    )
+
+
+def _error(
+    environment_id: str, path: str, kind: ErrorKind, line: int | None
+) -> SaveError:
+    return SaveError(
+        environment_id=environment_id,
+        path=path,
+        kind_code=kind,
+        line=line,
+        message=f"{kind} on line {line}",
+    )
 
 
 def _sync(container: ServiceContainer) -> SyncService:
@@ -473,3 +496,105 @@ class TestSyncService:
         assert _sync(container).manifest_hash() == sha256_hex(
             "\0".join(["reference.json", reference, "1"]) + "\n"
         )
+
+    def test_check_reports_the_stores_errors_and_deletes_the_reverted_alone(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        environment: Environment,
+    ) -> None:
+        other = Environment(id="example-env-2", name="Example-2", exempt=False)
+        session.add(other)
+        session.add_all(
+            [
+                _error(STORE_ENVIRONMENT_ID, "camp/b.md", ErrorKind.REVERTED, 4),
+                _error(STORE_ENVIRONMENT_ID, "camp/b.md", ErrorKind.PARSE, 9),
+                _error(STORE_ENVIRONMENT_ID, "camp/a.md", ErrorKind.PARSE, None),
+                _error(other.id, "camp/a.md", ErrorKind.REVERTED, 2),
+            ]
+        )
+        session.flush()
+
+        first = _sync(container).check("camp/a.md", HASH, 0.0)
+        second = _sync(container).check("camp/a.md", HASH, 0.0)
+
+        assert first.errors == [
+            CheckedError("camp/a.md", ErrorKind.PARSE, None, "parse on line None"),
+            CheckedError("camp/b.md", ErrorKind.REVERTED, 4, "reverted on line 4"),
+            CheckedError("camp/b.md", ErrorKind.PARSE, 9, "parse on line 9"),
+        ]
+        assert second.errors == [first.errors[0], first.errors[2]]
+        assert sorted(
+            (error.environment_id, error.kind_code)
+            for error in session.scalars(select(SaveError))
+        ) == [
+            ("example-env-1", ErrorKind.PARSE),
+            ("example-env-1", ErrorKind.PARSE),
+            ("example-env-2", ErrorKind.REVERTED),
+        ]
+
+    def test_check_agrees_with_a_documents_tree_hash_and_its_latest_save(
+        self,
+        container: ServiceContainer,
+        caplog: pytest.LogCaptureFixture,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        item = _bear_item(container, project, project_session)
+        sync = _sync(container)
+        sync.admit(BEARER, STORE_ENVIRONMENT_ID, "1")
+        save = ANSWERED.replace("by: ada", "by: agent")
+        merged = sync.put(item, save.encode(), sha256_hex(ANSWERED))
+
+        with caplog.at_level(logging.INFO):
+            agreed = [
+                sync.check(item, disk_hash, 0.0).checked
+                for disk_hash in (merged.hash, sha256_hex(save))
+            ]
+
+        assert merged.hash == sha256_hex(ANSWERED) != sha256_hex(save)
+        assert agreed == [True, True]
+        assert caplog.text == ""
+
+    def test_check_logs_a_hash_the_server_does_not_hold(
+        self,
+        container: ServiceContainer,
+        caplog: pytest.LogCaptureFixture,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        item = _bear_item(container, project, project_session)
+
+        with caplog.at_level(logging.WARNING):
+            answer = _sync(container).check(item, HASH, 0.0)
+
+        assert not answer.checked
+        assert f"Sync check of {item}: the store's sidecar has {HASH} acked" in (
+            caplog.text
+        )
+
+    def test_check_of_a_path_the_store_does_not_sync_is_not_checked(
+        self,
+        container: ServiceContainer,
+        caplog: pytest.LogCaptureFixture,
+        project: Project,
+    ) -> None:
+        stray = f"draft-{project.number}/notes.md"
+
+        with caplog.at_level(logging.INFO):
+            answer = _sync(container).check(stray, HASH, 0.0)
+
+        assert not answer.checked
+        assert [
+            (record.levelname, record.getMessage()) for record in caplog.records
+        ] == [("INFO", f"Sync check of {stray}: not a path the store syncs")]
+
+    def test_check_observes_the_hooks_wait(
+        self, container: ServiceContainer, environment: Environment
+    ) -> None:
+        count, total = _hook_waits()
+
+        _sync(container).check("reference.json", HASH, 0.25)
+        _sync(container).check("reference.json", HASH, 1.5)
+
+        assert _hook_waits() == (count + 2, total + 1.75)

@@ -29,7 +29,11 @@ from app.engine.paths import sha256_hex
 from app.models import Document, Environment, Project, SaveError, User
 from app.models.reference import ErrorKind, ProjectState
 from app.services.container import ServiceContainer
-from app.services.sync_service import SYNC_PROTOCOL_MAX, SYNC_PROTOCOL_MIN
+from app.services.sync_service import (
+    HOOK_WAIT_SECONDS,
+    SYNC_PROTOCOL_MAX,
+    SYNC_PROTOCOL_MIN,
+)
 from app.services.sync_stream_service import (
     STREAM_CONNECTED,
     STREAM_CONNECTS_TOTAL,
@@ -37,9 +41,11 @@ from app.services.sync_stream_service import (
 )
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
 from tests.support.fake_sidecar import (
+    HOMELESS,
     STORE_ENVIRONMENT_ID,
     STRAY,
     SYNC_TOKEN,
+    Check,
     FakeSidecar,
     sync_headers,
 )
@@ -90,6 +96,30 @@ COMPACT_PLAN = json.dumps(
     }
 )
 
+FIX_PLAN = json.dumps(
+    {"tasks": [{"id": "fix", "title": "Fix the client for v4", "status": "pending"}]}
+)
+
+DEFERRED = """# Camp chores
+
+```decision id=D1
+options:
+  - Dome
+  - Tunnel
+answer: deferred
+by: agent
+at: 2026-10-12T09:30:00Z
+to: fix
+```
+
+```question id=Q1
+answer: deferred
+by: agent
+at: 2026-10-12T09:30:00Z
+to: plan
+```
+"""
+
 HASH = "a" * 64
 
 EVENTS = "/api/sync/events"
@@ -99,6 +129,7 @@ ROUTES = [
     ("GET", "/api/sync/files/reference.json"),
     ("POST", "/api/sync/manifest"),
     ("GET", EVENTS),
+    ("POST", "/api/sync/check"),
 ]
 """Each sync route, at a path that resolves; `_call`'s body is valid for
 each."""
@@ -175,7 +206,13 @@ def _call(
         url,
         method=method,
         headers={**headers, "X-Pilot-Base-Hash": "none"},
-        json={"tree": {}, "shadow": {}},
+        json={
+            "tree": {},
+            "shadow": {},
+            "path": "reference.json",
+            "hash": HASH,
+            "wait_seconds": 0.0,
+        },
     )
 
 
@@ -193,6 +230,34 @@ def _bear_draft(container: ServiceContainer, project: Project) -> str:
     with scoped_session(container):
         container.document_service().bear_draft(project, DRAFT)
     return f"draft-{project.number}/project.md"
+
+
+def _done_deferrals(
+    container: ServiceContainer,
+    project: Project,
+    session: models.Session,
+    person: User,
+) -> tuple[str, str]:
+    """The plan of `project` with the task `fix`, and a done item whose D1 is
+    deferred to `fix` and Q1 to the plan. Returns the item's id and path."""
+    with scoped_session(container) as db:
+        container.plan_service().save(project, FIX_PLAN.encode())
+        item = container.document_service().bear_item(
+            project, "decision", "Camp chores", session, DEFERRED
+        )
+        container.record_service().done(item, person)
+        path = f"draft-{project.number}/{db.get_one(Document, item.id).path}"
+        return str(item.id), path
+
+
+def _told(session: DbSession, path: str) -> str:
+    """What the hook tells the agent of `path`'s Save Errors, in order."""
+    return "".join(
+        f"{path}:{error.line}: {error.message}\n"
+        for error in session.scalars(
+            select(SaveError).where(SaveError.path == path).order_by(SaveError.id)
+        )
+    )
 
 
 def _assert_in_step(container: ServiceContainer, sidecar: FakeSidecar) -> None:
@@ -1082,3 +1147,336 @@ class TestEventsSequences:
         archived = f"draft-{other.number}/"
         assert not [path for path in fake_sidecar.tree if path.startswith(archived)]
         _assert_in_step(container, fake_sidecar)
+
+
+class TestCheck:
+    """`POST /api/sync/check` (design 1 §5.1, §5.6)."""
+
+    def test_the_answer_is_checked_the_errors_and_the_deferrals(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        item = _bear_item(container, project, project_session, ANSWERED)
+        block, done = _done_deferrals(container, project, project_session, person)
+        plan = f"draft-{project.number}/plan.json"
+        fake_sidecar.save(item, ANSWERED.replace("by: ada", "by: agent"))
+        fake_sidecar.save(plan, MISSPELT_PLAN)
+        reverted, held = (
+            session.scalars(
+                select(SaveError.message).where(SaveError.kind_code == kind)
+            ).one()
+            for kind in (ErrorKind.REVERTED, ErrorKind.PARSE)
+        )
+
+        response = fake_sidecar.post_check(item, sha256_hex(ANSWERED), 0.1)
+
+        assert response.status_code == 200
+        assert response.json == {
+            "checked": True,
+            "errors": [
+                {"path": item, "kind": "reverted", "line": 8, "message": reverted},
+                {"path": plan, "kind": "parse", "line": None, "message": held},
+            ],
+            "homeless_deferrals": [
+                {
+                    "block": f"{block}/D1",
+                    "document": done,
+                    "title": "Camp chores",
+                    "to": "fix",
+                },
+                {
+                    "block": f"{block}/Q1",
+                    "document": done,
+                    "title": "Camp chores",
+                    "to": "plan",
+                },
+            ],
+        }
+
+    def test_the_reverted_errors_answered_are_deleted_and_the_parse_errors_stand(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        item = _bear_item(container, project, project_session, ANSWERED)
+        plan = f"draft-{project.number}/plan.json"
+        fake_sidecar.save(item, ANSWERED.replace("by: ada", "by: agent"))
+        fake_sidecar.save(plan, MISSPELT_PLAN)
+
+        answers = [fake_sidecar.post_check(plan, HASH, 0.0).json for _ in range(2)]
+
+        assert [
+            [(error["path"], error["kind"]) for error in answer["errors"]]
+            for answer in answers
+        ] == [[(item, "reverted"), (plan, "parse")], [(plan, "parse")]]
+        assert session.scalars(select(SaveError.kind_code)).all() == [ErrorKind.PARSE]
+
+    def test_a_document_checks_its_tree_hash_and_its_latest_save(
+        self,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        caplog: pytest.LogCaptureFixture,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        item = _bear_item(container, project, project_session, ANSWERED)
+        edited = ANSWERED.replace("# Which tent?", "# Which tent for the lake?")
+        reverting = edited.replace("by: ada", "by: agent")
+
+        with caplog.at_level(logging.WARNING):
+            clean = fake_sidecar.save(item, edited).status
+            clean_checked = fake_sidecar.check(item).checked
+            reverted = fake_sidecar.save(item, reverting).status
+            rewritten = fake_sidecar.text(item)
+            # The merged bytes the sidecar wrote, and the save it sent.
+            reverted_checked = [
+                fake_sidecar.check(item).checked,
+                fake_sidecar.post_check(item, sha256_hex(reverting), 0.0).json[
+                    "checked"
+                ],
+            ]
+            held = fake_sidecar.save(item, BROKEN).status
+            held_checked = fake_sidecar.check(item).checked
+
+        assert (clean, reverted, held) == (204, 200, 204)
+        assert rewritten == edited
+        assert (clean_checked, reverted_checked, held_checked) == (
+            True,
+            [True, True],
+            True,
+        )
+        assert caplog.text == ""
+
+    def test_a_hash_the_server_does_not_hold_is_not_checked_and_logged(
+        self,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        caplog: pytest.LogCaptureFixture,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        item = _bear_item(container, project, project_session, ANSWERED)
+
+        with caplog.at_level(logging.WARNING):
+            response = fake_sidecar.post_check(item, HASH, 0.0)
+
+        assert response.json["checked"] is False
+        assert f"Sync check of {item}: the store's sidecar has {HASH} acked" in (
+            caplog.text
+        )
+
+    def test_a_plan_checks_its_rendering_and_while_held_any_hash(
+        self,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+    ) -> None:
+        plan = f"draft-{project.number}/plan.json"
+        _bear_draft(container, project)
+
+        assert fake_sidecar.save(plan, COMPACT_PLAN).status == 200
+        canonical = fake_sidecar.check(plan).checked
+        # The save the canonical rendering replaced is stored nowhere.
+        compact = fake_sidecar.post_check(plan, sha256_hex(COMPACT_PLAN), 0.0)
+        assert fake_sidecar.save(plan, MISSPELT_PLAN).faults == 1
+        held = [
+            fake_sidecar.check(plan).checked,
+            fake_sidecar.post_check(plan, HASH, 0.0).json["checked"],
+        ]
+        fake_sidecar.connect()
+        written_down = fake_sidecar.post_check(plan, sha256_hex(MISSPELT_PLAN), 0.0)
+
+        assert (canonical, compact.json["checked"]) == (True, False)
+        assert held == [True, True]
+        assert written_down.json["checked"] is False
+        assert fake_sidecar.check(plan).checked
+
+    def test_a_view_checks_its_projection(
+        self, container: ServiceContainer, fake_sidecar: FakeSidecar, project: Project
+    ) -> None:
+        timeline = f"draft-{project.number}/timeline.json"
+        fake_sidecar.connect()
+
+        assert fake_sidecar.check(timeline).checked
+        assert fake_sidecar.check("reference.json").checked
+        assert fake_sidecar.post_check(timeline, HASH, 0.0).json["checked"] is False
+
+    @pytest.mark.parametrize(
+        "path", ["example/notes.md", "draft-1/notes.md", "draft-1/../reference.json"]
+    )
+    def test_a_path_the_tree_does_not_resolve_is_not_checked(
+        self, fake_sidecar: FakeSidecar, path: str
+    ) -> None:
+        response = fake_sidecar.post_check(path, HASH, 0.0)
+
+        assert response.status_code == 200
+        assert response.json["checked"] is False
+
+    def test_the_hooks_wait_is_observed(self, fake_sidecar: FakeSidecar) -> None:
+        count = _sample(HOOK_WAIT_SECONDS, "pilot_sync_hook_wait_seconds_count")
+
+        fake_sidecar.post_check("reference.json", HASH, 0.125)
+
+        assert (
+            _sample(HOOK_WAIT_SECONDS, "pilot_sync_hook_wait_seconds_count")
+            == count + 1
+        )
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"hash": HASH, "wait_seconds": 0.0},
+            {"path": "reference.json", "wait_seconds": 0.0},
+            {"path": "reference.json", "hash": HASH},
+            {"path": "reference.json", "hash": HASH.upper(), "wait_seconds": 0.0},
+            {"path": "reference.json", "hash": HASH, "wait_seconds": -0.1},
+            {"path": "reference.json", "hash": HASH, "wait_seconds": "soon"},
+        ],
+    )
+    def test_a_body_that_is_not_a_check_is_400(
+        self, client: FlaskClient, body: dict[str, object]
+    ) -> None:
+        response = client.post("/api/sync/check", json=body, headers=sync_headers())
+
+        assert response.status_code == 400
+
+    def test_a_refused_check_deletes_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        item = _bear_item(container, project, project_session, ANSWERED)
+        fake_sidecar.save(item, ANSWERED.replace("by: ada", "by: agent"))
+        _configure(container, sync_token="")
+
+        response = fake_sidecar.post_check(item, sha256_hex(ANSWERED), 0.0)
+
+        assert response.status_code == 401
+        assert session.scalars(select(SaveError.kind_code)).all() == [
+            ErrorKind.REVERTED
+        ]
+
+
+class TestCheckSequences:
+    """Design 1 §5.6, the hook's check through the fake sidecar: what the
+    agent is told after an edit."""
+
+    def test_a_reverted_line_is_told_once(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        item = _bear_item(container, project, project_session, ANSWERED)
+        fake_sidecar.connect()
+        fake_sidecar.save(item, ANSWERED.replace("by: ada", "by: agent"))
+        told = _told(session, item)
+
+        checks = [fake_sidecar.check(item), fake_sidecar.check(item)]
+
+        assert told.startswith(f"{item}:8: ")
+        assert checks == [Check(True, told), Check(True, "")]
+
+    def test_a_parse_error_is_told_until_a_clean_save(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        item = _bear_item(container, project, project_session, ANSWERED)
+        fake_sidecar.connect()
+        fake_sidecar.save(item, BROKEN)
+        told = _told(session, item)
+
+        held = [fake_sidecar.check(item), fake_sidecar.check(item)]
+        fake_sidecar.save(item, ANSWERED.replace("# Which tent?", "# Which tent now?"))
+
+        assert told
+        assert held == [Check(True, told), Check(True, told)]
+        assert fake_sidecar.check(item) == Check(True, "")
+
+    def test_the_local_notes_are_told_after_the_errors(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        item = _bear_item(container, project, project_session, ANSWERED)
+        stray = f"draft-{project.number}/notes.md"
+        fake_sidecar.write(stray, "# Notes\n")
+        fake_sidecar.connect()
+        fake_sidecar.save(item, ANSWERED.replace("by: ada", "by: agent"))
+        told = _told(session, item)
+
+        checks = [fake_sidecar.check(stray), fake_sidecar.check(item)]
+
+        assert checks == [
+            Check(False, f"{told}{stray}: {STRAY}\n"),
+            Check(True, f"{stray}: {STRAY}\n"),
+        ]
+
+    def test_a_deferral_without_a_home_is_told_until_a_note_names_it(
+        self,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        block, document = _done_deferrals(container, project, project_session, person)
+        plan = f"draft-{project.number}/plan.json"
+        fake_sidecar.connect()
+        noted = json.loads(FIX_PLAN)
+        noted["tasks"][0]["notes"] = [
+            {
+                "id": "n1",
+                "summary": "Pick the tent",
+                "content": "Once the client runs.",
+                "refs": [f"{block}/D1"],
+            }
+        ]
+
+        told = fake_sidecar.check(plan).text
+        fake_sidecar.save(plan, json.dumps(noted))
+        homed_one = fake_sidecar.check(plan).text
+        # Striking the note leaves the block its home: the note was dealt with.
+        fake_sidecar.save(plan, FIX_PLAN)
+        struck = fake_sidecar.check(plan).text
+        noted["notes"] = [
+            {
+                "id": "n2",
+                "summary": "Sweep before the finish",
+                "content": "Settle what waited.",
+                "refs": [f"{block}/Q1"],
+            }
+        ]
+        fake_sidecar.save(plan, json.dumps(noted))
+
+        assert told == (
+            f"{HOMELESS}\n"
+            f"- {block}/D1 in {document} (Camp chores), to: fix\n"
+            f"- {block}/Q1 in {document} (Camp chores), to: plan\n"
+        )
+        assert (
+            homed_one
+            == struck
+            == (f"{HOMELESS}\n- {block}/Q1 in {document} (Camp chores), to: plan\n")
+        )
+        assert fake_sidecar.check(plan) == Check(True, "")

@@ -4,6 +4,8 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field, StringConstraints
 
+from app.models.reference import ErrorKind
+
 Sha256 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 """A hash the protocol speaks: the sha256 of a file's bytes, lowercase hex."""
 
@@ -71,3 +73,54 @@ class SyncChangeSchema(BaseModel):
 
     path: str = Field(..., description="The path, from the tree's root")
     hash: Sha256 = Field(..., description="The tree hash it moved to")
+
+
+class SyncCheckRequestSchema(BaseModel):
+    """The hook's check of a file, as the store's sidecar posts it."""
+
+    path: str = Field(..., description="The file the hook names, from the tree's root")
+    hash: Sha256 = Field(..., description="The hash of the file on disk, acked")
+    wait_seconds: float = Field(
+        ..., ge=0, description="How long the sidecar waited for that hash's ack"
+    )
+
+
+class SyncSaveErrorSchema(BaseModel):
+    """A Save Error of the store's tree."""
+
+    path: str = Field(..., description="The path, from the tree's root")
+    kind: ErrorKind = Field(
+        ...,
+        description="`parse`: the save is held; `reverted`: a record-owned line"
+        " was restored",
+    )
+    line: int | None = Field(..., description="The line of the save it is on")
+    message: str = Field(..., description="What is wrong")
+
+
+class SyncHomelessDeferralSchema(BaseModel):
+    """A deferral without a home: a deferred block no plan note names."""
+
+    block: str = Field(
+        ..., description="The block as a note's `refs` names it, `<item id>/<local id>`"
+    )
+    document: str = Field(..., description="Its document's path, from the tree's root")
+    title: str = Field(..., description="Its item's title")
+    to: str = Field(..., description="The task it is deferred to, or `plan`")
+
+
+class SyncCheckResponseSchema(BaseModel):
+    """What the hook prints after an edit, and whether the server agrees with
+    the file's hash."""
+
+    checked: bool = Field(
+        ..., description="Whether the server agrees the file holds the hash posted"
+    )
+    errors: list[SyncSaveErrorSchema] = Field(
+        ...,
+        description="Every Save Error of the store's tree, in path order; the"
+        " `reverted` ones are reported once",
+    )
+    homeless_deferrals: list[SyncHomelessDeferralSchema] = Field(
+        ..., description="Every deferral without a home"
+    )

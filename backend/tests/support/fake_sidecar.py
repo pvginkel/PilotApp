@@ -1,8 +1,9 @@
 """The fake sidecar (design 1 §11): the store's tree and the sidecar's shadow
 as dicts, the real sync routes driven through Flask's test client as the
 store's sidecar drives them, with its bearer and the three headers, its change
-stream read between steps and applied as the sidecar applies it, and the
-manifest reconcile run as the sidecar runs it."""
+stream read between steps and applied as the sidecar applies it, the manifest
+reconcile run as the sidecar runs it, and the hook's check answered with the
+text the agent is told."""
 
 import hashlib
 import json
@@ -25,6 +26,10 @@ STORE_ENVIRONMENT_ID = "example-env-1"
 STRAY = "not a document of the record — files are born through `add_item`"
 """The local note on a file the record never bore (design 1 §5.5, D10)."""
 
+HOMELESS = "Deferrals without a home (no plan note names these blocks):"
+"""The heading the hook prints the deferrals without a home under (design 1
+§5.6 step 4)."""
+
 
 @dataclass(frozen=True)
 class Put:
@@ -37,6 +42,16 @@ class Put:
     hash: str
     stale: bool
     faults: int
+
+
+@dataclass(frozen=True)
+class Check:
+    """What the hook's check came to: whether the server agreed with the
+    file's hash, and the text the agent is told, empty when there is
+    nothing to tell."""
+
+    checked: bool
+    text: str
 
 
 class FakeSidecar:
@@ -96,6 +111,41 @@ class FakeSidecar:
             json={"tree": tree, "shadow": shadow},
             headers=sync_headers(),
         )
+
+    def post_check(self, path: str, hash: str, wait_seconds: float) -> TestResponse:
+        """`POST /api/sync/check` as the sidecar sends it."""
+        return self.client.post(
+            "/api/sync/check",
+            json={"path": path, "hash": hash, "wait_seconds": wait_seconds},
+            headers=sync_headers(),
+        )
+
+    def check(self, path: str) -> Check:
+        """The hook's check of `path` after the agent's edit (design 1 §5.6):
+        the sidecar hashes the file on disk, which its uploads have acked by
+        now with no wait, posts the check, and renders the answer as the hook
+        prints it: each error as `<path>:<line>: <message>`, the line left
+        out when it has none; then each local note as `<path>: <note>`, in
+        path order; then the deferrals without a home under `HOMELESS`, each
+        as `- <block> in <document> (<title>), to: <to>`."""
+        response = self.post_check(path, _sha256(self.tree[path]), 0.0)
+        assert response.status_code == 200, response.get_data(as_text=True)
+        answer: dict[str, Any] = response.json
+        lines = [
+            f"{error['path']}: {error['message']}"
+            if error["line"] is None
+            else f"{error['path']}:{error['line']}: {error['message']}"
+            for error in answer["errors"]
+        ]
+        lines.extend(f"{noted}: {note}" for noted, note in sorted(self.notes.items()))
+        if answer["homeless_deferrals"]:
+            lines.append(HOMELESS)
+            lines.extend(
+                f"- {deferral['block']} in {deferral['document']}"
+                f" ({deferral['title']}), to: {deferral['to']}"
+                for deferral in answer["homeless_deferrals"]
+            )
+        return Check(answer["checked"], "".join(f"{line}\n" for line in lines))
 
     def write(self, path: str, content: str | bytes) -> None:
         """The agent writes `path` while the sidecar is not looking: nothing

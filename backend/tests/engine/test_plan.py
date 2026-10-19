@@ -1,6 +1,6 @@
 """`plan.json`: rendered canonical from the plan's rows, and a save parsed back
 into them with its notes, every fault holding the whole save (design 1 §6.2,
-DB 173, 205-213)."""
+DB 173, 205-213); and the deferrals no note gives a home (DB 214)."""
 
 import hashlib
 import json
@@ -14,15 +14,17 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.engine import dsl
-from app.engine.plan import PlanService
+from app.engine.plan import HomelessDeferral, PlanService
 from app.models import (
+    Document,
     Item,
     PlanNote,
     PlanNoteReference,
     PlanTask,
     Project,
+    User,
 )
-from app.models.reference import TaskStatus
+from app.models.reference import ProjectState, TaskStatus
 from app.services.container import ServiceContainer
 
 TENT = """# Which tent?
@@ -37,6 +39,26 @@ options:
 options:
   - North
   - South
+```
+"""
+
+DEFERRED = """# Camp chores
+
+```decision id=D1
+options:
+  - Dome
+  - Tunnel
+answer: deferred
+by: agent
+at: 2026-10-12T09:30:00Z
+to: fix
+```
+
+```question id=Q1
+answer: deferred
+by: agent
+at: 2026-10-12T09:30:00Z
+to: plan
 ```
 """
 
@@ -129,6 +151,35 @@ def _block_id(session: DbSession, item: Item, local_id: str) -> int:
             models.Block.document_id == item.id, models.Block.local_id == local_id
         )
     ).one()
+
+
+def _deferrals(
+    container: ServiceContainer,
+    project: Project,
+    project_session: models.Session,
+    person: User,
+    *,
+    done: bool = True,
+) -> Item:
+    """An item of `project` whose D1 is deferred to the task `fix` and Q1 to
+    the plan, done by `person` unless `done` is false."""
+    item = container.document_service().bear_item(
+        project, "decision", "Camp chores", project_session, DEFERRED
+    )
+    if done:
+        container.record_service().done(item, person)
+    return item
+
+
+def _homeless(
+    session: DbSession, project: Project, item: Item, *local_ids_to: str
+) -> list[HomelessDeferral]:
+    """The deferrals without a home of `item`, each `<local id>:<to>`."""
+    document = f"draft-{project.number}/{session.get_one(Document, item.id).path}"
+    return [
+        HomelessDeferral(f"{item.id}/{local_id}", document, item.title, to)
+        for local_id, _, to in (entry.partition(":") for entry in local_ids_to)
+    ]
 
 
 def _plan(**values: Any) -> dict[str, Any]:
@@ -766,3 +817,123 @@ class TestPlanServiceFaults:
                 " or move them first, in a save of their own"
             ]
             assert _rows(session, project) == rows
+
+
+class TestPlanServiceHomelessDeferrals:
+    def test_a_done_items_deferrals_no_note_names_are_homeless(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        _save(container, project, _plan())
+        item = _deferrals(container, project, project_session, person)
+
+        document = f"draft-{project.number}/items/1-camp-chores.md"
+        assert container.plan_service().homeless_deferrals() == [
+            HomelessDeferral(f"{item.id}/D1", document, "Camp chores", "fix"),
+            HomelessDeferral(f"{item.id}/Q1", document, "Camp chores", "plan"),
+        ]
+
+    def test_an_open_items_deferrals_are_not_homeless(
+        self,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        _save(container, project, _plan())
+        _deferrals(container, project, project_session, person, done=False)
+
+        assert container.plan_service().homeless_deferrals() == []
+
+    def test_a_deferral_in_the_draft_is_no_items_and_not_homeless(
+        self, container: ServiceContainer, project: Project
+    ) -> None:
+        container.document_service().bear_draft(
+            project, DEFERRED.replace("to: fix", "to: plan")
+        )
+
+        assert container.plan_service().homeless_deferrals() == []
+
+    def test_a_note_naming_the_block_is_its_home_open_or_struck(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        _save(container, project, _plan())
+        item = _deferrals(container, project, project_session, person)
+        plan = _plan()
+        plan["tasks"][0]["notes"][0]["refs"] = [f"{item.id}/D1"]
+        assert _save(container, project, plan) == []
+        homed = _homeless(session, project, item, "Q1:plan")
+
+        assert container.plan_service().homeless_deferrals() == homed
+
+        # The note is struck: it was dealt with, and the block keeps its home.
+        plan["tasks"][0]["notes"] = []
+        assert _save(container, project, plan) == []
+        assert session.scalars(select(PlanNote.deleted_at)).one() is not None
+        assert container.plan_service().homeless_deferrals() == homed
+
+        plan["notes"] = [
+            {
+                "id": "n2",
+                "summary": "Sweep before the finish",
+                "content": "Settle what waited.",
+                "refs": [f"{item.id}/Q1"],
+            }
+        ]
+        assert _save(container, project, plan) == []
+        assert container.plan_service().homeless_deferrals() == []
+
+    def test_a_deferral_to_a_done_task_or_a_finished_project_is_not_homeless(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        _save(container, project, _plan())
+        item = _deferrals(container, project, project_session, person)
+        plan = _plan()
+        plan["tasks"][0]["status"] = "done"
+        assert _save(container, project, plan) == []
+
+        assert container.plan_service().homeless_deferrals() == _homeless(
+            session, project, item, "Q1:plan"
+        )
+
+        project.slug = "camp"
+        project.state_code = ProjectState.FINISHED
+        session.flush()
+        assert container.plan_service().homeless_deferrals() == []
+
+    def test_the_deferrals_are_in_project_item_and_block_order(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        later = Project(created_by_user_id=person.id)
+        session.add(later)
+        session.flush()
+        for owner in (later, project):
+            _save(container, owner, _plan())
+        last = _deferrals(container, later, project_session, person)
+        first = _deferrals(container, project, project_session, person)
+        second = _deferrals(container, project, project_session, person)
+
+        assert container.plan_service().homeless_deferrals() == [
+            *_homeless(session, project, first, "D1:fix", "Q1:plan"),
+            *_homeless(session, project, second, "D1:fix", "Q1:plan"),
+            *_homeless(session, later, last, "D1:fix", "Q1:plan"),
+        ]

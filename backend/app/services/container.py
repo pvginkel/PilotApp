@@ -156,6 +156,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         app_settings=app_config,
         ingest_service=ingest_service,
         tree_service=tree_service,
+        plan_service=plan_service,
     )
     sync_stream_service = providers.Singleton(
         SyncStreamService,

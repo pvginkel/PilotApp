@@ -1,6 +1,6 @@
 """The store's sync (design 1 §5): the gate every sync call passes, the file
-put and get, the manifest reconcile and its hash, moving the engine's values
-over the wire."""
+put and get, the manifest reconcile and its hash, and the hook's check,
+moving the engine's values over the wire."""
 
 import hashlib
 import hmac
@@ -11,18 +11,21 @@ from dataclasses import dataclass
 from typing import Literal
 
 from prometheus_client import Counter, Histogram
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.app_config import AppSettings
 from app.engine.ingest import Ingested, IngestService, PathKind
-from app.engine.tree import ManifestEntry, TreeFile, TreeService
+from app.engine.plan import HomelessDeferral, PlanService
+from app.engine.tree import ManifestEntry, TreeFile, TreePlan, TreeService
 from app.exceptions import (
     AuthenticationException,
     AuthorizationException,
+    RecordNotFoundException,
     SyncProtocolUnsupportedException,
 )
-from app.models import Environment
+from app.models import Environment, SaveError
 from app.models.reference import ErrorKind
 
 SYNC_PROTOCOL_MIN = 1
@@ -51,6 +54,10 @@ RECONCILES_TOTAL = Counter(
     "pilot_sync_reconciles_total",
     "Manifest reconciles of the store's tree",
 )
+HOOK_WAIT_SECONDS = Histogram(
+    "pilot_sync_hook_wait_seconds",
+    "The store sidecar's wait for its ack of a file the hook checks, as it reports it",
+)
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +77,25 @@ class Reconciled:
     delete: list[str]
 
 
+@dataclass(frozen=True)
+class CheckedError:
+    """A Save Error as the check reports it."""
+
+    path: str
+    kind: ErrorKind
+    line: int | None
+    message: str
+
+
+@dataclass(frozen=True)
+class Checked:
+    """What the hook's check answers (design 1 §5.6 step 3)."""
+
+    checked: bool
+    errors: list[CheckedError]
+    homeless_deferrals: list[HomelessDeferral]
+
+
 class SyncService:
     def __init__(
         self,
@@ -77,11 +103,13 @@ class SyncService:
         app_settings: AppSettings,
         ingest_service: IngestService,
         tree_service: TreeService,
+        plan_service: PlanService,
     ) -> None:
         self.db = db
         self.app_settings = app_settings
         self.ingest_service = ingest_service
         self.tree_service = tree_service
+        self.plan_service = plan_service
 
     def admit(
         self,
@@ -199,6 +227,75 @@ class SyncService:
                 ", ".join(send_up),
             )
         return Reconciled(manifest, send_up, write_down, delete)
+
+    def check(self, path: str, disk_hash: str, wait_seconds: float) -> Checked:
+        """The hook's check of `path`, from the tree's root, whose file holds
+        `disk_hash` once the store's sidecar has had it acked, after
+        `wait_seconds` of waiting for that (design 1 §5.6 step 3).
+
+        `checked` says whether the server agrees with that hash, a
+        disagreement logged. The errors are every Save Error of the store's
+        Environment in path order: its `reverted` rows are deleted as they are
+        read, so each is reported once, and its `parse` rows stand until a
+        clean save of their path. With them, every deferral without a home.
+        """
+        HOOK_WAIT_SECONDS.observe(wait_seconds)
+        checked = self._agrees(path, disk_hash)
+        store = SaveError.environment_id == self.app_settings.store_environment_id
+        columns = (
+            SaveError.id,
+            SaveError.path,
+            SaveError.kind_code,
+            SaveError.line,
+            SaveError.message,
+        )
+        # One statement deletes what it returns: a `reverted` row committed
+        # after it is the next check's to report.
+        reverted = self.db.execute(
+            delete(SaveError)
+            .where(store, SaveError.kind_code == ErrorKind.REVERTED)
+            .returning(*columns)
+        ).all()
+        parse = self.db.execute(
+            select(*columns).where(store, SaveError.kind_code == ErrorKind.PARSE)
+        ).all()
+        errors = [
+            CheckedError(row.path, row.kind_code, row.line, row.message)
+            for row in sorted([*parse, *reverted], key=lambda row: (row.path, row.id))
+        ]
+        return Checked(checked, errors, self.plan_service.homeless_deferrals())
+
+    def _agrees(self, path: str, disk_hash: str) -> bool:
+        """Whether the server agrees `path` holds `disk_hash`: the path's tree
+        hash, or the hash of the latest save it took of the path. A held
+        `plan.json`'s save is stored nowhere (design 1 §5.3 step 3), so the
+        server agrees with any hash while its `parse` Save Errors stand."""
+        try:
+            resolved = self.tree_service.resolve(path)
+        except RecordNotFoundException:
+            logger.info("Sync check of %s: not a path the store syncs", path)
+            return False
+        agreed: set[str | None]
+        if isinstance(resolved, TreeFile):
+            agreed = {resolved.hash}
+        elif isinstance(resolved, TreePlan):
+            if self.tree_service.held_path(path):
+                return True
+            agreed = {self.plan_service.render(resolved.project).hash}
+        else:
+            agreed = {
+                self.tree_service.hash(resolved.project, resolved.document),
+                resolved.document.ingested_hash,
+            }
+        if disk_hash in agreed:
+            return True
+        logger.warning(
+            "Sync check of %s: the store's sidecar has %s acked, which the"
+            " server does not hold for the path",
+            path,
+            disk_hash,
+        )
+        return False
 
 
 def _outcome(answer: Ingested) -> Outcome:

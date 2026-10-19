@@ -293,6 +293,148 @@
         "title": "ReadinessCheckSchema",
         "type": "object"
       },
+      "SyncCheckRequestSchema.19c06e7": {
+        "description": "The hook's check of a file, as the store's sidecar posts it.",
+        "properties": {
+          "hash": {
+            "description": "The hash of the file on disk, acked",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Hash",
+            "type": "string"
+          },
+          "path": {
+            "description": "The file the hook names, from the tree's root",
+            "title": "Path",
+            "type": "string"
+          },
+          "wait_seconds": {
+            "description": "How long the sidecar waited for that hash's ack",
+            "minimum": 0,
+            "title": "Wait Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "path",
+          "hash",
+          "wait_seconds"
+        ],
+        "title": "SyncCheckRequestSchema",
+        "type": "object"
+      },
+      "SyncCheckResponseSchema.19c06e7": {
+        "description": "What the hook prints after an edit, and whether the server agrees with\nthe file's hash.",
+        "properties": {
+          "checked": {
+            "description": "Whether the server agrees the file holds the hash posted",
+            "title": "Checked",
+            "type": "boolean"
+          },
+          "errors": {
+            "description": "Every Save Error of the store's tree, in path order; the `reverted` ones are reported once",
+            "items": {
+              "$ref": "#/components/schemas/SyncCheckResponseSchema.19c06e7.SyncSaveErrorSchema"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "homeless_deferrals": {
+            "description": "Every deferral without a home",
+            "items": {
+              "$ref": "#/components/schemas/SyncCheckResponseSchema.19c06e7.SyncHomelessDeferralSchema"
+            },
+            "title": "Homeless Deferrals",
+            "type": "array"
+          }
+        },
+        "required": [
+          "checked",
+          "errors",
+          "homeless_deferrals"
+        ],
+        "title": "SyncCheckResponseSchema",
+        "type": "object"
+      },
+      "SyncCheckResponseSchema.19c06e7.ErrorKind": {
+        "enum": [
+          "parse",
+          "reverted"
+        ],
+        "title": "ErrorKind",
+        "type": "string"
+      },
+      "SyncCheckResponseSchema.19c06e7.SyncHomelessDeferralSchema": {
+        "description": "A deferral without a home: a deferred block no plan note names.",
+        "properties": {
+          "block": {
+            "description": "The block as a note's `refs` names it, `<item id>/<local id>`",
+            "title": "Block",
+            "type": "string"
+          },
+          "document": {
+            "description": "Its document's path, from the tree's root",
+            "title": "Document",
+            "type": "string"
+          },
+          "title": {
+            "description": "Its item's title",
+            "title": "Title",
+            "type": "string"
+          },
+          "to": {
+            "description": "The task it is deferred to, or `plan`",
+            "title": "To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "block",
+          "document",
+          "title",
+          "to"
+        ],
+        "title": "SyncHomelessDeferralSchema",
+        "type": "object"
+      },
+      "SyncCheckResponseSchema.19c06e7.SyncSaveErrorSchema": {
+        "description": "A Save Error of the store's tree.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/SyncCheckResponseSchema.19c06e7.ErrorKind",
+            "description": "`parse`: the save is held; `reverted`: a record-owned line was restored"
+          },
+          "line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The line of the save it is on",
+            "title": "Line"
+          },
+          "message": {
+            "description": "What is wrong",
+            "title": "Message",
+            "type": "string"
+          },
+          "path": {
+            "description": "The path, from the tree's root",
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "kind",
+          "line",
+          "message"
+        ],
+        "title": "SyncSaveErrorSchema",
+        "type": "object"
+      },
       "SyncManifestRequestSchema.19c06e7": {
         "description": "The store's tree as its sidecar sees it, posted for the reconcile; the\npaths from the tree's root.",
         "properties": {
@@ -1061,6 +1203,77 @@
         "parameters": [],
         "responses": {},
         "summary": "The browser's SSE stream.",
+        "tags": []
+      }
+    },
+    "/api/sync/check": {
+      "post": {
+        "description": "",
+        "operationId": "post__api_sync_check",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SyncCheckRequestSchema.19c06e7"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncCheckResponseSchema.19c06e7"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "426": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncProtocolRangeSchema.19c06e7"
+                }
+              }
+            },
+            "description": "Upgrade Required"
+          }
+        },
+        "summary": "The hook's check of a file of the store's tree after an edit (design 1 §5.6 step 3): the file's hash on disk, once its sidecar has it acked, in; whether the server agrees with it, every Save Error of the store's tree and every deferral without a home out. A `reverted` Save Error is answered once and deleted; a `parse` one stands until a clean save of its path.",
         "tags": []
       }
     },

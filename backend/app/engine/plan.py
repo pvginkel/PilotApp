@@ -10,13 +10,22 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import and_, delete, exists, or_, select
 from sqlalchemy.orm import Session
 
 from app.engine import dsl
+from app.engine.paths import tree_path
 from app.engine.views import Rendering, render_json, utc_time
-from app.models import Block, Item, PlanNote, PlanNoteReference, PlanTask, Project
-from app.models.reference import TaskStatus
+from app.models import (
+    Block,
+    Document,
+    Item,
+    PlanNote,
+    PlanNoteReference,
+    PlanTask,
+    Project,
+)
+from app.models.reference import ProjectState, TaskStatus
 
 _PLAN_KEYS = ("ticket", "repo", "tasks", "notes")
 _TASK_KEYS = ("id", "title", "status", "notes")
@@ -25,6 +34,21 @@ _STATUSES = "pending, in_progress or done"
 # What a JSON escape can write and no PostgreSQL `text` holds.
 _UNSTORABLE = re.compile(r"[\x00\ud800-\udfff]")
 _NOT_TEXT = "the plan is not text: a string holds `\\u0000` or an unpaired surrogate"
+
+
+@dataclass(frozen=True)
+class HomelessDeferral:
+    """A deferral without a home (DB decision 214).
+
+    `block` is the Block as a note's `refs` names it, `<item id>/<local id>`;
+    `document` its Document's path from the tree's root, and `title` its
+    Item's; `to` the Plan Task it is deferred to, or `plan`.
+    """
+
+    block: str
+    document: str
+    title: str
+    to: str
 
 
 @dataclass(frozen=True)
@@ -279,6 +303,56 @@ class PlanService:
                 for block_id in wanted - held
             )
         self.db.flush()
+
+    def homeless_deferrals(self) -> list[HomelessDeferral]:
+        """Every deferral without a home, computed and never stored (DB
+        decision 214): a Block answered `deferred` in a Document whose Item is
+        done, deferred to a Plan Task that is not `done` or to the plan of a
+        Project not finished, that no Plan Note names, a struck note's
+        reference counting. In project, item and block order."""
+        rows = self.db.execute(
+            select(
+                Project,
+                Document.path,
+                Item.title,
+                Block.document_id,
+                Block.local_id,
+                Block.deferred_to_task_id,
+            )
+            .select_from(Block)
+            .join(Document, Document.id == Block.document_id)
+            .join(Item, Item.id == Document.id)
+            .join(Project, Project.id == Item.project_id)
+            .outerjoin(
+                PlanTask,
+                and_(
+                    PlanTask.project_id == Item.project_id,
+                    PlanTask.task_id == Block.deferred_to_task_id,
+                ),
+            )
+            .where(
+                Block.answer == dsl.DEFERRED,
+                Item.done_at.is_not(None),
+                or_(
+                    PlanTask.status_code != TaskStatus.DONE,
+                    and_(
+                        Block.deferred_to_task_id.is_(None),
+                        Project.state_code != ProjectState.FINISHED,
+                    ),
+                ),
+                ~exists().where(PlanNoteReference.block_id == Block.id),
+            )
+            .order_by(Project.number, Item.seq, Block.position)
+        ).all()
+        return [
+            HomelessDeferral(
+                block=f"{document_id}/{local_id}",
+                document=tree_path(project, path),
+                title=title,
+                to=dsl.PLAN if task_id is None else task_id,
+            )
+            for project, path, title, document_id, local_id, task_id in rows
+        ]
 
 
 class _Unreadable(Exception):

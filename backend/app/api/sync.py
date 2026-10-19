@@ -1,5 +1,6 @@
 """The store sidecar's sync routes (design 1 §5.1): the store's tree, path by
-path and whole, and its change stream, under the store's bearer.
+path and whole, its change stream and the hook's check, under the store's
+bearer.
 
 Registered on the app, not on `api_bp`, so the OIDC gate never sees them:
 the bearer is the store, and every call passes the gate below first.
@@ -22,6 +23,8 @@ from app.exceptions import SyncProtocolUnsupportedException, ValidationException
 from app.schemas.common import ApiErrorResponseSchema
 from app.schemas.sync_schema import (
     SyncChangeSchema,
+    SyncCheckRequestSchema,
+    SyncCheckResponseSchema,
     SyncHelloSchema,
     SyncManifestEntrySchema,
     SyncManifestRequestSchema,
@@ -171,6 +174,34 @@ def reconcile(
         delete=answer.delete,
     )
     return jsonify(response.model_dump()), 200
+
+
+@sync_bp.route("/check", methods=["POST"])
+@public
+@api.validate(
+    json=SyncCheckRequestSchema,
+    resp=SpectreeResponse(
+        HTTP_200=SyncCheckResponseSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_426=SyncProtocolRangeSchema,
+    ),
+)
+@inject
+def check(
+    sync_service: SyncService = Provide[ServiceContainer.sync_service],
+) -> Any:
+    """The hook's check of a file of the store's tree after an edit (design 1
+    §5.6 step 3): the file's hash on disk, once its sidecar has it acked, in;
+    whether the server agrees with it, every Save Error of the store's tree
+    and every deferral without a home out. A `reverted` Save Error is
+    answered once and deleted; a `parse` one stands until a clean save of
+    its path."""
+    body = SyncCheckRequestSchema.model_validate(request.get_json())
+    answer = sync_service.check(body.path, body.hash, body.wait_seconds)
+    response = SyncCheckResponseSchema.model_validate(answer, from_attributes=True)
+    return jsonify(response.model_dump(mode="json")), 200
 
 
 @sync_bp.route("/events", methods=["GET"])
