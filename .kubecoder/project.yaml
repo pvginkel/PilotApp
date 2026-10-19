@@ -49,3 +49,16 @@ projects:
     build: cexec modern-app pnpm build
     test: cexec modern-app pnpm playwright test
     lint: cexec modern-app pnpm check
+
+  sidecar:
+    description: >-
+      pilot-sync, the store environment's sync sidecar: a Go module that keeps
+      the store's tree a live projection of the record.
+    setup: cexec go go mod download
+    build: cexec go go build ./...
+    test: cexec go go test -race ./...
+    lint:
+      # gofmt exits 0 when it lists files: a listed file is the failure.
+      - cexec go sh -c 'test -z "$(gofmt -l . | tee /dev/stderr)"'
+      - cexec go go vet ./...
+      - cexec go golangci-lint run ./...
