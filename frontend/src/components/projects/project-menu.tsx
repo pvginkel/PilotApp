@@ -151,7 +151,12 @@ export function ProjectMenu({ project }: { project: Project }) {
             {project.member ? (
               <MenuItem
                 icon={UserMinus}
-                onSelect={() => membership('project.leave', `You left ${name}. It moves to Other projects.`)}
+                onSelect={() =>
+                  membership(
+                    'project.leave',
+                    project.state === 'finished' ? `You left ${name}.` : `You left ${name}. It moves to Other projects.`,
+                  )
+                }
                 testId="project.menu.leave"
               >
                 Leave the project

@@ -121,7 +121,7 @@ The popovers and the menu close on a press outside them and on Esc.
 project" on a finished one; and "Archive the project". On an archived project, "Bring back" alone.
 
 Join and Leave act at once, each with a toast: "You joined <name>." and "You left <name>. It moves
-to Other projects."
+to Other projects.", on a finished project "You left <name>." alone, since it stays under Finished.
 
 Finish asks first, in a modal dialog, and Archive, Reopen and Bring back ask in one shaped as
 Finish's (D010): the title "<Act> <name>?", the lines of what it does, a note, and Cancel beside the

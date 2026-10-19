@@ -89,6 +89,26 @@ test.describe('Join and Leave', () => {
     await projectHead.menuButton.click();
     await expect(projectHead.menuItems.first()).toHaveText('Join the project');
   });
+
+  test('Leave on a finished project only says the person left, the project staying under Finished', async ({
+    page,
+    people,
+    projects,
+    projectHead,
+    projectList,
+  }) => {
+    const me = await people.signIn({ name: 'Test Person' });
+    const name = makeUnique('Leaving');
+    const id = await projects.make({ name, state: 'finished', members: [me.handle!, 'ada'] });
+    await projectList.open(id);
+    const finished = projectList.group('finished').root;
+    await expect(projectList.tab(name, finished)).toBeVisible();
+
+    await projectHead.choose('leave');
+    await expect(page.getByTestId('app-shell.toast.item').getByText(`You left ${name}.`, { exact: true })).toBeVisible();
+    await expect(projectList.tab(name, finished)).toBeVisible();
+    expect((await projects.head(id)).member).toBe(false);
+  });
 });
 
 test.describe('Finish', () => {
