@@ -178,9 +178,14 @@ class ServiceContainer(containers.DeclarativeContainer):
     people_service = providers.Factory(PeopleService, db=db_session)
     link_service = providers.Factory(LinkService, db=db_session)
 
-    # The projects as the signed-in person reads them (F1, F2, F3)
+    # The projects as the signed-in person reads them (F1, F2, F3), and their
+    # transitions and membership (F4.1, F5, F6, F127, F128)
     project_service = providers.Factory(
-        ProjectService, db=db_session, people_service=people_service
+        ProjectService,
+        db=db_session,
+        people_service=people_service,
+        record_service=record_service,
+        view_service=view_service,
     )
 
     # The invented record: the dev stack's seed, loaded by `cli

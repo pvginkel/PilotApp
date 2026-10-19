@@ -1,5 +1,6 @@
 """The record's own writes (design 1 §6.4, F32.4): a person's answer, Done on
-an action, undo, Done on a document, Read and Reviewed.
+an action, undo, Done on a document, Read and Reviewed; and Finish's close of
+the open items (F5.1).
 
 Each is a write of the caller's transaction, under the document's row lock
 (TD §8.5). A write that touches the text splices it into the published text
@@ -10,7 +11,7 @@ write to the file (design 1 §5.2, §7). No write raises *modified*.
 
 from datetime import UTC, datetime
 
-from sqlalchemy import exists, select
+from sqlalchemy import ColumnElement, and_, exists, select
 from sqlalchemy.orm import Session
 
 from app.engine import dsl
@@ -27,6 +28,7 @@ REVIEW = "review"
 ANSWERED = "answered"
 MARKED = "marked"
 SETTLED = "settled"
+FINISHED = "finished"
 
 
 class RecordService:
@@ -228,6 +230,35 @@ class RecordService:
         """Reviewed on a review: the item's mark, the text untouched."""
         self._mark_by_kind(item, user, REVIEW, "Reviewed")
 
+    def close_unanswered(self, project: Project, user: User, at: datetime) -> None:
+        """Finish's close (F5.1): every open item of the project but the
+        opening, which is never done, done unanswered at `at` by `user`, its
+        Done Cause `finished`, which offers no undo. The text is untouched.
+
+        Each prose item's document row is held first, so a write of one
+        document waits for the close or the close finds its item done.
+        """
+        self.db.scalars(
+            select(Document.id)
+            .join(Item, Item.id == Document.id)
+            .where(_open_in(project))
+            .order_by(Document.id)
+            .with_for_update(of=Document)
+        ).all()
+        items = self.db.scalars(
+            select(Item)
+            .where(_open_in(project))
+            .order_by(Item.seq)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).all()
+        for item in items:
+            item.done_at = at
+            item.done_cause_code = FINISHED
+            item.done_by_user_id = user.id
+        if items:
+            self.view_service.timeline_moved(project)
+
     def _mark_by_kind(self, item: Item, user: User, kind: str, mark: str) -> None:
         if self.db.get_one(ItemKind, item.kind_code).form != PROSE:
             raise InvalidOperationException(
@@ -281,6 +312,15 @@ class RecordService:
         item.done_cause_code = cause
         item.done_by_user_id = user.id
         self.view_service.timeline_moved(project)
+
+
+def _open_in(project: Project) -> ColumnElement[bool]:
+    """The project's open items but the opening."""
+    return and_(
+        Item.project_id == project.id,
+        Item.done_at.is_(None),
+        Item.kind_code != OPENING,
+    )
 
 
 def _a_person(user: User, operation: str, cause: str) -> None:

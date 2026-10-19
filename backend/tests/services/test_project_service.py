@@ -1,15 +1,25 @@
-"""The projects as the signed-in person reads them: the project list's tabs
-and a project's head (F1, F2, F3)."""
+"""The projects as the signed-in person reads them, the project list's tabs
+and a project's head (F1, F2, F3); and what they change of a project's
+standing, its transitions and their membership (F4.1, F5, F6, F127, F128)."""
 
+import json
 import uuid
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from flask import Flask
+from psycopg.errors import LockNotAvailable
 from sqlalchemy import select
+from sqlalchemy import text as sql
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session as DbSession
 
-from app.exceptions import RecordNotFoundException
+from app.database import scoped_session
+from app.engine.bus import EngineEvent, TreeHashMoved
+from app.engine.paths import TIMELINE, tree_path
+from app.exceptions import InvalidOperationException, RecordNotFoundException
+from app.extensions import db
 from app.models import (
     Environment,
     Item,
@@ -20,11 +30,15 @@ from app.models import (
     ProjectTransition,
     User,
 )
-from app.models.reference import ProjectState, TaskStatus, TransitionKind
+from app.models.reference import ProjectState, TaskStatus, TransitionKind, UserKind
 from app.schemas.testing_record import InventedProjectCreateSchema
 from app.services.auth_service import AuthContext
 from app.services.container import ServiceContainer
-from app.services.project_service import PlanProgress, plan_progress
+from app.services.project_service import (
+    ARCHIVED_REFUSAL,
+    PlanProgress,
+    plan_progress,
+)
 
 ADA = AuthContext(
     subject="subject-ada", email=None, name="Ada Example", roles={"editor"}
@@ -46,6 +60,38 @@ def _make(container: ServiceContainer, **spec: Any) -> Project:
 
 def _ben(container: ServiceContainer) -> User:
     return container.test_data_service().person("ben", "Ben Example")
+
+
+def _transitions(
+    session: DbSession, project: Project
+) -> list[tuple[TransitionKind, datetime, uuid.UUID]]:
+    return [
+        (transition.kind_code, transition.at, transition.by_user_id)
+        for transition in session.scalars(
+            select(ProjectTransition)
+            .where(ProjectTransition.project_id == project.id)
+            .order_by(ProjectTransition.at, ProjectTransition.id)
+        )
+    ]
+
+
+def _standing(project: Project) -> tuple[ProjectState, bool, bool]:
+    return project.state_code, project.archived, project.autopilot
+
+
+def _memberships(
+    session: DbSession, project: Project, person: User
+) -> list[ProjectMember]:
+    return list(
+        session.scalars(
+            select(ProjectMember)
+            .where(
+                ProjectMember.project_id == project.id,
+                ProjectMember.user_id == person.id,
+            )
+            .order_by(ProjectMember.id)
+        )
+    )
 
 
 def _task(task_id: str, status: TaskStatus) -> PlanTask:
@@ -412,3 +458,501 @@ class TestHead:
             container.project_service().head(ADA, unknown)
 
         assert raised.value.message == f"Project {unknown} was not found"
+
+
+@pytest.mark.usefixtures("person")
+class TestTransition:
+    @pytest.mark.parametrize(
+        ("spec", "kind", "standing"),
+        [
+            (
+                {"state": "open"},
+                TransitionKind.FINISHED,
+                (ProjectState.FINISHED, False, False),
+            ),
+            (
+                {"state": "finished"},
+                TransitionKind.REOPENED,
+                (ProjectState.OPEN, False, False),
+            ),
+            (
+                {"state": "draft"},
+                TransitionKind.ARCHIVED,
+                (ProjectState.DRAFT, True, False),
+            ),
+            (
+                {"state": "open", "autopilot": True},
+                TransitionKind.ARCHIVED,
+                (ProjectState.OPEN, True, True),
+            ),
+            (
+                {"state": "finished"},
+                TransitionKind.ARCHIVED,
+                (ProjectState.FINISHED, True, False),
+            ),
+            (
+                {"state": "draft", "archived": True},
+                TransitionKind.BROUGHT_BACK,
+                (ProjectState.DRAFT, False, False),
+            ),
+            (
+                {"state": "open", "autopilot": True, "archived": True},
+                TransitionKind.BROUGHT_BACK,
+                (ProjectState.OPEN, False, True),
+            ),
+            (
+                {"state": "finished", "archived": True},
+                TransitionKind.BROUGHT_BACK,
+                (ProjectState.FINISHED, False, False),
+            ),
+            (
+                {"state": "open"},
+                TransitionKind.AUTOPILOT_ON,
+                (ProjectState.OPEN, False, True),
+            ),
+            (
+                {"state": "open", "autopilot": True},
+                TransitionKind.AUTOPILOT_OFF,
+                (ProjectState.OPEN, False, False),
+            ),
+        ],
+    )
+    def test_a_transition_its_standing_allows(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        spec: dict[str, Any],
+        kind: TransitionKind,
+        standing: tuple[ProjectState, bool, bool],
+    ) -> None:
+        made = _make(container, name="Camp", **spec)
+        before = _transitions(session, made)
+        started = datetime.now(UTC)
+
+        container.project_service().transition(ADA, made.id, kind)
+
+        ((written, at, by),) = _transitions(session, made)[len(before) :]
+        assert (written, by) == (kind, person.id)
+        assert started <= at <= datetime.now(UTC)
+        assert _standing(made) == standing
+
+    def test_finish_turns_auto_pilot_off_at_its_instant_by_its_person(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        made = _make(container, name="Camp", autopilot=True)
+        before = _transitions(session, made)
+
+        container.project_service().transition(ADA, made.id, TransitionKind.FINISHED)
+
+        finished, autopilot_off = _transitions(session, made)[len(before) :]
+        assert finished[0] is TransitionKind.FINISHED
+        assert autopilot_off == (TransitionKind.AUTOPILOT_OFF, *finished[1:])
+        assert finished[2] == person.id
+        assert _standing(made) == (ProjectState.FINISHED, False, False)
+
+    def test_finish_closes_the_open_items_at_its_instant(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        environment: Environment,
+    ) -> None:
+        made = _make(
+            container, name="Camp", open_items=2, environment_id=environment.id
+        )
+        service = container.project_service()
+
+        service.transition(ADA, made.id, TransitionKind.FINISHED)
+
+        ((_, at, _),) = [
+            transition
+            for transition in _transitions(session, made)
+            if transition[0] is TransitionKind.FINISHED
+        ]
+        items = session.scalars(select(Item).where(Item.project_id == made.id))
+        assert [
+            (item.done_at, item.done_cause_code, item.done_by_user_id) for item in items
+        ] == [(at, "finished", person.id)] * 2
+        assert service.head(ADA, made.id).open_items == 0
+
+    def test_reopen_leaves_auto_pilot_off(
+        self, container: ServiceContainer, session: DbSession
+    ) -> None:
+        made = _make(container, name="Camp", autopilot=True)
+        service = container.project_service()
+        service.transition(ADA, made.id, TransitionKind.FINISHED)
+        before = _transitions(session, made)
+
+        service.transition(ADA, made.id, TransitionKind.REOPENED)
+
+        assert [kind for kind, _, _ in _transitions(session, made)[len(before) :]] == [
+            TransitionKind.REOPENED
+        ]
+        assert _standing(made) == (ProjectState.OPEN, False, False)
+
+    def test_the_timeline_carries_the_new_standing(
+        self, container: ServiceContainer
+    ) -> None:
+        made = _make(container, name="Camp", autopilot=True)
+        service = container.project_service()
+
+        service.transition(ADA, made.id, TransitionKind.FINISHED)
+        service.transition(ADA, made.id, TransitionKind.ARCHIVED)
+
+        timeline = json.loads(container.view_service().timeline(made).text)
+        assert {
+            key: timeline["project"][key] for key in ("state", "archived", "autopilot")
+        } == {"state": "finished", "archived": True, "autopilot": False}
+
+    @pytest.mark.parametrize(
+        ("spec", "kind", "cause"),
+        [
+            (
+                {"state": "draft"},
+                TransitionKind.OPENED,
+                "a project opens at Create project",
+            ),
+            ({"state": "draft"}, TransitionKind.FINISHED, "it is a draft"),
+            ({"state": "finished"}, TransitionKind.FINISHED, "it is finished already"),
+            ({"state": "draft"}, TransitionKind.REOPENED, "it is not finished"),
+            ({"state": "open"}, TransitionKind.REOPENED, "it is not finished"),
+            ({"state": "open"}, TransitionKind.BROUGHT_BACK, "it is not archived"),
+            ({"state": "draft"}, TransitionKind.AUTOPILOT_ON, "it is a draft"),
+            ({"state": "finished"}, TransitionKind.AUTOPILOT_ON, "it is finished"),
+            (
+                {"state": "open", "autopilot": True},
+                TransitionKind.AUTOPILOT_ON,
+                "auto pilot is on already",
+            ),
+            (
+                {"state": "open"},
+                TransitionKind.AUTOPILOT_OFF,
+                "auto pilot is off already",
+            ),
+            ({"archived": True}, TransitionKind.ARCHIVED, ARCHIVED_REFUSAL),
+            ({"archived": True}, TransitionKind.FINISHED, ARCHIVED_REFUSAL),
+            (
+                {"state": "finished", "archived": True},
+                TransitionKind.REOPENED,
+                ARCHIVED_REFUSAL,
+            ),
+            ({"archived": True}, TransitionKind.AUTOPILOT_ON, ARCHIVED_REFUSAL),
+            (
+                {"autopilot": True, "archived": True},
+                TransitionKind.AUTOPILOT_OFF,
+                ARCHIVED_REFUSAL,
+            ),
+        ],
+    )
+    def test_a_transition_its_standing_does_not_allow_is_refused(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        spec: dict[str, Any],
+        kind: TransitionKind,
+        cause: str,
+    ) -> None:
+        made = _make(container, name="Camp", **spec)
+        before = (_transitions(session, made), _standing(made))
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.project_service().transition(ADA, made.id, kind)
+
+        assert refused.value.cause == cause
+        assert (_transitions(session, made), _standing(made)) == before
+
+    @pytest.mark.parametrize(
+        ("name", "kind", "message"),
+        [
+            (
+                "Camp",
+                TransitionKind.AUTOPILOT_ON,
+                "Cannot turn auto pilot on for Camp because it is a draft",
+            ),
+            (
+                None,
+                TransitionKind.FINISHED,
+                "Cannot finish the untitled project because it is a draft",
+            ),
+        ],
+    )
+    def test_a_refusal_names_the_change_and_the_project(
+        self,
+        container: ServiceContainer,
+        name: str | None,
+        kind: TransitionKind,
+        message: str,
+    ) -> None:
+        made = _make(container, name=name, state="draft")
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.project_service().transition(ADA, made.id, kind)
+
+        assert refused.value.message == message
+
+    def test_a_caller_without_a_handle_is_refused(
+        self, container: ServiceContainer, session: DbSession
+    ) -> None:
+        made = _make(container, name="Camp")
+        before = _transitions(session, made)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.project_service().transition(
+                NEWCOMER, made.id, TransitionKind.FINISHED
+            )
+
+        assert refused.value.message == (
+            "Cannot finish Camp because you have not chosen your handle yet"
+        )
+        assert (_transitions(session, made), made.state_code) == (
+            before,
+            ProjectState.OPEN,
+        )
+
+    def test_an_unknown_project_is_not_found(self, container: ServiceContainer) -> None:
+        unknown = uuid.uuid4()
+
+        with pytest.raises(RecordNotFoundException) as raised:
+            container.project_service().transition(
+                ADA, unknown, TransitionKind.FINISHED
+            )
+
+        assert raised.value.message == f"Project {unknown} was not found"
+
+    @pytest.mark.parametrize("open_items", [0, 2])
+    def test_a_transition_moves_the_timeline_once(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        environment: Environment,
+        open_items: int,
+    ) -> None:
+        made = _make(
+            container,
+            name="Camp",
+            autopilot=True,
+            open_items=open_items,
+            environment_id=environment.id,
+        )
+        with scoped_session(container):
+            pass
+        engine_events.clear()
+
+        with scoped_session(container):
+            container.project_service().transition(
+                ADA, made.id, TransitionKind.FINISHED
+            )
+
+        assert engine_events == [
+            TreeHashMoved(
+                tree_path(made, TIMELINE),
+                container.view_service().timeline(made).hash,
+            )
+        ]
+
+
+@pytest.mark.usefixtures("person")
+class TestJoin:
+    @pytest.mark.parametrize("state", ["draft", "open", "finished"])
+    def test_joining_opens_a_membership_now(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        state: str,
+    ) -> None:
+        _ben(container)
+        made = _make(container, name="Camp", state=state, members=["ben"])
+        started = datetime.now(UTC)
+
+        container.project_service().join(ADA, made.id)
+
+        (membership,) = _memberships(session, made, person)
+        assert membership.left_at is None
+        assert started <= membership.joined_at <= datetime.now(UTC)
+        assert container.project_service().head(ADA, made.id).member is True
+
+    def test_a_rejoin_is_a_new_row(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        made = _make(container, name="Camp")
+        service = container.project_service()
+        service.leave(ADA, made.id)
+
+        service.join(ADA, made.id)
+
+        first, again = _memberships(session, made, person)
+        assert first.left_at is not None
+        assert again.left_at is None
+        assert again.joined_at >= first.left_at
+
+    def test_a_member_cannot_join_again(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        made = _make(container, name="Camp")
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.project_service().join(ADA, made.id)
+
+        assert refused.value.message == (
+            "Cannot join Camp because you are a member already"
+        )
+        assert len(_memberships(session, made, person)) == 1
+
+    def test_an_archived_project_is_refused(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        _ben(container)
+        made = _make(container, name="Camp", members=["ben"], archived=True)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.project_service().join(ADA, made.id)
+
+        assert refused.value.cause == ARCHIVED_REFUSAL
+        assert _memberships(session, made, person) == []
+
+    def test_a_caller_without_a_handle_is_refused(
+        self, container: ServiceContainer, session: DbSession
+    ) -> None:
+        made = _make(container, name="Camp")
+        before = session.scalars(
+            select(ProjectMember.id).where(ProjectMember.project_id == made.id)
+        ).all()
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.project_service().join(NEWCOMER, made.id)
+
+        assert refused.value.message == (
+            "Cannot join Camp because you have not chosen your handle yet"
+        )
+        assert (
+            session.scalars(
+                select(ProjectMember.id).where(ProjectMember.project_id == made.id)
+            ).all()
+            == before
+        )
+
+    def test_an_unknown_project_is_not_found(self, container: ServiceContainer) -> None:
+        unknown = uuid.uuid4()
+
+        with pytest.raises(RecordNotFoundException):
+            container.project_service().join(ADA, unknown)
+
+    def test_membership_moves_no_timeline(
+        self, container: ServiceContainer, engine_events: list[EngineEvent]
+    ) -> None:
+        made = _make(container, name="Camp")
+        with scoped_session(container):
+            pass
+        engine_events.clear()
+
+        with scoped_session(container):
+            service = container.project_service()
+            service.leave(ADA, made.id)
+            service.join(ADA, made.id)
+
+        assert engine_events == []
+
+
+@pytest.mark.usefixtures("person")
+class TestLeave:
+    @pytest.mark.parametrize("state", ["draft", "open", "finished"])
+    def test_leaving_closes_the_membership_now(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        state: str,
+    ) -> None:
+        made = _make(container, name="Camp", state=state)
+        started = datetime.now(UTC)
+
+        container.project_service().leave(ADA, made.id)
+
+        (membership,) = _memberships(session, made, person)
+        assert membership.left_at is not None
+        assert started <= membership.left_at <= datetime.now(UTC)
+        head = container.project_service().head(ADA, made.id)
+        assert (head.member, head.members) == (False, ())
+
+    def test_a_person_who_is_no_member_cannot_leave(
+        self, container: ServiceContainer
+    ) -> None:
+        _ben(container)
+        made = _make(container, name="Camp", members=["ben"])
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.project_service().leave(ADA, made.id)
+
+        assert refused.value.message == "Cannot leave Camp because you are no member"
+
+    def test_an_archived_project_is_refused(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        made = _make(container, name="Camp", archived=True)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.project_service().leave(ADA, made.id)
+
+        assert refused.value.cause == ARCHIVED_REFUSAL
+        (membership,) = _memberships(session, made, person)
+        assert membership.left_at is None
+
+    def test_a_caller_without_a_handle_is_refused(
+        self, container: ServiceContainer
+    ) -> None:
+        made = _make(container, name="Camp")
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.project_service().leave(NEWCOMER, made.id)
+
+        assert refused.value.message == (
+            "Cannot leave Camp because you have not chosen your handle yet"
+        )
+
+    def test_an_unknown_project_is_not_found(self, container: ServiceContainer) -> None:
+        unknown = uuid.uuid4()
+
+        with pytest.raises(RecordNotFoundException):
+            container.project_service().leave(ADA, unknown)
+
+
+class TestStandingRowLock:
+    """Two changes of one project's standing never interleave."""
+
+    def test_a_change_waits_for_the_projects_row(self, committed_app: Flask) -> None:
+        container = committed_app.container
+        with scoped_session(container) as session:
+            session.add(
+                User(
+                    kind_code=UserKind.PERSON,
+                    subject=ADA.subject,
+                    handle="ada",
+                    name="Ada Example",
+                    avatar_slot=1,
+                )
+            )
+            session.flush()
+            project_id = _make(container, name="Camp").id
+        with committed_app.app_context():
+            engine = db.engine
+
+        with engine.connect() as holder:
+            holder.execute(
+                sql("SELECT id FROM projects WHERE id = :id FOR NO KEY UPDATE"),
+                {"id": project_id},
+            )
+            with (
+                pytest.raises(OperationalError) as raised,
+                scoped_session(container) as session,
+            ):
+                session.execute(sql("SET LOCAL lock_timeout = '200ms'"))
+                container.project_service().transition(
+                    ADA, project_id, TransitionKind.FINISHED
+                )
+            holder.rollback()
+
+        assert isinstance(raised.value.orig, LockNotAvailable)
+        with scoped_session(container) as session:
+            assert session.get_one(Project, project_id).state_code is ProjectState.OPEN

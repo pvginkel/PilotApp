@@ -232,12 +232,16 @@ def _done(item: Item) -> tuple[datetime | None, str | None, uuid.UUID | None]:
 
 
 def _textless(
-    session: DbSession, project: Project, project_session: models.Session, kind: str
+    session: DbSession,
+    project: Project,
+    project_session: models.Session,
+    kind: str,
+    seq: int = 1,
 ) -> Item:
     """An open item of `kind`, a work or wait item, which has no Document."""
     item = Item(
         project_id=project.id,
-        seq=1,
+        seq=seq,
         kind_code=kind,
         title="Build the camp",
         created_by_session_id=project_session.id,
@@ -1411,6 +1415,147 @@ class TestRecordServiceMarks:
         assert refused.value.cause == "the item is done"
 
 
+FINISH = datetime(2026, 10, 19, 15, 0, 1, 250000, tzinfo=UTC)
+"""Finish's instant, kept whole by the close."""
+
+
+class TestRecordServiceCloseUnanswered:
+    def test_every_open_item_but_the_opening_is_done_unanswered(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        documents = container.document_service()
+        opening = documents.bear_opening(project, "Camp", person, "Let's camp.\n")
+        decision, _ = _bear(
+            session,
+            container,
+            project,
+            project_session,
+            "decision",
+            "Which tent?",
+            DECISION,
+        )
+        notice, _ = _bear(
+            session, container, project, project_session, "notice", "Palette", NOTICE
+        )
+        work = _textless(session, project, project_session, "work", seq=4)
+        wait = _textless(session, project, project_session, "timed_wait", seq=5)
+        records = container.record_service()
+        records.read(notice, person)
+        read = _done(notice)
+
+        records.close_unanswered(project, person, FINISH)
+
+        assert [_done(item) for item in (decision, work, wait)] == [
+            (FINISH, "finished", person.id)
+        ] * 3
+        assert _done(notice) == read
+        assert _done(opening) == (None, None, None)
+
+    def test_the_text_is_untouched(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        _, document = _bear(
+            session,
+            container,
+            project,
+            project_session,
+            "decision",
+            "Which tent?",
+            DECISION,
+        )
+        versions = _versions(session, document)
+
+        container.record_service().close_unanswered(project, person, FINISH)
+
+        assert document.published_text == DECISION
+        assert _versions(session, document) == versions
+
+    def test_a_closed_item_offers_no_undo(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        item, _ = _bear(
+            session, container, project, project_session, "notice", "Palette", NOTICE
+        )
+        records = container.record_service()
+        records.close_unanswered(project, person, FINISH)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            records.undo(item)
+
+        assert refused.value.cause == "an item done as finished offers no undo"
+
+    def test_another_projects_items_stay_open(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        other = Project(created_by_user_id=person.id)
+        session.add(other)
+        session.flush()
+        item, _ = _bear(
+            session, container, project, project_session, "notice", "Palette", NOTICE
+        )
+
+        container.record_service().close_unanswered(other, person, FINISH)
+
+        assert _done(item) == (None, None, None)
+
+    def test_the_close_moves_the_timeline_once(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        for title in ("Palette", "Badges"):
+            _bear(session, container, project, project_session, "notice", title, NOTICE)
+        with scoped_session(container):
+            pass
+        engine_events.clear()
+
+        with scoped_session(container):
+            container.record_service().close_unanswered(project, person, FINISH)
+
+        assert engine_events == [
+            TreeHashMoved(
+                f"draft-{project.number}/timeline.json",
+                container.view_service().timeline(project).hash,
+            )
+        ]
+
+    def test_with_nothing_open_nothing_moves(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        person: User,
+    ) -> None:
+        with scoped_session(container):
+            container.record_service().close_unanswered(project, person, FINISH)
+
+        assert engine_events == []
+
+
 class TestRecordServiceEvents:
     def test_an_answer_moves_its_path_and_the_timeline_and_modifies_nothing(
         self,
@@ -1737,3 +1882,35 @@ class TestRecordServiceRowLock:
         with scoped_session(container) as session:
             assert session.get_one(Item, item_id).done_at is None
             assert session.get_one(Document, decision_id).published_text == DECISION
+
+    def test_the_close_waits_for_an_open_items_document_row(
+        self, committed_app: Flask
+    ) -> None:
+        person_id, decision_id, notice_id = _committed_items(committed_app)
+        container = committed_app.container
+        with committed_app.app_context():
+            engine = db.engine
+
+        with engine.connect() as holder:
+            holder.execute(
+                sql("SELECT id FROM documents WHERE id = :id FOR KEY SHARE"),
+                {"id": notice_id},
+            )
+            with (
+                pytest.raises(OperationalError) as raised,
+                scoped_session(container) as session,
+            ):
+                session.execute(sql("SET LOCAL lock_timeout = '200ms'"))
+                person = session.get_one(User, person_id)
+                project = session.get_one(
+                    Project, session.get_one(Item, notice_id).project_id
+                )
+                container.record_service().close_unanswered(project, person, FINISH)
+            holder.rollback()
+
+        assert isinstance(raised.value.orig, LockNotAvailable)
+        with scoped_session(container) as session:
+            assert [
+                session.get_one(Item, item_id).done_at
+                for item_id in (decision_id, notice_id)
+            ] == [None, None]

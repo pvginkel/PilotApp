@@ -1,7 +1,9 @@
-"""Schemas for /api/projects: the project list's tabs and a project's head."""
+"""Schemas for /api/projects: the project list's tabs, a project's head and
+the changes of its standing."""
 
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -126,4 +128,26 @@ class ProjectHeadSchema(BaseModel):
             "closes unanswered"
         ),
         examples=[3],
+    )
+
+
+class TransitionRequestSchema(BaseModel):
+    """A change of a project's standing the signed-in person makes."""
+
+    kind: Literal[
+        "finished",
+        "reopened",
+        "archived",
+        "brought_back",
+        "autopilot_on",
+        "autopilot_off",
+    ] = Field(
+        description=(
+            "Which change: Finish, Reopen, Archive, Bring back, or auto pilot "
+            "switched on or off. It must follow from the project's standing: "
+            "Finish from open, Reopen from finished, Archive from unarchived, "
+            "Bring back from archived, auto pilot on from off on an open "
+            "project, off from on; an archived project takes Bring back alone"
+        ),
+        examples=["finished"],
     )

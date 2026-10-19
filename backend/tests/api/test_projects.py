@@ -1,5 +1,7 @@
 """/api/projects: the project list, the archived projects and a project's
-head, as the signed-in person reads them (F1, F2, F3, D2)."""
+head, as the signed-in person reads them (F1, F2, F3, D2); and what they
+change of a project's standing, its transitions and their membership (F4.1,
+F5, F6, F127, F128)."""
 
 import uuid
 from datetime import datetime
@@ -10,7 +12,7 @@ from flask.testing import FlaskClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Environment, ProjectTransition
+from app.models import Environment, Item, ProjectMember, ProjectTransition, User
 from app.models.reference import TransitionKind
 from app.schemas.testing_record import InventedProjectCreateSchema
 from app.services.container import ServiceContainer
@@ -297,3 +299,332 @@ class TestGetProject:
         self, oidc_client: FlaskClient
     ) -> None:
         assert oidc_client.get(f"{PROJECTS}/{uuid.uuid4()}").status_code == 401
+
+
+@pytest.mark.usefixtures("person")
+class TestAddTransition:
+    def test_finish_answers_the_head_with_its_new_standing(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        environment: Environment,
+        session: Session,
+        person: User,
+    ) -> None:
+        recipes = _make(
+            container,
+            name="Recipe box",
+            autopilot=True,
+            open_items=2,
+            environment_id=environment.id,
+        )
+        _sign_in(client)
+
+        response = client.post(
+            f"{PROJECTS}/{recipes}/transitions", json={"kind": "finished"}
+        )
+
+        assert response.status_code == 201
+        body = response.get_json()
+        assert body["id"] == str(recipes)
+        assert (
+            body["state"],
+            body["archived"],
+            body["autopilot"],
+            body["member"],
+            body["open_items"],
+        ) == ("finished", False, False, True, 0)
+        assert [
+            (transition.kind_code, transition.by_user_id)
+            for transition in session.scalars(
+                select(ProjectTransition)
+                .where(ProjectTransition.project_id == recipes)
+                .order_by(ProjectTransition.at, ProjectTransition.id)
+            )
+        ][-2:] == [
+            (TransitionKind.FINISHED, person.id),
+            (TransitionKind.AUTOPILOT_OFF, person.id),
+        ]
+        assert {
+            item.done_cause_code
+            for item in session.scalars(select(Item).where(Item.project_id == recipes))
+        } == {"finished"}
+
+    @pytest.mark.parametrize(
+        ("spec", "kind", "standing"),
+        [
+            ({"state": "finished"}, "reopened", ("open", False, False)),
+            ({"state": "finished"}, "archived", ("finished", True, False)),
+            (
+                {"autopilot": True, "archived": True},
+                "brought_back",
+                ("open", False, True),
+            ),
+            ({}, "autopilot_on", ("open", False, True)),
+            ({"autopilot": True}, "autopilot_off", ("open", False, False)),
+        ],
+    )
+    def test_every_kind_a_person_makes(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        spec: dict[str, Any],
+        kind: str,
+        standing: tuple[str, bool, bool],
+    ) -> None:
+        recipes = _make(container, name="Recipe box", **spec)
+        _sign_in(client)
+
+        response = client.post(f"{PROJECTS}/{recipes}/transitions", json={"kind": kind})
+
+        assert response.status_code == 201
+        body = response.get_json()
+        assert (body["state"], body["archived"], body["autopilot"]) == standing
+
+    @pytest.mark.parametrize(
+        "body",
+        [{"kind": "opened"}, {"kind": "paused"}, {"kind": None}, {}],
+    )
+    def test_a_kind_no_person_makes_is_refused(
+        self, client: FlaskClient, container: ServiceContainer, body: dict[str, Any]
+    ) -> None:
+        recipes = _make(container, name="Recipe box", state="draft")
+        _sign_in(client)
+
+        response = client.post(f"{PROJECTS}/{recipes}/transitions", json=body)
+
+        assert response.status_code == 400
+
+    def test_a_kind_the_standing_does_not_allow_is_a_conflict(
+        self, client: FlaskClient, container: ServiceContainer
+    ) -> None:
+        recipes = _make(container, name="Recipe box", archived=True)
+        _sign_in(client)
+
+        response = client.post(
+            f"{PROJECTS}/{recipes}/transitions", json={"kind": "finished"}
+        )
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            "Cannot finish Recipe box because it is archived, and an archived "
+            "project takes Bring back alone"
+        )
+
+    def test_a_caller_without_a_handle_is_a_conflict(
+        self, client: FlaskClient, container: ServiceContainer
+    ) -> None:
+        recipes = _make(container, name="Recipe box")
+        _sign_in(client, subject="subject-newcomer")
+
+        response = client.post(
+            f"{PROJECTS}/{recipes}/transitions", json={"kind": "autopilot_on"}
+        )
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            "Cannot turn auto pilot on for Recipe box because you have not chosen "
+            "your handle yet"
+        )
+
+    def test_an_unknown_project_is_not_found(self, client: FlaskClient) -> None:
+        _sign_in(client)
+        unknown = uuid.uuid4()
+
+        response = client.post(
+            f"{PROJECTS}/{unknown}/transitions", json={"kind": "finished"}
+        )
+
+        assert response.status_code == 404
+        assert response.get_json()["error"] == f"Project {unknown} was not found"
+
+    def test_without_editor_it_is_refused(
+        self, client: FlaskClient, container: ServiceContainer
+    ) -> None:
+        recipes = _make(container, name="Recipe box")
+        _sign_in(client, roles=())
+
+        response = client.post(
+            f"{PROJECTS}/{recipes}/transitions", json={"kind": "finished"}
+        )
+
+        assert response.status_code == 403
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        response = oidc_client.post(
+            f"{PROJECTS}/{uuid.uuid4()}/transitions", json={"kind": "finished"}
+        )
+
+        assert response.status_code == 401
+
+
+def _open_memberships(session: Session, project_id: uuid.UUID, person: User) -> int:
+    return len(
+        session.scalars(
+            select(ProjectMember).where(
+                ProjectMember.project_id == project_id,
+                ProjectMember.user_id == person.id,
+                ProjectMember.left_at.is_(None),
+            )
+        ).all()
+    )
+
+
+@pytest.mark.usefixtures("person")
+class TestJoinProject:
+    def test_joining_answers_the_head_with_the_caller_a_member(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        person: User,
+    ) -> None:
+        container.test_data_service().person("ben", "Ben Example")
+        recipes = _make(container, name="Recipe box", members=["ben"])
+        _sign_in(client)
+
+        response = client.post(f"{PROJECTS}/{recipes}/membership")
+
+        assert response.status_code == 201
+        body = response.get_json()
+        assert body["member"] is True
+        assert [member["handle"] for member in body["members"]] == ["ben", "ada"]
+        assert _open_memberships(session, recipes, person) == 1
+
+    def test_a_member_joining_again_is_a_conflict(
+        self, client: FlaskClient, container: ServiceContainer
+    ) -> None:
+        recipes = _make(container, name="Recipe box")
+        _sign_in(client)
+
+        response = client.post(f"{PROJECTS}/{recipes}/membership")
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            "Cannot join Recipe box because you are a member already"
+        )
+
+    def test_an_archived_project_is_a_conflict(
+        self, client: FlaskClient, container: ServiceContainer
+    ) -> None:
+        container.test_data_service().person("ben", "Ben Example")
+        recipes = _make(container, name="Recipe box", members=["ben"], archived=True)
+        _sign_in(client)
+
+        assert client.post(f"{PROJECTS}/{recipes}/membership").status_code == 409
+
+    def test_a_caller_without_a_handle_is_a_conflict(
+        self, client: FlaskClient, container: ServiceContainer
+    ) -> None:
+        recipes = _make(container, name="Recipe box")
+        _sign_in(client, subject="subject-newcomer")
+
+        response = client.post(f"{PROJECTS}/{recipes}/membership")
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            "Cannot join Recipe box because you have not chosen your handle yet"
+        )
+
+    def test_an_unknown_project_is_not_found(self, client: FlaskClient) -> None:
+        _sign_in(client)
+
+        response = client.post(f"{PROJECTS}/{uuid.uuid4()}/membership")
+
+        assert response.status_code == 404
+
+    def test_without_editor_it_is_refused(
+        self, client: FlaskClient, container: ServiceContainer
+    ) -> None:
+        recipes = _make(container, name="Recipe box")
+        _sign_in(client, roles=())
+
+        assert client.post(f"{PROJECTS}/{recipes}/membership").status_code == 403
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        response = oidc_client.post(f"{PROJECTS}/{uuid.uuid4()}/membership")
+
+        assert response.status_code == 401
+
+
+@pytest.mark.usefixtures("person")
+class TestLeaveProject:
+    def test_leaving_answers_the_head_with_the_caller_no_member(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        person: User,
+    ) -> None:
+        container.test_data_service().person("ben", "Ben Example")
+        recipes = _make(container, name="Recipe box", members=["ben", "ada"])
+        _sign_in(client)
+
+        response = client.delete(f"{PROJECTS}/{recipes}/membership")
+
+        assert response.status_code == 200
+        body = response.get_json()
+        assert body["member"] is False
+        assert [member["handle"] for member in body["members"]] == ["ben"]
+        assert _open_memberships(session, recipes, person) == 0
+
+    def test_a_person_who_is_no_member_leaving_is_a_conflict(
+        self, client: FlaskClient, container: ServiceContainer
+    ) -> None:
+        container.test_data_service().person("ben", "Ben Example")
+        recipes = _make(container, name="Recipe box", members=["ben"])
+        _sign_in(client)
+
+        response = client.delete(f"{PROJECTS}/{recipes}/membership")
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            "Cannot leave Recipe box because you are no member"
+        )
+
+    def test_an_archived_project_is_a_conflict(
+        self, client: FlaskClient, container: ServiceContainer
+    ) -> None:
+        recipes = _make(container, name="Recipe box", archived=True)
+        _sign_in(client)
+
+        assert client.delete(f"{PROJECTS}/{recipes}/membership").status_code == 409
+
+    def test_a_caller_without_a_handle_is_a_conflict(
+        self, client: FlaskClient, container: ServiceContainer
+    ) -> None:
+        recipes = _make(container, name="Recipe box")
+        _sign_in(client, subject="subject-newcomer")
+
+        response = client.delete(f"{PROJECTS}/{recipes}/membership")
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            "Cannot leave Recipe box because you have not chosen your handle yet"
+        )
+
+    def test_an_unknown_project_is_not_found(self, client: FlaskClient) -> None:
+        _sign_in(client)
+
+        response = client.delete(f"{PROJECTS}/{uuid.uuid4()}/membership")
+
+        assert response.status_code == 404
+
+    def test_without_editor_it_is_refused(
+        self, client: FlaskClient, container: ServiceContainer
+    ) -> None:
+        recipes = _make(container, name="Recipe box")
+        _sign_in(client, roles=())
+
+        assert client.delete(f"{PROJECTS}/{recipes}/membership").status_code == 403
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        response = oidc_client.delete(f"{PROJECTS}/{uuid.uuid4()}/membership")
+
+        assert response.status_code == 401
