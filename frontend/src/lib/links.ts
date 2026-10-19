@@ -58,7 +58,8 @@ export function linker(settings: LinkSettings): Linker {
       title: `Open ${found} in VS Code`,
     });
     kinds.push({ pattern: ENVIRONMENT_ID, link: (id) => open(id, id) });
-    for (const { id, name } of settings.environments) {
+    // The longest name first: of Lab-1 and Lab-1-2, both matching at "Lab-1-2", the longer wins.
+    for (const { id, name } of [...settings.environments].sort((a, b) => b.name.length - a.name.length)) {
       kinds.push({ pattern: environmentName(name), link: (found) => open(id, found) });
     }
   }

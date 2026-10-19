@@ -63,6 +63,31 @@ test.describe('Links in text', () => {
     await expect(page).toHaveURL(`/projects/${onScreen}`);
   });
 
+  test('of two environments, one named as the other plus a hyphen suffix, the longer name links to its own', async ({
+    backendUrl,
+    people,
+    projects,
+    projectList,
+    links,
+  }) => {
+    await links.set({ environment_link_base_url: `${backendUrl}/kubecoder` });
+    const lab = { id: makeUnique('env'), name: `${makeUnique('Lab')}-1` };
+    const labTwo = { id: makeUnique('env'), name: `${lab.name}-2` };
+    await links.environment(lab.id, lab.name);
+    await links.environment(labTwo.id, labTwo.name);
+    const me = await people.signIn();
+    const name = makeUnique('Suffixed');
+    const id = await projects.make({ name, members: [me.handle!], tasks: [{ id: 'a', title: `Restart ${labTwo.name}`, status: 'in_progress' }] });
+    await projectList.open(id);
+
+    const status = projectList.tab(name).getByTestId('projects.tab.status');
+    await expect(status.getByRole('link')).toHaveCount(1);
+    await expect(status.getByRole('link', { name: labTwo.name, exact: true })).toHaveAttribute(
+      'data-href',
+      `${backendUrl}/kubecoder/environments/${labTwo.id}/ssh/open`,
+    );
+  });
+
   test('a link has the colour of the text around it and underlines under the mouse', async ({
     backendUrl,
     people,

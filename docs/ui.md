@@ -118,7 +118,8 @@ environments: [{id, name}]}`, the environments by name, then id.
    GitHub".
 3. While the base is set, an environment: an id of KubeCoder's form (`pvginkel-<…>-<six hex
    digits>`), or the name of one of the record's environments, anywhere when the name ends in
-   `-<digits>` and otherwise only before " environment" or " environments". It links to
+   `-<digits>` and otherwise only before " environment" or " environments", the longest name
+   first where two match at one place (`Lab-1-2` over `Lab-1`). It links to
    `<base>/environments/<id>/ssh/open`, which opens the environment in VS Code, titled "Open
    <environment> in VS Code".
 
