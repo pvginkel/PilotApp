@@ -386,10 +386,12 @@ class FakeController:
 
     @validate_call
     def busy(self, env_id: str, name: str) -> None:
-        """A turn is in flight: a send is `409 session-busy`."""
+        """A turn is in flight: a send is `409 session-busy`. The previous
+        turn's result is no longer held, as after a send."""
         with self._changed:
             session = self._session(env_id, name)
             session.status = "busy"
+            session.result = None
             self._publish(self._sessions_frame(env_id))
 
     @validate_call
