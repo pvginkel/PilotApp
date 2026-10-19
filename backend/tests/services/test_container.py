@@ -24,15 +24,16 @@ from app.services.controller_client import HeadlessCreateRequest
 from app.services.environment_service import EnvironmentService
 from app.services.fleet_consumer import FleetConsumer
 from app.services.relay_service import RelayService
+from app.services.relay_watchdog import WATCHDOG_TIMER, RelayWatchdog
 from app.services.session_start_service import SessionStartService
-from app.services.supervisor import Supervisor
+from app.services.supervisor import TIMER_RUNS_TOTAL, Supervisor
 from tests.conftest_infrastructure import (
     _clear_prometheus_registry,
     _create_test_app,
     _dispose_app,
 )
 from tests.support.fake_controller import ServedFakeController, client_of, raw_turn
-from tests.support.supervisor import wait_until
+from tests.support.supervisor import metric_value, wait_until
 from tests.support.tls import invent_ca
 
 
@@ -305,6 +306,28 @@ class TestRelayWiring:
             coordinator.shutdown()
 
 
+class TestRelayWatchdogWiring:
+    def test_the_watchdogs_timer_runs_from_startup(
+        self, committed_app: Flask, fake_controller: ServedFakeController
+    ) -> None:
+        container = committed_app.container
+        container.app_config.override(
+            AppSettings(controller_url=fake_controller.url, scheduler_tick_seconds=0.05)
+        )
+        client_of(container, fake_controller)
+        watchdog = container.relay_watchdog()
+        assert isinstance(watchdog, RelayWatchdog)
+        assert watchdog is container.relay_watchdog()
+        ticks = _watchdog_ticks()
+        coordinator = container.lifecycle_coordinator()
+
+        coordinator.fire_startup()
+        try:
+            wait_until(lambda: _watchdog_ticks() >= ticks + 2, "two watchdog ticks")
+        finally:
+            coordinator.shutdown()
+
+
 class TestSessionStartWiring:
     def test_a_start_after_startup_runs_to_its_briefs_send(
         self, committed_app: Flask, fake_controller: ServedFakeController
@@ -350,6 +373,10 @@ class TestSessionStartWiring:
             )
         finally:
             coordinator.shutdown()
+
+
+def _watchdog_ticks() -> float:
+    return metric_value(TIMER_RUNS_TOTAL, timer=WATCHDOG_TIMER, outcome="ok")
 
 
 def _state(container: ServiceContainer, run_id: uuid.UUID) -> SessionState:
