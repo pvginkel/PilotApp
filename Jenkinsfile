@@ -1,7 +1,9 @@
-// Tests PilotApp's backend and frontend in a Kubernetes Job, then builds the pilot and pilot-ui
-// images and pins them into PilotDeploy, which Argo CD syncs to prd.
+// Tests PilotApp's backend and frontend in a Kubernetes Job and its pilot-sync sidecar in the pod,
+// then builds the pilot, pilot-ui and pilot-sync images and pins the first two into PilotDeploy,
+// which Argo CD syncs to prd. pilot-sync, the store environment's sync sidecar, runs in no pod of
+// PilotDeploy's.
 //
-// The images are built from the tree the suite passed on, so `latest` is tagged at build time and
+// The images are built from the tree the suites passed on, so `latest` is tagged at build time and
 // there is no promote stage.
 //
 // Controller config:
@@ -16,7 +18,11 @@ pipeline {
         kubernetes {
             inheritFrom 'jenkins-agent kaniko'
             yamlMergeStrategy merge()
-            yaml podYaml(templates: ['k8s'])
+            // golang runs the image this environment's `go` tool runs (.kubecoder/config.yaml), so a
+            // failure of the sidecar's tests here is one there too.
+            yaml podYaml(templates: ['k8s'], images: [
+                [image: 'registry:5000/kube-coder-go-toolchain:latest', name: 'golang'],
+            ])
         }
     }
 
@@ -69,6 +75,18 @@ pipeline {
             }
         }
 
+        // The sidecar's tests are no suite of the validation Job, whose image has no Go.
+        stage('Test sidecar') {
+            steps {
+                container('golang') {
+                    dir('sidecar') {
+                        sh 'go vet ./...'
+                        sh 'go test -race ./...'
+                    }
+                }
+            }
+        }
+
         stage('Build pilot image') {
             steps {
                 container('kaniko') {
@@ -99,6 +117,23 @@ pipeline {
                             destinations: [
                                 "registry:5000/pilot-ui:${currentBuild.number}",
                                 'registry:5000/pilot-ui:latest',
+                            ]
+                        )
+                    }
+                }
+            }
+        }
+
+        stage('Build pilot-sync image') {
+            steps {
+                container('kaniko') {
+                    script {
+                        helmCharts.kaniko2(
+                            dockerfile: 'sidecar/Dockerfile',
+                            context: 'sidecar',
+                            destinations: [
+                                "registry:5000/pilot-sync:${currentBuild.number}",
+                                'registry:5000/pilot-sync:latest',
                             ]
                         )
                     }
