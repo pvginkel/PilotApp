@@ -1,11 +1,11 @@
 /**
  * The SSE stream admits only the identity the API serves.
  *
- * The backend's connect callback refuses a stream with 401/403, and the gateway
- * answers the refusal in-stream: it opens the stream, sends a named `rejected`
- * event carrying `{status, message}` and ends it. These tests open a bare
- * EventSource from the page, through the Vite proxy, so the callback sees the
- * browser's session cookie exactly as the app's own stream does.
+ * The backend refuses a stream with 401/403 in-stream: it opens the stream,
+ * sends a named `rejected` event carrying `{status, message}` and ends it.
+ * These tests open a bare EventSource from the page, through the Vite proxy,
+ * so the backend sees the browser's session cookie exactly as the app's own
+ * stream does.
  *
  * These are Pilot's role cases: the app reads and writes as `editor` alone.
  * The refusal itself and the app's recovery from `rejected` (the /api/auth/self
@@ -20,11 +20,11 @@ type StreamOutcome =
   | { outcome: 'rejected'; status: number; message: string };
 
 /**
- * Open a stream and report how the gateway answered: `accepted` on the
- * gateway's `ready` event, which it sends once the callback has accepted the
- * stream (the app's own client counts as connected on it too), `rejected` on
- * its `rejected` event. Not on a first envelope: in a local stage, the tests'
- * included, the backend sends no version on connect.
+ * Open a stream and report how the backend answered: `accepted` on its
+ * `ready` event, which it sends once it has accepted the stream (the app's own
+ * client counts as connected on it too), `rejected` on its `rejected` event.
+ * Not on a first envelope: in a local stage, the tests' included, the backend
+ * sends no version on connect.
  */
 async function openStream(page: Page, timeoutMs = 15000): Promise<StreamOutcome> {
   return page.evaluate(
@@ -61,7 +61,7 @@ test.describe('SSE connect refusal', () => {
 
     const result = await openStream(page);
 
-    expect(result).toMatchObject({ outcome: 'rejected', status: 403 });
+    expect(result).toEqual({ outcome: 'rejected', status: 403, message: 'FORBIDDEN' });
   });
 
   test('accepts a session with the editor role', async ({ page, frontendUrl, auth }) => {
