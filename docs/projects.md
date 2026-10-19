@@ -21,8 +21,8 @@ make them. In production the list is empty, and the centre reads "No projects ye
   archived, autopilot, member, members, progress, tasks, notes, open_items}`. A member is `{handle,
   name, initials, avatar_slot}`, in the order they joined; a task is a step, `{id, title, status,
   notes}`, with its open notes; `notes` are the plan's own; a note is `{id, summary, content}`.
-  `open_items` counts the project's open items but the opening, which is never done. An archived
-  project reads as it was left. An unknown id answers `404`.
+  `open_items` counts the project's open items but the opening, which is never done (D016). An
+  archived project reads as it was left. An unknown id answers `404`.
 
 ## Changing them
 

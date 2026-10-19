@@ -106,7 +106,9 @@ Ticket ids, repos and environments link wherever the record's words show, button
 `ENVIRONMENT_LINK_BASE_URL` (KubeCoder's address), in `backend/app/app_config.py`. An empty one is
 unset, and unset leaves its text unlinked. A template without `{id}`, or a base that is not an
 http(s) address, stops the app at boot; a base's trailing slash is dropped. Production's values
-are in PilotDeploy ([`deployment.md`](deployment.md)). **`GET /api/links`** answers them with the
+are in PilotDeploy ([`deployment.md`](deployment.md)), and production keeps the default pattern
+(D017): a list of the tracker's keys would have to follow its projects by hand, so a word shaped
+like an id, `SHA-256`, links too. **`GET /api/links`** answers them with the
 record's environments: `{ticket_id_pattern, ticket_url_template, environment_link_base_url,
 environments: [{id, name}]}`, the environments by name, then id.
 
