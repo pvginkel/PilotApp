@@ -38,7 +38,7 @@ class TestEnumTypes:
             "sync_outcome",
             "attachment_source",
             "session_state",
-            "line_kind",
+            "record_kind",
             "chat_kind",
             "close_cause",
             "effect_kind",

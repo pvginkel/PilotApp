@@ -17,5 +17,5 @@ from app.models.reference import (
     SessionKind,
 )
 from app.models.save_error import SaveError
-from app.models.session import Session
+from app.models.session import Session, SessionRecord, Turn
 from app.models.user import User

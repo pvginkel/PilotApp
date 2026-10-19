@@ -103,10 +103,11 @@ class SessionState(StrEnum):
     FAILED = "failed"
 
 
-class LineKind(StrEnum):
-    LOG = "log"
-    MESSAGE = "message"
+class RecordKind(StrEnum):
+    CLAUDE = "claude"
+    SEND = "send"
     SERVER = "server"
+    RESULT = "result"
 
 
 class ChatKind(StrEnum):
@@ -159,7 +160,7 @@ FIRING_CAUSE = _enum_type(FiringCause, "firing_cause")
 SYNC_OUTCOME = _enum_type(SyncOutcome, "sync_outcome")
 ATTACHMENT_SOURCE = _enum_type(AttachmentSource, "attachment_source")
 SESSION_STATE = _enum_type(SessionState, "session_state")
-LINE_KIND = _enum_type(LineKind, "line_kind")
+RECORD_KIND = _enum_type(RecordKind, "record_kind")
 CHAT_KIND = _enum_type(ChatKind, "chat_kind")
 CLOSE_CAUSE = _enum_type(CloseCause, "close_cause")
 EFFECT_KIND = _enum_type(EffectKind, "effect_kind")
@@ -182,7 +183,7 @@ ENUM_TYPES = (
     SYNC_OUTCOME,
     ATTACHMENT_SOURCE,
     SESSION_STATE,
-    LINE_KIND,
+    RECORD_KIND,
     CHAT_KIND,
     CLOSE_CAUSE,
     EFFECT_KIND,
