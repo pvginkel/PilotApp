@@ -21,8 +21,17 @@ A push to PilotApp's `main` starts two Jenkins jobs, each triggered by GitHub's 
 
 Argo CD's Application `pilot-prd`, registered in `pvginkel/ArgoCDDeploy`'s `releases/values.yaml`,
 follows PilotDeploy's `main` and syncs on its own, pruning what the chart no longer renders. A pin
-commit therefore rolls the pod: the new pod starts beside the old one, which is retired once the new
-one is ready. A PilotDeploy commit that changes the chart or its values deploys the same way.
+commit therefore rolls the pod: the new pod starts beside the old one (`RollingUpdate`, `maxSurge:
+1`, `maxUnavailable: 0`), which is retired once the new one is ready. A PilotDeploy commit that
+changes the chart or its values deploys the same way.
+
+The old pod's containers go on serving for 15 s once its termination starts, while the Service
+drops it from its endpoints. Then the backend's preStop calls `/health/drain`, waiting 40 s at
+most, and the drain stops the server's jobs within `GRACEFUL_SHUTDOWN_TIMEOUT`, which the chart
+sets to 20 s. Nothing drains to completion: every job resumes from its rows on the new pod, and the
+two pods' overlap is safe, each job's writes being conditional on rows it reads under their lock
+([`jobs.md`](jobs.md)).
+`terminationGracePeriodSeconds` is 70 (15 + 40 + 15), so the old pod is gone within 70 s.
 
 ## What runs
 
@@ -41,6 +50,16 @@ namespace `pilot-prd`:
   `ENVIRONMENT_LINK_BASE_URL`, each left unset where the values say nothing. Production's are
   `https://issues.webathome.org/issue/{id}` and `https://kubecoder.home`; the ticket id pattern is
   the app's default.
+  The backend reaches KubeCoder's controller ([`controller.md`](controller.md)) at `controller.url`
+  in the values, `https://kubecoder.home`, as `CONTROLLER_URL`, with `CONTROLLER_TOKEN` from the
+  Secret `pilot-kubecoder`. Its `CONTROLLER_CA_FILE` is the homelab root CA, against which the
+  controller's certificate verifies and which the image does not trust: the chart renders
+  `chart/files/homelab-root.crt` into the ConfigMap `homelab-root-ca` and mounts it read-only at
+  `/etc/ssl/homelab`. `migrate` sets none of the three. The backend refuses to start without the
+  URL and the token; with them it holds the controller's fleet stream open and keeps the Environment
+  rows current. Nothing in production starts, sends to or stops an environment: no route outside
+  testing mode starts a session ([`sessions.md`](sessions.md)), and the shutdown timer stops only
+  an environment Pilot started.
 - **Service `pilot`**, port 80 to the UI. Its annotations `nginx.webathome.org/server-name:
   pilot.ginbov.nl` and `nginx.webathome.org/is-public: "true"` have the estate's front door serve it
   as a public site, over HTTPS with a Let's Encrypt certificate. Prometheus scrapes the backend's
@@ -65,6 +84,9 @@ PilotApp and PilotDeploy are public repositories, so no secret is committed to e
 - **The Keycloak client's id and secret** are the operator's to write, to OpenBao at
   `eso/prd/pilot/prd/oidc` (`client_id`, `client_secret`). The ExternalSecret `pilot-oidc` brings
   them into the namespace through the `openbao-prd` store.
+- **The KubeCoder controller's token**, Pilot's named client credential there, is the operator's to
+  write, to OpenBao at `eso/prd/pilot/prd/kubecoder` (`token`). The ExternalSecret
+  `pilot-kubecoder` brings it into the namespace through the `openbao-prd` store.
 - **Flask's `SECRET_KEY` and the drain endpoint's `DRAIN_AUTH_KEY`** are generated in the
   cluster, once, by External Secrets `Password` generators, into the Secrets `pilot-secret-key` and
   `pilot-drain-auth`.

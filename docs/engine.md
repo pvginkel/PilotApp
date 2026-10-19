@@ -146,7 +146,8 @@ trim every value and read a blank note as none.
 `DocumentService.turn_ended(session)` clears the writing session of every document `session` was
 writing, cuts a `turn` version of each whose published text changed since its last version, and
 returns the paths, from the tree's root and sorted, of those whose latest save is still held. It
-emits nothing.
+emits nothing. The relay calls it in the transaction that ends a turn on the controller's `result`
+frame ([`sessions.md`](sessions.md)), and drops the paths it returns.
 
 ## The bus
 

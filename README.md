@@ -14,7 +14,9 @@ empty. Beneath the screens are the record's schema and the engine behind it: the
 parse gate and the merge by ownership, the record's own writes, and the rendered `timeline.json`,
 `reference.json` and `plan.json` ([`docs/engine.md`](docs/engine.md)); and the sync that keeps the
 store environment's tree in step with the record: the `/api/sync` routes and `pilot-sync`, the Go
-sidecar ([`docs/sync.md`](docs/sync.md)), which production does not switch on yet. It is built on
-the ModernAppTemplate stack (Flask on PostgreSQL, React + Vite, Playwright), which CI builds and
-Argo CD deploys to production at `https://pilot.ginbov.nl`
-([`docs/deployment.md`](docs/deployment.md)).
+sidecar ([`docs/sync.md`](docs/sync.md)), which production does not switch on yet; and the
+server's jobs on the KubeCoder controller: the environments Pilot starts and stops, and the sessions
+it runs there, recorded and streamed live ([`docs/sessions.md`](docs/sessions.md)). Production
+follows the fleet's stream and starts nothing yet. It is built on the ModernAppTemplate stack
+(Flask on PostgreSQL, React + Vite, Playwright), which CI builds and Argo CD deploys to production
+at `https://pilot.ginbov.nl` ([`docs/deployment.md`](docs/deployment.md)).

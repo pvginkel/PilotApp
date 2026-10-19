@@ -6,8 +6,8 @@ timeline per managed project shows its work, its decision documents and their as
 talks to Pilot's brain, a headless Claude Code session in a store environment.
 
 **Its first screens are in**: the handle step, the project list and a project's head, on the
-record's schema, the engine behind it (`backend/app/engine/`) and the sync of the store's tree, live
-in production at `https://pilot.ginbov.nl`, where every green build of `main` deploys itself
+record's schema, the engine behind it (`backend/app/engine/`), the sync of the store's tree and the
+server's jobs on the KubeCoder controller, live in production at `https://pilot.ginbov.nl`, where every green build of `main` deploys itself
 ([`docs/deployment.md`](docs/deployment.md)). Version 1 is built from the design record in
 `../PilotAppSpecs/design/` (start at its README), along the steps of its `implementation-plan.md`.
 Its `features.md` is the version-1 scope, and
@@ -135,3 +135,7 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
   them.
 - [`docs/sync.md`](docs/sync.md): the sync protocol and `pilot-sync`, the sidecar that keeps the
   store's tree in step with the record.
+- [`docs/jobs.md`](docs/jobs.md), [`docs/controller.md`](docs/controller.md),
+  [`docs/sessions.md`](docs/sessions.md): the supervisor that runs the server's long-lived jobs;
+  the KubeCoder controller's client, its fleet stream and environments on demand, with its fake;
+  the sessions, their records, relay and live stream.

@@ -131,9 +131,9 @@ per step and `5 of 5 passed`, and exits 0 only then. On exit, SIGTERM included, 
 up fails it at once; a failed run keeps its `/tmp/pilot-sync-proof-*` directory, the binary's log
 in it.
 
-**The fleet's live check.** A slice that changes how Pilot works the KubeCoder fleet (the
+**The fleet's live check** (D019). A slice that changes how Pilot works the KubeCoder fleet (the
 controller's client, the fleet stream, an environment's start or stop, a session's start, send or
-relay) proves it on one real turn against KubeCoder's dev stage, `https://kubecoder-dev.home`, with
+relay: [`controller.md`](controller.md), [`sessions.md`](sessions.md)) proves it on one real turn against KubeCoder's dev stage, `https://kubecoder-dev.home`, with
 the stack up; a check of the slice's own that needs the fleet rides on the same turn. The dev stage
 is a KubeCoder instance of its own, not production, and its `pvginkel/KubeCoderTestRepo`
 environments are there for checks like this one: the check starts one, and Pilot stops it. Its

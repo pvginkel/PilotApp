@@ -67,9 +67,28 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
 **Sessions and environments**
 
 - `environments`: a KubeCoder environment Pilot has touched, keyed by its environment id. The
-  store's row is made by its sidecar's first sync call ([`sync.md`](sync.md)).
+  store's row is made by its sidecar's first sync call ([`sync.md`](sync.md)), and a session start
+  makes one from the controller's report when it first touches the environment. The fleet stream
+  keeps its `name`, `last_state`, `last_seen_at` and `exempt` current; `server_started_at` says that
+  Pilot started it, and `stop_due_at` is when Pilot stops it ([`controller.md`](controller.md)).
 - `sessions`: a run of a Claude Code conversation in one environment, for one project, of a session
-  kind; `token_hash` is unique, so a bearer token resolves to one session.
+  kind, in a state (`starting`, `running`, `idle`, `stopped`, `ended`, `failed`):
+  `controller_session` names its headless session at the controller and `conversation_id` its
+  Claude conversation; `current_line`, a JSON object, says what its turn in flight is doing, and is
+  null while none is ([`sessions.md`](sessions.md)). `token_hash` is unique, so a bearer token
+  resolves to one session.
+- `turns`: a message sent to a session and the reply it produced, numbered by `seq` from 1 within
+  the session: its `message`, its `author_user_id` (none for the server's own, such as a start's
+  brief), the item or the block it quotes (one at most; a quoted block's removal clears the key),
+  `started_at`, `ended_at`, and the `error` of a turn that failed.
+- `session_records`: every session's list, chat and work alike, in one table, numbered by `seq`
+  from 1 within its session without a gap, which its writer holds under the session's row lock:
+  `kind_code` (`claude`, `result`, `send`, `server`), the `payload`, its turn (`turn_id`, a turn of
+  its own session), and `at`. A `claude` or `result` record is a line or the end of the controller
+  session's raw stream: it falls in a turn and carries its `controller_session` and `raw_offset`,
+  which no other kind has. A `claude` payload is never a `stream_event` line. A `send` has no
+  payload, its words and author being its turn's, and a turn has one at most; every other kind
+  has a payload.
 
 ## The reference values
 
@@ -98,7 +117,9 @@ to it ([`engine.md`](engine.md)):
 - the project's `name`, the draft's title.
 
 The project's `state_code`, `archived` and `autopilot` are caches of its transitions, written with
-each one ([`projects.md`](projects.md)).
+each one ([`projects.md`](projects.md)). A session's `turns`, `turn_started_at` and
+`turn_ended_at` are caches of its turns, which the send, the turn's end and the session start
+refresh ([`sessions.md`](sessions.md)).
 
 ## Physical notes
 
