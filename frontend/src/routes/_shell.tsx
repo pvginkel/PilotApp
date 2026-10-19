@@ -15,9 +15,11 @@ import { LinksProvider } from '@/components/shared/linked-text';
 import { TopBar } from '@/components/shell/top-bar';
 import { isPerson, PersonProvider, useSelf } from '@/hooks/use-self';
 import { useShellKeys } from '@/lib/keys';
+import { registerServiceWorker } from '@/lib/service-worker';
 import { startTheme } from '@/lib/theme';
 
 startTheme();
+registerServiceWorker();
 
 export const Route = createFileRoute('/_shell')({
   component: Shell,
