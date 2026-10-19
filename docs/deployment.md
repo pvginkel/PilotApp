@@ -21,12 +21,6 @@ follows PilotDeploy's `main` and syncs on its own, pruning what the chart no lon
 commit therefore rolls the pod: the new pod starts beside the old one, which is retired once the new
 one is ready. A PilotDeploy commit that changes the chart or its values deploys the same way.
 
-Until PilotDeploy drops them, the chart still renders the retired SSE gateway: an `sse-gateway`
-container, its hand-pinned image `images.sseGateway` and its generated callback secret
-`pilot-sse-callback`. Nothing routes to it since the backend serves the SSE stream (backend
-template v0.16.0), and they go from PilotDeploy, step 11 of that release's sync in
-ModernAppTemplate's `changelog.md`. The rest of this page describes the chart without them.
-
 ## What runs
 
 PilotDeploy's chart `pilot`, on the estate's `homelab-shared` library chart, renders into the
