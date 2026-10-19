@@ -5,9 +5,9 @@ the KubeCoder fleet, and the operator decides and does only what their hands mus
 timeline per managed project shows its work, its decision documents and their asks; a side chat
 talks to Pilot's brain, a headless Claude Code session in a store environment.
 
-**No screen of Pilot's own exists yet**: the app is the ModernAppTemplate skeleton with the record's
-schema, the engine behind it (`backend/app/engine/`) and the sync of the store's tree, live in
-production at `https://pilot.ginbov.nl`, where every green build of `main` deploys itself
+**Its first screens are in**: the handle step, the project list and a project's head, on the
+record's schema, the engine behind it (`backend/app/engine/`) and the sync of the store's tree, live
+in production at `https://pilot.ginbov.nl`, where every green build of `main` deploys itself
 ([`docs/deployment.md`](docs/deployment.md)). Version 1 is built from the design record in
 `../PilotAppSpecs/design/` (start at its README), along the steps of its `implementation-plan.md`.
 Its `features.md` is the version-1 scope, and
@@ -57,6 +57,7 @@ template-owned file to add app behaviour; use the extension points instead:
 |------|-----------|
 | New API endpoints | `backend/app/api/`, registered in `register_blueprints()` in `backend/app/startup.py` |
 | New services | `backend/app/services/`, wired in `backend/app/services/container.py` |
+| New screens | a route under `frontend/src/routes/_shell/`; tokens in `frontend/src/styles/app-theme.css` ([`docs/ui.md`](docs/ui.md)) |
 | Side effects after a request's commit | `after_commit()` from `backend/app/utils/after_commit.py` |
 | CLI commands, post-migration logic | `backend/app/startup.py` |
 | Test fixtures | `backend/tests/conftest.py`, `frontend/tests/support/fixtures.ts` |
@@ -124,7 +125,9 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
 - [`docs/slice-doc-plan.md`](docs/slice-doc-plan.md): which doc surfaces a shipped slice updates.
 - [`docs/deployment.md`](docs/deployment.md): how a change reaches production, and what runs there.
 - [`docs/sign-in.md`](docs/sign-in.md): who can use Pilot: the `editor` role the API requires, a
-  signed-in test's session included.
+  signed-in test's session included, and the person on the record, with the handle they choose.
+- [`docs/ui.md`](docs/ui.md), [`docs/projects.md`](docs/projects.md): the UI's shell, tokens,
+  shared pieces and links in text; the projects' API and screens.
 - [`docs/record.md`](docs/record.md), [`docs/block-dsl.md`](docs/block-dsl.md),
   [`docs/projection.md`](docs/projection.md), [`docs/engine.md`](docs/engine.md): the record's
   schema and the dev seed, the block DSL, the store's tree and its files, and the engine between

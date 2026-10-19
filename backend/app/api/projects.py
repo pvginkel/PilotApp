@@ -1,5 +1,5 @@
 """The projects as the signed-in person reads them, the project list, the
-archived projects and a project's head (F1, F2, F3, D2); and what they change
+archived projects and a project's head (F1, F2, F3, D012); and what they change
 of a project's standing: its transitions and their membership (F4.1, F5, F6,
 F127, F128)."""
 

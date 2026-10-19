@@ -11,7 +11,7 @@ nothing it emits is delivered before that transaction commits.
 |---|---|
 | `DocumentService` (`documents.py`) | the births, `publish()`, the document's row lock, versions, the turn's end |
 | `IngestService` (`ingest.py`) | an agent's save of a path of the tree |
-| `RecordService` (`record.py`) | a person's answer, Done, undo, Read, Reviewed |
+| `RecordService` (`record.py`) | a person's answer, Done, undo, Read, Reviewed; Finish's close |
 | `PlanService` (`plan.py`) | `plan.json`, rendered and saved; the deferrals without a home |
 | `TreeService` (`tree.py`) | what a path names, the bytes it must hold, its tree hash; the manifest |
 | `ViewService` (`views.py`) | `reference.json` and `timeline.json` |
@@ -123,6 +123,11 @@ the next clean save's merge carries the write to the file.
   unanswered; its cause is `settled`. Then a `done` version is cut and the item marked done.
 - `read(item, user)` on a notice and `reviewed(item, user)` on a review: the item's mark, cause
   `marked`, the text untouched.
+- `close_unanswered(project, user, at)`: Finish's close ([`projects.md`](projects.md)). Every open
+  item of the project but the opening, which is never done, is marked done at `at` by `user`, cause
+  `finished`, which offers no undo; the texts are untouched. It takes the row lock of each open
+  prose item's document first, in id order, so a write to one of them waits for the close or finds
+  its item done.
 
 Each refuses with `InvalidOperationException`, its message saying why: Pilot as the actor of an
 answer, an action's Done, Read or Reviewed, since Pilot answers in the file with `by: agent`; any
@@ -133,7 +138,8 @@ not a `document`, Read on one that is not a notice, Reviewed on one that is not 
 an item that is no prose item, is not done, has been consumed, or was done by a cause that offers
 none. A block the text does not have is a `RecordNotFoundException`.
 
-The writes record their times to the second, trim every value, and read a blank note as none.
+The writes but the close, which takes its caller's time, record their times to the second; they
+trim every value and read a blank note as none.
 
 ## The turn's end
 
@@ -151,7 +157,7 @@ already emitted in the transaction is delivered once.
 
 | Event | Emitted |
 |---|---|
-| `TreeHashMoved(path, hash)` | when a path's tree hash moved: a birth, a publish, a save; `timeline.json` when what it shows moved, a done mark or its undo included; `plan.json` when a save moved its rendering |
+| `TreeHashMoved(path, hash)` | when a path's tree hash moved: a birth, a publish, a save; `timeline.json` when what it shows moved, a done mark or its undo and a project's transition included; `plan.json` when a save moved its rendering |
 | `DocumentModified(project_id, path)` | on every save of a document, held or published; the record's own writes raise none |
 | `ErrorsRaised(project_id, path)` | on every held save |
 | `ErrorsResolved(project_id, path)` | on a clean save after a held one, and when a held `plan.json` is written down |

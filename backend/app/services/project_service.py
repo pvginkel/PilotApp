@@ -345,7 +345,7 @@ class ProjectService:
 def _refusal(project: Project, kind: TransitionKind) -> str | None:
     """Why the project's standing does not allow a transition of `kind`, or
     none: a kind follows from the standing it leaves (DB 170), an archived
-    project takes Bring back alone (D2), and auto pilot is an open project's
+    project takes Bring back alone (D012), and auto pilot is an open project's
     (F2.6, F4.1)."""
     if kind is TransitionKind.OPENED:
         return "a project opens at Create project"

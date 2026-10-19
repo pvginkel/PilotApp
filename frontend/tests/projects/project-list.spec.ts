@@ -1,7 +1,8 @@
 /**
  * The project list (F1): the person's projects, then Other projects and Finished, each group with
  * its count and a remembered chevron; a tab's name, ticket id and status line; each project at its
- * own address, the bare address opening the one the browser remembers; the archived projects (D2).
+ * own address, the bare address opening the one the browser remembers; the archived projects
+ * (D012).
  */
 
 import { test, expect } from '../support/fixtures';

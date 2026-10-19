@@ -36,6 +36,11 @@ namespace `pilot-prd`:
   The backend serves the store's sync routes, `/api/sync/` ([`sync.md`](sync.md)), and refuses
   every call to them: the chart sets neither `SYNC_TOKEN` nor `STORE_ENVIRONMENT_ID`, and either
   one empty refuses all (D007).
+  The backend's link settings ([`ui.md`](ui.md)) come from `links` in the values:
+  `ticketUrlTemplate` as `TICKET_URL_TEMPLATE` and `environmentLinkBaseUrl` as
+  `ENVIRONMENT_LINK_BASE_URL`, each left unset where the values say nothing. Production's are
+  `https://issues.webathome.org/issue/{id}` and `https://kubecoder.home`; the ticket id pattern is
+  the app's default.
 - **Service `pilot`**, port 80 to the UI. Its annotations `nginx.webathome.org/server-name:
   pilot.ginbov.nl` and `nginx.webathome.org/is-public: "true"` have the estate's front door serve it
   as a public site, over HTTPS with a Let's Encrypt certificate. Prometheus scrapes the backend's

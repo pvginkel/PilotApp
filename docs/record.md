@@ -12,15 +12,17 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
 - `users`: a person who signs in, or Pilot itself. Pilot is the one row of kind `agent`, with the
   handle `agent` and the name `Pilot`, written by the first revision; it has no `subject`, email,
   notification token or avatar slot. A person has a `subject` and an `avatar_slot`, each unique. A
-  handle is lower-case letters, digits and hyphens, unique, and `agent` is no person's.
+  handle is lower-case letters, digits and hyphens, unique, and `agent` is no person's. A person's
+  row is made when they choose their handle, at their first sign-in, with the lowest free slot
+  counting from 1 ([`sign-in.md`](sign-in.md)).
 - `projects`: `number` (an identity, which names a draft's folder), `slug` (none while the project
   is a draft and set once it is not; lower-case letters, digits and hyphens, never starting with
   `draft-`), `name`, the state (`draft`, `open`, `finished`), `archived`, `autopilot`, and the
   plan's `ticket` and `repo`.
 - `project_members`: a membership from `joined_at` to `left_at`; one open membership per user and
-  project.
+  project, and a rejoin is a new row; nothing makes Pilot a member.
 - `project_transitions`: each change of a project's state, archived flag or auto pilot switch, with
-  when and by whom.
+  when and by whom ([`projects.md`](projects.md)).
 
 **The plan**, which `plan.json` renders and is parsed back into
 
@@ -95,6 +97,9 @@ to it ([`engine.md`](engine.md)):
 - the document's `blocks` and `block_options`, rewritten in place by local id;
 - the project's `name`, the draft's title.
 
+The project's `state_code`, `archived` and `autopilot` are caches of its transitions, written with
+each one ([`projects.md`](projects.md)).
+
 ## Physical notes
 
 - The three document text columns (`documents.ingested_text`, `documents.published_text`,
@@ -133,11 +138,15 @@ command, and each worker clones it. The documents, the record's writes and the p
 engine's own operations, so the seed is a record the engine could have produced, and its times are
 those of the run:
 
-- the people `ada` and `ben`;
-- a draft, `Garden planner`, its draft holding one unanswered question;
-- the open project `recipe-box`, ticket `RB-12`, in the environment `example-recipes-1`: an opening;
-  items a work session added, with asks open, answered by a person and by Pilot, deferred to a task
-  and to the plan, and done; an attachment; and a plan whose notes point at blocks, one of its tasks
-  removed.
+- the people `ada` and `ben`, in avatar slots 1 and 2;
+- a draft, `Garden planner`, ada's, its draft holding one unanswered question;
+- the open project `recipe-box`, ticket `RB-12`, ada's and ben's, in the environment
+  `example-recipes-1`: an opening; items a work session added, with asks open, answered by a person
+  and by Pilot, deferred to a task and to the plan, and done; an attachment; and a plan whose notes
+  point at blocks, one of its tasks removed;
+- the finished project `bike-log`, `Bike repair log`, ben's and ada's, both its steps done, auto
+  pilot turned off as it finished;
+- the archived project `photo-album`, `Photo album`, ada's, one step in progress and one not
+  started.
 
 Tests find its rows by slug, handle and item title.

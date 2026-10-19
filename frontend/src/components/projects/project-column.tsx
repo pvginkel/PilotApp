@@ -1,6 +1,6 @@
 /**
  * The side column (F1): the project list, the person's projects first, then Other projects and
- * Finished; or the archived projects, opened from the list's menu, with a back arrow (D2).
+ * Finished; or the archived projects, opened from the list's menu, with a back arrow (D012).
  */
 
 import { useState } from 'react';

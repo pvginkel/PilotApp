@@ -1,7 +1,7 @@
 /**
  * The project's menu at the end of its head (F2.4): what each standing offers, an archived
- * project only Bring back (D2); Join and Leave at once, each with its toast (F127, review r1 Q1);
- * Finish, Reopen, Archive and Bring back, each asking first in a dialog with ruling D1's texts,
+ * project only Bring back (D012); Join and Leave at once, each with its toast (F127, D011);
+ * Finish, Reopen, Archive and Bring back, each asking first in a dialog with D010's texts,
  * no toast after (F5.1, F6, F128); the list and the head showing the new standing; everything
  * closed on another project (F1.6).
  */
@@ -114,7 +114,7 @@ test.describe('Finish', () => {
     await expect(dialog.note).toHaveText('The timeline and the chat stay, and the project can be reopened.');
     await expect(dialog.cancel).toHaveText('Cancel');
     await expect(dialog.confirm).toHaveText('Finish project');
-    // No environments line and no YouTrack checkbox (X41), nothing about the notifications (D1).
+    // No environments line and no YouTrack checkbox (X41), nothing about the notifications (D011).
     await expect(dialog.root.locator('input')).toHaveCount(0);
     await expect(dialog.root).not.toContainText(/environment|YouTrack|notif/i);
 

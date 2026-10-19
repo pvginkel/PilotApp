@@ -3,7 +3,7 @@
  * Finished chip once finished (F2.6, F4.1); the step button and its plan (F2.2, F3); the members
  * (F2.5); the plan's notes (F2.7); the project's menu (F2.4). A draft's head has its name, the
  * Draft chip, its members and its menu. An archived project's reads as it was left, marked
- * archived, its switch not to be flipped (D2).
+ * archived, its switch not to be flipped (D012).
  *
  * On a narrow window it stands in its two rows: the name and auto pilot, then the step, the
  * members and the icons, the repo hidden.

@@ -3,7 +3,7 @@ import { waitForUiState } from '../helpers';
 
 type Group = 'others' | 'finished';
 
-/** The project list in the side column (F1), and the archived projects it opens (D2). */
+/** The project list in the side column (F1), and the archived projects it opens (D012). */
 export class ProjectListPage {
   readonly head: Locator;
   readonly menuButton: Locator;

@@ -2,7 +2,7 @@
  * A project's head (F2): the name, the ticket and the repo, linked; the step button and the plan
  * popover (F2.2, F3); the plan's notes and a step's (F2.7, F3.6); the members (F2.5); the auto
  * pilot switch, the Finished chip in its place (F2.6, F4.1); a draft's and an archived project's
- * head (D2); everything it opens closed on another project (F1.6); two rows on a narrow window.
+ * head (D012); everything it opens closed on another project (F1.6); two rows on a narrow window.
  */
 
 import { test, expect } from '../support/fixtures';
