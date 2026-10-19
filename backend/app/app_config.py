@@ -80,6 +80,11 @@ class AppEnvironment(BaseSettings):
             "empty leaves it to requests' own trust"
         ),
     )
+    SCHEDULER_TICK_SECONDS: float = Field(
+        default=10.0,
+        gt=0,
+        description="Seconds the supervisor's scheduler waits between two rounds of its timers",
+    )
 
 
 class AppSettings(BaseModel):
@@ -144,6 +149,9 @@ class AppSettings(BaseModel):
     """The CAs that verify the controller's certificate, PEM; None leaves it to
     requests' own trust."""
 
+    scheduler_tick_seconds: float = 10.0
+    """The wait between two rounds of the supervisor's timers (design 2 §7.1)."""
+
     def dump_for_logging(self) -> dict[str, str]:
         """Every setting, for the boot log, with the Sensitive ones as ``***``."""
         return dump_config_for_logging(self)
@@ -168,4 +176,5 @@ class AppSettings(BaseModel):
             controller_ca_file=(
                 Path(env.CONTROLLER_CA_FILE) if env.CONTROLLER_CA_FILE else None
             ),
+            scheduler_tick_seconds=env.SCHEDULER_TICK_SECONDS,
         )

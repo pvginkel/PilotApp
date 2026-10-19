@@ -27,6 +27,7 @@ from app.services.oidc_client_service import OidcClientService
 from app.services.people_service import PeopleService
 from app.services.project_service import ProjectService
 from app.services.sse_connection_manager import SSEConnectionManager
+from app.services.supervisor import Supervisor
 from app.services.sync_service import SyncService
 from app.services.sync_stream_service import SyncStreamService
 from app.services.task_service import TaskService
@@ -69,6 +70,10 @@ def start_controller_client(container: "ServiceContainer") -> None:
 class ServiceContainer(containers.DeclarativeContainer):
     """Container for service dependency injection."""
 
+    # The container itself, for a service that opens sessions of its own. An
+    # inline providers.Self() argument resolves to None.
+    __self__ = providers.Self()
+
     # Configuration providers
     config = providers.Dependency(instance_of=Settings)
     app_config = providers.Dependency(instance_of=AppSettings)
@@ -106,6 +111,19 @@ class ServiceContainer(containers.DeclarativeContainer):
     fake_controller = providers.Singleton(
         FakeController, token=app_config.provided.controller_token
     )
+
+    # The supervisor: the long-lived jobs' threads (design 2 §7). Built by its
+    # starter so that it hears STARTUP; jobs register on it before then.
+    supervisor = providers.Singleton(
+        Supervisor,
+        container=__self__,
+        lifecycle_coordinator=lifecycle_coordinator,
+        controller_configured=providers.Callable(
+            lambda url: url is not None, app_config.provided.controller_url
+        ),
+        scheduler_tick_seconds=app_config.provided.scheduler_tick_seconds,
+    )
+    register_for_background_startup(lambda c: c.supervisor())
 
     # Temp file manager
     temp_file_manager = providers.Singleton(

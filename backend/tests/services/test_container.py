@@ -1,15 +1,20 @@
-"""The container's start of the controller's client (design 2 §14; V12)."""
+"""The container's start of the controller's client (design 2 §14; V12), and its
+supervisor (design 2 §7)."""
 
+import logging
+import threading
 from pathlib import Path
 
 import pytest
 from flask import Flask
+from sqlalchemy.orm import Session
 
 from app import create_app
 from app.app_config import AppSettings
 from app.config import Settings
 from app.exceptions import ConfigurationError
 from app.services.container import ServiceContainer, start_controller_client
+from app.services.supervisor import Supervisor
 from tests.conftest_infrastructure import (
     _clear_prometheus_registry,
     _create_test_app,
@@ -134,3 +139,54 @@ class TestStartControllerClient:
         )
 
         _dispose_app(production)
+
+
+class TestSupervisorWiring:
+    def test_the_supervisor_ticks_as_the_settings_say(
+        self, committed_app: Flask
+    ) -> None:
+        container = committed_app.container
+        container.app_config.override(AppSettings(scheduler_tick_seconds=0.05))
+        supervisor = container.supervisor()
+        ticks: list[int] = []
+        ticked = threading.Event()
+
+        def timer(db: Session) -> None:
+            ticks.append(len(ticks) + 1)
+            if len(ticks) == 3:
+                ticked.set()
+
+        supervisor.register_timer("probe", timer, needs_controller=False)
+        container.lifecycle_coordinator().fire_startup()
+
+        assert isinstance(supervisor, Supervisor)
+        assert supervisor is container.supervisor()
+        assert ticked.wait(5)
+
+    @pytest.mark.parametrize(
+        ("app_settings", "said"),
+        [
+            (AppSettings(), True),
+            (AppSettings(controller_url="http://controller.example"), False),
+        ],
+        ids=["no-controller", "controller"],
+    )
+    def test_the_supervisor_knows_whether_a_controller_is_configured(
+        self,
+        test_settings: Settings,
+        app_settings: AppSettings,
+        said: bool,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        container = _container(test_settings, app_settings)
+        container.supervisor().register_job("fleet", needs_controller=True)
+        coordinator = container.lifecycle_coordinator()
+
+        with caplog.at_level(logging.INFO, logger="app.services.supervisor"):
+            coordinator.fire_startup()
+        coordinator.shutdown()
+
+        assert (
+            "No controller configured (CONTROLLER_URL unset): the jobs and timers "
+            "that need one do not start (fleet)" in caplog.messages
+        ) is said
