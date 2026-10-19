@@ -49,7 +49,7 @@ class AppEnvironment(BaseSettings):
         default=15.0,
         gt=0,
         description="Seconds the sync change stream stays idle before a heartbeat comment",
-)
+    )
     TICKET_URL_TEMPLATE: str | None = Field(
         default=None,
         description=(
