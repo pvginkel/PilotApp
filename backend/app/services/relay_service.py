@@ -18,9 +18,17 @@ controller session's last recorded offset and takes each frame in order:
 A stream that drops, or stays silent past the client's read timeout, raises, and
 the supervisor runs the loop again with backoff: it reopens at the last
 committed offset.
+
+Each run first asks the controller whether it has the turn in flight (§8.2): a
+Turn written before its send that the controller never got is sent then. A
+controller session that is gone is resumed (§9.6, F71): re-created with the
+Session's conversation in the same environment, and carried on by a server-own
+"continue" Turn. An environment that is not running is waited for. At STARTUP
+the job's reconcile runs the relay of every Session with a Turn in flight.
 """
 
 import json
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -28,7 +36,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from prometheus_client import Counter, Gauge
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.orm import Session
 
 from app.core_exceptions import ExternalServiceException
@@ -37,11 +45,20 @@ from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import Session as AgentSession
 from app.models import Turn
 from app.models.reference import RecordKind, SessionState
-from app.services.controller_client import ControllerClient, RawFrame, ResultFrame
+from app.services.controller_client import (
+    ControllerClient,
+    ControllerProblem,
+    ControllerProblemType,
+    HeadlessCreateRequest,
+    RawFrame,
+    ResultFrame,
+    SessionSnapshot,
+)
 from app.services.current_line import CurrentLine, after_line, after_partial, at_send
 from app.services.environment_service import EnvironmentService
 from app.services.session_record_service import (
     SessionRecordService,
+    read_records,
     stream_position,
 )
 from app.services.session_stream_service import SessionStreamService
@@ -51,10 +68,26 @@ from app.utils.after_commit import after_commit
 if TYPE_CHECKING:
     from app.services.container import ServiceContainer
 
+logger = logging.getLogger(__name__)
+
 RELAY_JOB = "relay"
 
 SEND_FAILED = "send-failed"
 """The `type` of the `server` record a send that failed before its `202` writes."""
+
+SESSION_GONE = "session-gone"
+"""The `type` of the `server` record a resume writes: the controller session was
+gone."""
+
+CONTINUE = "continue"
+"""The message of the server's own Turn that carries a resumed session on (F71)."""
+
+SETTLE_WAIT_MS = 10_000
+"""How long one wait for an environment to settle is held; a loop that is not
+told to stop waits again until it settles."""
+
+_SETTLING = ("provisioning", "starting", "stopping")
+_TURN_IN_FLIGHT = ("busy", "interrupting")
 
 _TURN_FAILED = "The turn ended in an error"
 
@@ -75,7 +108,11 @@ class _Opening:
     env_id: str
     controller_session: str
     turn_id: int
+    message: str
     offset: int
+    recorded_turn: int
+    """The controller's number of the last turn the record ended in this
+    controller session; 0 before the first."""
     current_line: CurrentLine | None
 
 
@@ -107,7 +144,8 @@ class RelayService:
         session_streams: SessionStreamService,
         environment_service: EnvironmentService,
     ) -> None:
-        """Register the `relay` job, whose loops are one per Session.
+        """Register the `relay` job, whose loops are one per Session, and whose
+        reconcile runs the relay of every Session with a Turn in flight.
 
         Args:
             container: Gives each relay transaction its database session, and
@@ -121,7 +159,9 @@ class RelayService:
         self._supervisor = supervisor
         self._streams = session_streams
         self._environments = environment_service
-        supervisor.register_job(RELAY_JOB, needs_controller=True)
+        supervisor.register_job(
+            RELAY_JOB, needs_controller=True, reconcile=self._reconcile
+        )
 
     def send(
         self,
@@ -141,16 +181,22 @@ class RelayService:
         fails before the `202` writes the Turn ended with its `error`, and a
         `server` record saying so (F125).
 
+        A controller session that is gone (`404`) is resumed first, and the
+        message sent to the one that replaces it (§9.6). A send refused because
+        the controller has a turn in flight writes nothing, and starts the
+        Session's relay when this process runs none.
+
         Returns:
             The Turn; one whose send failed has its `error`
 
         Raises:
             RecordNotFoundException: No Session has the id
-            InvalidOperationException: The Session has no controller session
+            InvalidOperationException: The Session has no controller session,
+                or the controller has a turn in flight (`409 session-busy`)
         """
         session = self._records(db).require_session(session_id)
         try:
-            self._deliver(session, message)
+            self._deliver_resuming(db, session, message)
         except ExternalServiceException as error:
             turn = self._new_turn(db, session_id, message, author_user_id)
             self._failed(db, turn, error)
@@ -160,9 +206,14 @@ class RelayService:
         return turn
 
     def send_turn(self, db: Session, turn_id: int) -> Turn:
-        """Send a Turn written before its send, as the session start writes its
-        brief (§9.6), and relay it once the caller's transaction commits. As
-        `send`, with the Turn's `started_at` moved to the send.
+        """Send the first Turn of a `starting` Session's controller session,
+        written before its send, as the session start writes its brief (§9.6),
+        and relay it once the caller's transaction commits. As `send`, with the
+        Turn's `started_at` moved to the send.
+
+        A Turn the controller has already, sent before a cut or by another
+        process (§8.2, §8.1), is not sent again; one whose send another
+        process's commit made `running` first is left as it is.
 
         Returns:
             The Turn; one whose send failed has its `error`
@@ -175,12 +226,20 @@ class RelayService:
         if turn is None:
             raise RecordNotFoundException("Turn", str(turn_id))
         session = self._records(db).require_session(turn.session_id)
+        name = _controller_session(session)
+        recorded = _recorded_turn(db, session.id, name)
+        failure: ExternalServiceException | None = None
         try:
-            self._deliver(session, turn.message)
+            self._deliver_once(session.environment_id, name, recorded, turn.message)
         except ExternalServiceException as error:
-            self._failed(db, turn, error)
+            failure = error
+        session = self._records(db).lock_session(session.id)
+        if not _in_flight(db, turn.id) or session.state_code == SessionState.RUNNING:
             return turn
-        self._accepted(db, turn)
+        if failure is None:
+            self._accepted(db, turn)
+        else:
+            self._failed(db, turn, failure)
         return turn
 
     def relay(self, session_id: uuid.UUID, handle: LoopHandle) -> None:
@@ -189,19 +248,56 @@ class RelayService:
         Returns at once when no turn is in flight, and when the loop is told to
         stop.
 
+        The turn in flight is sent first when the controller does not have it.
+        A controller session that is gone is resumed, and an environment that
+        is not running is waited for until it settles; then the run carries on
+        with the Session as its rows have it. A stream the watchdog closes
+        (`Supervisor.interrupt_loop`) is reopened.
+
         Raises:
-            ExternalServiceException: The stream could not be opened, or dropped
-                before the turn's `result`
+            ExternalServiceException: The controller failed, the stream dropped
+                before the turn's `result`, or the environment settled other
+                than `running`
         """
-        with scoped_session(self._container) as db:
-            opening = _opening(db, session_id)
-        if opening is None:
-            return
-        RELAYS_RUNNING.inc()
-        try:
-            self._relay_turn(opening, handle)
-        finally:
-            RELAYS_RUNNING.dec()
+        while not handle.stopping:
+            with scoped_session(self._container) as db:
+                opening = _opening(db, session_id)
+            if opening is None:
+                return
+            try:
+                self._deliver_once(
+                    opening.env_id,
+                    opening.controller_session,
+                    opening.recorded_turn,
+                    opening.message,
+                )
+                if self._relay_turn(opening, handle):
+                    return
+            except ControllerProblem as problem:
+                match problem.problem_type:
+                    case ControllerProblemType.NOT_FOUND:
+                        self._resume(opening, problem)
+                    case ControllerProblemType.CONFLICT:
+                        self._await_environment(opening.env_id, handle)
+                    case _:
+                        raise
+
+    def _reconcile(self, db: Session) -> None:
+        """At STARTUP: run the relay of every Session `running` with a Turn in
+        flight (§8.2). Its run decides from the controller's state whether to
+        relay the turn or send it first."""
+        in_flight = exists().where(
+            Turn.session_id == AgentSession.id, Turn.ended_at.is_(None)
+        )
+        for session_id in db.scalars(
+            select(AgentSession.id)
+            .where(AgentSession.state_code == SessionState.RUNNING, in_flight)
+            .order_by(AgentSession.id)
+        ):
+            logger.info("Resuming the relay of session %s", session_id)
+            self._supervisor.start_loop(
+                RELAY_JOB, partial(self.relay, session_id), key=str(session_id)
+            )
 
     def _start_relay(self, session_id: uuid.UUID) -> None:
         # A relay past its turn's last action still counts as live: `again`
@@ -211,13 +307,145 @@ class RelayService:
         )
 
     def _deliver(self, session: AgentSession, message: str) -> None:
-        if session.controller_session is None:
-            raise InvalidOperationException(
-                f"send a turn to session {session.id}", "it has no controller session"
-            )
         self._client().send_message(
-            session.environment_id, session.controller_session, message
+            session.environment_id, _controller_session(session), message
         )
+
+    def _deliver_resuming(
+        self, db: Session, session: AgentSession, message: str
+    ) -> None:
+        """Send `message`; a controller session that is gone is resumed first
+        (§9.6). A session busy with a turn has the send refused, and the
+        Session's relay started if this process runs none."""
+        try:
+            self._deliver(session, message)
+        except ControllerProblem as problem:
+            match problem.problem_type:
+                case ControllerProblemType.SESSION_BUSY:
+                    self._supervisor.start_loop(
+                        RELAY_JOB, partial(self.relay, session.id), key=str(session.id)
+                    )
+                    raise InvalidOperationException(
+                        f"send a turn to session {session.id}", "a turn is in flight"
+                    ) from problem
+                case ControllerProblemType.NOT_FOUND:
+                    gone = session.controller_session
+                    session = self._records(db).lock_session(session.id)
+                    if session.controller_session == gone:
+                        self._recreate(db, session, problem)
+                    self._deliver(session, message)
+                case _:
+                    raise
+
+    def _deliver_once(
+        self, env_id: str, name: str, recorded_turn: int, message: str
+    ) -> None:
+        """Send a Turn written before its send, unless the controller has it
+        already (§8.2): its session busy, or past the turn the record last
+        ended in it. A send refused as busy while the controller has the turn
+        is one another process made first."""
+        client = self._client()
+        if _has_turn(client.get_session(env_id, name), recorded_turn):
+            return
+        try:
+            client.send_message(env_id, name, message)
+        except ControllerProblem as problem:
+            if problem.problem_type is not ControllerProblemType.SESSION_BUSY:
+                raise
+            if not _has_turn(client.get_session(env_id, name), recorded_turn):
+                raise
+
+    def _resume(self, opening: _Opening, problem: ControllerProblem) -> None:
+        """The relay's resume of a controller session that is gone (§9.6): it
+        is re-created, and a server-own "continue" Turn, which the run sends
+        next, carries the Session on. Nothing is done when another process
+        resumed it first, or the Session has moved on."""
+        with scoped_session(self._container) as db:
+            session = self._records(db).lock_session(opening.session_id)
+            if (
+                session.state_code != SessionState.RUNNING
+                or session.controller_session != opening.controller_session
+            ):
+                return
+            self._recreate(db, session, problem)
+            turn = self._new_turn(db, session.id, CONTINUE, None)
+            session.state_code = SessionState.RUNNING
+            session.current_line = at_send(None, turn.started_at)
+            _refresh_turns(db, session, turn)
+
+    def _recreate(
+        self, db: Session, session: AgentSession, problem: ControllerProblem
+    ) -> None:
+        """Under the Session's lock: a `server` record outside any Turn saying
+        the controller session is gone, every Turn in flight ended with no
+        `result`, the session re-created with `resume` the Session's
+        conversation in its environment, and `controller_session` overwritten
+        (§9.6; decision 9). A `running` Session is left `idle`, for its caller's
+        next Turn.
+
+        Raises:
+            ExternalServiceException: The create failed, and nothing is written
+        """
+        gone = session.controller_session
+        created = self._client().create_headless_session(
+            session.environment_id,
+            HeadlessCreateRequest(
+                cwd=session.cwd,
+                resume=session.conversation_id,
+                agent=session.agent,
+                model=session.model,
+                reasoning_effort=session.reasoning_effort,
+            ),
+        )
+        self._records(db).append(
+            session.id,
+            RecordKind.SERVER,
+            payload={"type": SESSION_GONE, "reason": str(problem)},
+        )
+        now = datetime.now(UTC)
+        for turn in db.scalars(
+            select(Turn).where(Turn.session_id == session.id, Turn.ended_at.is_(None))
+        ):
+            turn.ended_at = now
+        session.controller_session = created.name
+        if session.state_code == SessionState.RUNNING:
+            session.state_code = SessionState.IDLE
+            session.current_line = None
+            latest = db.scalars(
+                select(Turn)
+                .where(Turn.session_id == session.id)
+                .order_by(Turn.seq.desc())
+            ).first()
+            if latest is not None:
+                _refresh_turns(db, session, latest)
+        db.flush()
+        logger.info(
+            "Session %s lost controller session %s; resumed as %s in environment %s",
+            session.id,
+            gone,
+            created.name,
+            session.environment_id,
+        )
+
+    def _await_environment(self, env_id: str, handle: LoopHandle) -> None:
+        """Wait until the environment settles (§9.6), or the loop is told to
+        stop.
+
+        Raises:
+            ExternalServiceException: It settled other than `running`
+        """
+        logger.info("Environment %s is not running: waiting for it to settle", env_id)
+        while not handle.stopping:
+            environment = self._client().get_environment(
+                env_id, wait="settled", wait_ms=SETTLE_WAIT_MS
+            )
+            if environment.status == "running":
+                return
+            if environment.status not in _SETTLING:
+                raise ExternalServiceException(
+                    f"relay a turn in environment {env_id}",
+                    f"the environment settled {environment.status}",
+                )
 
     def _new_turn(
         self,
@@ -268,18 +496,25 @@ class RelayService:
         )
         _refresh_turns(db, session, turn)
 
-    def _relay_turn(self, opening: _Opening, handle: LoopHandle) -> None:
+    def _relay_turn(self, opening: _Opening, handle: LoopHandle) -> bool:
+        """Relay the stream to the turn's `result`; whether it came. A stream
+        closed by the loop's stop or by the watchdog ends without it."""
         progress = _Progress(opening.offset, opening.current_line)
         stream = self._client().open_response_stream(
             opening.env_id, opening.controller_session, opening.offset
         )
-        with stream, handle.holding(stream):
-            for frame in stream:
-                if isinstance(frame, RawFrame):
-                    self._line(opening, frame, progress)
-                elif isinstance(frame, ResultFrame):
-                    self._end_turn(opening, frame, progress.offset)
-                    return
+        RELAYS_RUNNING.inc()
+        try:
+            with stream, handle.holding(stream):
+                for frame in stream:
+                    if isinstance(frame, RawFrame):
+                        self._line(opening, frame, progress)
+                    elif isinstance(frame, ResultFrame):
+                        self._end_turn(opening, frame, progress.offset)
+                        return True
+            return False
+        finally:
+            RELAYS_RUNNING.dec()
 
     def _line(self, opening: _Opening, frame: RawFrame, progress: _Progress) -> None:
         progress.offset = frame.offset
@@ -324,6 +559,12 @@ class RelayService:
         )
         session.current_line = after_line(session.current_line, payload, record.at)
         progress.current_line = session.current_line
+        if session.conversation_id is None and isinstance(payload, dict):
+            # Every line `claude` prints names its conversation, which a resume
+            # carries on (§9.6).
+            conversation = payload.get("session_id")
+            if isinstance(conversation, str) and conversation:
+                session.conversation_id = conversation
         return True
 
     def _partial(
@@ -424,9 +665,42 @@ def _opening(db: Session, session_id: uuid.UUID) -> _Opening | None:
         env_id=session.environment_id,
         controller_session=session.controller_session,
         turn_id=turn.id,
+        message=turn.message,
         offset=position.raw_offset if position is not None and resumed else 0,
+        recorded_turn=_recorded_turn(db, session_id, session.controller_session),
         current_line=session.current_line,
     )
+
+
+def _controller_session(session: AgentSession) -> str:
+    if session.controller_session is None:
+        raise InvalidOperationException(
+            f"send a turn to session {session.id}", "it has no controller session"
+        )
+    return session.controller_session
+
+
+def _recorded_turn(db: Session, session_id: uuid.UUID, controller_session: str) -> int:
+    """The controller's number of the turn the Session's last `result` record
+    ended, when that record is of `controller_session`; else 0 (§8.2)."""
+    last = next(
+        iter(
+            read_records(
+                db, session_id, kind=RecordKind.RESULT, limit=1, newest_first=True
+            )
+        ),
+        None,
+    )
+    if last is None or last.record.controller_session != controller_session:
+        return 0
+    turn = last.record.payload.get("turn")
+    return turn if isinstance(turn, int) else 0
+
+
+def _has_turn(snapshot: SessionSnapshot, recorded_turn: int) -> bool:
+    """Whether the controller has had the turn in flight: its session is busy
+    with it, or has ended a turn the record has not."""
+    return snapshot.status in _TURN_IN_FLIGHT or (snapshot.turn or 0) > recorded_turn
 
 
 def _turn_in_flight(db: Session, session_id: uuid.UUID) -> Turn | None:

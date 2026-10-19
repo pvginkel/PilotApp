@@ -181,6 +181,69 @@ class TestSupervisorLoops:
         assert supervisor.start_loop("keyed", loop, key=1)
         assert calls.wait_for(3)[2] == "keyed:1"
 
+    def test_an_interrupt_closes_the_runs_io_and_the_loop_runs_on(
+        self, app: Flask, supervise: Supervise, supervisor_log: LogWaiter
+    ) -> None:
+        supervisor, coordinator = supervise(app.container)
+        supervisor.register_job("held", needs_controller=False)
+        coordinator.fire_startup()
+        calls = _Calls()
+
+        class _Resource:
+            def __init__(self, n: int) -> None:
+                self.n = n
+                self.closed = threading.Event()
+
+            def close(self) -> None:
+                calls.add(f"closed {self.n}")
+                self.closed.set()
+
+        def loop(handle: LoopHandle) -> None:
+            for n in (1, 2):
+                resource = _Resource(n)
+                with handle.holding(resource):
+                    calls.add(f"holding {n}")
+                    resource.closed.wait(WAIT_SECONDS)
+                if handle.stopping:
+                    return
+            calls.add("ran on")
+
+        assert not supervisor.interrupt_loop("held")
+        supervisor.start_loop("held", loop)
+        calls.wait_for(1)
+
+        assert supervisor.interrupt_loop("held")
+        calls.wait_for(3)
+        assert supervisor.interrupt_loop("held")
+
+        supervisor_log.wait_for(r"Loop held ended")
+        assert calls.items == [
+            "holding 1",
+            "closed 1",
+            "holding 2",
+            "closed 2",
+            "ran on",
+        ]
+        assert not supervisor.interrupt_loop("held")
+
+    def test_an_interrupt_of_a_loop_holding_nothing_does_nothing(
+        self, app: Flask, supervise: Supervise
+    ) -> None:
+        supervisor, coordinator = supervise(app.container)
+        supervisor.register_job("idle", needs_controller=False)
+        coordinator.fire_startup()
+        running = threading.Event()
+
+        def loop(handle: LoopHandle) -> None:
+            running.set()
+            handle.wait(WAIT_SECONDS)
+
+        supervisor.start_loop("idle", loop, key=1)
+        assert running.wait(WAIT_SECONDS)
+
+        assert not supervisor.interrupt_loop("idle", key=1)
+        assert not supervisor.interrupt_loop("idle", key=2)
+
     def test_a_loop_that_returns_ended_on_purpose(
         self, app: Flask, supervise: Supervise, supervisor_log: LogWaiter
     ) -> None:

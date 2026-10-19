@@ -143,6 +143,31 @@ class TestReadRecords:
             read_records(session, project_session.id, after=1, before=4, limit=10)
         ) == [2, 3]
 
+    def test_it_reads_one_kind_of_record(
+        self,
+        session: DbSession,
+        records: SessionRecordService,
+        project_session: models.Session,
+    ) -> None:
+        turn = _turn(session, project_session, 1, None)
+        _server(records, project_session, "Starting")
+        _line(records, project_session, turn, 10)
+        _line(records, project_session, turn, 20, kind=RecordKind.RESULT)
+        _line(records, project_session, turn, 30)
+
+        assert _seqs(
+            read_records(session, project_session.id, kind=RecordKind.CLAUDE, limit=10)
+        ) == [2, 4]
+        assert _seqs(
+            read_records(
+                session,
+                project_session.id,
+                kind=RecordKind.RESULT,
+                limit=1,
+                newest_first=True,
+            )
+        ) == [3]
+
     def test_it_reads_one_sessions_records_only(
         self,
         session: DbSession,

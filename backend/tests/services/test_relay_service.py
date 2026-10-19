@@ -6,8 +6,9 @@ called as its loop calls it, once the fake holds the turn. The loop's tests run
 it on a database of its own, from the send's commit, as the supervisor does."""
 
 import json
+import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from queue import Empty
 from typing import Any
@@ -25,12 +26,14 @@ from app.models import DocumentVersion, Environment, Project, Turn, User
 from app.models.reference import RecordKind, SessionState, UserKind, VersionCause
 from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerClient, HeadlessCreateRequest
-from app.services.environment_service import EnvironmentService
-from app.services.fake_controller import FinishOutcome
+from app.services.environment_service import SHUTDOWN_TIMER, EnvironmentService
+from app.services.fake_controller import FakeControllerProblem, FinishOutcome
 from app.services.relay_service import (
+    CONTINUE,
     PARTIALS_FORWARDED_TOTAL,
     RELAYS_RUNNING,
     SEND_FAILED,
+    SESSION_GONE,
     RelayService,
 )
 from app.services.session_record_service import (
@@ -39,7 +42,7 @@ from app.services.session_record_service import (
     read_records,
 )
 from app.services.sse_connection_manager import SSEConnection
-from app.services.supervisor import LoopHandle
+from app.services.supervisor import TIMER_RUNS_TOTAL, LoopHandle
 from app.utils.after_commit import clear_after_commit_callbacks
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
 from tests.support.fake_controller import ServedFakeController, client_of, raw_turn
@@ -303,10 +306,8 @@ class TestSend:
     @pytest.mark.parametrize(
         ("failure", "answer"),
         [
-            ("busy", "409 session-busy"),
             ("unreachable", "502 worker-unreachable"),
             ("stopped", "409 conflict"),
-            ("unknown", "404 not-found"),
         ],
     )
     def test_a_send_that_fails_before_the_202_writes_the_failed_turn(
@@ -321,14 +322,10 @@ class TestSend:
         answer: str,
     ) -> None:
         match failure:
-            case "busy":
-                fake_controller.busy(ENV, controller_session)
             case "unreachable":
                 fake_controller.unreachable(ENV)
             case "stopped":
                 fake_controller.set_status(ENV, "stopped")
-            case "unknown":
-                idle.controller_session = "claude-unknown"
         due = _row(session).stop_due_at
 
         turn = _send(relays, session, idle, "Rename the badge", author=person)
@@ -351,6 +348,106 @@ class TestSend:
         assert idle.turns == 1
         assert _row(session).stop_due_at == due
 
+    def test_a_send_while_the_controller_has_a_turn_is_refused_and_writes_nothing(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        idle: models.Session,
+        person: User,
+    ) -> None:
+        fake_controller.busy(ENV, controller_session)
+
+        with pytest.raises(InvalidOperationException, match="a turn is in flight"):
+            relays.send(session, idle.id, "Rename the badge", author_user_id=person.id)
+
+        assert (
+            session.scalars(select(Turn).where(Turn.session_id == idle.id)).all() == []
+        )
+        assert _records(session, idle.id) == []
+        assert idle.state_code == SessionState.IDLE
+
+    def test_a_send_to_a_controller_session_that_is_gone_resumes_it_then_sends(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        idle: models.Session,
+        person: User,
+    ) -> None:
+        idle.conversation_id = "conversation-1"
+        idle.agent, idle.model = "worker", "claude-example-1"
+        # The reaper took the idle session (§9.6).
+        controller_client.end_session(ENV, controller_session)
+        before = len(fake_controller.calls)
+
+        turn = _send(relays, session, idle, "Rename the badge", author=person)
+
+        [created] = fake_controller.sessions(ENV)
+        assert created.name != controller_session
+        assert created.session_id == "conversation-1"
+        assert created.status == "busy"
+        assert fake_controller.calls[before:] == [
+            f"POST /environments/{ENV}/sessions/headless/{controller_session}/messages",
+            f"POST /environments/{ENV}/sessions/headless",
+            f"POST /environments/{ENV}/sessions/headless/{created.name}/messages",
+        ]
+        assert idle.controller_session == created.name
+        assert (turn.seq, turn.error, turn.ended_at) == (1, None, None)
+        [gone, sent] = _records(session, idle.id)
+        assert (gone.record.kind_code, gone.turn) == (RecordKind.SERVER, None)
+        assert gone.record.payload["type"] == SESSION_GONE
+        assert "404 not-found" in gone.record.payload["reason"]
+        assert (sent.record.kind_code, sent.turn) == (RecordKind.SEND, 1)
+        assert idle.state_code == SessionState.RUNNING
+
+    def test_a_resume_creates_with_the_sessions_options(
+        self,
+        session: DbSession,
+        creating: tuple[RelayService, "_Creating"],
+        project: Project,
+    ) -> None:
+        relays, fake = creating
+        run = _agent_session(session, project, "claude-gone")
+        run.conversation_id = "conversation-1"
+        run.agent, run.model, run.reasoning_effort = "worker", "model-1", "high"
+
+        turn = _send(relays, session, run, "Rename the badge")
+
+        assert turn.error is None
+        assert fake.create_bodies == [
+            {
+                "cwd": "/work/Example",
+                "resume": "conversation-1",
+                "agent": "worker",
+                "model": "model-1",
+                "reasoningEffort": "high",
+            }
+        ]
+
+    def test_a_resume_the_controller_refuses_fails_the_turn_and_writes_nothing_else(
+        self,
+        session: DbSession,
+        creating: tuple[RelayService, "_Creating"],
+        project: Project,
+    ) -> None:
+        relays, fake = creating
+        run = _agent_session(session, project, "claude-gone")
+        fake.refuse_creates = True
+
+        turn = _send(relays, session, run, "Rename the badge")
+
+        assert turn.error is not None and "502 worker-unreachable" in turn.error
+        assert turn.error.startswith("Cannot create a headless session in environment")
+        assert [
+            stored.record.payload["type"] for stored in _records(session, run.id)
+        ] == [SEND_FAILED]
+        assert run.controller_session == "claude-gone"
+        assert fake.sessions(ENV) == []
+
     def test_turns_are_numbered_in_their_session(
         self,
         session: DbSession,
@@ -360,8 +457,9 @@ class TestSend:
         idle: models.Session,
     ) -> None:
         first = _send(relays, session, idle, "One")
-        # The controller has the first in flight: the second fails.
+        fake_controller.unreachable(ENV)
         second = _send(relays, session, idle, "Two")
+        fake_controller.unreachable(ENV, on=False)
 
         assert (first.seq, second.seq) == (1, 2)
         assert second.error is not None
@@ -468,6 +566,96 @@ class TestSendTurn:
         assert failed.record.payload == {"type": SEND_FAILED, "reason": brief.error}
         # What follows is the session start's: the Session is left as it was.
         assert run.state_code == SessionState.STARTING
+
+    def test_a_turn_the_controller_has_already_is_not_sent_again(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        project: Project,
+    ) -> None:
+        _environment_row(session)
+        run = _agent_session(
+            session, project, controller_session, SessionState.STARTING
+        )
+        brief = self._brief(session, run)
+        # The brief went out before a cut that lost its commit (§8.2).
+        controller_client.send_message(ENV, controller_session, brief.message)
+        before = len(fake_controller.calls)
+
+        relays.send_turn(session, brief.id)
+        clear_after_commit_callbacks()
+
+        assert fake_controller.calls[before:] == [
+            f"GET /environments/{ENV}/sessions/{controller_session}"
+        ]
+        assert (brief.ended_at, brief.error) == (None, None)
+        assert run.state_code == SessionState.RUNNING
+
+    def test_a_send_another_process_made_first_is_taken_as_sent(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        supervise: Supervise,
+        project: Project,
+    ) -> None:
+        fake = _Racing(keepalive_seconds=0.2)
+        try:
+            client = client_of(container, fake)
+            relays, _ = _relay_service(container, supervise)
+            name = _headless(fake, client)
+            _environment_row(session)
+            run = _agent_session(session, project, name, SessionState.STARTING)
+            brief = self._brief(session, run)
+
+            relays.send_turn(session, brief.id)
+            clear_after_commit_callbacks()
+
+            path = f"/environments/{ENV}/sessions"
+            assert fake.calls[-3:] == [
+                f"GET {path}/{name}",
+                f"POST {path}/headless/{name}/messages",
+                f"GET {path}/{name}",
+            ]
+            assert (brief.ended_at, brief.error) == (None, None)
+            assert run.state_code == SessionState.RUNNING
+            assert _records(session, run.id) == []
+        finally:
+            fake.close()
+
+    def test_a_turn_another_process_made_running_is_left_as_it_is(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        controller_client: ControllerClient,
+        controller_session: str,
+        project: Project,
+    ) -> None:
+        _environment_row(session)
+        run = _agent_session(
+            session, project, controller_session, SessionState.STARTING
+        )
+        brief = self._brief(session, run)
+        controller_client.send_message(ENV, controller_session, brief.message)
+        # Another process's send of it committed, and its relay wrote a line.
+        working = {
+            "state": "working",
+            "since": "2026-01-01T12:00:00+00:00",
+            "step": {"tool": "Bash", "input": {"command": "ls"}},
+        }
+        run.state_code = SessionState.RUNNING
+        run.current_line = working
+        started = brief.started_at
+        session.flush()
+
+        relays.send_turn(session, brief.id)
+        clear_after_commit_callbacks()
+
+        assert run.current_line == working
+        assert brief.started_at == started
+        assert run.turn_started_at is None
 
     def test_an_unknown_turn_is_refused(
         self, session: DbSession, relays: RelayService
@@ -848,6 +1036,38 @@ class TestRelay:
         ]
         assert _claude(session, idle.id) == _recorded(lines, offsets)
 
+    def test_the_first_line_names_the_sessions_conversation(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        idle: models.Session,
+    ) -> None:
+        lines = raw_turn("turn_text")
+        _send(relays, session, idle)
+        _turn_of(fake_controller, controller_session, lines)
+
+        _relay(relays, idle)
+
+        assert idle.conversation_id == json.loads(lines[0])["session_id"]
+
+    def test_a_conversation_the_session_has_is_kept(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        idle: models.Session,
+    ) -> None:
+        idle.conversation_id = "conversation-1"
+        _send(relays, session, idle)
+        _turn_of(fake_controller, controller_session, raw_turn("turn_text"))
+
+        _relay(relays, idle)
+
+        assert idle.conversation_id == "conversation-1"
+
     def test_a_session_with_no_turn_in_flight_opens_no_stream(
         self,
         session: DbSession,
@@ -859,6 +1079,73 @@ class TestRelay:
 
         assert not any("/response?" in call for call in fake_controller.calls)
         assert _records(session, idle.id) == []
+
+
+class _Creating(ServedFakeController):
+    """The fake, keeping each headless create's body, and refusing every create
+    with `502 worker-unreachable` while `refuse_creates` is set."""
+
+    def __init__(self, keepalive_seconds: float) -> None:
+        super().__init__(keepalive_seconds)
+        self.create_bodies: list[dict[str, Any]] = []
+        self.refuse_creates = False
+
+    def _create_session(self, request: Request, env_id: str) -> Response:
+        if self.refuse_creates:
+            raise FakeControllerProblem(
+                502, "worker-unreachable", f"the worker of {env_id} does not answer"
+            )
+        self.create_bodies.append(request.get_json(silent=True) or {})
+        return super()._create_session(request, env_id)
+
+
+@pytest.fixture
+def creating(
+    session: DbSession, container: ServiceContainer, supervise: Supervise
+) -> Iterator[tuple[RelayService, _Creating]]:
+    """The relays on `_Creating`, with the environment running and its row."""
+    fake = _Creating(keepalive_seconds=0.2)
+    client_of(container, fake)
+    fake.add_environment(ENV, status="running")
+    _environment_row(session)
+    try:
+        yield _relay_service(container, supervise)[0], fake
+    finally:
+        fake.close()
+
+
+class _GoneOnce(ServedFakeController):
+    """The fake, running `after_404` once, as it refuses a send to a session it
+    does not have: another process's action then."""
+
+    def __init__(self, keepalive_seconds: float) -> None:
+        super().__init__(keepalive_seconds)
+        self.after_404: Callable[[], None] | None = None
+
+    def _send(self, request: Request, env_id: str, name: str) -> Response:
+        try:
+            return super()._send(request, env_id, name)
+        except FakeControllerProblem as problem:
+            hook, self.after_404 = self.after_404, None
+            if problem.status == 404 and hook is not None:
+                hook()
+            raise
+
+
+class _Racing(ServedFakeController):
+    """The fake, where another process's send lands right after the first
+    status snapshot it answers."""
+
+    def __init__(self, keepalive_seconds: float) -> None:
+        super().__init__(keepalive_seconds)
+        self._raced = False
+
+    def _get_session(self, request: Request, env_id: str, name: str) -> Response:
+        response = super()._get_session(request, env_id, name)
+        if not self._raced:
+            self._raced = True
+            self.busy(env_id, name)
+        return response
 
 
 class _Replaying(ServedFakeController):
@@ -1123,3 +1410,490 @@ class TestRelayLoop:
         assert _claude_committed(container, run_id) == _recorded(
             lines + lines, first + second
         )
+
+
+RELAY_LOGGER = "app.services.relay_service"
+
+
+def _running_committed(
+    container: ServiceContainer, run_id: uuid.UUID, message: str = "Rename the badge"
+) -> None:
+    """A Turn in flight on the Session, `running`, as a send's commit leaves it
+    with no relay running: a restart's rows."""
+    with scoped_session(container) as db:
+        run = db.get_one(models.Session, run_id)
+        now = datetime.now(UTC)
+        run.turns += 1
+        db.add(Turn(session_id=run_id, seq=run.turns, message=message, started_at=now))
+        run.state_code = SessionState.RUNNING
+        run.turn_started_at = now
+        run.turn_ended_at = None
+        run.current_line = {"state": "thinking", "since": now.isoformat()}
+
+
+def _idle(container: ServiceContainer, run_id: uuid.UUID) -> None:
+    wait_until(
+        lambda: _read(container, run_id).state_code == SessionState.IDLE,
+        "the turn ended",
+    )
+
+
+def _sends(fake: ServedFakeController, name: str) -> int:
+    return fake.calls.count(
+        f"POST /environments/{ENV}/sessions/headless/{name}/messages"
+    )
+
+
+def _has_busy(fake: ServedFakeController, name: str) -> bool:
+    """Whether the fake has the headless session `name`, busy with a turn."""
+    return any(
+        session.name == name and session.status == "busy"
+        for session in fake.sessions(ENV)
+    )
+
+
+def _committed_records(
+    container: ServiceContainer, run_id: uuid.UUID
+) -> list[StoredRecord]:
+    with scoped_session(container) as db:
+        return _records(db, run_id)
+
+
+def _committed_turns(container: ServiceContainer, run_id: uuid.UUID) -> list[Turn]:
+    with scoped_session(container) as db:
+        turns = list(
+            db.scalars(select(Turn).where(Turn.session_id == run_id).order_by(Turn.seq))
+        )
+        db.expunge_all()
+        return turns
+
+
+class TestRestartRecovery:
+    """A new supervisor over the rows a restart left (§8.2; V07, V18)."""
+
+    @pytest.fixture
+    def loop_log(self) -> Iterator[LogWaiter]:
+        with listening(SUPERVISOR_LOGGER, RELAY_LOGGER) as waiter:
+            yield waiter
+
+    @pytest.fixture
+    def rows(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+    ) -> tuple[str, uuid.UUID, uuid.UUID]:
+        """An idle Session on the fake's headless session, committed: the
+        session's name, the Session's id and its person's."""
+        name = _headless(fake_controller, committed_controller_client)
+        run_id, person_id = _committed_session(committed_app.container, name)
+        return name, run_id, person_id
+
+    def test_startup_relays_a_turn_that_ended_while_nothing_ran(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        supervise: Supervise,
+        rows: tuple[str, uuid.UUID, uuid.UUID],
+        loop_log: LogWaiter,
+    ) -> None:
+        container = committed_app.container
+        name, run_id, _ = rows
+        _running_committed(container, run_id)
+        committed_controller_client.send_message(ENV, name, "Rename the badge")
+        lines = raw_turn("turn_text")
+        offsets = _turn_of(fake_controller, name, lines)
+        _, coordinator = _relay_service(container, supervise)
+
+        coordinator.fire_startup()
+
+        loop_log.wait_for(rf"Resuming the relay of session {run_id}")
+        _idle(container, run_id)
+        assert _claude_committed(container, run_id) == _recorded(lines, offsets)
+        [result] = [
+            stored
+            for stored in _committed_records(container, run_id)
+            if stored.record.kind_code == RecordKind.RESULT
+        ]
+        assert (result.turn, result.record.payload["turn"]) == (1, 1)
+        assert _sends(fake_controller, name) == 1
+
+    def test_startup_sends_a_turn_the_controller_never_got_then_relays_it(
+        self,
+        committed_app: Flask,
+        fake_controller: ServedFakeController,
+        supervise: Supervise,
+        rows: tuple[str, uuid.UUID, uuid.UUID],
+        loop_log: LogWaiter,
+    ) -> None:
+        container = committed_app.container
+        name, run_id, _ = rows
+        _running_committed(container, run_id, CONTINUE)
+        _, coordinator = _relay_service(container, supervise)
+
+        coordinator.fire_startup()
+
+        wait_until(
+            lambda: fake_controller.session(ENV, name).status == "busy",
+            "the turn sent",
+        )
+        lines = raw_turn("turn_text")
+        offsets = _turn_of(fake_controller, name, lines)
+        _idle(container, run_id)
+        assert _sends(fake_controller, name) == 1
+        assert _claude_committed(container, run_id) == _recorded(lines, offsets)
+
+    def test_a_drain_mid_turn_leaves_the_rest_to_the_next_supervisor(
+        self,
+        committed_app: Flask,
+        fake_controller: ServedFakeController,
+        supervise: Supervise,
+        rows: tuple[str, uuid.UUID, uuid.UUID],
+        loop_log: LogWaiter,
+    ) -> None:
+        container = committed_app.container
+        name, run_id, person_id = rows
+        lines = raw_turn("turn_tool")
+        relays, first = _relay_service(container, supervise)
+        first.fire_startup()
+        _send_committed(container, relays, run_id, person_id)
+        offsets = fake_controller.play(ENV, name, lines[:11])
+        recorded = _recorded(lines[:11], offsets)
+        wait_until(
+            lambda: _claude_committed(container, run_id) == recorded,
+            "the first half recorded",
+        )
+
+        began = time.perf_counter()
+        first.shutdown()
+
+        assert time.perf_counter() - began < 20
+        loop_log.wait_for(rf"Loop relay:{run_id} ended")
+        assert _read(container, run_id).state_code == SessionState.RUNNING
+
+        rest = _turn_of(fake_controller, name, lines[11:])
+        _, second = _relay_service(container, supervise)
+        second.fire_startup()
+
+        _idle(container, run_id)
+        assert _claude_committed(container, run_id) == _recorded(lines, offsets + rest)
+        path = f"GET /environments/{ENV}/sessions/headless/{name}/response"
+        assert [call for call in fake_controller.calls if call.startswith(path)] == [
+            f"{path}?format=raw&offset=0",
+            f"{path}?format=raw&offset={recorded[-1][0]}",
+        ]
+
+    def test_a_send_refused_as_busy_starts_the_missing_relay(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        supervise: Supervise,
+        rows: tuple[str, uuid.UUID, uuid.UUID],
+        loop_log: LogWaiter,
+    ) -> None:
+        container = committed_app.container
+        name, run_id, person_id = rows
+        relays, coordinator = _relay_service(container, supervise)
+        coordinator.fire_startup()
+        # A turn in flight whose relay this process does not run.
+        _running_committed(container, run_id)
+        committed_controller_client.send_message(ENV, name, "Rename the badge")
+
+        with scoped_session(container) as db:
+            with pytest.raises(InvalidOperationException):
+                relays.send(db, run_id, "And the logo", author_user_id=person_id)
+
+        loop_log.wait_for(rf"Loop relay:{run_id} started")
+        lines = raw_turn("turn_text")
+        offsets = _turn_of(fake_controller, name, lines)
+        _idle(container, run_id)
+        assert _claude_committed(container, run_id) == _recorded(lines, offsets)
+        assert len(_committed_turns(container, run_id)) == 1
+
+
+class TestEnvironmentRestartUnderARun:
+    """F71 under a run (§9.6; V17)."""
+
+    @pytest.fixture
+    def relay_log(self) -> Iterator[LogWaiter]:
+        with listening(SUPERVISOR_LOGGER, RELAY_LOGGER) as waiter:
+            yield waiter
+
+    @pytest.fixture
+    def relaying(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        supervise: Supervise,
+    ) -> tuple[str, uuid.UUID, list[str], list[int]]:
+        """A Session's turn in flight, its first lines recorded by its relay:
+        the controller session's name, the Session's id, the turn's lines and
+        the recorded ones' offsets."""
+        container = committed_app.container
+        relays, coordinator = _relay_service(container, supervise)
+        name = _headless(fake_controller, committed_controller_client)
+        run_id, person_id = _committed_session(container, name)
+        coordinator.fire_startup()
+        _send_committed(container, relays, run_id, person_id)
+        lines = raw_turn("turn_tool")
+        offsets = fake_controller.play(ENV, name, lines[:11])
+        wait_until(
+            lambda: (
+                _claude_committed(container, run_id) == _recorded(lines[:11], offsets)
+            ),
+            "the first lines recorded",
+        )
+        return name, run_id, lines, offsets
+
+    def _assert_resumed(
+        self,
+        container: ServiceContainer,
+        run_id: uuid.UUID,
+        lines: list[str],
+        offsets: list[int],
+        second: list[int],
+    ) -> None:
+        """Turn 1 ended by the server, with no result; the server's record
+        outside any Turn; Turn 2, "continue", relayed from offset 0 of the new
+        controller session to its result."""
+        records = _committed_records(container, run_id)
+        first_turn = [s.record.seq for s in records if s.turn == 1]
+        [gone] = [s for s in records if s.record.kind_code == RecordKind.SERVER]
+        assert gone.turn is None and gone.record.payload["type"] == SESSION_GONE
+        assert "404 not-found" in gone.record.payload["reason"]
+        assert max(first_turn) < gone.record.seq
+        assert all(s.turn == 2 for s in records if s.record.seq > gone.record.seq)
+        assert [s.turn for s in records if s.record.kind_code == RecordKind.RESULT] == [
+            2
+        ]
+        resumed = [
+            (s.record.controller_session, s.record.raw_offset)
+            for s in records
+            if s.turn == 2 and s.record.kind_code == RecordKind.CLAUDE
+        ]
+        text = raw_turn("turn_text")
+        assert resumed == [
+            ("claude-2", offset) for offset, _ in _recorded(text, second)
+        ]
+        assert _claude_committed(container, run_id) == (
+            _recorded(lines[:11], offsets) + _recorded(text, second)
+        )
+        [brief, carried_on] = _committed_turns(container, run_id)
+        assert brief.ended_at is not None and brief.error is None
+        assert (carried_on.message, carried_on.author_user_id) == (CONTINUE, None)
+        assert carried_on.ended_at is not None
+        run = _read(container, run_id)
+        assert run.controller_session == "claude-2"
+        assert run.conversation_id == json.loads(lines[0])["session_id"]
+
+    def test_an_environment_restart_is_waited_for_then_resumed_and_continued(
+        self,
+        committed_app: Flask,
+        fake_controller: ServedFakeController,
+        relaying: tuple[str, uuid.UUID, list[str], list[int]],
+        relay_log: LogWaiter,
+    ) -> None:
+        container = committed_app.container
+        name, run_id, lines, offsets = relaying
+
+        fake_controller.restart(ENV)
+
+        relay_log.wait_for(
+            rf"Environment {ENV} is not running: waiting for it to settle"
+        )
+        fake_controller.set_status(ENV, "running")
+        relay_log.wait_for(
+            rf"Session {run_id} lost controller session {name}; resumed as "
+            rf"claude-2 in environment {ENV}"
+        )
+        wait_until(
+            lambda: fake_controller.session(ENV, "claude-2").status == "busy",
+            "the continue sent",
+        )
+        assert (
+            fake_controller.session(ENV, "claude-2").session_id
+            == json.loads(lines[0])["session_id"]
+        )
+        second = _turn_of(fake_controller, "claude-2", raw_turn("turn_text"))
+        _idle(container, run_id)
+
+        self._assert_resumed(container, run_id, lines, offsets, second)
+        path = f"GET /environments/{ENV}/sessions/headless/claude-2/response"
+        assert [c for c in fake_controller.calls if c.startswith(path)][0] == (
+            f"{path}?format=raw&offset=0"
+        )
+
+    def test_a_controller_session_gone_under_a_run_is_resumed(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        relaying: tuple[str, uuid.UUID, list[str], list[int]],
+        relay_log: LogWaiter,
+    ) -> None:
+        container = committed_app.container
+        name, run_id, lines, offsets = relaying
+
+        committed_controller_client.end_session(ENV, name)
+
+        relay_log.wait_for(rf"Session {run_id} lost controller session {name}; .*")
+        wait_until(
+            lambda: fake_controller.session(ENV, "claude-2").status == "busy",
+            "the continue sent",
+        )
+        second = _turn_of(fake_controller, "claude-2", raw_turn("turn_text"))
+        _idle(container, run_id)
+
+        self._assert_resumed(container, run_id, lines, offsets, second)
+        assert not relay_log.matching(r"Environment .* waiting for it to settle")
+
+
+class TestTwoProcesses:
+    """Two supervisors on one database, as a roll's overlap runs them (§8.1;
+    V14)."""
+
+    def test_two_relays_of_one_turn_record_every_line_once(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        supervise: Supervise,
+    ) -> None:
+        container = committed_app.container
+        name = _headless(fake_controller, committed_controller_client)
+        run_id, _ = _committed_session(container, name)
+        _running_committed(container, run_id)
+        committed_controller_client.send_message(ENV, name, "Rename the badge")
+        _, one = _relay_service(container, supervise)
+        _, other = _relay_service(container, supervise)
+
+        with listening(SUPERVISOR_LOGGER) as log:
+            one.fire_startup()
+            other.fire_startup()
+            wait_until(lambda: metric_value(RELAYS_RUNNING) == 2, "both relaying")
+            lines = raw_turn("turn_subagent")
+            offsets = _turn_of(fake_controller, name, lines)
+            _idle(container, run_id)
+            log.wait_for(rf"Loop relay:{run_id} ended", count=2)
+
+        records = _committed_records(container, run_id)
+        assert [s.record.seq for s in records] == list(range(1, len(records) + 1))
+        assert _claude_committed(container, run_id) == _recorded(lines, offsets)
+        assert [s.record.kind_code for s in records].count(RecordKind.RESULT) == 1
+
+    def test_two_relays_resume_a_gone_session_once(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        supervise: Supervise,
+    ) -> None:
+        container = committed_app.container
+        name = _headless(fake_controller, committed_controller_client)
+        run_id, _ = _committed_session(container, name)
+        _running_committed(container, run_id)
+        committed_controller_client.send_message(ENV, name, "Rename the badge")
+        _, one = _relay_service(container, supervise)
+        _, other = _relay_service(container, supervise)
+        one.fire_startup()
+        other.fire_startup()
+        wait_until(lambda: metric_value(RELAYS_RUNNING) == 2, "both relaying")
+
+        with listening(RELAY_LOGGER) as log:
+            committed_controller_client.end_session(ENV, name)
+            wait_until(
+                lambda: _has_busy(fake_controller, "claude-2"), "the continue sent"
+            )
+            _turn_of(fake_controller, "claude-2", raw_turn("turn_text"))
+            _idle(container, run_id)
+
+        assert len(log.matching(r"Session .* lost controller session .*")) == 1
+        assert [s.name for s in fake_controller.sessions(ENV)] == ["claude-2"]
+        assert [turn.message for turn in _committed_turns(container, run_id)] == [
+            "Rename the badge",
+            CONTINUE,
+        ]
+        assert _sends(fake_controller, "claude-2") >= 1
+        servers = [
+            s
+            for s in _committed_records(container, run_id)
+            if s.record.kind_code == RecordKind.SERVER
+        ]
+        assert len(servers) == 1
+
+    def test_a_send_after_another_process_resumed_the_session_sends_to_its_one(
+        self, committed_app: Flask, supervise: Supervise
+    ) -> None:
+        container = committed_app.container
+        fake = _GoneOnce(keepalive_seconds=0.2)
+        try:
+            client = client_of(container, fake)
+            relays, _ = _relay_service(container, supervise)
+            name = _headless(fake, client)
+            run_id, _ = _committed_session(container, name)
+            client.end_session(ENV, name)
+
+            def another_process_resumes() -> None:
+                # Its resume committed between this send's 404 and its lock.
+                created = client.create_headless_session(ENV, HeadlessCreateRequest())
+                with scoped_session(container) as db:
+                    run = db.get_one(models.Session, run_id)
+                    run.controller_session = created.name
+
+            fake.after_404 = another_process_resumes
+            create = f"POST /environments/{ENV}/sessions/headless"
+            creates = fake.calls.count(create)
+
+            with scoped_session(container) as db:
+                turn = relays.send(db, run_id, "Rename the badge")
+                assert turn.error is None
+        finally:
+            fake.close()
+
+        assert [(s.name, s.status) for s in fake.sessions(ENV)] == [
+            ("claude-2", "busy")
+        ]
+        assert fake.calls.count(create) == creates + 1
+        assert _read(container, run_id).controller_session == "claude-2"
+        assert _committed_records(container, run_id) == []
+
+    def test_two_shutdown_timers_stop_an_environment_once(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        supervise: Supervise,
+    ) -> None:
+        container = committed_app.container
+        fake_controller.add_environment(ENV, status="running")
+        with scoped_session(container) as db:
+            _environment_row(db, due=datetime.now(UTC) - timedelta(seconds=1))
+        _, one = _relay_service(container, supervise)
+        _, other = _relay_service(container, supervise)
+        ticks = metric_value(TIMER_RUNS_TOTAL, timer=SHUTDOWN_TIMER, outcome="ok")
+
+        with listening("app.services.environment_service") as log:
+            one.fire_startup()
+            other.fire_startup()
+            log.wait_for(rf"Stopped environment {ENV}, due .*")
+            wait_until(
+                lambda: (
+                    metric_value(TIMER_RUNS_TOTAL, timer=SHUTDOWN_TIMER, outcome="ok")
+                    >= ticks + 6
+                ),
+                "three ticks of each",
+            )
+
+        assert fake_controller.calls.count(f"POST /environments/{ENV}/stop") == 1
+        assert len(log.matching(r"Stopped environment .*")) == 1
+        assert _row_committed(container).server_started_at is None
+
+
+def _row_committed(container: ServiceContainer) -> Environment:
+    with scoped_session(container) as db:
+        row = _row(db)
+        db.expunge(row)
+        return row

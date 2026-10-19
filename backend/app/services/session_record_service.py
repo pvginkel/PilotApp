@@ -78,15 +78,18 @@ def read_records(
     *,
     after: int = 0,
     before: int | None = None,
+    kind: RecordKind | None = None,
     limit: int,
     newest_first: bool = False,
 ) -> list[StoredRecord]:
     """The Session's records after the `seq` `after`, and before `before` when
-    given, at most `limit`, in order, or newest first."""
+    given, of `kind` when given, at most `limit`, in order, or newest first."""
     is_send = SessionRecord.kind_code == RecordKind.SEND
     bounds = [SessionRecord.session_id == session_id, SessionRecord.seq > after]
     if before is not None:
         bounds.append(SessionRecord.seq < before)
+    if kind is not None:
+        bounds.append(SessionRecord.kind_code == kind)
     statement = (
         select(
             SessionRecord,

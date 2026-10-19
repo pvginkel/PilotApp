@@ -7,7 +7,7 @@ commit on a database of its own, as the supervisor does, to the turn's end and
 the shutdown timer's stop."""
 
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -55,15 +55,21 @@ SUPERVISOR_LOGGER = "app.services.supervisor"
 
 class _Recording(ServedFakeController):
     """The fake, keeping each headless create's body, and refusing every send
-    with `502 worker-unreachable` while `refuse_sends` is set."""
+    with `502 worker-unreachable` while `refuse_sends` is set. `during_create`,
+    when set, runs once, as a create is answered: another process's action
+    then."""
 
     def __init__(self, keepalive_seconds: float) -> None:
         super().__init__(keepalive_seconds)
         self.create_bodies: list[dict[str, Any]] = []
         self.refuse_sends = False
+        self.during_create: Callable[[], None] | None = None
 
     def _create_session(self, request: Request, env_id: str) -> Response:
         self.create_bodies.append(request.get_json(silent=True) or {})
+        hook, self.during_create = self.during_create, None
+        if hook is not None:
+            hook()
         return super()._create_session(request, env_id)
 
     def _send(self, request: Request, env_id: str, name: str) -> Response:
@@ -449,7 +455,8 @@ class TestRun:
         _run(starts, run)
 
         assert fake.calls[before:] == [
-            f"POST /environments/{ENV}/sessions/headless/{name}/messages"
+            f"GET /environments/{ENV}/sessions/{name}",
+            f"POST /environments/{ENV}/sessions/headless/{name}/messages",
         ]
         assert _read(session, run.id).state_code == SessionState.RUNNING
         assert _server(session, run.id) == [(None, STARTING_ENV)]
@@ -732,3 +739,143 @@ class TestStartLoop:
         assert kinds[:2] == [RecordKind.SERVER, RecordKind.SERVER]
         assert kinds[-1] == RecordKind.RESULT
         assert set(kinds[2:-1]) == {RecordKind.CLAUDE}
+
+    def test_startup_resumes_a_start_that_was_cut(
+        self,
+        committed_app: Flask,
+        committed_fake: _Recording,
+        supervise: Supervise,
+        loop_log: LogWaiter,
+    ) -> None:
+        container = committed_app.container
+        project_id = _committed_project(container)
+        # A process that wrote the Session and was gone before its loop ran.
+        cut, _, _ = _services(container, supervise)
+        with scoped_session(container) as db:
+            run_id = cut.start_session(
+                db, project_id, ENV, kind_code="work", cwd=CWD, brief=BRIEF
+            ).id
+        _, _, coordinator = _services(container, supervise)
+
+        with listening(START_LOGGER) as log:
+            coordinator.fire_startup()
+            log.wait_for(rf"Resuming the start of session {run_id}")
+
+        loop_log.wait_for(rf"Loop relay:{run_id} started")
+        run = _committed(container, run_id)
+        assert run.state_code == SessionState.RUNNING
+        assert run.controller_session is not None
+        assert committed_fake.create_bodies == [{"cwd": CWD}]
+        assert _sends(committed_fake, run.controller_session) == 1
+
+    def test_a_brief_the_controller_got_before_a_cut_is_not_sent_again(
+        self,
+        committed_app: Flask,
+        committed_fake: _Recording,
+        supervise: Supervise,
+        loop_log: LogWaiter,
+    ) -> None:
+        container = committed_app.container
+        project_id = _committed_project(container)
+        cut, _, _ = _services(container, supervise)
+        with scoped_session(container) as db:
+            run_id = cut.start_session(
+                db, project_id, ENV, kind_code="work", cwd=CWD, brief=BRIEF
+            ).id
+        # The cut process created the session and sent the brief; the send's
+        # commit was lost.
+        committed_fake.set_status(ENV, "running")
+        client = container.controller_client()
+        name = client.create_headless_session(ENV, HeadlessCreateRequest()).name
+        with scoped_session(container) as db:
+            db.get_one(models.Session, run_id).controller_session = name
+        client.send_message(ENV, name, BRIEF)
+        _, _, coordinator = _services(container, supervise)
+
+        coordinator.fire_startup()
+
+        loop_log.wait_for(rf"Loop relay:{run_id} started")
+        assert _committed(container, run_id).state_code == SessionState.RUNNING
+        assert _sends(committed_fake, name) == 1
+        committed_fake.play(ENV, name, raw_turn("turn_text"))
+        committed_fake.finish(ENV, name, "success", "Done.")
+        wait_until(
+            lambda: _committed(container, run_id).state_code == SessionState.IDLE,
+            "the brief's turn ended",
+        )
+
+    def test_a_controller_session_another_process_recorded_first_stands(
+        self,
+        committed_app: Flask,
+        committed_fake: _Recording,
+        supervise: Supervise,
+    ) -> None:
+        container = committed_app.container
+        starts, _, _ = _services(container, supervise)
+        project_id = _committed_project(container)
+        with scoped_session(container) as db:
+            run_id = starts.start_session(
+                db, project_id, ENV, kind_code="work", cwd=CWD, brief=BRIEF
+            ).id
+        client = container.controller_client()
+        other: list[str] = []
+
+        def another_process_creates() -> None:
+            # Its create answered, and its commit, before this run's.
+            other.append(
+                client.create_headless_session(ENV, HeadlessCreateRequest()).name
+            )
+            with scoped_session(container) as db:
+                db.get_one(models.Session, run_id).controller_session = other[0]
+
+        committed_fake.during_create = another_process_creates
+
+        starts.run(run_id, LoopHandle(f"start:{run_id}"))
+
+        run = _committed(container, run_id)
+        assert run.controller_session == other[0]
+        assert run.started_at is None
+        assert run.state_code == SessionState.RUNNING
+        assert committed_fake.session(ENV, other[0]).status == "busy"
+        orphan = [s.name for s in committed_fake.sessions(ENV) if s.name != other[0]]
+        assert [committed_fake.session(ENV, n).status for n in orphan] == ["idle"]
+
+    def test_a_failure_after_another_process_ran_the_session_changes_nothing(
+        self,
+        committed_app: Flask,
+        committed_fake: _Recording,
+        supervise: Supervise,
+    ) -> None:
+        container = committed_app.container
+        starts, _, _ = _services(container, supervise)
+        project_id = _committed_project(container)
+        with scoped_session(container) as db:
+            run_id = starts.start_session(
+                db, project_id, ENV, kind_code="work", cwd=CWD, brief=BRIEF
+            ).id
+
+        def another_process_runs_it() -> None:
+            with scoped_session(container) as db:
+                db.get_one(models.Session, run_id).state_code = SessionState.RUNNING
+            committed_fake.unreachable(ENV)
+
+        committed_fake.during_create = another_process_runs_it
+
+        starts.run(run_id, LoopHandle(f"start:{run_id}"))
+
+        run = _committed(container, run_id)
+        assert (run.state_code, run.error) == (SessionState.RUNNING, None)
+        with scoped_session(container) as db:
+            assert [payload for _, payload in _server(db, run_id)] == [
+                STARTING_ENV,
+                CREATING,
+            ]
+
+
+START_LOGGER = "app.services.session_start_service"
+
+
+def _sends(fake: ServedFakeController, name: str) -> int:
+    return fake.calls.count(
+        f"POST /environments/{ENV}/sessions/headless/{name}/messages"
+    )

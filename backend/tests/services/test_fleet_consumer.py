@@ -236,6 +236,34 @@ class TestFleetConsumer:
         [view] = consumer.sessions("env-a") or ()
         assert (view.name, view.mode, view.working) == (created.name, "headless", False)
 
+    def test_it_keeps_each_environments_latest_state(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        consume: Consume,
+    ) -> None:
+        fake_controller.add_environment("env-a", status="running")
+        consumer, _ = consume()
+        listed = consumer.environment("env-a")
+        assert listed is not None and listed.status == "running"
+        assert listed.pod is not None and listed.pod.restart_count == 0
+        assert consumer.environment("env-x") is None
+
+        fake_controller.restart("env-a")
+
+        def restarts() -> int | None:
+            environment = consumer.environment("env-a")
+            if environment is None or environment.pod is None:
+                return None
+            return environment.pod.restart_count
+
+        wait_until(lambda: restarts() == 1, "the restart's state frame")
+
+        fake_controller.remove_environment("env-a")
+
+        wait_until(lambda: consumer.environment("env-a") is None, "gone")
+
     def test_the_list_is_applied_before_the_frames_that_came_meanwhile(
         self, committed_app: Flask, consume: Consume
     ) -> None:
@@ -297,6 +325,7 @@ class TestFleetConsumer:
         assert not fleet_log.matching(r"Loop fleet raised.*")
         assert metric_value(FLEET_STREAM_CONNECTED) == 0
         assert consumer.sessions("env-a") is None
+        assert consumer.environment("env-a") is None
 
     def test_without_a_controller_it_does_not_connect(
         self,

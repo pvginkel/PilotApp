@@ -47,7 +47,7 @@ FLEET_STREAM_CONNECTED = Gauge(
 
 class FleetConsumer:
     """Keeps the Environment rows current, and each environment's latest
-    session set."""
+    state and session set."""
 
     def __init__(self, container: "ServiceContainer", supervisor: Supervisor) -> None:
         """Register the `fleet` job, whose reconcile starts its loop.
@@ -59,6 +59,7 @@ class FleetConsumer:
         self._container = container
         self._supervisor = supervisor
         self._lock = threading.Lock()
+        self._environments: dict[str, ControllerEnvironment] = {}
         self._sessions: dict[str, tuple[SessionView, ...]] = {}
         supervisor.register_job(
             FLEET_JOB, needs_controller=True, reconcile=self._reconcile
@@ -69,6 +70,12 @@ class FleetConsumer:
         None while the stream is down, and for an environment it has not given."""
         with self._lock:
             return self._sessions.get(env_id)
+
+    def environment(self, env_id: str) -> ControllerEnvironment | None:
+        """The environment as the latest list or `state` frame gave it; None
+        while the stream is down, and for an environment it has not given."""
+        with self._lock:
+            return self._environments.get(env_id)
 
     def _reconcile(self, db: Session) -> None:
         # No rows of its own: each connect's list is its reconcile.
@@ -94,6 +101,7 @@ class FleetConsumer:
             finally:
                 FLEET_STREAM_CONNECTED.set(0)
                 with self._lock:
+                    self._environments.clear()
                     self._sessions.clear()
 
     def _apply_listing(self, listing: EnvironmentList) -> None:
@@ -101,6 +109,10 @@ class FleetConsumer:
         reported = sorted(listing.items, key=lambda environment: environment.env_id)
         listed = {environment.env_id for environment in reported}
         listed.update(listing.unprojectable)
+        with self._lock:
+            self._environments.update(
+                (environment.env_id, environment) for environment in reported
+            )
         with scoped_session(self._container) as db:
             for environment in reported:
                 _report(db, environment, seen_at)
@@ -114,10 +126,13 @@ class FleetConsumer:
     def _apply(self, frame: FleetFrame) -> None:
         match frame:
             case StateFrame(environment=environment):
+                with self._lock:
+                    self._environments[environment.env_id] = environment
                 with scoped_session(self._container) as db:
                     _report(db, environment, datetime.now(UTC))
             case GoneFrame(env_id=env_id):
                 with self._lock:
+                    self._environments.pop(env_id, None)
                     self._sessions.pop(env_id, None)
                 with scoped_session(self._container) as db:
                     db.execute(

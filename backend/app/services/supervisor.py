@@ -106,9 +106,15 @@ class LoopHandle:
     def _request_stop(self) -> None:
         with self._lock:
             self._stop.set()
+        self._close_held()
+
+    def _close_held(self) -> bool:
+        """Close what the run holds now; whether it held anything."""
+        with self._lock:
             held, self._held = self._held, []
         for resource in held:
             resource.close()
+        return bool(held)
 
 
 @dataclass
@@ -260,6 +266,19 @@ class Supervisor:
             else:
                 entry.pending[name] = run
             return True
+
+    def interrupt_loop(self, job: str, key: str | int | None = None) -> bool:
+        """Close the I/O the live loop `job:key`'s run holds, without stopping
+        the loop: a controller stream's iteration ends without raising, and the
+        run carries on from there.
+
+        Returns:
+            Whether the loop is live and its run held I/O, which is now closed
+        """
+        name = job if key is None else f"{job}:{key}"
+        with self._lock:
+            loop = self._loops.get(name)
+        return loop is not None and loop.handle._close_held()
 
     def _spawn(self, job: _Job, name: str, run: LoopRun) -> None:
         # Under self._lock.

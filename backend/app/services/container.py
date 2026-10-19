@@ -29,6 +29,7 @@ from app.services.oidc_client_service import OidcClientService
 from app.services.people_service import PeopleService
 from app.services.project_service import ProjectService
 from app.services.relay_service import RelayService
+from app.services.relay_watchdog import RelayWatchdog
 from app.services.session_record_service import SessionRecordService
 from app.services.session_start_service import SessionStartService
 from app.services.session_stream_service import SessionStreamService
@@ -196,6 +197,12 @@ class ServiceContainer(containers.DeclarativeContainer):
         environment_service=environment_service,
     )
     register_for_background_startup(lambda c: c.relay_service())
+    # The relays' watchdog, on the fleet stream (design 2 §9.3); its timer
+    # registers on the supervisor when built, before STARTUP.
+    relay_watchdog = providers.Singleton(
+        RelayWatchdog, supervisor=supervisor, fleet_consumer=fleet_consumer
+    )
+    register_for_background_startup(lambda c: c.relay_watchdog())
 
     # The session start (design 2 §13.2); its job registers on the supervisor
     # when built, before STARTUP.

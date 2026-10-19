@@ -11,6 +11,12 @@ such record rebuilds the current line in its transaction.
 Every failure of the controller during the start leaves the Session `failed`
 with its `error` and a `server` record saying so, its brief no longer in
 flight, and nothing is retried (F125).
+
+At STARTUP the job's reconcile runs the start loop of every Session still
+`starting`, which resumes where its rows left it (§8.2). Each write the run makes
+is conditional on the rows it read, under the Session's lock, so a second
+process running the same start during a roll's overlap (§8.1) changes nothing
+the first has written.
 """
 
 import hashlib
@@ -99,7 +105,8 @@ class SessionStartService:
         relay_service: RelayService,
         controller_configured: bool,
     ) -> None:
-        """Register the `start` job, whose loops are one per Session.
+        """Register the `start` job, whose loops are one per Session, and whose
+        reconcile runs the start of every Session still `starting`.
 
         Args:
             container: Gives each start transaction its database session, and
@@ -117,7 +124,9 @@ class SessionStartService:
         self._environments = environment_service
         self._relays = relay_service
         self._controller_configured = controller_configured
-        supervisor.register_job(START_JOB, needs_controller=True)
+        supervisor.register_job(
+            START_JOB, needs_controller=True, reconcile=self._reconcile
+        )
 
     def start_session(
         self,
@@ -184,9 +193,11 @@ class SessionStartService:
     def run(self, session_id: uuid.UUID, handle: LoopHandle) -> None:
         """The start loop's run, from where the Session's rows left its start:
         the environment brought up and the headless session created while the
-        Session has no controller session, then the brief sent. Returns at once
-        for a Session no longer `starting`, and between the phases when the
-        loop is told to stop.
+        Session has no controller session, then the brief sent, unless the
+        controller has it already. Returns at once for a Session no longer
+        `starting`, and between the phases when the loop is told to stop. A
+        controller session another process recorded first stands, and the one
+        this run created is left to the controller's reaper.
         """
         with scoped_session(self._container) as db:
             pending = _pending(db, session_id)
@@ -208,14 +219,28 @@ class SessionStartService:
                 return
             with scoped_session(self._container) as db:
                 session = self._records(db).lock_session(session_id)
-                session.controller_session = created.name
-                session.started_at = datetime.now(UTC)
+                if (
+                    session.state_code == SessionState.STARTING
+                    and session.controller_session is None
+                ):
+                    session.controller_session = created.name
+                    session.started_at = datetime.now(UTC)
             if handle.stopping:
                 return
         with scoped_session(self._container) as db:
             brief = self._relays.send_turn(db, pending.brief_id)
             if brief.error is not None:
                 self._fail(db, session_id, brief.error, recorded=True)
+
+    def _reconcile(self, db: Session) -> None:
+        """At STARTUP: run the start of every Session still `starting` (§8.2)."""
+        for session_id in db.scalars(
+            select(AgentSession.id)
+            .where(AgentSession.state_code == SessionState.STARTING)
+            .order_by(AgentSession.id)
+        ):
+            logger.info("Resuming the start of session %s", session_id)
+            self._start_loop(session_id)
 
     def _start_loop(self, session_id: uuid.UUID) -> None:
         self._supervisor.start_loop(
@@ -238,8 +263,11 @@ class SessionStartService:
         """The Session `failed` with `reason`, its brief ended, and a `server`
         record saying so unless the brief's failed send `recorded` one. Then
         the environment's shutdown timer is armed, if it is Pilot's to stop and
-        nothing else runs or starts there."""
+        nothing else runs or starts there. A Session no longer `starting` is
+        left as it is."""
         records = self._records(db)
+        if records.lock_session(session_id).state_code != SessionState.STARTING:
+            return
         if not recorded:
             records.append(
                 session_id,
