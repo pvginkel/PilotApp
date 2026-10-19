@@ -35,7 +35,7 @@ func run() int {
 		return 1
 	}
 	logger.Info("pilot-sync is keeping the tree", "server", cfg.PilotURL, "environment", cfg.EnvironmentID,
-		"tree", cfg.TreeRoot, "data", cfg.DataDir, "protocol", protocol.Version)
+		"tree", cfg.TreeRoot, "data", cfg.DataDir, "local_port", cfg.LocalPort, "protocol", protocol.Version)
 	if err := s.Run(ctx); err != nil {
 		logger.Error("pilot-sync stopped", "error", err)
 		return 1

@@ -5,8 +5,10 @@ import (
 	"errors"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 
 	"github.com/pvginkel/PilotApp/sidecar/internal/files"
@@ -18,13 +20,20 @@ import (
 // one; a path has one at a time (design 1 §5.3).
 const parallelCalls = 4
 
-// strayNote is the local note on a file the record never bore (design 1
-// §5.5, D10).
-const strayNote = "not a document of the record — files are born through `add_item`"
+// The local notes the hook prints.
+const (
+	// strayNote is on a file the record never bore (design 1 §5.5, D10).
+	strayNote = "not a document of the record — files are born through `add_item`"
+	// revertNote is on a read-only view a write got through to (design 1 §8).
+	revertNote = "a read-only view; re-projected"
+)
+
+// viewMode is the mode of a read-only view (design 1 §8).
+const viewMode fs.FileMode = 0o444
 
 // tree is the store's tree as the sidecar keeps it: the files under its
-// root, the shadow of each as it last synced, the local notes on them, and
-// the server they sync with.
+// root, the shadow of each as it last synced, the local notes on them, the
+// read-only views among them, and the server they sync with.
 type tree struct {
 	root   string
 	client *protocol.Client
@@ -33,23 +42,63 @@ type tree struct {
 	logger *slog.Logger
 	slots  chan struct{}
 	locks  *pathLocks
+
+	mu       sync.Mutex
+	readonly map[string]bool
 }
 
 func newTree(root string, client *protocol.Client, store *shadow.Store, logger *slog.Logger) *tree {
 	return &tree{
-		root:   root,
-		client: client,
-		shadow: store,
-		notes:  &notes{byPath: map[string]string{}},
-		logger: logger,
-		slots:  make(chan struct{}, parallelCalls),
-		locks:  &pathLocks{held: map[string]*pathLock{}},
+		root:     root,
+		client:   client,
+		shadow:   store,
+		notes:    &notes{byPath: map[string]note{}},
+		logger:   logger,
+		slots:    make(chan struct{}, parallelCalls),
+		locks:    &pathLocks{held: map[string]*pathLock{}},
+		readonly: map[string]bool{},
 	}
+}
+
+// listed takes the read-only views of manifest, every path the store syncs.
+// Until the first manifest is listed, no path is a view.
+func (t *tree) listed(manifest []protocol.Entry) {
+	readonly := map[string]bool{}
+	for _, entry := range manifest {
+		if entry.Readonly {
+			readonly[entry.Path] = true
+		}
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.readonly = readonly
+}
+
+// view says whether path is a read-only view, as the last manifest listed
+// it.
+func (t *tree) view(path string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.readonly[path]
 }
 
 // name is the file of path, a path from the tree's root.
 func (t *tree) name(path string) string {
 	return filepath.Join(t.root, filepath.FromSlash(path))
+}
+
+// path is the path from the tree's root of the file at name, an absolute
+// path; false when name is not a file of the tree.
+func (t *tree) path(name string) (string, bool) {
+	if !filepath.IsAbs(name) {
+		return "", false
+	}
+	rel, err := filepath.Rel(t.root, name)
+	if err != nil {
+		return "", false
+	}
+	path := filepath.ToSlash(rel)
+	return path, protocol.ValidPath(path)
 }
 
 // hold takes a call's slot and path's lock, false when ctx is done first;
@@ -124,9 +173,10 @@ func (t *tree) unsynced(path string) (bool, fs.FileMode, error) {
 }
 
 // download fetches the bytes path must hold and writes them, the shadow
-// first, so the watch's echo of the write hashes as synced. A file holding
-// bytes that never synced keeps them: they go up, and the answer carries the
-// record's. The caller holds path.
+// first, so the watch's echo of the write hashes as synced; a read-only view
+// is written with the view's mode. A file holding bytes that never synced
+// keeps them: they go up, and the answer carries the record's. The caller
+// holds path.
 func (t *tree) download(ctx context.Context, path string) {
 	content, err := t.client.Get(ctx, path)
 	switch {
@@ -149,6 +199,9 @@ func (t *tree) download(ctx context.Context, path string) {
 		t.logger.Info("changed on disk since it synced: left for its upload", "path", path)
 		return
 	}
+	if t.view(path) {
+		mode = viewMode
+	}
 	name := t.name(path)
 	if err := os.MkdirAll(filepath.Dir(name), 0o755); err != nil {
 		t.logger.Error("cannot write a file of the record", "path", path, "error", err)
@@ -164,6 +217,46 @@ func (t *tree) download(ctx context.Context, path string) {
 	}
 	t.notes.clear(path)
 	t.logger.Info("written down", "path", path, "hash", protocol.Hash(content))
+}
+
+// revert writes the bytes path last synced with over the file of path, a
+// read-only view a write got through to, with the view's mode, and notes it
+// for the next check; nothing goes up (design 1 §8). It answers the hash the
+// file then holds, "" when it could not. The caller holds path.
+func (t *tree) revert(path string) string {
+	content, err := t.shadow.Read(path)
+	if err == nil {
+		err = files.Write(t.name(path), content, viewMode)
+	}
+	if err != nil {
+		t.logger.Error("cannot re-project a read-only view", "path", path, "error", err)
+		return ""
+	}
+	t.notes.once(path, revertNote)
+	t.logger.Info("a read-only view was written: re-projected", "path", path)
+	return protocol.Hash(content)
+}
+
+// protect gives the file of path, a read-only view, the view's mode when it
+// has another. The caller holds path.
+func (t *tree) protect(path string) {
+	name := t.name(path)
+	info, err := os.Lstat(name)
+	if errors.Is(err, fs.ErrNotExist) {
+		return
+	}
+	if err != nil {
+		t.logger.Error("cannot read a file of the tree", "path", path, "error", err)
+		return
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm() == viewMode {
+		return
+	}
+	if err := os.Chmod(name, viewMode); err != nil {
+		t.logger.Error("cannot make a read-only view read-only", "path", path, "error", err)
+		return
+	}
+	t.logger.Info("made read-only", "path", path)
 }
 
 // remove deletes the file of path, which the record no longer lists, and
@@ -204,19 +297,52 @@ func (t *tree) remove(path string) {
 // knows of a file that the server holds no Save Error for.
 type notes struct {
 	mu     sync.Mutex
-	byPath map[string]string
+	byPath map[string]note
 }
 
-func (n *notes) note(path, text string) {
+// note is a local note: its text, and whether the check that prints it ends
+// it.
+type note struct {
+	text string
+	once bool
+}
+
+// keep notes text on path until it is cleared.
+func (n *notes) keep(path, text string) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	n.byPath[path] = text
+	n.byPath[path] = note{text: text}
 }
 
+// once notes text on path until a check prints it.
+func (n *notes) once(path, text string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.byPath[path] = note{text: text, once: true}
+}
+
+// clear ends the note kept on path; a note made once stays until printed.
 func (n *notes) clear(path string) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	delete(n.byPath, path)
+	if !n.byPath[path].once {
+		delete(n.byPath, path)
+	}
+}
+
+// print is every note as the hook prints it, `<path>: <note>`, in path
+// order; a note made once is printed once.
+func (n *notes) print() []string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	lines := make([]string, 0, len(n.byPath))
+	for _, path := range slices.Sorted(maps.Keys(n.byPath)) {
+		lines = append(lines, path+": "+n.byPath[path].text)
+		if n.byPath[path].once {
+			delete(n.byPath, path)
+		}
+	}
+	return lines
 }
 
 // pathLocks holds a lock per path, so the file of a path and its shadow are

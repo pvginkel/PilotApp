@@ -49,13 +49,22 @@ type posted struct {
 	Shadow map[string]string `json:"shadow"`
 }
 
+// checkPost is a check the server took.
+type checkPost struct {
+	Path        string  `json:"path"`
+	Hash        string  `json:"hash"`
+	WaitSeconds float64 `json:"wait_seconds"`
+}
+
 // server plays the sync routes as design 1 §5.1 shapes them, over a record
-// of its own: files, path to the bytes it must hold. A PUT is answered with
-// respond, 204 by default, and the record takes what it answered; a GET
-// answers the record; a manifest is answered by design 1 §5.5's rule over
-// the record, amended by reconciling; the change stream is accepted unless
-// opening answers its attempt otherwise, and each one accepted is handed to
-// the test on streams. Two PUTs of one path out at once fail the test.
+// of its own: files, path to the bytes it must hold, those in views
+// read-only. A PUT is answered with respond, 204 by default, and the record
+// takes what it answered; a GET answers the record; a manifest is answered
+// by design 1 §5.5's rule over the record, amended by reconciling; a check
+// is answered by checking, its path agreed and no error by default; the
+// change stream is accepted unless opening answers its attempt otherwise,
+// and each one accepted is handed to the test on streams. Two PUTs of one
+// path out at once fail the test.
 type server struct {
 	t       *testing.T
 	url     string
@@ -64,13 +73,16 @@ type server struct {
 
 	mu          sync.Mutex
 	files       map[string]string
+	views       map[string]bool
 	puts        []put
+	checks      []checkPost
 	gets        []string
 	posts       []posted
 	connects    int
 	out         map[string]int
 	respond     func(put) answer
 	reconciling func(posted, protocol.Reconciled) protocol.Reconciled
+	checking    func(checkPost) protocol.CheckAnswer
 	opening     func(attempt int) (status int, body string)
 }
 
@@ -87,8 +99,12 @@ func newServer(t *testing.T) *server {
 		quit:    make(chan struct{}),
 		streams: make(chan *stream, 16),
 		files:   map[string]string{},
+		views:   map[string]bool{},
 		out:     map[string]int{},
 		respond: func(put) answer { return answer{} },
+		checking: func(checkPost) protocol.CheckAnswer {
+			return protocol.CheckAnswer{Checked: true, Errors: []protocol.SaveError{}, HomelessDeferrals: []protocol.HomelessDeferral{}}
+		},
 		opening: func(int) (int, string) { return 0, "" },
 	}
 	httpServer := httptest.NewServer(http.HandlerFunc(s.serve))
@@ -111,6 +127,12 @@ func (s *server) amending(reconciling func(posted, protocol.Reconciled) protocol
 	s.reconciling = reconciling
 }
 
+func (s *server) answeringChecks(checking func(checkPost) protocol.CheckAnswer) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.checking = checking
+}
+
 // opens answers the change stream's attempts, each counted from 1: a status
 // and a body, or 0 to open it.
 func (s *server) opens(opening func(attempt int) (int, string)) {
@@ -125,9 +147,18 @@ func (s *server) record(path, content string) {
 	defer s.mu.Unlock()
 	if content == "" {
 		delete(s.files, path)
+		delete(s.views, path)
 		return
 	}
 	s.files[path] = content
+}
+
+// view sets what path, a read-only view, must hold.
+func (s *server) view(path, content string) {
+	s.record(path, content)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.views[path] = true
 }
 
 func (s *server) taken() []put {
@@ -146,6 +177,12 @@ func (s *server) manifests() []posted {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return slices.Clone(s.posts)
+}
+
+func (s *server) checked() []checkPost {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.checks)
 }
 
 // accept is the change stream the server opens next.
@@ -184,6 +221,8 @@ func (s *server) serve(w http.ResponseWriter, r *http.Request) {
 		s.manifest(w, r)
 	case r.URL.Path == "/api/sync/events" && r.Method == http.MethodGet:
 		s.events(w, r)
+	case r.URL.Path == "/api/sync/check" && r.Method == http.MethodPost:
+		s.check(w, r)
 	default:
 		s.t.Errorf("unexpected %s %s", r.Method, r.URL)
 		w.WriteHeader(http.StatusInternalServerError)
@@ -272,7 +311,7 @@ func (s *server) rule(body posted) protocol.Reconciled {
 		Manifest: []protocol.Entry{}, SendUp: []string{}, WriteDown: []protocol.Entry{}, Delete: []string{},
 	}
 	for _, path := range slices.Sorted(maps.Keys(s.files)) {
-		entry := protocol.Entry{Path: path, Hash: protocol.Hash([]byte(s.files[path]))}
+		entry := protocol.Entry{Path: path, Hash: protocol.Hash([]byte(s.files[path])), Readonly: s.views[path]}
 		answered.Manifest = append(answered.Manifest, entry)
 		if body.Tree[path] != entry.Hash {
 			answered.WriteDown = append(answered.WriteDown, entry)
@@ -288,6 +327,23 @@ func (s *server) rule(body posted) protocol.Reconciled {
 	}
 	slices.Sort(answered.Delete)
 	return answered
+}
+
+func (s *server) check(w http.ResponseWriter, r *http.Request) {
+	var body checkPost
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		s.t.Errorf("posted a check that is not {path, hash, wait_seconds}: %v", err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	s.mu.Lock()
+	s.checks = append(s.checks, body)
+	checking := s.checking
+	s.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(checking(body)); err != nil {
+		s.t.Error(err)
+	}
 }
 
 func (s *server) events(w http.ResponseWriter, r *http.Request) {
@@ -411,7 +467,7 @@ func (s started) noted(path string) string {
 	notes := s.sidecar.tree.notes
 	notes.mu.Lock()
 	defer notes.mu.Unlock()
-	return notes.byPath[path]
+	return notes.byPath[path].text
 }
 
 // synced is the hash path last synced with, "" when it has not.
@@ -425,9 +481,10 @@ func configure(s *server, tree, data string) config.Config {
 		PilotURL:      s.url,
 		Token:         token,
 		EnvironmentID: environment,
-		LocalPort:     config.DefaultLocalPort,
-		TreeRoot:      tree,
-		DataDir:       data,
+		// A port the kernel picks, free.
+		LocalPort: 0,
+		TreeRoot:  tree,
+		DataDir:   data,
 	}
 }
 

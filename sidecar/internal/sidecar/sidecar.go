@@ -7,8 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/pvginkel/PilotApp/sidecar/internal/config"
@@ -24,6 +27,8 @@ type Sidecar struct {
 	watcher *watch.Watcher
 	uploads *uploads
 	logger  *slog.Logger
+	// listener is the local port's, on localhost, served for the hook.
+	listener net.Listener
 	// wanted holds a reconcile asked for and not yet run.
 	wanted chan struct{}
 	// sleep waits d, false when ctx is done first.
@@ -31,8 +36,8 @@ type Sidecar struct {
 }
 
 // New readies the sidecar cfg configures: its data directory proven
-// writable, its shadow loaded from it, and its tree, made when there is
-// none, watched.
+// writable, its shadow loaded from it, its tree, made when there is none,
+// watched, and its local port bound on localhost.
 func New(cfg config.Config, logger *slog.Logger) (*Sidecar, error) {
 	if err := probe(cfg.DataDir); err != nil {
 		return nil, fmt.Errorf("cannot write the data directory %s: %w", cfg.DataDir, err)
@@ -44,15 +49,23 @@ func New(cfg config.Config, logger *slog.Logger) (*Sidecar, error) {
 	if err := os.MkdirAll(cfg.TreeRoot, 0o755); err != nil {
 		return nil, fmt.Errorf("cannot make the tree %s: %w", cfg.TreeRoot, err)
 	}
+	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.LocalPort))
+	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", address)
+	if err != nil {
+		return nil, fmt.Errorf("cannot serve the hook's check: %w", err)
+	}
 	t := newTree(cfg.TreeRoot, protocol.NewClient(cfg.PilotURL, cfg.Token, cfg.EnvironmentID), store, logger)
-	s := &Sidecar{tree: t, uploads: newUploads(t), logger: logger, wanted: make(chan struct{}, 1), sleep: sleep}
+	s := &Sidecar{
+		tree: t, uploads: newUploads(t), logger: logger, listener: listener, wanted: make(chan struct{}, 1), sleep: sleep,
+	}
 	if s.watcher, err = watch.New(cfg.TreeRoot, watch.Debounce, s.uploads.changed, s.overflowed, logger); err != nil {
-		return nil, err
+		return nil, errors.Join(err, listener.Close())
 	}
 	return s, nil
 }
 
-// Run keeps the tree until ctx is done, then abandons the calls still out.
+// Run keeps the tree and serves the hook until ctx is done, then abandons
+// the calls still out.
 func (s *Sidecar) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -61,11 +74,23 @@ func (s *Sidecar) Run(ctx context.Context) error {
 		s.keep(ctx)
 		close(kept)
 	}()
+	server := s.local(ctx)
+	var serveErr error
+	served := make(chan struct{})
+	go func() {
+		defer close(served)
+		if err := server.Serve(s.listener); !errors.Is(err, http.ErrServerClosed) {
+			serveErr = fmt.Errorf("serve the hook's check: %w", err)
+			cancel()
+		}
+	}()
 	err := s.watcher.Run(ctx)
 	cancel()
+	err = errors.Join(err, server.Shutdown(context.Background()))
+	<-served
 	s.uploads.close()
 	<-kept
-	return err
+	return errors.Join(err, serveErr)
 }
 
 func sleep(ctx context.Context, d time.Duration) bool {

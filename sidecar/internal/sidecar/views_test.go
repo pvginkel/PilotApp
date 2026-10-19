@@ -1,0 +1,122 @@
+package sidecar
+
+import (
+	"io/fs"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+// writeOver replaces the file at name with content as `sed -i` does: a new
+// file renamed over it, whatever its mode.
+func writeOver(t *testing.T, name, content string) {
+	t.Helper()
+	tmp := filepath.Join(filepath.Dir(name), "sed-tmp")
+	write(t, tmp, content)
+	if err := os.Rename(tmp, name); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func modeOf(t *testing.T, name string) fs.FileMode {
+	t.Helper()
+	info, err := os.Stat(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return info.Mode().Perm()
+}
+
+func TestProjectsAReadOnlyViewMode0444(t *testing.T) {
+	s := newServer(t)
+	tree := t.TempDir()
+	at := func(path string) string { return filepath.Join(tree, filepath.FromSlash(path)) }
+	s.view("proj/timeline.json", "[]")
+	s.view("reference.json", "{}")
+	s.record("proj/inbox/1-a.md", "one")
+	running := start(t, s, tree, t.TempDir())
+
+	for path, want := range map[string]fs.FileMode{
+		"proj/timeline.json": 0o444, "reference.json": 0o444, "proj/inbox/1-a.md": 0o644,
+	} {
+		if got := modeOf(t, at(path)); got != want {
+			t.Errorf("%s: mode %v, want %v", path, got, want)
+		}
+	}
+
+	// A record move rewrites the view read-only.
+	s.view("proj/timeline.json", "[1]")
+	running.stream.send(t, change("proj/timeline.json", "[1]"))
+	eventually(t, "the view rewritten", func() bool { return holds(at("proj/timeline.json"), "[1]") })
+	if got := modeOf(t, at("proj/timeline.json")); got != 0o444 {
+		t.Errorf("rewritten with mode %v", got)
+	}
+
+	// A reconcile makes a view whose mode was changed read-only again.
+	if err := os.Chmod(at("reference.json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	running.stream.send(t, manifest)
+	eventually(t, "the view made read-only", func() bool { return modeOf(t, at("reference.json")) == 0o444 })
+	if puts := s.taken(); len(puts) != 0 {
+		t.Fatalf("took %v", puts)
+	}
+}
+
+func TestRevertsAWriteToAReadOnlyViewAndNotesItOnce(t *testing.T) {
+	s := newServer(t)
+	tree := t.TempDir()
+	view := filepath.Join(tree, "proj", "timeline.json")
+	document := filepath.Join(tree, "proj", "inbox", "1-a.md")
+	s.view("proj/timeline.json", "[]")
+	s.record("proj/inbox/1-a.md", "one")
+	running := start(t, s, tree, t.TempDir())
+
+	writeOver(t, view, `["edited"]`)
+	eventually(t, "the view reverted", func() bool { return holds(view, "[]") })
+	if got := modeOf(t, view); got != 0o444 {
+		t.Errorf("reverted with mode %v", got)
+	}
+	settle()
+	if puts := s.taken(); len(puts) != 0 {
+		t.Fatalf("took %v: a view sent up", puts)
+	}
+	if note := running.noted("proj/timeline.json"); note != revertNote {
+		t.Fatalf("noted %q", note)
+	}
+
+	// The record moves the view: the note stays for the hook.
+	s.view("proj/timeline.json", "[1]")
+	running.stream.send(t, change("proj/timeline.json", "[1]"))
+	eventually(t, "the view rewritten", func() bool { return holds(view, "[1]") })
+	write(t, document, "two")
+	if got := running.check(t, document); got != "proj/timeline.json: "+revertNote+"\n" {
+		t.Fatalf("printed %q", got)
+	}
+	if got := running.check(t, document); got != "" {
+		t.Fatalf("printed %q the second time", got)
+	}
+}
+
+func TestCheckOfAReadOnlyViewWrittenPostsTheViewsHash(t *testing.T) {
+	s := newServer(t)
+	tree := t.TempDir()
+	view := filepath.Join(tree, "reference.json")
+	s.view("reference.json", "{}")
+	running := start(t, s, tree, t.TempDir())
+
+	writeOver(t, view, `{"edited": true}`)
+	if got := running.check(t, view); got != "reference.json: "+revertNote+"\n" {
+		t.Fatalf("printed %q", got)
+	}
+	if !holds(view, "{}") {
+		t.Fatalf("the view holds %q", read(t, view))
+	}
+	if checks := s.checked(); len(checks) != 1 || checks[0].Hash != hashOf("{}") {
+		t.Fatalf("posted %+v", checks)
+	}
+	settle()
+	if puts := s.taken(); len(puts) != 0 {
+		t.Fatalf("took %v: a view sent up", puts)
+	}
+}

@@ -116,3 +116,21 @@ func TestDeleteForgetsThePathAndTheDirectoriesItEmpties(t *testing.T) {
 		t.Fatalf("a restart holds %v", got)
 	}
 }
+
+func TestReadIsTheBytesLastSynced(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Read("proj/timeline.json"); err == nil {
+		t.Fatal("read a path never synced")
+	}
+	for _, content := range []string{"[]", "[1]"} {
+		if err := store.Put("proj/timeline.json", []byte(content)); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := store.Read("proj/timeline.json"); err != nil || string(got) != content {
+			t.Fatalf("read %q, %v", got, err)
+		}
+	}
+}

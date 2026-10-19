@@ -130,8 +130,8 @@ func (s *Sidecar) overflowed() {
 
 // reconcile makes the tree the record's projection (design 1 §5.5): what
 // changed on disk since it synced goes up first; then the tree's hashes and
-// the shadow's are posted, and the answer's paths are written down and
-// deleted.
+// the shadow's are posted, the answer's paths are written down, its
+// read-only views given the view's mode, and its deletes deleted.
 func (s *Sidecar) reconcile(ctx context.Context) error {
 	t := s.tree
 	disk, err := t.walk()
@@ -153,6 +153,7 @@ func (s *Sidecar) reconcile(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("reconcile: %w", err)
 	}
+	t.listed(answer.Manifest)
 	var written sync.WaitGroup
 	for _, entry := range answer.WriteDown {
 		written.Go(func() {
@@ -165,6 +166,17 @@ func (s *Sidecar) reconcile(ctx context.Context) error {
 		})
 	}
 	written.Wait()
+	for _, entry := range answer.Manifest {
+		if !entry.Readonly {
+			continue
+		}
+		release, ok := t.hold(ctx, entry.Path)
+		if !ok {
+			break
+		}
+		t.protect(entry.Path)
+		release()
+	}
 	for _, path := range answer.Delete {
 		release, ok := t.hold(ctx, path)
 		if !ok {

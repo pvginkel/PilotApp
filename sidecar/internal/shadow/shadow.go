@@ -84,6 +84,17 @@ func (s *Store) Put(path string, content []byte) error {
 	return nil
 }
 
+// Read is the bytes path last synced with.
+func (s *Store) Read(path string) ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	content, err := os.ReadFile(filepath.Join(s.dir, filepath.FromSlash(path)))
+	if err != nil {
+		return nil, fmt.Errorf("read %s in the shadow: %w", path, err)
+	}
+	return content, nil
+}
+
 // Hashes is every path the shadow holds, with the hash it last synced.
 func (s *Store) Hashes() map[string]string {
 	s.mu.Lock()
