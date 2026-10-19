@@ -42,4 +42,17 @@ export class People {
     expect(response.status(), await response.text()).toBe(201);
     return (await response.json()) as Self;
   }
+
+  /** Another person on the record, who holds `handle`; the spec stays signed in as it was. */
+  async other(handle: string): Promise<void> {
+    const response = await this.page.request.post(`${this.backendUrl}/api/testing/people`, { data: { handle } });
+    expect(response.status(), await response.text()).toBe(201);
+  }
+
+  /** The signed-in person as the API reads them. */
+  async self(): Promise<Self> {
+    const response = await this.page.request.get(`${this.backendUrl}/api/people/self`);
+    expect(response.status(), await response.text()).toBe(200);
+    return (await response.json()) as Self;
+  }
 }

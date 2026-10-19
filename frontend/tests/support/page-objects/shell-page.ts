@@ -16,6 +16,7 @@ export class ShellPage {
   readonly profileMenu: Locator;
   readonly profileName: Locator;
   readonly theme: Locator;
+  readonly profileItem: Locator;
   readonly signOut: Locator;
   readonly keys: Locator;
   readonly keysBackdrop: Locator;
@@ -34,6 +35,7 @@ export class ShellPage {
     this.profileMenu = page.getByTestId('app-shell.topbar.user.dropdown');
     this.profileName = page.getByTestId('shell.profile.name');
     this.theme = page.getByTestId('shell.profile.theme');
+    this.profileItem = page.getByTestId('shell.profile.page');
     this.signOut = page.getByTestId('app-shell.topbar.user.logout');
     this.keys = page.getByTestId('shell.keys');
     this.keysBackdrop = page.getByTestId('shell.keys.backdrop');

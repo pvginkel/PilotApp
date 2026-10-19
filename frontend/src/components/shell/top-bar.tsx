@@ -1,13 +1,15 @@
 /**
  * The top bar (F111): the drawer toggle on a narrow window, the logo on its tile and the name, and
- * the signed-in person's avatar, which opens the profile menu (F126).
+ * the signed-in person's avatar, which opens the profile menu (F126). At the handle step it has
+ * no drawer to toggle, and its menu no Profile.
  */
 
-import { LogOut, Menu as MenuIcon } from 'lucide-react';
+import { useNavigate } from '@tanstack/react-router';
+import { LogOut, Menu as MenuIcon, UserRound } from 'lucide-react';
 import { Avatar } from '@/components/shared/avatar';
 import { Menu, MenuItem } from '@/components/shared/menu';
 import { useAuthContext } from '@/contexts/auth-context';
-import type { Self } from '@/hooks/use-self';
+import { isPerson, type Self } from '@/hooks/use-self';
 import { THEMES, type Theme } from '@/lib/browser-state';
 import { useTheme } from '@/lib/theme';
 
@@ -15,23 +17,25 @@ const THEME_LABELS: Record<Theme, string> = { system: 'System', light: 'Light', 
 
 interface TopBarProps {
   self: Self | undefined;
-  drawerOpen: boolean;
-  onDrawer: () => void;
+  /** Null while the app is not open. */
+  drawer: { open: boolean; toggle: () => void } | null;
 }
 
-export function TopBar({ self, drawerOpen, onDrawer }: TopBarProps) {
+export function TopBar({ self, drawer }: TopBarProps) {
   return (
     <header className="topbar" data-testid="app-shell.topbar">
-      <button
-        type="button"
-        className="drawer-toggle"
-        aria-label="Projects"
-        aria-expanded={drawerOpen}
-        onClick={onDrawer}
-        data-testid="shell.drawer-toggle"
-      >
-        <MenuIcon className="icon" aria-hidden="true" />
-      </button>
+      {drawer && (
+        <button
+          type="button"
+          className="drawer-toggle"
+          aria-label="Projects"
+          aria-expanded={drawer.open}
+          onClick={drawer.toggle}
+          data-testid="shell.drawer-toggle"
+        >
+          <MenuIcon className="icon" aria-hidden="true" />
+        </button>
+      )}
       <div className="brand">
         <img className="logo" src="/logo.svg" alt="" />
         Pilot
@@ -43,9 +47,10 @@ export function TopBar({ self, drawerOpen, onDrawer }: TopBarProps) {
 }
 
 // The template's user dropdown in the mockup's avatar, as FieldnotesApp has it: the name, the
-// theme and Sign out, under the template's test ids, which its sign-in specs look for.
+// theme, Profile and Sign out, under the template's test ids, which its sign-in specs look for.
 function ProfileMenu({ self }: { self: Self }) {
   const { logout } = useAuthContext();
+  const navigate = useNavigate();
   const [theme, chooseTheme] = useTheme();
   const name = self.name ?? 'Unknown User';
   return (
@@ -87,6 +92,11 @@ function ProfileMenu({ self }: { self: Self }) {
         </select>
       </label>
       <hr className="menu-rule" />
+      {isPerson(self) && (
+        <MenuItem icon={UserRound} onSelect={() => navigate({ to: '/profile' })} testId="shell.profile.page">
+          Profile
+        </MenuItem>
+      )}
       <MenuItem icon={LogOut} onSelect={logout} testId="app-shell.topbar.user.logout">
         Sign out
       </MenuItem>

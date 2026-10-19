@@ -7,6 +7,84 @@
   /* An icon centres on the capitals of the text it sits in: cap is the font's own cap height. */
   .icon { display: inline-block; flex: none; width: 1em; height: 1em; vertical-align: calc(0.5cap - 0.5em); }
 
+  /* ---- Buttons -------------------------------------------------------------------------- */
+
+  /* The text fills the box between the borders, so it centres; an icon beside it hangs from its
+     baseline, level with the capitals whatever the font. Every button has the key's edge, as kbd
+     does: 2px on the right and at the bottom. */
+  .btn {
+    --h: 34px;
+    display: inline-flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 8px;
+    height: var(--h);
+    padding: 0 14px;
+    border: 1px solid hsl(var(--border));
+    border-right-width: 2px;
+    border-bottom-width: 2px;
+    border-radius: var(--radius);
+    background: hsl(var(--background));
+    color: inherit;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: calc(var(--h) - 3px);
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .btn .icon { position: relative; top: calc(0.5em - 0.5cap); }
+  .btn:hover:not(:disabled) { background: hsl(var(--accent)); }
+  .btn:disabled { opacity: 0.45; cursor: default; }
+  .btn-sm { --h: 28px; padding: 0 10px; font-size: 13px; gap: 6px; }
+  .btn-icon { width: var(--h); padding: 0; align-items: center; }
+  .btn-icon .icon { top: 0; }
+  /* White text sits on the deeper blue: on the header's #568ed2 it has 3.4:1, here 5.7:1. */
+  .btn-primary {
+    border-color: hsl(var(--primary-edge));
+    background: hsl(var(--primary-strong));
+    color: hsl(var(--primary-foreground));
+  }
+  .btn-primary:hover:not(:disabled) { background: hsl(var(--primary-edge)); }
+  /* The muted primary: the colour at rest, stronger on hover, the deeper blue while pressed. */
+  .btn-soft {
+    border-color: hsl(var(--primary-muted-foreground) / 0.3);
+    background: hsl(var(--primary-muted));
+    color: hsl(var(--primary-muted-foreground));
+  }
+  .btn-soft:hover:not(:disabled) { background: hsl(var(--primary-muted-strong)); }
+  .btn-soft:active:not(:disabled), .btn-soft.on {
+    border-color: hsl(var(--primary-edge));
+    background: hsl(var(--primary-strong));
+    color: hsl(var(--primary-foreground));
+  }
+  .btn-ghost { border-color: transparent; background: none; color: hsl(var(--muted-foreground)); }
+  .btn-ghost:hover:not(:disabled) { color: hsl(var(--foreground)); }
+
+  /* ---- Text fields (F115's look) --------------------------------------------------------- */
+
+  /* One line at rest, its button beside it in a .field-row, level with its bottom edge. */
+  .field {
+    display: block;
+    width: 100%;
+    height: 38px;
+    padding: 7px 12px;
+    border: 1px solid hsl(var(--input));
+    border-radius: var(--radius);
+    background: hsl(var(--background));
+    color: inherit;
+    font: inherit;
+    font-size: 14px;
+    line-height: 22px;
+    resize: none;
+    overflow-y: hidden;
+  }
+  .field:focus { outline: none; border-color: hsl(var(--ring)); box-shadow: 0 0 0 3px hsl(var(--ring) / 0.2); }
+  .field::placeholder { color: hsl(var(--muted-foreground)); }
+  .field-row { display: flex; gap: 8px; align-items: flex-end; }
+  .field-row .field { flex: 1; min-width: 0; }
+  .field-row .btn { --h: 38px; }
+
   /* ---- Avatars (avatar.tsx) ------------------------------------------------------------- */
 
   .avatar {

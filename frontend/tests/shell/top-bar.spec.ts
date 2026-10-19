@@ -40,7 +40,7 @@ test.describe('The top bar', () => {
 });
 
 test.describe('The profile menu', () => {
-  test('opens from the avatar: the name, the theme and Sign out', async ({ people, shell }) => {
+  test('opens from the avatar: the name, the theme, Profile and Sign out', async ({ people, shell }) => {
     await people.signIn({ name: 'Ada Example' });
     await shell.open();
 
@@ -50,6 +50,7 @@ test.describe('The profile menu', () => {
     await expect(shell.profileName).toHaveText('Ada Example');
     await expect(shell.theme).toHaveValue('system');
     await expect(shell.theme.locator('option')).toHaveText(['System', 'Light', 'Dark']);
+    await expect(shell.profileMenu.getByRole('menuitem')).toHaveText(['Profile', 'Sign out']);
     await expect(shell.signOut).toHaveText('Sign out');
   });
 
