@@ -126,7 +126,7 @@ class TestEnsureEnvironment:
         )
         before = datetime.now(UTC)
 
-        environments.ensure_environment(ENV)
+        environments.ensure_environment(session, ENV)
 
         row = _row(session)
         assert row is not None
@@ -143,7 +143,7 @@ class TestEnsureEnvironment:
     ) -> None:
         fake_controller.add_environment(ENV)
 
-        environments.ensure_environment(ENV)
+        environments.ensure_environment(session, ENV)
 
         row = _row(session)
         assert row is not None and row.name == ENV
@@ -157,17 +157,30 @@ class TestEnsureEnvironment:
         _environment(session, started=False)
         fake_controller.add_environment(ENV, name="Renamed", status="stopped")
 
-        environments.ensure_environment(ENV)
+        environments.ensure_environment(session, ENV)
 
         row = _row(session)
         assert row is not None and (row.name, row.last_state) == ("Env-A", "running")
         assert fake_controller.calls == []
 
+    def test_the_row_is_the_callers_to_commit(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        fake_controller.add_environment(ENV)
+
+        environments.ensure_environment(session, ENV)
+        session.rollback()
+
+        assert _row(session) is None
+
     def test_an_environment_the_controller_lacks_is_not_found(
         self, environments: EnvironmentService, session: Session
     ) -> None:
         with pytest.raises(ControllerProblem) as raised:
-            environments.ensure_environment(ENV)
+            environments.ensure_environment(session, ENV)
 
         assert raised.value.problem_type is ControllerProblemType.NOT_FOUND
         assert _row(session) is None
@@ -232,7 +245,7 @@ class TestStart:
         project: Project,
     ) -> None:
         fake_controller.add_environment(ENV, status="stopped")
-        environments.ensure_environment(ENV)
+        environments.ensure_environment(session, ENV)
         _agent_session(session, project, SessionState.STARTING)
 
         environments.start(ENV)
@@ -585,7 +598,7 @@ class TestShutdownTimer:
             stop_after_seconds=0,
         )
         fake_controller.add_environment(ENV, status="stopped")
-        service.ensure_environment(ENV)
+        service.ensure_environment(session, ENV)
         starting = _agent_session(session, project, SessionState.STARTING)
         service.start(ENV)
         row = _row(session)

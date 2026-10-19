@@ -30,6 +30,7 @@ from app.services.people_service import PeopleService
 from app.services.project_service import ProjectService
 from app.services.relay_service import RelayService
 from app.services.session_record_service import SessionRecordService
+from app.services.session_start_service import SessionStartService
 from app.services.session_stream_service import SessionStreamService
 from app.services.sse_connection_manager import SSEConnectionManager
 from app.services.supervisor import Supervisor
@@ -195,6 +196,21 @@ class ServiceContainer(containers.DeclarativeContainer):
         environment_service=environment_service,
     )
     register_for_background_startup(lambda c: c.relay_service())
+
+    # The session start (design 2 §13.2); its job registers on the supervisor
+    # when built, before STARTUP.
+    session_start_service = providers.Singleton(
+        SessionStartService,
+        container=__self__,
+        supervisor=supervisor,
+        session_streams=session_stream_service,
+        environment_service=environment_service,
+        relay_service=relay_service,
+        controller_configured=providers.Callable(
+            lambda url: url is not None, app_config.provided.controller_url
+        ),
+    )
+    register_for_background_startup(lambda c: c.session_start_service())
 
     # Task service - in-memory task management
     task_service = providers.Singleton(

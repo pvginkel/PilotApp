@@ -1,4 +1,5 @@
-"""A Session's current line, as the relay rebuilds it (design 2 §9.5, Q5; V15)."""
+"""A Session's current line, as the session start sets it and the relay
+rebuilds it (design 2 §9.5, Q5; V15)."""
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -8,6 +9,7 @@ from app.services.current_line import (
     after_line,
     after_partial,
     at_send,
+    while_starting,
 )
 
 AT = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
@@ -66,6 +68,15 @@ TEXT_DELTA = {
 }
 
 WORKING: CurrentLine = {"state": "working", "since": AT.isoformat(), "step": READ}
+
+
+class TestWhileStarting:
+    def test_a_start_records_words_are_the_line_from_its_time(self) -> None:
+        assert while_starting("Starting Example-1…", AT) == {
+            "state": "starting",
+            "since": AT.isoformat(),
+            "text": "Starting Example-1…",
+        }
 
 
 class TestAtSend:

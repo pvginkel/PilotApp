@@ -57,12 +57,14 @@ def register_root_blueprints(app: Flask) -> None:
     from app.api.testing_links import testing_links_bp
     from app.api.testing_record import testing_record_bp
     from app.api.testing_sync import testing_sync_bp
+    from app.api.testing_sessions import testing_sessions_bp
 
     app.register_blueprint(sync_bp)
     app.register_blueprint(testing_sync_bp)
     app.register_blueprint(testing_links_bp)
     app.register_blueprint(testing_record_bp)
     app.register_blueprint(testing_controller_bp)
+    app.register_blueprint(testing_sessions_bp)
 
 
 def register_cli_commands(cli: click.Group) -> None:

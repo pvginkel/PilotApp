@@ -24,6 +24,7 @@ from app.services.controller_client import HeadlessCreateRequest
 from app.services.environment_service import EnvironmentService
 from app.services.fleet_consumer import FleetConsumer
 from app.services.relay_service import RelayService
+from app.services.session_start_service import SessionStartService
 from app.services.supervisor import Supervisor
 from tests.conftest_infrastructure import (
     _clear_prometheus_registry,
@@ -302,6 +303,58 @@ class TestRelayWiring:
             wait_until(lambda: _turns_ended(container, run_id) == 1, "the turn ended")
         finally:
             coordinator.shutdown()
+
+
+class TestSessionStartWiring:
+    def test_a_start_after_startup_runs_to_its_briefs_send(
+        self, committed_app: Flask, fake_controller: ServedFakeController
+    ) -> None:
+        container = committed_app.container
+        container.app_config.override(
+            AppSettings(controller_url=fake_controller.url, scheduler_tick_seconds=0.05)
+        )
+        client_of(container, fake_controller)
+        fake_controller.add_environment("env-a", status="running")
+        with scoped_session(container) as db:
+            person = User(
+                kind_code=UserKind.PERSON,
+                subject="subject-ada",
+                handle="ada",
+                name="Ada Example",
+                avatar_slot=1,
+            )
+            db.add(person)
+            db.flush()
+            project = Project(created_by_user_id=person.id)
+            db.add(project)
+            db.flush()
+            project_id = project.id
+        starts = container.session_start_service()
+        assert isinstance(starts, SessionStartService)
+        coordinator = container.lifecycle_coordinator()
+
+        coordinator.fire_startup()
+        try:
+            with scoped_session(container) as db:
+                run_id = starts.start_session(
+                    db,
+                    project_id,
+                    "env-a",
+                    kind_code="work",
+                    cwd="/work/Example",
+                    brief="Rename the badge.",
+                ).id
+            wait_until(
+                lambda: _state(container, run_id) == SessionState.RUNNING,
+                "the brief sent",
+            )
+        finally:
+            coordinator.shutdown()
+
+
+def _state(container: ServiceContainer, run_id: uuid.UUID) -> SessionState:
+    with scoped_session(container) as db:
+        return db.get_one(AgentSession, run_id).state_code
 
 
 def _turns_ended(container: ServiceContainer, run_id: uuid.UUID) -> int | None:

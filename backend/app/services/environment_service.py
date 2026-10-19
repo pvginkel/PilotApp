@@ -87,24 +87,23 @@ class EnvironmentService:
             SHUTDOWN_TIMER, self.run_shutdown_timer, needs_controller=True
         )
 
-    def ensure_environment(self, env_id: str) -> None:
+    def ensure_environment(self, db: Session, env_id: str) -> None:
         """Make the environment's row from the controller's own report, on
-        Pilot's first touch of it; a row that exists is left as it is.
+        Pilot's first touch of it, in the caller's transaction; a row that
+        exists is left as it is.
 
         Raises:
             ControllerProblem: `not-found` if the controller has no such
                 environment
         """
-        with scoped_session(self._container) as db:
-            if db.get(Environment, env_id) is not None:
-                return
+        if db.get(Environment, env_id) is not None:
+            return
         report = self._client().get_environment(env_id)
-        with scoped_session(self._container) as db:
-            db.execute(
-                insert(Environment)
-                .values(id=env_id, **reported_columns(report, datetime.now(UTC)))
-                .on_conflict_do_nothing(index_elements=[Environment.id])
-            )
+        db.execute(
+            insert(Environment)
+            .values(id=env_id, **reported_columns(report, datetime.now(UTC)))
+            .on_conflict_do_nothing(index_elements=[Environment.id])
+        )
 
     def start(self, env_id: str) -> ControllerEnvironment:
         """Bring the environment up and wait until it settles (§13.2).
@@ -126,7 +125,8 @@ class EnvironmentService:
             ExternalServiceException: The wait ran out before it settled, or
                 the controller failed otherwise
         """
-        self.ensure_environment(env_id)
+        with scoped_session(self._container) as db:
+            self.ensure_environment(db, env_id)
         client = self._client()
         try:
             outcome = client.start_environment(env_id)

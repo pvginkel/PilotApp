@@ -8,9 +8,10 @@ block under way), `working` (a tool call without its result yet) and `waiting`
 `agent`, the sub-agent's `type` and `description` while `waiting`; `text`, the
 latest `server` record's words while `starting`.
 
-The send sets it, and the relay rebuilds it from each line it records and from
-each partial it forwards, as the line implies; a sub-agent's line implies
-nothing of the main thread's.
+The session start sets it from each `server` record it writes while the Session
+is `starting`; the send keeps that line, or sets `thinking`; and the relay
+rebuilds it from each line it records and from each partial it forwards, as the
+line implies; a sub-agent's line implies nothing of the main thread's.
 """
 
 from datetime import datetime
@@ -22,6 +23,12 @@ type LineState = Literal["starting", "thinking", "writing", "working", "waiting"
 _AGENT_TOOLS = ("Task", "Agent")
 _TOOL_BLOCKS = ("tool_use", "server_tool_use", "mcp_tool_use")
 _THINKING_BLOCKS = ("thinking", "redacted_thinking")
+
+
+def while_starting(text: str, at: datetime) -> CurrentLine:
+    """The current line once the session start writes, at `at`, the `server`
+    record whose words are `text`."""
+    return {"state": "starting", "since": at.isoformat(), "text": text}
 
 
 def at_send(previous: CurrentLine | None, at: datetime) -> CurrentLine:
