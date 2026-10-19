@@ -293,6 +293,12 @@ test.describe('The list on a narrow window', () => {
     await expect(page).toHaveURL(`/projects/${bId}`);
     await expect(shell.side).toBeHidden();
     await expect(shell.scrim).toBeHidden();
+
+    // Back on the project it was opened on, the drawer stays closed.
+    await page.goBack();
+    await expect(page).toHaveURL(`/projects/${aId}`);
+    await expect(shell.side).toBeHidden();
+    await expect(shell.scrim).toBeHidden();
   });
 });
 

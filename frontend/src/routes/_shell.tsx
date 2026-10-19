@@ -28,8 +28,10 @@ export const Route = createFileRoute('/_shell')({
 function Shell() {
   const { data: self } = useSelf();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  // The drawer is open on the page it was opened on, so going elsewhere closes it.
+  // The drawer is open on the page it was opened on, and going elsewhere closes it: coming back
+  // to that page, by Back or a link, finds it closed.
   const [drawerOn, setDrawerOn] = useState<string | null>(null);
+  if (drawerOn !== null && drawerOn !== pathname) setDrawerOn(null);
   const drawerOpen = drawerOn === pathname;
   const [keysList, setKeysList] = useState(false);
   useShellKeys(() => setKeysList(!keysList));
