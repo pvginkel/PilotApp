@@ -139,19 +139,33 @@ test.describe('The plan popover', () => {
     expect(await background('Step a')).toBe(await background('Step c'));
   });
 
-  test('a step’s title links: a span in the step button, a link in the popover', async ({ page, people, projects, projectHead }) => {
+  test('a step’s title links: a span in the step button, a link in the popover', async ({
+    page,
+    backendUrl,
+    people,
+    projects,
+    projectHead,
+    links,
+  }) => {
+    await links.set({ ticket_url_template: `${backendUrl}/tickets/{id}` });
     const me = await people.signIn();
-    const title = 'Port pvginkel/Example';
+    const title = 'Port PL-7 to pvginkel/Example';
     const id = await projects.make({ name: makeUnique('Linked'), members: [me.handle!], tasks: [{ id: 'a', title, status: 'in_progress' }] });
     await projectHead.open(id);
 
-    const inButton = projectHead.step.getByRole('link', { name: 'pvginkel/Example' });
-    await expect(inButton).toHaveAttribute('data-href', 'https://github.com/pvginkel/Example');
+    await expect(projectHead.step.getByRole('link', { name: 'pvginkel/Example' })).toHaveAttribute(
+      'data-href',
+      'https://github.com/pvginkel/Example',
+    );
+    const inButton = projectHead.step.getByRole('link', { name: 'PL-7' });
+    await expect(inButton).toHaveAttribute('data-href', `${backendUrl}/tickets/PL-7`);
     await expect(inButton).not.toHaveAttribute('href');
-    // The span opens the repo, and not the plan.
+    // The span opens the ticket, and not the plan.
     const opened = page.waitForEvent('popup');
     await inButton.click();
-    await (await opened).close();
+    const popup = await opened;
+    expect(popup.url()).toBe(`${backendUrl}/tickets/PL-7`);
+    await popup.close();
     await expect(projectHead.plan).toHaveCount(0);
 
     // Clicked beside the span, on the donut, the button opens the plan.
