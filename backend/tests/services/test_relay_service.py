@@ -844,6 +844,7 @@ class TestRelay:
 
         [second] = sent
         assert first.ended_at is not None
+        first_ended_at = first.ended_at
         assert second.error is None and second.ended_at is None
         assert idle.state_code == SessionState.RUNNING
         assert idle.current_line == {
@@ -862,6 +863,8 @@ class TestRelay:
         _relay(relays, idle)
 
         assert second.ended_at is not None
+        # A Turn that ended already keeps its end.
+        assert first.ended_at == first_ended_at
         assert idle.state_code == SessionState.IDLE
         results = [
             (stored.turn, stored.record.raw_offset)
