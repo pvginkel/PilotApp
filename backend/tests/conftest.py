@@ -20,7 +20,6 @@ Without one the suite passes where ``.env`` sets it, and fails in CI.
 from collections.abc import Generator
 
 import pytest
-from dependency_injector import providers
 from flask import Flask
 from flask.testing import FlaskClient
 from sqlalchemy.orm import Session as DbSession
@@ -39,7 +38,6 @@ from app.utils.lifecycle_coordinator import LifecycleCoordinator
 # Import all infrastructure fixtures
 from tests.conftest_infrastructure import *  # noqa: F403
 from tests.support.fake_controller import (
-    FAKE_CONTROLLER_TOKEN,
     ServedFakeController,
     client_of,
 )

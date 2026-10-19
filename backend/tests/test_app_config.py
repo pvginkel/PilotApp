@@ -162,7 +162,7 @@ class TestAppSettings:
             "controller_token": "***",
             "controller_ca_file": "None",
             "scheduler_tick_seconds": repr(10.0),
-            "environment_stop_after_seconds": repr(1800),
+            "environment_stop_after_seconds": repr(1800.0),
         }
 
     def test_the_link_settings_are_unset_by_default(self) -> None:

@@ -56,8 +56,8 @@ def register_root_blueprints(app: Flask) -> None:
     from app.api.testing_controller import testing_controller_bp
     from app.api.testing_links import testing_links_bp
     from app.api.testing_record import testing_record_bp
-    from app.api.testing_sync import testing_sync_bp
     from app.api.testing_sessions import testing_sessions_bp
+    from app.api.testing_sync import testing_sync_bp
 
     app.register_blueprint(sync_bp)
     app.register_blueprint(testing_sync_bp)

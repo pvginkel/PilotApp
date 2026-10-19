@@ -1317,6 +1317,303 @@
         "title": "SelfResponseSchema",
         "type": "object"
       },
+      "SessionRecordPageSchema.01118bb": {
+        "description": "A page of a Session's records, in order.",
+        "properties": {
+          "ended": {
+            "description": "The page holds the Session's last record, and its stream has ended",
+            "title": "Ended",
+            "type": "boolean"
+          },
+          "records": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "claude": "#/components/schemas/SessionRecordPageSchema.01118bb.ClaudeRecordSchema",
+                  "result": "#/components/schemas/SessionRecordPageSchema.01118bb.ResultRecordSchema",
+                  "send": "#/components/schemas/SessionRecordPageSchema.01118bb.SendRecordSchema",
+                  "server": "#/components/schemas/SessionRecordPageSchema.01118bb.ServerRecordSchema"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/SessionRecordPageSchema.01118bb.ClaudeRecordSchema"
+                },
+                {
+                  "$ref": "#/components/schemas/SessionRecordPageSchema.01118bb.ResultRecordSchema"
+                },
+                {
+                  "$ref": "#/components/schemas/SessionRecordPageSchema.01118bb.ServerRecordSchema"
+                },
+                {
+                  "$ref": "#/components/schemas/SessionRecordPageSchema.01118bb.SendRecordSchema"
+                }
+              ]
+            },
+            "title": "Records",
+            "type": "array"
+          }
+        },
+        "required": [
+          "records",
+          "ended"
+        ],
+        "title": "SessionRecordPageSchema",
+        "type": "object"
+      },
+      "SessionRecordPageSchema.01118bb.ClaudeRecordSchema": {
+        "description": "A line of the controller session's raw response stream, as `claude`\nprinted it.",
+        "properties": {
+          "at": {
+            "description": "When the record was written",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "kind": {
+            "const": "claude",
+            "title": "Kind",
+            "type": "string"
+          },
+          "payload": {
+            "description": "The line: its JSON, or a string for a line that is not",
+            "title": "Payload"
+          },
+          "raw_offset": {
+            "description": "The byte offset after the line in its raw stream",
+            "title": "Raw Offset",
+            "type": "integer"
+          },
+          "seq": {
+            "description": "The record's number in its Session, from 1",
+            "title": "Seq",
+            "type": "integer"
+          },
+          "turn": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The number of the record's Turn; null outside any Turn",
+            "title": "Turn"
+          }
+        },
+        "required": [
+          "seq",
+          "at",
+          "turn",
+          "kind",
+          "payload",
+          "raw_offset"
+        ],
+        "title": "ClaudeRecordSchema",
+        "type": "object"
+      },
+      "SessionRecordPageSchema.01118bb.ResultRecordSchema": {
+        "description": "The worker's `result` frame, which ended the Turn.",
+        "properties": {
+          "at": {
+            "description": "When the record was written",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "kind": {
+            "const": "result",
+            "title": "Kind",
+            "type": "string"
+          },
+          "payload": {
+            "description": "The frame: turn, result, isError, interrupted",
+            "title": "Payload"
+          },
+          "seq": {
+            "description": "The record's number in its Session, from 1",
+            "title": "Seq",
+            "type": "integer"
+          },
+          "turn": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The number of the record's Turn; null outside any Turn",
+            "title": "Turn"
+          }
+        },
+        "required": [
+          "seq",
+          "at",
+          "turn",
+          "kind",
+          "payload"
+        ],
+        "title": "ResultRecordSchema",
+        "type": "object"
+      },
+      "SessionRecordPageSchema.01118bb.SendRecordSchema": {
+        "description": "A person's message, in its place among the lines.",
+        "properties": {
+          "at": {
+            "description": "When the record was written",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The handle of the Turn's author",
+            "title": "Author"
+          },
+          "kind": {
+            "const": "send",
+            "title": "Kind",
+            "type": "string"
+          },
+          "message": {
+            "description": "The Turn's words",
+            "title": "Message",
+            "type": "string"
+          },
+          "seq": {
+            "description": "The record's number in its Session, from 1",
+            "title": "Seq",
+            "type": "integer"
+          },
+          "turn": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The number of the record's Turn; null outside any Turn",
+            "title": "Turn"
+          }
+        },
+        "required": [
+          "seq",
+          "at",
+          "turn",
+          "kind",
+          "author",
+          "message"
+        ],
+        "title": "SendRecordSchema",
+        "type": "object"
+      },
+      "SessionRecordPageSchema.01118bb.ServerRecordSchema": {
+        "description": "The server's own line.",
+        "properties": {
+          "at": {
+            "description": "When the record was written",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "kind": {
+            "const": "server",
+            "title": "Kind",
+            "type": "string"
+          },
+          "payload": {
+            "title": "Payload"
+          },
+          "seq": {
+            "description": "The record's number in its Session, from 1",
+            "title": "Seq",
+            "type": "integer"
+          },
+          "turn": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The number of the record's Turn; null outside any Turn",
+            "title": "Turn"
+          }
+        },
+        "required": [
+          "seq",
+          "at",
+          "turn",
+          "kind",
+          "payload"
+        ],
+        "title": "ServerRecordSchema",
+        "type": "object"
+      },
+      "SessionRecordsQuerySchema.01118bb": {
+        "additionalProperties": false,
+        "description": "Which records a page holds: those after `after`, at most `limit`.",
+        "properties": {
+          "after": {
+            "default": 0,
+            "description": "The page starts after this record number",
+            "minimum": 0,
+            "title": "After",
+            "type": "integer"
+          },
+          "limit": {
+            "default": 200,
+            "description": "The most records the page holds",
+            "maximum": 1000,
+            "minimum": 1,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "SessionRecordsQuerySchema",
+        "type": "object"
+      },
+      "SessionStreamViewSchema.01118bb": {
+        "additionalProperties": false,
+        "description": "A view of a Session's stream on the browser's SSE connection.",
+        "properties": {
+          "request_id": {
+            "description": "The SSE connection's request id",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Request Id",
+            "type": "string"
+          },
+          "view": {
+            "description": "The view's key, unique within its connection",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "View",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "view"
+        ],
+        "title": "SessionStreamViewSchema",
+        "type": "object"
+      },
       "SyncCheckRequestSchema.19c06e7": {
         "description": "The hook's check of a file, as the store's sidecar posts it.",
         "properties": {
@@ -1946,6 +2243,120 @@
           "roles"
         ],
         "title": "TestSessionResponseSchema",
+        "type": "object"
+      },
+      "TestingSessionStartSchema.e784b23": {
+        "description": "A work Session to start for a project, in an environment of the\nconfigured controller.",
+        "properties": {
+          "agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The agent name to create with",
+            "title": "Agent"
+          },
+          "brief": {
+            "description": "The first Turn's message",
+            "examples": [
+              "Rename the badge."
+            ],
+            "minLength": 1,
+            "title": "Brief",
+            "type": "string"
+          },
+          "cwd": {
+            "description": "The headless session's working directory",
+            "examples": [
+              "/work/Example"
+            ],
+            "minLength": 1,
+            "title": "Cwd",
+            "type": "string"
+          },
+          "environment_id": {
+            "description": "The controller's id of the environment it runs in",
+            "examples": [
+              "example-env-1"
+            ],
+            "minLength": 1,
+            "title": "Environment Id",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The model to create with",
+            "title": "Model"
+          },
+          "project_id": {
+            "description": "The Project the Session works",
+            "format": "uuid",
+            "title": "Project Id",
+            "type": "string"
+          },
+          "reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The reasoning effort to create with",
+            "title": "Reasoning Effort"
+          },
+          "resume": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A Claude conversation id to resume",
+            "title": "Resume"
+          }
+        },
+        "required": [
+          "project_id",
+          "environment_id",
+          "cwd",
+          "brief"
+        ],
+        "title": "TestingSessionStartSchema",
+        "type": "object"
+      },
+      "TestingSessionStartedSchema.e784b23": {
+        "description": "The Session the start wrote, `starting`.",
+        "properties": {
+          "id": {
+            "description": "The Session's id",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "TestingSessionStartedSchema",
         "type": "object"
       },
       "TestingSyncAnswerRequestSchema.05888e5": {
@@ -2853,6 +3264,241 @@
           }
         ],
         "summary": "Change the project's standing, as the signed-in person, now.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/sessions/{session_id}/records": {
+      "get": {
+        "description": "",
+        "operationId": "get__api_sessions_{session_id}_records",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The page starts after this record number",
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "The page starts after this record number",
+              "minimum": 0,
+              "title": "After",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The most records the page holds",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "description": "The most records the page holds",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionRecordPageSchema.01118bb"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "A page of the Session's records after a record number, in order.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/sessions/{session_id}/stream": {
+      "delete": {
+        "description": "Returns:     204: The view is gone     403: The connection is another user's",
+        "operationId": "delete__api_sessions_{session_id}_stream",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionStreamViewSchema.01118bb"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Close a view; the connection's other views of the Session stay. Idempotent.",
+        "tags": [],
+        "x-required-role": "editor"
+      },
+      "post": {
+        "description": "Returns:     204: The connection receives the frames written from now on     409: This process holds no connection under `request_id`     403: The connection is another user's",
+        "operationId": "post__api_sessions_{session_id}_stream",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionStreamViewSchema.01118bb"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Open a view of the Session's live frames on the caller's SSE connection.",
         "tags": [],
         "x-required-role": "editor"
       }
@@ -3788,6 +4434,83 @@
           }
         ],
         "summary": "Make a project in the standing given, made now by its first member.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/sessions": {
+      "post": {
+        "description": "Returns:     201: The Session, `starting`     404: No Project has the id     409: No controller is configured     502: The controller has no such environment, or failed",
+        "operationId": "post__api_testing_sessions",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestingSessionStartSchema.e784b23"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestingSessionStartedSchema.e784b23"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Start a work Session for an existing project in an environment of the configured controller; its start runs once the request commits.",
         "tags": [],
         "x-required-role": "editor"
       }
