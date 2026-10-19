@@ -4,6 +4,8 @@
  */
 
 import { test, expect } from '../support/fixtures';
+import { makeUnique } from '../support/helpers';
+import { ProjectListPage } from '../support/page-objects/project-list-page';
 
 test.describe('The theme', () => {
   test('follows the OS, live, under System', async ({ page, people, shell }) => {
@@ -56,5 +58,27 @@ test.describe('The theme', () => {
 
     await shell.theme.selectOption('system');
     await expect(html).toHaveAttribute('data-theme', 'light');
+  });
+
+  test('chosen in one tab, stays when another tab switches projects', async ({ page, people, projects, projectList, shell }) => {
+    const me = await people.signIn();
+    const a = await projects.make({ name: makeUnique('A'), members: [me.handle!] });
+    const b = makeUnique('B');
+    const bId = await projects.make({ name: b, members: [me.handle!] });
+    await projectList.open(a);
+    const other = await page.context().newPage();
+    await other.goto(`/projects/${a}`);
+    const otherList = new ProjectListPage(other);
+    await expect(otherList.tab(b)).toBeVisible();
+
+    await shell.user.click();
+    await shell.theme.selectOption('dark');
+    await otherList.tab(b).click();
+
+    await expect(other).toHaveURL(`/projects/${bId}`);
+    const stored = () => page.evaluate(() => JSON.parse(localStorage.getItem('pilot')!) as { theme: string; project: string });
+    await expect.poll(async () => (await stored()).project).toBe(bId);
+    expect((await stored()).theme).toBe('dark');
+    await other.close();
   });
 });

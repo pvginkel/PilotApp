@@ -40,9 +40,10 @@ export function browserState(): BrowserState {
   return state;
 }
 
+/** Writes only what changed over what is stored, so that what another tab chose stays. */
 export function rememberInBrowser(change: Partial<BrowserState>): void {
   state = { ...state, ...change };
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...load(), ...change }));
   listeners.forEach((listener) => listener());
 }
 
