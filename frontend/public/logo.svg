@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">Pilot</title>
+  <!-- favicon.svg's mark in the top bar's colours: the tile white, the mark in the bar's blue. -->
+  <rect width="64" height="64" rx="14" fill="#fff"/>
+  <g transform="translate(2.744 3.963) scale(2.438)" fill="none" stroke="#568ed2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 2v4"/>
+    <path d="M4 6h16l-2 5H6z"/>
+    <path d="M8.7 6l.8 5v10"/>
+    <path d="M15.3 6l-.8 5v10"/>
+    <path d="M6 21h12"/>
+  </g>
+</svg>

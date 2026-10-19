@@ -1,0 +1,105 @@
+/* The frame every screen sits in: the top bar, the side column and the centre, the drawer on a
+   narrow window, the profile menu and the keys list (PilotAppSpecs design/mockup/style.css,
+   "Header", "Layout" and "Narrow screens"). */
+
+@layer components {
+  /* ---- The top bar ---------------------------------------------------------------------- */
+
+  /* The header is the one block of colour: white on the primary. It lies over the drawer, so
+     the profile menu does too. */
+  .topbar {
+    position: relative;
+    z-index: 26;
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    height: var(--topbar);
+    padding: 0 20px;
+    background: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+  }
+  /* Large text (bold, over 18.66px), for which the header's 3.4:1 passes. */
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 20px; }
+  .logo { width: 32px; height: 32px; }
+  .topbar .spacer { flex: 1; }
+  .topbar :focus-visible { outline-color: #fff; }
+  .drawer-toggle {
+    display: none;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: #fff;
+    font-size: 22px;
+  }
+  .topbar .avatar-btn { padding: 0; border: 0; border-radius: 999px; background: none; font: inherit; }
+  /* Before a person takes a palette slot, their avatar is the header's own. */
+  .topbar .avatar:not([data-colour]) { background: rgb(0 0 0 / 0.25); color: #fff; }
+
+  /* ---- The profile menu ----------------------------------------------------------------- */
+
+  .menu-pop .menu-name { padding: 7px 10px 4px; font-weight: 600; white-space: nowrap; }
+  .menu-pop .menu-field {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 4px 10px 8px;
+    color: hsl(var(--muted-foreground));
+  }
+  .menu-field select {
+    height: 28px;
+    padding: 0 6px;
+    border: 1px solid hsl(var(--input));
+    border-radius: var(--radius);
+    background: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font: inherit;
+  }
+  .menu-pop .menu-rule { margin: 2px -6px 6px; border: 0; border-top: 1px solid hsl(var(--border)); }
+
+  /* ---- The side column and the centre --------------------------------------------------- */
+
+  .app { position: relative; flex: 1; min-height: 0; display: flex; }
+
+  .tabs {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    width: var(--tabs);
+    border-right: 1px solid hsl(var(--border));
+    background: hsl(var(--side));
+    overflow-y: auto;
+  }
+
+  .centre { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+  /* ---- The keys list -------------------------------------------------------------------- */
+
+  dl.keys { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: 14px; }
+  dl.keys dd { margin: 0; color: hsl(var(--muted-foreground)); }
+
+  /* ---- A narrow window: the side column is a drawer over the centre, behind a scrim ----- */
+
+  @media (max-width: 900px) {
+    .drawer-toggle { display: grid; place-items: center; }
+    /* Hidden once it has slid out, so a closed drawer takes no focus. */
+    .tabs {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      z-index: 25;
+      width: min(300px, 85vw);
+      background: hsl(var(--background));
+      box-shadow: var(--shadow-lg);
+      transform: translateX(-105%);
+      visibility: hidden;
+      transition: transform 160ms ease-out, visibility 0s 160ms;
+    }
+    .app[data-drawer="open"] .tabs { transform: none; visibility: visible; transition: transform 160ms ease-out; }
+    .drawer-scrim { position: absolute; inset: 0; z-index: 24; background: rgb(0 0 0 / 0.3); }
+    .app:not([data-drawer="open"]) .drawer-scrim { display: none; }
+  }
+  @media (min-width: 901px) { .drawer-scrim { display: none; } }
+}

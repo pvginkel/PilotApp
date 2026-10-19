@@ -1,0 +1,94 @@
+/* The shared pieces every screen uses, as the mockup draws them (PilotAppSpecs
+   design/mockup/style.css). Each piece's own section; a screen's styling lives with its screen. */
+
+@layer components {
+  /* ---- Icons ---------------------------------------------------------------------------- */
+
+  /* An icon centres on the capitals of the text it sits in: cap is the font's own cap height. */
+  .icon { display: inline-block; flex: none; width: 1em; height: 1em; vertical-align: calc(0.5cap - 0.5em); }
+
+  /* ---- Avatars (avatar.tsx) ------------------------------------------------------------- */
+
+  .avatar {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 32px;
+    height: 32px;
+    border-radius: 999px;
+    background: hsl(var(--muted));
+    color: hsl(var(--muted-foreground));
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+  }
+  .avatar.sm { width: 24px; height: 24px; font-size: 10px; }
+  .avatar .icon { font-size: 18px; }
+  .avatar.sm .icon { font-size: 14px; }
+  .avatar[data-colour="1"] { background: hsl(var(--avatar-1)); color: hsl(var(--avatar-1-text)); }
+  .avatar[data-colour="2"] { background: hsl(var(--avatar-2)); color: hsl(var(--avatar-2-text)); }
+  .avatar[data-colour="3"] { background: hsl(var(--avatar-3)); color: hsl(var(--avatar-3-text)); }
+  .avatar[data-colour="4"] { background: hsl(var(--avatar-4)); color: hsl(var(--avatar-4-text)); }
+  .avatar[data-colour="5"] { background: hsl(var(--avatar-5)); color: hsl(var(--avatar-5-text)); }
+  .avatar[data-colour="6"] { background: hsl(var(--avatar-6)); color: hsl(var(--avatar-6-text)); }
+  /* Pilot's mark in the same circle: Lucide's user-round under a pilot's cap, 13 of the 20. */
+  .avatar.pilot { background: hsl(var(--avatar-pilot)); color: hsl(var(--avatar-pilot-text)); }
+  .avatar.pilot svg { width: 65%; height: 65%; }
+
+  /* ---- Menus (menu.tsx) ----------------------------------------------------------------- */
+
+  .menu-anchor { position: relative; }
+  .menu-pop {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 15;
+    min-width: 220px;
+    padding: 6px;
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+    background: hsl(var(--background));
+    box-shadow: var(--shadow-lg);
+    color: hsl(var(--foreground));
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  .menu-item {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    width: 100%;
+    padding: 7px 10px;
+    border: 0;
+    border-radius: 6px;
+    background: none;
+    color: inherit;
+    font: inherit;
+    font-size: 14px;
+    text-align: left;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .menu-item:hover { background: hsl(var(--accent)); }
+  .menu-item .icon { position: relative; top: calc(0.5em - 0.5cap); color: hsl(var(--muted-foreground)); }
+
+  /* ---- Dialogs (dialog.tsx) ------------------------------------------------------------- */
+
+  .overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: grid;
+    place-items: center;
+    background: rgb(0 0 0 / 0.35);
+  }
+  .dialog {
+    min-width: 380px;
+    padding: 20px 24px;
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+    background: hsl(var(--background));
+    box-shadow: var(--shadow-lg);
+  }
+  .dialog h2 { margin: 0 0 12px; font-size: 16px; font-weight: 700; }
+}

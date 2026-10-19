@@ -1,14 +1,224 @@
 /**
- * App-specific theme overrides.
- * App-owned — not overwritten by template updates.
+ * The mockup's tokens and base styles (PilotAppSpecs design/mockup/style.css), ported once for
+ * every screen. App-owned: copier writes it once and never updates it.
  *
- * Override CSS custom properties defined in index.css to set brand colors.
- * Add app-specific utilities with @utility directives.
- *
- * Example:
- *   @layer base {
- *     :root {
- *       --primary: 200 80% 50%;
- *     }
- *   }
+ * The theme is the page's `data-theme`, set from the person's preference before the first render
+ * (src/lib/theme.ts). The token blocks are unlayered, so they win over index.css's layered ones,
+ * its `prefers-color-scheme: dark` block included; each sets every token index.css has too, so a
+ * preference that differs from the system's leaves none of the template's on the system's side.
+ * Before the script runs no `data-theme` is set and index.css's tokens follow the system's; their
+ * background and text are the mockup's.
  */
+@import "../components/shared/shared.css";
+@import "../components/shell/shell.css";
+
+/* Tailwind's `dark:` variant follows the page's theme, not the system's. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* The tokens index.css does not map to Tailwind colours. */
+@theme {
+  --color-primary-strong: hsl(var(--primary-strong));
+  --color-primary-edge: hsl(var(--primary-edge));
+  --color-primary-muted: hsl(var(--primary-muted));
+  --color-primary-muted-strong: hsl(var(--primary-muted-strong));
+  --color-primary-muted-foreground: hsl(var(--primary-muted-foreground));
+  --color-destructive-text: hsl(var(--destructive-text));
+  --color-success: hsl(var(--success));
+  --color-success-text: hsl(var(--success-text));
+  --color-warning: hsl(var(--warning));
+  --color-warning-text: hsl(var(--warning-text));
+  --color-info: hsl(var(--info));
+  --color-info-text: hsl(var(--info-text));
+  --color-urgent: hsl(var(--urgent));
+  --color-urgent-text: hsl(var(--urgent-text));
+  --color-side: hsl(var(--side));
+
+  /* A toast slides in from above (src/styles/toast.ts). */
+  --animate-toast-in: toast-in 150ms ease-out;
+  @keyframes toast-in {
+    from { opacity: 0; transform: translateY(-6px); }
+  }
+}
+
+:root {
+  --radius: 0.5rem;
+  --column: 820px;
+  --topbar: 56px;
+  --tabs: 264px;
+  --panel: 420px;
+}
+
+/* The mockup's light tokens: the template's, with a soft blue as the primary colour. */
+:root[data-theme="light"] {
+  --background: 0 0% 100%;
+  --foreground: 224 71% 4%;
+  --card: 0 0% 100%;
+  --card-foreground: 224 71% 4%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 224 71% 4%;
+  --primary: 213 58% 58%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 220 15% 96%;
+  --secondary-foreground: 220 9% 46%;
+  --muted: 220 15% 96%;
+  --muted-foreground: 220 9% 46%;
+  --accent: 220 15% 96%;
+  --accent-foreground: 220 9% 46%;
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 220 13% 91%;
+  --input: 220 13% 91%;
+  --ring: 213 58% 58%;
+  --primary-strong: 213 52% 43%;
+  --primary-muted: 213 70% 95%;
+  --primary-muted-strong: 213 68% 88%;
+  --primary-muted-foreground: 213 52% 38%;
+  --link: 213 55% 42%;
+  --link-hover: 213 55% 42%;
+  --success: 142 72% 43%;
+  --success-foreground: 142 72% 8%;
+  --warning: 48 79% 42%;
+  --warning-foreground: 48 64% 10%;
+  --info: 200 90% 47%;
+  --info-foreground: 200 69% 10%;
+  --stage-indicator: 35 80% 45%;
+  /* Text in the status colours, and the blue as a surface under white text, darker where the
+     base colours miss 4.5:1 for text. */
+  --warning-text: 40 90% 29%;
+  --info-text: 201 96% 32%;
+  --success-text: 142 72% 27%;
+  --destructive-text: 0 74% 45%;
+  --primary-edge: 213 52% 34%;
+  --urgent: 24 95% 53%;
+  --urgent-text: 20 90% 35%;
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  /* The project list's colour: the muted at half over the background, made opaque. */
+  --side: 220 15% 98%;
+  /* The avatars' palette (ui-conventions.md, "Answering: the options"): a background at 92–95%
+     lightness, initials at 35–38%, every pair at 4.5:1 or better; the primary's tint first, the
+     mockup's pink second. Pilot's mark is grey, outside it. */
+  --avatar-1: var(--primary-muted);
+  --avatar-1-text: var(--primary-muted-foreground);
+  --avatar-2: 330 60% 92%;
+  --avatar-2-text: 330 55% 35%;
+  --avatar-3: 142 45% 95%;
+  --avatar-3-text: 142 35% 35%;
+  --avatar-4: 40 80% 93%;
+  --avatar-4-text: 32 50% 35%;
+  --avatar-5: 262 60% 95%;
+  --avatar-5-text: 262 45% 38%;
+  --avatar-6: 188 45% 95%;
+  --avatar-6-text: 188 40% 35%;
+  --avatar-pilot: 220 13% 88%;
+  --avatar-pilot-text: 220 12% 34%;
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --background: 224 71% 4%;
+  --foreground: 210 40% 98%;
+  --card: 224 71% 4%;
+  --card-foreground: 210 40% 98%;
+  --popover: 224 71% 4%;
+  --popover-foreground: 210 40% 98%;
+  --primary: 213 58% 58%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 215 28% 17%;
+  --secondary-foreground: 210 40% 98%;
+  --muted: 215 28% 17%;
+  --muted-foreground: 218 11% 65%;
+  --accent: 216 34% 17%;
+  --accent-foreground: 210 40% 98%;
+  --destructive: 0 63% 50%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 216 34% 17%;
+  --input: 216 34% 17%;
+  --ring: 213 58% 58%;
+  --link: 213 80% 72%;
+  --link-hover: 213 80% 72%;
+  --primary-strong: 213 50% 40%;
+  --primary-muted: 213 32% 17%;
+  --primary-muted-strong: 213 38% 26%;
+  --primary-muted-foreground: 213 80% 76%;
+  --success: 142 69% 52%;
+  --success-foreground: 142 72% 8%;
+  --warning: 49 82% 47%;
+  --warning-foreground: 49 72% 8%;
+  --info: 200 64% 53%;
+  --info-foreground: 200 74% 9%;
+  --stage-indicator: 35 70% 60%;
+  --warning-text: 49 82% 47%;
+  --info-text: 200 64% 53%;
+  --success-text: 142 69% 52%;
+  --destructive-text: 0 90% 70%;
+  --primary-edge: 213 50% 30%;
+  --urgent: 24 90% 55%;
+  --urgent-text: 28 95% 65%;
+  --side: 218 36% 10.5%;
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.25);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.25), 0 2px 4px -2px rgb(0 0 0 / 0.25);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.25), 0 4px 6px -4px rgb(0 0 0 / 0.25);
+  /* In dark, a background at 17–22% lightness and initials at 76–80%. */
+  --avatar-1: var(--primary-muted);
+  --avatar-1-text: var(--primary-muted-foreground);
+  --avatar-2: 330 30% 22%;
+  --avatar-2-text: 330 70% 80%;
+  --avatar-3: 142 30% 18%;
+  --avatar-3-text: 142 50% 76%;
+  --avatar-4: 36 40% 19%;
+  --avatar-4-text: 40 75% 76%;
+  --avatar-5: 262 30% 22%;
+  --avatar-5-text: 262 70% 80%;
+  --avatar-6: 188 30% 18%;
+  --avatar-6-text: 188 50% 76%;
+  --avatar-pilot: 215 25% 26%;
+  --avatar-pilot-text: 216 30% 96%;
+  color-scheme: dark;
+}
+
+@layer base {
+  body {
+    font: 15px/1.6 ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  }
+
+  a { color: hsl(var(--link)); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  code, kbd, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+  code {
+    font-size: 0.86em;
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+    background: hsl(var(--muted));
+    overflow-wrap: anywhere;
+  }
+
+  pre {
+    overflow-x: auto;
+    padding: 10px 12px;
+    border-radius: var(--radius);
+    background: hsl(var(--muted));
+    font-size: 13px;
+  }
+  pre code { padding: 0; background: none; }
+
+  kbd {
+    display: inline-block;
+    min-width: 1.5em;
+    padding: 0 0.35em;
+    border: 1px solid hsl(var(--border));
+    border-right-width: 2px;
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    font-size: 11px;
+    line-height: 1.6;
+    text-align: center;
+    color: hsl(var(--muted-foreground));
+    background: hsl(var(--background));
+  }
+
+  :focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
+}

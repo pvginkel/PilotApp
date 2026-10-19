@@ -1,27 +1,31 @@
-/** Toast tone class maps — app-owned, customizable per project. */
+/**
+ * Toast tone class maps — app-owned, customizable per project.
+ *
+ * The template's toast in the mockup's look (PilotAppSpecs design/mockup/style.css, "Toasts"): a
+ * card on the page's background, its text at 14px, sliding in from above. At 380px at most it
+ * stands 24px from the right edge of the template's 420px viewport, the mockup's place; on a wide
+ * window it is lifted to 24px from the bottom too. An error or a warning is told apart by its
+ * border.
+ */
+
+const look = [
+  'max-w-[380px] rounded-[var(--radius)] border-border bg-background text-foreground shadow-[var(--shadow-lg)]',
+  'animate-toast-in min-[901px]:bottom-2',
+  '[&>div]:px-3.5 [&>div]:py-2.5',
+].join(' ');
+
+const action = 'border border-primary-edge bg-primary-strong text-primary-foreground hover:bg-primary-edge focus:ring-ring';
 
 export const toastToneStyles = {
-  success: {
-    container: 'bg-green-50 border-green-200 text-green-800',
-    action: 'bg-green-800 text-green-50 hover:bg-green-700 focus:ring-green-900',
-  },
-  error: {
-    container: 'bg-red-50 border-red-200 text-red-800',
-    action: 'bg-red-800 text-red-50 hover:bg-red-700 focus:ring-red-900',
-  },
-  warning: {
-    container: 'bg-yellow-50 border-yellow-200 text-yellow-800',
-    action: 'bg-yellow-800 text-yellow-50 hover:bg-yellow-700 focus:ring-yellow-900',
-  },
-  info: {
-    container: 'bg-blue-50 border-blue-200 text-blue-800',
-    action: 'bg-blue-800 text-blue-50 hover:bg-blue-700 focus:ring-blue-900',
-  },
+  success: { container: look, action },
+  error: { container: `${look} border-destructive/60`, action },
+  warning: { container: `${look} border-warning/60`, action },
+  info: { container: look, action },
 } as const;
 
 export const toastIconMap = {
-  success: '\u2713',
-  error: '\u2715',
-  warning: '\u26A0',
-  info: '\u2139',
+  success: '✓',
+  error: '✕',
+  warning: '⚠',
+  info: 'ℹ',
 } as const;
