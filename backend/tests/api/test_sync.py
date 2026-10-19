@@ -1074,6 +1074,19 @@ class TestEvents:
 
         assert _stream_counts() == (connects + 1, connected)
 
+    def test_a_head_of_the_stream_leaves_no_stream_open(
+        self, client: FlaskClient
+    ) -> None:
+        connects, connected = _stream_counts()
+
+        response = client.head(EVENTS, headers=sync_headers())
+        # Closed as the server closes it once sent: its body never started,
+        # so the generator's `finally` never runs.
+        response.close()
+
+        assert response.status_code == 200
+        assert _stream_counts() == (connects + 1, connected)
+
     def test_a_refused_stream_is_the_status_itself(self, client: FlaskClient) -> None:
         headers = {**sync_headers()}
         del headers["Authorization"]
