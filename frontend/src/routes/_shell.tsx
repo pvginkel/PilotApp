@@ -3,6 +3,7 @@
  * centre, where the child route shows. Under the mockup's breakpoint the side column is a drawer
  * over the centre (F98.3), opened from the top bar and closed by its scrim or by going elsewhere.
  * At a first sign-in the handle step stands in their place (F137): no screen opens before it.
+ * Every text under the side column and the centre links through the link settings read here.
  */
 
 import { useState } from 'react';
@@ -10,6 +11,7 @@ import { createFileRoute, Outlet, useRouterState } from '@tanstack/react-router'
 import { HandleStep } from '@/components/people/handle-step';
 import { ProjectColumn } from '@/components/projects/project-column';
 import { KeysList } from '@/components/shell/keys-list';
+import { LinksProvider } from '@/components/shared/linked-text';
 import { TopBar } from '@/components/shell/top-bar';
 import { isPerson, PersonProvider, useSelf } from '@/hooks/use-self';
 import { useShellKeys } from '@/lib/keys';
@@ -40,15 +42,17 @@ function Shell() {
       {self !== undefined && person === null && <HandleStep self={self} />}
       {person !== null && (
         <PersonProvider value={person}>
-          <div className="app" data-drawer={drawerOpen ? 'open' : 'closed'} data-testid="shell.app">
-            <nav className="tabs" aria-label="Projects" data-testid="shell.side">
-              <ProjectColumn />
-            </nav>
-            <div className="drawer-scrim" onClick={() => setDrawerOn(null)} data-testid="shell.scrim" />
-            <main className="centre" data-testid="shell.centre">
-              <Outlet />
-            </main>
-          </div>
+          <LinksProvider>
+            <div className="app" data-drawer={drawerOpen ? 'open' : 'closed'} data-testid="shell.app">
+              <nav className="tabs" aria-label="Projects" data-testid="shell.side">
+                <ProjectColumn />
+              </nav>
+              <div className="drawer-scrim" onClick={() => setDrawerOn(null)} data-testid="shell.scrim" />
+              <main className="centre" data-testid="shell.centre">
+                <Outlet />
+              </main>
+            </div>
+          </LinksProvider>
         </PersonProvider>
       )}
       {keysList && <KeysList onClose={() => setKeysList(false)} />}

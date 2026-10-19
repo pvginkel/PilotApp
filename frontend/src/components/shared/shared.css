@@ -85,6 +85,12 @@
   .field-row .field { flex: 1; min-width: 0; }
   .field-row .btn { --h: 38px; }
 
+  /* ---- Links in text (linked-text.tsx) ---------------------------------------------------- */
+
+  /* A ticket id, a repo or an environment, in the colour of the text around it. */
+  .mention { color: inherit; text-decoration: none; cursor: pointer; }
+  .mention:hover { text-decoration: underline; }
+
   /* ---- Counts --------------------------------------------------------------------------- */
 
   /* A group's or a tab's count, in a pill beside its name. */

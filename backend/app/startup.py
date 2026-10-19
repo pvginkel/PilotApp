@@ -51,12 +51,13 @@ def register_root_blueprints(app: Flask) -> None:
     OIDC gate: the store sidecar's sync routes, under the store's bearer, and
     the sync's testing endpoints, refused outside testing mode."""
     from app.api.sync import sync_bp
-    from app.api.testing_sync import testing_sync_bp
-
+    from app.api.testing_links import testing_links_bp
     from app.api.testing_record import testing_record_bp
+    from app.api.testing_sync import testing_sync_bp
 
     app.register_blueprint(sync_bp)
     app.register_blueprint(testing_sync_bp)
+    app.register_blueprint(testing_links_bp)
     app.register_blueprint(testing_record_bp)
 
 

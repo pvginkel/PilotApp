@@ -544,6 +544,47 @@
         "title": "InventedProjectSchema",
         "type": "object"
       },
+      "LinkSettingsSchema.fb10421": {
+        "description": "The link settings the deployment's environment sets (F91, F93); a\nsetting left out or null is unset.",
+        "properties": {
+          "environment_link_base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "KubeCoder's address, without a trailing slash once set",
+            "examples": [
+              "https://kubecoder.example.com",
+              null
+            ],
+            "title": "Environment Link Base Url"
+          },
+          "ticket_url_template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A ticket's address, `{id}` standing for its id",
+            "examples": [
+              "https://tracker.example.com/issue/{id}",
+              null
+            ],
+            "title": "Ticket Url Template"
+          }
+        },
+        "title": "LinkSettingsSchema",
+        "type": "object"
+      },
       "LinksResponseSchema.d9d9a05": {
         "description": "The deployment's link settings and the record's environments.",
         "properties": {
@@ -3483,6 +3524,53 @@
           }
         ],
         "summary": "Put an environment Pilot has touched on the record.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/links": {
+      "put": {
+        "description": "Returns:     200: The link settings as the app now holds them     400: A template without `{id}`, or a base that is not an http(s)         address",
+        "operationId": "put__api_testing_links",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkSettingsSchema.fb10421"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkSettingsSchema.fb10421"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Set the ticket URL template and KubeCoder's address, checked as at boot; a setting left out is unset. The ticket id pattern stays.",
         "tags": [],
         "x-required-role": "editor"
       }
