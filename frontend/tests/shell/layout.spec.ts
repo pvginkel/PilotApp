@@ -22,10 +22,11 @@ test.describe('The layout on a wide window', () => {
 
 test.describe('The drawer on a narrow window', () => {
   test.use({ viewport: { width: 390, height: 844 } });
+  // At a stable address: the bare address moves on to a project, which closes the drawer.
 
   test('opens from the top bar’s toggle and closes by its scrim', async ({ people, shell }) => {
     await people.signIn();
-    await shell.open();
+    await shell.open('/profile');
 
     await expect(shell.drawerToggle).toBeVisible();
     await expect(shell.drawerToggle).toHaveAttribute('aria-expanded', 'false');
@@ -50,7 +51,7 @@ test.describe('The drawer on a narrow window', () => {
 
   test('closes again from the toggle', async ({ people, shell }) => {
     await people.signIn();
-    await shell.open();
+    await shell.open('/profile');
 
     await shell.drawerToggle.click();
     await expect(shell.side).toBeVisible();

@@ -85,6 +85,28 @@
   .field-row .field { flex: 1; min-width: 0; }
   .field-row .btn { --h: 38px; }
 
+  /* ---- Counts --------------------------------------------------------------------------- */
+
+  /* A group's or a tab's count, in a pill beside its name. */
+  .ptab-count {
+    display: inline-grid;
+    place-items: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: hsl(var(--muted));
+    color: hsl(var(--muted-foreground));
+    font-size: 11.5px;
+  }
+
+  /* ---- Empty states (empty-state.tsx) ---------------------------------------------------- */
+
+  .empty-state { margin: 48px auto; max-width: 440px; text-align: center; color: hsl(var(--muted-foreground)); }
+  .empty-state > .icon { width: 56px; height: 56px; stroke-width: 1.5; color: hsl(var(--primary)); }
+  .empty-state h2 { margin: 12px 0 6px; font-size: 18px; color: hsl(var(--foreground)); }
+  .empty-state p { margin: 0; font-size: 14.5px; }
+
   /* ---- Avatars (avatar.tsx) ------------------------------------------------------------- */
 
   .avatar {

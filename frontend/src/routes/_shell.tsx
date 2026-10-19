@@ -1,5 +1,5 @@
 /**
- * The frame every screen sits in: the top bar, the side column for the project list and the
+ * The frame every screen sits in: the top bar, the side column with the project list and the
  * centre, where the child route shows. Under the mockup's breakpoint the side column is a drawer
  * over the centre (F98.3), opened from the top bar and closed by its scrim or by going elsewhere.
  * At a first sign-in the handle step stands in their place (F137): no screen opens before it.
@@ -8,6 +8,7 @@
 import { useState } from 'react';
 import { createFileRoute, Outlet, useRouterState } from '@tanstack/react-router';
 import { HandleStep } from '@/components/people/handle-step';
+import { ProjectColumn } from '@/components/projects/project-column';
 import { KeysList } from '@/components/shell/keys-list';
 import { TopBar } from '@/components/shell/top-bar';
 import { isPerson, PersonProvider, useSelf } from '@/hooks/use-self';
@@ -40,7 +41,9 @@ function Shell() {
       {person !== null && (
         <PersonProvider value={person}>
           <div className="app" data-drawer={drawerOpen ? 'open' : 'closed'} data-testid="shell.app">
-            <nav className="tabs" aria-label="Projects" data-testid="shell.side" />
+            <nav className="tabs" aria-label="Projects" data-testid="shell.side">
+              <ProjectColumn />
+            </nav>
             <div className="drawer-scrim" onClick={() => setDrawerOn(null)} data-testid="shell.scrim" />
             <main className="centre" data-testid="shell.centre">
               <Outlet />

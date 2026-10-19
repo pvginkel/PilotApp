@@ -34,7 +34,7 @@ test.describe('The theme', () => {
     // A token index.css sets in its prefers-color-scheme block, and the mockup never had.
     const secondary = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--secondary').trim());
     expect(secondary).toBe('220 15% 96%');
-    expect(await page.evaluate(() => localStorage.getItem('pilot'))).toBe('{"theme":"light"}');
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('pilot')!).theme)).toBe('light');
 
     await shell.open();
     await expect(html).toHaveAttribute('data-theme', 'light');

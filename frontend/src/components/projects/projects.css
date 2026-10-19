@@ -1,0 +1,57 @@
+/* The project list in the side column (PilotAppSpecs design/mockup/style.css, "Layout: the
+   project tabs" and "Finished projects"). */
+
+@layer components {
+  /* Projects, and its menu at the right. */
+  .tabs-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 10px 4px 21px;
+    font-size: 13px;
+    font-weight: 600;
+    color: hsl(var(--muted-foreground));
+  }
+  /* The archived projects' head: the back arrow, then its name. */
+  .tabs-head.archived { justify-content: flex-start; gap: 6px; padding-left: 10px; }
+
+  .tab {
+    position: relative;
+    display: block;
+    width: 100%;
+    padding: 10px 16px 10px 18px;
+    border-left: 3px solid transparent;
+    color: inherit;
+    text-decoration: none;
+  }
+  .tab:hover { background: hsl(var(--accent)); text-decoration: none; }
+  .tab[aria-current="page"] { border-left-color: hsl(var(--primary)); background: hsl(var(--primary-muted)); }
+  .tab-name { display: flex; align-items: center; gap: 8px; font-weight: 600; line-height: 1.35; }
+  .tab-name .card-id { margin-left: auto; font-weight: 400; font-size: 12px; color: hsl(var(--muted-foreground)); }
+  .tab-status { display: flex; align-items: center; gap: 6px; margin-top: 2px; font-size: 13px; color: hsl(var(--muted-foreground)); }
+
+  /* Other projects and Finished: a group each, opened and closed on its chevron. */
+  .tabs-group {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    width: 100%;
+    margin-top: 10px;
+    padding: 10px 10px 10px 21px;
+    border: 0;
+    border-top: 1px solid hsl(var(--border));
+    background: none;
+    color: hsl(var(--muted-foreground));
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+  }
+  .tabs-group .icon { position: relative; top: calc(0.5em - 0.5cap); width: 12px; height: 12px; }
+  .tabs-group .ptab-count { margin-left: 2px; }
+  .tab.finished .tab-name { font-weight: 500; color: hsl(var(--muted-foreground)); }
+  .tab.finished[aria-current="page"] .tab-name { color: hsl(var(--foreground)); }
+
+  .tabs-none { margin: 6px 21px; font-size: 13px; color: hsl(var(--muted-foreground)); }
+}
