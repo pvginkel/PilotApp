@@ -15,7 +15,10 @@ from app.engine.plan import PlanService
 from app.engine.record import RecordService
 from app.engine.tree import TreeService
 from app.engine.views import ViewService
+from app.exceptions import ConfigurationError
 from app.services.auth_service import AuthService
+from app.services.controller_client import ControllerClient
+from app.services.fake_controller import FakeController
 from app.services.frontend_version_service import FrontendVersionService
 from app.services.health_service import HealthService
 from app.services.link_service import LinkService
@@ -44,6 +47,25 @@ def register_for_background_startup(fn: Callable[[Any], None]) -> None:
     _background_starters.append(fn)
 
 
+def start_controller_client(container: "ServiceContainer") -> None:
+    """Build the controller's client, which registers its readiness check, when
+    a controller is configured.
+
+    Production refuses to start without one. The CLI builds the app without its
+    background services and never gets here, so a migration needs no
+    controller's settings.
+    """
+    app_config = container.app_config()
+    if container.config().is_production and (
+        app_config.controller_url is None or not app_config.controller_token
+    ):
+        raise ConfigurationError(
+            "CONTROLLER_URL and CONTROLLER_TOKEN must be set in production"
+        )
+    if app_config.controller_url is not None:
+        container.controller_client()
+
+
 class ServiceContainer(containers.DeclarativeContainer):
     """Container for service dependency injection."""
 
@@ -67,6 +89,21 @@ class ServiceContainer(containers.DeclarativeContainer):
         HealthService,
         lifecycle_coordinator=lifecycle_coordinator,
         settings=config,
+    )
+
+    # The KubeCoder controller's client (design 2 §14). Its starter is
+    # registered before any that starts a thread, so a refusal starts none.
+    controller_client = providers.Singleton(
+        ControllerClient,
+        base_url=app_config.provided.controller_url,
+        token=app_config.provided.controller_token,
+        health_service=health_service,
+    )
+    register_for_background_startup(lambda c: start_controller_client(c))
+
+    # The controller's fake, served under /api/testing/controller in testing mode
+    fake_controller = providers.Singleton(
+        FakeController, token=app_config.provided.controller_token
     )
 
     # Temp file manager

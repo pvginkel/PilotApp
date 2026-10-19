@@ -65,6 +65,14 @@ class AppEnvironment(BaseSettings):
             "Code; unset, environments show unlinked (F93)"
         ),
     )
+    CONTROLLER_URL: str = Field(
+        default="",
+        description="The KubeCoder controller's base URL; empty runs the app with no controller",
+    )
+    CONTROLLER_TOKEN: str = Field(
+        default="",
+        description="Pilot's named client credential at the KubeCoder controller",
+    )
 
 
 class AppSettings(BaseModel):
@@ -118,6 +126,13 @@ class AppSettings(BaseModel):
             raise ValueError("ENVIRONMENT_LINK_BASE_URL must be an http(s) address")
         return base.rstrip("/")
 
+    controller_url: str | None = None
+    """The KubeCoder controller's base URL (design 2 §14); None runs the app with
+    no controller, and production refuses to start so."""
+
+    controller_token: Annotated[str, Sensitive] = ""
+    """Pilot's named client credential at the controller."""
+
     def dump_for_logging(self) -> dict[str, str]:
         """Every setting, for the boot log, with the Sensitive ones as ``***``."""
         return dump_config_for_logging(self)
@@ -137,4 +152,6 @@ class AppSettings(BaseModel):
             sync_heartbeat_seconds=env.SYNC_HEARTBEAT_SECONDS,
             ticket_url_template=env.TICKET_URL_TEMPLATE or None,
             environment_link_base_url=env.ENVIRONMENT_LINK_BASE_URL or None,
+            controller_url=env.CONTROLLER_URL or None,
+            controller_token=env.CONTROLLER_TOKEN,
         )

@@ -60,6 +60,35 @@ class TestAppSettings:
         with pytest.raises(ValueError):
             AppEnvironment(SYNC_HEARTBEAT_SECONDS=0)
 
+    def test_load_reads_the_controller_from_the_environment(self) -> None:
+        settings = AppSettings.load(
+            AppEnvironment(
+                CONTROLLER_URL="https://controller.example",
+                CONTROLLER_TOKEN="a-token",
+            )
+        )
+
+        assert settings.controller_url == "https://controller.example"
+        assert settings.controller_token == "a-token"
+
+    def test_an_empty_controller_url_is_no_controller(self) -> None:
+        settings = AppSettings.load(
+            AppEnvironment(CONTROLLER_URL="", CONTROLLER_TOKEN="")
+        )
+
+        assert settings.controller_url is None
+        assert settings.controller_token == ""
+
+    def test_the_controller_token_is_hidden_in_the_log(self) -> None:
+        settings = AppSettings(
+            controller_url="https://controller.example", controller_token="a-token"
+        )
+
+        dumped = settings.dump_for_logging()
+
+        assert dumped["controller_url"] == repr("https://controller.example")
+        assert dumped["controller_token"] == "***"
+
     def test_the_settings_are_logged_with_the_token_masked(self) -> None:
         settings = AppSettings(
             sync_token="example-token", store_environment_id="example-env-1"
@@ -73,6 +102,8 @@ class TestAppSettings:
             "sync_heartbeat_seconds": "15.0",
             "ticket_url_template": "None",
             "environment_link_base_url": "None",
+            "controller_url": "None",
+            "controller_token": "***",
         }
 
     def test_the_link_settings_are_unset_by_default(self) -> None:
@@ -131,4 +162,6 @@ class TestAppSettings:
             "sync_heartbeat_seconds": "15.0",
             "ticket_url_template": repr("https://tracker.example.com/{id}"),
             "environment_link_base_url": "None",
+            "controller_url": "None",
+            "controller_token": "***",
         }

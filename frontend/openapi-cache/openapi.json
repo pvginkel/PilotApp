@@ -3424,6 +3424,83 @@
         "tags": []
       }
     },
+    "/api/testing/controller/{path}": {
+      "delete": {
+        "description": "",
+        "operationId": "delete__api_testing_controller_{path}",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "format": "path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {},
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "The fake controller's answer to its route at `path`, streams included.",
+        "tags": [],
+        "x-required-role": "editor"
+      },
+      "get": {
+        "description": "",
+        "operationId": "get__api_testing_controller_{path}",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "format": "path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {},
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "The fake controller's answer to its route at `path`, streams included.",
+        "tags": [],
+        "x-required-role": "editor"
+      },
+      "post": {
+        "description": "",
+        "operationId": "post__api_testing_controller_{path}",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "format": "path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {},
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "The fake controller's answer to its route at `path`, streams included.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
     "/api/testing/deployments/version": {
       "post": {
         "description": "",

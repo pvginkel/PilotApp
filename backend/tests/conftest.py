@@ -20,6 +20,7 @@ Without one the suite passes where ``.env`` sets it, and fails in CI.
 from collections.abc import Generator
 
 import pytest
+from dependency_injector import providers
 from flask.testing import FlaskClient
 from sqlalchemy.orm import Session as DbSession
 
@@ -29,10 +30,13 @@ from app.engine.bus import EngineEvent
 from app.models import Document, Environment, Item, Project, User
 from app.models.reference import DocumentRole, SessionState, UserKind
 from app.services.container import ServiceContainer
+from app.services.controller_client import ControllerClient
+from app.services.health_service import HealthService
 from app.utils.after_commit import clear_after_commit_callbacks
 
 # Import all infrastructure fixtures
 from tests.conftest_infrastructure import *  # noqa: F403
+from tests.support.fake_controller import FAKE_CONTROLLER_TOKEN, ServedFakeController
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID, SYNC_TOKEN, FakeSidecar
 
 
@@ -162,3 +166,32 @@ def engine_events(container: ServiceContainer) -> Generator[list[EngineEvent]]:
     finally:
         bus.unsubscribe(events.append)
         clear_after_commit_callbacks()
+
+
+@pytest.fixture
+def fake_controller() -> Generator[ServedFakeController]:
+    """The KubeCoder controller's fake, served over HTTP with no environment;
+    the test drives it through its verbs. Its keepalive is 0.2 s."""
+    fake = ServedFakeController(keepalive_seconds=0.2)
+    try:
+        yield fake
+    finally:
+        fake.close()
+
+
+@pytest.fixture
+def controller_client(
+    container: ServiceContainer, fake_controller: ServedFakeController
+) -> ControllerClient:
+    """The real client, talking to ``fake_controller``: the container's client
+    for the test. Its readiness check is on a health service of its own."""
+    client = ControllerClient(
+        base_url=fake_controller.url,
+        token=FAKE_CONTROLLER_TOKEN,
+        health_service=HealthService(
+            lifecycle_coordinator=container.lifecycle_coordinator(),
+            settings=container.config(),
+        ),
+    )
+    container.controller_client.override(providers.Object(client))
+    return client
