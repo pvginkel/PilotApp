@@ -6,24 +6,27 @@
 import { createContext, useCallback, useContext, useState, type ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { useDismiss } from '@/hooks/use-dismiss';
+import { cn } from '@/lib/utils';
 
 const CloseMenu = createContext<() => void>(() => undefined);
 
 interface MenuProps {
   /** The menu's accessible name. */
   label: string;
+  /** The class of the box that holds the button and the menu. */
+  anchorClassName?: string;
   testId: string;
   trigger: (state: { open: boolean; toggle: () => void }) => ReactNode;
   children: ReactNode;
 }
 
-export function Menu({ label, testId, trigger, children }: MenuProps) {
+export function Menu({ label, anchorClassName, testId, trigger, children }: MenuProps) {
   const [open, setOpen] = useState(false);
   const close = useCallback(() => setOpen(false), []);
   const anchor = useDismiss('menu', open, close);
 
   return (
-    <div className="menu-anchor" ref={anchor}>
+    <div className={cn('menu-anchor', anchorClassName)} ref={anchor}>
       {trigger({ open, toggle: () => setOpen(!open) })}
       {open && (
         <div className="menu-pop" role="menu" aria-label={label} data-testid={testId}>

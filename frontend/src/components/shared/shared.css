@@ -237,4 +237,10 @@
     box-shadow: var(--shadow-lg);
   }
   .dialog h2 { margin: 0 0 12px; font-size: 16px; font-weight: 700; }
+  /* A confirm dialog (the mockup's Finish): what the act does, a note, then Cancel and the act. */
+  .dialog.confirm { width: min(480px, calc(100vw - 32px)); min-width: 0; }
+  .dialog-list { margin: 0 0 14px; padding-left: 1.2em; font-size: 14px; }
+  .dialog-list li { margin: 4px 0; }
+  .dialog-note { margin: 0 0 18px; font-size: 13.5px; color: hsl(var(--muted-foreground)); }
+  .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
 }

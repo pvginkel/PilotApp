@@ -1,7 +1,14 @@
 import type { Locator, Page } from '@playwright/test';
-import { waitForUiState } from '../helpers';
+import type { FormTestEvent } from '@/lib/test/test-events';
+import { waitForUiState, waitTestEvent } from '../helpers';
 
-/** A project's head (F2), the plan popover its step button opens (F3) and the plan's notes (F2.7). */
+type Act = 'join' | 'leave' | 'finish' | 'reopen' | 'archive' | 'bring-back';
+type Ask = Exclude<Act, 'join' | 'leave'>;
+
+/**
+ * A project's head (F2), the plan popover its step button opens (F3), the plan's notes (F2.7), and
+ * the project's menu and the dialogs it opens (F2.4).
+ */
 export class ProjectHeadPage {
   readonly root: Locator;
   readonly name: Locator;
@@ -19,6 +26,9 @@ export class ProjectHeadPage {
   readonly members: Locator;
   readonly notesButton: Locator;
   readonly notes: Locator;
+  readonly menuButton: Locator;
+  readonly menu: Locator;
+  readonly menuItems: Locator;
 
   constructor(private readonly page: Page) {
     this.root = page.getByTestId('project.head');
@@ -37,6 +47,9 @@ export class ProjectHeadPage {
     this.members = page.getByTestId('project.members');
     this.notesButton = page.getByTestId('project.notes.button');
     this.notes = page.getByTestId('project.notes');
+    this.menuButton = page.getByTestId('project.menu.button');
+    this.menu = page.getByTestId('project.menu');
+    this.menuItems = this.menu.getByRole('menuitem');
   }
 
   /** Opens a project at its own address, once its head is read. */
@@ -53,5 +66,42 @@ export class ProjectHeadPage {
       notesButton: root.getByTestId('project.plan.step.notes-button'),
       notes: root.getByTestId('project.plan.step.notes'),
     };
+  }
+
+  menuItem(act: Act): Locator {
+    return this.page.getByTestId(`project.menu.${act}`);
+  }
+
+  /** Chooses `act` in the project's menu; Join and Leave are done once the head and the list show it. */
+  async choose(act: Act): Promise<void> {
+    await this.menuButton.click();
+    const done = act === 'join' || act === 'leave' ? this.written(act) : undefined;
+    await this.menuItem(act).click();
+    await done;
+  }
+
+  /** The dialog the menu opens to ask before `ask`. */
+  dialog(ask: Ask): { root: Locator; backdrop: Locator; title: Locator; lines: Locator; note: Locator; cancel: Locator; confirm: Locator } {
+    const id = `project.${ask}-dialog`;
+    return {
+      root: this.page.getByTestId(id),
+      backdrop: this.page.getByTestId(`${id}.backdrop`),
+      title: this.page.getByTestId(`${id}.title`),
+      lines: this.page.getByTestId(`${id}.line`),
+      note: this.page.getByTestId(`${id}.note`),
+      cancel: this.page.getByTestId(`${id}.cancel`),
+      confirm: this.page.getByTestId(`${id}.confirm`),
+    };
+  }
+
+  /** Confirms the dialog open for `ask`, done once the head and the list show it. */
+  async confirm(ask: Ask): Promise<void> {
+    const done = this.written(ask);
+    await this.dialog(ask).confirm.click();
+    await done;
+  }
+
+  private written(act: Act): Promise<FormTestEvent> {
+    return waitTestEvent<FormTestEvent>(this.page, 'form', (event) => event.formId === `project.${act}` && event.phase === 'success');
   }
 }
