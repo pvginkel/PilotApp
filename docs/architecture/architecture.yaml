@@ -32,7 +32,7 @@ applicationComponents:
 applicationServices:
   - id: svc:pilot-api,1a12e768-b197-4e77-a095-f981982bbb8c
     label: Pilot API
-    summary: HTTP API under /api — the sign-in flow and the signed-in user, background task status, and the SSE gateway's connection callbacks.
+    summary: HTTP API under /api — the sign-in flow and the signed-in user, background task status, and the browser's SSE event stream.
     introduced: 2026-10-14
     lifecycle: active
 
@@ -78,16 +78,11 @@ relations:
     type: Assignment
 
   # --- What the frontend consumes ---
-  # The SPA calls the API same-origin; the UI's NGINX proxies /api/ to the backend.
+  # The SPA calls the API same-origin, its SSE event stream (/api/sse/stream)
+  # included; the UI's NGINX proxies /api/ to the backend.
   - id: rel:pilot-ui-consumes-api
     source: app:pilot-ui,7059ff8a-e581-4466-99e1-3a63a1b9f38c
     target: svc:pilot-api,1a12e768-b197-4e77-a095-f981982bbb8c
-    type: Association
-
-  # The SPA holds an event stream on /api/sse/, which the UI's NGINX proxies to the gateway.
-  - id: rel:pilot-ui-consumes-ssegateway
-    source: app:pilot-ui,7059ff8a-e581-4466-99e1-3a63a1b9f38c
-    target: svc:ssegateway,59a7d043-bb0c-4e44-a8b8-3e943338f807
     type: Association
 
   # --- What the backend consumes: recipes the deployer resolves ---
@@ -103,11 +98,3 @@ relations:
     target: cap:iam
     type: Association
     boundBy: "env:OIDC_ISSUER_URL"
-
-  # Task and version events to the browsers. The default is the backend's own (app/config.py).
-  - id: rel:pilot-consumes-ssegateway
-    source: app:pilot,e80b688e-4132-477e-85fd-3da0dfe34163
-    target: svc:ssegateway,59a7d043-bb0c-4e44-a8b8-3e943338f807
-    type: Association
-    boundBy: "env:SSE_GATEWAY_URL"
-    boundByDefaultValue: "http://localhost:3502"
