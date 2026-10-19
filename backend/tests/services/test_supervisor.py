@@ -197,6 +197,93 @@ class TestSupervisorLoops:
         assert metric_value(JOB_RESTARTS_TOTAL, job="once") == 0
         assert metric_value(JOB_UP, job="once") == 0
 
+    def test_a_request_to_run_again_has_a_live_loop_run_once_more(
+        self, app: Flask, supervise: Supervise, supervisor_log: LogWaiter
+    ) -> None:
+        supervisor, coordinator = supervise(app.container)
+        supervisor.register_job("again", needs_controller=False)
+        coordinator.fire_startup()
+        calls = _Calls()
+        release = threading.Event()
+
+        def loop(handle: LoopHandle) -> None:
+            calls.add(handle.name)
+            release.wait(WAIT_SECONDS)
+
+        # With no live loop, the request starts one.
+        assert supervisor.start_loop("again", loop, again=True)
+        calls.wait_for(1)
+        assert supervisor.start_loop("again", loop, again=True)
+        assert supervisor.start_loop("again", loop, again=True)
+        release.set()
+
+        supervisor_log.wait_for(r"Loop again ended")
+        assert calls.items == ["again", "again"]
+        assert supervisor_log.matching(r"Loop again started") == ["Loop again started"]
+        assert supervisor_log.matching(r"Loop again runs again") == [
+            "Loop again runs again"
+        ]
+        assert metric_value(JOB_RESTARTS_TOTAL, job="again") == 0
+
+    def test_a_request_after_a_runs_last_action_is_not_lost(
+        self, app: Flask, supervise: Supervise, supervisor_log: LogWaiter
+    ) -> None:
+        # The window between a relay's last action and its loop's end, where
+        # the next turn's send asks for the relay.
+        supervisor, coordinator = supervise(app.container)
+        supervisor.register_job("again", needs_controller=False)
+        coordinator.fire_startup()
+        calls = _Calls()
+
+        def loop(handle: LoopHandle) -> None:
+            if not calls.items:
+                calls.add(supervisor.start_loop("again", loop, again=True))
+            calls.add(handle.name)
+
+        assert supervisor.start_loop("again", loop)
+
+        supervisor_log.wait_for(r"Loop again ended")
+        assert calls.items == [True, "again", "again"]
+
+    def test_without_again_the_same_request_is_a_no_op(
+        self, app: Flask, supervise: Supervise, supervisor_log: LogWaiter
+    ) -> None:
+        supervisor, coordinator = supervise(app.container)
+        supervisor.register_job("once", needs_controller=False)
+        coordinator.fire_startup()
+        calls = _Calls()
+
+        def loop(handle: LoopHandle) -> None:
+            if not calls.items:
+                calls.add(supervisor.start_loop("once", loop))
+            calls.add(handle.name)
+
+        assert supervisor.start_loop("once", loop)
+
+        supervisor_log.wait_for(r"Loop once ended")
+        assert calls.items == [False, "once"]
+
+    def test_a_loop_told_to_stop_does_not_run_again(
+        self, app: Flask, supervise: Supervise, supervisor_log: LogWaiter
+    ) -> None:
+        supervisor, coordinator = supervise(app.container)
+        supervisor.register_job("again", needs_controller=False)
+        coordinator.fire_startup()
+        calls = _Calls()
+
+        def loop(handle: LoopHandle) -> None:
+            calls.add(handle.name)
+            handle.wait(WAIT_SECONDS)
+
+        assert supervisor.start_loop("again", loop)
+        calls.wait_for(1)
+        assert supervisor.start_loop("again", loop, again=True)
+
+        coordinator.shutdown()
+
+        supervisor_log.wait_for(r"Loop again ended")
+        assert calls.items == ["again"]
+
     def test_a_loop_that_raises_restarts_with_doubling_backoff_to_its_cap(
         self, app: Flask, supervise: Supervise, supervisor_log: LogWaiter
     ) -> None:

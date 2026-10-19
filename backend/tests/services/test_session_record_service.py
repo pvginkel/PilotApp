@@ -21,12 +21,16 @@ from app.models import Environment, Project, SessionRecord, Turn, User
 from app.models.reference import RecordKind, SessionState, UserKind
 from app.services.container import ServiceContainer
 from app.services.session_record_service import (
+    RECORDS_WRITTEN_TOTAL,
     SessionRecordService,
+    StreamPosition,
     last_record,
     read_records,
+    stream_position,
 )
 from app.utils import after_commit as after_commit_module
 from app.utils.after_commit import clear_after_commit_callbacks
+from tests.support.supervisor import metric_value
 
 APP_DIR = Path(app_package.__file__).parent
 MODEL_MODULES = {APP_DIR / "models" / "session.py", APP_DIR / "models" / "__init__.py"}
@@ -66,6 +70,24 @@ def _seqs(stored: list) -> list[int]:
     return [entry.record.seq for entry in stored]
 
 
+def _line(
+    records: SessionRecordService,
+    run: models.Session,
+    turn: Turn,
+    offset: int,
+    controller_session: str = "claude-1",
+    kind: RecordKind = RecordKind.CLAUDE,
+) -> None:
+    records.append(
+        run.id,
+        kind,
+        payload={"type": "system", "subtype": "status"},
+        turn_id=turn.id,
+        raw_offset=offset,
+        controller_session=controller_session,
+    )
+
+
 class TestReadRecords:
     def test_it_reads_the_records_after_a_seq_in_order_up_to_a_limit(
         self,
@@ -102,6 +124,24 @@ class TestReadRecords:
         assert _seqs(
             read_records(session, project_session.id, limit=2, newest_first=True)
         ) == [3, 2]
+
+    def test_it_reads_before_a_seq(
+        self,
+        session: DbSession,
+        records: SessionRecordService,
+        project_session: models.Session,
+    ) -> None:
+        for n in range(5):
+            _server(records, project_session, f"Line {n}")
+
+        assert _seqs(
+            read_records(
+                session, project_session.id, before=4, limit=2, newest_first=True
+            )
+        ) == [3, 2]
+        assert _seqs(
+            read_records(session, project_session.id, after=1, before=4, limit=10)
+        ) == [2, 3]
 
     def test_it_reads_one_sessions_records_only(
         self,
@@ -176,6 +216,57 @@ class TestReadRecords:
         assert last is not None
         assert last.record.seq == 2
         assert last.record.payload == {"text": "Second"}
+
+
+class TestStreamPosition:
+    def test_none_before_the_first_line(
+        self,
+        session: DbSession,
+        records: SessionRecordService,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        assert stream_position(session, project_session.id) is None
+
+        turn = _turn(session, project_session, 1, author=person)
+        records.append(project_session.id, RecordKind.SEND, turn_id=turn.id)
+        _server(records, project_session, "Starting Example-1…")
+
+        assert stream_position(session, project_session.id) is None
+
+    def test_the_last_line_or_result_past_the_records_after_it(
+        self,
+        session: DbSession,
+        records: SessionRecordService,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        first = _turn(session, project_session, 1, author=None)
+        _line(records, project_session, first, 120)
+        _line(records, project_session, first, 300, kind=RecordKind.RESULT)
+        second = _turn(session, project_session, 2, author=person)
+        records.append(project_session.id, RecordKind.SEND, turn_id=second.id)
+        # More than a page of the search's.
+        for n in range(40):
+            _server(records, project_session, f"Effect {n}")
+
+        assert stream_position(session, project_session.id) == StreamPosition(
+            "claude-1", 300
+        )
+
+    def test_a_new_controller_session_moves_it(
+        self,
+        session: DbSession,
+        records: SessionRecordService,
+        project_session: models.Session,
+    ) -> None:
+        turn = _turn(session, project_session, 1, author=None)
+        _line(records, project_session, turn, 900)
+        _line(records, project_session, turn, 80, controller_session="claude-2")
+
+        assert stream_position(session, project_session.id) == StreamPosition(
+            "claude-2", 80
+        )
 
 
 def _docstrings(tree: ast.Module) -> set[ast.AST]:
@@ -333,6 +424,29 @@ class TestAppend:
     def test_it_refuses_an_unknown_session(self, records: SessionRecordService) -> None:
         with pytest.raises(RecordNotFoundException):
             records.append(uuid.uuid4(), RecordKind.SERVER, payload={"text": "Lost"})
+
+    def test_each_record_is_counted_by_its_kind(
+        self,
+        session: DbSession,
+        records: SessionRecordService,
+        project_session: models.Session,
+    ) -> None:
+        before = {
+            kind: metric_value(RECORDS_WRITTEN_TOTAL, kind=kind.value)
+            for kind in (RecordKind.SERVER, RecordKind.CLAUDE)
+        }
+        turn = _turn(session, project_session, 1, author=None)
+
+        _server(records, project_session, "One")
+        _server(records, project_session, "Two")
+        _line(records, project_session, turn, 120)
+
+        assert metric_value(RECORDS_WRITTEN_TOTAL, kind="server") == (
+            before[RecordKind.SERVER] + 2
+        )
+        assert metric_value(RECORDS_WRITTEN_TOTAL, kind="claude") == (
+            before[RecordKind.CLAUDE] + 1
+        )
 
     def test_the_records_of_one_transaction_share_one_wake(
         self, records: SessionRecordService, project_session: models.Session

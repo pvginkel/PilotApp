@@ -5,8 +5,8 @@ A job is registered by name before STARTUP. It has a *reconcile*, run once at
 STARTUP in a database session of its own before any of the job's loops start,
 and *loops*: threads run by job and key (`relay:12`), one live loop per key, each
 running until it returns. A loop that raises is restarted with backoff; one that
-returns ended on purpose. A *timer* runs on the scheduler's tick, each run in a
-database session of its own.
+returns ended on purpose, unless it was asked to run again meanwhile. A *timer*
+runs on the scheduler's tick, each run in a database session of its own.
 
 Nothing drains to completion (design 2 §7.3): every job resumes from rows, so at
 PREPARE_SHUTDOWN the supervisor tells every loop to stop and closes the I/O it
@@ -136,6 +136,9 @@ class _Loop:
         self.name = name
         self.run = run
         self.handle = LoopHandle(name)
+        # Set by a request to run again; cleared, under the supervisor's lock,
+        # as each run starts.
+        self.again = False
         self.thread = threading.Thread(
             target=target, args=(self,), name=f"job-{name}", daemon=True
         )
@@ -215,19 +218,29 @@ class Supervisor:
                 )
             self._timers.append(_Timer(timer, run, needs_controller))
 
-    def start_loop(self, job: str, run: LoopRun, key: str | int | None = None) -> bool:
+    def start_loop(
+        self,
+        job: str,
+        run: LoopRun,
+        key: str | int | None = None,
+        *,
+        again: bool = False,
+    ) -> bool:
         """Run `run` as the loop `job:key` (`job` when there is no key).
 
         Before the job's reconcile has run the loop waits for it, and starts once
         the reconcile at STARTUP is done: the suite and the CLI never fire
         STARTUP, so there it never starts. A request for a name that has a live
         or waiting loop is a no-op: a loop past its last action whose thread has
-        not yet ended still counts as live.
+        not yet ended still counts as live. With `again`, a request for a name
+        that has a live loop has that loop run its run once more after the
+        current run returns, so a run starts after every such request.
 
         Returns:
-            Whether this request started the loop or set it waiting; False for a
-            no-op, at and after PREPARE_SHUTDOWN, and for a job that needs the
-            controller when none is configured
+            Whether this request started the loop, set it waiting, or set a
+            live loop to run again; False for a no-op, at and after
+            PREPARE_SHUTDOWN, and for a job that needs the controller when none
+            is configured
         """
         name = job if key is None else f"{job}:{key}"
         with self._lock:
@@ -236,7 +249,11 @@ class Supervisor:
                 entry.needs_controller and not self._controller_configured
             ):
                 return False
-            if name in self._loops or name in entry.pending:
+            live = self._loops.get(name)
+            if live is not None and again:
+                live.again = True
+                return True
+            if live is not None or name in entry.pending:
                 return False
             if entry.reconciled:
                 self._spawn(entry, name, run)
@@ -255,6 +272,8 @@ class Supervisor:
         delay = self._backoff_initial
         try:
             while True:
+                with self._lock:
+                    loop.again = False
                 began = time.perf_counter()
                 failure: Exception | None = None
                 JOB_UP.labels(job=loop.job).inc()
@@ -265,7 +284,14 @@ class Supervisor:
                 finally:
                     JOB_UP.labels(job=loop.job).dec()
                 if failure is None:
-                    return
+                    # The check and the release are one step under the lock:
+                    # a request after it starts a loop of its own.
+                    with self._lock:
+                        if not loop.again or loop.handle.stopping:
+                            del self._loops[loop.name]
+                            return
+                    logger.info("Loop %s runs again", loop.name)
+                    continue
                 if loop.handle.stopping:
                     logger.error(
                         "Loop %s raised while stopping", loop.name, exc_info=failure
@@ -285,7 +311,8 @@ class Supervisor:
                 delay = min(delay * 2, self._backoff_max)
         finally:
             with self._lock:
-                del self._loops[loop.name]
+                if self._loops.get(loop.name) is loop:
+                    del self._loops[loop.name]
             logger.info("Loop %s ended", loop.name)
 
     def _on_lifecycle_event(self, event: LifecycleEvent) -> None:

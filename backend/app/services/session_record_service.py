@@ -11,6 +11,7 @@ import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from prometheus_client import Counter
 from sqlalchemy import case, select
 from sqlalchemy.orm import Session
 
@@ -34,6 +35,15 @@ STREAM_ENDED_STATES = (SessionState.ENDED, SessionState.FAILED)
 """The states in which a Session's stream has ended after its last record
 (§11.2)."""
 
+RECORDS_WRITTEN_TOTAL = Counter(
+    "pilot_records_written_total",
+    "Session Records written, by kind",
+    ["kind"],
+)
+
+# A backwards search reads the last record alone first, then pages of this.
+_SEARCH_PAGE = 32
+
 
 @dataclass(frozen=True)
 class StoredRecord:
@@ -54,17 +64,29 @@ class RecordPage:
     ended: bool
 
 
+@dataclass(frozen=True)
+class StreamPosition:
+    """Where a Session's records stand in a controller session's raw file."""
+
+    controller_session: str
+    raw_offset: int
+
+
 def read_records(
     db: Session,
     session_id: uuid.UUID,
     *,
     after: int = 0,
+    before: int | None = None,
     limit: int,
     newest_first: bool = False,
 ) -> list[StoredRecord]:
-    """The Session's records after the `seq` `after`, at most `limit`, in order,
-    or newest first."""
+    """The Session's records after the `seq` `after`, and before `before` when
+    given, at most `limit`, in order, or newest first."""
     is_send = SessionRecord.kind_code == RecordKind.SEND
+    bounds = [SessionRecord.session_id == session_id, SessionRecord.seq > after]
+    if before is not None:
+        bounds.append(SessionRecord.seq < before)
     statement = (
         select(
             SessionRecord,
@@ -74,7 +96,7 @@ def read_records(
         )
         .outerjoin(Turn, Turn.id == SessionRecord.turn_id)
         .outerjoin(User, User.id == Turn.author_user_id)
-        .where(SessionRecord.session_id == session_id, SessionRecord.seq > after)
+        .where(*bounds)
         .order_by(SessionRecord.seq.desc() if newest_first else SessionRecord.seq)
         .limit(limit)
     )
@@ -87,6 +109,23 @@ def read_records(
 def last_record(db: Session, session_id: uuid.UUID) -> StoredRecord | None:
     """The Session's last record; None before its first."""
     return next(iter(read_records(db, session_id, limit=1, newest_first=True)), None)
+
+
+def stream_position(db: Session, session_id: uuid.UUID) -> StreamPosition | None:
+    """The controller session and raw offset of the Session's last `claude` or
+    `result` record; None before its first."""
+    before, limit = None, 1
+    while True:
+        page = read_records(
+            db, session_id, before=before, limit=limit, newest_first=True
+        )
+        for stored in page:
+            record = stored.record
+            if record.raw_offset is not None and record.controller_session is not None:
+                return StreamPosition(record.controller_session, record.raw_offset)
+        if len(page) < limit:
+            return None
+        before, limit = page[-1].record.seq, _SEARCH_PAGE
 
 
 def to_record_schema(stored: StoredRecord) -> SessionRecordSchema:
@@ -178,6 +217,7 @@ class SessionRecordService:
         )
         self.db.add(record)
         self.db.flush()
+        RECORDS_WRITTEN_TOTAL.labels(kind=kind.value).inc()
         after_commit(self._streams.waker(session_id))
         return record
 

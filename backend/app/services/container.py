@@ -28,6 +28,7 @@ from app.services.metrics_service import MetricsService
 from app.services.oidc_client_service import OidcClientService
 from app.services.people_service import PeopleService
 from app.services.project_service import ProjectService
+from app.services.relay_service import RelayService
 from app.services.session_record_service import SessionRecordService
 from app.services.session_stream_service import SessionStreamService
 from app.services.sse_connection_manager import SSEConnectionManager
@@ -183,6 +184,17 @@ class ServiceContainer(containers.DeclarativeContainer):
     session_record_service = providers.Factory(
         SessionRecordService, db=db_session, session_streams=session_stream_service
     )
+
+    # The send and the relay (design 2 §9); the relay's job registers on the
+    # supervisor when built, before STARTUP.
+    relay_service = providers.Singleton(
+        RelayService,
+        container=__self__,
+        supervisor=supervisor,
+        session_streams=session_stream_service,
+        environment_service=environment_service,
+    )
+    register_for_background_startup(lambda c: c.relay_service())
 
     # Task service - in-memory task management
     task_service = providers.Singleton(

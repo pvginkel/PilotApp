@@ -1,8 +1,9 @@
 """The container's start of the controller's client (design 2 §14; V12), its
-supervisor (design 2 §7), and the jobs registered on it (design 2 §13)."""
+supervisor (design 2 §7), and the jobs registered on it (design 2 §9, §13)."""
 
 import logging
 import threading
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -15,17 +16,21 @@ from app.app_config import AppSettings
 from app.config import Settings
 from app.database import scoped_session
 from app.exceptions import ConfigurationError
-from app.models import Environment
+from app.models import Environment, Project, User
+from app.models import Session as AgentSession
+from app.models.reference import SessionState, UserKind
 from app.services.container import ServiceContainer, start_controller_client
+from app.services.controller_client import HeadlessCreateRequest
 from app.services.environment_service import EnvironmentService
 from app.services.fleet_consumer import FleetConsumer
+from app.services.relay_service import RelayService
 from app.services.supervisor import Supervisor
 from tests.conftest_infrastructure import (
     _clear_prometheus_registry,
     _create_test_app,
     _dispose_app,
 )
-from tests.support.fake_controller import ServedFakeController, client_of
+from tests.support.fake_controller import ServedFakeController, client_of, raw_turn
 from tests.support.supervisor import wait_until
 from tests.support.tls import invent_ca
 
@@ -246,6 +251,63 @@ class TestEnvironmentWiring:
 
         assert fake_controller.environment("env-other").status == "running"
         assert _last_state(container, "env-other") == "running"
+
+
+class TestRelayWiring:
+    def test_a_send_after_startup_is_relayed_to_its_turns_end(
+        self, committed_app: Flask, fake_controller: ServedFakeController
+    ) -> None:
+        container = committed_app.container
+        container.app_config.override(
+            AppSettings(controller_url=fake_controller.url, scheduler_tick_seconds=0.05)
+        )
+        client = client_of(container, fake_controller)
+        fake_controller.add_environment("env-a", status="running")
+        name = client.create_headless_session("env-a", HeadlessCreateRequest()).name
+        with scoped_session(container) as db:
+            person = User(
+                kind_code=UserKind.PERSON,
+                subject="subject-ada",
+                handle="ada",
+                name="Ada Example",
+                avatar_slot=1,
+            )
+            db.add_all([person, Environment(id="env-a", name="A", exempt=False)])
+            db.flush()
+            project = Project(created_by_user_id=person.id)
+            db.add(project)
+            db.flush()
+            run = AgentSession(
+                project_id=project.id,
+                environment_id="env-a",
+                kind_code="work",
+                cwd="/work/Example",
+                controller_session=name,
+                token_hash="1" * 64,
+                state_code=SessionState.IDLE,
+            )
+            db.add(run)
+            db.flush()
+            run_id = run.id
+        relays = container.relay_service()
+        assert isinstance(relays, RelayService)
+        coordinator = container.lifecycle_coordinator()
+
+        coordinator.fire_startup()
+        try:
+            with scoped_session(container) as db:
+                relays.send(db, run_id, "Rename the badge")
+            fake_controller.play("env-a", name, raw_turn("turn_text"))
+            fake_controller.finish("env-a", name)
+            wait_until(lambda: _turns_ended(container, run_id) == 1, "the turn ended")
+        finally:
+            coordinator.shutdown()
+
+
+def _turns_ended(container: ServiceContainer, run_id: uuid.UUID) -> int | None:
+    with scoped_session(container) as db:
+        run = db.get_one(AgentSession, run_id)
+        return run.turns if run.state_code == SessionState.IDLE else None
 
 
 def _last_state(container: ServiceContainer, env_id: str) -> str | None:
