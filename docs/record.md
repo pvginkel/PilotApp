@@ -64,7 +64,8 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
 
 **Sessions and environments**
 
-- `environments`: a KubeCoder environment Pilot has touched, keyed by its environment id.
+- `environments`: a KubeCoder environment Pilot has touched, keyed by its environment id. The
+  store's row is made by its sidecar's first sync call ([`sync.md`](sync.md)).
 - `sessions`: a run of a Claude Code conversation in one environment, for one project, of a session
   kind; `token_hash` is unique, so a bearer token resolves to one session.
 

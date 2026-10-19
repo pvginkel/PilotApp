@@ -9,11 +9,14 @@ configuration are in `pvginkel/PilotDeploy`; Argo CD deploys it.
 A push to PilotApp's `main` starts two Jenkins jobs, each triggered by GitHub's push hook:
 
 - **`PilotApp`** runs the `Jenkinsfile`: the backend and frontend suites through the pipeline
-  library's `modernApp.test`, then the images `registry:5000/pilot` (the backend) and
-  `registry:5000/pilot-ui` (the UI), each tagged with the build number, then a commit to
-  PilotDeploy's `main` that pins both in `config/prd/values.yaml` as `images.pilot` and
-  `images.pilotUI` (`:<build number>`). The pin step edits those lines in place and never creates a
-  key, so both keys stay in that file. A new build aborts one still running.
+  library's `modernApp.test`, then `Test sidecar`, `go vet` and `go test -race` of `sidecar/` in a
+  `golang` container on the image this environment's `go` tool runs. Then the images
+  `registry:5000/pilot` (the backend), `registry:5000/pilot-ui` (the UI) and
+  `registry:5000/pilot-sync` (the store's sync sidecar), each tagged with the build number and
+  `latest`, then a commit to PilotDeploy's `main` that pins the first two in
+  `config/prd/values.yaml` as `images.pilot` and `images.pilotUI` (`:<build number>`). The pin step
+  edits those lines in place and never creates a key, so both keys stay in that file. A new build
+  aborts one still running.
 - **`AaC/PilotApp`** runs `Jenkinsfile.architecture` (below).
 
 Argo CD's Application `pilot-prd`, registered in `pvginkel/ArgoCDDeploy`'s `releases/values.yaml`,
@@ -30,11 +33,17 @@ namespace `pilot-prd`:
   (`python -m app.cli upgrade-db`) to completion before the pod's containers start: `backend` (the
   Flask API and the SSE stream, port 3501) and `ui` (the SPA's nginx, port 3500, which proxies
   `/api/` to the backend).
+  The backend serves the store's sync routes, `/api/sync/` ([`sync.md`](sync.md)), and refuses
+  every call to them: the chart sets neither `SYNC_TOKEN` nor `STORE_ENVIRONMENT_ID`, and either
+  one empty refuses all (D007).
 - **Service `pilot`**, port 80 to the UI. Its annotations `nginx.webathome.org/server-name:
   pilot.ginbov.nl` and `nginx.webathome.org/is-public: "true"` have the estate's front door serve it
   as a public site, over HTTPS with a Let's Encrypt certificate. Prometheus scrapes the backend's
   `/metrics` on port 3501.
 - The secrets below.
+
+`pilot-sync`, the third image, is built for the store environment's pod, which KubeCoder composes
+from its catalog; nothing PilotDeploy renders runs it, and nothing pins it (D007).
 
 ## The database
 

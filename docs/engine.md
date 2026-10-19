@@ -12,13 +12,14 @@ nothing it emits is delivered before that transaction commits.
 | `DocumentService` (`documents.py`) | the births, `publish()`, the document's row lock, versions, the turn's end |
 | `IngestService` (`ingest.py`) | an agent's save of a path of the tree |
 | `RecordService` (`record.py`) | a person's answer, Done, undo, Read, Reviewed |
-| `PlanService` (`plan.py`) | `plan.json`, rendered and saved |
-| `TreeService` (`tree.py`) | what a path names, the bytes it must hold, its tree hash |
+| `PlanService` (`plan.py`) | `plan.json`, rendered and saved; the deferrals without a home |
+| `TreeService` (`tree.py`) | what a path names, the bytes it must hold, its tree hash; the manifest |
 | `ViewService` (`views.py`) | `reference.json` and `timeline.json` |
 | `EngineBus` (`bus.py`) | the events, one bus per process |
 
 The grammar the engine reads is [`block-dsl.md`](block-dsl.md), the tree and its files
-[`projection.md`](projection.md), the tables [`record.md`](record.md).
+[`projection.md`](projection.md), the tables [`record.md`](record.md), and the sync between the
+engine and the store's tree [`sync.md`](sync.md).
 
 ## Born in the record
 
@@ -59,6 +60,8 @@ It validates nothing against the record and cuts no version.
 when it has none, and `session` the session whose turn wrote the save, none while that is not
 known. It answers an `Ingested`:
 
+- `kind`: what the path names, `document`, `plan` or `view` (any read-only path, an attachment
+  included);
 - `content`: the bytes the file must now hold, none when the save already holds them;
 - `hash`: the path's tree hash after the save, except for a held save of `plan.json`, which is
   answered with the save's own hash while the tree hash stays the rendering's;
@@ -92,6 +95,10 @@ A save of `plan.json` takes the project's row lock, removes the path's `parse` S
 parsed back into the plan's rows ([`projection.md`](projection.md)); a held one writes a `parse`
 Save Error per fault and changes no row. A save of a read-only path stores nothing. Any other path
 is refused with `RecordNotFoundException`.
+
+`IngestService.write_down(paths)` is the manifest reconcile's ([`sync.md`](sync.md)): a held
+`plan.json` among the paths the store is to write down is written down canonical, so under the
+project's row lock its `parse` Save Errors go, in every environment, with `ErrorsResolved`.
 
 ## The record's own writes
 
@@ -147,15 +154,14 @@ already emitted in the transaction is delivered once.
 | `TreeHashMoved(path, hash)` | when a path's tree hash moved: a birth, a publish, a save; `timeline.json` when what it shows moved, a done mark or its undo included; `plan.json` when a save moved its rendering |
 | `DocumentModified(project_id, path)` | on every save of a document, held or published; the record's own writes raise none |
 | `ErrorsRaised(project_id, path)` | on every held save |
-| `ErrorsResolved(project_id, path)` | on a clean save after a held one |
+| `ErrorsResolved(project_id, path)` | on a clean save after a held one, and when a held `plan.json` is written down |
+| `ManifestChanged()` | when the set of syncing projects changed; nothing in the record raises it yet, and the sync's testing endpoint does |
 
 ## Testing it
 
 The engine's tests are in `backend/tests/engine/`, the block DSL's in `backend/tests/engine/dsl/`
 with the corpus ([`block-dsl.md`](block-dsl.md)). Two fixtures of `backend/tests/conftest.py`
 serve them: `engine_events`, every event the bus delivers during the test, and `fake_sidecar`, the
-fake sidecar's engine-facing half (`backend/tests/support/fake_sidecar.py`). The fake holds the
-store's tree and the sidecar's shadow as dicts, `save()` ingests as the file put does, and
-`drain()` fetches every path whose `TreeHashMoved` differs from the shadow, as the sidecar does.
-The bus delivers on a commit, so a test reads events after committing through
-`scoped_session(container)` or a request context.
+store's sidecar played against the sync routes ([`sync.md`](sync.md)): `save()` writes a file and
+puts it, and `drain()` fetches what the change stream says moved. The bus delivers on a commit, so
+a test reads events after committing through `scoped_session(container)` or a request context.

@@ -5,9 +5,9 @@ the KubeCoder fleet, and the operator decides and does only what their hands mus
 timeline per managed project shows its work, its decision documents and their asks; a side chat
 talks to Pilot's brain, a headless Claude Code session in a store environment.
 
-**No route or screen of Pilot's own exists yet**: the app is the ModernAppTemplate skeleton with the
-record's schema and the engine behind it (`backend/app/engine/`), live in production at
-`https://pilot.ginbov.nl`, where every green build of `main` deploys itself
+**No screen of Pilot's own exists yet**: the app is the ModernAppTemplate skeleton with the record's
+schema, the engine behind it (`backend/app/engine/`) and the sync of the store's tree, live in
+production at `https://pilot.ginbov.nl`, where every green build of `main` deploys itself
 ([`docs/deployment.md`](docs/deployment.md)). Version 1 is built from the design record in
 `../PilotAppSpecs/design/` (start at its README), along the steps of its `implementation-plan.md`.
 Its `features.md` is the version-1 scope, and
@@ -25,14 +25,15 @@ phase ticks it ([`docs/slice-doc-plan.md`](docs/slice-doc-plan.md) §6), and an 
 - **`backend/`** — the Flask API (Python, uv), on PostgreSQL.
 - **`frontend/`** — the React + Vite SPA (TypeScript, pnpm) with TanStack Router/Query, an
   OpenAPI-generated client, and a Playwright E2E suite that boots the backend per worker.
+- **`sidecar/`** — `pilot-sync`, the store environment's sync sidecar (Go), app-owned.
 
 Everything builds through `kc project build|test|lint|setup`, run **from the repo root** — those
 verbs are cwd-bound. The toolchain lives in the `modern-app` sidecar, so ad-hoc `uv`/`pnpm`
-commands need `cexec modern-app`. The root and `backend/` are two uv projects, each with its own
-`uv.lock`, and both locks are committed, because CI and the image sync `--locked`.
-`scripts/dev.py` starts the dev stack and `scripts/dev.py stop` stops it from another shell. After
-a backend API change, `scripts/regenerate-openapi.py --frontend` refreshes the frontend's OpenAPI
-cache and client; a backend test fails while the committed cache is stale.
+commands need `cexec modern-app`, and `go` ones `cexec go`. The root and `backend/` are two uv
+projects, each with its own `uv.lock`, and both locks are committed, because CI and the image sync
+`--locked`. `scripts/dev.py` starts the dev stack and `scripts/dev.py stop` stops it from another
+shell. After a backend API change, `scripts/regenerate-openapi.py --frontend` refreshes the
+frontend's OpenAPI cache and client; a backend test fails while the committed cache is stale.
 `cexec modern-app python3 scripts/check_updates.py` reports the dependencies with a newer release,
 major, minor and patch, in every component it finds.
 
@@ -63,11 +64,11 @@ template-owned file to add app behaviour; use the extension points instead:
 
 The template repos are not edited from here: what the template gets wrong is fixed in this repo, in
 a commit of its own, and listed here as a standing edit, so that a `copier update` that conflicts on
-it resolves to this repo's side. One stands today, an addition rather than a fix: the `Jenkinsfile`'s
-sidecar, its `golang` container and its `Test sidecar` and `Build pilot-sync image` stages, which the
-template, rendering no `sidecar/`, has no place for. uv, the migration that keeps the app's loggers,
-the masked database URL in `backend/app/cli.py` and the declarative `Jenkinsfile` on the library's
-`modernApp.test` are the template's own since root v0.2.0 and backend v0.14.0, and
+it resolves to this repo's side. One stands today (D008), an addition rather than a fix: the
+`Jenkinsfile`'s sidecar, its `golang` container and its `Test sidecar` and `Build pilot-sync image`
+stages, which the template, rendering no `sidecar/`, has no place for. uv, the migration that keeps
+the app's loggers, the masked database URL in `backend/app/cli.py` and the declarative `Jenkinsfile`
+on the library's `modernApp.test` are the template's own since root v0.2.0 and backend v0.14.0, and
 `backend/scripts/init-dev-database.py` (production's locale) since backend v0.15.0.
 
 ## Architecture model
@@ -126,3 +127,5 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
   [`docs/projection.md`](docs/projection.md), [`docs/engine.md`](docs/engine.md): the record's
   schema and the dev seed, the block DSL, the store's tree and its files, and the engine between
   them.
+- [`docs/sync.md`](docs/sync.md): the sync protocol and `pilot-sync`, the sidecar that keeps the
+  store's tree in step with the record.

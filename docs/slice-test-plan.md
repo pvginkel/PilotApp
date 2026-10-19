@@ -7,7 +7,8 @@ names it. Read it top to bottom and do what it says.
 ## What this phase proves, and what it does not
 
 **There is one deployment, and it is production.** A push to `main` runs the `PilotApp` Jenkins job
-(the suites, the `pilot` and `pilot-ui` images), which pins the images in `pvginkel/PilotDeploy`, from
+(the suites, the sidecar's tests, the `pilot`, `pilot-ui` and `pilot-sync` images), which pins
+`pilot` and `pilot-ui` in `pvginkel/PilotDeploy`, from
 which Argo CD rolls the Application `pilot-prd`: the pod behind `https://pilot.ginbov.nl`, which the
 operator and their wife use. There is no dev instance. So this phase proves the slice **locally
 first** (the suites, then the dev stack running here), pushes only what that proved, confirms the
@@ -49,12 +50,14 @@ kc project lint
 All three must be green. No gate is known red, so a failure is this slice's. A `kc project` verb
 prints its output only on failure, so read its exit code directly and never through a pipe.
 
-`kc project test` prints one `[ OK ]` per suite and no counts. Run the two suites once directly and
-read the counts, so that a suite that collected nothing is not taken for a green one:
+`kc project test` prints one `[ OK ]` per suite and no counts. Run the suites once directly and read
+the counts, so that a suite that collected nothing is not taken for a green one. The sidecar's
+suite prints a line per package: `ok`, or `?` for `cmd/pilot-sync`, which has no tests.
 
 ```bash
 cexec modern-app sh -c 'cd backend && uv run pytest -q' 2>&1 | tail -1
 cexec modern-app sh -c 'cd frontend && pnpm playwright test' 2>&1 | tail -3
+cexec go sh -c 'cd sidecar && go test -race ./...'
 ```
 
 Then the same verbs from the root of every other repo the slice touched, each where it declares
@@ -105,6 +108,25 @@ database from the migrations:
 ```bash
 cexec modern-app sh -c 'cd backend && uv run cli load-test-data --yes-i-am-sure'
 ```
+
+**The sync's live proof** (D009). A slice that changes the sync, at either end
+([`sync.md`](sync.md)), runs its script with the stack up, from the repo root:
+
+```bash
+scripts/sync-live-proof.py
+```
+
+It builds `pilot-sync` (`cexec go`), loads the dev seed and leaves it loaded, and puts the dev
+backend in testing mode for the store: it appends `FLASK_ENV=testing`, a throwaway `SYNC_TOKEN` and
+this environment's id as `STORE_ENVIRONMENT_ID` to `backend/.env`, which the backend restarts on.
+It then runs the binary as a plain process on a temporary tree, behind a proxy it can cut, and
+proves five things: a file edited in the tree reaches the record; a record edit rewrites the file
+and is not sent back; the local check answers a clean save, reverted lines and a stray file; a
+dropped connection reconciles; a `manifest` event reconciles. It prints `PASS <n>.` or `FAIL <n>.`
+per step and `5 of 5 passed`, and exits 0 only then. On exit, SIGTERM included, it writes
+`backend/.env` back byte for byte and waits for the backend to restart on it. A stack that is not
+up fails it at once; a failed run keeps its `/tmp/pilot-sync-proof-*` directory, the binary's log
+in it.
 
 **Stop the stack** from another shell, and confirm it is down:
 
@@ -161,7 +183,7 @@ Each push starts its repo's jobs, and each is followed to its end:
 
 | Push to | Starts |
 |---------|--------|
-| PilotApp | `PilotApp` (`Jenkinsfile`: the suites, both images, the pin commit) and `AaC/PilotApp` (`Jenkinsfile.architecture`: validates and archives `docs/architecture/*.yaml`) |
+| PilotApp | `PilotApp` (`Jenkinsfile`: the suites, the sidecar's tests, three images, the pin commit of two) and `AaC/PilotApp` (`Jenkinsfile.architecture`: validates and archives `docs/architecture/*.yaml`) |
 | PilotDeploy, the build's pin commits included | `AaC/PilotDeploy` (generates and publishes the `pilot-deploy` model) |
 | Architecture | `AaC/Architecture` |
 | ArgoCDDeploy | `AaC/ArgoCDDeploy` |

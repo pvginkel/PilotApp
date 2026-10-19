@@ -1,8 +1,9 @@
 # The store's tree
 
 The store environment holds a tree of files, one folder per project, which the brain and its
-sessions read and write. The record renders it, and the engine takes the agent's saves of it back
-into the record ([`engine.md`](engine.md)). This page is the tree as built
+sessions read and write. The record renders it, the engine takes the agent's saves of it back
+into the record ([`engine.md`](engine.md)), and `pilot-sync`, the store's sidecar, keeps the files
+on disk in step with the record ([`sync.md`](sync.md)). This page is the tree as built
 (`backend/app/engine/paths.py`, `tree.py`, `views.py` and `plan.py`): what each path holds, and the
 shapes of its three JSON files, which the brain's skills are written against. Tests pin each shape
 (`TestViewService` in `backend/tests/engine/test_views.py`, `TestPlanServiceRender` in
@@ -40,8 +41,10 @@ hold, is:
 - for a rendered file, the hash of its rendering;
 - for an attachment, its `sha256`.
 
-`TreeService.read(path)` gives the bytes a path must hold with their tree hash, and
-`TreeService.hashes(project)` every path of a folder with its tree hash.
+`TreeService.read(path)` gives the bytes a path must hold with their tree hash,
+`TreeService.hashes(project)` every path of a folder with its tree hash, and
+`TreeService.manifest()` every path the store syncs: `reference.json` and every path of every
+project that is not archived, each with its tree hash and whether it is read-only.
 
 ## The JSON files
 
