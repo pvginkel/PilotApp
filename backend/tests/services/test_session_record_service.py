@@ -344,13 +344,22 @@ def _constructors(tree: ast.Module) -> set[ast.AST]:
 
 def _uses(path: Path) -> list[tuple[ast.AST, ast.Module]]:
     """Every node of the module that names the table outside a docstring, and
-    the module."""
+    the module: the model by its name, by a name an import gives it, or as an
+    attribute (`models.SessionRecord`), and the table by its name in a string."""
     tree = ast.parse(path.read_text(), filename=str(path))
     docstrings = _docstrings(tree)
+    names = {"SessionRecord"} | {
+        alias.asname
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        for alias in node.names
+        if alias.name == "SessionRecord" and alias.asname is not None
+    }
     return [
         (node, tree)
         for node in ast.walk(tree)
-        if (isinstance(node, ast.Name) and node.id == "SessionRecord")
+        if (isinstance(node, ast.Name) and node.id in names)
+        or (isinstance(node, ast.Attribute) and node.attr == "SessionRecord")
         or (
             isinstance(node, ast.Constant)
             and isinstance(node.value, str)
@@ -393,13 +402,24 @@ class TestTheOneRead:
     def test_it_sees_a_query_elsewhere(self, tmp_path: Path) -> None:
         stray = tmp_path / "stray.py"
         stray.write_text(
+            "from app import models\n"
             "from app.models import SessionRecord\n"
+            "from app.models import SessionRecord as Records\n"
             "def count(db):\n"
             "    return db.query(SessionRecord).count()\n"
+            "def count_by_attribute(db):\n"
+            "    return db.query(models.SessionRecord).count()\n"
+            "def count_by_alias(db):\n"
+            "    return db.query(Records).count()\n"
             "RAW = 'SELECT seq FROM session_records'\n"
         )
 
-        assert sorted(getattr(node, "lineno", 0) for node, _ in _uses(stray)) == [3, 4]
+        assert sorted(getattr(node, "lineno", 0) for node, _ in _uses(stray)) == [
+            5,
+            7,
+            9,
+            10,
+        ]
 
 
 class TestAppend:
