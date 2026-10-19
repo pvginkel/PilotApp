@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+
+	"github.com/pvginkel/PilotApp/sidecar/internal/protocol"
 )
 
 // writeOver replaces the file at name with content as `sed -i` does: a new
@@ -61,6 +63,33 @@ func TestProjectsAReadOnlyViewMode0444(t *testing.T) {
 	eventually(t, "the view made read-only", func() bool { return modeOf(t, at("reference.json")) == 0o444 })
 	if puts := s.taken(); len(puts) != 0 {
 		t.Fatalf("took %v", puts)
+	}
+}
+
+func TestWritesA200AnswerForAViewTheShadowDoesNotHoldMode0444(t *testing.T) {
+	s := newServer(t)
+	tree := t.TempDir()
+	view := filepath.Join(tree, "reference.json")
+	s.view("reference.json", "{}")
+	// The reconcile lists the view and writes nothing down: the shadow does
+	// not hold it.
+	s.amending(func(_ posted, answered protocol.Reconciled) protocol.Reconciled {
+		answered.WriteDown = []protocol.Entry{}
+		return answered
+	})
+	s.answering(func(put) answer { return answer{content: "{}"} })
+	running := start(t, s, tree, t.TempDir())
+
+	write(t, view, `{"edited": true}`)
+	eventually(t, "the projection written", func() bool { return holds(view, "{}") })
+	if got := modeOf(t, view); got != 0o444 {
+		t.Errorf("written with mode %v", got)
+	}
+	if puts := s.taken(); len(puts) != 1 || puts[0].base != "none" {
+		t.Fatalf("took %v, not the view with no base", puts)
+	}
+	if running.synced("reference.json") != hashOf("{}") {
+		t.Error("the shadow not updated")
 	}
 }
 
