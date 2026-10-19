@@ -34,10 +34,13 @@ the spec repo is one working tree shared by parallel sessions, and a duplicate i
 self-correcting. A doc here cites a decision by its bare id, with no link, and states what it rules
 in its own words.
 
-Beyond those markers, the design record changes through a proposal, not here. What this pass owes
-it besides is the settled item off §5, and `features.md` brought in line where the slice delivers
-something it names differently. Only what the operator ruled goes in; a divergence nobody ruled on is named in the
-close-out report instead.
+Beyond those markers and a correction, the design record changes through a proposal, not here. What
+this pass owes it besides is the settled item off §5, and `features.md` brought in line where the
+slice delivers something it names differently. Only what the operator ruled goes in; a divergence
+nobody ruled on is named in the close-out report instead. A correction (D015, `CLAUDE.md`) this pass
+makes itself only where it is a plain error — a wrong citation, a stale cross-reference, a typo; a
+passage the build departed from is such a divergence, and the operator's word on it in the close-out
+corrects it.
 
 ### 3. `README.md`
 

@@ -112,6 +112,13 @@ under the `kubecoder:data-modelling` skill, if it touches the data model; an arc
 the feature ledger with it. Once absorbed, the proposal is deleted, and the plan's line naming it
 goes with it.
 
+**A correction is not a change to the plan** (D015). An edit after which no later slice would be
+built or planned differently — a wrong citation, a stale cross-reference, a typo, a passage that
+describes a part already built otherwise than it was built — is made in the design record directly,
+committed with a message that says what it corrects, with no proposal and no row. A plain error
+anyone corrects; a passage the build departed from without a ruling is corrected on the operator's
+word, which a close-out report asks for. In doubt, it is a proposal.
+
 **Every other decision is a row in the spec repo's `decisions.md`**, whose head has the rules: a
 ruling made inside a slice's triage, planning or run (the slice's doc phase lands it), one on an
 item of `understanding.md` §5, one taken in a session of its own. A decision taken for now goes into
