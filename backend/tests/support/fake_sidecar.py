@@ -217,8 +217,8 @@ class FakeSidecar:
         """Design 1 §5.5: every file whose hash on disk is not the shadow's
         goes up first; then the tree's hashes and the shadow's are posted;
         then each path to write down is fetched and written, and each path to
-        delete removed from the tree and the shadow. Returns the server's
-        answer."""
+        delete removed from the tree and the shadow, its local note with it.
+        Returns the server's answer."""
         for path in sorted(self.tree):
             if _sha256(self.tree[path]) != self.shadow.get(path):
                 self.upload(path)
@@ -233,6 +233,7 @@ class FakeSidecar:
         for path in answer["delete"]:
             self.tree.pop(path, None)
             del self.shadow[path]
+            self.notes.pop(path, None)
         return answer
 
     def drain(self) -> list[str]:
