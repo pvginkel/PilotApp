@@ -28,11 +28,12 @@ const Debounce = 50 * time.Millisecond
 // Watcher watches every directory of a tree, those made after it started
 // included.
 type Watcher struct {
-	root    string
-	delay   time.Duration
-	changed func(path string)
-	logger  *slog.Logger
-	notify  *fsnotify.Watcher
+	root       string
+	delay      time.Duration
+	changed    func(path string)
+	overflowed func()
+	logger     *slog.Logger
+	notify     *fsnotify.Watcher
 
 	mu     sync.Mutex
 	timers map[string]*time.Timer
@@ -40,20 +41,24 @@ type Watcher struct {
 
 // New watches every directory of the tree at root, an absolute path. Once
 // Run runs, a file's change is reported to changed by its path from root,
-// with forward slashes, after delay with no further event on it. A file in a
-// directory made later is reported; one already in the tree is not.
-func New(root string, delay time.Duration, changed func(path string), logger *slog.Logger) (*Watcher, error) {
+// with forward slashes, after delay with no further event on it; a file
+// removed is a change. A file in a directory made later is reported; one
+// already in the tree is not. When the kernel's queue overflows, events are
+// lost: every directory is watched again and overflowed is told, the tree
+// then the caller's to rescan.
+func New(root string, delay time.Duration, changed func(path string), overflowed func(), logger *slog.Logger) (*Watcher, error) {
 	notify, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, fmt.Errorf("watch %s: %w", root, err)
 	}
 	w := &Watcher{
-		root:    root,
-		delay:   delay,
-		changed: changed,
-		logger:  logger,
-		notify:  notify,
-		timers:  map[string]*time.Timer{},
+		root:       root,
+		delay:      delay,
+		changed:    changed,
+		overflowed: overflowed,
+		logger:     logger,
+		notify:     notify,
+		timers:     map[string]*time.Timer{},
 	}
 	if err := w.add(root, false); err != nil {
 		return nil, errors.Join(fmt.Errorf("watch %s: %w", root, err), notify.Close())
@@ -78,6 +83,10 @@ func (w *Watcher) Run(ctx context.Context) (err error) {
 			if !ok {
 				return errors.New("the watch ended")
 			}
+			if errors.Is(err, fsnotify.ErrEventOverflow) {
+				w.rescan()
+				continue
+			}
 			w.logger.Error("the watch reported an error", "error", err)
 		}
 	}
@@ -95,9 +104,19 @@ func (w *Watcher) event(event fsnotify.Event) {
 			return
 		}
 	}
-	if event.Has(fsnotify.Create) || event.Has(fsnotify.Write) || event.Has(fsnotify.Rename) {
+	if event.Has(fsnotify.Create) || event.Has(fsnotify.Write) || event.Has(fsnotify.Rename) || event.Has(fsnotify.Remove) {
 		w.touch(event.Name)
 	}
+}
+
+// rescan answers an overflow: a directory made while events were lost is
+// watched from here on.
+func (w *Watcher) rescan() {
+	w.logger.Warn("the watch overflowed: rescanning the tree")
+	if err := w.add(w.root, false); err != nil {
+		w.logger.Error("cannot watch the tree again", "error", err)
+	}
+	w.overflowed()
 }
 
 // add watches dir and every directory under it, reporting each file in them

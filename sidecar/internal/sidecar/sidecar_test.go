@@ -1,184 +1,16 @@
 package sidecar
 
 import (
-	"context"
-	"io"
 	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 
-	"github.com/pvginkel/PilotApp/sidecar/internal/config"
 	"github.com/pvginkel/PilotApp/sidecar/internal/protocol"
-	"github.com/pvginkel/PilotApp/sidecar/internal/watch"
 )
-
-const (
-	token       = "example-token"
-	environment = "example-env-1"
-)
-
-// put is a PUT the server took.
-type put struct {
-	path   string
-	base   string
-	body   string
-	header http.Header
-}
-
-// answer is how the server answers a PUT: 204 when content is empty, else
-// 200 with content; or status alone, a refusal.
-type answer struct {
-	content string
-	status  int
-}
-
-// server plays the sync routes' PUT as design 1 §5.1 shapes it, answering
-// each with respond, 204 by default, and fails the test on two PUTs of one
-// path out at once.
-type server struct {
-	t       *testing.T
-	url     string
-	mu      sync.Mutex
-	puts    []put
-	out     map[string]int
-	respond func(put) answer
-}
-
-func newServer(t *testing.T) *server {
-	s := &server{t: t, out: map[string]int{}, respond: func(put) answer { return answer{} }}
-	httpServer := httptest.NewServer(http.HandlerFunc(s.serve))
-	t.Cleanup(httpServer.Close)
-	s.url = httpServer.URL
-	return s
-}
-
-func (s *server) answering(respond func(put) answer) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.respond = respond
-}
-
-func (s *server) taken() []put {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return append([]put(nil), s.puts...)
-}
-
-func (s *server) serve(w http.ResponseWriter, r *http.Request) {
-	path, ok := strings.CutPrefix(r.URL.Path, "/api/sync/files/")
-	if r.Method != http.MethodPut || !ok {
-		s.t.Errorf("unexpected %s %s", r.Method, r.URL)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		s.t.Error(err)
-	}
-	taken := put{path: path, base: r.Header.Get("X-Pilot-Base-Hash"), body: string(body), header: r.Header.Clone()}
-	s.mu.Lock()
-	s.out[path]++
-	if s.out[path] > 1 {
-		s.t.Errorf("two PUTs of %s out at once", path)
-	}
-	s.puts = append(s.puts, taken)
-	respond := s.respond
-	s.mu.Unlock()
-
-	given := respond(taken)
-
-	s.mu.Lock()
-	s.out[path]--
-	s.mu.Unlock()
-	w.Header().Set("X-Pilot-Faults", "0")
-	switch {
-	case given.status != 0:
-		w.WriteHeader(given.status)
-	case given.content == "":
-		w.Header().Set("X-Pilot-Hash", protocol.Hash(body))
-		w.WriteHeader(http.StatusNoContent)
-	default:
-		w.Header().Set("X-Pilot-Hash", protocol.Hash([]byte(given.content)))
-		w.Header().Set("Content-Type", "application/octet-stream")
-		_, _ = io.WriteString(w, given.content)
-	}
-}
-
-// start runs a sidecar on tree and data against s until the test ends, or
-// until the stop it answers is called.
-func start(t *testing.T, s *server, tree, data string) func() {
-	t.Helper()
-	sidecar, err := New(configure(s, tree, data), slog.New(slog.NewTextHandler(t.Output(), nil)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error)
-	go func() { done <- sidecar.Run(ctx) }()
-	stop := sync.OnceFunc(func() {
-		cancel()
-		if err := <-done; err != nil {
-			t.Error(err)
-		}
-	})
-	t.Cleanup(stop)
-	return stop
-}
-
-func configure(s *server, tree, data string) config.Config {
-	return config.Config{
-		PilotURL:      s.url,
-		Token:         token,
-		EnvironmentID: environment,
-		LocalPort:     config.DefaultLocalPort,
-		TreeRoot:      tree,
-		DataDir:       data,
-	}
-}
-
-func eventually(t *testing.T, what string, cond func() bool) {
-	t.Helper()
-	for deadline := time.Now().Add(5 * time.Second); !cond(); time.Sleep(5 * time.Millisecond) {
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s", what)
-		}
-	}
-}
-
-// settle waits long enough for any PUT still to come.
-func settle() {
-	time.Sleep(4 * watch.Debounce)
-}
-
-func write(t *testing.T, name, content string) {
-	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(name), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(name, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func read(t *testing.T, name string) string {
-	t.Helper()
-	content, err := os.ReadFile(name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(content)
-}
-
-func hashOf(content string) string {
-	return protocol.Hash([]byte(content))
-}
 
 func TestPutsAChangedFileWithItsShadowAsTheBase(t *testing.T) {
 	s := newServer(t)
@@ -188,17 +20,18 @@ func TestPutsAChangedFileWithItsShadowAsTheBase(t *testing.T) {
 	start(t, s, tree, t.TempDir())
 
 	write(t, file, "one")
-	eventually(t, "the first PUT", func() bool { return len(s.taken()) == 1 })
-	write(t, file, "two")
 	eventually(t, "the second PUT", func() bool { return len(s.taken()) == 2 })
+	write(t, file, "two")
+	eventually(t, "the third PUT", func() bool { return len(s.taken()) == 3 })
 	settle()
 
 	puts := s.taken()
-	if len(puts) != 2 {
+	if len(puts) != 3 {
 		t.Fatalf("took %d PUTs", len(puts))
 	}
 	for i, want := range []put{
-		{path: "proj/inbox/1-a.md", base: "none", body: "one"},
+		{path: "proj/inbox/1-a.md", base: "none", body: "zero"},
+		{path: "proj/inbox/1-a.md", base: hashOf("zero"), body: "one"},
 		{path: "proj/inbox/1-a.md", base: hashOf("one"), body: "two"},
 	} {
 		if got := puts[i]; got.path != want.path || got.base != want.base || got.body != want.body {
@@ -211,7 +44,7 @@ func TestPutsAChangedFileWithItsShadowAsTheBase(t *testing.T) {
 		"X-Pilot-Sync-Protocol": strconv.Itoa(protocol.Version),
 	}
 	for name, value := range headers {
-		if got := puts[0].header.Get(name); got != value {
+		if got := puts[1].header.Get(name); got != value {
 			t.Errorf("%s: got %q, want %q", name, got, value)
 		}
 	}
@@ -236,7 +69,7 @@ func TestWritesA200AnswerInPlaceAndNeverSendsItBack(t *testing.T) {
 	write(t, file, "saved")
 	eventually(t, "the answer written", func() bool { return read(t, file) == "merged" })
 	settle()
-	if puts := s.taken(); len(puts) != 1 {
+	if puts := s.taken(); len(puts) != 2 {
 		t.Fatalf("took %d PUTs, the sidecar's own write sent back", len(puts))
 	}
 	info, err := os.Stat(file)
@@ -245,8 +78,8 @@ func TestWritesA200AnswerInPlaceAndNeverSendsItBack(t *testing.T) {
 	}
 
 	write(t, file, "edited")
-	eventually(t, "the next PUT", func() bool { return len(s.taken()) == 2 })
-	if base := s.taken()[1].base; base != hashOf("merged") {
+	eventually(t, "the next PUT", func() bool { return len(s.taken()) == 3 })
+	if base := s.taken()[2].base; base != hashOf("merged") {
 		t.Fatalf("based on %s, not the answer's hash", base)
 	}
 }
@@ -267,17 +100,17 @@ func TestKeepsTheAgentsWriteMadeWhileThePutWasOut(t *testing.T) {
 	start(t, s, tree, t.TempDir())
 
 	write(t, file, "first")
-	eventually(t, "the first PUT", func() bool { return len(s.taken()) == 1 })
+	eventually(t, "the first PUT", func() bool { return len(s.taken()) == 2 })
 	write(t, file, "second")
 	settle()
-	if puts := s.taken(); len(puts) != 1 {
+	if puts := s.taken(); len(puts) != 2 {
 		t.Fatalf("took %d PUTs while the first was out", len(puts))
 	}
 	close(release)
-	eventually(t, "the second PUT", func() bool { return len(s.taken()) == 2 })
+	eventually(t, "the second PUT", func() bool { return len(s.taken()) == 3 })
 	settle()
 
-	if second := s.taken()[1]; second.body != "second" || second.base != hashOf("first, merged") {
+	if second := s.taken()[2]; second.body != "second" || second.base != hashOf("first, merged") {
 		t.Fatalf("second PUT: %q based on %s", second.body, second.base)
 	}
 	if got := read(t, file); got != "second" {
@@ -290,43 +123,54 @@ func TestKeepsTheShadowAcrossARestart(t *testing.T) {
 	tree, data := t.TempDir(), t.TempDir()
 	file := filepath.Join(tree, "proj", "a.md")
 	write(t, file, "")
-	stop := start(t, s, tree, data)
+	first := start(t, s, tree, data)
 	write(t, file, "one")
-	eventually(t, "the first PUT", func() bool { return len(s.taken()) == 1 })
+	eventually(t, "the PUT", func() bool { return len(s.taken()) == 2 })
 	settle()
-	stop()
+	first.stop()
 
 	start(t, s, tree, data)
 	write(t, file, "one")
 	settle()
-	if puts := s.taken(); len(puts) != 1 {
+	if puts := s.taken(); len(puts) != 2 {
 		t.Fatalf("took %d PUTs of a file as last synced", len(puts))
 	}
 	write(t, file, "two")
-	eventually(t, "the second PUT", func() bool { return len(s.taken()) == 2 })
-	if base := s.taken()[1].base; base != hashOf("one") {
+	eventually(t, "the next PUT", func() bool { return len(s.taken()) == 3 })
+	if base := s.taken()[2].base; base != hashOf("one") {
 		t.Fatalf("based on %s, not the last run's hash", base)
 	}
 }
 
-func TestLeavesAFileTheRecordNeverBore(t *testing.T) {
+func TestLeavesAFileTheRecordNeverBoreWithANote(t *testing.T) {
 	s := newServer(t)
 	s.answering(func(put) answer { return answer{status: http.StatusNotFound} })
 	tree := t.TempDir()
 	file := filepath.Join(tree, "proj", "notes.md")
 	write(t, file, "")
-	start(t, s, tree, t.TempDir())
+	running := start(t, s, tree, t.TempDir())
+	if note := running.noted("proj/notes.md"); note != strayNote {
+		t.Fatalf("noted %q on connect", note)
+	}
 
 	write(t, file, "mine")
-	eventually(t, "the first PUT", func() bool { return len(s.taken()) == 1 })
-	write(t, file, "still mine")
 	eventually(t, "the second PUT", func() bool { return len(s.taken()) == 2 })
-	if base := s.taken()[1].base; base != "none" {
+	write(t, file, "still mine")
+	eventually(t, "the third PUT", func() bool { return len(s.taken()) == 3 })
+	if base := s.taken()[2].base; base != "none" {
 		t.Fatalf("based on %s: a refused save is in the shadow", base)
 	}
 	if got := read(t, file); got != "still mine" {
 		t.Fatalf("the file holds %q", got)
 	}
+	if note := running.noted("proj/notes.md"); note != strayNote {
+		t.Fatalf("noted %q", note)
+	}
+
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the note gone with the file", func() bool { return running.noted("proj/notes.md") == "" })
 }
 
 func TestPutsAFileOfADirectoryMadeLater(t *testing.T) {

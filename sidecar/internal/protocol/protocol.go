@@ -15,6 +15,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	pathpkg "path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -137,6 +139,28 @@ func (c *Client) put(request *http.Request, content []byte) (PutAnswer, error) {
 	return answer, nil
 }
 
+// Get fetches the bytes the file at path must hold: GET
+// /api/sync/files/<path>.
+func (c *Client) Get(ctx context.Context, path string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, callTimeout)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, c.fileURL(path), nil)
+	if err != nil {
+		return nil, fmt.Errorf("GET %s: %w", path, err)
+	}
+	answer, err := c.do(request)
+	if err != nil {
+		return nil, fmt.Errorf("GET %s: %w", path, err)
+	}
+	if answer.status != http.StatusOK {
+		return nil, fmt.Errorf("GET %s: answered %d, not 200", path, answer.status)
+	}
+	if hash := answer.header.Get("X-Pilot-Hash"); hash != Hash(answer.body) {
+		return nil, fmt.Errorf("GET %s: answered X-Pilot-Hash %q, not the hash of its bytes", path, hash)
+	}
+	return answer.body, nil
+}
+
 // reply is an answer the server gave: its status, headers and body.
 type reply struct {
 	status int
@@ -144,28 +168,33 @@ type reply struct {
 	body   []byte
 }
 
-// do sends request with the three headers and reads the answer, returning a
-// refusal as its error.
+// do sends request and reads the answer whole.
 func (c *Client) do(request *http.Request) (reply, error) {
-	request.Header.Set("Authorization", "Bearer "+c.token)
-	request.Header.Set("X-Pilot-Environment", c.environment)
-	request.Header.Set("X-Pilot-Sync-Protocol", strconv.Itoa(Version))
-	response, err := c.http.Do(request)
+	response, err := c.send(request)
 	if err != nil {
 		return reply{}, err
 	}
-	body, err := read(response)
+	body, err := io.ReadAll(response.Body)
 	if err := errors.Join(err, response.Body.Close()); err != nil {
 		return reply{}, err
 	}
 	return reply{status: response.StatusCode, header: response.Header, body: body}, nil
 }
 
-func read(response *http.Response) ([]byte, error) {
-	if response.StatusCode >= 300 {
-		return nil, refusal(response)
+// send sends request with the three headers, returning a refusal as its
+// error; the answer's body is the caller's to close.
+func (c *Client) send(request *http.Request) (*http.Response, error) {
+	request.Header.Set("Authorization", "Bearer "+c.token)
+	request.Header.Set("X-Pilot-Environment", c.environment)
+	request.Header.Set("X-Pilot-Sync-Protocol", strconv.Itoa(Version))
+	response, err := c.http.Do(request)
+	if err != nil {
+		return nil, err
 	}
-	return io.ReadAll(response.Body)
+	if response.StatusCode >= 300 {
+		return nil, errors.Join(refusal(response), response.Body.Close())
+	}
+	return response, nil
 }
 
 func refusal(response *http.Response) error {
@@ -184,6 +213,25 @@ func refusal(response *http.Response) error {
 		return &unsupported
 	}
 	return &StatusError{Status: response.StatusCode, Body: string(body)}
+}
+
+// ValidPath says whether path is a path of the tree as the protocol speaks
+// it: from the tree's root, with forward slashes, clean, and inside the tree.
+func ValidPath(path string) bool {
+	return path != "." && filepath.IsLocal(path) && pathpkg.Clean(path) == path
+}
+
+// validHash says whether hash is a hash as the protocol speaks it.
+func validHash(hash string) bool {
+	if len(hash) != sha256.Size*2 {
+		return false
+	}
+	for _, r := range hash {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // fileURL is the route of the file at path, each segment escaped.

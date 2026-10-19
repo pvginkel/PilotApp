@@ -5,87 +5,95 @@ import (
 	"context"
 	"errors"
 	"io/fs"
-	"log/slog"
 	"os"
-	"path/filepath"
 	"sync"
 
 	"github.com/pvginkel/PilotApp/sidecar/internal/files"
 	"github.com/pvginkel/PilotApp/sidecar/internal/protocol"
-	"github.com/pvginkel/PilotApp/sidecar/internal/shadow"
 )
-
-// parallelPuts bounds the PUTs out at once, across paths; a path has one at
-// a time (design 1 §5.3).
-const parallelPuts = 4
 
 // uploads sends the tree's files up as they change: a file whose hash is not
 // its shadow's goes up with the shadow's hash as its base, and the answer is
 // recorded in the shadow and, when it carries bytes, written in place. A
 // file the sidecar wrote itself hashes as its shadow, so it never goes up.
 type uploads struct {
-	root   string
-	client *protocol.Client
-	shadow *shadow.Store
-	logger *slog.Logger
+	tree   *tree
 	ctx    context.Context
 	cancel context.CancelFunc
-	slots  chan struct{}
 	wg     sync.WaitGroup
 
-	mu sync.Mutex
-	// out holds each path with a PUT out, and whether it changed again
-	// since the PUT read it.
-	out    map[string]bool
+	mu     sync.Mutex
+	out    map[string]*pending
 	closed bool
 }
 
-func newUploads(root string, client *protocol.Client, store *shadow.Store, logger *slog.Logger) *uploads {
+// pending is a path being sent up: whether it changed since its PUT read it,
+// and the callers of send waiting for the next PUT to read it.
+type pending struct {
+	again   bool
+	waiting []*sync.WaitGroup
+}
+
+func newUploads(t *tree) *uploads {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &uploads{
-		root:   root,
-		client: client,
-		shadow: store,
-		logger: logger,
-		ctx:    ctx,
-		cancel: cancel,
-		slots:  make(chan struct{}, parallelPuts),
-		out:    map[string]bool{},
-	}
+	return &uploads{tree: t, ctx: ctx, cancel: cancel, out: map[string]*pending{}}
 }
 
 // changed is told the file at path, from the tree's root, changed.
 func (u *uploads) changed(path string) {
+	u.queue(path, nil)
+}
+
+// send sends each of paths up and waits until each has been read after the
+// call, and sent or found in sync.
+func (u *uploads) send(paths []string) {
+	var done sync.WaitGroup
+	for _, path := range paths {
+		u.queue(path, &done)
+	}
+	done.Wait()
+}
+
+func (u *uploads) queue(path string, done *sync.WaitGroup) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	if u.closed {
 		return
 	}
-	if _, out := u.out[path]; out {
-		u.out[path] = true
-		return
+	entry, out := u.out[path]
+	if !out {
+		entry = &pending{}
+		u.out[path] = entry
+		u.wg.Add(1)
+		go u.run(path, entry)
 	}
-	u.out[path] = false
-	u.wg.Add(1)
-	go u.run(path)
+	entry.again = true
+	if done != nil {
+		done.Add(1)
+		entry.waiting = append(entry.waiting, done)
+	}
 }
 
-// run uploads path until it no longer changed while its PUT was out.
-func (u *uploads) run(path string) {
+// run sends path up until it no longer changed while its PUT was out.
+func (u *uploads) run(path string, entry *pending) {
 	defer u.wg.Done()
 	for {
-		u.slots <- struct{}{}
-		u.upload(path)
-		<-u.slots
 		u.mu.Lock()
-		again := u.out[path] && !u.closed
-		if again {
-			u.out[path] = false
-		} else {
+		waiting := entry.waiting
+		entry.waiting = nil
+		next := entry.again && !u.closed
+		entry.again = false
+		if !next {
 			delete(u.out, path)
 		}
 		u.mu.Unlock()
-		if !again {
+		if next {
+			u.upload(path)
+		}
+		for _, done := range waiting {
+			done.Done()
+		}
+		if !next {
 			return
 		}
 	}
@@ -100,15 +108,23 @@ func (u *uploads) close() {
 	u.wg.Wait()
 }
 
+// upload sends the file of path up, unless it is in sync.
 func (u *uploads) upload(path string) {
-	name := filepath.Join(u.root, filepath.FromSlash(path))
+	t := u.tree
+	release, ok := t.hold(u.ctx, path)
+	if !ok {
+		return
+	}
+	defer release()
+	name := t.name(path)
 	info, err := os.Lstat(name)
 	if errors.Is(err, fs.ErrNotExist) {
 		// Gone: no delete goes up (design 1 §5.5).
+		t.notes.clear(path)
 		return
 	}
 	if err != nil {
-		u.logger.Error("cannot read a file of the tree", "path", path, "error", err)
+		t.logger.Error("cannot read a file of the tree", "path", path, "error", err)
 		return
 	}
 	if !info.Mode().IsRegular() {
@@ -116,43 +132,47 @@ func (u *uploads) upload(path string) {
 	}
 	sent, err := os.ReadFile(name)
 	if errors.Is(err, fs.ErrNotExist) {
+		t.notes.clear(path)
 		return
 	}
 	if err != nil {
-		u.logger.Error("cannot read a file of the tree", "path", path, "error", err)
+		t.logger.Error("cannot read a file of the tree", "path", path, "error", err)
 		return
 	}
-	base, _ := u.shadow.Hash(path)
+	base, _ := t.shadow.Hash(path)
 	if protocol.Hash(sent) == base {
 		return
 	}
-	answer, err := u.client.Put(u.ctx, path, sent, base)
+	answer, err := t.client.Put(u.ctx, path, sent, base)
 	switch {
 	case err == nil:
 	case u.ctx.Err() != nil:
 		return
 	case errors.Is(err, protocol.ErrNotFound):
-		u.logger.Info("not a path of the record: left as it is", "path", path)
+		t.notes.note(path, strayNote)
+		t.logger.Info("not a path of the record: left as it is", "path", path)
 		return
 	default:
-		u.logger.Error("cannot sync a file of the tree", "path", path, "error", err)
+		// Left for the next reconcile, whose first step sends it up.
+		t.logger.Error("cannot sync a file of the tree", "path", path, "error", err)
 		return
 	}
 	held := sent
 	if answer.Content != nil {
 		held = answer.Content
 	}
-	if err := u.shadow.Put(path, held); err != nil {
-		u.logger.Error("cannot record a sync", "path", path, "error", err)
+	if err := t.shadow.Put(path, held); err != nil {
+		t.logger.Error("cannot record a sync", "path", path, "error", err)
 		return
 	}
+	t.notes.clear(path)
 	if answer.Content != nil {
 		if err := writeAnswer(name, sent, answer.Content, info.Mode().Perm()); err != nil {
-			u.logger.Error("cannot write a sync's answer", "path", path, "error", err)
+			t.logger.Error("cannot write a sync's answer", "path", path, "error", err)
 			return
 		}
 	}
-	u.logger.Info("synced", "path", path, "hash", answer.Hash, "rewritten", answer.Content != nil,
+	t.logger.Info("synced", "path", path, "hash", answer.Hash, "rewritten", answer.Content != nil,
 		"stale", answer.Stale, "faults", answer.Faults)
 }
 

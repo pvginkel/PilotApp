@@ -50,3 +50,36 @@ func TestIsTemp(t *testing.T) {
 		t.Fatal("IsTemp names the wrong files")
 	}
 }
+
+func TestRemoveEmptyDirsStopsAtTheFirstDirectoryInUseAndKeepsTheRoot(t *testing.T) {
+	root := t.TempDir()
+	deep := filepath.Join(root, "proj", "inbox", "deep")
+	if err := os.MkdirAll(deep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "proj", "plan.json"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemoveEmptyDirs(root, deep); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "proj", "inbox")); !os.IsNotExist(err) {
+		t.Errorf("an empty directory is still there: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "proj")); err != nil {
+		t.Errorf("a directory in use is gone: %v", err)
+	}
+
+	if err := os.Remove(filepath.Join(root, "proj", "plan.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemoveEmptyDirs(root, filepath.Join(root, "proj", "inbox")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "proj")); !os.IsNotExist(err) {
+		t.Errorf("an empty directory is still there: %v", err)
+	}
+	if _, err := os.Stat(root); err != nil {
+		t.Errorf("the root is gone: %v", err)
+	}
+}

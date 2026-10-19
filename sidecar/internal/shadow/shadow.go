@@ -9,8 +9,10 @@
 package shadow
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"sync"
@@ -80,4 +82,23 @@ func (s *Store) Put(path string, content []byte) error {
 	}
 	s.hashes[path] = protocol.Hash(content)
 	return nil
+}
+
+// Hashes is every path the shadow holds, with the hash it last synced.
+func (s *Store) Hashes() map[string]string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return maps.Clone(s.hashes)
+}
+
+// Delete forgets path, and every directory of the shadow it leaves empty.
+func (s *Store) Delete(path string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	name := filepath.Join(s.dir, filepath.FromSlash(path))
+	if err := os.Remove(name); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("forget %s in the shadow: %w", path, err)
+	}
+	delete(s.hashes, path)
+	return files.RemoveEmptyDirs(s.dir, filepath.Dir(name))
 }

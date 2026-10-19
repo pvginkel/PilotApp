@@ -7,8 +7,11 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/fsnotify/fsnotify"
 )
 
 // reported is what a watch reported: each path, and the file's bytes as
@@ -47,7 +50,7 @@ func start(t *testing.T, setup func(root string)) (string, *reported) {
 	root := t.TempDir()
 	setup(root)
 	got := &reported{root: root, seen: map[string][]string{}}
-	w, err := New(root, Debounce, got.changed, slog.New(slog.NewTextHandler(t.Output(), nil)))
+	w, err := New(root, Debounce, got.changed, func() {}, slog.New(slog.NewTextHandler(t.Output(), nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,4 +156,44 @@ func TestReportsNoFileOfTheTreeAtTheStartNorATempFile(t *testing.T) {
 	if paths := got.all(); len(paths) != 0 {
 		t.Fatalf("reported %q", paths)
 	}
+}
+
+func TestReportsAFileRemoved(t *testing.T) {
+	root, got := start(t, func(root string) {
+		write(t, filepath.Join(root, "proj", "a.md"), "a")
+	})
+	if err := os.Remove(filepath.Join(root, "proj", "a.md")); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "the report", func() bool { return slices.Contains(got.all(), "proj/a.md") })
+}
+
+func TestWatchesTheTreeAgainAndSaysSoOnAnOverflow(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "proj")
+	write(t, filepath.Join(dir, "a.md"), "a")
+	got := &reported{root: root, seen: map[string][]string{}}
+	var overflows atomic.Int32
+	w, err := New(root, Debounce, got.changed, func() { overflows.Add(1) }, slog.New(slog.NewTextHandler(t.Output(), nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A directory whose watch the lost events would have set.
+	if err := w.notify.Remove(dir); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error)
+	go func() { done <- w.Run(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+	})
+
+	w.notify.Errors <- fsnotify.ErrEventOverflow
+	eventually(t, "the overflow told", func() bool { return overflows.Load() == 1 })
+	write(t, filepath.Join(dir, "a.md"), "after")
+	eventually(t, "the report", func() bool { return slices.Contains(got.of("proj/a.md"), "after") })
 }

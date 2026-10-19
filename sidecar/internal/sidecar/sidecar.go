@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/pvginkel/PilotApp/sidecar/internal/config"
 	"github.com/pvginkel/PilotApp/sidecar/internal/files"
@@ -19,8 +20,14 @@ import (
 
 // Sidecar is pilot-sync, ready to run.
 type Sidecar struct {
+	tree    *tree
 	watcher *watch.Watcher
 	uploads *uploads
+	logger  *slog.Logger
+	// wanted holds a reconcile asked for and not yet run.
+	wanted chan struct{}
+	// sleep waits d, false when ctx is done first.
+	sleep func(ctx context.Context, d time.Duration) bool
 }
 
 // New readies the sidecar cfg configures: its data directory proven
@@ -37,20 +44,39 @@ func New(cfg config.Config, logger *slog.Logger) (*Sidecar, error) {
 	if err := os.MkdirAll(cfg.TreeRoot, 0o755); err != nil {
 		return nil, fmt.Errorf("cannot make the tree %s: %w", cfg.TreeRoot, err)
 	}
-	client := protocol.NewClient(cfg.PilotURL, cfg.Token, cfg.EnvironmentID)
-	uploads := newUploads(cfg.TreeRoot, client, store, logger)
-	watcher, err := watch.New(cfg.TreeRoot, watch.Debounce, uploads.changed, logger)
-	if err != nil {
+	t := newTree(cfg.TreeRoot, protocol.NewClient(cfg.PilotURL, cfg.Token, cfg.EnvironmentID), store, logger)
+	s := &Sidecar{tree: t, uploads: newUploads(t), logger: logger, wanted: make(chan struct{}, 1), sleep: sleep}
+	if s.watcher, err = watch.New(cfg.TreeRoot, watch.Debounce, s.uploads.changed, s.overflowed, logger); err != nil {
 		return nil, err
 	}
-	return &Sidecar{watcher: watcher, uploads: uploads}, nil
+	return s, nil
 }
 
-// Run keeps the tree until ctx is done, then abandons the PUTs still out.
+// Run keeps the tree until ctx is done, then abandons the calls still out.
 func (s *Sidecar) Run(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	kept := make(chan struct{})
+	go func() {
+		s.keep(ctx)
+		close(kept)
+	}()
 	err := s.watcher.Run(ctx)
+	cancel()
 	s.uploads.close()
+	<-kept
 	return err
+}
+
+func sleep(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // probe makes dir when there is none and writes a file in it, so a data

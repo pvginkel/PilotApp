@@ -1,5 +1,6 @@
-// Package files writes a file whole: a temp file in its directory, renamed
-// over it, so a reader sees the old bytes or the new and never a part.
+// Package files writes a file of the tree whole: a temp file in its
+// directory, renamed over it, so a reader sees the old bytes or the new and
+// never a part. It removes the directories a delete leaves empty.
 package files
 
 import (
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 // TempPrefix opens the name of every temp file pilot-sync writes. A file so
@@ -35,6 +37,22 @@ func Write(path string, content []byte, mode fs.FileMode) error {
 	}
 	if err != nil {
 		return fmt.Errorf("write %s: %w", path, errors.Join(err, os.Remove(tmp.Name())))
+	}
+	return nil
+}
+
+// RemoveEmptyDirs removes dir, and each directory above it up to root, root
+// itself kept, while each is empty.
+func RemoveEmptyDirs(root, dir string) error {
+	for dir != root && strings.HasPrefix(dir, root+string(filepath.Separator)) {
+		err := os.Remove(dir)
+		if errors.Is(err, syscall.ENOTEMPTY) || errors.Is(err, syscall.EEXIST) {
+			return nil
+		}
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("remove the empty directory %s: %w", dir, err)
+		}
+		dir = filepath.Dir(dir)
 	}
 	return nil
 }

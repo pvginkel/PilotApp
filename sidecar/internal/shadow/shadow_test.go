@@ -1,6 +1,7 @@
 package shadow
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"testing"
@@ -73,5 +74,45 @@ func TestOpenRemovesAWriteCutShort(t *testing.T) {
 	}
 	if _, err := os.Stat(cut); !os.IsNotExist(err) {
 		t.Errorf("the temp file is still there: %v", err)
+	}
+}
+
+func TestDeleteForgetsThePathAndTheDirectoriesItEmpties(t *testing.T) {
+	dir := t.TempDir()
+	store, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for path, content := range map[string]string{"proj/plan.json": "{}", "old/inbox/a.md": "a", "old/b.md": "b"} {
+		if err := store.Put(path, []byte(content)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.Delete("old/inbox/a.md"); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"proj/plan.json": protocol.Hash([]byte("{}")), "old/b.md": protocol.Hash([]byte("b"))}
+	if got := store.Hashes(); !maps.Equal(got, want) {
+		t.Fatalf("holds %v", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "old", "inbox")); !os.IsNotExist(err) {
+		t.Errorf("the emptied directory is still there: %v", err)
+	}
+	if err := store.Delete("old/b.md"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "old")); !os.IsNotExist(err) {
+		t.Errorf("the emptied directory is still there: %v", err)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Errorf("the shadow's own directory is gone: %v", err)
+	}
+
+	reopened, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reopened.Hashes(); len(got) != 1 {
+		t.Fatalf("a restart holds %v", got)
 	}
 }
