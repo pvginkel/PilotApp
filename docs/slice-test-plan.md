@@ -154,10 +154,12 @@ its command:
    makes (`scripts/sync-live-proof.py`), not a second one: settings appended to `backend/.env`,
    which the backend restarts on (`backend/scripts/dev-watch.sh`) and whose last line for a key wins
    (python-dotenv), and the file's original bytes written back in step 6, whatever happened before
-   it. `FLASK_ENV=testing` opens the testing routes. The token is `PILOT_DEV_CONTROLLER_TOKEN`,
-   which this environment projects from its secret catalog (`.kubecoder/config.yaml`) and the
-   backend never reads by that name: it goes into the file as `CONTROLLER_TOKEN` and is never
-   printed; the backend's start logs its settings with the token as `***`.
+   it. A step 1 run again before step 6 keeps the copy the first one saved, the only copy of the
+   original, and step 6 clears `tmp/fleet/` once the original is back. `FLASK_ENV=testing` opens the
+   testing routes. The token is `PILOT_DEV_CONTROLLER_TOKEN`, which this environment projects from
+   its secret catalog (`.kubecoder/config.yaml`) and the backend never reads by that name: it goes
+   into the file as `CONTROLLER_TOKEN` and is never printed; the backend's start logs its settings
+   with the token as `***`.
    `ENVIRONMENT_STOP_AFTER_SECONDS=60` shortens the shutdown timer to fit the check.
    `CONTROLLER_CA_FILE` stays unset: the `modern-app` container's `REQUESTS_CA_BUNDLE` is the system
    bundle, which holds the homelab root. The dev seed goes in first, for a project to start the
@@ -165,8 +167,10 @@ its command:
 
    ```bash
    cexec modern-app sh -c 'cd backend && uv run cli load-test-data --yes-i-am-sure'
-   mkdir -p tmp/fleet && rm -f tmp/fleet/*
-   if [ -e backend/.env ]; then cp backend/.env tmp/fleet/env.orig; else touch tmp/fleet/no-env; fi
+   mkdir -p tmp/fleet && find tmp/fleet -type f ! -name env.orig ! -name no-env -delete
+   if [ ! -e tmp/fleet/env.orig ] && [ ! -e tmp/fleet/no-env ]; then
+     if [ -e backend/.env ]; then cp backend/.env tmp/fleet/env.orig; else touch tmp/fleet/no-env; fi
+   fi
    DB=$(sed -n 's/^DATABASE_URL=postgresql+psycopg:/postgresql:/p' tmp/fleet/env.orig 2>/dev/null | tail -1)
    echo "${DB:-postgresql://postgres:postgres@localhost:5432/pilot}" > tmp/fleet/db
    { echo; echo FLASK_ENV=testing; echo CONTROLLER_URL=https://kubecoder-dev.home
@@ -287,6 +291,7 @@ its command:
    SECONDS=0; until r=$(curl -s -m 5 http://localhost:3501/health/readyz) && [ -n "$r" ] && ! printf '%s' "$r" | grep -q '"controller"' || [ $SECONDS -ge 90 ]; do sleep 1; done
    echo "$r"                                                                                # no controller check
    grep -cF -- "$PILOT_DEV_CONTROLLER_TOKEN" logs/backend.log /tmp/pilot-dev.log tmp/fleet/*   # 0 each
+   { [ -e tmp/fleet/no-env ] && [ ! -e backend/.env ]; } || cmp -s backend/.env tmp/fleet/env.orig && rm -rf tmp/fleet && echo "tmp/fleet/ cleared"
    ```
 
 **Stop the stack** from another shell, and confirm it is down:
