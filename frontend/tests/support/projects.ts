@@ -10,6 +10,7 @@ import type { components } from '@/lib/api/generated/types';
 
 type ProjectSpec = components['schemas']['InventedProjectCreateSchema.6d6b324'];
 type ProjectTab = components['schemas']['ProjectListResponseSchema.e86ccd6.ProjectTabSchema'];
+type ProjectHead = components['schemas']['ProjectHeadSchema.e86ccd6'];
 type TransitionKind = components['schemas']['TransitionRequestSchema.e86ccd6']['kind'];
 
 export class Projects {
@@ -30,6 +31,13 @@ export class Projects {
     const response = await this.page.request.get(`${this.backendUrl}/api/projects?archived=${archived}`);
     expect(response.status(), await response.text()).toBe(200);
     return ((await response.json()) as { projects: ProjectTab[] }).projects;
+  }
+
+  /** A project's head, as the signed-in person reads it. */
+  async head(id: string): Promise<ProjectHead> {
+    const response = await this.page.request.get(`${this.backendUrl}/api/projects/${id}`);
+    expect(response.status(), await response.text()).toBe(200);
+    return (await response.json()) as ProjectHead;
   }
 
   /** A transition by the signed-in person. */

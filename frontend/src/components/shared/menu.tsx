@@ -3,9 +3,9 @@
  * on Esc, and when one of its items is chosen.
  */
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useState, type ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { useEscape } from '@/lib/keys';
+import { useDismiss } from '@/hooks/use-dismiss';
 
 const CloseMenu = createContext<() => void>(() => undefined);
 
@@ -19,18 +19,8 @@ interface MenuProps {
 
 export function Menu({ label, testId, trigger, children }: MenuProps) {
   const [open, setOpen] = useState(false);
-  const anchor = useRef<HTMLDivElement>(null);
   const close = useCallback(() => setOpen(false), []);
-  useEscape('menu', open, close);
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const onPress = (event: PointerEvent) => {
-      if (!anchor.current?.contains(event.target as Node)) close();
-    };
-    document.addEventListener('pointerdown', onPress);
-    return () => document.removeEventListener('pointerdown', onPress);
-  }, [open, close]);
+  const anchor = useDismiss('menu', open, close);
 
   return (
     <div className="menu-anchor" ref={anchor}>

@@ -91,6 +91,23 @@
   .mention { color: inherit; text-decoration: none; cursor: pointer; }
   .mention:hover { text-decoration: underline; }
 
+  /* ---- Chips ---------------------------------------------------------------------------- */
+
+  /* A word in a pill beside a name: a standing such as Draft or Finished. */
+  .chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 4px;
+    padding: 0 7px;
+    border-radius: 999px;
+    background: hsl(var(--muted));
+    color: hsl(var(--muted-foreground));
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: nowrap;
+  }
+  .chip .icon { position: relative; top: calc(0.5em - 0.5cap); }
+
   /* ---- Counts --------------------------------------------------------------------------- */
 
   /* A group's or a tab's count, in a pill beside its name. */
@@ -177,6 +194,29 @@
   }
   .menu-item:hover { background: hsl(var(--accent)); }
   .menu-item .icon { position: relative; top: calc(0.5em - 0.5cap); color: hsl(var(--muted-foreground)); }
+
+  /* ---- Popovers (popover.tsx) ----------------------------------------------------------- */
+
+  .popover-anchor { position: relative; }
+  .popover {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 15;
+    padding: 10px 0;
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+    background: hsl(var(--background));
+    box-shadow: var(--shadow-lg);
+    color: hsl(var(--foreground));
+    font-size: 14px;
+    font-weight: 400;
+    text-align: left;
+    white-space: normal;
+    cursor: default;
+    overflow-y: auto;
+  }
+  .popover h3 { margin: 0 0 6px; padding: 0 14px; font-size: 13px; color: hsl(var(--muted-foreground)); }
 
   /* ---- Dialogs (dialog.tsx) ------------------------------------------------------------- */
 

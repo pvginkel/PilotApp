@@ -1,12 +1,14 @@
 /**
- * How a project's standing reads (STATUS-4): the head's step reading (F2.2) and a tab's status
- * line (F1.2), derived from the record, never written by the brain (database.md decision 15).
+ * How a project's standing reads (STATUS-4): the head's step reading (F2.2), a tab's status line
+ * (F1.2), derived from the record, never written by the brain (database.md decision 15), and a
+ * step's standing in the plan popover (F3.1).
  */
 
 import type { components } from '@/lib/api/generated/types';
 
 type ProjectTab = components['schemas']['ProjectListResponseSchema.e86ccd6.ProjectTabSchema'];
 type PlanProgress = components['schemas']['ProjectListResponseSchema.e86ccd6.PlanProgressSchema'];
+type TaskStatus = components['schemas']['ProjectHeadSchema.e86ccd6.TaskStatus'];
 
 interface StepReading {
   text: string;
@@ -15,7 +17,7 @@ interface StepReading {
 }
 
 /** The first step in progress by name; else "Not started", "N of M done" or "All steps done". */
-function stepReading(progress: PlanProgress): StepReading {
+export function stepReading(progress: PlanProgress): StepReading {
   const [first, ...rest] = progress.in_progress;
   if (first !== undefined) return { text: first, more: rest.length > 0 };
   if (progress.done === 0) return { text: 'Not started', more: false };
@@ -40,6 +42,27 @@ export function projectStatusLine(tab: Pick<ProjectTab, 'state' | 'finished_at' 
     default: {
       const unknown: never = tab.state;
       return { text: String(unknown), more: false, at: null };
+    }
+  }
+}
+
+interface PlanStep {
+  /** The step's mark in the plan popover: ticked once done, highlighted while in progress. */
+  mark: 'done' | 'now' | 'pending';
+  label: string;
+}
+
+export function planStep(status: TaskStatus): PlanStep {
+  switch (status) {
+    case 'done':
+      return { mark: 'done', label: 'Done' };
+    case 'in_progress':
+      return { mark: 'now', label: 'In progress' };
+    case 'pending':
+      return { mark: 'pending', label: 'Not started' };
+    default: {
+      const unknown: never = status;
+      return { mark: 'pending', label: String(unknown) };
     }
   }
 }

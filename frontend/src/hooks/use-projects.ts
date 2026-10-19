@@ -1,10 +1,10 @@
 /**
- * The project list and the archived projects, as GET /api/projects reads them. Both refetch when
- * the window comes back into focus, and after the person's own writes, which invalidate every
- * query; nothing pushes them (F1).
+ * The project list and the archived projects, as GET /api/projects reads them, and a project's
+ * head, as GET /api/projects/<id> does. Each refetches when the window comes back into focus, and
+ * after the person's own writes, which invalidate every query; nothing pushes them (F1, F2).
  */
 
-import { useGetProjects } from '@/lib/api/generated/hooks';
+import { useGetProjects, useGetProjectsByProjectId } from '@/lib/api/generated/hooks';
 import type { components } from '@/lib/api/generated/types';
 import { useUiStateInstrumentation } from '@/lib/test/ui-state';
 
@@ -39,4 +39,12 @@ export function groupProjects(projects: ProjectTab[]): Groups {
     others: active.filter((project) => !project.member),
     finished: projects.filter((project) => project.state === 'finished'),
   };
+}
+
+export type ProjectHead = components['schemas']['ProjectHeadSchema.e86ccd6'];
+
+export function useProjectHead(id: string) {
+  const query = useGetProjectsByProjectId({ path: { project_id: id } }, { refetchOnWindowFocus: 'always' });
+  useUiStateInstrumentation('project.head', { isLoading: query.isLoading, error: query.error });
+  return query;
 }

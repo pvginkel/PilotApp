@@ -1,0 +1,123 @@
+/* A project's head (PilotAppSpecs design/mockup/style.css, "The head's controls", "Auto pilot",
+   the plan's donut and the plan popover, and "Narrow screens"). */
+
+@layer components {
+  /* The head's controls share their text's baseline; its two rows stand in one line. */
+  .feed-head {
+    flex: none;
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    min-height: 52px;
+    padding: 11.5px 24px;
+    border-bottom: 1px solid hsl(var(--border));
+  }
+  .feed-head .head-row { display: contents; }
+  .feed-head h1 { margin: 0; font-size: 17px; font-weight: 600; white-space: nowrap; }
+  .feed-head .meta { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 13px; color: hsl(var(--muted-foreground)); }
+  .feed-head .meta > :first-child { white-space: nowrap; }
+  .feed-head .meta .repo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .feed-head .grow { flex: 1; }
+  .chip.draft-chip { background: hsl(var(--primary-muted)); color: hsl(var(--primary-muted-foreground)); }
+  .chip.finished-chip, .chip.archived-chip { font-weight: 600; }
+
+  /* In a tight head the repo and the step's name give way; auto pilot, the members and the icons
+     keep their size. */
+  .feed-head .switch, .feed-head .members, .feed-head .head-icon { flex: none; }
+  .feed-head .head-icon { align-self: center; }
+
+  /* The members: avatars overlapping by 2px, each ringed in the page's colour. */
+  .members { display: flex; align-self: center; }
+  .members .avatar { box-shadow: 0 0 0 2px hsl(var(--background)); }
+  .members .avatar + .avatar { margin-left: -2px; }
+
+  /* Auto pilot: a switch, its knob moving right when it is on. */
+  .switch {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    font-size: 13px;
+    color: hsl(var(--muted-foreground));
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .switch .track {
+    position: relative;
+    top: 1px;
+    align-self: center;
+    width: 32px;
+    height: 18px;
+    border-radius: 999px;
+    background: hsl(var(--muted-foreground) / 0.35);
+    transition: background-color 0.15s;
+  }
+  .switch .knob {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+    transition: transform 0.15s;
+  }
+  .switch[aria-checked="true"] .track { background: hsl(var(--primary)); }
+  .switch[aria-checked="true"] .knob { transform: translateX(14px); }
+  .switch:disabled { opacity: 0.55; cursor: default; }
+  .switch:focus-visible { outline: none; }
+  .switch:focus-visible .track { box-shadow: 0 0 0 2px hsl(var(--ring)); }
+
+  /* The step button: a long step name gives way before the ticket does. */
+  .step-anchor { min-width: 0; }
+  .step-anchor > .btn { max-width: 100%; }
+  .step-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  /* ", …" when more steps are in progress: it stays when the name gives way, without the gap. */
+  .step-more { flex: none; margin-left: -6px; white-space: pre; }
+  /* The plan's donut. It hangs from the baseline as an icon does, lowered to centre on the capitals. */
+  .plan-ring { position: relative; top: calc(8px - 0.5cap); flex: none; width: 16px; height: 16px; transform: rotate(-90deg); }
+  .plan-ring circle { fill: none; stroke-width: 3; stroke: hsl(var(--muted-foreground) / 0.3); }
+  .plan-ring .done { stroke: hsl(var(--primary)); }
+  .plan-ring .now { stroke: hsl(var(--primary) / 0.45); }
+
+  /* The plan popover: the steps in order, every step in progress highlighted. */
+  .plan-pop { width: 320px; }
+  .plan-pop ol { margin: 0; padding: 0; list-style: none; }
+  .plan-step { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; padding: 4px 14px; color: hsl(var(--muted-foreground)); }
+  .plan-step.now { color: hsl(var(--foreground)); font-weight: 600; background: hsl(var(--primary-muted)); }
+  .plan-step .step-title { flex: 1; min-width: 0; }
+  /* The mark has no text, so its baseline is its bottom edge; it is lifted to centre on the
+     step's capitals. */
+  .plan-step .mark { position: relative; top: calc(9px - 0.5cap); flex: none; width: 18px; height: 18px; border-radius: 999px; border: 1.5px solid hsl(var(--border)); }
+  .plan-step .mark .icon { position: absolute; inset: 0; margin: auto; width: 11px; height: 11px; }
+  .plan-step.done .mark { border-color: hsl(var(--primary)); background: hsl(var(--primary)); color: #fff; }
+  .plan-step.now .mark { border-color: hsl(var(--primary)); }
+  .plan-step.now .mark::after { content: ''; position: absolute; inset: 3.5px; border-radius: 999px; background: hsl(var(--primary) / 0.45); }
+  .plan-step .step-notes { flex: none; padding: 0; border: 0; background: none; color: hsl(var(--muted-foreground)); font: inherit; cursor: pointer; }
+  .plan-step .step-notes:hover, .plan-step .step-notes[aria-expanded="true"] { color: hsl(var(--foreground)); }
+  .plan-step .note-list { flex-basis: 100%; margin: 4px 0 2px; padding-left: 28px; }
+
+  /* A list of notes: each summary, then its content. */
+  .note-list { margin: 0; padding: 0; list-style: none; font-size: 13.5px; font-weight: 400; color: hsl(var(--foreground)); }
+  .note-list > li + li { margin-top: 8px; }
+  .note-summary { display: block; font-weight: 600; }
+  .note-content { margin: 2px 0 0; color: hsl(var(--muted-foreground)); white-space: pre-wrap; }
+  .notes-pop { width: 340px; }
+  .notes-pop .note-list { padding: 0 14px; }
+
+  /* A narrow window: the name and auto pilot, then the step, the members and the icons, the repo
+     hidden; the plan opens under the step, within the window. */
+  @media (max-width: 900px) {
+    .feed-head { flex-direction: column; align-items: stretch; gap: 8px; padding: 8px 14px; }
+    .feed-head .head-row { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+    .feed-head h1 { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .feed-head .meta .repo { display: none; }
+    .feed-head .step-anchor { flex: 1; }
+    .plan-pop { right: auto; left: 0; width: min(320px, calc(100vw - 28px)); }
+    .notes-pop { width: min(340px, calc(100vw - 28px)); }
+  }
+}
