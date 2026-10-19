@@ -18,8 +18,10 @@ from app.engine.views import ViewService
 from app.services.auth_service import AuthService
 from app.services.frontend_version_service import FrontendVersionService
 from app.services.health_service import HealthService
+from app.services.link_service import LinkService
 from app.services.metrics_service import MetricsService
 from app.services.oidc_client_service import OidcClientService
+from app.services.people_service import PeopleService
 from app.services.sse_connection_manager import SSEConnectionManager
 from app.services.sync_service import SyncService
 from app.services.sync_stream_service import SyncStreamService
@@ -170,6 +172,10 @@ class ServiceContainer(containers.DeclarativeContainer):
         record_service=record_service,
         tree_service=tree_service,
     )
+
+    # The signed-in person on the record (F137), and what links in text (F93)
+    people_service = providers.Factory(PeopleService, db=db_session)
+    link_service = providers.Factory(LinkService, db=db_session)
 
     # The dev stack's seed, loaded by `cli load-test-data`
     test_data_service = providers.Factory(

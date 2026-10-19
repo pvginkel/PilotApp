@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.config import Sensitive, dump_config_for_logging
@@ -49,6 +49,21 @@ class AppEnvironment(BaseSettings):
         default=15.0,
         gt=0,
         description="Seconds the sync change stream stays idle before a heartbeat comment",
+)
+    TICKET_URL_TEMPLATE: str | None = Field(
+        default=None,
+        description=(
+            "A ticket's address, {id} standing for its id; unset, ticket ids show "
+            "unlinked (F91)"
+        ),
+    )
+    ENVIRONMENT_LINK_BASE_URL: str | None = Field(
+        default=None,
+        description=(
+            "KubeCoder's address: an environment links to "
+            "<base>/environments/<environment id>/ssh/open, which opens it in VS "
+            "Code; unset, environments show unlinked (F93)"
+        ),
     )
 
 
@@ -79,6 +94,30 @@ class AppSettings(BaseModel):
     """How long the sync change stream stays idle before it writes a heartbeat
     comment (design 1 §5.1)."""
 
+    ticket_url_template: str | None = None
+    """A ticket's address, `{id}` standing for its id (F91)."""
+
+    environment_link_base_url: str | None = None
+    """KubeCoder's address, without a trailing slash (F93)."""
+
+    @field_validator("ticket_url_template")
+    @classmethod
+    def _holds_the_id(cls, template: str | None) -> str | None:
+        if template is not None and "{id}" not in template:
+            raise ValueError(
+                "TICKET_URL_TEMPLATE must hold {id}, where the ticket id goes"
+            )
+        return template
+
+    @field_validator("environment_link_base_url")
+    @classmethod
+    def _is_an_address(cls, base: str | None) -> str | None:
+        if base is None:
+            return None
+        if not base.startswith(("https://", "http://")):
+            raise ValueError("ENVIRONMENT_LINK_BASE_URL must be an http(s) address")
+        return base.rstrip("/")
+
     def dump_for_logging(self) -> dict[str, str]:
         """Every setting, for the boot log, with the Sensitive ones as ``***``."""
         return dump_config_for_logging(self)
@@ -96,4 +135,6 @@ class AppSettings(BaseModel):
             store_environment_id=env.STORE_ENVIRONMENT_ID,
             sync_put_max_bytes=env.SYNC_PUT_MAX_BYTES,
             sync_heartbeat_seconds=env.SYNC_HEARTBEAT_SECONDS,
+            ticket_url_template=env.TICKET_URL_TEMPLATE or None,
+            environment_link_base_url=env.ENVIRONMENT_LINK_BASE_URL or None,
         )

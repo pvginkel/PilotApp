@@ -29,7 +29,14 @@ def create_container() -> ServiceContainer:
 
 def register_blueprints(api_bp: Blueprint, app: Flask) -> None:
     """Register all app-specific blueprints on api_bp (under /api prefix)."""
-    pass
+    # api_bp is the process's one; a second app (the tests build several)
+    # finds it registered already, with these on it.
+    if not api_bp._got_registered_once:
+        from app.api.links import links_bp
+        from app.api.people import people_bp
+
+        api_bp.register_blueprint(links_bp)
+        api_bp.register_blueprint(people_bp)
 
 
 def register_error_handlers(app: Flask) -> None:

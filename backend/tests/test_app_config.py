@@ -1,9 +1,10 @@
-"""App settings: the ticket id pattern (F91), the store's sync, deployment
-configuration."""
+"""App settings: the ticket id pattern and the link settings (F91, F93), the store's sync,
+deployment configuration."""
 
 import re
 
 import pytest
+from pydantic import ValidationError
 
 from app.app_config import AppEnvironment, AppSettings
 
@@ -70,4 +71,64 @@ class TestAppSettings:
             "store_environment_id": "'example-env-1'",
             "sync_put_max_bytes": "2097152",
             "sync_heartbeat_seconds": "15.0",
+            "ticket_url_template": "None",
+            "environment_link_base_url": "None",
+        }
+
+    def test_the_link_settings_are_unset_by_default(self) -> None:
+        settings = AppSettings.load(AppEnvironment())
+
+        assert settings.ticket_url_template is None
+        assert settings.environment_link_base_url is None
+
+    def test_load_reads_the_link_settings_from_the_environment(self) -> None:
+        settings = AppSettings.load(
+            AppEnvironment(
+                TICKET_URL_TEMPLATE="https://tracker.example.com/issue/{id}",
+                ENVIRONMENT_LINK_BASE_URL="https://kubecoder.example.com",
+            )
+        )
+
+        assert settings.ticket_url_template == "https://tracker.example.com/issue/{id}"
+        assert settings.environment_link_base_url == "https://kubecoder.example.com"
+
+    def test_an_empty_link_setting_is_unset(self) -> None:
+        settings = AppSettings.load(
+            AppEnvironment(TICKET_URL_TEMPLATE="", ENVIRONMENT_LINK_BASE_URL="")
+        )
+
+        assert settings.ticket_url_template is None
+        assert settings.environment_link_base_url is None
+
+    def test_the_base_loses_its_trailing_slash(self) -> None:
+        settings = AppSettings(
+            environment_link_base_url="http://kubecoder.example.com/"
+        )
+
+        assert settings.environment_link_base_url == "http://kubecoder.example.com"
+
+    def test_a_template_without_the_id_is_refused(self) -> None:
+        with pytest.raises(ValidationError, match="must hold {id}"):
+            AppSettings.load(
+                AppEnvironment(TICKET_URL_TEMPLATE="https://tracker.example.com/issue/")
+            )
+
+    @pytest.mark.parametrize(
+        "base", ["kubecoder.example.com", "ftp://kubecoder.example.com"]
+    )
+    def test_a_base_that_is_no_http_address_is_refused(self, base: str) -> None:
+        with pytest.raises(ValidationError, match="must be an http"):
+            AppSettings.load(AppEnvironment(ENVIRONMENT_LINK_BASE_URL=base))
+
+    def test_the_settings_are_logged_as_they_stand(self) -> None:
+        settings = AppSettings(ticket_url_template="https://tracker.example.com/{id}")
+
+        assert settings.dump_for_logging() == {
+            "ticket_id_pattern": repr(re.compile(r"[A-Z][A-Z0-9_]*-[1-9][0-9]*")),
+            "sync_token": "***",
+            "store_environment_id": repr(""),
+            "sync_put_max_bytes": "2097152",
+            "sync_heartbeat_seconds": "15.0",
+            "ticket_url_template": repr("https://tracker.example.com/{id}"),
+            "environment_link_base_url": "None",
         }

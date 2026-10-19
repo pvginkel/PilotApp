@@ -174,6 +174,24 @@
         "title": "ForceSSECallbackErrorQuerySchema",
         "type": "object"
       },
+      "HandleChoiceSchema.d1d9f70": {
+        "description": "The handle a person chooses at their first sign-in.",
+        "properties": {
+          "handle": {
+            "description": "Lower-case letters, digits and hyphens; unique; not `agent`; never changed after",
+            "examples": [
+              "ada"
+            ],
+            "title": "Handle",
+            "type": "string"
+          }
+        },
+        "required": [
+          "handle"
+        ],
+        "title": "HandleChoiceSchema",
+        "type": "object"
+      },
       "HealthResponse.d817ae2": {
         "description": "Liveness and drain response.",
         "properties": {
@@ -201,6 +219,94 @@
           "ready"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "LinksResponseSchema.d9d9a05": {
+        "description": "The deployment's link settings and the record's environments.",
+        "properties": {
+          "environment_link_base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "KubeCoder's address, without a trailing slash: an environment links to `<base>/environments/<environment id>/ssh/open`; null when unset, and environments then show unlinked",
+            "examples": [
+              "https://kubecoder.example.com",
+              null
+            ],
+            "title": "Environment Link Base Url"
+          },
+          "environments": {
+            "description": "Every environment of the record, by name",
+            "items": {
+              "$ref": "#/components/schemas/LinksResponseSchema.d9d9a05.EnvironmentNameSchema"
+            },
+            "title": "Environments",
+            "type": "array"
+          },
+          "ticket_id_pattern": {
+            "description": "The regular expression a whole ticket id matches (F91)",
+            "examples": [
+              "[A-Z][A-Z0-9_]*-[1-9][0-9]*"
+            ],
+            "title": "Ticket Id Pattern",
+            "type": "string"
+          },
+          "ticket_url_template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A ticket's address, `{id}` standing for its id; null when unset, and ticket ids then show unlinked",
+            "examples": [
+              "https://tracker.example.com/issue/{id}",
+              null
+            ],
+            "title": "Ticket Url Template"
+          }
+        },
+        "required": [
+          "ticket_id_pattern",
+          "ticket_url_template",
+          "environment_link_base_url",
+          "environments"
+        ],
+        "title": "LinksResponseSchema",
+        "type": "object"
+      },
+      "LinksResponseSchema.d9d9a05.EnvironmentNameSchema": {
+        "description": "An environment of the record, by its id and the name text calls it by.",
+        "properties": {
+          "id": {
+            "description": "The KubeCoder environment id",
+            "examples": [
+              "example-env-1"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "The environment's name",
+            "examples": [
+              "Example-1"
+            ],
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "EnvironmentNameSchema",
         "type": "object"
       },
       "ReadyzResponse.d817ae2": {
@@ -291,6 +397,98 @@
           "critical"
         ],
         "title": "ReadinessCheckSchema",
+        "type": "object"
+      },
+      "SelfResponseSchema.d1d9f70": {
+        "description": "The signed-in person, as the app's shell and the handle step draw them.",
+        "properties": {
+          "avatar_slot": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The avatar's palette slot, from 1, the same on every screen (F132); null until the handle is chosen",
+            "examples": [
+              1,
+              null
+            ],
+            "title": "Avatar Slot"
+          },
+          "handle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The person's handle; null at their first sign-in, until they choose it",
+            "examples": [
+              "ada",
+              null
+            ],
+            "title": "Handle"
+          },
+          "handle_prefill": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the handle step's field starts with while the handle is null: the name's first word made to fit a handle, empty when the token carries no name; null once the handle is chosen",
+            "examples": [
+              null,
+              "ada"
+            ],
+            "title": "Handle Prefill"
+          },
+          "initials": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The avatar's initials, from the name (F106); null with no name",
+            "examples": [
+              "AE"
+            ],
+            "title": "Initials"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The full name: the record's once the handle is chosen (the handle when the token carried none), the token's before, null when it carries none",
+            "examples": [
+              "Ada Example"
+            ],
+            "title": "Name"
+          }
+        },
+        "required": [
+          "handle",
+          "handle_prefill",
+          "name",
+          "initials",
+          "avatar_slot"
+        ],
+        "title": "SelfResponseSchema",
         "type": "object"
       },
       "SyncCheckRequestSchema.19c06e7": {
@@ -1194,6 +1392,197 @@
         },
         "summary": "Get current authenticated user information.",
         "tags": []
+      }
+    },
+    "/api/links": {
+      "get": {
+        "description": "Returns:     200: The link settings and the record's environments     401: No one is signed in     403: The caller lacks the editor role",
+        "operationId": "get__api_links",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinksResponseSchema.d9d9a05"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read what text links: ticket ids, by the pattern and the URL template, and environments, by KubeCoder's address; unset, they show unlinked.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/people/self": {
+      "get": {
+        "description": "A person with a row has its name (unless the token carries none), email and last seen refreshed. One without is at their first sign-in: the answer has no handle and no slot, and the prefill for the handle step.\n\nReturns:     200: The signed-in person     401: No one is signed in     403: The caller lacks the editor role",
+        "operationId": "get__api_people_self",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelfResponseSchema.d1d9f70"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read the signed-in person, recording the sign-in on their row.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/people/self/handle": {
+      "post": {
+        "description": "Returns:     201: The person, with their handle and avatar slot     400: The handle is not lower-case letters, digits and hyphens     401: No one is signed in     403: The caller lacks the editor role     409: The handle is Pilot's or another person's, or the caller has one",
+        "operationId": "post__api_people_self_handle",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HandleChoiceSchema.d1d9f70"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelfResponseSchema.d1d9f70"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Choose the signed-in person's handle, which puts them on the record.",
+        "tags": [],
+        "x-required-role": "editor"
       }
     },
     "/api/sse/stream": {
