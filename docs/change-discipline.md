@@ -19,6 +19,11 @@ topic docs beside this one.
   which win where they disagree with those; and the decisions taken for now in its
   `considerations.md`. A plan or an implementation that disagrees with one is wrong, however
   convenient.
+- **Its technical choices are suggestions, not rulings** (D018). How the design record and the
+  mockup build a feature, a transport, a library, a component's shape or a split between
+  processes, is weighed on its merits at planning and implementation, and changed where another
+  design is better. What binds is the scope and the rulings above; a reviewer sends a departure
+  from a technical choice back on its merits, never for departing.
 - **An open item is the operator's to rule.** `understanding.md` §5 is the one open list. A slice
   that meets one of its items stops and asks; it does not settle the question in code.
 
@@ -27,7 +32,9 @@ topic docs beside this one.
 The React app is the mockup in `../PilotAppSpecs/design/mockup/`, converted: its layout, its
 controls and its styling carry over as they are, and `ui-conventions.md` holds the rulings on what
 shows and what a control does. No styling rule is written down anywhere else; where the mockup and
-a habit of this template disagree, the mockup wins.
+a habit of this template disagree, the mockup wins. Where the mockup and the design record
+disagree, the record wins: the mockup is the older of the two. How the mockup's code builds a
+screen is a technical choice, a suggestion like the design's (D018).
 
 ## The server decides when; the brain decides what
 
@@ -70,8 +77,11 @@ no shim, adapter or compatibility parameter.
 
 The root, `backend/` and `frontend/` are generated from ModernAppTemplate; `CLAUDE.md` says which
 files are the template's and where app code goes instead. App behaviour never goes into a
-template-owned file. The template family itself is not edited from here: what it gets wrong is fixed
-in this repo, in its own commit that says so, so that a `copier update` merges it knowingly.
+template-owned file. Template-owned code is improved, though, and in this repo (D018): what the
+template gets wrong, or does less well than the work needs, is changed here, with no need to stay
+backwards compatible, in its own commit that says so, so that a `copier update` merges it
+knowingly, and an agent merges it into ModernAppTemplate. The template family itself is not edited
+from here.
 
 ## No tombstones
 

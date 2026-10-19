@@ -63,16 +63,17 @@ template-owned file to add app behaviour; use the extension points instead:
 | Test fixtures | `backend/tests/conftest.py`, `frontend/tests/support/fixtures.ts` |
 | Sidecars CI must wait for | `backend/scripts/wait-for-services.py` (the suite runner calls it) |
 
-The template repos are not edited from here: what the template gets wrong is fixed in this repo, in
-a commit of its own, and listed here as a standing edit, so that a `copier update` that conflicts on
-it resolves to this repo's side. Two stand today, each an addition rather than a fix: the
-`Jenkinsfile`'s sidecar, its `golang` container and its `Test sidecar` and `Build pilot-sync image`
-stages, which the template, rendering no `sidecar/`, has no place for (D008); and the page head of
-`frontend/index.html`, which links the PWA's `/manifest.json` and sets `theme-color`, which no
-app-owned file can. uv, the migration that keeps the app's loggers, the masked database URL in
-`backend/app/cli.py` and the declarative `Jenkinsfile` on the library's `modernApp.test` are the
-template's own since root v0.2.0 and backend v0.14.0, and
-`backend/scripts/init-dev-database.py` (production's locale) since backend v0.15.0.
+Template-owned code is improved in this repo, not in the template repos (D018): what the template
+gets wrong, or does less well than the work needs, is changed here, with no need to stay backwards
+compatible, in a commit of its own, and listed here as a standing edit, so that a `copier update`
+that conflicts on it resolves to this repo's side; an agent merges it into ModernAppTemplate. Two
+stand today, each an addition rather than a fix: the `Jenkinsfile`'s sidecar, its `golang` container
+and its `Test sidecar` and `Build pilot-sync image` stages, which the template, rendering no
+`sidecar/`, has no place for (D008); and the page head of `frontend/index.html`, which links the
+PWA's `/manifest.json` and sets `theme-color`, which no app-owned file can. uv, the migration that
+keeps the app's loggers, the masked database URL in `backend/app/cli.py` and the declarative
+`Jenkinsfile` on the library's `modernApp.test` are the template's own since root v0.2.0 and backend
+v0.14.0, and `backend/scripts/init-dev-database.py` (production's locale) since backend v0.15.0.
 
 ## Architecture model
 
