@@ -116,7 +116,8 @@ func (t *tree) hold(ctx context.Context, path string) (release func(), ok bool) 
 	}, true
 }
 
-// walk hashes every file of the tree, by path.
+// walk hashes every file of the tree, by path. A file it cannot read is
+// left out, as its upload leaves it: it costs its own path only.
 func (t *tree) walk() (map[string]string, error) {
 	hashes := map[string]string{}
 	err := filepath.WalkDir(t.root, func(name string, entry fs.DirEntry, err error) error {
@@ -129,18 +130,20 @@ func (t *tree) walk() (map[string]string, error) {
 		if !entry.Type().IsRegular() || files.IsTemp(entry.Name()) {
 			return nil
 		}
+		rel, err := filepath.Rel(t.root, name)
+		if err != nil {
+			return err
+		}
+		path := filepath.ToSlash(rel)
 		content, err := os.ReadFile(name)
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil
 		}
 		if err != nil {
-			return err
+			t.logger.Error("cannot read a file of the tree", "path", path, "error", err)
+			return nil
 		}
-		rel, err := filepath.Rel(t.root, name)
-		if err != nil {
-			return err
-		}
-		hashes[filepath.ToSlash(rel)] = protocol.Hash(content)
+		hashes[path] = protocol.Hash(content)
 		return nil
 	})
 	return hashes, err

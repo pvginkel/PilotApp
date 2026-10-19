@@ -3,6 +3,7 @@ package sidecar
 import (
 	"context"
 	"net/http"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -102,6 +103,35 @@ func TestDeletesOnlyWhatTheShadowHolds(t *testing.T) {
 		if hash := running.synced(path); hash != "" {
 			t.Errorf("%s: still in the shadow", path)
 		}
+	}
+}
+
+func TestReconcilesPastAFileItCannotRead(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a file of mode 0000")
+	}
+	s := newServer(t)
+	tree := t.TempDir()
+	at := func(path string) string { return filepath.Join(tree, filepath.FromSlash(path)) }
+	s.record("proj/a.md", "one")
+	s.record("proj/b.md", "bee")
+	write(t, at("proj/b.md"), "the agent's")
+	if err := os.Chmod(at("proj/b.md"), 0); err != nil {
+		t.Fatal(err)
+	}
+	start(t, s, tree, t.TempDir())
+
+	if !holds(at("proj/a.md"), "one") {
+		t.Error("the reconcile stopped at the file it cannot read")
+	}
+	if posted := s.manifests()[0]; len(posted.Tree) != 0 {
+		t.Errorf("posted %v, the file it cannot read in it", posted.Tree)
+	}
+	if err := os.Chmod(at("proj/b.md"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, at("proj/b.md")); got != "the agent's" {
+		t.Errorf("the file it cannot read holds %q", got)
 	}
 }
 
