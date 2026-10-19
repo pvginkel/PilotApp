@@ -55,15 +55,23 @@ SUPERVISOR_LOGGER = "app.services.supervisor"
 
 class _Recording(ServedFakeController):
     """The fake, keeping each headless create's body, and refusing every send
-    with `502 worker-unreachable` while `refuse_sends` is set. `during_create`,
-    when set, runs once, as a create is answered: another process's action
-    then."""
+    with `502 worker-unreachable` while `refuse_sends` is set. `during_create`
+    and `during_settle`, when set, run once, as a create or an environment's
+    `wait` is answered: another process's action then."""
 
     def __init__(self, keepalive_seconds: float) -> None:
         super().__init__(keepalive_seconds)
         self.create_bodies: list[dict[str, Any]] = []
         self.refuse_sends = False
         self.during_create: Callable[[], None] | None = None
+        self.during_settle: Callable[[], None] | None = None
+
+    def _get_environment(self, request: Request, env_id: str) -> Response:
+        if "wait" in request.args:
+            hook, self.during_settle = self.during_settle, None
+            if hook is not None:
+                hook()
+        return super()._get_environment(request, env_id)
 
     def _create_session(self, request: Request, env_id: str) -> Response:
         self.create_bodies.append(request.get_json(silent=True) or {})
@@ -870,6 +878,97 @@ class TestStartLoop:
                 STARTING_ENV,
                 CREATING,
             ]
+
+    @pytest.mark.parametrize("state", [SessionState.RUNNING, SessionState.IDLE])
+    def test_a_session_another_process_moved_on_while_its_environment_came_up_is_left_alone(
+        self,
+        committed_app: Flask,
+        committed_fake: _Recording,
+        supervise: Supervise,
+        state: SessionState,
+    ) -> None:
+        container = committed_app.container
+        starts, _, _ = _services(container, supervise)
+        project_id = _committed_project(container)
+        with scoped_session(container) as db:
+            run_id = starts.start_session(
+                db, project_id, ENV, kind_code="work", cwd=CWD, brief=BRIEF
+            ).id
+        client = container.controller_client()
+        other: list[str] = []
+        lines: list[dict[str, Any] | None] = []
+
+        def another_process_runs_it() -> None:
+            # Its create and its brief's send committed, and at `idle` the
+            # brief's turn ended, before this run's environment start returns.
+            name = client.create_headless_session(ENV, HeadlessCreateRequest()).name
+            client.send_message(ENV, name, BRIEF)
+            other.append(name)
+            now = datetime.now(UTC)
+            lines.append(
+                {"state": "thinking", "since": now.isoformat()}
+                if state == SessionState.RUNNING
+                else None
+            )
+            with scoped_session(container) as db:
+                run = db.get_one(models.Session, run_id)
+                run.controller_session = name
+                run.state_code = state
+                run.current_line = lines[0]
+                if state == SessionState.IDLE:
+                    _turns(db, run_id)[0].ended_at = now
+            if state == SessionState.IDLE:
+                committed_fake.finish(ENV, name, "success", "Done.")
+
+        committed_fake.during_settle = another_process_runs_it
+
+        starts.run(run_id, LoopHandle(f"start:{run_id}"))
+
+        run = _committed(container, run_id)
+        assert (run.state_code, run.controller_session) == (state, other[0])
+        assert run.current_line == lines[0]
+        with scoped_session(container) as db:
+            assert [payload for _, payload in _server(db, run_id)] == [STARTING_ENV]
+        assert [s.name for s in committed_fake.sessions(ENV)] == other
+        assert _sends(committed_fake, other[0]) == 1
+
+    def test_a_controller_session_another_process_recorded_while_its_environment_came_up_gets_the_brief(
+        self,
+        committed_app: Flask,
+        committed_fake: _Recording,
+        supervise: Supervise,
+    ) -> None:
+        container = committed_app.container
+        starts, _, _ = _services(container, supervise)
+        project_id = _committed_project(container)
+        with scoped_session(container) as db:
+            run_id = starts.start_session(
+                db, project_id, ENV, kind_code="work", cwd=CWD, brief=BRIEF
+            ).id
+        client = container.controller_client()
+        other: list[str] = []
+
+        def another_process_creates_and_stops() -> None:
+            # Its create committed, and its loop told to stop before the send.
+            other.append(
+                client.create_headless_session(ENV, HeadlessCreateRequest()).name
+            )
+            with scoped_session(container) as db:
+                db.get_one(models.Session, run_id).controller_session = other[0]
+
+        committed_fake.during_settle = another_process_creates_and_stops
+
+        starts.run(run_id, LoopHandle(f"start:{run_id}"))
+
+        run = _committed(container, run_id)
+        assert (run.state_code, run.controller_session) == (
+            SessionState.RUNNING,
+            other[0],
+        )
+        with scoped_session(container) as db:
+            assert [payload for _, payload in _server(db, run_id)] == [STARTING_ENV]
+        assert [s.name for s in committed_fake.sessions(ENV)] == other
+        assert _sends(committed_fake, other[0]) == 1
 
 
 START_LOGGER = "app.services.session_start_service"

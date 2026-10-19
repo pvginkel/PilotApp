@@ -209,22 +209,29 @@ class SessionStartService:
                 if handle.stopping:
                     return
                 with scoped_session(self._container) as db:
-                    self._phase(db, session_id, CREATING)
-                created = self._client().create_headless_session(
-                    pending.env_id, pending.create
+                    pending = self._creating(db, session_id)
+                if pending is None:
+                    return
+                created = (
+                    self._client().create_headless_session(
+                        pending.env_id, pending.create
+                    )
+                    if pending.controller_session is None
+                    else None
                 )
             except ExternalServiceException as error:
                 with scoped_session(self._container) as db:
                     self._fail(db, session_id, str(error), recorded=False)
                 return
-            with scoped_session(self._container) as db:
-                session = self._records(db).lock_session(session_id)
-                if (
-                    session.state_code == SessionState.STARTING
-                    and session.controller_session is None
-                ):
-                    session.controller_session = created.name
-                    session.started_at = datetime.now(UTC)
+            if created is not None:
+                with scoped_session(self._container) as db:
+                    session = self._records(db).lock_session(session_id)
+                    if (
+                        session.state_code == SessionState.STARTING
+                        and session.controller_session is None
+                    ):
+                        session.controller_session = created.name
+                        session.started_at = datetime.now(UTC)
             if handle.stopping:
                 return
         with scoped_session(self._container) as db:
@@ -246,6 +253,16 @@ class SessionStartService:
         self._supervisor.start_loop(
             START_JOB, partial(self.run, session_id), key=str(session_id)
         )
+
+    def _creating(self, db: Session, session_id: uuid.UUID) -> _Pending | None:
+        """The Session's start as its rows have it under its lock, with the
+        phase that creates the headless session written while it has no
+        controller session; None when it is no longer `starting`."""
+        self._records(db).lock_session(session_id)
+        pending = _pending(db, session_id)
+        if pending is not None and pending.controller_session is None:
+            self._phase(db, session_id, CREATING)
+        return pending
 
     def _phase(self, db: Session, session_id: uuid.UUID, text: str) -> None:
         """The `server` record naming the phase the start enters, and the
