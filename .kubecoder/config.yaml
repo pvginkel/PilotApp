@@ -26,6 +26,11 @@ secrets:
   # name the backend does not read: the check hands it to the dev stack as
   # CONTROLLER_TOKEN, and nothing else sees it under that name.
   PILOT_DEV_CONTROLLER_TOKEN: pilot-kubecoder-dev-token
+  # The dev stage's test account, a user of production's realm holding the dev
+  # client's `editor` role alone: the deployed checks of docs/slice-test-plan.md
+  # sign in to pilot-dev.home with it.
+  PILOT_DEV_TEST_USERNAME: pilot-dev-test-username
+  PILOT_DEV_TEST_PASSWORD: pilot-dev-test-password
 
 tools:
   - use: modern-app
