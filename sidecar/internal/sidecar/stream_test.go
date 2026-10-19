@@ -138,7 +138,9 @@ func TestFetchesAMovedPathOnceItsChangesCoalesce(t *testing.T) {
 	s.record("proj/a.md", "one")
 	running := start(t, s, tree, t.TempDir())
 
-	s.record("proj/a.md", "three")
+	// The record has moved past both of a.md's changes: a fetch per change
+	// would GET it twice, the second change's hash not the first fetch's.
+	s.record("proj/a.md", "four")
 	s.record("proj/timeline.json", "[3]")
 	for _, frame := range []string{
 		change("proj/a.md", "two"), heartbeat, change("proj/timeline.json", "[3]"), change("proj/a.md", "three"),
@@ -146,14 +148,14 @@ func TestFetchesAMovedPathOnceItsChangesCoalesce(t *testing.T) {
 		running.stream.send(t, frame)
 	}
 	eventually(t, "the moved paths written", func() bool {
-		return holds(at("proj/a.md"), "three") && holds(at("proj/timeline.json"), "[3]")
+		return holds(at("proj/a.md"), "four") && holds(at("proj/timeline.json"), "[3]")
 	})
 	settle()
 	fetched := s.fetched()
 	if got := countOf(fetched, "proj/a.md"); got != 2 {
 		t.Errorf("fetched proj/a.md %d times: %v", got, fetched)
 	}
-	if running.synced("proj/a.md") != hashOf("three") {
+	if running.synced("proj/a.md") != hashOf("four") {
 		t.Error("the shadow not updated")
 	}
 }
