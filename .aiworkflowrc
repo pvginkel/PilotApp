@@ -6,7 +6,7 @@ design_philosophy = "docs/change-discipline.md"
 
 [test_phase]
 # The suites, the dev stack running in this environment, then the push, the
-# rollout of pilot-prd and the checks against the deployed app.
+# rollout of pilot-dev and the checks against it, signed in as the test account.
 strategy = "docs/slice-test-plan.md"
 
 [doc_phase]
@@ -14,7 +14,13 @@ plan = "docs/slice-doc-plan.md"
 
 [push]
 # A slice's test phase pushes what the slice committed, which deploys it to
-# prd at pilot.ginbov.nl; the driver checks that every repo reached origin.
+# pilot-dev at pilot-dev.home; production moves only when the operator promotes
+# it. The driver checks that every repo reached origin.
 enabled = true
 
-# No [devlock]: there is no dev instance to occupy.
+# The occupancy lease over pilot-dev, held by the driver for the test phase and
+# again for the doc phase's push. Relative to the spec repo, the mount every
+# environment of the project shares; its git ignores the lease and the
+# dev-holder note the driver writes beside it.
+[devlock]
+lease = "slices/.devlock.lock"

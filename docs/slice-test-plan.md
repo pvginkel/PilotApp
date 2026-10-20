@@ -6,30 +6,41 @@ names it. Read it top to bottom and do what it says.
 
 ## What this phase proves, and what it does not
 
-**There is one deployment, and it is production.** A push to `main` runs the `PilotApp` Jenkins job
-(the suites, the sidecar's tests, the `pilot`, `pilot-ui` and `pilot-sync` images), which pins
-`pilot` and `pilot-ui` in `pvginkel/PilotDeploy`, from
-which Argo CD rolls the Application `pilot-prd`: the pod behind `https://pilot.ginbov.nl`, which the
-operator and their wife use. There is no dev instance. So this phase proves the slice **locally
-first** (the suites, then the dev stack running here), pushes only what that proved, confirms the
-rollout, and then checks the deployment for what only it can show.
+**Pilot has two stages, and a push deploys to dev** ([`deployment.md`](deployment.md)). A push to
+`main` runs the Jenkins job `PilotApp/Build-Main` (the suites, the sidecar's tests, the `pilot`,
+`pilot-ui` and `pilot-sync` images, tagged `dev-<n>`), which pins `pilot` and `pilot-ui` for both
+stages in `pvginkel/PilotDeploy`'s `main`, from which Argo CD rolls the Application `pilot-dev`: the
+pod behind `https://pilot-dev.home`, internal, whose sessions and environments are
+`kubecoder-dev`'s. Production, `pilot-prd` behind `https://pilot.ginbov.nl`, which the operator and
+their wife use, follows PilotDeploy's `prd` branch, which only `PilotApp/Promote-PRD` moves, and only
+the operator starts it. So this phase proves the slice **locally first** (the suites, then the dev
+stack running here), pushes only what that proved, confirms the rollout on `pilot-dev`, and then
+checks `pilot-dev` for what only a deployment can show.
 
-Two things follow from production being the only instance:
+Three things follow:
 
-- **What a check writes there is real.** Every deployed check below only reads, and the sign-in
-  check stops at Keycloak's login form. No check here signs in: no agent holds an account with the
-  `editor` role, so whether a signed-in user reaches the app is the operator's to confirm. Their
-  own first sign-in is the last check of a go-live (ruling D1), and the close-out report names it
-  as theirs.
-- There is no `devlock`: nothing is occupied for the length of a check. Two slices that push close
-  together both deploy, and the later image holds both.
+- **A check may write on dev, and signs in.** `pilot-dev` is the slices' own: no one's work is in
+  its database or its fleet. A deployed check signs in through Keycloak's login page as the test
+  account, a user of production's realm holding the dev client's `editor` role alone (step 4.6),
+  and works the app through the API or the UI as a user does. What it writes is invented, as on the
+  dev stack (§2), and stays in dev's database.
+- **Nothing checks production.** The test phase never starts `PilotApp/Promote-PRD`, a slice's
+  first promotion included: the promotion is the operator's, and the close-out names it as theirs
+  ([the operator gate](#the-operator-gate)). Production is only read, to show that the pushes left
+  it where it was (step 4.1).
+- **The test phase holds the devlock.** `.aiworkflowrc` names a lease, `slices/.devlock.lock` in
+  the spec repo, the mount every environment of the project shares. The run loop's driver takes it
+  before the test phase starts, keeps it across a findings re-loop, and lets it go once the phase is
+  clean and every repo has reached `origin`; it takes it again for the doc phase's push alone. While
+  one slice holds it, another slice's test phase waits, so two slices never push, roll and check
+  `pilot-dev` at once; the waiting run's log names the holder, from the `dev-holder` note the driver
+  writes beside the lease. Nothing in this doc takes or frees it.
 
-What the checks cannot show from here is reported as *not verified*: the site from outside the
-LAN (step 4.5), a signed-in session, and anything that needs a part of the fleet no slice has wired
-into the deployment yet (a store environment, YouTrack). The KubeCoder controller is wired: what
-Pilot does with it is proven on a real turn against KubeCoder's dev stage (§2, the fleet's live
-check), and production shows only that its backend reaches its controller (step 4.3), since no
-check there starts anything.
+What the checks cannot show from here is reported as *not verified*: production after a promotion,
+and anything that needs a part of the fleet no slice has wired into the deployment yet (a store
+environment, YouTrack). The KubeCoder controller is wired: what Pilot does with it is proven on a
+real turn against `kubecoder-dev` (§2, the fleet's live check), and `pilot-dev` shows only that its
+backend reaches that controller (step 4.3), since no route of a deployed stage starts anything yet.
 
 ## 0. Preconditions
 
@@ -320,28 +331,43 @@ honouring any repo named in `plan.md`'s `## Push holds`, in an order that holds:
 
 1. **Read what a public repo's push carries first.** PilotApp and PilotDeploy are public:
    `git log -p origin/main..main` in each, before its push. No secret, token or literal key
-   (no client secret, no generated value, no fallback for one), and no excerpt of a real project,
-   chat or decision document. One found comes out of the history before the push; it is never
-   pushed.
+   (no client secret, no generated value, no fallback for one), neither of the test account's
+   credentials, and no excerpt of a real project, chat or decision document. One found comes out of
+   the history before the push; it is never pushed. The credentials are counted, never shown:
+
+   ```bash
+   for r in . ../PilotDeploy; do git -C $r log -p origin/main..main | grep -cF -e "$PILOT_DEV_TEST_USERNAME" -e "$PILOT_DEV_TEST_PASSWORD"; done   # 0 each
+   ```
+
 2. **PilotDeploy first when it adds a pin key the PilotApp build writes.** The build's last stage,
    `cicd.writeVersionPins`, edits `images.pilot` and `images.pilotUI` in PilotDeploy's
-   `config/prd/values.yaml` in place, and fails on a key that file on `origin/main` does not
-   already hold. Every green build pins, so the rule is about a key the PilotDeploy change adds,
-   not about pinning as such. Otherwise push the chart first when the new image needs what the
-   chart adds, the image first when the chart needs the new image, and either when neither does.
+   `config/dev/values.yaml` and `config/prd/values.yaml` in place, in one commit, and fails on a
+   file or key that `origin/main` does not already hold. Every green build pins, so the rule is
+   about a key the PilotDeploy change adds, not about pinning as such. Otherwise push the chart
+   first when the new image needs what the chart adds, the image first when the chart needs the new
+   image, and either when neither does.
 3. **Rebase, never force.** Every green PilotApp build commits its pins to PilotDeploy's `main`, so
    before a PilotDeploy push, `git -C ../PilotDeploy fetch -q && git -C ../PilotDeploy rebase
    origin/main`. A rejected push means a pin commit landed first: fetch and rebase again. The same
    holds for ArgoCDDeploy and Architecture, which the whole estate pushes to: rebase onto
-   `origin/main`, run their gate again from their root, then push.
-4. **A registry entry only once what it names has built green.** A producer's entry in
-   Architecture's `pipeline-producers.yaml` once its `AaC/<Repo>` job has a green build: a
-   registered producer with no artifact fails `AaC/Architecture`'s collector. Pilot's entry in
-   ArgoCDDeploy's `releases/values.yaml` once PilotDeploy's `origin/main` pins both images to a
-   green build's (`:0`, the seed, names no image): the Application syncs as soon as it exists.
-   ArgoCDDeploy and Architecture are the estate's, and a push there needs the operator's ruling in
-   the plan (the deploy slice's D1 is one).
+   `origin/main`, run their gate again from their root, then push. PilotDeploy's `prd` is the
+   promotion job's: nothing here pushes it, but for its creation ([a stage's first
+   deploy](#a-stages-first-deploy), step 2).
+4. **A registry entry only once what it names exists.** A producer's entry in Architecture's
+   `pipeline-producers.yaml` once its `AaC/<Repo>` job has a green build: a registered producer
+   with no artifact fails `AaC/Architecture`'s collector. A stage of Pilot's in ArgoCDDeploy's
+   `releases/values.yaml` once the PilotDeploy branch it follows is on `origin` and its values pin
+   images the registry holds (`:0`, the seed, names none): the Application syncs as soon as it
+   exists, and one whose branch is not on `origin` cannot resolve its revision. ArgoCDDeploy and
+   Architecture are the estate's, and a push there needs the operator's ruling in the plan.
 5. **The plan's `## Ordering constraints`**, where they say more.
+
+Before the first push, record production's pod and its images, which step 4.1 reads again:
+
+```bash
+mkdir -p tmp/prd && cexec iac kubectl -n pilot-prd get pods -l app.kubernetes.io/name=pilot \
+  -o jsonpath='{range .items[*]}{.metadata.name} {.spec.containers[*].image}{"\n"}{end}' | tee tmp/prd/before
+```
 
 ### Following a build
 
@@ -349,36 +375,39 @@ Each push starts its repo's jobs, and each is followed to its end:
 
 | Push to | Starts |
 |---------|--------|
-| PilotApp | `PilotApp` (`Jenkinsfile`: the suites, the sidecar's tests, three images, the pin commit of two) and `AaC/PilotApp` (`Jenkinsfile.architecture`: validates and archives `docs/architecture/*.yaml`) |
-| PilotDeploy, the build's pin commits included | `AaC/PilotDeploy` (generates and publishes the `pilot-deploy` model) |
+| PilotApp | `PilotApp/Build-Main` (`Jenkinsfile`: the suites, the sidecar's tests, three images tagged `dev-<n>` and `dev-latest`, the pin commit of two for both stages) and `AaC/PilotApp` (`Jenkinsfile.architecture`: validates and archives `docs/architecture/*.yaml`) |
+| PilotDeploy's `main`, the build's pin commits included | no job: `pilot-dev` rolls it |
+| PilotDeploy's `prd`, which a promotion moves | `AaC/PilotDeploy` (generates and publishes the `pilot-deploy` model, production's) |
 | Architecture | `AaC/Architecture` |
 | ArgoCDDeploy | `AaC/ArgoCDDeploy` |
 
-Once `pilot-app` and `pilot-deploy` are registered, `AaC/Architecture` also runs after every green
-`AaC/PilotApp` and `AaC/PilotDeploy` build (an upstream trigger, after a 90 s quiet period);
-`track_build.py` waits for it as their downstream build.
+`PilotApp/Promote-PRD` has no trigger, and nothing here starts it.
+
+`AaC/Architecture` also runs after every green `AaC/PilotApp` and `AaC/PilotDeploy` build (an
+upstream trigger, after a 90 s quiet period); `track_build.py` waits for it as their downstream
+build.
 
 ```bash
-timeout 1800 track_build.py PilotApp --hash "$(git rev-parse HEAD)" --appear-timeout 120 --diagnose
+timeout 1800 track_build.py PilotApp/Build-Main --hash "$(git rev-parse HEAD)" --appear-timeout 120 --diagnose
 timeout 900 track_build.py AaC/PilotApp --hash "$(git rev-parse HEAD)" --appear-timeout 120 --diagnose
-timeout 900 track_build.py AaC/PilotDeploy --hash <the PilotDeploy commit> --appear-timeout 120 --diagnose
 ```
 
 It needs `JENKINS_TOKEN`, which this environment projects, and the deploy repo's clone
-(`../PilotDeploy`), which it fetches to follow the pin commit. Once `PilotApp`'s build is green it
-reads the pin line from the console (`pvginkel/PilotDeploy <sha> pins config/prd/values.yaml.`)
-and waits until `pilot-prd` has rolled that commit. The `timeout` sits above the build (the first
-`PilotApp` build took 270 s, the model app's run near ten minutes), the 120 s Argo CD may take to
-see the pin commit and the ten-minute roll deadline after that, so that a slow roll ends in
-`track_build.py`'s own exit `6` with its diagnosis rather than in `timeout`'s `124` with none. The
-pin commit started `AaC/PilotDeploy`: follow that build too, by the commit the pin line names.
-While no Application follows PilotDeploy (before the first deploy below), pass
-`--no-follow-argocd`: the pins have nothing to roll them yet. Its exit status says where it
-stopped:
+(`../PilotDeploy`), which it fetches to follow the pin commit. Once `PilotApp/Build-Main`'s build is
+green it reads the pin line from the console (`pvginkel/PilotDeploy <sha> pins
+config/dev/values.yaml, config/prd/values.yaml.`) and waits until every Application that follows
+the commit has rolled it: one whose source tracks PilotDeploy's `main` and whose values files name a
+pinned file, which is `pilot-dev` alone, since `pilot-prd` tracks `prd`. The `timeout` sits above
+the build (the job's first build took 270 s, the model app's run near ten minutes), the 120 s Argo
+CD may take to see the pin commit and the ten-minute roll deadline after that, so that a slow roll
+ends in `track_build.py`'s own exit `6` with its diagnosis rather than in `timeout`'s `124` with
+none. The pin commit starts no build: `AaC/PilotDeploy` builds `prd`. While Argo CD has no
+`pilot-dev` (before its first deploy below), pass `--no-follow-argocd`: the pins have nothing to
+roll them yet. Its exit status says where it stopped:
 
 | Exit | Meaning | What to do |
 |------|---------|------------|
-| `0` | Every build is green and `pilot-prd` rolled the pin commit (or nothing was followed into Argo CD). | Wait for the roll check to end, then go on to the deployed checks. The Application is `Healthy` once the old pod's termination has started, not once the pod is gone. |
+| `0` | Every build is green and `pilot-dev` rolled the pin commit (or nothing was followed into Argo CD). | Wait for the roll check to end, then go on to the deployed checks. The Application is `Healthy` once the old pod's termination has started, not once the pod is gone. |
 | `1` | A build failed; nothing was followed into Argo CD. | `--diagnose` printed the console tail; the full log's path is in the summary. A finding. |
 | `3` | An operational problem: Jenkins or Kubernetes auth, a build that never appeared, a failed fetch; with `--deploy`, a repo and branch no Application follows. | Fix the cause and run it again; the build is not re-run. |
 | `4` | The builds are green, but there is no clone of the deploy repo they pushed to. | The summary gives the `git clone` line. This environment declares PilotDeploy, so this is an environment fault, not a slice finding. |
@@ -386,8 +415,8 @@ stopped:
 | `6` | The Application had not rolled the commit ten minutes after Argo CD saw it. | A finding; the diagnosis is on disk as for `5`. |
 | `7` | Argo CD will not roll the commit on its own: it never saw it (a lost webhook), or the sync is not automated. | A finding, except where a step below expects it. This kubeconfig cannot sync or refresh an Application, and waiting longer does not help. |
 
-A PilotDeploy push that no build made is followed into Argo CD by its commit, once it is on
-`origin/main`, beside its `AaC/PilotDeploy` build:
+A push to PilotDeploy's `main` that no build made is followed into Argo CD by its commit, once it is
+on `origin/main`; `pilot-dev` is the Application that rolls it:
 
 ```bash
 timeout 900 track_build.py --deploy PilotDeploy main "$(git -C ../PilotDeploy rev-parse HEAD)"
@@ -396,27 +425,28 @@ timeout 900 track_build.py --deploy PilotDeploy main "$(git -C ../PilotDeploy re
 ### The roll check
 
 **Every roll of a running pod is watched from before its push until the old pod is gone.**
-`pilot-prd` rolls by starting the new pod beside the old one (`RollingUpdate`, `maxSurge: 1`,
+`pilot-dev` rolls by starting the new pod beside the old one (`RollingUpdate`, `maxSurge: 1`,
 `maxUnavailable: 0`), and retires the old pod only once the new one is ready. Each of the old pod's
 containers goes on serving for 15 s after its termination starts, then the backend drains: its
 `preStop` calls `/health/drain` and waits for it 40 s at most, and the drain stops the backend's
 long-lived jobs (the fleet stream, the relays, the timers) within `GRACEFUL_SHUTDOWN_TIMEOUT`,
 20 s. Nothing drains to completion: a relay cut mid-turn is resumed by the new pod. The termination
-grace is 70 s (15 + 40 + 15), so the old pod is gone within 70 s. This
-environment reads prd but cannot roll it (its kubeconfig is read-only outside `development`), so
-the check rides the roll a push causes: a PilotApp push, whose build pins new images, and a
-PilotDeploy push that changes the pod template (`chart/templates/deployment.yaml`, or a value it
-reads). A PilotDeploy push that leaves the pod template alone rolls nothing and has no roll check.
-Start the check in the background, before the push:
+grace is 70 s (15 + 40 + 15), so the old pod is gone within 70 s. This environment reads the prd
+cluster, where both stages run, but cannot roll anything there (its kubeconfig is read-only outside
+`development`), so the check rides the roll a push causes: a PilotApp push, whose build pins new
+images, and a push to PilotDeploy's `main` that changes dev's pod template
+(`chart/templates/deployment.yaml`, or a value of `config/dev/values.yaml` it reads). A PilotDeploy
+push that leaves dev's pod template alone rolls nothing and has no roll check. Start the check in
+the background, before the push:
 
 ```bash
 SECONDS=0
 mkdir -p tmp/roll && rm -f tmp/roll/*
-cexec iac kubectl -n pilot-prd get pods -l app.kubernetes.io/name=pilot -o name | cut -d/ -f2 > tmp/roll/old
+cexec iac kubectl -n pilot-dev get pods -l app.kubernetes.io/name=pilot -o name | cut -d/ -f2 > tmp/roll/old
 [ "$(wc -l < tmp/roll/old)" -eq 1 ] || { echo "tmp/roll/old names $(wc -l < tmp/roll/old) pods, not one: no check"; exit 1; }
 probe() { while :; do echo "$(date -u +%T.%3N) $(curl -s -o /dev/null -m 5 -w '%{http_code}' "$1") $1"; sleep 0.5; done >> tmp/roll/probes; }
-probe https://pilot.ginbov.nl/ & probe https://pilot.ginbov.nl/api/auth/self &
-until [ $SECONDS -ge 1800 ] || { cexec iac kubectl -n pilot-prd get pods -l app.kubernetes.io/name=pilot --no-headers --request-timeout=10s > tmp/roll/now &&
+probe https://pilot-dev.home/ & probe https://pilot-dev.home/api/auth/self &
+until [ $SECONDS -ge 1800 ] || { cexec iac kubectl -n pilot-dev get pods -l app.kubernetes.io/name=pilot --no-headers --request-timeout=10s > tmp/roll/now &&
     sed "s/^/$(date -u +%T) /" tmp/roll/now >> tmp/roll/pods && ! grep -qwFf tmp/roll/old tmp/roll/now; }; do sleep 5; done
 kill $(jobs -p)
 grep -vwFf tmp/roll/old tmp/roll/now | cut -d' ' -f1 > tmp/roll/new
@@ -425,8 +455,8 @@ awk '{ print $3, $2 }' tmp/roll/probes | sort | uniq -c
 ```
 
 `tmp/roll/old` names the one pod that runs before the push, and the check stops at once unless it
-names exactly one: none means the listing failed, or Pilot is not deployed yet (the first deploy
-below has no roll check); two, a roll already under way, so wait for it to end and start again. The
+names exactly one: none means the listing failed, or `pilot-dev` is not deployed yet (a first
+deploy has no roll check); two, a roll already under way, so wait for it to end and start again. The
 check probes the site every half second, with reads that write nothing, lists the pods every 5 s,
 and ends on its own once the pod in `tmp/roll/old` is gone, its termination included, or after
 30 minutes. It prints how often each URL gave each status. `/` answers `200` (the UI's nginx) and
@@ -438,193 +468,272 @@ every 5 s to set beside it. "the old pod outlived the check" means the roll did 
 30 minutes, which is a finding too. The pod the roll produced is named in `tmp/roll/new`. One roll
 at a time: a push waits until the check of the one before it has ended.
 
-### The first deploy
+### A stage's first deploy
 
-While Argo CD has no `pilot-prd` (`cexec iac kubectl -n argocd-prd get application pilot-prd`
-answers `NotFound`), a slice's push takes Pilot live, and the order is fixed. Steps 1 to 3 of the
-order above decide it; this is how each push is followed.
+While Argo CD has no Application for a stage (`cexec iac kubectl -n argocd-prd get application
+pilot-<stage>` answers `NotFound`), the slice that adds it takes it live, and the order is fixed.
+Steps 1 to 4 of the order above decide it; this is how each push is followed. The commands name
+`pilot-dev`, whose first deploy also put production on the `prd` branch (step 2).
 
-1. **PilotDeploy**, with `images.pilot` and `images.pilotUI` in `config/prd/values.yaml`. Follow
-   its `AaC/PilotDeploy` build to green. Until `AaC/Architecture` has collected `pilot-app`, that
-   build's console carries two `gap:` lines (`app:pilot` and `app:pilot-ui` resolve to no
-   producer); they are expected, and the model is whole from the first `AaC/PilotDeploy` build
-   after that collection, which only a later PilotDeploy push starts.
-2. **PilotApp.** Follow `PilotApp` with `--no-follow-argocd` and `AaC/PilotApp` to green, then the
-   pin commit: `git -C ../PilotDeploy fetch -q && git -C ../PilotDeploy show
-   origin/main:config/prd/values.yaml` pins both images to `:<n>`, `<n>` the build's number, and
-   that commit's `AaC/PilotDeploy` build is green too. Bring the local PilotDeploy up to it
-   (`git -C ../PilotDeploy rebase origin/main`).
-3. **Architecture**, the slice's producer entries, now that both `AaC/` jobs have a green build.
-   Follow `AaC/Architecture` by the pushed commit (`--appear-timeout` stays at its default 300 s,
-   above the job's 90 s quiet period). It is green with `pilot-deploy`'s references to
-   `app:pilot` and `app:pilot-ui` reported as tolerated `dangling-reference` warnings until
-   `pilot-deploy` is regenerated after this collection.
-4. **ArgoCDDeploy**, Pilot's entry, now that the pins name a green build's images. Follow
-   `AaC/ArgoCDDeploy` by the pushed commit, and the registry's sync:
+1. **PilotDeploy's `main`**, with the stage's `config/<stage>/`: its `values.yaml` holds every key
+   the build pins, pinned to images the registry holds (a build's tag, never the `:0` seed), so
+   that the stage syncs before PilotApp's push; its `terraform.tfvars` sets `manage_webhook =
+   false`, the repository's one webhook being production's. Follow the push into the Applications
+   that track `main` already with `track_build.py --deploy` (above); with none, it refuses with
+   exit `3`, and there is nothing to follow.
+2. **PilotDeploy's `prd`, while `origin` has none** (`git -C ../PilotDeploy ls-remote --heads origin
+   prd` prints nothing). It is made once, by hand, at the commit step 1 pushed, whose
+   `config/prd/values.yaml` pins no `:prd-<n>` tag: the promotion job admits that tip unrecorded
+   and refuses every other one no release records ([`deployment.md`](deployment.md)). Production's
+   render there is the one `pilot-prd` runs, so moving it onto `prd` (step 3) rolls nothing. The
+   push starts `AaC/PilotDeploy`'s first build from `prd`:
+
+   ```bash
+   git -C ../PilotDeploy show HEAD:config/prd/values.yaml | grep -c ':prd-'   # 0
+   git -C ../PilotDeploy push origin "$(git -C ../PilotDeploy rev-parse HEAD):refs/heads/prd"
+   timeout 900 track_build.py AaC/PilotDeploy --hash "$(git -C ../PilotDeploy rev-parse HEAD)" --appear-timeout 120 --diagnose
+   ```
+
+   From then on only the promotion moves `prd`.
+3. **ArgoCDDeploy**, the stage's entry. Follow `AaC/ArgoCDDeploy` by the pushed commit, and the
+   registry's sync:
 
    ```bash
    timeout 900 track_build.py --deploy ArgoCDDeploy main "$(git -C /work/scratch/ArgoCDDeploy rev-parse HEAD)"
    ```
 
-   The Application `releases` rolls the commit, and that creates `pilot-prd`. `argocd-prd`, Argo
+   The Application `releases` rolls the commit, and that creates `pilot-<stage>`. `argocd-prd`, Argo
    CD's own Application, follows the same repo and branch and is synced by hand on purpose, so the
    run ends `7` with `argocd-prd` the one Application reported as having no automated sync policy,
    or `0` if it had compared the commit already. Either is the expected end when the summary lists
-   `releases` as rolled; anything else is a finding.
-5. **The first sync**, which has no pod before it and so no roll check. `pilot-prd` syncs on its
-   own: Argo applies the chart's Namespace `pilot-prd` first, before it creates the hook Job; then
-   the PreSync hook (Job `tf-presync-pilot-prd` in `argocd-hooks`) applies PilotDeploy's
-   Terraform, which makes Pilot's role and database on `postgres-pas` and writes the Secret
-   `pilot-db` into `pilot-prd`; then the secret generators and the ExternalSecrets; then the
-   Deployment, whose init container `migrate` applies the migrations before the backend starts.
-   Follow it:
+   `releases` as rolled; anything else is a finding. An Application the commit moved onto another
+   branch, `pilot-prd` onto `prd`, is `Synced` there at the commit it ran before, its pod the one
+   recorded before the first push:
 
    ```bash
-   timeout 300 sh -c 'until cexec iac kubectl -n argocd-prd get application pilot-prd -o name; do sleep 5; done'
+   cexec iac kubectl -n argocd-prd get application pilot-prd \
+     -o jsonpath='{.spec.source.targetRevision} {.status.sync.revision} {.status.sync.status} {.status.health.status}{"\n"}'
+   ```
+
+4. **The first sync**, which has no pod before it and so no roll check. `pilot-dev` syncs on its
+   own: Argo applies the chart's Namespace `pilot-dev` first, before it creates the hook Job; then
+   the PreSync hook (Job `tf-presync-pilot-dev` in `argocd-hooks`) applies PilotDeploy's Terraform
+   with `config/dev/`, which makes the stage's role and database, `pilot_dev_db`, on `postgres-pas`
+   and writes the Secret `pilot-db` into `pilot-dev`; then the secret generators and the
+   ExternalSecrets; then the Deployment, whose init container `migrate` applies the migrations
+   before the backend starts. Follow it:
+
+   ```bash
+   timeout 300 sh -c 'until cexec iac kubectl -n argocd-prd get application pilot-dev -o name; do sleep 5; done'
    git -C ../PilotDeploy fetch -q
    timeout 900 track_build.py --deploy PilotDeploy main "$(git -C ../PilotDeploy rev-parse origin/main)"
    ```
 
-   Exit `0` is `pilot-prd` `Synced` at that commit and no longer `Progressing`. Read the hook's
+   Exit `0` is `pilot-dev` `Synced` at that commit and no longer `Progressing`. Read the hook's
    apply at once, while its pod is still there to read:
 
    ```bash
-   cexec iac kubectl -n argocd-hooks logs job/tf-presync-pilot-prd | grep -E 'Creation complete|Apply complete'
+   cexec iac kubectl -n argocd-hooks logs job/tf-presync-pilot-dev | grep -E 'Creation complete|Apply complete'
    ```
 
    On the first sync `module.db`'s role, database and Secret are among the resources it created; a
-   later sync applies `0 added`.
+   later sync applies `0 added`. The site's name and certificate follow the sync (step 4.5).
+5. **PilotApp**, last, now that the stage runs, so that its build's pin commit rolls `pilot-dev`
+   under the roll check, as every later build's does. Follow `PilotApp/Build-Main` and
+   `AaC/PilotApp` to green as above; then `git -C ../PilotDeploy fetch -q && git -C ../PilotDeploy
+   show origin/main:config/dev/values.yaml` pins both images to `:dev-<n>` and `config/prd/values.yaml`
+   to `:prd-<n>`, `<n>` the build's number. Bring the local PilotDeploy up to it
+   (`git -C ../PilotDeploy rebase origin/main`).
 
 ## 4. The deployed checks
 
-After every push that deployed (a roll, a PilotDeploy sync, the first deploy), all of them. Each
-only reads, and each runs through the read-only kubeconfig (`cexec iac kubectl`), which cannot
-read Secrets, exec, port-forward or proxy.
+After every push that deployed to `pilot-dev` (a roll, a PilotDeploy sync, a first deploy), all of
+them. Steps 1 to 5 and 8 only read, through the read-only kubeconfig (`cexec iac kubectl`), which
+cannot read Secrets, exec, port-forward or proxy; step 6 signs in, and step 7 may write.
 
 Once any roll check has ended the old pod is gone, so the label names one pod, the one the push
 produced (`tmp/roll/new`):
 
 ```bash
-POD=$(cexec iac kubectl -n pilot-prd get pods -l app.kubernetes.io/name=pilot -o name | cut -d/ -f2)
+POD=$(cexec iac kubectl -n pilot-dev get pods -l app.kubernetes.io/name=pilot -o name | cut -d/ -f2)
 ```
 
-1. **The Application.** Its revision is the head of PilotDeploy's `origin/main`, which carries the
-   latest green build's pins, `Synced` and `Healthy`; the namespace is the chart's, as Argo CD
-   tracks it (`pilot-prd:/Namespace:pilot-prd/pilot-prd`), not Terraform's:
+1. **The Applications.** `pilot-dev`'s revision is the head of PilotDeploy's `origin/main`, which
+   carries the latest green build's pins, `Synced` and `Healthy`; the namespace is the chart's, as
+   Argo CD tracks it (`pilot-dev:/Namespace:pilot-dev/pilot-dev`), not Terraform's. `pilot-prd` is
+   where the pushes found it: on `prd`, `Synced` at `origin/prd`'s tip, its pod and images the ones
+   recorded before the first push:
 
    ```bash
    git -C ../PilotDeploy fetch -q && git -C ../PilotDeploy log -1 --format='%H %s' origin/main
-   cexec iac kubectl -n argocd-prd get application pilot-prd \
+   cexec iac kubectl -n argocd-prd get application pilot-dev \
      -o jsonpath='{.status.sync.revision} {.status.sync.status} {.status.health.status}{"\n"}'
-   cexec iac kubectl get namespace pilot-prd -o jsonpath='{.metadata.annotations.argocd\.argoproj\.io/tracking-id}{"\n"}'
+   cexec iac kubectl get namespace pilot-dev -o jsonpath='{.metadata.annotations.argocd\.argoproj\.io/tracking-id}{"\n"}'
+   git -C ../PilotDeploy rev-parse origin/prd
+   cexec iac kubectl -n argocd-prd get application pilot-prd \
+     -o jsonpath='{.spec.source.targetRevision} {.status.sync.revision} {.status.sync.status} {.status.health.status}{"\n"}'
+   cexec iac kubectl -n pilot-prd get pods -l app.kubernetes.io/name=pilot \
+     -o jsonpath='{range .items[*]}{.metadata.name} {.spec.containers[*].image}{"\n"}{end}' | diff tmp/prd/before - && echo "pilot-prd unchanged"
    ```
 
 2. **The pod and its images.** One pod, `2/2 Running`; `migrate` terminated `Completed`; `backend`
-   and `ui` ready with no restarts; `pilot` and `pilot-ui` at `:<n>`, `<n>` the
-   latest green `PilotApp` build, and each `imageID` the digest the registry holds for that tag:
+   and `ui` ready with no restarts; `pilot` and `pilot-ui` at the tag `origin/main`'s
+   `config/dev/values.yaml` pins, `:dev-<n>`, `<n>` the latest green `PilotApp/Build-Main` build,
+   and each `imageID` the digest the registry holds for that tag. The build pushed `pilot-sync`
+   too, and each image's `dev-latest` is its `dev-<n>`:
 
    ```bash
-   cexec iac kubectl -n pilot-prd get pod $POD -o wide
-   cexec iac kubectl -n pilot-prd get pod $POD -o jsonpath='{range .status.initContainerStatuses[*]}{.name} {.state.terminated.reason}{"\n"}{end}{range .status.containerStatuses[*]}{.name} {.ready} {.restartCount} {.image} {.imageID}{"\n"}{end}'
-   curl -fsS -u "$JENKINS_USER:$JENKINS_TOKEN" "$JENKINS_URL/job/PilotApp/lastSuccessfulBuild/api/json?tree=number"; echo
-   for img in pilot pilot-ui; do
-     curl -sI -H 'Accept: application/vnd.oci.image.manifest.v1+json' http://registry:5000/v2/$img/manifests/<n> | grep -i docker-content-digest
-   done
-   cexec iac kubectl -n pilot-prd logs $POD -c migrate    # the migrations, run before the backend served
+   cexec iac kubectl -n pilot-dev get pod $POD -o wide
+   cexec iac kubectl -n pilot-dev get pod $POD -o jsonpath='{range .status.initContainerStatuses[*]}{.name} {.state.terminated.reason}{"\n"}{end}{range .status.containerStatuses[*]}{.name} {.ready} {.restartCount} {.image} {.imageID}{"\n"}{end}'
+   curl -fsS -u "$JENKINS_USER:$JENKINS_TOKEN" "$JENKINS_URL/job/PilotApp/job/Build-Main/lastSuccessfulBuild/api/json?tree=number"; echo
+   for img in pilot pilot-ui pilot-sync; do for tag in dev-<n> dev-latest; do
+     echo "$img:$tag $(curl -sI -H 'Accept: application/vnd.oci.image.manifest.v1+json' http://registry:5000/v2/$img/manifests/$tag | grep -i docker-content-digest)"
+   done; done
+   cexec iac kubectl -n pilot-dev logs $POD -c migrate    # the migrations, run before the backend served
    ```
 
-   The backend's log is the pod's: `cexec iac kubectl -n pilot-prd logs $POD -c backend`.
+   The backend's log is the pod's: `cexec iac kubectl -n pilot-dev logs $POD -c backend`. Once
+   step 6 has signed in, it holds the test account's username, because every signed-in request logs
+   the caller's email, and the realm signs in by email: from then on it is read only through a
+   `grep` for the lines a check wants, never whole, and no line of a signed-in request is printed.
 
-3. **The backend's readiness, on the pod's IP, and its fleet stream.** `200` with `"status":
-   "ok"`: `checks.database` `ok` (connected, no migration pending) and `checks.controller` `ok` (the
-   controller's `/readyz` answers, verified against the homelab root the chart mounts). The
-   `controller` check is not critical: a controller that does not answer reads `"status":
-   "degraded"`, still `200`, and is a finding here:
+3. **The backend's readiness, on the pod's IP, its controller and its fleet stream.** `200` with
+   `"status": "ok"`: `checks.database` `ok` (connected, no migration pending) and
+   `checks.controller` `ok` (the controller's `/readyz` answers, verified against the homelab root
+   the chart mounts). The `controller` check is not critical: a controller that does not answer
+   reads `"status": "degraded"`, still `200`, and is a finding here. The controller is
+   `kubecoder-dev`'s, never the operator's fleet:
 
    ```bash
-   IP=$(cexec iac kubectl -n pilot-prd get pod $POD -o jsonpath='{.status.podIP}')
+   IP=$(cexec iac kubectl -n pilot-dev get pod $POD -o jsonpath='{.status.podIP}')
    curl -s -m 10 -w '\n%{http_code}\n' "http://$IP:3501/health/readyz"
+   cexec iac kubectl -n pilot-dev get pod $POD \
+     -o jsonpath='{.spec.containers[?(@.name=="backend")].env[?(@.name=="CONTROLLER_URL")].value}{"\n"}'   # https://kubecoder-dev.home
    ```
 
-   Never through `https://pilot.ginbov.nl/health/readyz`: `/health/` is registered at the app
-   root, outside `/api/`, and the UI's nginx answers every such path with `index.html` and `200`,
-   ready backend or not (ElectronicsInventory's `https://parts.ginbov.nl/health/readyz` does today:
+   Never through `https://pilot-dev.home/health/readyz`: `/health/` is registered at the app root,
+   outside `/api/`, and the UI's nginx answers every such path with `index.html` and `200`, ready
+   backend or not (ElectronicsInventory's `https://parts.ginbov.nl/health/readyz` does today:
    `200`, `text/html`). This pod reaches pod IPs directly.
 
    The controller's `/readyz` asks for no token. What shows the token works is the fleet
    consumer's connect line in the backend's log, `Fleet stream connected; <n> environments listed`,
-   `<n>` the production controller's environments: its list of them is authenticated. A `Loop fleet
-   raised; restarting in <n> s` after it is the stream dropping and the supervisor reopening it; one
-   that keeps coming is a finding:
+   `<n>` `kubecoder-dev`'s environments: its list of them is authenticated. A `Loop fleet raised;
+   restarting in <n> s` after it is the stream dropping and the supervisor reopening it; one that
+   keeps coming is a finding:
 
    ```bash
-   cexec iac kubectl -n pilot-prd logs $POD -c backend | grep -E 'Fleet stream connected|Loop fleet'
+   cexec iac kubectl -n pilot-dev logs $POD -c backend | grep -E 'Fleet stream connected|Loop fleet'
    ```
 
 4. **The secrets.** Four ExternalSecrets, each `SecretSynced` and ready: `pilot-oidc` and
-   `pilot-kubecoder` (from `openbao-prd`, `eso/prd/pilot/prd/oidc` and
-   `eso/prd/pilot/prd/kubecoder`) and the generated `pilot-secret-key` and `pilot-drain-auth`:
+   `pilot-kubecoder` (from `openbao-prd`, `eso/prd/pilot/dev/oidc` and
+   `eso/prd/pilot/dev/kubecoder`) and the generated `pilot-secret-key` and `pilot-drain-auth`:
 
    ```bash
-   cexec iac kubectl -n pilot-prd get externalsecrets
+   cexec iac kubectl -n pilot-dev get externalsecrets
+   cexec iac kubectl -n pilot-dev get externalsecrets -o jsonpath='{range .items[*]}{.metadata.name} {.spec.data[*].remoteRef.key}{"\n"}{end}'
    ```
 
    The Secrets themselves are unreadable here: the running backend (step 3's database connection and
-   fleet stream, step 6's sign-in redirect) is what shows they reached it.
+   fleet stream, step 6's sign-in) is what shows they reached it.
 
-5. **The public site and its certificate.** `200`, curl exit `0`, against a bundle of the public
-   CAs alone; the certificate a public CA's (Let's Encrypt), for `pilot.ginbov.nl`; the Service
-   carries `nginx.webathome.org/server-name: pilot.ginbov.nl` and
-   `nginx.webathome.org/is-public: "true"`:
+5. **The site and its certificate.** `200`, curl exit `0`, against the homelab root alone; the
+   certificate the homelab CA's (issuer `homelab-ca Intermediate CA`), for `pilot-dev.home`; the
+   Service carries `nginx.webathome.org/server-name: pilot-dev.home`,
+   `nginx.webathome.org/is-public: "false"` and `nginx.webathome.org/enable-ssl: "yes"`, from which
+   the homelab DNS publishes the name and the front door serves it with that certificate:
 
    ```bash
-   mkdir -p tmp/public-ca/none && cat /usr/share/ca-certificates/mozilla/*.crt > tmp/public-ca/bundle.pem
-   curl -s -m 10 --cacert tmp/public-ca/bundle.pem --capath tmp/public-ca/none -o /dev/null -w '%{http_code}\n' https://pilot.ginbov.nl/; echo "exit $?"
-   echo | openssl s_client -connect pilot.ginbov.nl:443 -servername pilot.ginbov.nl 2>/dev/null | openssl x509 -noout -issuer -subject -ext subjectAltName -enddate
-   cexec iac kubectl -n pilot-prd get service pilot -o jsonpath='{.metadata.annotations}{"\n"}'
+   mkdir -p tmp/ca-none
+   curl -s -m 10 --cacert /usr/local/share/ca-certificates/homelab-root.crt --capath tmp/ca-none -o /dev/null -w '%{http_code}\n' https://pilot-dev.home/; echo "exit $?"
+   echo | openssl s_client -connect pilot-dev.home:443 -servername pilot-dev.home 2>/dev/null | openssl x509 -noout -issuer -subject -ext subjectAltName -enddate
+   cexec iac kubectl -n pilot-dev get service pilot -o jsonpath='{.metadata.annotations}{"\n"}'
    ```
 
-   Not plain `curl`: the system bundle holds the homelab's private root
-   (`/usr/local/share/ca-certificates/homelab-root.crt`), and curl reads `/etc/ssl/certs` as its
-   CA path even beside `--cacert`, so either accepts a `homelab-ca` certificate. Exit `60` is a
-   certificate the public CAs do not vouch for, or one for another name: the front door serves its
-   default certificate for a host it has no certificate for. After the first sync the front door's
-   manager (`nginx-prd`, Deployment `nginxmanager`) requests the site's first certificate and
-   retries every minute until it is issued, so retry for ten minutes; past that it is a finding,
-   with `cexec iac kubectl -n nginx-prd logs deploy/nginxmanager --all-containers` beside it.
+   Not plain `curl`: the system bundle holds the public CAs beside the homelab root, and curl reads
+   `/etc/ssl/certs` as its CA path even beside `--cacert`, hence the empty `--capath`. Exit `60` is
+   a certificate the homelab root does not vouch for, or one for another name: the front door serves
+   its default certificate for a host it has no certificate for. Exit `6` is a name that does not
+   resolve yet. After the first sync the homelab DNS publishes the name, and the front door's
+   manager (`nginx-prd`, Deployment `nginxmanager`) requests the site's first certificate from the
+   homelab step-ca, so retry for ten minutes; past that it is a finding, with `cexec iac kubectl -n
+   nginx-prd logs deploy/nginxmanager --all-containers` beside it. `pilot-dev.home` is internal: it
+   resolves on the LAN alone, and there is no outside path to check.
 
-   From here `pilot.ginbov.nl` resolves to the front door's inside address, and the public address
-   it has on the internet does not answer from inside the LAN: the site from outside, the phone's
-   path, is *not verified* here.
-
-6. **Sign-in.** With no session, `/api/auth/self` answers `401`. The login route answers `302` to
-   `auth.ginbov.nl`'s authorization endpoint in realm `homelab`, with `client_id=pilot-app` and
-   `redirect_uri=https%3A%2F%2Fpilot.ginbov.nl%2Fapi%2Fauth%2Fcallback`; Keycloak answers that
-   request `200` with its login form (`id="kc-form-login"`):
+6. **Sign-in, as the test account.** `scripts/dev-sign-in.py` walks the app's sign-in as a browser
+   does, through Keycloak's real login page, with the test account's username and password from
+   `PILOT_DEV_TEST_USERNAME` and `PILOT_DEV_TEST_PASSWORD`, which this environment projects from its
+   secret catalog (`.kubecoder/config.yaml`):
 
    ```bash
-   curl -s -m 10 -o /dev/null -w '%{http_code}\n' https://pilot.ginbov.nl/api/auth/self
-   LOGIN=$(curl -s -m 10 -o /dev/null -w '%{http_code} %{redirect_url}' 'https://pilot.ginbov.nl/api/auth/login?redirect=/')
-   echo "$LOGIN"
-   curl -s -m 10 -o tmp/kc-login.html -w '%{http_code}\n' "${LOGIN#* }"
-   grep -o 'id="kc-form-login"\|kc-error-message\|Client not found\.\|Invalid parameter: [a-z_]*' tmp/kc-login.html | sort -u
+   scripts/dev-sign-in.py          # https://pilot-dev.home; exit 0 signed in as an editor
    ```
 
-   The login route builds its redirect from configuration and the origin the request came in on
-   (the `redirect_uri` is that origin's callback), without asking Keycloak (and answers `400`
-   without its `redirect` parameter), so the `302` proves the configuration and only
-   Keycloak's answer proves the client: a client that does not exist, or a redirect URI it does not
-   register, answers `400` with `kc-error-message` ("Client not found.", "Invalid parameter:
-   redirect_uri"). The page title, "Sign in to Homelab", is the same on both, so it is no marker.
-   Nothing is entered in the form.
+   It prints a line a step: an anonymous `/api/auth/self` answers `401`; the login route answers
+   `302` to `auth.ginbov.nl`'s authorization endpoint in realm `homelab`, with `redirect_uri`
+   `https://pilot-dev.home/api/auth/callback`; Keycloak answers `200` with its login form; the
+   form's post answers `302` to the app's callback with a code; the callback answers `302` to `/`
+   and sets `access_token`, `refresh_token` and `id_token`; the signed-in `/api/auth/self` answers
+   `200` with `editor` among its roles. The test account holds the dev client's `editor` role alone,
+   so that role shows the backend signs in on dev's own client (`eso/prd/pilot/dev/oidc`). A step
+   that answers otherwise ends the script with exit `1` and a `FAIL:` line naming it, a Keycloak
+   page by what it asks (refused credentials, a required action). Exit `2` is the two variables
+   unset, which leaves every signed-in check *not verified*, never passed.
 
-7. **The builds.** Each of `PilotApp`, `AaC/PilotApp` and `AaC/PilotDeploy` has a green latest
-   build, the pin commits' `AaC/PilotDeploy` builds included:
+   Neither credential is printed, nor anything that carries one: the script never prints Keycloak's
+   pages, which echo the username back, nor `/api/auth/self`'s `email` and `name`, the email being
+   the username; a check that reads `/api/auth/self` itself prints `roles` alone. Neither credential
+   goes into a file, a commit or the close-out. The session is the app's cookies, which the script
+   writes to `tmp/dev-session/`, readable by this user alone: `cookies.txt` for curl and
+   `state.json` for Playwright (step 7).
+
+7. **The slice's own checks on dev**: every acceptance criterion in `verification.json` that only
+   the deployment can show, exercised against `https://pilot-dev.home` as the test account, through
+   the API or the UI. A check may write; what it writes is invented, as on the dev stack. Through
+   the API, curl sends the session and keeps the cookies a refresh replaces:
 
    ```bash
-   for j in job/PilotApp job/AaC/job/PilotApp job/AaC/job/PilotDeploy; do
+   S=tmp/dev-session/cookies.txt
+   curl -s -m 10 -b $S -c $S https://pilot-dev.home/api/auth/self | python3 -c 'import json, sys; print(json.load(sys.stdin)["roles"])'
+   ```
+
+   The access token lasts minutes; the backend refreshes it from `refresh_token` on the next
+   request, and `-c` keeps the new pair. A `401` once the refresh token has expired too is the
+   session's end: run `scripts/dev-sign-in.py` again.
+
+   Through the UI, a Playwright script loads the session as its context's `storageState`. It runs in
+   the `modern-app` container, whose Chromium does not trust the homelab root that curl does, so
+   `ignoreHTTPSErrors` stands in for it, step 5 having checked the certificate; `NODE_PATH` lets a
+   script under `tmp/` resolve `@playwright/test`:
+
+   ```bash
+   mkdir -p tmp/dev-ui && cat > tmp/dev-ui/check.cjs <<'EOF'
+   const { chromium } = require('@playwright/test');
+   (async () => {
+     const browser = await chromium.launch();
+     const context = await browser.newContext({ storageState: 'tmp/dev-session/state.json', ignoreHTTPSErrors: true });
+     const page = await context.newPage();
+     await page.goto('https://pilot-dev.home/');
+     // The check's own steps; its screenshots go into tmp/dev-ui/.
+     await browser.close();
+   })();
+   EOF
+   cexec modern-app env NODE_PATH=frontend/node_modules timeout 300 node tmp/dev-ui/check.cjs
+   ```
+
+   The UI shows the signed-in person, so a check reads what it checks, never a page's text whole.
+   When the phase ends, `rm -rf tmp/dev-session tmp/dev-ui`: the cookies are a live session.
+
+8. **The builds.** Each of `PilotApp/Build-Main` and `AaC/PilotApp` has a green latest build, and
+   `AaC/PilotDeploy` too where the phase pushed `prd` (a first deploy's step 2). `PilotApp/Promote-PRD`
+   has no build the phase started: its last build, if it has one, is older than the phase:
+
+   ```bash
+   for j in job/PilotApp/job/Build-Main job/AaC/job/PilotApp job/AaC/job/PilotDeploy; do
      curl -fsS -u "$JENKINS_USER:$JENKINS_TOKEN" "$JENKINS_URL/$j/lastBuild/api/json?tree=fullDisplayName,result"; echo
    done
+   curl -fsS -u "$JENKINS_USER:$JENKINS_TOKEN" "$JENKINS_URL/job/PilotApp/job/Promote-PRD/api/json?tree=lastBuild%5Bnumber,timestamp%5D"; echo
    ```
 
 ## 5. Check off `verification.json`
@@ -642,5 +751,10 @@ criterion unproven if it says so. It may not end with one assumed.
 
 ## The operator gate
 
-The operator's gate is the close-out report, after the run; at a go-live, their own first sign-in
-to `https://pilot.ginbov.nl` is part of it.
+The operator's gate is the close-out report, after the run, and the promotion is theirs. A slice
+whose push reached `pilot-dev` appends an `action` entry to its close-out that names the promotion
+as the operator's: start `PilotApp/Promote-PRD` once dev holds what they want in production, the
+PilotDeploy commit that carries the slice and the build `<n>` it pins named in it. Its Consequence:
+production goes on running the release before it, and the slice's change is on dev alone. What
+production then shows its users is the operator's to see; nothing here signs in to
+`https://pilot.ginbov.nl`.
