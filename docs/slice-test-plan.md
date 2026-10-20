@@ -384,8 +384,8 @@ Each push starts its repo's jobs, and each is followed to its end:
 `PilotApp/Promote-PRD` has no trigger, and nothing here starts it.
 
 `AaC/Architecture` also runs after every green `AaC/PilotApp` and `AaC/PilotDeploy` build (an
-upstream trigger, after a 90 s quiet period); `track_build.py` waits for it as their downstream
-build.
+upstream trigger, after a 90 s quiet period). `track_build.py` does not wait for it: it follows an
+`AaC/*` build to that build's own result alone.
 
 ```bash
 timeout 1800 track_build.py PilotApp/Build-Main --hash "$(git rev-parse HEAD)" --appear-timeout 120 --diagnose
@@ -548,8 +548,10 @@ Steps 1 to 4 of the order above decide it; this is how each push is followed. Th
 ## 4. The deployed checks
 
 After every push that deployed to `pilot-dev` (a roll, a PilotDeploy sync, a first deploy), all of
-them. Steps 1 to 5 and 8 only read, through the read-only kubeconfig (`cexec iac kubectl`), which
-cannot read Secrets, exec, port-forward or proxy; step 6 signs in, and step 7 may write.
+them. A first deploy's run after its step 5: until PilotApp's build pins `dev-<n>`, the stage runs
+the seed pins and the registry holds no `dev-*` tag for step 2 to find. Steps 1 to 5 and 8 only
+read, through the read-only kubeconfig (`cexec iac kubectl`), which cannot read Secrets, exec,
+port-forward or proxy; step 6 signs in, and step 7 may write.
 
 Once any roll check has ended the old pod is gone, so the label names one pod, the one the push
 produced (`tmp/roll/new`):
