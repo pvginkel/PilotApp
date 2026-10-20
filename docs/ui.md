@@ -137,9 +137,14 @@ from acting.
 
 ## The PWA
 
-`frontend/public/` holds the manifest (`manifest.json`), its icons (192px, 512px and a 512px
-maskable one) and the service worker, `sw.js`; the page head links the manifest and sets
-`theme-color` to `#568ed2`, a standing edit of the template's `index.html` (`CLAUDE.md`).
+`frontend/public/` holds the app's mark, `favicon.svg`: the operator's control tower, drawn in
+three-quarter perspective, on a rounded tile in the theme's blue (D020). The favicon and the
+manifest's icons (192px, 512px and a 512px maskable one, the tile full-bleed with the tower at 0.8 of
+its size) are rendered from it by `scripts/render-icons.mjs`, run from `frontend/` after a change to
+the SVG; the top bar's `logo.svg` is the same tower in blues on a white tile, the bar being the
+theme's blue itself (D020). Beside them stand the manifest (`manifest.json`) and the service worker,
+`sw.js`; the page head links the manifest and sets `theme-color` to `#568ed2`, a standing edit of
+the template's `index.html` (`CLAUDE.md`).
 `registerServiceWorker()` (`src/lib/service-worker.ts`) registers the worker when the shell's
 module loads, on any page, before sign-in too, wherever the browser offers service workers (a
 secure context). The worker caches nothing. It answers only a navigation the network does not,

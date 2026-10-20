@@ -1,12 +1,149 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+<svg xmlns="http://www.w3.org/2000/svg" width="1254" height="1254" viewBox="0 0 1254 1254" role="img" aria-labelledby="title desc">
   <title id="title">Pilot</title>
-  <!-- favicon.svg's mark in the top bar's colours: the tile white, the mark in the bar's blue. -->
-  <rect width="64" height="64" rx="14" fill="#fff"/>
-  <g transform="translate(2.744 3.963) scale(2.438)" fill="none" stroke="#568ed2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M12 2v4"/>
-    <path d="M4 6h16l-2 5H6z"/>
-    <path d="M8.7 6l.8 5v10"/>
-    <path d="M15.3 6l-.8 5v10"/>
-    <path d="M6 21h12"/>
+  <desc id="desc">Pilot's mark in the top bar's colours: the control tower of favicon.svg in blues, its glass pale, on a white tile.</desc>
+  <defs>
+    <linearGradient id="background-blue" x1="0" y1="0" x2="0" y2="1254" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#ffffff"/>
+    </linearGradient>
+    <linearGradient id="front-white" x1="0" y1="0" x2="0.8" y2="1">
+      <stop stop-color="#568ed2"/>
+      <stop offset="1" stop-color="#518bd1"/>
+    </linearGradient>
+    <linearGradient id="roof-top" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#568ed2"/>
+      <stop offset="1" stop-color="#528cd1"/>
+    </linearGradient>
+    <linearGradient id="roof-side" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#4381cd"/>
+      <stop offset="1" stop-color="#316eb9"/>
+    </linearGradient>
+    <linearGradient id="roof-front-edge" x1="0" y1="0" x2="1" y2="0">
+      <stop stop-color="#3272be"/>
+      <stop offset="1" stop-color="#2e68ae"/>
+    </linearGradient>
+    <linearGradient id="roof-side-edge" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#25538b"/>
+      <stop offset="1" stop-color="#204777"/>
+    </linearGradient>
+    <linearGradient id="cabin-side" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#3e7ecc"/>
+      <stop offset="1" stop-color="#306db6"/>
+    </linearGradient>
+    <linearGradient id="underside-front" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#306bb3"/>
+      <stop offset="1" stop-color="#285a97"/>
+    </linearGradient>
+    <linearGradient id="underside-side" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#224d80"/>
+      <stop offset="1" stop-color="#1c3f6a"/>
+    </linearGradient>
+    <linearGradient id="shaft-side" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#2e68ae"/>
+      <stop offset="1" stop-color="#2a5f9f"/>
+    </linearGradient>
+    <linearGradient id="glass-front" x1="0" y1="0" x2="0.8" y2="1">
+      <stop stop-color="#d6e4f5"/>
+      <stop offset="1" stop-color="#ccddf2"/>
+    </linearGradient>
+    <linearGradient id="glass-side" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#c9dcf2"/>
+      <stop offset="1" stop-color="#bad1ee"/>
+    </linearGradient>
+    <linearGradient id="recess" x1="0" y1="0" x2="1" y2="0">
+      <stop stop-color="#3373c1"/>
+      <stop offset="1" stop-color="#2e69af"/>
+    </linearGradient>
+    <linearGradient id="plinth-front" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#4d88d0"/>
+      <stop offset="1" stop-color="#4683ce"/>
+    </linearGradient>
+    <linearGradient id="plinth-side" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#2b61a2"/>
+      <stop offset="1" stop-color="#275893"/>
+    </linearGradient>
+    <linearGradient id="door-blue" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#26558e"/>
+      <stop offset="1" stop-color="#204879"/>
+    </linearGradient>
+    <clipPath id="left-window-clip"><path d="M350 403 507 390 536 525 414 534Z"/></clipPath>
+    <clipPath id="center-window-clip"><path d="M539 387 768 366 737 512 567 523Z"/></clipPath>
+    <clipPath id="side-window-clip"><path d="M830 371 930 399 878 531 795 512Z"/></clipPath>
+  </defs>
+
+  <rect id="tile" width="1254" height="1254" rx="274" fill="url(#background-blue)"/>
+
+  <g id="tower">
+    <g id="foundation">
+      <path id="lower-plinth-top" fill="url(#front-white)" d="M380 1091 433 1072 836 1070 886 1087 770 1093Z"/>
+      <path id="lower-plinth-front" fill="url(#plinth-front)" d="M380 1091 770 1093V1148H380Z"/>
+      <path id="lower-plinth-side" fill="url(#plinth-side)" d="M770 1093 886 1087V1147L770 1148Z"/>
+      <path id="upper-plinth-front" fill="#3b7ccb" d="M433 1049 742 1050V1074L433 1073Z"/>
+      <path id="upper-plinth-side" fill="url(#plinth-side)" d="M742 1050 836 1045V1070L742 1074Z"/>
+    </g>
+
+    <g id="shaft">
+      <path id="shaft-front" fill="url(#front-white)" d="M505 611 703 599V1017L742 1050 433 1049 505 1012Z"/>
+      <path id="shaft-side-face" fill="url(#shaft-side)" d="M703 599 762 611V1012L703 1018Z"/>
+      <path id="shaft-foot-side" fill="url(#roof-side)" d="M703 1018 762 1012 836 1045 742 1050Z"/>
+      <g id="vertical-recesses">
+        <path fill="url(#recess)" d="M545 646 558 645V940L545 942Z"/>
+        <path fill="#224c80" d="M545 646 558 645V651Z"/>
+        <path fill="#285a97" d="M545 942 558 936V940Z"/>
+        <path fill="url(#recess)" d="M651 639 664 638V940L651 942Z"/>
+        <path fill="#1f4675" d="M651 639 664 638V642L651 643Z"/>
+        <path fill="#285a97" d="M651 942 664 936V940Z"/>
+      </g>
+      <g id="entrance">
+        <path fill="#306db6" d="M570 1041V956H633V1041H630V959H573V1041Z"/>
+        <path fill="url(#door-blue)" d="M579 965H625V1035H579Z"/>
+        <path fill="#4180cd" d="M579 965H625V968H579Z"/>
+      </g>
+    </g>
+
+    <g id="observation-cabin">
+      <path id="cabin-underside-front" fill="url(#underside-front)" d="M367 581 783 552 703 605 505 619Z"/>
+      <path id="cabin-underside-right" fill="url(#underside-side)" d="M783 552 913 581 762 618 703 605Z"/>
+      <path id="cabin-front-frame" fill="url(#front-white)" d="M303 387 807 345 769 521H783V552L367 581V549L386 547Z"/>
+      <path id="cabin-right-frame" fill="url(#cabin-side)" d="M807 345 959 391 896 546 913 550V581L783 552V521H769Z"/>
+
+      <g id="left-glazing" clip-path="url(#left-window-clip)">
+        <path fill="url(#glass-front)" d="M350 403 507 390 536 525 414 534Z"/>
+        <path fill="#dfeaf7" d="M357 408 501 395 400 501Z"/>
+        <path fill="#c0d5ef" d="M414 534 525 476 536 525Z"/>
+        <path fill="#c8daf1" d="M350 403 507 390 508 395 357 409 418 532 414 534Z"/>
+      </g>
+      <g id="center-glazing" clip-path="url(#center-window-clip)">
+        <path fill="url(#glass-front)" d="M539 387 768 366 737 512 567 523Z"/>
+        <path fill="#dfeaf7" d="M546 391 739 374 562 488Z"/>
+        <path fill="#c1d6ef" d="M567 523 750 450 737 512Z"/>
+        <path fill="#c6d9f1" d="M539 387 768 366 767 370 546 391 572 523 567 523Z"/>
+      </g>
+      <g id="side-glazing" clip-path="url(#side-window-clip)">
+        <path fill="url(#glass-side)" d="M830 371 930 399 878 531 795 512Z"/>
+        <path fill="#c2d6f0" d="M830 371 930 399 807 479Z"/>
+        <path fill="#bdd3ee" d="M807 479 930 399 878 531 795 512Z"/>
+        <path fill="#bfd5ef" d="M830 371 930 399 928 404 834 377 800 513 795 512Z"/>
+      </g>
+      <path id="front-window-ledge" fill="url(#front-white)" d="M367 549 783 521V552L367 581Z"/>
+      <path id="side-window-ledge" fill="url(#cabin-side)" d="M783 521 913 550V581L783 552Z"/>
+    </g>
+
+    <g id="roof">
+      <path id="roof-silhouette" fill="#3679ca" d="M271 361 351 302 783 264 959 330 983 369 974 391 801 345 284 387Z"/>
+      <path id="roof-front-plane" fill="url(#roof-top)" d="M271 361 351 302 783 264 809 319Z"/>
+      <path id="roof-right-plane" fill="url(#roof-side)" d="M783 264 959 330 983 369 809 319Z"/>
+      <path id="roof-front-fascia" fill="url(#roof-front-edge)" d="M271 361 809 319 801 345 284 387Z"/>
+      <path id="roof-right-fascia" fill="url(#roof-side-edge)" d="M809 319 983 369 974 391 801 345Z"/>
+    </g>
+
+    <g id="antenna">
+      <path id="antenna-mount-front" fill="#568ed2" d="M563 285V252L588 250V232L640 227V246H645V277Z"/>
+      <path id="antenna-mount-side" fill="url(#shaft-side)" d="M640 227 655 230V249L669 251V275L645 277V246H640Z"/>
+      <path id="antenna-front" fill="url(#front-white)" d="M588 114 640 108V223L588 228Z"/>
+      <path id="antenna-side" fill="#2a5f9f" d="M640 108 655 111V226L640 223Z"/>
+      <path id="antenna-front-seam" fill="#316db7" d="M588 228 640 223V229L588 234Z"/>
+      <path id="antenna-side-seam" fill="#21497b" d="M640 223 655 226V232L640 229Z"/>
+    </g>
   </g>
 </svg>
