@@ -489,7 +489,7 @@ Steps 1 to 4 of the order above decide it; this is how each push is followed. Th
    push starts `AaC/PilotDeploy`'s first build from `prd`:
 
    ```bash
-   git -C ../PilotDeploy show HEAD:config/prd/values.yaml | grep -c ':prd-'   # 0
+   git -C ../PilotDeploy show HEAD:config/prd/values.yaml | grep -cE '^[^#]*:prd-[0-9]'   # 0
    git -C ../PilotDeploy push origin "$(git -C ../PilotDeploy rev-parse HEAD):refs/heads/prd"
    timeout 900 track_build.py AaC/PilotDeploy --hash "$(git -C ../PilotDeploy rev-parse HEAD)" --appear-timeout 120 --diagnose
    ```
