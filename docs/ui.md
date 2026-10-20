@@ -144,9 +144,10 @@ maskable one) and the service worker, `sw.js`; the page head links the manifest 
 module loads, on any page, before sign-in too, wherever the browser offers service workers (a
 secure context). The worker caches nothing. It answers only a navigation the network does not,
 with one line, "Pilot is unreachable. Try again when you are back on the network.", and never a
-request under `/api/`, where sign-in, its callback and sign-out are. The UI's nginx caches `*.js`
-and the icons for a year; the browser fetches a worker's script past that cache, but a changed
-icon needs a new file name.
+request under `/api/`, where sign-in, its callback and sign-out are. The UI's nginx caches the
+build's hashed `/assets/` for a year and has the browser revalidate the root's files — the icons,
+the logo, the manifest, the worker — on every load, so a changed icon shows under its name (a
+standing edit of the template's `nginx.conf`, `CLAUDE.md`).
 
 ## Testing it
 
