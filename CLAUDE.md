@@ -67,9 +67,11 @@ Template-owned code is improved in this repo, not in the template repos (D018): 
 gets wrong, or does less well than the work needs, is changed here, with no need to stay backwards
 compatible, in a commit of its own, and listed here as a standing edit, so that a `copier update`
 that conflicts on it resolves to this repo's side; an agent merges it into ModernAppTemplate. Three
-stand today: the `Jenkinsfile`'s sidecar, its `golang` container and its `Test sidecar` and `Build
-pilot-sync image` stages, an addition the template, rendering no `sidecar/`, has no place for
-(D008); the page head of `frontend/index.html`, which links the PWA's `/manifest.json` and sets
+stand today: the `Jenkinsfile`, the app's own as a whole, which tags its images `dev-<n>` and
+`dev-latest` and pins `dev-<n>` into PilotDeploy's `config/dev` and `prd-<n>` into its `config/prd`
+in one commit, where the template's tags `<n>` and `latest` and pins production alone, and which
+carries the sidecar's `golang` container and its `Test sidecar` and `Build pilot-sync image` stages,
+which the template, rendering no `sidecar/`, has no place for (D008); the page head of `frontend/index.html`, which links the PWA's `/manifest.json` and sets
 `theme-color`, which no app-owned file can; and the cache rule of `frontend/nginx.conf`, which keeps
 the year-long immutable cache to the build's hashed `/assets/` and has the root's files — the icons,
 the logo, the manifest, the worker — revalidated on every load, so that a changed icon shows under

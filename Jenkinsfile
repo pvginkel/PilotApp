@@ -1,13 +1,11 @@
 // Tests PilotApp's backend and frontend in a Kubernetes Job and its pilot-sync sidecar in the pod,
-// then builds the pilot, pilot-ui and pilot-sync images and pins the first two into PilotDeploy,
-// which Argo CD syncs to prd. pilot-sync, the store environment's sync sidecar, runs in no pod of
-// PilotDeploy's.
-//
-// The images are built from the tree the suites passed on, so `latest` is tagged at build time and
-// there is no promote stage.
+// then builds the pilot, pilot-ui and pilot-sync images, each tagged dev-<n> and dev-latest, and
+// pins the first two into PilotDeploy's main, which Argo CD syncs to pilot-dev. The prd pins it
+// writes there take effect when PilotApp/Promote-PRD retags the three images prd-<n> and advances
+// prd. pilot-sync, the store environment's sync sidecar, runs in no pod of PilotDeploy's.
 //
 // Controller config:
-//   - Job: PilotApp
+//   - Job: PilotApp/Build-Main
 //   - SCM: pvginkel/PilotApp, branch main
 //   - Script Path: Jenkinsfile
 
@@ -95,8 +93,8 @@ pipeline {
                             dockerfile: 'backend/Dockerfile',
                             context: 'backend',
                             destinations: [
-                                "registry:5000/pilot:${currentBuild.number}",
-                                'registry:5000/pilot:latest',
+                                "registry:5000/pilot:dev-${currentBuild.number}",
+                                'registry:5000/pilot:dev-latest',
                             ]
                         )
                     }
@@ -115,8 +113,8 @@ pipeline {
                             dockerfile: 'frontend/Dockerfile',
                             context: 'frontend',
                             destinations: [
-                                "registry:5000/pilot-ui:${currentBuild.number}",
-                                'registry:5000/pilot-ui:latest',
+                                "registry:5000/pilot-ui:dev-${currentBuild.number}",
+                                'registry:5000/pilot-ui:dev-latest',
                             ]
                         )
                     }
@@ -132,8 +130,8 @@ pipeline {
                             dockerfile: 'sidecar/Dockerfile',
                             context: 'sidecar',
                             destinations: [
-                                "registry:5000/pilot-sync:${currentBuild.number}",
-                                'registry:5000/pilot-sync:latest',
+                                "registry:5000/pilot-sync:dev-${currentBuild.number}",
+                                'registry:5000/pilot-sync:dev-latest',
                             ]
                         )
                     }
@@ -141,14 +139,22 @@ pipeline {
             }
         }
 
+        // One commit on PilotDeploy's main pins both stages: Argo CD syncs pilot-dev from main, so
+        // the commit rolls dev, and pilot-prd follows prd, which only PilotApp/Promote-PRD moves to a
+        // commit of main, so the prd pins are written now for the promotion to release.
         stage('Write image pins') {
             steps {
                 container('k8s') {
                     script {
+                        String n = "${currentBuild.number}"
                         cicd.writeVersionPins(repo: 'pvginkel/PilotDeploy', pins: [
+                            'config/dev/values.yaml': [
+                                'images.pilot': ":dev-${n}",
+                                'images.pilotUI': ":dev-${n}",
+                            ],
                             'config/prd/values.yaml': [
-                                'images.pilot': ":${currentBuild.number}",
-                                'images.pilotUI': ":${currentBuild.number}",
+                                'images.pilot': ":prd-${n}",
+                                'images.pilotUI': ":prd-${n}",
                             ],
                         ])
                     }
