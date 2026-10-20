@@ -830,6 +830,32 @@ class TestRelay:
             (offsets[3], '"a string"'),
         ]
 
+    def test_a_line_jsonb_refuses_is_a_record_of_its_text(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        idle: models.Session,
+    ) -> None:
+        nul = '{"type": "user", "content": [{"text": "a\\u0000b"}]}'
+        nul_key = '{"type": "user", "a\\u0000b": 1}'
+        lone = '{"type": "assistant", "text": "cut \\ud83d"}'
+        paired = '{"type": "assistant", "text": "whole \\ud83d\\ude00"}'
+        _send(relays, session, idle)
+        offsets = _turn_of(
+            fake_controller, controller_session, [nul, nul_key, lone, paired]
+        )
+
+        _relay(relays, idle)
+
+        assert _claude(session, idle.id) == [
+            (offsets[0], nul),
+            (offsets[1], nul_key),
+            (offsets[2], lone),
+            (offsets[3], {"type": "assistant", "text": "whole \U0001f600"}),
+        ]
+
     def test_the_main_threads_block_starts_and_text_deltas_reach_a_view(
         self,
         session: DbSession,

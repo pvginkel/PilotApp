@@ -186,9 +186,10 @@ otherwise, and takes each frame in order:
   sub-agent's among them, is dropped.
 - **Every other line is a `claude` record**, a blank or non-JSON one included, in a transaction of
   its own that rebuilds a running Session's current line. A line that is not a JSON object is
-  stored as its text. A line at or below the last recorded offset of the same controller session
-  is one the record has, and is skipped. While the Session's `conversation_id` is null, a recorded
-  line's `session_id` sets it.
+  stored as its text, and so is one that jsonb refuses: a string holding a `\u0000`, or a lone
+  surrogate such as a truncated emoji's `\ud83d`, the line kept whole rather than scrubbed. A line
+  at or below the last recorded offset of the same controller session is one the record has, and
+  is skipped. While the Session's `conversation_id` is null, a recorded line's `session_id` sets it.
 - **The `result` frame ends the Turn**, and nothing else does (D004). In one transaction: the
   `result` record, its payload the frame's data and its offset the stream's last raw frame's; the
   Turn ended, with `error` the result's text (or "The turn ended in an error") when the frame says

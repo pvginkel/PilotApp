@@ -41,6 +41,7 @@ flight.
 
 import json
 import logging
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -130,6 +131,9 @@ _STOPS: dict[str, tuple[StopCause, str]] = {
 of its reason."""
 
 _TURN_FAILED = "The turn ended in an error"
+
+# What jsonb refuses in a string: a NUL, and a surrogate no pair completes.
+_REFUSED = re.compile(r"[\x00\ud800-\udfff]")
 
 RELAYS_RUNNING = Gauge(
     "pilot_relays_running", "Turns in flight this process is relaying"
@@ -1128,12 +1132,24 @@ def _refresh_turns(db: Session, session: AgentSession, turn: Turn) -> None:
 
 def _payload(line: str) -> Any:
     """A raw line as a record holds it: its JSON object, or the line's text for
-    one that is not a JSON object."""
+    one that is not a JSON object or that jsonb refuses (a `\\u0000`, or a lone
+    surrogate such as a truncated emoji's `\\ud83d`)."""
     try:
         value = json.loads(line)
     except ValueError:
         return line
-    return value if isinstance(value, dict) else line
+    return value if isinstance(value, dict) and _storable(value) else line
+
+
+def _storable(value: Any) -> bool:
+    """Whether jsonb takes every string of a parsed line, its keys included."""
+    if isinstance(value, str):
+        return _REFUSED.search(value) is None
+    if isinstance(value, dict):
+        return all(_storable(key) and _storable(item) for key, item in value.items())
+    if isinstance(value, list):
+        return all(_storable(item) for item in value)
+    return True
 
 
 def _forwarded(line: dict[str, Any]) -> bool:
