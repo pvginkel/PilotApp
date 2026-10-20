@@ -127,13 +127,13 @@ Only the timer's stop clears `server_started_at`. The tick reads the Sessions as
 
 | Setting | Default | |
 |---|---|---|
-| `CONTROLLER_URL` | empty | the controller's base URL; empty runs the app with no controller, and production refuses to start so |
-| `CONTROLLER_TOKEN` | empty | Pilot's named client credential, a secret; production refuses to start without it |
+| `CONTROLLER_URL` | empty | the controller's base URL; empty runs the app with no controller, and a backend with `FLASK_ENV=production`, as both deployed stages run, refuses to start so |
+| `CONTROLLER_TOKEN` | empty | Pilot's named client credential, a secret; with `FLASK_ENV=production` the backend refuses to start without it |
 | `CONTROLLER_CA_FILE` | empty | a PEM file of the CAs that verify the controller's certificate; empty leaves it to requests' own trust, and a path that is no file fails the app's start |
 | `ENVIRONMENT_STOP_AFTER_SECONDS` | 1800 | how long an environment Pilot started stands idle before its shutdown timer stops it; above 0 |
 
-Production's are in [`deployment.md`](deployment.md). The dev stack runs with no controller unless
-`backend/.env` sets one, as the fleet's live check does against KubeCoder's dev stage
+Each deployed stage's are in [`deployment.md`](deployment.md). The dev stack runs with no controller
+unless `backend/.env` sets one, as the fleet's live check does against KubeCoder's dev stage
 ([`slice-test-plan.md`](slice-test-plan.md) §2).
 
 ## The fake

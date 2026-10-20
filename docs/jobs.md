@@ -61,9 +61,10 @@ helpers to wait on a log line, a metric or a condition.
 At PREPARE_SHUTDOWN the supervisor drops the loops still waiting for a reconcile, tells every loop
 to stop and closes the I/O each holds; the scheduler finishes the timer it is running. Its shutdown
 waiter joins the threads within the coordinator's budget, `GRACEFUL_SHUTDOWN_TIMEOUT` (the
-template's setting, 600 s by default, 20 s in production). Every thread is a daemon, so the process
-exits at the end of the budget even with a loop still running: whatever it was doing, the next
-process resumes from the rows. The pod's timing around it is in [`deployment.md`](deployment.md).
+template's setting, 600 s by default, 20 s in both deployed stages). Every thread is a daemon, so
+the process exits at the end of the budget even with a loop still running: whatever it was doing,
+the next process resumes from the rows. The pod's timing around it is in
+[`deployment.md`](deployment.md).
 
 During a roll the old and the new backend overlap, each running every job. That is safe because
 each write a job makes is conditional on rows it reads under their lock: a relay, a start and a

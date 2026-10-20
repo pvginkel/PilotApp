@@ -1,10 +1,11 @@
 # Sign-in and access
 
 Pilot signs its users in through Keycloak with the template's OIDC login, and admits only an account
-that holds one role: `editor`, a client role of Pilot's Keycloak client `pilot-app` in the realm
-`homelab` at `https://auth.ginbov.nl`. The operator makes the client and grants the role in
-Keycloak. The role is the whole of access control: every holder sees and works every project, and
-an account without it cannot use Pilot.
+that holds one role: `editor`, a client role of its stage's Keycloak client in the realm `homelab`
+at `https://auth.ginbov.nl`: production's client is `pilot-app`, and the dev stage has one of its
+own ([`deployment.md`](deployment.md)). The operator makes each client and grants its `editor` in
+Keycloak, each stage's apart from the other's. The role is the whole of access control: every holder
+sees and works every project, and an account without it cannot use Pilot.
 
 Keycloak keeps no handle, the short name that stands for a person in Pilot's files, so a person
 chooses theirs at their first sign-in, before the app opens, and is on Pilot's record from then
@@ -13,7 +14,7 @@ chooses theirs at their first sign-in, before the app opens, and is on Pilot's r
 ## What the backend checks
 
 `AuthService` is wired with `editor` as both its read and its write role, and no admin role
-(`backend/app/services/container.py`). With sign-in on (`OIDC_ENABLED`, as in production):
+(`backend/app/services/container.py`). With sign-in on (`OIDC_ENABLED`, as in both deployed stages):
 
 - **Every endpoint on the API blueprint needs `editor`**, reads included: the template's and every
   one `register_blueprints()` in `backend/app/startup.py` adds. A request with no valid token

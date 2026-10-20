@@ -154,10 +154,10 @@ refresh ([`sessions.md`](sessions.md)).
 
 `cli load-test-data --yes-i-am-sure` recreates the dev database from the revisions and loads an
 invented record into it, `TestDataService.load_all()` in
-`backend/app/services/test_data_service.py`; it refuses to run on production. Playwright's global setup builds its seed database with the same
-command, and each worker clones it. The documents, the record's writes and the plan go through the
-engine's own operations, so the seed is a record the engine could have produced, and its times are
-those of the run:
+`backend/app/services/test_data_service.py`; it refuses to run on `STAGE=prd`, production's stage.
+Playwright's global setup builds its seed database with the same command, and each worker clones it.
+The documents, the record's writes and the plan go through the engine's own operations, so the seed
+is a record the engine could have produced, and its times are those of the run:
 
 - the people `ada` and `ben`, in avatar slots 1 and 2;
 - a draft, `Garden planner`, ada's, its draft holding one unanswered question;

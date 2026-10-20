@@ -28,13 +28,13 @@ Three things follow:
   first promotion included: the promotion is the operator's, and the close-out names it as theirs
   ([the operator gate](#the-operator-gate)). Production is only read, to show that the pushes left
   it where it was (step 4.1).
-- **The test phase holds the devlock.** `.aiworkflowrc` names a lease, `slices/.devlock.lock` in
-  the spec repo, the mount every environment of the project shares. The run loop's driver takes it
-  before the test phase starts, keeps it across a findings re-loop, and lets it go once the phase is
-  clean and every repo has reached `origin`; it takes it again for the doc phase's push alone. While
-  one slice holds it, another slice's test phase waits, so two slices never push, roll and check
-  `pilot-dev` at once; the waiting run's log names the holder, from the `dev-holder` note the driver
-  writes beside the lease. Nothing in this doc takes or frees it.
+- **The test phase holds the devlock** (D024). `.aiworkflowrc` names a lease, `slices/.devlock.lock`
+  in the spec repo, the mount every environment of the project shares. The run loop's driver takes
+  it before the test phase starts, keeps it across a findings re-loop, and lets it go once the phase
+  is clean and every repo has reached `origin`; it takes it again for the doc phase's push alone.
+  While one slice holds it, another slice's test phase waits, so two slices never push, roll and
+  check `pilot-dev` at once; the waiting run's log names the holder, from the `dev-holder` note the
+  driver writes beside the lease. Nothing in this doc takes or frees it.
 
 What the checks cannot show from here is reported as *not verified*: production after a promotion,
 and anything that needs a part of the fleet no slice has wired into the deployment yet (a store

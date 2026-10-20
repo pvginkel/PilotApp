@@ -7,10 +7,11 @@ talks to Pilot's brain, a headless Claude Code session in a store environment.
 
 **Its first screens are in**: the handle step, the project list and a project's head, on the
 record's schema, the engine behind it (`backend/app/engine/`), the sync of the store's tree and the
-server's jobs on the KubeCoder controller, live in production at `https://pilot.ginbov.nl`, where every green build of `main` deploys itself
-([`docs/deployment.md`](docs/deployment.md)). Version 1 is built from the design record in
-`../PilotAppSpecs/design/` (start at its README), along the steps of its `implementation-plan.md`.
-Its `features.md` is the version-1 scope, and
+server's jobs on the KubeCoder controller. Every green build of `main` deploys itself to the dev
+stage at `https://pilot-dev.home`, and production at `https://pilot.ginbov.nl` runs what the
+operator promotes from there ([`docs/deployment.md`](docs/deployment.md)). Version 1 is built from
+the design record in `../PilotAppSpecs/design/` (start at its README), along the steps of its
+`implementation-plan.md`. Its `features.md` is the version-1 scope, and
 [`docs/change-discipline.md`](docs/change-discipline.md) says how the record binds a change. A
 decision it leaves open is the operator's to rule, not something to settle in code. Delivery is
 tracked per feature in the record's `feature-ledger.md`, and that is not optional: every slice's doc
@@ -71,14 +72,15 @@ stand today: the `Jenkinsfile`, the app's own as a whole, which tags its images 
 `dev-latest` and pins `dev-<n>` into PilotDeploy's `config/dev` and `prd-<n>` into its `config/prd`
 in one commit, where the template's tags `<n>` and `latest` and pins production alone, and which
 carries the sidecar's `golang` container and its `Test sidecar` and `Build pilot-sync image` stages,
-which the template, rendering no `sidecar/`, has no place for (D008); the page head of `frontend/index.html`, which links the PWA's `/manifest.json` and sets
-`theme-color`, which no app-owned file can; and the cache rule of `frontend/nginx.conf`, which keeps
-the year-long immutable cache to the build's hashed `/assets/` and has the root's files — the icons,
-the logo, the manifest, the worker — revalidated on every load, so that a changed icon shows under
-its name. uv, the migration that keeps the app's loggers, the masked database URL in
-`backend/app/cli.py` and the declarative `Jenkinsfile` on the library's `modernApp.test` are the
-template's own since root v0.2.0 and backend v0.14.0, and `backend/scripts/init-dev-database.py`
-(production's locale) since backend v0.15.0.
+which the template, rendering no `sidecar/`, has no place for (D008); the page head of
+`frontend/index.html`, which links the PWA's `/manifest.json` and sets `theme-color`, which no
+app-owned file can; and the cache rule of `frontend/nginx.conf`, which keeps the year-long immutable
+cache to the build's hashed `/assets/` and has the root's files — the icons, the logo, the manifest,
+the worker — revalidated on every load, so that a changed icon shows under its name. uv, the
+migration that keeps the app's loggers, the masked database URL in `backend/app/cli.py` and the
+declarative `Jenkinsfile` on the library's `modernApp.test` are the template's own since root v0.2.0
+and backend v0.14.0, and `backend/scripts/init-dev-database.py` (production's locale) since backend
+v0.15.0.
 
 ## Architecture model
 
@@ -129,7 +131,8 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
 - [`docs/change-discipline.md`](docs/change-discipline.md): the rules every change obeys.
 - [`docs/slice-test-plan.md`](docs/slice-test-plan.md): how a slice is verified.
 - [`docs/slice-doc-plan.md`](docs/slice-doc-plan.md): which doc surfaces a shipped slice updates.
-- [`docs/deployment.md`](docs/deployment.md): how a change reaches production, and what runs there.
+- [`docs/deployment.md`](docs/deployment.md): the dev and prd stages, how a change reaches each,
+  and what runs there.
 - [`docs/sign-in.md`](docs/sign-in.md): who can use Pilot: the `editor` role the API requires, a
   signed-in test's session included, and the person on the record, with the handle they choose.
 - [`docs/ui.md`](docs/ui.md), [`docs/projects.md`](docs/projects.md): the UI's shell, tokens,

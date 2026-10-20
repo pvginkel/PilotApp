@@ -40,6 +40,9 @@ A push to PilotApp's `main` starts two Jenkins jobs, each triggered by GitHub's 
   in their files. A new build aborts one still running.
 - **`AaC/PilotApp`** runs `Jenkinsfile.architecture` (below).
 
+The build job and the promotion job (below) sit together in the Jenkins folder `PilotApp`, named
+as KubeCoder's pair is, `KubeCoder/Build-Main` and `KubeCoder/Promote-PRD` (D022).
+
 `pilot-dev` follows PilotDeploy's `main` and syncs on its own, pruning what the chart no longer
 renders, so a pin commit rolls dev's pod (below). A PilotDeploy commit to `main` that changes the
 chart or the values deploys to dev the same way, and reaches production only when a promotion
@@ -122,8 +125,8 @@ objects into each stage's namespace:
   stage's host. Production's `nginx.webathome.org/is-public: "true"` has the estate's front door
   serve it as a public site, over HTTPS with a Let's Encrypt certificate. Dev's `is-public: "false"`
   and `enable-ssl: "yes"` have the front door serve `pilot-dev.home` as an internal site, over HTTPS
-  with a certificate from the homelab step-ca, and the homelab DNS publish the name, with no hand
-  step. Prometheus scrapes the backend's `/metrics` on port 3501.
+  with a certificate from the homelab step-ca (D023), and the homelab DNS publish the name, with no
+  hand step. Prometheus scrapes the backend's `/metrics` on port 3501.
 - The secrets below.
 
 `pilot-sync`, the third image, is built for the store environment's pod, which KubeCoder composes
@@ -191,7 +194,7 @@ Two producers publish Pilot into the estate's architecture model, both registere
   it.
 
 The dev stage is not published: a producer publishes one stage, and production is the one the
-model describes.
+model describes (D021).
 
 `AaC/Architecture` collects the model after every green build of either job.
 

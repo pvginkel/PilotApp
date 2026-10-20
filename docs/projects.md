@@ -6,7 +6,7 @@ transitions and its members. The API is `backend/app/api/projects.py` on `Projec
 the tables are [`record.md`](record.md)'s, and the frame the screens sit in is [`ui.md`](ui.md).
 
 Nothing in the app creates a project yet: the dev seed and the suites' testing endpoints (below)
-make them. In production the list is empty, and the centre reads "No projects yet".
+make them. In a deployed stage the list is empty, and the centre reads "No projects yet".
 
 ## Reading them
 
