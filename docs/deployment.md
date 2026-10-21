@@ -179,24 +179,31 @@ commit ([`slice-test-plan.md`](slice-test-plan.md)).
 
 ## The architecture model
 
-Two producers publish Pilot into the estate's architecture model, both registered in
+Three producers publish Pilot into the estate's architecture model, all registered in
 `pvginkel/Architecture`'s `pipeline-producers.yaml`:
 
 - **`pilot-app`** is this repo's hand-authored `docs/architecture/architecture.yaml`: the products
   `app:pilot` and `app:pilot-ui`, the services they expose and what the backend consumes. `kc
   project lint` validates it; `AaC/PilotApp` validates and archives it on every push to `main`. A
-  change to what the app exposes or consumes updates it.
+  change to what the app exposes or consumes updates it. Both products carry `logo: pilot`, the
+  Pilot mark from the Architecture repo's logo library, which the model stamps onto every instance,
+  service and interface behind them.
 - **`pilot-deploy`** is production's, generated from PilotDeploy's chart with `config/prd/` by
   `AaC/PilotDeploy`, with the judgment layer in PilotDeploy's `architecture.yaml`. The job builds
   PilotDeploy's `prd`, so it runs on every promotion that moves `prd`, and a change on `main` to
   the judgment layer or `Jenkinsfile.architecture` publishes once a promotion carries it.
-  PilotDeploy's `kc project test` reads this repo's model, so it needs PilotApp checked out beside
-  it.
+- **`pilot-dev-deploy`** is the dev stage's, generated the same way with `config/dev/` by
+  `AaC/PilotDeployDev`, which runs PilotDeploy's `Jenkinsfile.architecture-dev` on `main`, so every
+  pin commit republishes it.
 
-The dev stage is not published: a producer publishes one stage, and production is the one the
-model describes (D021).
+Both stages are published (D025), each as a producer of its own, as Keycloak's two are: a pipeline
+publishes one stage, from the branch Argo CD syncs it from. The judgment layer is the stages' one
+file, and marks each stage's host a web UI, `pilot.ginbov.nl` and `pilot-dev.home`, so the Home
+launcher shows Pilot as two tiles under the Pilot mark, one tagged PRD and one DEV. PilotDeploy's
+`kc project test` generates both and reads this repo's model, so it needs PilotApp checked out
+beside it.
 
-`AaC/Architecture` collects the model after every green build of either job.
+`AaC/Architecture` collects the model after every green build of any of the three jobs.
 
 ## Checking it
 

@@ -376,15 +376,15 @@ Each push starts its repo's jobs, and each is followed to its end:
 | Push to | Starts |
 |---------|--------|
 | PilotApp | `PilotApp/Build-Main` (`Jenkinsfile`: the suites, the sidecar's tests, three images tagged `dev-<n>` and `dev-latest`, the pin commit of two for both stages) and `AaC/PilotApp` (`Jenkinsfile.architecture`: validates and archives `docs/architecture/*.yaml`) |
-| PilotDeploy's `main`, the build's pin commits included | no job: `pilot-dev` rolls it |
+| PilotDeploy's `main`, the build's pin commits included | `AaC/PilotDeployDev` (`Jenkinsfile.architecture-dev`: generates and publishes the `pilot-dev-deploy` model, the dev stage's), and `pilot-dev` rolls it |
 | PilotDeploy's `prd`, which a promotion moves | `AaC/PilotDeploy` (generates and publishes the `pilot-deploy` model, production's) |
 | Architecture | `AaC/Architecture` |
 | ArgoCDDeploy | `AaC/ArgoCDDeploy` |
 
 `PilotApp/Promote-PRD` has no trigger, and nothing here starts it.
 
-`AaC/Architecture` also runs after every green `AaC/PilotApp` and `AaC/PilotDeploy` build (an
-upstream trigger, after a 90 s quiet period). `track_build.py` does not wait for it: it follows an
+`AaC/Architecture` also runs after every green `AaC/PilotApp`, `AaC/PilotDeploy` and
+`AaC/PilotDeployDev` build (an upstream trigger, after a 90 s quiet period). `track_build.py` does not wait for it: it follows an
 `AaC/*` build to that build's own result alone.
 
 ```bash
@@ -401,7 +401,8 @@ pinned file, which is `pilot-dev` alone, since `pilot-prd` tracks `prd`. The `ti
 the build (the job's first build took 270 s, the model app's run near ten minutes), the 120 s Argo
 CD may take to see the pin commit and the ten-minute roll deadline after that, so that a slow roll
 ends in `track_build.py`'s own exit `6` with its diagnosis rather than in `timeout`'s `124` with
-none. The pin commit starts no build: `AaC/PilotDeploy` builds `prd`. While Argo CD has no
+none. The pin commit starts `AaC/PilotDeployDev` alone, which `track_build.py` does not follow:
+`AaC/PilotDeploy` builds `prd`. While Argo CD has no
 `pilot-dev` (before its first deploy below), pass `--no-follow-argocd`: the pins have nothing to
 roll them yet. Its exit status says where it stopped:
 
