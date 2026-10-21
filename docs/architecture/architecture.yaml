@@ -4,7 +4,8 @@
 # the products below are `pilot-deploy`'s (pvginkel/PilotDeploy).
 #
 # The UI is the product a person opens, so it carries the app's own name: the launcher titles a
-# tile with the label of the product behind the host.
+# tile with the label of the product behind the host. Both products carry the Pilot mark, which the
+# model stamps onto every instance, service and interface behind them, the launcher's tiles too.
 schemaVersion: "0.1"
 producer: pilot-app
 
@@ -16,6 +17,7 @@ applicationComponents:
     lifecycle: active
     stereotype: SoftwareProduct
     sourceRepository: git:pvginkel/PilotApp
+    logo: pilot
     stats:
       image: registry:5000/pilot
 
@@ -26,6 +28,7 @@ applicationComponents:
     lifecycle: active
     stereotype: SoftwareProduct
     sourceRepository: git:pvginkel/PilotApp
+    logo: pilot
     stats:
       image: registry:5000/pilot-ui
 
