@@ -105,7 +105,9 @@ class SyncHomelessDeferralSchema(BaseModel):
         ..., description="The block as a note's `refs` names it, `<item id>/<local id>`"
     )
     document: str = Field(..., description="Its document's path, from the tree's root")
-    title: str = Field(..., description="Its item's title")
+    title: str | None = Field(
+        ..., description="Its item's title; null while its text gives none"
+    )
     to: str = Field(..., description="The task it is deferred to, or `plan`")
 
 

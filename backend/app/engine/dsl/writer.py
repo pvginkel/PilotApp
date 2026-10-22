@@ -100,6 +100,22 @@ def write_recommended(text: str, *, by: str, at: datetime) -> str:
     return edit.apply()[0]
 
 
+def with_title(text: str, title: str) -> str:
+    """`title` written first in the text's front matter, one opened at the
+    top where the text has none; the text as it is where its front matter
+    gives a title (DB decision 50)."""
+    front_matter = parse(text).front_matter
+    if front_matter.title is not None:
+        return text
+    edit = _Edit(text)
+    lines = _render([("title", title)])
+    if front_matter.span is None:
+        edit.insert(0, ["---", *lines, "---"])
+    else:
+        edit.insert(front_matter.span.first, lines)
+    return edit.apply()[0]
+
+
 def recommendation(block: Block) -> str | None:
     """The answer Done records for a block left unanswered (F32.5): a
     question's `default`; `Yes` to a confirmation and `Agree` to another

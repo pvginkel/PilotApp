@@ -17,6 +17,7 @@ from app.engine import dsl
 from app.engine.plan import HomelessDeferral, PlanService
 from app.models import (
     Document,
+    Environment,
     Item,
     PlanNote,
     PlanNoteReference,
@@ -835,6 +836,32 @@ class TestPlanServiceHomelessDeferrals:
         assert container.plan_service().homeless_deferrals() == [
             HomelessDeferral(f"{item.id}/D1", document, "Camp chores", "fix"),
             HomelessDeferral(f"{item.id}/Q1", document, "Camp chores", "plan"),
+        ]
+
+    def test_a_registered_documents_deferrals_with_no_title_have_none(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        _save(container, project, _plan())
+        documents = container.document_service()
+        item = documents.bear_item(
+            project, "decision", "Camp chores", project_session, DEFERRED
+        )
+        document = session.get_one(Document, item.id)
+        document.source_environment_id = environment.id
+        document.source_path = "/work/Example/chores.md"
+        documents.publish(document, DEFERRED.replace("# Camp chores\n\n", ""))
+        container.record_service().done(item, person)
+
+        path = f"draft-{project.number}/items/1-camp-chores.md"
+        assert container.plan_service().homeless_deferrals() == [
+            HomelessDeferral(f"{item.id}/D1", path, None, "fix"),
+            HomelessDeferral(f"{item.id}/Q1", path, None, "plan"),
         ]
 
     def test_an_open_items_deferrals_are_not_homeless(

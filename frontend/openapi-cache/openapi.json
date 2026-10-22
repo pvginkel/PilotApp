@@ -1698,9 +1698,16 @@
             "type": "string"
           },
           "title": {
-            "description": "Its item's title",
-            "title": "Title",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its item's title; null while its text gives none",
+            "title": "Title"
           },
           "to": {
             "description": "The task it is deferred to, or `plan`",

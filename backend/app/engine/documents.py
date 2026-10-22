@@ -77,7 +77,8 @@ class DocumentService:
         text: str = "",
     ) -> Item:
         """A prose item of Pilot's own that `session` added, of a prose kind
-        but the opening, titled as added until its text gives a title."""
+        but the opening, the title it was added with written into its text's
+        front matter where that gives none (DB decision 50)."""
         item_kind = self.db.get(ItemKind, kind)
         if item_kind is None or item_kind.form != PROSE or kind == OPENING:
             raise InvalidOperationException(
@@ -87,7 +88,8 @@ class DocumentService:
         return self._bear_item(
             project,
             Item(kind_code=kind, title=title, created_by_session_id=session.id),
-            text,
+            title,
+            dsl.with_title(text, title),
             session.id,
         )
 
@@ -98,6 +100,7 @@ class DocumentService:
         return self._bear_item(
             project,
             Item(kind_code=OPENING, title=title, created_by_user_id=user.id),
+            title,
             text,
             None,
         )
@@ -214,8 +217,15 @@ class DocumentService:
         return document
 
     def _bear_item(
-        self, project: Project, item: Item, text: str, session_id: uuid.UUID | None
+        self,
+        project: Project,
+        item: Item,
+        title: str,
+        text: str,
+        session_id: uuid.UUID | None,
     ) -> Item:
+        """`item` born with `text`, its file named by `title`, the title it
+        was added with."""
         # Births in one project take their `seq` one at a time.
         self.db.execute(
             select(Project.id).where(Project.id == project.id).with_for_update()
@@ -229,7 +239,7 @@ class DocumentService:
         item.id = uuid.uuid4()
         item.project_id = project.id
         item.seq = seq
-        document = Document(id=item.id, path=_item_path(seq, item.title))
+        document = Document(id=item.id, path=_item_path(seq, title))
         parsed = self._read(project, item, document, text)
         self.db.add(item)
         self._bear(project, item, document, text, parsed, session_id)
@@ -328,8 +338,7 @@ class DocumentService:
             return
         document.summary = front_matter.summary
         item.kind_code = _kind(item, parsed.blocks)
-        if parsed.title is not None:
-            item.title = parsed.title
+        item.title = parsed.title
         item.plan_task_id = front_matter.step
         item.urgent = front_matter.urgent
         item.for_user_id = (

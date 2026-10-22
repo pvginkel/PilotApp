@@ -80,13 +80,18 @@ _BLOCK_SCALAR_HEADER = re.compile(r"[|>][-+0-9]*")
 
 class DocumentKind(StrEnum):
     """What a document is, which decides the rules that are not every
-    document's: the draft's slug, the title of Pilot's own one-block item."""
+    document's: the draft's slug, the title of every item Pilot saves (DB
+    222)."""
 
     DRAFT = "draft"
     HANDBOOK = "handbook"
     OPENING = "opening"
     OWN_ITEM = "own_item"
     REGISTERED_ITEM = "registered_item"
+    """A registered document as Pilot saves it."""
+    WORKER_VERSION = "worker_version"
+    """A registered document as its worker's turn left it: no save of
+    Pilot's, so outside the title rule."""
 
 
 @dataclass(frozen=True)
@@ -195,8 +200,7 @@ def validate(document: ParsedDocument, facts: Facts) -> list[Fault]:
                 Fault(lines["slug"].first, f"front matter: `slug: {slug}` {problem}")
             )
     if (
-        facts.document is DocumentKind.OWN_ITEM
-        and len(document.blocks) == 1
+        facts.document in (DocumentKind.OWN_ITEM, DocumentKind.REGISTERED_ITEM)
         and document.title is None
     ):
         faults.append(

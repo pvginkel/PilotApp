@@ -59,7 +59,9 @@ RETITLED = "---\ntitle: Badge palette\n---\n\nWhich colours for the badges?\n"
 
 BROKEN = "```decision id=D1\noptions:\n  - Dome\n"
 
-UNANSWERED = """# Which tent?
+UNANSWERED = """---
+title: Which tent?
+---
 
 ```decision id=D1
 options:
@@ -68,7 +70,9 @@ options:
 ```
 """
 
-ANSWERED = """# Which tent?
+ANSWERED = """---
+title: Which tent?
+---
 
 ```decision id=D1
 options:
@@ -88,6 +92,8 @@ options:
   - Tunnel
 ```
 """
+
+TENT_FRONT_MATTER = "---\ntitle: Which tent?\n---\n"
 
 ANSWERED_AT = datetime(2026, 10, 12, 9, 40, tzinfo=UTC)
 
@@ -573,19 +579,37 @@ class TestIngestServiceGate:
         assert not answer.held
         assert draft.published_text == save
 
-    def test_an_own_items_one_block_needs_a_title(
+    @pytest.mark.parametrize(
+        "save",
+        [
+            pytest.param(UNANSWERED.replace(TENT_FRONT_MATTER, ""), id="one-block"),
+            pytest.param("Rain is due.\n", id="prose"),
+            pytest.param(
+                UNANSWERED.replace(TENT_FRONT_MATTER, "") + "```question id=Q1\n```\n",
+                id="two-blocks",
+            ),
+        ],
+    )
+    @pytest.mark.parametrize("registered", [False, True], ids=["own", "registered"])
+    def test_a_save_pilot_makes_of_an_item_needs_a_title(
         self,
         session: DbSession,
         container: ServiceContainer,
         project: Project,
         environment: Environment,
         project_session: models.Session,
+        save: str,
+        registered: bool,
     ) -> None:
         with scoped_session(container):
             item = container.document_service().bear_item(
                 project, "decision", "Which tent?", project_session, ANSWERED
             )
-        save = ANSWERED.replace("# Which tent?\n\n", "")
+        document = session.get_one(Document, item.id)
+        if registered:
+            document.source_environment_id = environment.id
+            document.source_path = "/work/Example/tents.md"
+            session.flush()
 
         answer = _ingest(
             container,
@@ -602,7 +626,8 @@ class TestIngestServiceGate:
                 " or a first heading",
             ),
         )
-        assert session.get_one(Document, item.id).published_text == ANSWERED
+        assert document.published_text == ANSWERED
+        assert item.title == "Which tent?"
 
     @pytest.mark.parametrize(
         ("because", "faults"),
@@ -650,7 +675,7 @@ class TestIngestServiceGate:
         assert answer.held is bool(faults)
         assert answer.faults == faults
         published = session.get_one(Document, item.id).published_text
-        assert published == ("" if faults else save)
+        assert published == ("---\ntitle: Ship the badges?\n---\n" if faults else save)
 
     @pytest.mark.parametrize(
         "answer_lines",
@@ -716,7 +741,7 @@ class TestIngestServiceGate:
             pytest.param(
                 UNANSWERED.replace("  - Dome\n", '  - "Dome\\0"\n'),
                 dsl.Fault(
-                    5,
+                    7,
                     "block D1: the body is not text: a key or value holds NUL or"
                     " an unpaired surrogate",
                 ),
@@ -869,12 +894,12 @@ class TestIngestServiceMerge:
             hash=sha256_hex(ANSWERED),
             stale=False,
             held=False,
-            faults=(dsl.Fault(7, message),),
+            faults=(dsl.Fault(9, message),),
         )
         assert draft.ingested_text == save
         assert draft.published_text == ANSWERED
         assert _errors(session) == [
-            (environment.id, path, ErrorKind.REVERTED, 7, message)
+            (environment.id, path, ErrorKind.REVERTED, 9, message)
         ]
 
     def test_a_block_a_non_draft_drops_is_restored(
@@ -1177,7 +1202,9 @@ class TestIngestServiceSequences:
         path = f"draft-{project.number}/items/1-which-tent.md"
         timeline = f"draft-{project.number}/timeline.json"
         assert fake_sidecar.drain() == [path, timeline]
-        edited = ANSWERED.replace("# Which tent?", "# Which tent for the lake?")
+        edited = ANSWERED.replace(
+            "title: Which tent?", "title: Which tent for the lake?"
+        )
 
         answer = fake_sidecar.save(path, edited)
 
@@ -1216,7 +1243,7 @@ class TestIngestServiceSequences:
                 environment.id,
                 path,
                 ErrorKind.REVERTED,
-                8,
+                10,
                 "block D1: `by:` is the record's, ada's answer; reverted",
             )
         ]
@@ -1263,19 +1290,23 @@ class TestIngestServiceSequences:
         _write_answer(container, session.get_one(Document, item.id))
         assert fake_sidecar.drain() == []
         assert fake_sidecar.text(path) == broken
-        fixed = UNANSWERED.replace("# Which tent?\n", "# Which tent?\n\nRain is due.\n")
+        fixed = UNANSWERED.replace(
+            TENT_FRONT_MATTER, TENT_FRONT_MATTER + "\nRain is due.\n"
+        )
         answer = fake_sidecar.save(path, fixed)
 
-        merged = ANSWERED.replace("# Which tent?\n", "# Which tent?\n\nRain is due.\n")
+        merged = ANSWERED.replace(
+            TENT_FRONT_MATTER, TENT_FRONT_MATTER + "\nRain is due.\n"
+        )
         assert answer.stale is False
         assert not container.tree_service().held_path(path)
         assert answer.content == merged.encode()
         assert fake_sidecar.text(path) == merged
         assert answer.faults == 3
         assert [(kind, line) for _, _, kind, line, _ in _errors(session)] == [
-            (ErrorKind.REVERTED, 9),
-            (ErrorKind.REVERTED, 10),
             (ErrorKind.REVERTED, 11),
+            (ErrorKind.REVERTED, 12),
+            (ErrorKind.REVERTED, 13),
         ]
 
     def test_a_save_behind_a_projection_in_flight_is_stale_and_merged(
@@ -1295,12 +1326,14 @@ class TestIngestServiceSequences:
         _write_answer(container, session.get_one(Document, item.id))
 
         edited = UNANSWERED.replace(
-            "# Which tent?\n", "# Which tent?\n\nRain is due.\n"
+            TENT_FRONT_MATTER, TENT_FRONT_MATTER + "\nRain is due.\n"
         )
         answer = fake_sidecar.save(path, edited)
         fake_sidecar.drain()
 
-        merged = ANSWERED.replace("# Which tent?\n", "# Which tent?\n\nRain is due.\n")
+        merged = ANSWERED.replace(
+            TENT_FRONT_MATTER, TENT_FRONT_MATTER + "\nRain is due.\n"
+        )
         assert answer.stale is True
         assert answer.content == merged.encode()
         assert fake_sidecar.text(path) == merged

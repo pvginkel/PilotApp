@@ -1,5 +1,5 @@
 {
-  "document": "registered_item",
+  "document": "worker_version",
   "handles": ["agent", "ada", "ben"],
   "plan_task_ids": ["build", "verify"],
   "removed_task_ids": ["spike"],

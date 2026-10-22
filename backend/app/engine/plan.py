@@ -42,12 +42,13 @@ class HomelessDeferral:
 
     `block` is the Block as a note's `refs` names it, `<item id>/<local id>`;
     `document` its Document's path from the tree's root, and `title` its
-    Item's; `to` the Plan Task it is deferred to, or `plan`.
+    Item's, none while its text gives none; `to` the Plan Task it is deferred
+    to, or `plan`.
     """
 
     block: str
     document: str
-    title: str
+    title: str | None
     to: str
 
 

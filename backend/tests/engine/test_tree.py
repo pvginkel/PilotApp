@@ -141,7 +141,9 @@ class TestTreeService:
             ).hexdigest(),
             "badge-colours/handbook.md": sha256_hex("Keep it short.\n"),
             "badge-colours/items/1-the-palette.md": sha256_hex(_HELD),
-            "badge-colours/items/2-which-colour.md": sha256_hex(""),
+            "badge-colours/items/2-which-colour.md": sha256_hex(
+                "---\ntitle: Which colour?\n---\n"
+            ),
             "badge-colours/plan.json": container.plan_service().render(project).hash,
             "badge-colours/project.md": sha256_hex("# Badges\n"),
             "badge-colours/timeline.json": container.view_service()

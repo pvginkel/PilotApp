@@ -50,7 +50,9 @@ from tests.support.fake_sidecar import (
     sync_headers,
 )
 
-ANSWERED = """# Which tent?
+ANSWERED = """---
+title: Which tent?
+---
 
 ```decision id=D1
 options:
@@ -62,7 +64,9 @@ at: 2026-10-12T09:40:00Z
 ```
 """
 
-DECISION = """# Which tent?
+DECISION = """---
+title: Which tent?
+---
 
 ```decision id=D1
 options:
@@ -100,7 +104,9 @@ FIX_PLAN = json.dumps(
     {"tasks": [{"id": "fix", "title": "Fix the client for v4", "status": "pending"}]}
 )
 
-DEFERRED = """# Camp chores
+DEFERRED = """---
+title: Camp chores
+---
 
 ```decision id=D1
 options:
@@ -475,7 +481,7 @@ class TestPutFile:
         assert [
             (error.environment_id, error.path, error.kind_code, error.line)
             for error in session.scalars(select(SaveError))
-        ] == [(STORE_ENVIRONMENT_ID, path, ErrorKind.REVERTED, 8)]
+        ] == [(STORE_ENVIRONMENT_ID, path, ErrorKind.REVERTED, 10)]
 
     def test_a_held_save_is_204_with_its_own_hash_and_faults(
         self,
@@ -1192,7 +1198,7 @@ class TestCheck:
         assert response.json == {
             "checked": True,
             "errors": [
-                {"path": item, "kind": "reverted", "line": 8, "message": reverted},
+                {"path": item, "kind": "reverted", "line": 10, "message": reverted},
                 {"path": plan, "kind": "parse", "line": None, "message": held},
             ],
             "homeless_deferrals": [
@@ -1210,6 +1216,38 @@ class TestCheck:
                 },
             ],
         }
+
+    def test_a_deferral_in_a_registered_document_with_no_title_has_none(
+        self,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        untitled = DEFERRED.replace("---\ntitle: Camp chores\n---\n", "")
+        with scoped_session(container) as db:
+            container.plan_service().save(project, FIX_PLAN.encode())
+            documents = container.document_service()
+            item = documents.bear_item(
+                project, "decision", "Camp chores", project_session, DEFERRED
+            )
+            document = db.get_one(Document, item.id)
+            document.source_environment_id = environment.id
+            document.source_path = "/work/Example/chores.md"
+            documents.publish(document, untitled)
+            container.record_service().done(item, person)
+            block = str(item.id)
+            path = f"draft-{project.number}/{document.path}"
+
+        response = fake_sidecar.post_check(path, sha256_hex(untitled), 0.1)
+
+        assert response.status_code == 200
+        assert response.json["homeless_deferrals"] == [
+            {"block": f"{block}/D1", "document": path, "title": None, "to": "fix"},
+            {"block": f"{block}/Q1", "document": path, "title": None, "to": "plan"},
+        ]
 
     def test_the_reverted_errors_answered_are_deleted_and_the_parse_errors_stand(
         self,
@@ -1400,7 +1438,7 @@ class TestCheckSequences:
 
         checks = [fake_sidecar.check(item), fake_sidecar.check(item)]
 
-        assert told.startswith(f"{item}:8: ")
+        assert told.startswith(f"{item}:10: ")
         assert checks == [Check(True, told), Check(True, "")]
 
     def test_a_parse_error_is_told_until_a_clean_save(

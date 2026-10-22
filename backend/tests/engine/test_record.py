@@ -39,7 +39,9 @@ from app.models.reference import (
 from app.services.container import ServiceContainer
 from tests.support.fake_sidecar import FakeSidecar
 
-DECISION = """# Which tent?
+DECISION = """---
+title: Which tent?
+---
 
 ```decision id=D1
 options:
@@ -49,13 +51,17 @@ recommend: Dome
 ```
 """
 
-ACTION = """# Put the key into OpenBao
+ACTION = """---
+title: Put the key into OpenBao
+---
 
 ```action id=A1
 ```
 """
 
-ACTION_WITH_OPTIONS = """# Try the fix
+ACTION_WITH_OPTIONS = """---
+title: Try the fix
+---
 
 ```action id=A1
 options:
@@ -64,14 +70,18 @@ options:
 ```
 """
 
-QUESTION_DRAFT = """# Badges
+QUESTION_DRAFT = """---
+title: Badges
+---
 
 ```question id=Q1
 default: Blue
 ```
 """
 
-TWO_ASKS = """# Camp plan
+TWO_ASKS = """---
+title: Camp plan
+---
 
 ```decision id=D1
 options:
@@ -84,7 +94,9 @@ default: The lake
 ```
 """
 
-PRE_RULED = """# Camp plan
+PRE_RULED = """---
+title: Camp plan
+---
 
 ```decision id=D1
 options:
@@ -102,7 +114,9 @@ default: The lake
 ```
 """
 
-RECOMMENDED = """# Camp plan
+RECOMMENDED = """---
+title: Camp plan
+---
 
 ```decision id=D1
 options:
@@ -131,7 +145,9 @@ by: ada
 ```
 """
 
-UNREADY = """# Camp chores
+UNREADY = """---
+title: Camp chores
+---
 
 ```question id=Q1
 ```
@@ -144,7 +160,9 @@ default: The lake
 ```
 """
 
-SETTLED = """# Camp plan
+SETTLED = """---
+title: Camp plan
+---
 
 ```decision id=D1
 options:
@@ -163,7 +181,7 @@ to: plan
 ```
 """
 
-NOTICE = "# The palette\n\nBlue and green.\n"
+NOTICE = "---\ntitle: The palette\n---\n\nBlue and green.\n"
 
 
 def _z(moment: datetime | None) -> str:

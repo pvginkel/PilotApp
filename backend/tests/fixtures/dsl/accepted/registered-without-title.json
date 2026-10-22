@@ -1,5 +1,8 @@
 {
   "rule": "accepted: a registered document with neither title nor heading",
+  "facts": {
+    "document": "worker_version"
+  },
   "parse": {
     "blocks": [
       {

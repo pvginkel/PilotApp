@@ -1,5 +1,5 @@
 {
-  "rule": "held: a Pilot's-own one-block item with neither `title` nor a first heading",
+  "rule": "held: a save Pilot makes with neither `title` nor a first heading",
   "facts": {
     "document": "own_item"
   },

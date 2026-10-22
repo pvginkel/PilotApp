@@ -238,7 +238,7 @@ class TestDocumentServiceBirth:
         document = session.get_one(Document, second.id)
         assert document.path == "items/2-which-colour.md"
         assert document.project_id is None
-        assert document.published_text == ""
+        assert document.published_text == "---\ntitle: Which colour?\n---\n"
         [version] = _versions(session, document)
         assert version.cause_code is VersionCause.BORN
         assert version.session_id == project_session.id
@@ -319,6 +319,69 @@ class TestDocumentServiceBirth:
             f" because {kind} is not a kind of prose item Pilot adds"
         )
         assert session.scalar(select(func.count()).select_from(Item)) == 0
+
+    @pytest.mark.parametrize(
+        ("text", "born"),
+        [
+            pytest.param("", "---\ntitle: The palette\n---\n", id="empty"),
+            pytest.param(
+                "Blue and green.\n",
+                "---\ntitle: The palette\n---\nBlue and green.\n",
+                id="prose",
+            ),
+            pytest.param(
+                "# Two colours\n\nBlue and green.\n",
+                "---\ntitle: The palette\n---\n# Two colours\n\nBlue and green.\n",
+                id="heading",
+            ),
+            pytest.param(
+                "---\nurgent: true\n---\nBlue and green.\n",
+                "---\ntitle: The palette\nurgent: true\n---\nBlue and green.\n",
+                id="front-matter",
+            ),
+            pytest.param(
+                "---\r\nurgent: true\r\n---\r\nBlue and green.\r\n",
+                "---\r\ntitle: The palette\r\nurgent: true\r\n---\r\n"
+                "Blue and green.\r\n",
+                id="crlf",
+            ),
+        ],
+    )
+    def test_pilots_own_item_is_born_with_its_title_in_its_front_matter(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        text: str,
+        born: str,
+    ) -> None:
+        item = container.document_service().bear_item(
+            project, "notice", "The palette", project_session, text
+        )
+
+        document = session.get_one(Document, item.id)
+        assert document.published_text == born
+        assert item.title == "The palette"
+        assert _versions(session, document)[0].text == born
+
+    def test_a_title_its_front_matter_gives_is_kept_at_birth(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        text = "---\ntitle: Two colours\n---\nBlue and green.\n"
+
+        item = container.document_service().bear_item(
+            project, "notice", "The palette", project_session, text
+        )
+
+        document = session.get_one(Document, item.id)
+        assert document.published_text == text
+        assert item.title == "Two colours"
+        assert document.path == "items/1-the-palette.md"
 
     def test_an_item_born_with_its_text_reads_it(
         self,
@@ -480,7 +543,10 @@ class TestDocumentServiceBirth:
 
         folder = f"draft-{project.number}"
         assert engine_events == [
-            TreeHashMoved(f"{folder}/items/1-the-palette.md", sha256_hex("")),
+            TreeHashMoved(
+                f"{folder}/items/1-the-palette.md",
+                sha256_hex("---\ntitle: The palette\n---\n"),
+            ),
             TreeHashMoved(
                 f"{folder}/timeline.json",
                 container.view_service().timeline(project).hash,
@@ -650,7 +716,7 @@ class TestDocumentServicePublish:
         assert item.for_user_id is None
         assert document.summary is None
 
-    def test_a_text_without_a_title_keeps_the_items_title(
+    def test_an_items_title_is_its_texts_alone(
         self,
         session: DbSession,
         container: ServiceContainer,
@@ -661,14 +727,36 @@ class TestDocumentServicePublish:
         item = documents.bear_item(project, "notice", "The palette", project_session)
         document = session.get_one(Document, item.id)
 
+        documents.publish(document, "---\ntitle: Two colours\n---\n# Blue\n")
+        assert item.title == "Two colours"
+
+        documents.publish(document, "# Blue and green\n")
+        assert item.title == "Blue and green"
+
+    def test_a_registered_documents_title_is_none_while_its_text_gives_none(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+    ) -> None:
+        documents = container.document_service()
+        item = documents.bear_item(project, "notice", "The palette", project_session)
+        document = session.get_one(Document, item.id)
+        document.source_environment_id = environment.id
+        document.source_path = "/work/Example/palette.md"
+
         documents.publish(document, "Blue and green.\n")
-        assert item.title == "The palette"
+        session.flush()
+        assert item.title is None
 
         documents.publish(document, "# Two colours\n\nBlue and green.\n")
         assert item.title == "Two colours"
 
         documents.publish(document, "Blue and green.\n")
-        assert item.title == "Two colours"
+        session.flush()
+        assert item.title is None
 
     @pytest.mark.parametrize(
         ("text", "kind"),

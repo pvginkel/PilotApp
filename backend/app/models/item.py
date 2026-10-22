@@ -30,7 +30,9 @@ class Item(db.Model):  # type: ignore[name-defined]
 
     A Prose Item's Document has the Item's id. For a Prose Item, `kind_code`,
     `title`, `plan_task_id`, `urgent` and `for_user_id` are caches of its
-    Document's published text, rebuilt on every publish (DB §7.4).
+    Document's published text, rebuilt on every publish (DB §7.4); the
+    opening's are set at its birth. A Prose Item's `title` is none while its
+    text gives none (DB 223).
     """
 
     __tablename__ = "items"
@@ -72,7 +74,7 @@ class Item(db.Model):  # type: ignore[name-defined]
     project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id"))
     seq: Mapped[int] = mapped_column(Integer)
     kind_code: Mapped[str] = mapped_column(ForeignKey("item_kinds.code"))
-    title: Mapped[str] = mapped_column(Text)
+    title: Mapped[str | None] = mapped_column(Text)
     plan_task_id: Mapped[str | None] = mapped_column(Text)
     urgent: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     for_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))

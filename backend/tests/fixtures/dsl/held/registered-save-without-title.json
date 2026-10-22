@@ -1,0 +1,43 @@
+{
+  "rule": "held: a save Pilot makes with neither `title` nor a first heading",
+  "facts": {
+    "document": "registered_item"
+  },
+  "parse": {
+    "blocks": [
+      {
+        "id": "D1",
+        "kind": "decision",
+        "fence": [3, 7],
+        "lines": {
+          "options": [4, 6]
+        },
+        "options": [
+          {
+            "label": "Dome",
+            "line": 5
+          },
+          {
+            "label": "Tunnel",
+            "line": 6
+          }
+        ]
+      },
+      {
+        "id": "Q1",
+        "kind": "question",
+        "fence": [9, 11],
+        "lines": {
+          "default": [10, 10]
+        },
+        "default": "Monday"
+      }
+    ]
+  },
+  "faults": [
+    {
+      "line": null,
+      "message": "the item has no title: give it `title` in the front matter or a first heading"
+    }
+  ]
+}

@@ -19,6 +19,7 @@ from app.engine.dsl import (
     parse,
     recommendation,
     validate,
+    with_title,
     write_answer,
     write_done,
     write_recommended,
@@ -530,6 +531,55 @@ class TestWriteRecommended:
         text = "```action id=A1\ndone: 2026-10-11T08:00:00Z\nby: ben\n```\n"
 
         assert write_recommended(text, by="ada", at=AT) == text
+
+
+class TestWithTitle:
+    @pytest.mark.parametrize(
+        ("text", "titled"),
+        [
+            pytest.param("", "---\ntitle: Tent\n---\n", id="empty"),
+            pytest.param("Prose.\n", "---\ntitle: Tent\n---\nProse.\n", id="prose"),
+            pytest.param("Prose.", "---\ntitle: Tent\n---\nProse.", id="no-ending"),
+            pytest.param(
+                "# Which tent?\n",
+                "---\ntitle: Tent\n---\n# Which tent?\n",
+                id="heading",
+            ),
+            pytest.param(
+                "---\nurgent: true\n---\nProse.\n",
+                "---\ntitle: Tent\nurgent: true\n---\nProse.\n",
+                id="front-matter",
+            ),
+            pytest.param(
+                "---\r\nurgent: true\r\n---\r\nProse.\r\n",
+                "---\r\ntitle: Tent\r\nurgent: true\r\n---\r\nProse.\r\n",
+                id="crlf",
+            ),
+            pytest.param(
+                "---\nProse.\n",
+                "---\ntitle: Tent\n---\n---\nProse.\n",
+                id="unclosed-front-matter",
+            ),
+        ],
+    )
+    def test_the_title_is_written_first_in_the_front_matter(
+        self, text: str, titled: str
+    ) -> None:
+        assert with_title(text, "Tent") == titled
+
+    def test_a_title_the_front_matter_gives_is_kept(self) -> None:
+        text = "---\nurgent: true\ntitle: Which tent?\n---\n# Tent\n"
+
+        assert with_title(text, "Tent") == text
+
+    @pytest.mark.parametrize(
+        "title", ["Fix: the client", "#1 priority", "yes", "  Tent  ", "'Tent'"]
+    )
+    def test_the_written_title_reads_back_as_given(self, title: str) -> None:
+        document = parse(with_title("Prose.\n", title))
+
+        assert document.faults == ()
+        assert document.title == title.strip()
 
 
 class TestRecommendation:

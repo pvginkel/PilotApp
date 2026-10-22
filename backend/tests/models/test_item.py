@@ -30,6 +30,16 @@ class TestItem:
         assert item.done_at is None
         assert item.created_at is not None
 
+    def test_an_item_may_have_no_title(
+        self, session: DbSession, project: Project, project_session: Session
+    ) -> None:
+        item = _item(project, project_session, title=None)
+        session.add(item)
+        session.flush()
+        session.refresh(item)
+
+        assert item.title is None
+
     def test_the_opening_is_a_persons_words(
         self, session: DbSession, project: Project, person: User
     ) -> None:

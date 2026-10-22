@@ -57,7 +57,7 @@ SECTION_6_1 = (
     "held: a written `to` naming neither `plan` nor a task in the plan",
     "held: `by` naming no handle",
     "held: `at` or `done` not a time",
-    "held: a Pilot's-own one-block item with neither `title` nor a first heading",
+    "held: a save Pilot makes with neither `title` nor a first heading",
     "held: a block kind in the wrong case",
     "held: `id=` on a fence that is not a block",
     "held: `step` naming no task of the project",
@@ -75,7 +75,7 @@ SECTION_6_1 = (
 )
 
 FACTS = Facts(
-    document=DocumentKind.REGISTERED_ITEM,
+    document=DocumentKind.WORKER_VERSION,
     handles={"agent", "ada", "ben"},
     plan_task_ids={"build", "verify"},
     removed_task_ids={"spike"},
@@ -803,10 +803,25 @@ class TestValidate:
     def test_a_slug_outside_the_draft_is_not_read(self) -> None:
         assert _messages("---\nslug: Not A Slug\n---\n") == []
 
-    def test_pilot_s_own_one_block_item_needs_a_title(self) -> None:
-        facts = _facts(document=DocumentKind.OWN_ITEM)
-
-        assert validate(parse("```question id=Q1\n```\n"), facts) == [
+    @pytest.mark.parametrize(
+        "document", [DocumentKind.OWN_ITEM, DocumentKind.REGISTERED_ITEM]
+    )
+    @pytest.mark.parametrize(
+        "text",
+        [
+            pytest.param("", id="empty"),
+            pytest.param("Prose.\n", id="prose"),
+            pytest.param("```question id=Q1\n```\n", id="one-block"),
+            pytest.param(
+                "```question id=Q1\n```\n```question id=Q2\n```\n", id="two-blocks"
+            ),
+            pytest.param("---\nsummary: S\n---\nProse.\n", id="front-matter"),
+        ],
+    )
+    def test_a_save_pilot_makes_of_any_shape_needs_a_title(
+        self, document: DocumentKind, text: str
+    ) -> None:
+        assert validate(parse(text), _facts(document=document)) == [
             Fault(
                 None,
                 "the item has no title: give it `title` in the front matter or a first heading",
@@ -814,22 +829,21 @@ class TestValidate:
         ]
 
     @pytest.mark.parametrize(
+        "document", [DocumentKind.OWN_ITEM, DocumentKind.REGISTERED_ITEM]
+    )
+    @pytest.mark.parametrize(
         "text",
         [
             "---\ntitle: T\n---\n```question id=Q1\n```\n",
             "# T\n```question id=Q1\n```\n",
+            "---\ntitle: T\n---\n",
+            "Prose.\n\n## T\n",
         ],
     )
-    def test_either_title_source_satisfies_the_rule(self, text: str) -> None:
-        assert _messages(text, _facts(document=DocumentKind.OWN_ITEM)) == []
-
-    @pytest.mark.parametrize(
-        "blocks", ["", "```question id=Q1\n```\n```question id=Q2\n```\n"]
-    )
-    def test_pilot_s_own_item_of_other_than_one_block_needs_no_title(
-        self, blocks: str
+    def test_either_title_source_satisfies_the_rule(
+        self, document: DocumentKind, text: str
     ) -> None:
-        assert _messages(blocks, _facts(document=DocumentKind.OWN_ITEM)) == []
+        assert _messages(text, _facts(document=document)) == []
 
     @pytest.mark.parametrize(
         "document",
@@ -837,7 +851,7 @@ class TestValidate:
             DocumentKind.DRAFT,
             DocumentKind.HANDBOOK,
             DocumentKind.OPENING,
-            DocumentKind.REGISTERED_ITEM,
+            DocumentKind.WORKER_VERSION,
         ],
     )
     def test_no_other_document_needs_a_title(self, document: DocumentKind) -> None:

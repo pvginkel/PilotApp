@@ -40,7 +40,9 @@ from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID, SYNC_TOKEN
 
 BEARER = f"Bearer {SYNC_TOKEN}"
 
-ANSWERED = """# Which tent?
+ANSWERED = """---
+title: Which tent?
+---
 
 ```decision id=D1
 options:
