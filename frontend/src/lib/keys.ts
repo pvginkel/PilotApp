@@ -1,15 +1,15 @@
 /**
  * The shell's keys (F110): `?` opens the keys list, and Esc closes the top-most open thing, one
  * per press, in ui-conventions.md's order ("Keys"). Neither acts in a text field, nor with a
- * modifier held.
+ * modifier held: Esc in Other's field is the field's own (text-field.tsx).
  */
 
 import { useEffect, useRef } from 'react';
 
 // Bottom to top: Esc closes the highest layer open, and within a layer the one opened last.
-// A menu shares its layer with Stop's confirmation; the panel is the one that lies over the
-// overlay.
-const LAYERS = ['overlay', 'panel', 'plan', 'menu', 'dialog', 'keys'] as const;
+// Other's consoles lie under everything; a menu shares its layer with Stop's confirmation; the
+// panel is the one that lies over the overlay.
+const LAYERS = ['console', 'overlay', 'panel', 'plan', 'menu', 'dialog', 'keys'] as const;
 type EscapeLayer = (typeof LAYERS)[number];
 
 interface OpenThing {

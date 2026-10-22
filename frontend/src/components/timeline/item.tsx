@@ -1,16 +1,18 @@
 /**
  * A prose item on the timeline. Open, it is its head (F12), its title and its text, the prose drawn
- * as GFM (F29.1), the prose before its first block folding when long (F12.2); an urgent one is
- * tinted (F10.1), and one whose latest save is held shows its last published text with a dashed
- * border, a concept (F78). Done, it is its line (F13.1, F13.2).
+ * as GFM (F29.1), the prose before its first block folding when long (F12.2), a decision's block
+ * answered in its place (F19.1); an urgent one is tinted (F10.1), and one whose latest save is held
+ * shows its last published text with a dashed border, a concept (F78). Done, it is its line (F13.1,
+ * F13.2).
  */
 
-import type { AnimationEvent } from 'react';
+import type { AnimationEvent, ReactNode } from 'react';
 import { StickyNote, TriangleAlert } from 'lucide-react';
 import { Fold } from '@/components/shared/fold';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Markdown } from '@/components/shared/markdown';
 import { Time } from '@/components/shared/time';
+import { Block } from '@/components/timeline/block';
 import { kindOf } from '@/components/timeline/kinds';
 import { UserAvatar } from '@/components/timeline/user-avatar';
 import { blocksOf, titleOf, type BodyPart, type ProsePart, type TimelineItem, type TimelineUser } from '@/hooks/use-timeline';
@@ -49,6 +51,8 @@ export function Item({ item, fresh, onFlashed }: ItemProps) {
 }
 
 function OpenItem({ item }: { item: TimelineItem }) {
+  // A decision is its one block, answered in place.
+  const ask = item.kind === 'decision' ? <Block item={item} block={blocksOf(item)[0]} /> : null;
   return (
     <div className="item-body">
       <ItemHead item={item} />
@@ -56,7 +60,7 @@ function OpenItem({ item }: { item: TimelineItem }) {
         <LinkedText text={titleOf(item)} />
       </div>
       {/* The API gives every prose item but the opening its text. */}
-      <ItemText body={item.body!} />
+      <ItemText body={item.body!} ask={ask} />
     </div>
   );
 }
@@ -88,8 +92,8 @@ function ItemHead({ item }: { item: TimelineItem }) {
 
 const isProse = (part: BodyPart): part is ProsePart => part.type === 'prose';
 
-/** The prose before the first block folds; what comes after it shows whole. */
-function ItemText({ body }: { body: BodyPart[] }) {
+/** The prose before the first block folds, the ask stands in that block's place, and what comes after shows whole. */
+function ItemText({ body, ask }: { body: BodyPart[]; ask: ReactNode }) {
   const first = body.findIndex((part) => part.type === 'block');
   const lead = (first < 0 ? body : body.slice(0, first)).filter(isProse);
   const after = (first < 0 ? [] : body.slice(first + 1)).filter(isProse);
@@ -102,6 +106,7 @@ function ItemText({ body }: { body: BodyPart[] }) {
           ))}
         </Fold>
       )}
+      {ask}
       {after.map((part, index) => (
         <div key={index} className="item-after">
           <Markdown text={part.markdown} />

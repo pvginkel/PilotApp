@@ -1,5 +1,6 @@
 /**
- * What the browser remembers (F133): kept in its storage, nothing of it on the server.
+ * What the browser remembers (F133): kept in its storage, nothing of it on the server. Unsent text
+ * is kept under a key of its own, read when its field opens and written as it is typed.
  */
 
 import { useSyncExternalStore } from 'react';
@@ -54,4 +55,24 @@ function subscribe(listener: () => void): () => void {
 
 export function useBrowserState(): BrowserState {
   return useSyncExternalStore(subscribe, browserState);
+}
+
+const UNSENT_KEY = 'pilot.unsent';
+
+function readUnsent(): Record<string, unknown> {
+  return JSON.parse(localStorage.getItem(UNSENT_KEY) ?? '{}') as Record<string, unknown>;
+}
+
+/** What was typed into the field `field` and not sent. */
+export function unsentText(field: string): string | undefined {
+  const text = readUnsent()[field];
+  return typeof text === 'string' ? text : undefined;
+}
+
+/** Keeps what is typed into a field until it is sent, over what another tab keeps; none, nothing kept. */
+export function keepUnsent(field: string, text: string): void {
+  const unsent = readUnsent();
+  if (text === '') delete unsent[field];
+  else unsent[field] = text;
+  localStorage.setItem(UNSENT_KEY, JSON.stringify(unsent));
 }

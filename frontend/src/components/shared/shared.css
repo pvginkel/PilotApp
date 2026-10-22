@@ -72,9 +72,10 @@
   }
   .link:hover { text-decoration: underline; }
 
-  /* ---- Text fields (F115's look) --------------------------------------------------------- */
+  /* ---- Text fields (text-field.tsx) ------------------------------------------------------ */
 
-  /* One line at rest, its button beside it in a .field-row, level with its bottom edge. */
+  /* One line at rest, growing as text-field.tsx sets its height, its button beside it in a
+     .field-row, level with its bottom edge; the row keeps some room under it when kept in view. */
   .field {
     display: block;
     width: 100%;
@@ -92,7 +93,7 @@
   }
   .field:focus { outline: none; border-color: hsl(var(--ring)); box-shadow: 0 0 0 3px hsl(var(--ring) / 0.2); }
   .field::placeholder { color: hsl(var(--muted-foreground)); }
-  .field-row { display: flex; gap: 8px; align-items: flex-end; }
+  .field-row { display: flex; gap: 8px; align-items: flex-end; scroll-margin-bottom: 24px; }
   .field-row .field { flex: 1; min-width: 0; }
   .field-row .btn { --h: 38px; }
 

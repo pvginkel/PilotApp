@@ -7,6 +7,10 @@ export function KeysList({ onClose }: { onClose: () => void }) {
     <Dialog layer="keys" title="Keys" onClose={onClose} testId="shell.keys">
       <dl className="keys">
         <dt>
+          <kbd>Ctrl</kbd>+<kbd>Enter</kbd>
+        </dt>
+        <dd>send, in a text field; Cmd+Enter on a Mac</dd>
+        <dt>
           <kbd>Esc</kbd>
         </dt>
         <dd>close what is on top, one per press</dd>

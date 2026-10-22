@@ -39,11 +39,16 @@ const KINDS: Record<TimelineItem['kind'], Kind> = {
   timed_wait: { label: 'Wait', icon: Hourglass },
 };
 
-const BLOCK_ICONS: Record<Block['kind'], LucideIcon> = {
-  decision: MessageCircleQuestion,
-  question: MessageCircleQuestion,
-  action: Hand,
+const BLOCK_KINDS: Record<Block['kind'], Kind> = {
+  decision: KINDS.decision,
+  question: KINDS.question,
+  action: KINDS.action,
 };
+
+/** A block's icon and label, as its head shows them (F31.1): a confirmation's is its item's. */
+export function blockKindOf(block: Block): Kind {
+  return block.confirmation ? KINDS.confirmation : BLOCK_KINDS[block.kind];
+}
 
 export function kindOf(item: TimelineItem): Kind {
   if (item.kind !== 'document') return KINDS[item.kind];
@@ -54,5 +59,5 @@ export function kindOf(item: TimelineItem): Kind {
     count: blocks.filter((block) => block.kind === kind).length,
   }));
   const top = counts.reduce((best, next) => (next.count > best.count ? next : best));
-  return { label: `Document · ${blocks.length}`, icon: top.count > 0 ? BLOCK_ICONS[top.kind] : KINDS.document.icon };
+  return { label: `Document · ${blocks.length}`, icon: top.count > 0 ? BLOCK_KINDS[top.kind].icon : KINDS.document.icon };
 }

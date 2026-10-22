@@ -12,7 +12,7 @@ test.describe('Keys', () => {
     await page.keyboard.press('?');
     await expect(shell.keys).toBeVisible();
     await expect(shell.keys.getByRole('heading')).toHaveText('Keys');
-    await expect(shell.keys.locator('dt')).toHaveText(['Esc', '?']);
+    await expect(shell.keys.locator('dt')).toHaveText(['Ctrl+Enter', 'Esc', '?']);
 
     await page.keyboard.press('?');
     await expect(shell.keys).toBeHidden();

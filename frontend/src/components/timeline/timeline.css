@@ -1,5 +1,5 @@
 /* A project's timeline (PilotAppSpecs design/mockup/style.css, "Layout", "Dividers", "Items", "The
-   collapsed line" and "The prompt that started a project"). */
+   collapsed line", "The prompt that started a project" and "Blocks"). */
 
 @layer components {
   .feed { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; scrollbar-gutter: stable; }
@@ -98,6 +98,138 @@
   .chip.urgent { background: hsl(var(--urgent) / 0.15); color: hsl(var(--urgent-text)); font-weight: 600; }
   .item-title { margin: 6px 0 4px; font-size: 16px; font-weight: 600; line-height: 1.4; }
   .item-after { margin-top: 12px; }
+
+  /* ---- Blocks: where a person answers, under the prose that asks --------------------------- */
+
+  .block {
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+    background: hsl(var(--muted) / 0.35);
+    scroll-margin: 90px;
+  }
+  /* A one-ask item's panel. */
+  .block.solo { margin: 12px 0 0; }
+  .block-head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 6px 8px 0 14px;
+    font-size: 13px;
+    line-height: 28px;
+    color: hsl(var(--muted-foreground));
+  }
+  .block-head .kind { display: inline-flex; align-items: baseline; gap: 6px; font-weight: 600; color: hsl(var(--primary-muted-foreground)); }
+  .block-head .kind .icon { position: relative; top: calc(0.5em - 0.5cap); }
+  .block-head .grow { flex: 1; }
+  /* The chevron that opens a closed answer, small beside the block's label: its baseline is the
+     icon's foot, lifted by half the icon less half the cap height, so it centres on the capitals. */
+  .block-head .toggle { --h: 20px; position: relative; top: calc(6px - 0.5cap); }
+  .block-head .toggle .icon { width: 12px; height: 12px; stroke-width: 2.2; }
+  /* Who answered: the time, then the avatar, which keeps one place whatever comes before it. */
+  .block-head .who { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; white-space: nowrap; }
+  .block-controls { padding: 6px 14px 12px; }
+  .block.solo .block-controls { padding-top: 12px; }
+  .block.solo .block-head + .block-controls { padding-top: 6px; }
+
+  .options { display: flex; flex-direction: column; gap: 6px; }
+  .option {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 10px;
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid hsl(var(--border));
+    border-right-width: 2px;
+    border-bottom-width: 2px;
+    border-radius: var(--radius);
+    background: hsl(var(--background));
+    color: inherit;
+    font: inherit;
+    font-size: 14px;
+    text-align: left;
+    cursor: pointer;
+  }
+  /* A chosen option keeps its colour under the mouse; only the others react to hover. */
+  .option:hover:not(:disabled):not(.chosen) { border-color: hsl(var(--primary) / 0.6); background: hsl(var(--primary-muted) / 0.6); }
+  .option:disabled { cursor: default; }
+  .option .label { flex: none; max-width: 40%; font-weight: 600; }
+  .option .desc { flex: 1; color: hsl(var(--muted-foreground)); }
+  .option .rec {
+    flex: none;
+    padding: 0 7px;
+    border-radius: 999px;
+    background: hsl(var(--primary-strong));
+    color: hsl(var(--primary-foreground));
+    font-size: 11.5px;
+    font-weight: 600;
+  }
+  .option.recommended { border-color: hsl(var(--primary) / 0.7); background: hsl(var(--primary-muted)); }
+  .option.chosen { border-color: hsl(var(--primary-edge)); background: hsl(var(--primary-strong)); color: hsl(var(--primary-foreground)); }
+  .option.chosen .desc { color: hsl(var(--primary-foreground) / 0.85); }
+  .option.chosen .rec { background: hsl(var(--primary-foreground)); color: hsl(var(--primary-strong)); }
+  .option.faded { opacity: 0.5; }
+  .option.single .label { flex: 1; max-width: none; font-weight: 500; }
+  .option.other { border-style: dashed; border-right-width: 1px; border-bottom-width: 1px; }
+  .option.other .label { color: hsl(var(--primary-muted-foreground)); }
+  .option.other .desc { white-space: pre-wrap; }
+  .option.other.chosen { border-style: solid; border-right-width: 2px; border-bottom-width: 2px; }
+  .option.other.chosen .label { color: inherit; }
+  .option.closed { cursor: pointer; }
+
+  /* Other's console: it takes its row's place, the field with Send and the cross inside its border,
+     and keeps some room under it when it is kept in view. */
+  .console {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    flex: 1 1 260px;
+    min-width: 0;
+    padding-right: 4px;
+    border: 1px solid hsl(var(--primary));
+    border-radius: var(--radius);
+    background: hsl(var(--background));
+    scroll-margin-bottom: 24px;
+  }
+  .console:focus-within { box-shadow: 0 0 0 3px hsl(var(--ring) / 0.2); }
+  .options .console { flex: none; }
+  .console .field { flex: 1; min-width: 0; height: 36px; border: 0; background: transparent; }
+  .console .field:focus { box-shadow: none; }
+  .console-btn {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 28px;
+    height: 28px;
+    margin: 4px 0;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: none;
+    color: hsl(var(--muted-foreground));
+    cursor: pointer;
+  }
+  .console-btn:hover:not(:disabled) { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
+  .console-btn:disabled { opacity: 0.45; cursor: default; }
+  .console-btn.send { color: hsl(var(--primary-strong)); }
+
+  /* An answer that is no option's row: a deferral. */
+  .answer { font-size: 14px; }
+  .answer .said { white-space: pre-wrap; }
+  .answer + .options { margin-top: 10px; }
+
+  /* A note under its answer, led by a note's icon; its lines after the first align with its words. */
+  .block .note {
+    display: block;
+    padding-left: calc(1em + 6px);
+    text-indent: calc(-1em - 6px);
+    color: hsl(var(--muted-foreground));
+    white-space: pre-wrap;
+  }
+  .block .note .icon { margin-right: 6px; }
+  .answer .note { margin-top: 6px; }
+  .option .note { flex-basis: 100%; }
+  .option.chosen .note { color: hsl(var(--primary-foreground) / 0.85); }
 
   /* ---- The done line -------------------------------------------------------------------- */
 

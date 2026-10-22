@@ -3,9 +3,9 @@ import type { UiStateTestEvent } from '@/lib/test/test-events';
 import { waitTestEvent } from '../helpers';
 
 /**
- * A project's timeline (F8): its rows, the opening, its items open and as done lines, the urgent
- * banners and the "N open above" chip (F10.2, F11), a finished timeline's end (F5.3), and where it
- * stands scrolled.
+ * A project's timeline (F8): its rows, the opening, its items open and as done lines, an open
+ * item's block (F31), the urgent banners and the "N open above" chip (F10.2, F11), a finished
+ * timeline's end (F5.3), and where it stands scrolled.
  */
 export class TimelinePage {
   readonly root: Locator;
@@ -69,6 +69,30 @@ export class TimelinePage {
       lineTime: root.getByTestId('timeline.line.time'),
       said: root.getByTestId('timeline.line.said'),
       note: root.getByTestId('timeline.line.note'),
+      block: this.block(root),
+    };
+  }
+
+  /** An open item's block, its head, its answer and its options, Other and its console. */
+  private block(item: Locator) {
+    const root = item.getByTestId('timeline.block');
+    return {
+      root,
+      head: root.getByTestId('timeline.block.head'),
+      kind: root.getByTestId('timeline.block.kind'),
+      toggle: root.getByTestId('timeline.block.toggle'),
+      answered: root.getByTestId('timeline.block.answered'),
+      who: root.getByTestId('timeline.block.who'),
+      time: root.getByTestId('timeline.block.time'),
+      deferred: root.getByTestId('timeline.block.deferred'),
+      note: root.getByTestId('timeline.block.note'),
+      options: root.getByTestId('timeline.block.option'),
+      option: (label: string) => root.getByTestId('timeline.block.option').filter({ has: this.page.locator('.label', { hasText: label }) }),
+      other: root.getByTestId('timeline.block.other'),
+      console: root.getByTestId('timeline.block.console'),
+      field: root.getByTestId('timeline.block.console.field'),
+      send: root.getByTestId('timeline.block.console.send'),
+      cancel: root.getByTestId('timeline.block.console.cancel'),
     };
   }
 
