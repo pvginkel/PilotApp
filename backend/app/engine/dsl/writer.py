@@ -109,9 +109,10 @@ def write_recommended(text: str, *, by: str, at: datetime) -> str:
 
 
 def with_title(text: str, title: str) -> str:
-    """`title` written first in the text's front matter, one opened at the
-    top where the text has none; the text as it is where its front matter
-    gives a title (DB decision 50)."""
+    """`title` written in the text's front matter: in place of a `title` key
+    that gives none, else first, one front matter opened at the top where the
+    text has none; the text as it is where its front matter gives a title (DB
+    decision 50)."""
     if parse(text).front_matter.title is not None:
         return text
     return _titled(text, title, ())[0]
@@ -120,17 +121,28 @@ def with_title(text: str, title: str) -> str:
 def _titled(
     text: str, title: str, faults: Sequence[Fault]
 ) -> tuple[str, tuple[Fault, ...]]:
-    """`title` written first in the front matter of `text`, one opened at the
-    top where it has none; each of `faults` kept at its line."""
-    span = parse(text).front_matter.span
+    """`title` written in the front matter of `text`: in place of a `title`
+    key there that gives none, else first, one front matter opened at the top
+    where it has none; each of `faults` kept at its line."""
+    front = parse(text).front_matter
     lines = _render([("title", title)])
-    at, lines = (0, ["---", *lines, "---"]) if span is None else (span.first, lines)
+    key = front.lines.get("title")
     edit = _Edit(text)
+    if front.span is None:
+        at, gone, lines = 0, 0, ["---", *lines, "---"]
+    elif key is None:
+        at, gone = front.span.first, 0
+    else:
+        at, gone = key.first - 1, key.last - key.first + 1
+        edit.drop(key)
     edit.insert(at, lines)
     return edit.apply()[0], tuple(
         fault
         if fault.line is None or fault.line <= at
-        else Fault(fault.line + len(lines), fault.message)
+        else Fault(
+            at + 1 if fault.line <= at + gone else fault.line + len(lines) - gone,
+            fault.message,
+        )
         for fault in faults
     )
 

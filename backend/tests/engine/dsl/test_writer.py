@@ -585,6 +585,30 @@ class TestWithTitle:
         assert with_title(text, "Tent") == text
 
     @pytest.mark.parametrize(
+        ("text", "titled"),
+        [
+            pytest.param(
+                "---\ntitle:\n---\nBody\n", "---\ntitle: Tent\n---\nBody\n", id="blank"
+            ),
+            pytest.param(
+                "---\nurgent: true\ntitle: ''\n---\nBody\n",
+                "---\nurgent: true\ntitle: Tent\n---\nBody\n",
+                id="empty-quoted",
+            ),
+            pytest.param(
+                "---\ntitle:\n  - Dome\n  - Tunnel\nurgent: true\n---\nBody\n",
+                "---\ntitle: Tent\nurgent: true\n---\nBody\n",
+                id="list",
+            ),
+        ],
+    )
+    def test_a_title_key_that_gives_none_is_replaced(
+        self, text: str, titled: str
+    ) -> None:
+        assert with_title(text, "Tent") == titled
+        assert parse(titled).faults == ()
+
+    @pytest.mark.parametrize(
         "title", ["Fix: the client", "#1 priority", "yes", "  Tent  ", "'Tent'"]
     )
     def test_the_written_title_reads_back_as_given(self, title: str) -> None:
@@ -909,8 +933,23 @@ class TestMerge:
                 ),
                 6,
             ),
+            (
+                REGISTERED.replace("title: Tent\n---\n", "title:\n---\n# Tent\n"),
+                REGISTERED,
+                4,
+            ),
+            (
+                REGISTERED.replace("title: Tent\n---\n", "title: ''\n---\n# Tent\n"),
+                REGISTERED,
+                4,
+            ),
         ],
-        ids=["no-front-matter", "front-matter-without-title"],
+        ids=[
+            "no-front-matter",
+            "front-matter-without-title",
+            "blank-title",
+            "empty-title",
+        ],
     )
     def test_a_title_the_reverted_body_took_is_written_into_the_front_matter(
         self, save: str, expected: str, line: int
