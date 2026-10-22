@@ -3,8 +3,8 @@ import type { UiStateTestEvent } from '@/lib/test/test-events';
 import { waitTestEvent } from '../helpers';
 
 /**
- * A project's timeline (F8): its rows, the opening, its items open and as done lines, an open
- * item's block (F31), the urgent banners and the "N open above" chip (F10.2, F11), a finished
+ * A project's timeline (F8): its rows, the opening, its items open and as done lines with Undo, an
+ * open item's block (F31) or a confirmation's card (F22), the urgent banners and the "N open above" chip (F10.2, F11), a finished
  * timeline's end (F5.3), and where it stands scrolled.
  */
 export class TimelinePage {
@@ -60,20 +60,28 @@ export class TimelinePage {
       kind: root.getByTestId('timeline.item.kind'),
       time: root.getByTestId('timeline.item.time'),
       urgent: root.getByTestId('timeline.item.urgent'),
+      why: root.getByTestId('timeline.item.why'),
       forUser: root.getByTestId('timeline.item.for'),
       title: root.getByTestId('timeline.item.title'),
       text: root.getByTestId('timeline.item.text'),
       more: root.getByTestId('timeline.item.text.more'),
+      read: root.getByTestId('timeline.item.read'),
       line: root.getByTestId('timeline.line'),
+      lineKind: root.getByTestId('timeline.line.kind'),
       lineTitle: root.getByTestId('timeline.line.title'),
       lineTime: root.getByTestId('timeline.line.time'),
       said: root.getByTestId('timeline.line.said'),
       note: root.getByTestId('timeline.line.note'),
+      undo: root.getByTestId('timeline.line.undo'),
       block: this.block(root),
+      confirm: this.confirm(root),
     };
   }
 
-  /** An open item's block, its head, its answer and its options, Other and its console. */
+  /**
+   * An open item's block, its head, its answer; a decision's options, a question's field and Send,
+   * an action's paste-back, Done and its options as buttons; Other and its console.
+   */
   private block(item: Locator) {
     const root = item.getByTestId('timeline.block');
     return {
@@ -86,6 +94,13 @@ export class TimelinePage {
       time: root.getByTestId('timeline.block.time'),
       deferred: root.getByTestId('timeline.block.deferred'),
       note: root.getByTestId('timeline.block.note'),
+      said: root.getByTestId('timeline.block.said'),
+      answerField: root.getByTestId('timeline.block.field'),
+      answerSend: root.getByTestId('timeline.block.send'),
+      paste: root.getByTestId('timeline.block.paste'),
+      done: root.getByTestId('timeline.block.done'),
+      acts: root.getByTestId('timeline.block.act'),
+      act: (label: string) => root.getByTestId('timeline.block.act').filter({ hasText: label }),
       options: root.getByTestId('timeline.block.option'),
       option: (label: string) => root.getByTestId('timeline.block.option').filter({ has: this.page.locator('.label', { hasText: label }) }),
       other: root.getByTestId('timeline.block.other'),
@@ -93,6 +108,22 @@ export class TimelinePage {
       field: root.getByTestId('timeline.block.console.field'),
       send: root.getByTestId('timeline.block.console.send'),
       cancel: root.getByTestId('timeline.block.console.cancel'),
+    };
+  }
+
+  /** An open confirmation's card: its proposal, the check and the cross, No's console, Details. */
+  private confirm(item: Locator) {
+    return {
+      root: item.getByTestId('timeline.confirm'),
+      proposal: item.getByTestId('timeline.confirm.proposal'),
+      yes: item.getByTestId('timeline.confirm.yes'),
+      no: item.getByTestId('timeline.confirm.no'),
+      console: item.getByTestId('timeline.confirm.console'),
+      field: item.getByTestId('timeline.confirm.console.field'),
+      send: item.getByTestId('timeline.confirm.console.send'),
+      cancel: item.getByTestId('timeline.confirm.console.cancel'),
+      details: item.getByTestId('timeline.confirm.details'),
+      prose: item.getByTestId('timeline.confirm.prose'),
     };
   }
 

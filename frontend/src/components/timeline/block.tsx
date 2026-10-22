@@ -1,34 +1,72 @@
 /**
- * A one-ask item's block (F31), in a panel of its own under the prose that asks. Answered, it has
- * a head: its kind, a chevron where it opens, Answered, and when and by whom, Pilot's mark on a
- * block Pilot settled (F31.1, F31.3). An answer that is not a person's, and every answer in a done
- * item, reads closed: the chosen option only, which opens, as the chevron does, to every option,
- * changeable while the item is not done (F31.2). A deferred block reads "Deferred to <task>", or
- * to the project's end, its note under it; opened, every option, none chosen, stands under that
- * line (F31.4). A note sits under its answer with its icon (F17.4).
+ * A one-ask item's block (F31), in a panel of its own under the prose that asks: a decision's
+ * options, a question's field, an action's paste-back and buttons, a confirmation's check and cross.
+ * Answered, it has a head: its kind, a chevron where it opens, Answered, and when and by whom,
+ * Pilot's mark on a block Pilot settled (F31.1, F31.3). An answer that is not a person's, and every
+ * answer in a done item, reads closed: the answer only, which opens, as the chevron does, to the
+ * block's controls, live while the item is not done (F31.2). A deferred block reads "Deferred to
+ * <task>", or to the project's end, its note under it; opened, its controls, nothing chosen, stand
+ * under that line (F31.4). A note sits under its answer with its icon (F17.4).
  */
 
 import { useState } from 'react';
 import { Check, ChevronDown, ChevronUp } from 'lucide-react';
 import { Time } from '@/components/shared/time';
+import { ActionAnswer } from '@/components/timeline/action';
+import { ConfirmControls, Proposal } from '@/components/timeline/confirmation';
 import { DecisionOptions } from '@/components/timeline/decision';
 import { blockKindOf } from '@/components/timeline/kinds';
 import { Note } from '@/components/timeline/note';
+import { QuestionAnswer } from '@/components/timeline/question';
+import { Deferral, DEFERRED } from '@/components/timeline/said';
 import { UserAvatar } from '@/components/timeline/user-avatar';
 import { useAnswer } from '@/hooks/use-answer';
 import type { Block as BlockData, TimelineItem } from '@/hooks/use-timeline';
 import { cn } from '@/lib/utils';
 
-/** The answer that stands for a block sent to a task of the plan, or to the project's end. */
-const DEFERRED = 'deferred';
-
 export function Block({ item, block }: { item: TimelineItem; block: BlockData }) {
-  const { answer, saving } = useAnswer(item.id, block.id);
+  const { answer, done, saving } = useAnswer(item.id, block.id);
   const [opened, setOpened] = useState(false);
   const answered = block.answer !== null || block.done !== null;
   const closable = answered && (block.by?.kind !== 'person' || item.done !== null);
   const closed = closable && !opened;
   const deferred = saving === null && block.answer === DEFERRED;
+  const live = item.done === null && saving === null;
+  const own = deferred ? null : block.answer;
+
+  const controls = () => {
+    if (block.confirmation) {
+      return (
+        <ConfirmControls item={item} block={block} chosen={saving === null ? own : saving.answer} live={live && !closed} onAnswer={answer}>
+          <Proposal block={block} />
+          {saving === null && !deferred && block.note !== null && <Note text={block.note} />}
+        </ConfirmControls>
+      );
+    }
+    switch (block.kind) {
+      case 'decision':
+        return (
+          <DecisionOptions
+            item={item}
+            block={block}
+            chosen={saving === null ? own : saving.answer}
+            closed={closed}
+            live={live}
+            onOpen={() => setOpened(true)}
+            onAnswer={answer}
+          />
+        );
+      case 'question':
+        return <QuestionAnswer item={item} block={block} saving={saving} closed={closed} live={live} onAnswer={answer} />;
+      case 'action':
+        return <ActionAnswer item={item} block={block} saving={saving} closed={closed} live={live} onAnswer={answer} onDone={done} />;
+      default: {
+        const unknown: never = block.kind;
+        throw new Error(`A block of kind ${String(unknown)} has no controls`);
+      }
+    }
+  };
+
   return (
     <section
       className={cn('block solo', answered ? 'answered' : 'open')}
@@ -38,25 +76,8 @@ export function Block({ item, block }: { item: TimelineItem; block: BlockData })
     >
       {answered && <BlockHead block={block} closable={closable} closed={closed} onToggle={() => setOpened(!opened)} />}
       <div className="block-controls">
-        {deferred && (
-          <div className="answer" data-testid="timeline.block.deferred">
-            <div className="said">
-              Deferred to <em>{block.deferral!.title ?? "the project's end"}</em>
-            </div>
-            {block.note !== null && <Note text={block.note} />}
-          </div>
-        )}
-        {!(closed && deferred) && (
-          <DecisionOptions
-            item={item}
-            block={block}
-            chosen={saving ?? (deferred ? null : block.answer)}
-            closed={closed}
-            live={item.done === null && saving === null}
-            onOpen={() => setOpened(true)}
-            onAnswer={answer}
-          />
-        )}
+        {deferred && <Deferral block={block} />}
+        {!(closed && deferred) && controls()}
       </div>
     </section>
   );

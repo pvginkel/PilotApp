@@ -1,5 +1,5 @@
 /* A project's timeline (PilotAppSpecs design/mockup/style.css, "Layout", "Dividers", "Items", "The
-   collapsed line", "The prompt that started a project" and "Blocks"). */
+   collapsed line", "The prompt that started a project", "Blocks" and the confirmation's card). */
 
 @layer components {
   .feed { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; scrollbar-gutter: stable; }
@@ -98,6 +98,49 @@
   .chip.urgent { background: hsl(var(--urgent) / 0.15); color: hsl(var(--urgent-text)); font-weight: 600; }
   .item-title { margin: 6px 0 4px; font-size: 16px; font-weight: 600; line-height: 1.4; }
   .item-after { margin-top: 12px; }
+  .item-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+
+  /* ---- A confirmation: a compact card in a soft yellow, Yes and No as a check and a cross, grey
+     until hovered --------------------------------------------------------------------------- */
+
+  .item.confirm.open:not(.urgent) {
+    border-color: hsl(var(--warning) / 0.55);
+    background: linear-gradient(hsl(var(--warning) / 0.08), hsl(var(--warning) / 0.08)), hsl(var(--card));
+  }
+  :root[data-theme="dark"] .item.confirm.open:not(.urgent) {
+    background: linear-gradient(hsl(var(--warning) / 0.12), hsl(var(--warning) / 0.12)), hsl(var(--card));
+  }
+  .item.confirm .item-body { padding: 6px 14px 10px; }
+  .item.confirm:not(.urgent) .item-head .kind, .item-head .why { color: hsl(var(--warning-text)); }
+  .confirm-row { display: flex; align-items: center; gap: 12px; }
+  .confirm-text { flex: 1; min-width: 0; }
+  .confirm-row .item-title { margin: 0; font-size: 15px; }
+  .proposal { font-size: 14px; line-height: 1.45; color: hsl(var(--muted-foreground)); }
+  .confirm-text .note, .confirm-text .answer { margin-top: 4px; font-size: 13.5px; color: hsl(var(--muted-foreground)); }
+  .yes-no { display: flex; flex: none; gap: 6px; }
+  .yn {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+    background: hsl(var(--background));
+    color: hsl(var(--muted-foreground));
+    font-size: 18px;
+    cursor: pointer;
+  }
+  .yn.yes:hover:not(:disabled), .yn.yes.chosen { border-color: hsl(var(--success) / 0.6); background: hsl(var(--success) / 0.12); color: hsl(var(--success-text)); }
+  .yn.no:hover:not(:disabled), .yn.no.chosen { border-color: hsl(var(--destructive) / 0.6); background: hsl(var(--destructive) / 0.1); color: hsl(var(--destructive-text)); }
+  .yn:disabled { cursor: default; }
+  .yn:disabled:not(.chosen) { opacity: 0.4; }
+  .confirm-foot { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 14px; margin-top: 6px; font-size: 13px; }
+  .link.details { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; font-size: 13px; }
+  .confirm-prose { margin-top: 8px; }
+  .item.confirm .console, .block .console.no { margin-top: 8px; }
+  .console.no { border-color: hsl(var(--destructive) / 0.6); }
+  .console.no:focus-within { box-shadow: 0 0 0 3px hsl(var(--destructive) / 0.15); }
 
   /* ---- Blocks: where a person answers, under the prose that asks --------------------------- */
 
@@ -213,20 +256,25 @@
   .console-btn:disabled { opacity: 0.45; cursor: default; }
   .console-btn.send { color: hsl(var(--primary-strong)); }
 
-  /* An answer that is no option's row: a deferral. */
+  /* An answer that is no option's row: a question's, an action's, a deferral. */
   .answer { font-size: 14px; }
   .answer .said { white-space: pre-wrap; }
-  .answer + .options { margin-top: 10px; }
+  .answer .said.boxed { padding: 6px 10px; border-radius: 6px; background: hsl(var(--muted)); }
+  .block-controls > .answer + * { margin-top: 10px; }
+
+  /* An action's paste-back over its buttons: the field's parent, kept in view as it grows. */
+  .paste-back { scroll-margin-bottom: 24px; }
+  .paste-back .item-actions { margin-top: 8px; }
 
   /* A note under its answer, led by a note's icon; its lines after the first align with its words. */
-  .block .note {
+  .block .note, .confirm-text .note {
     display: block;
     padding-left: calc(1em + 6px);
     text-indent: calc(-1em - 6px);
     color: hsl(var(--muted-foreground));
     white-space: pre-wrap;
   }
-  .block .note .icon { margin-right: 6px; }
+  .block .note .icon, .confirm-text .note .icon { margin-right: 6px; }
   .answer .note { margin-top: 6px; }
   .option .note { flex-basis: 100%; }
   .option.chosen .note { color: hsl(var(--primary-foreground) / 0.85); }
@@ -248,6 +296,8 @@
   }
   .item.collapsed { border-color: transparent; background: none; margin: 2px 0; }
   .line .kind-icon { color: hsl(var(--primary)); }
+  .line .kind-icon.yes { color: hsl(var(--success-text)); }
+  .line .kind-icon.no { color: hsl(var(--destructive-text)); }
   .line .title, .line .said-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .line .title { flex: 1; }
   /* The answer wraps to a line of its own, under the title and on to the row's end. */

@@ -18,6 +18,8 @@ type TransitionKind = components['schemas']['TransitionRequestSchema.e86ccd6']['
 type ItemSpec = components['schemas']['InventedItemCreateSchema.6d6b324'];
 type Save = components['schemas']['InventedSaveSchema.6d6b324'];
 type Timeline = components['schemas']['TimelineSchema.1fdd8ae'];
+type Block = components['schemas']['TimelineSchema.1fdd8ae.BlockSchema'];
+type BlockPart = components['schemas']['TimelineSchema.1fdd8ae.BlockPartSchema'];
 
 export class Projects {
   constructor(
@@ -83,6 +85,12 @@ export class Projects {
     const response = await this.page.request.get(`${this.backendUrl}/api/projects/${id}/timeline`);
     expect(response.status(), await response.text()).toBe(200);
     return (await response.json()) as Timeline;
+  }
+
+  /** A one-ask item's block, as the signed-in person reads the project's timeline. */
+  async block(projectId: string, itemId: string): Promise<Block> {
+    const item = (await this.timeline(projectId)).items.find((each) => each.id === itemId)!;
+    return (item.body!.find((part) => part.type === 'block') as BlockPart).block;
   }
 
   /** The project list's tabs, or the archived projects', as the signed-in person reads them. */

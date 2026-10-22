@@ -1,21 +1,25 @@
 /**
  * A prose item on the timeline. Open, it is its head (F12), its title and its text, the prose drawn
- * as GFM (F29.1), the prose before its first block folding when long (F12.2), a decision's block
- * answered in its place (F19.1); an urgent one is tinted (F10.1), and one whose latest save is held
- * shows its last published text with a dashed border, a concept (F78). Done, it is its line (F13.1,
- * F13.2).
+ * as GFM (F29.1), the prose before its first block folding when long (F12.2), a one-ask item's
+ * block answered in its place (F19.1, F20, F21) and a notice's Read under its text (F23); a
+ * confirmation is a card of its own (F22). An urgent one is tinted (F10.1), and one whose latest
+ * save is held shows its last published text with a dashed border, a concept (F78). Done, it is
+ * its line (F13.1, F13.2), with Undo while the record offers it (F14.1).
  */
 
 import type { AnimationEvent, ReactNode } from 'react';
-import { StickyNote, TriangleAlert } from 'lucide-react';
+import { Check, StickyNote, Undo2, X } from 'lucide-react';
 import { Fold } from '@/components/shared/fold';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Markdown } from '@/components/shared/markdown';
 import { Time } from '@/components/shared/time';
 import { Block } from '@/components/timeline/block';
+import { Confirmation } from '@/components/timeline/confirmation';
+import { ItemHead } from '@/components/timeline/item-head';
 import { kindOf } from '@/components/timeline/kinds';
 import { UserAvatar } from '@/components/timeline/user-avatar';
-import { blocksOf, titleOf, type BodyPart, type ProsePart, type TimelineItem, type TimelineUser } from '@/hooks/use-timeline';
+import { useRead, useUndo } from '@/hooks/use-marks';
+import { blocksOf, isProse, titleOf, type BodyPart, type TimelineItem, type TimelineUser } from '@/hooks/use-timeline';
 import { usePerson } from '@/hooks/use-self';
 import { cn } from '@/lib/utils';
 
@@ -34,6 +38,7 @@ export function Item({ item, fresh, onFlashed }: ItemProps) {
       className={cn(
         'item',
         done ? 'collapsed' : 'open',
+        item.kind === 'confirmation' && 'confirm',
         !done && item.concept && 'concept',
         !done && item.urgent && 'urgent',
         fresh && 'fresh',
@@ -51,8 +56,7 @@ export function Item({ item, fresh, onFlashed }: ItemProps) {
 }
 
 function OpenItem({ item }: { item: TimelineItem }) {
-  // A decision is its one block, answered in place.
-  const ask = item.kind === 'decision' ? <Block item={item} block={blocksOf(item)[0]} /> : null;
+  if (item.kind === 'confirmation') return <Confirmation item={item} />;
   return (
     <div className="item-body">
       <ItemHead item={item} />
@@ -60,37 +64,37 @@ function OpenItem({ item }: { item: TimelineItem }) {
         <LinkedText text={titleOf(item)} />
       </div>
       {/* The API gives every prose item but the opening its text. */}
-      <ItemText body={item.body!} ask={ask} />
+      <ItemText body={item.body!} ask={askOf(item)} />
     </div>
   );
 }
 
-function ItemHead({ item }: { item: TimelineItem }) {
-  const { icon: Icon, label } = kindOf(item);
+/** What an open item asks, answered in place: a one-ask item's one block, a notice's Read. */
+function askOf(item: TimelineItem): ReactNode {
+  switch (item.kind) {
+    case 'decision':
+    case 'question':
+    case 'action':
+      return <Block item={item} block={blocksOf(item)[0]} />;
+    case 'notice':
+      return <Read item={item} />;
+    default:
+      return null;
+  }
+}
+
+/** A notice's one button, its own state: nothing goes back to a session (F23.1). */
+function Read({ item }: { item: TimelineItem }) {
+  const { mark, pending } = useRead(item.id);
   return (
-    <div className="item-head" data-testid="timeline.item.head">
-      <span className="kind" data-testid="timeline.item.kind">
-        <Icon className="icon" aria-hidden="true" />
-        {label}
-      </span>
-      <span className="sep">·</span>
-      <Time at={item.created_at} format="clock" testId="timeline.item.time" />
-      {item.urgent && (
-        <span className="chip urgent" data-testid="timeline.item.urgent">
-          <TriangleAlert className="icon" aria-hidden="true" />
-          Urgent
-        </span>
-      )}
-      {item.for_user && (
-        <span className="chip for" data-testid="timeline.item.for">
-          for {item.for_user.name}
-        </span>
-      )}
+    <div className="item-actions">
+      <button type="button" className="btn btn-primary" onClick={mark} disabled={pending} data-testid="timeline.item.read">
+        <Check className="icon" aria-hidden="true" />
+        Read
+      </button>
     </div>
   );
 }
-
-const isProse = (part: BodyPart): part is ProsePart => part.type === 'prose';
 
 /** The prose before the first block folds, the ask stands in that block's place, and what comes after shows whole. */
 function ItemText({ body, ask }: { body: BodyPart[]; ask: ReactNode }) {
@@ -145,25 +149,25 @@ function saidIn(item: TimelineItem): Said | null {
 }
 
 /**
- * The same line for every kind: its icon, its title and when it was done; under the title the
- * person's answer to a one-ask item with its note, the other person's after their avatar. It does
- * not expand.
+ * The same line for every kind: its icon, its title, Undo while the record offers it, and when it
+ * was done; under the title the person's answer to a one-ask item with its note, the other
+ * person's after their avatar. A confirmation's Yes leads it with a green check, its No with a red
+ * cross (F22.5). It does not expand.
  */
 function DoneLine({ item }: { item: TimelineItem }) {
   const me = usePerson();
-  const { icon: Icon } = kindOf(item);
   const title = titleOf(item);
   const said = saidIn(item);
+  // An item's done line is drawn only once it is done.
+  const done = item.done!;
   return (
     <div className="line" data-testid="timeline.line">
-      <span className="kind-icon">
-        <Icon className="icon" aria-hidden="true" />
-      </span>
+      <LineLead item={item} />
       <span className="title" title={title} data-testid="timeline.line.title">
         <LinkedText text={title} />
       </span>
-      {/* An item's done line is drawn only once it is done. */}
-      <Time at={item.done!.at} format="clock" testId="timeline.line.time" />
+      {done.undo && <Undo item={item} />}
+      <Time at={done.at} format="clock" testId="timeline.line.time" />
       {said && (
         <span className="said" data-testid="timeline.line.said">
           <span className="said-text" title={[said.words, said.note].filter(Boolean).join(' · ')}>
@@ -180,5 +184,42 @@ function DoneLine({ item }: { item: TimelineItem }) {
         </span>
       )}
     </div>
+  );
+}
+
+/** The line's icon: its kind's, or a confirmation's answer. */
+function LineLead({ item }: { item: TimelineItem }) {
+  const answer = item.kind === 'confirmation' ? blocksOf(item)[0].answer : null;
+  if (answer === 'Yes' || answer === 'No') {
+    const Icon = answer === 'Yes' ? Check : X;
+    return (
+      <span className={cn('kind-icon', answer === 'Yes' ? 'yes' : 'no')} title={answer} data-testid="timeline.line.kind">
+        <Icon className="icon" aria-hidden="true" />
+      </span>
+    );
+  }
+  const { icon: Icon } = kindOf(item);
+  return (
+    <span className="kind-icon" data-testid="timeline.line.kind">
+      <Icon className="icon" aria-hidden="true" />
+    </span>
+  );
+}
+
+/** Undo, whoever answered, until a session has taken the answer (F14.1). */
+function Undo({ item }: { item: TimelineItem }) {
+  const { mark, pending } = useUndo(item.id);
+  return (
+    <button
+      type="button"
+      className="btn btn-ghost btn-sm btn-icon"
+      onClick={mark}
+      disabled={pending}
+      title="Undo, until a session has taken it"
+      aria-label="Undo"
+      data-testid="timeline.line.undo"
+    >
+      <Undo2 className="icon" aria-hidden="true" />
+    </button>
   );
 }

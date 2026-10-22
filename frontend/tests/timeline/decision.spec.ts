@@ -5,9 +5,9 @@
  * deferral reads it: closed, opening to every option, with who answered in its head (F31).
  */
 
-import type { Page } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
+import { slowNetwork } from '../support/network';
 import type { Projects } from '../support/projects';
 import type { components } from '@/lib/api/generated/types';
 
@@ -34,19 +34,6 @@ const UNSENT_KEY = 'pilot.unsent';
 async function blockOf(projects: Projects, project: string, item: string): Promise<Block> {
   const found = (await projects.timeline(project)).items.find((each) => each.id === item)!;
   return (found.body!.find((part) => part.type === 'block') as BlockPart).block;
-}
-
-/** Every request the page sends waits `latency` milliseconds longer, until the returned call. */
-async function slowNetwork(page: Page, latency: number): Promise<() => Promise<void>> {
-  const cdp = await page.context().newCDPSession(page);
-  const conditions = (wait: number) =>
-    cdp.send('Network.emulateNetworkConditions', { offline: false, latency: wait, downloadThroughput: -1, uploadThroughput: -1 });
-  await cdp.send('Network.enable');
-  await conditions(latency);
-  return async () => {
-    await conditions(0);
-    await cdp.detach();
-  };
 }
 
 test.describe('A decision', () => {

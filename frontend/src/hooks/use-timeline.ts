@@ -13,13 +13,15 @@ export type TimelineItem = Schemas['TimelineSchema.1fdd8ae.TimelineItemSchema'];
 export type TimelineUser = Schemas['TimelineSchema.1fdd8ae.UserSchema'];
 export type Block = Schemas['TimelineSchema.1fdd8ae.BlockSchema'];
 export type BodyPart = NonNullable<TimelineItem['body']>[number];
-export type ProsePart = Schemas['TimelineSchema.1fdd8ae.ProsePartSchema'];
+type ProsePart = Schemas['TimelineSchema.1fdd8ae.ProsePartSchema'];
 
 export function useTimeline(id: string) {
   const query = useGetProjectsTimelineByProjectId({ path: { project_id: id } }, { refetchOnWindowFocus: 'always' });
   useUiStateInstrumentation('project.timeline', { isLoading: query.isLoading, error: query.error });
   return query;
 }
+
+export const isProse = (part: BodyPart): part is ProsePart => part.type === 'prose';
 
 /** A prose item's blocks, in their order. */
 export function blocksOf(item: TimelineItem): Block[] {

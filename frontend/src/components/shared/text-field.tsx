@@ -1,7 +1,8 @@
 /**
  * The text field every answer is typed into (F115): one line at rest, growing with what is typed
- * to eight lines, then scrolling. Enter breaks the line and Ctrl+Enter (Cmd+Enter on a Mac) sends
- * (F110). While it has the focus, its parent, the row that holds its Send, is kept in view.
+ * to eight lines, then scrolling. Enter breaks the line and Ctrl+Enter (Cmd+Enter on a Mac) sends,
+ * where the field has one Send (F110). While it has the focus, its parent, the row that holds what
+ * sends it, is kept in view.
  */
 
 import { useLayoutEffect, useRef, type KeyboardEvent } from 'react';
@@ -12,7 +13,8 @@ const LINES = 8;
 interface TextFieldProps {
   value: string;
   onChange: (value: string) => void;
-  onSend: () => void;
+  /** Ctrl+Enter's; none where several buttons send the field, as an action's options do. */
+  onSend?: () => void;
   /** Esc in the field, where it closes what holds it: Other's console. */
   onEscape?: () => void;
   label: string;
@@ -39,7 +41,7 @@ export function TextField({ value, onChange, onSend, onEscape, label, placeholde
   }, [value]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing) {
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing && onSend) {
       event.preventDefault();
       onSend();
     } else if (event.key === 'Escape' && onEscape) {

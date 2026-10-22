@@ -10,13 +10,11 @@
  */
 
 import { useState } from 'react';
-import { Send, X } from 'lucide-react';
 import { LinkedText } from '@/components/shared/linked-text';
-import { TextField } from '@/components/shared/text-field';
+import { Console } from '@/components/timeline/console';
 import { Note } from '@/components/timeline/note';
-import { useUnsentText } from '@/hooks/use-unsent-text';
+import type { Answer } from '@/hooks/use-answer';
 import type { Block, TimelineItem } from '@/hooks/use-timeline';
-import { useEscape } from '@/lib/keys';
 import { cn } from '@/lib/utils';
 
 /** A proposal's answer, and the label of a decision's one row where it proposes nothing. */
@@ -46,7 +44,7 @@ interface DecisionOptionsProps {
   /** Whether it takes an answer now. */
   live: boolean;
   onOpen: () => void;
-  onAnswer: (answer: string, onSaved?: () => void) => void;
+  onAnswer: Answer;
 }
 
 export function DecisionOptions({ item, block, chosen, closed, live, onOpen, onAnswer }: DecisionOptionsProps) {
@@ -103,10 +101,14 @@ export function DecisionOptions({ item, block, chosen, closed, live, onOpen, onA
         </button>
       ))}
       {live && typing ? (
-        <OtherConsole
+        <Console
           field={`${item.id}/${block.id}/other`}
           initial={kept ?? ''}
-          onSend={onAnswer}
+          label="Other, in your own words"
+          placeholder="Other: in your own words"
+          send="Send"
+          testId="timeline.block.console"
+          onSend={(words, onSaved) => onAnswer(words, { onSaved })}
           onClose={() => setTyping(false)}
         />
       ) : (
@@ -140,59 +142,5 @@ function RowWords({ label, text }: { label: string; text: string | null }) {
         </span>
       )}
     </>
-  );
-}
-
-interface OtherConsoleProps {
-  /** Where its unsent words are kept in the browser. */
-  field: string;
-  /** The words it opens with while none are kept. */
-  initial: string;
-  onSend: (words: string, onSaved: () => void) => void;
-  onClose: () => void;
-}
-
-/** Other's console, in Esc's order under everything else, and closed by Esc in its field too. */
-function OtherConsole({ field, initial, onSend, onClose }: OtherConsoleProps) {
-  const { text, change, sent } = useUnsentText(field, initial);
-  useEscape('console', true, onClose);
-  const blank = text.trim() === '';
-  const send = () => {
-    if (!blank) onSend(text, sent);
-  };
-  return (
-    <div className="console" data-testid="timeline.block.console">
-      <TextField
-        value={text}
-        onChange={change}
-        onSend={send}
-        onEscape={onClose}
-        label="Other, in your own words"
-        placeholder="Other: in your own words"
-        autoFocus
-        testId="timeline.block.console.field"
-      />
-      <button
-        type="button"
-        className="console-btn send"
-        onClick={send}
-        disabled={blank}
-        title="Send (Ctrl+Enter)"
-        aria-label="Send"
-        data-testid="timeline.block.console.send"
-      >
-        <Send className="icon" aria-hidden="true" />
-      </button>
-      <button
-        type="button"
-        className="console-btn"
-        onClick={onClose}
-        title="Cancel (Esc)"
-        aria-label="Cancel"
-        data-testid="timeline.block.console.cancel"
-      >
-        <X className="icon" aria-hidden="true" />
-      </button>
-    </div>
   );
 }
