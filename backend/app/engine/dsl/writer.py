@@ -7,13 +7,20 @@ record does not own is left as written, its line ending included (TD
 §7.1.4), and a line the record writes takes the text's own ending.
 """
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import yaml
 
-from app.engine.dsl.document import AnswerChannel, Block, BlockKind, Fault, Span
+from app.engine.dsl.document import (
+    AnswerChannel,
+    Block,
+    BlockKind,
+    Fault,
+    ParsedDocument,
+    Span,
+)
 from app.engine.dsl.reader import (
     AGENT,
     ANSWER_KEYS,
@@ -32,8 +39,9 @@ _FENCE_PROOF_INDENT = 4
 @dataclass(frozen=True)
 class Merge:
     """An agent's save merged against the published text: the text to
-    publish, and a fault per line the merge put back or took out, at its line
-    in `text`, for a `reverted` Save Error."""
+    publish, and a fault per line, block or body prose the merge put back or
+    took out, at its line in `text` where it has one, for a `reverted` Save
+    Error."""
 
     text: str
     reverted: tuple[Fault, ...]
@@ -136,12 +144,15 @@ def merge(published: str, save: str, document: DocumentKind) -> Merge:
     §5.3 step 4): the agent's prose, front matter, definitions and own answer
     lines from the save, every record-owned line from the published text.
 
-    A block's answer lines are the record's when its `by` names a person. The
-    record's lines changed or dropped are put back at the end of the block's
-    mapping, and a person's lines the record does not hold are taken out. A
-    block the save dropped is restored whole, except in the draft, where it
-    goes with its answers (F47.4). Every line of the opening is the
-    record's (DB 162).
+    A block a person has answered is the record's whole (F32.7): where the
+    save's fence differs, the published one replaces it. A person's lines the
+    record does not hold are taken out of any other block. In a registered
+    document a person has answered in, the body prose is the record's too,
+    the front matter staying the agent's. A block the save dropped is
+    restored whole. The draft is exempt (F47.4): there a person's answer
+    lines alone are the record's, put back at the end of the block's mapping
+    where changed or dropped, and a block the save dropped goes with its
+    answers. Every line of the opening is the record's (DB 162).
     """
     if document is DocumentKind.OPENING:
         return _merge_opening(published, save)
@@ -150,11 +161,23 @@ def merge(published: str, save: str, document: DocumentKind) -> Merge:
     published_blocks = parse(published).blocks
     held = {block.local_id: block for block in published_blocks}
     saved = {block.local_id: block for block in parse(save).blocks}
+    draft = document is DocumentKind.DRAFT
     for block in saved.values():
-        _merge_block(edit, block, held.get(block.local_id), source)
-    if document is not DocumentKind.DRAFT:
-        _restore_dropped_blocks(edit, published_blocks, saved, source)
+        answered = held.get(block.local_id)
+        if answered is not None and _a_persons(answered):
+            if draft:
+                _carry_answer(edit, block, answered, source)
+            else:
+                _carry_fence(edit, block, answered, source)
+        elif _a_persons(block):
+            _drop_unheld(edit, block)
+    if not draft:
+        _place_blocks(edit, published_blocks, saved, source, _restored)
     text, reverted = edit.apply()
+    if document is DocumentKind.REGISTERED_ITEM and any(
+        map(_a_persons, published_blocks)
+    ):
+        return _carry_prose(published, text, reverted)
     return Merge(text, reverted)
 
 
@@ -175,87 +198,203 @@ def _merge_opening(published: str, save: str) -> Merge:
     )
 
 
-def _merge_block(
-    edit: "_Edit", block: Block, published: Block | None, source: "_Edit"
+def _carry_fence(
+    edit: "_Edit", block: Block, published: Block, source: "_Edit"
+) -> None:
+    fence = [source.content(number) for number in _numbers(published.fence)]
+    if [edit.content(number) for number in _numbers(block.fence)] == fence:
+        return
+    edit.drop(block.fence)
+    edit.insert(
+        block.fence.last,
+        fence,
+        [(0, f"block {block.local_id} reverted: answered by a person")],
+    )
+
+
+def _carry_answer(
+    edit: "_Edit", block: Block, published: Block, source: "_Edit"
 ) -> None:
     prefix = f"block {block.local_id}: "
-    if published is not None and _a_persons(published):
-        record = source.answer_lines(published)
-        written = edit.answer_lines(block)
-        if written == record:
-            return
-        indent = edit.indent(block)
-        restored: list[str] = []
-        marks: list[tuple[int, str]] = []
-        for key, lines in record.items():
-            if written.get(key) != lines:
-                marks.append(
-                    (
-                        len(restored),
-                        f"{prefix}`{key}:` is the record's,"
-                        f" {published.by}'s answer; reverted",
-                    )
+    record = source.answer_lines(published)
+    written = edit.answer_lines(block)
+    if written == record:
+        return
+    indent = edit.indent(block)
+    restored: list[str] = []
+    marks: list[tuple[int, str]] = []
+    for key, lines in record.items():
+        if written.get(key) != lines:
+            marks.append(
+                (
+                    len(restored),
+                    f"{prefix}`{key}:` is the record's,"
+                    f" {published.by}'s answer; reverted",
                 )
-            restored.extend(_indented(lines, indent))
-        marks.extend(
-            (
-                0,
-                f"{prefix}`{key}:` beside {published.by}'s answer is the"
-                " record's to write; dropped",
             )
-            for key in written
-            if key not in record
+        restored.extend(_indented(lines, indent))
+    marks.extend(
+        (
+            0,
+            f"{prefix}`{key}:` beside {published.by}'s answer is the"
+            " record's to write; dropped",
         )
-        after = _mapping_end(block)
-        for span in _answer_spans(block).values():
-            edit.drop(span)
-        edit.insert(after, restored, marks)
-    elif _a_persons(block):
-        for key, span in _answer_spans(block).items():
-            edit.drop(
-                span,
-                f"{prefix}`{key}:` is {block.by}'s answer, which the record does"
-                " not hold; dropped",
-            )
+        for key in written
+        if key not in record
+    )
+    after = _mapping_end(block)
+    for span in _answer_spans(block).values():
+        edit.drop(span)
+    edit.insert(after, restored, marks)
 
 
-def _restore_dropped_blocks(
+def _drop_unheld(edit: "_Edit", block: Block) -> None:
+    for key, span in _answer_spans(block).items():
+        edit.drop(
+            span,
+            f"block {block.local_id}: `{key}:` is {block.by}'s answer, which the"
+            " record does not hold; dropped",
+        )
+
+
+def _restored(block: Block) -> list[tuple[int, str]]:
+    return [
+        (0, f"block {block.local_id}: only the draft's blocks may be removed; restored")
+    ]
+
+
+def _place_blocks(
     edit: "_Edit",
-    published: Sequence[Block],
-    saved: Mapping[str, Block],
+    blocks: Sequence[Block],
+    present: Mapping[str, Block],
     source: "_Edit",
+    marks: Callable[[Block], list[tuple[int, str]]],
 ) -> None:
-    """Each published block the save dropped, its fence as published, after
-    the nearest block before it that the save keeps, else before the nearest
-    after it, else at the end."""
+    """Each of `blocks` that `present` lacks, its fence as `source` has it,
+    after the nearest block before it that `present` has, else before the
+    nearest after it, else at the end; each of its marks at its line of the
+    fence."""
     appended = False
-    for index, block in enumerate(published):
-        if block.local_id in saved:
+    for index, block in enumerate(blocks):
+        if block.local_id in present:
             continue
         fence = [source.content(number) for number in _numbers(block.fence)]
-        message = (
-            f"block {block.local_id}: only the draft's blocks may be removed; restored"
-        )
         before = next(
             (
-                saved[b.local_id]
-                for b in reversed(published[:index])
-                if b.local_id in saved
+                present[b.local_id]
+                for b in reversed(blocks[:index])
+                if b.local_id in present
             ),
             None,
         )
         after = next(
-            (saved[b.local_id] for b in published[index + 1 :] if b.local_id in saved),
+            (present[b.local_id] for b in blocks[index + 1 :] if b.local_id in present),
             None,
         )
         if before is not None:
-            edit.insert(before.fence.last, ["", *fence], [(1, message)])
+            edit.insert(before.fence.last, ["", *fence], _shifted(marks(block), 1))
         elif after is not None:
-            edit.insert(after.fence.first - 1, [*fence, ""], [(0, message)])
+            edit.insert(after.fence.first - 1, [*fence, ""], marks(block))
         else:
             lead = [""] if edit.lines or appended else []
-            edit.insert(len(edit.lines), [*lead, *fence], [(len(lead), message)])
+            edit.insert(
+                len(edit.lines), [*lead, *fence], _shifted(marks(block), len(lead))
+            )
             appended = True
+
+
+def _carry_prose(published: str, merged: str, reverted: tuple[Fault, ...]) -> Merge:
+    """A registered document a person has answered in (F32.7): where the
+    merged save's body prose differs from the published one, the published
+    body under the save's front matter, each block as the merge left it, and
+    each block the save added placed beside its neighbours."""
+    ours, theirs = parse(published), parse(merged)
+    source = _Edit(merged)
+    known = {block.local_id for block in ours.blocks}
+    held = _body(ours, _Edit(published), known)
+    saved = _body(theirs, source, known)
+    if [token for token, _ in held] == [token for token, _ in saved]:
+        return Merge(merged, reverted)
+    differs = next(
+        (
+            index
+            for index, (one, other) in enumerate(zip(held, saved, strict=False))
+            if one[0] != other[0]
+        ),
+        min(len(held), len(saved)),
+    )
+
+    def marks(block: Block) -> list[tuple[int, str]]:
+        return [
+            (fault.line - block.fence.first, fault.message)
+            for fault in reverted
+            if fault.line is not None and fault.line in _numbers(block.fence)
+        ]
+
+    edit = _Edit(_with_ending(published, source.ending))
+    front = ours.front_matter.span
+    if front is not None:
+        edit.drop(front)
+    if theirs.front_matter.span is not None:
+        edit.insert(
+            0 if front is None else front.last,
+            [source.content(n) for n in _numbers(theirs.front_matter.span)],
+        )
+    carried = {block.local_id: block for block in theirs.blocks}
+    for block in ours.blocks:
+        kept = carried[block.local_id]
+        edit.drop(block.fence)
+        edit.insert(
+            block.fence.last,
+            [source.content(number) for number in _numbers(kept.fence)],
+            marks(kept),
+        )
+    _place_blocks(
+        edit, theirs.blocks, {b.local_id: b for b in ours.blocks}, source, marks
+    )
+    if differs < len(held):
+        edit.mark(held[differs][1], _PROSE_REVERTED)
+    text, faults = edit.apply()
+    if differs == len(held):
+        faults = (*faults, Fault(None, _PROSE_REVERTED))
+    return Merge(text, faults)
+
+
+_BLANK = ("line", "")
+_PROSE_REVERTED = "the body prose reverted: a person has answered in the document"
+
+
+def _body(
+    parsed: ParsedDocument, edit: "_Edit", known: set[str]
+) -> list[tuple[tuple[str, str], int]]:
+    """The text after its front matter, each token with its line: a line of
+    prose by its content, every blank one alike, and a block `known` by its
+    id. Another block is left out with one blank line beside it, the one
+    before it else the one after it: the separator a block added brings."""
+    fences = {block.fence.first: block for block in parsed.blocks}
+    span = parsed.front_matter.span
+    number = 1 if span is None else span.last + 1
+    tokens: list[tuple[tuple[str, str], int]] = []
+    separator = False
+    while number <= len(edit.lines):
+        block = fences.get(number)
+        if block is None:
+            content = edit.content(number)
+            token = ("line", content) if content.strip() else _BLANK
+            if not (separator and token == _BLANK):
+                tokens.append((token, number))
+            separator = False
+            number += 1
+            continue
+        number = block.fence.last + 1
+        if block.local_id in known:
+            tokens.append((("block", block.local_id), block.fence.first))
+            separator = False
+        elif tokens and tokens[-1][0] == _BLANK:
+            tokens.pop()
+        else:
+            separator = True
+    return tokens
 
 
 def _rewrite(
@@ -294,6 +433,15 @@ def _mapping_end(block: Block) -> int:
 
 def _numbers(span: Span) -> range:
     return range(span.first, span.last + 1)
+
+
+def _shifted(marks: list[tuple[int, str]], by: int) -> list[tuple[int, str]]:
+    return [(offset + by, message) for offset, message in marks]
+
+
+def _with_ending(text: str, ending: str) -> str:
+    """Every line of `text` ended with `ending`."""
+    return ending.join(line.removesuffix("\r") for line in text.split("\n"))
 
 
 def _indented(lines: Sequence[str], indent: str) -> list[str]:
@@ -347,8 +495,9 @@ class _Edit:
         if parts[-1]:
             self.lines.append(parts[-1])
         first = text.find("\n")
-        self._ending = "\r\n" if first > 0 and text[first - 1] == "\r" else "\n"
+        self.ending = "\r\n" if first > 0 and text[first - 1] == "\r" else "\n"
         self._dropped: dict[int, list[str]] = {}
+        self._marked: dict[int, list[str]] = {}
         self._inserted: dict[int, list[tuple[list[str], list[tuple[int, str]]]]] = {}
 
     def content(self, number: int) -> str:
@@ -388,6 +537,10 @@ class _Edit:
         if fault is not None:
             self._dropped[span.first].append(fault)
 
+    def mark(self, number: int, fault: str) -> None:
+        """A fault at line `number`, kept or dropped."""
+        self._marked.setdefault(number, []).append(fault)
+
     def insert(
         self, after: int, lines: list[str], faults: Sequence[tuple[int, str]] = ()
     ) -> None:
@@ -402,15 +555,16 @@ class _Edit:
         def emit(after: int) -> None:
             for lines, marks in self._inserted.get(after, ()):
                 if out and not out[-1].endswith("\n"):
-                    out[-1] += self._ending
+                    out[-1] += self.ending
                 start = len(out) + 1
-                out.extend(line + self._ending for line in lines)
+                out.extend(line + self.ending for line in lines)
                 faults.extend(
                     Fault(start + offset, message) for offset, message in marks
                 )
 
         emit(0)
         for number, line in enumerate(self.lines, start=1):
+            faults.extend(Fault(len(out) + 1, m) for m in self._marked.get(number, ()))
             if number in self._dropped:
                 faults.extend(Fault(len(out) + 1, m) for m in self._dropped[number])
             else:

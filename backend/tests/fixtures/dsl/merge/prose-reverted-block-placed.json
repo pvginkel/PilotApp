@@ -1,0 +1,10 @@
+{
+  "rule": "merge: a reverted body keeps the blocks the save added, after the block before them",
+  "document": "registered_item",
+  "reverted": [
+    {
+      "line": 25,
+      "message": "the body prose reverted: a person has answered in the document"
+    }
+  ]
+}

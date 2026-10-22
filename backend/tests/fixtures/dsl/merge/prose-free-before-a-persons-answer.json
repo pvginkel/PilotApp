@@ -1,0 +1,5 @@
+{
+  "rule": "merge: a registered document's body prose is the agent's until a person answers in it",
+  "document": "registered_item",
+  "reverted": []
+}

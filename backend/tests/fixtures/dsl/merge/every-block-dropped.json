@@ -1,6 +1,6 @@
 {
   "rule": "merge: blocks dropped from a save that keeps none are restored at its end",
-  "document": "registered_item",
+  "document": "own_item",
   "reverted": [
     {
       "line": 12,

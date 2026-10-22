@@ -1,6 +1,6 @@
 {
-  "rule": "merge: a restored line takes the indentation of the block's mapping in the save",
-  "document": "registered_item",
+  "rule": "merge: in the draft, a restored line takes the indentation of the block's mapping in the save",
+  "document": "draft",
   "reverted": [
     {
       "line": 15,

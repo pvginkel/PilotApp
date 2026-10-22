@@ -1,0 +1,5 @@
+{
+  "rule": "merge: a block the save adds to a frozen body stays where the save put it",
+  "document": "registered_item",
+  "reverted": []
+}

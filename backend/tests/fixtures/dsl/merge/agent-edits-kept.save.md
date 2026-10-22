@@ -12,7 +12,6 @@ Pack the tarp.
 options:
   - Dome: sleeps four
   - Tunnel: sleeps six
-  - Hammocks
 recommend: Dome
 answer: Tunnel
 by: ada
@@ -28,6 +27,7 @@ at: 2026-10-12T09:00:00Z
 ```
 
 ```action id=A1
+check: the tent is in the car
 ```
 
 ```question id=Q2

@@ -95,6 +95,8 @@ options:
 
 TENT_FRONT_MATTER = "---\ntitle: Which tent?\n---\n"
 
+FROZEN = "block D1 reverted: answered by a person"
+
 ANSWERED_AT = datetime(2026, 10, 12, 9, 40, tzinfo=UTC)
 
 PLAN = (
@@ -902,6 +904,99 @@ class TestIngestServiceMerge:
             (environment.id, path, ErrorKind.REVERTED, 9, message)
         ]
 
+    def test_a_definition_under_a_persons_answer_is_reverted(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+    ) -> None:
+        with scoped_session(container):
+            item = container.document_service().bear_item(
+                project, "decision", "Which tent?", project_session, ANSWERED
+            )
+        path = f"draft-{project.number}/items/1-which-tent.md"
+        save = ANSWERED.replace("  - Tunnel\n", "  - Tunnel: sleeps two\n")
+
+        answer = _ingest(container, path, save, environment)
+
+        assert answer.content == ANSWERED.encode()
+        assert answer.faults == (dsl.Fault(5, FROZEN),)
+        assert session.get_one(Document, item.id).published_text == ANSWERED
+        assert _errors(session) == [
+            (environment.id, path, ErrorKind.REVERTED, 5, FROZEN)
+        ]
+
+    def test_undo_unfreezes_the_block(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        with scoped_session(container):
+            item = container.document_service().bear_item(
+                project, "decision", "Which tent?", project_session, UNANSWERED
+            )
+        document = session.get_one(Document, item.id)
+        path = f"draft-{project.number}/items/1-which-tent.md"
+        save = UNANSWERED.replace("  - Tunnel\n", "  - Tunnel: sleeps two\n")
+        with scoped_session(container):
+            container.record_service().answer(document, "D1", person, "Dome")
+        answered = document.published_text
+        assert answered is not None
+        frozen = _ingest(container, path, save, environment)
+        with scoped_session(container):
+            container.record_service().undo(item)
+
+        thawed = _ingest(container, path, save, environment)
+
+        assert frozen.faults == (dsl.Fault(5, FROZEN),)
+        assert frozen.content == answered.encode()
+        assert thawed.faults == ()
+        assert document.published_text == save
+
+    def test_a_registered_documents_prose_is_reverted_once_a_person_answered(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+    ) -> None:
+        published = ANSWERED.replace(
+            TENT_FRONT_MATTER, TENT_FRONT_MATTER + "\nRain is due.\n"
+        )
+        with scoped_session(container):
+            item = container.document_service().bear_item(
+                project, "decision", "Which tent?", project_session, published
+            )
+        document = session.get_one(Document, item.id)
+        document.source_environment_id = environment.id
+        document.source_path = "/work/Example/tents.md"
+        session.flush()
+        retitled = "title: Which tent for the lake?"
+        save = published.replace("Rain is due.", "Sun all week.").replace(
+            "title: Which tent?", retitled
+        )
+
+        answer = _ingest(
+            container,
+            f"draft-{project.number}/items/1-which-tent.md",
+            save,
+            environment,
+        )
+
+        merged = published.replace("title: Which tent?", retitled)
+        prose = "the body prose reverted: a person has answered in the document"
+        assert answer.content == merged.encode()
+        assert answer.faults == (dsl.Fault(5, prose),)
+        assert document.published_text == merged
+        assert item.title == "Which tent for the lake?"
+
     def test_a_block_a_non_draft_drops_is_restored(
         self,
         session: DbSession,
@@ -1239,13 +1334,7 @@ class TestIngestServiceSequences:
         assert fake_sidecar.text(path) == ANSWERED
         assert fake_sidecar.shadow[path] == sha256_hex(ANSWERED)
         assert _errors(session) == [
-            (
-                environment.id,
-                path,
-                ErrorKind.REVERTED,
-                10,
-                "block D1: `by:` is the record's, ada's answer; reverted",
-            )
+            (environment.id, path, ErrorKind.REVERTED, 5, FROZEN)
         ]
         assert fake_sidecar.drain() == []
 
@@ -1302,12 +1391,10 @@ class TestIngestServiceSequences:
         assert not container.tree_service().held_path(path)
         assert answer.content == merged.encode()
         assert fake_sidecar.text(path) == merged
-        assert answer.faults == 3
-        assert [(kind, line) for _, _, kind, line, _ in _errors(session)] == [
-            (ErrorKind.REVERTED, 11),
-            (ErrorKind.REVERTED, 12),
-            (ErrorKind.REVERTED, 13),
-        ]
+        assert answer.faults == 1
+        assert [
+            (kind, line, message) for _, _, kind, line, message in _errors(session)
+        ] == [(ErrorKind.REVERTED, 7, FROZEN)]
 
     def test_a_save_behind_a_projection_in_flight_is_stale_and_merged(
         self,

@@ -1,0 +1,10 @@
+{
+  "rule": "merge: a registered document's body prose is carried whole once a person has answered in it, its front matter the agent's",
+  "document": "registered_item",
+  "reverted": [
+    {
+      "line": 8,
+      "message": "the body prose reverted: a person has answered in the document"
+    }
+  ]
+}

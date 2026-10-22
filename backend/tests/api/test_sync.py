@@ -481,7 +481,7 @@ class TestPutFile:
         assert [
             (error.environment_id, error.path, error.kind_code, error.line)
             for error in session.scalars(select(SaveError))
-        ] == [(STORE_ENVIRONMENT_ID, path, ErrorKind.REVERTED, 10)]
+        ] == [(STORE_ENVIRONMENT_ID, path, ErrorKind.REVERTED, 5)]
 
     def test_a_held_save_is_204_with_its_own_hash_and_faults(
         self,
@@ -1198,7 +1198,7 @@ class TestCheck:
         assert response.json == {
             "checked": True,
             "errors": [
-                {"path": item, "kind": "reverted", "line": 10, "message": reverted},
+                {"path": item, "kind": "reverted", "line": 5, "message": reverted},
                 {"path": plan, "kind": "parse", "line": None, "message": held},
             ],
             "homeless_deferrals": [
@@ -1438,7 +1438,7 @@ class TestCheckSequences:
 
         checks = [fake_sidecar.check(item), fake_sidecar.check(item)]
 
-        assert told.startswith(f"{item}:10: ")
+        assert told.startswith(f"{item}:5: ")
         assert checks == [Check(True, told), Check(True, "")]
 
     def test_a_parse_error_is_told_until_a_clean_save(

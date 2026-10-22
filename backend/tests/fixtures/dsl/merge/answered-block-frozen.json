@@ -1,0 +1,10 @@
+{
+  "rule": "merge: a block a person has answered is carried whole, the save's definition reverted (F32.7)",
+  "document": "own_item",
+  "reverted": [
+    {
+      "line": 10,
+      "message": "block D1 reverted: answered by a person"
+    }
+  ]
+}

@@ -47,12 +47,24 @@ SECTION_6_4 = (
     "splice: the lines written take the text's own line ending",
     "merge: the agent's prose, front matter and definitions from the save, as written",
     "merge: the agent's own `by: agent` lines from the save, as written",
+    "merge: a block Pilot answered `by: agent` is the agent's to reword",
+    "merge: a block a person has answered is carried whole,"
+    " the save's definition reverted (F32.7)",
     "merge: a record-owned line the save changed is restored",
     "merge: a record-owned line the save dropped is restored",
     "merge: the agent's answer over a person's is reverted",
+    "merge: a registered document's body prose is carried whole once a person has"
+    " answered in it, its front matter the agent's",
+    "merge: a registered document's body prose is the agent's until a person"
+    " answers in it",
+    "merge: a block the save adds to a frozen body stays where the save put it",
+    "merge: a reverted body keeps the blocks the save added, after the block before them",
     "merge: a person's lines the record does not hold are dropped",
     "merge: a block the save dropped is restored whole, after the block before it",
     "merge: in the draft, a block the save dropped goes with its answers (F47.4)",
+    "merge: in the draft, the definition of a block a person answered is the agent's"
+    " (F47.4)",
+    "merge: in the draft, a record-owned line of a block the save keeps is restored",
     "merge: every line of the opening is the record's (DB 162)",
     "merge: the save's own line endings, a restored line's among them",
 )
@@ -618,28 +630,61 @@ ANSWERED = (
     "# Tent\n\n```decision id=D1\noptions:\n  - Dome\n  - Tunnel\nanswer: Tunnel\n"
     "by: ada\nat: 2026-10-12T09:40:00Z\n```\n"
 )
+FROZEN = "block D1 reverted: answered by a person"
+PROSE = "the body prose reverted: a person has answered in the document"
+TENT = "# Tent\n\n```decision id=D1\noptions:\n  - Dome\n  - Tunnel\nrecommend: Dome\n```\n"
+SEND = (
+    "# Send\n\n```decision id=C1\ntype: confirmation\nbecause: auto-pilot-off\n"
+    "proposal: Post the invitations today.\n```\n"
+)
+DRILL = "# Drill\n\n```action id=A1\ncheck: the receipt shows it returned\n```\n"
+REGISTERED = (
+    "---\ntitle: Tent\n---\n\nRain on the second night.\n\n```decision id=D1\n"
+    "options:\n  - Dome\n  - Tunnel\nanswer: Tunnel\nby: ada\n"
+    "at: 2026-10-12T09:40:00Z\n```\n"
+)
 
 
 class TestMerge:
     def test_a_save_equal_to_the_published_text_is_kept(self) -> None:
         assert merge(ANSWERED, ANSWERED, DocumentKind.HANDBOOK) == Merge(ANSWERED, ())
 
-    def test_a_person_s_lines_reordered_unchanged_are_kept(self) -> None:
+    def test_a_person_s_lines_reordered_revert_the_block(self) -> None:
         save = ANSWERED.replace(
             "by: ada\nat: 2026-10-12T09:40:00Z\n", "at: 2026-10-12T09:40:00Z\nby: ada\n"
         )
 
-        assert merge(ANSWERED, save, DocumentKind.HANDBOOK) == Merge(save, ())
+        assert merge(ANSWERED, save, DocumentKind.HANDBOOK) == Merge(
+            ANSWERED, (Fault(3, FROZEN),)
+        )
+
+    def test_in_the_draft_a_person_s_lines_reordered_unchanged_are_kept(
+        self,
+    ) -> None:
+        save = ANSWERED.replace(
+            "by: ada\nat: 2026-10-12T09:40:00Z\n", "at: 2026-10-12T09:40:00Z\nby: ada\n"
+        )
+
+        assert merge(ANSWERED, save, DocumentKind.DRAFT) == Merge(save, ())
 
     def test_a_person_s_lines_kept_in_a_save_with_crlf_are_kept(self) -> None:
         save = ANSWERED.replace("\n", "\r\n")
 
         assert merge(ANSWERED, save, DocumentKind.HANDBOOK) == Merge(save, ())
 
-    def test_a_block_the_save_emptied_gets_the_record_s_lines_back(self) -> None:
+    def test_a_block_the_save_emptied_gets_its_fence_back(self) -> None:
         save = "# Tent\n\n```decision id=D1\n```\n"
 
-        merged = merge(ANSWERED, save, DocumentKind.HANDBOOK)
+        assert merge(ANSWERED, save, DocumentKind.HANDBOOK) == Merge(
+            ANSWERED, (Fault(3, FROZEN),)
+        )
+
+    def test_in_the_draft_a_block_the_save_emptied_gets_the_record_s_lines_back(
+        self,
+    ) -> None:
+        save = "# Tent\n\n```decision id=D1\n```\n"
+
+        merged = merge(ANSWERED, save, DocumentKind.DRAFT)
 
         assert merged.text == (
             "# Tent\n\n```decision id=D1\nanswer: Tunnel\nby: ada\n"
@@ -707,7 +752,7 @@ class TestMerge:
 
         merged = merge(published, save, DocumentKind.HANDBOOK)
 
-        assert [fault.line for fault in merged.reverted] == [7, 12]
+        assert [fault.line for fault in merged.reverted] == [3, 12]
 
     def test_the_opening_saved_as_published_is_kept(self) -> None:
         text = "# Shed\n\nThe roof leaks.\n"
@@ -731,3 +776,171 @@ class TestMerge:
         assert merged.reverted == (
             Fault(2, "the opening is the record's: the save is reverted"),
         )
+
+    @pytest.mark.parametrize(
+        ("published", "old", "new"),
+        [
+            (
+                write_answer(
+                    TENT, "D1", answer="Tunnel", by="ada", at=AT, via=AnswerChannel.APP
+                ),
+                "  - Tunnel\n",
+                "  - Tunnel: in the rain\n",
+            ),
+            (
+                write_answer(
+                    TENT, "D1", answer="Tunnel", by="ada", at=AT, via=AnswerChannel.CHAT
+                ),
+                "recommend: Dome\n",
+                "recommend: Tunnel\n",
+            ),
+            (
+                write_answer(
+                    TENT,
+                    "D1",
+                    answer="deferred",
+                    by="ada",
+                    at=AT,
+                    via=AnswerChannel.CHAT,
+                    to="build",
+                ),
+                "  - Dome\n",
+                "  - Dome: four people\n",
+            ),
+            (
+                write_answer(
+                    SEND,
+                    "C1",
+                    answer="Yes",
+                    by="ada",
+                    at=AT,
+                    via=AnswerChannel.AUTOPILOT,
+                ),
+                "today.",
+                "next week.",
+            ),
+            (
+                write_done(DRILL, "A1", by="ada", at=AT),
+                "it returned",
+                "it paid",
+            ),
+            (write_recommended(TENT, by="ada", at=AT), "  - Tunnel\n", ""),
+        ],
+        ids=["page", "chat", "deferred", "switch", "done", "recommended"],
+    )
+    def test_a_person_s_answer_freezes_the_block(
+        self, published: str, old: str, new: str
+    ) -> None:
+        [block] = parse(published).blocks
+        save = published.replace(old, new)
+
+        merged = merge(published, save, DocumentKind.OWN_ITEM)
+
+        assert merged == Merge(
+            published,
+            (Fault(3, f"block {block.local_id} reverted: answered by a person"),),
+        )
+
+    def test_a_person_replacing_pilot_s_answer_freezes_the_block(self) -> None:
+        pilot_s = "```question id=Q1\ndefault: Oak\nanswer: Pine\nby: agent\n```\n"
+        answered = write_answer(
+            pilot_s, "Q1", answer="Elm", by="ada", at=AT, via=AnswerChannel.APP
+        )
+
+        assert merge(
+            pilot_s, pilot_s.replace("Oak", "Ash"), DocumentKind.OWN_ITEM
+        ) == Merge(pilot_s.replace("Oak", "Ash"), ())
+        assert merge(
+            answered, answered.replace("Oak", "Ash"), DocumentKind.OWN_ITEM
+        ) == Merge(answered, (Fault(1, "block Q1 reverted: answered by a person"),))
+
+    def test_undo_unfreezes_the_block(self) -> None:
+        published = clear_answer(ANSWERED, "D1")
+        save = published.replace("  - Tunnel\n", "  - Tunnel: in the rain\n")
+
+        assert merge(published, save, DocumentKind.HANDBOOK) == Merge(save, ())
+
+    def test_a_block_a_person_answered_moved_whole_stays_where_the_save_put_it(
+        self,
+    ) -> None:
+        published = ANSWERED + "\n```question id=Q1\n```\n"
+        save = "# Tent\n\n```question id=Q1\n```\n\n" + ANSWERED.removeprefix(
+            "# Tent\n\n"
+        )
+
+        assert merge(published, save, DocumentKind.OWN_ITEM) == Merge(save, ())
+
+    def test_a_frozen_body_with_prose_added_at_its_end_names_no_line(self) -> None:
+        save = REGISTERED + "\nPack the tarp.\n"
+
+        merged = merge(REGISTERED, save, DocumentKind.REGISTERED_ITEM)
+
+        assert merged == Merge(REGISTERED, (Fault(None, PROSE),))
+
+    def test_a_frozen_body_with_prose_dropped_names_the_first_line_restored(
+        self,
+    ) -> None:
+        save = REGISTERED.replace("Rain on the second night.\n\n", "")
+
+        merged = merge(REGISTERED, save, DocumentKind.REGISTERED_ITEM)
+
+        assert merged == Merge(REGISTERED, (Fault(5, PROSE),))
+
+    def test_a_block_moved_in_a_frozen_body_goes_back(self) -> None:
+        published = REGISTERED + "\n```question id=Q1\n```\n"
+        save = REGISTERED.replace(
+            "```decision id=D1", "```question id=Q1\n```\n\n```decision id=D1"
+        )
+
+        merged = merge(published, save, DocumentKind.REGISTERED_ITEM)
+
+        assert merged == Merge(published, (Fault(7, PROSE),))
+
+    def test_a_reverted_body_takes_the_save_s_line_endings(self) -> None:
+        save = REGISTERED.replace("Rain", "Sun").replace("\n", "\r\n")
+
+        merged = merge(REGISTERED, save, DocumentKind.REGISTERED_ITEM)
+
+        assert merged == Merge(REGISTERED.replace("\n", "\r\n"), (Fault(5, PROSE),))
+
+    def test_a_reverted_body_keeps_each_block_s_faults(self) -> None:
+        save = (
+            REGISTERED.replace("Rain", "Sun").replace("answer: Tunnel", "answer: Dome")
+            + "\n```question id=Q2\nanswer: Oak\nby: ben\n```\n"
+        )
+
+        merged = merge(REGISTERED, save, DocumentKind.REGISTERED_ITEM)
+
+        assert merged == Merge(
+            REGISTERED + "\n```question id=Q2\n```\n",
+            (
+                Fault(5, PROSE),
+                Fault(7, FROZEN),
+                Fault(
+                    17,
+                    "block Q2: `answer:` is ben's answer, which the record does not"
+                    " hold; dropped",
+                ),
+                Fault(
+                    17,
+                    "block Q2: `by:` is ben's answer, which the record does not hold;"
+                    " dropped",
+                ),
+            ),
+        )
+
+    def test_undo_unfreezes_the_body(self) -> None:
+        published = clear_answer(REGISTERED, "D1")
+        save = published.replace("Rain", "Sun")
+
+        assert merge(published, save, DocumentKind.REGISTERED_ITEM) == Merge(save, ())
+
+    @pytest.mark.parametrize(
+        "document", [DocumentKind.OWN_ITEM, DocumentKind.HANDBOOK, DocumentKind.DRAFT]
+    )
+    def test_only_a_registered_document_s_body_freezes(
+        self, document: DocumentKind
+    ) -> None:
+        save = REGISTERED.replace("Rain", "Sun")
+
+        assert merge(REGISTERED, save, document) == Merge(save, ())

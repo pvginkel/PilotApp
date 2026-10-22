@@ -1,5 +1,5 @@
 {
-  "rule": "merge: the record's lines the save leaves unchanged stay where the save has them",
-  "document": "registered_item",
+  "rule": "merge: in the draft, the record's lines the save leaves unchanged stay where the save has them",
+  "document": "draft",
   "reverted": []
 }
