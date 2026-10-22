@@ -318,7 +318,7 @@ class TestRecordServiceAnswer:
             person.id,
         )
 
-    def test_an_answer_to_the_openings_one_block_leaves_it_open(
+    def test_the_opening_has_no_block_to_answer(
         self,
         session: DbSession,
         container: ServiceContainer,
@@ -330,9 +330,11 @@ class TestRecordServiceAnswer:
         )
         document = session.get_one(Document, opening.id)
 
-        container.record_service().answer(document, "D1", person, "Tunnel")
+        with pytest.raises(RecordNotFoundException) as missing:
+            container.record_service().answer(document, "D1", person, "Tunnel")
 
-        assert _block(session, document, "D1").answered_at is not None
+        assert missing.value.message == f"Block {document.id}/D1 was not found"
+        assert document.published_text == DECISION
         assert _done(opening) == (None, None, None)
 
     def test_an_answer_in_a_document_leaves_the_item_open(
@@ -654,6 +656,24 @@ class TestRecordServiceDoneAction:
         )
         assert (block.answer, block.answered_by_user_id) == (None, person.id)
         assert _done(item) == (block.done_at, "answered", person.id)
+
+    def test_the_opening_has_no_action_to_mark_done(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+    ) -> None:
+        opening = container.document_service().bear_opening(
+            project, "Put the key into OpenBao", person, ACTION
+        )
+        document = session.get_one(Document, opening.id)
+
+        with pytest.raises(RecordNotFoundException):
+            container.record_service().done_action(document, "A1", person)
+
+        assert document.published_text == ACTION
+        assert _done(opening) == (None, None, None)
 
     def test_an_action_in_a_document_leaves_the_item_open(
         self,

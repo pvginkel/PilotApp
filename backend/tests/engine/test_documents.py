@@ -366,6 +366,28 @@ class TestDocumentServiceBirth:
         [version] = _versions(session, document)
         assert version.session_id is None
 
+    @pytest.mark.parametrize("words", [ONE_DECISION, BROKEN])
+    def test_the_opening_is_born_unread_with_no_blocks(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+        words: str,
+    ) -> None:
+        opening = container.document_service().bear_opening(
+            project, "Badge colours", person, words
+        )
+
+        assert (opening.kind_code, opening.title) == ("opening", "Badge colours")
+        assert (opening.plan_task_id, opening.urgent, opening.for_user_id) == (
+            None,
+            False,
+            None,
+        )
+        assert session.get_one(Document, opening.id).published_text == words
+        assert _blocks(session, opening.id) == []
+
     def test_a_born_text_with_a_fault_is_refused(
         self, session: DbSession, container: ServiceContainer, project: Project
     ) -> None:
@@ -677,28 +699,33 @@ class TestDocumentServicePublish:
 
         assert item.kind_code == kind
 
-    def test_the_openings_item_is_fixed_at_birth(
+    @pytest.mark.parametrize("text", [ONE_DECISION, BROKEN])
+    def test_the_openings_text_is_published_unread(
         self,
         session: DbSession,
         container: ServiceContainer,
         project: Project,
         person: User,
         build_task: PlanTask,
+        text: str,
     ) -> None:
         documents = container.document_service()
         opening = documents.bear_opening(
             project, "Badge colours", person, "We need a badge.\n"
         )
+        document = session.get_one(Document, opening.id)
 
-        documents.publish(session.get_one(Document, opening.id), ONE_DECISION)
+        documents.publish(document, text)
 
+        assert document.published_text == text
         assert (opening.kind_code, opening.title) == ("opening", "Badge colours")
         assert (opening.plan_task_id, opening.urgent, opening.for_user_id) == (
             None,
             False,
             None,
         )
-        assert session.get_one(Document, opening.id).summary is None
+        assert document.summary is None
+        assert _blocks(session, opening.id) == []
 
     def test_the_timeline_moves_with_what_it_shows(
         self,

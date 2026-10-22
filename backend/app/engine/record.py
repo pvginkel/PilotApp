@@ -75,7 +75,7 @@ class RecordService:
             raise InvalidOperationException(
                 operation, f"`to: {to}` names neither `plan` nor a task in the plan"
             )
-        blocks = dsl.parse(_published(document)).blocks
+        blocks = _blocks(item, document)
         block = _block(document, blocks, local_id)
         if (
             block.kind is dsl.BlockKind.ACTION
@@ -119,7 +119,7 @@ class RecordService:
         )
         _a_person(user, operation, "Pilot settles an action in the file")
         _not_done(item, operation)
-        blocks = dsl.parse(_published(document)).blocks
+        blocks = _blocks(item, document)
         block = _block(document, blocks, local_id)
         if block.kind is not dsl.BlockKind.ACTION:
             raise InvalidOperationException(
@@ -302,7 +302,7 @@ class RecordService:
         at: datetime,
     ) -> None:
         """A one-ask item, done when its one block is answered (F32.3)."""
-        if item is not None and item.kind_code != OPENING and len(blocks) == 1:
+        if item is not None and len(blocks) == 1:
             self._mark(project, item, ANSWERED, user, at)
 
     def _mark(
@@ -332,6 +332,14 @@ def _not_done(item: Item | None, operation: str) -> None:
     """Done fixes an item's answers (F15, F24.3)."""
     if item is not None and item.done_at is not None:
         raise InvalidOperationException(operation, "the item is done")
+
+
+def _blocks(item: Item | None, document: Document) -> tuple[dsl.Block, ...]:
+    """The published text's blocks; none in the opening, whose text the
+    record never reads (DB decision 2)."""
+    if item is not None and item.kind_code == OPENING:
+        return ()
+    return dsl.parse(_published(document)).blocks
 
 
 def _block(

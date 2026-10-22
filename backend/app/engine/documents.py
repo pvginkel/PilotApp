@@ -93,7 +93,8 @@ class DocumentService:
 
     def bear_opening(self, project: Project, title: str, user: User, text: str) -> Item:
         """The opening, the words of `user` that started the project, born at
-        Create project. Its kind and title are fixed at birth."""
+        Create project as written: the record reads nothing from its text (DB
+        decision 2). Its kind and title are fixed at birth."""
         return self._bear_item(
             project,
             Item(kind_code=OPENING, title=title, created_by_user_id=user.id),
@@ -104,9 +105,9 @@ class DocumentService:
     def publish(self, document: Document, text: str) -> None:
         """Publish `text` as the document's truth and rebuild every cache read
         from it, in the transaction. Refused for a text with a fault: only a
-        parseable text is published (F78)."""
+        parseable text is published (F78). The opening's is never parsed."""
         project, item = self.owner(document)
-        parsed = self._parse(project, document, text)
+        parsed = self._read(project, item, document, text)
         tree_hash = self.tree_service.hash(project, document)
         shown = self._shown(project, item, document)
         self._set_published(document, text)
@@ -229,7 +230,7 @@ class DocumentService:
         item.project_id = project.id
         item.seq = seq
         document = Document(id=item.id, path=_item_path(seq, item.title))
-        parsed = self._parse(project, document, text)
+        parsed = self._read(project, item, document, text)
         self.db.add(item)
         self._bear(project, item, document, text, parsed, session_id)
         self.view_service.timeline_moved(project)
@@ -241,7 +242,7 @@ class DocumentService:
         item: Item | None,
         document: Document,
         text: str,
-        parsed: dsl.ParsedDocument,
+        parsed: dsl.ParsedDocument | None,
         session_id: uuid.UUID | None,
     ) -> None:
         self._set_published(document, text)
@@ -255,6 +256,15 @@ class DocumentService:
                 self.tree_service.hash(project, document),
             )
         )
+
+    def _read(
+        self, project: Project, item: Item | None, document: Document, text: str
+    ) -> dsl.ParsedDocument | None:
+        """The text's parse; none for the opening, whose text is the person's
+        words verbatim (DB decision 2)."""
+        if item is not None and item.kind_code == OPENING:
+            return None
+        return self._parse(project, document, text)
 
     def _parse(
         self, project: Project, document: Document, text: str
@@ -302,8 +312,10 @@ class DocumentService:
         project: Project,
         item: Item | None,
         document: Document,
-        parsed: dsl.ParsedDocument,
+        parsed: dsl.ParsedDocument | None,
     ) -> None:
+        if parsed is None:
+            return
         front_matter = parsed.front_matter
         users = self._users(
             {block.by for block in parsed.blocks if block.by is not None}
@@ -313,8 +325,6 @@ class DocumentService:
         if item is None:
             if document.role_code is DocumentRole.DRAFT:
                 project.name = parsed.title
-            return
-        if item.kind_code == OPENING:
             return
         document.summary = front_matter.summary
         item.kind_code = _kind(item, parsed.blocks)

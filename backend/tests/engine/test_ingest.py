@@ -946,6 +946,62 @@ class TestIngestServiceMerge:
             "We need badges.\n"
         )
 
+    @pytest.mark.parametrize(
+        ("save", "line"),
+        [
+            ("We need badges\n```decision id=D1\noptions:\n  - Dome\n", 1),
+            ("We need badges.\n```question id=Q1\nnote: [a]\n```\n", None),
+            (b"We need \x00badges.\n", 1),
+            ("We need badges.\n```question id=Q1\nby: nobody\n```\n", None),
+        ],
+    )
+    def test_a_faulty_save_of_the_opening_is_reverted_never_held(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+        environment: Environment,
+        save: str | bytes,
+        line: int | None,
+    ) -> None:
+        with scoped_session(container):
+            opening = container.document_service().bear_opening(
+                project, "Badges", person, "We need badges.\n"
+            )
+        path = f"draft-{project.number}/items/1-badges.md"
+
+        answer = _ingest(container, path, save, environment)
+
+        reverted = "the opening is the record's: the save is reverted"
+        assert (answer.held, answer.content) == (False, b"We need badges.\n")
+        assert answer.faults == (dsl.Fault(line, reverted),)
+        assert _errors(session) == [
+            (environment.id, path, ErrorKind.REVERTED, line, reverted)
+        ]
+        assert session.get_one(Document, opening.id).published_text == (
+            "We need badges.\n"
+        )
+        assert list(session.scalars(select(Block))) == []
+
+    def test_an_opening_holding_an_unclosed_fence_saved_as_is_is_kept(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+        environment: Environment,
+    ) -> None:
+        words = "We need badges.\n```decision id=D1\n"
+        with scoped_session(container):
+            container.document_service().bear_opening(project, "Badges", person, words)
+        path = f"draft-{project.number}/items/1-badges.md"
+
+        answer = _ingest(container, path, words, environment)
+
+        assert (answer.held, answer.content, answer.faults) == (False, None, ())
+        assert _errors(session) == []
+
     def test_the_writing_columns_take_the_saves_session(
         self,
         container: ServiceContainer,

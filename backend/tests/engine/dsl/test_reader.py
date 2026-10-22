@@ -47,6 +47,7 @@ SECTION_6_1 = (
     "held: a key a kind does not take",
     "held: `options` not a list",
     "held: an option that is not a label with at most one line",
+    "held: two options with one label",
     "held: `recommend` naming no label",
     "held: `recommend` beside `proposal`",
     "held: `type: confirmation` without `proposal` or `because`",
@@ -721,6 +722,27 @@ class TestParse:
             document = parse(f"```{kind} id=X1\n{lines}```\n")
 
             assert document.faults == (), kind
+
+    def test_option_labels_are_compared_trimmed(self) -> None:
+        document = parse('```decision id=D1\noptions:\n  - Dome\n  - " Dome "\n```\n')
+
+        assert document.faults == (Fault(4, "block D1: duplicate option label Dome"),)
+
+    def test_an_action_s_options_take_one_label_once(self) -> None:
+        document = parse(
+            "```action id=A1\noptions:\n  - Works\n  - Works: it does\n```\n"
+        )
+
+        assert document.faults == (Fault(4, "block A1: duplicate option label Works"),)
+
+    def test_labels_differing_in_case_are_two_options(self) -> None:
+        document = parse("```decision id=D1\noptions:\n  - Dome\n  - dome\n```\n")
+
+        assert [option.label for option in document.blocks[0].options] == [
+            "Dome",
+            "dome",
+        ]
+        assert document.faults == ()
 
     def test_the_faults_of_a_parse_are_in_line_order(self) -> None:
         document = parse("```question id=Q1\n```\n```question id=Q1\nnote: [a]\n```\n")

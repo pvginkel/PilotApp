@@ -1,0 +1,41 @@
+{
+  "rule": "held: two options with one label",
+  "parse": {
+    "title": "Which tent?",
+    "title_heading_line": 1,
+    "blocks": [
+      {
+        "id": "D1",
+        "kind": "decision",
+        "fence": [3, 9],
+        "lines": {
+          "options": [4, 7],
+          "recommend": [8, 8]
+        },
+        "options": [
+          {
+            "label": "Dome",
+            "recommended": true,
+            "line": 5
+          },
+          {
+            "label": "Tunnel",
+            "line": 6
+          },
+          {
+            "label": "Dome",
+            "text": "the round one",
+            "recommended": true,
+            "line": 7
+          }
+        ]
+      }
+    ]
+  },
+  "faults": [
+    {
+      "line": 7,
+      "message": "block D1: duplicate option label Dome"
+    }
+  ]
+}

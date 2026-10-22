@@ -201,13 +201,20 @@ class IngestService:
         self._store(document, text, session)
         self._clear(path)
         kind = _kind(document, item)
-        faults = sorted(
-            [
-                *faults,
-                *dsl.validate(dsl.parse(text), self._facts(project, document, kind)),
-            ],
-            key=lambda fault: (fault.line is None, fault.line or 0),
-        )
+        if kind is dsl.DocumentKind.OPENING:
+            # The opening is never read: the merge reverts a save that differs,
+            # whatever it holds (DB decision 2).
+            faults = []
+        else:
+            faults = sorted(
+                [
+                    *faults,
+                    *dsl.validate(
+                        dsl.parse(text), self._facts(project, document, kind)
+                    ),
+                ],
+                key=lambda fault: (fault.line is None, fault.line or 0),
+            )
         held = bool(faults)
         if held:
             self._raise(environment, path, ErrorKind.PARSE, faults)

@@ -630,6 +630,10 @@ class _Values:
                 )
                 continue
             label, text = read
+            if any(option.label == label for option in options):
+                self._faults.append(
+                    Fault(line, f"{self._prefix}duplicate option label {label}")
+                )
             options.append(Option(label, text, label == recommend, line))
         return tuple(options)
 
