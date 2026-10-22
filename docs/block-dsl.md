@@ -2,10 +2,10 @@
 
 A document is Markdown the agent writes, and the asks in it are fenced blocks the record reads. This
 page is the grammar as the engine reads and writes it. Its library is `app.engine.dsl`
-(`backend/app/engine/dsl/`): `parse()` and `validate()` in `reader.py`, the splice and the merge in
-`writer.py`. The library is pure: it takes text and returns text, and imports nothing but the
-standard library, PyYAML and the app's exceptions, so what it validates against comes in as values
-(`Facts`).
+(`backend/app/engine/dsl/`): `parse()`, `validate()` and `body()` in `reader.py`; the splice, the
+merge and `with_title()` in `writer.py`. The library is pure: it takes text and returns text, and
+imports nothing but the standard library, PyYAML and the app's exceptions, so what it validates
+against comes in as values (`Facts`).
 
 ````markdown
 ---
@@ -45,10 +45,21 @@ at: 2026-10-12T09:40:00Z
 Any other key is ignored.
 
 **The title** is the front matter's `title`, else the text of the first ATX heading (`#` to
-`######`) outside a fence, else none. The reader reports that heading's line, so that a display
-can strip it from the body. An item whose text gives no title keeps the title it holds: the one
-it was added with, or the last its text gave. The draft's title is the project's name. Pilot's own
-item with a single block must give a title one of the two ways.
+`######`) outside a fence, else none. A first heading is the title's own when the front matter
+gives no title or the same words, and the reader reports its line. An item's title is its text's
+alone, none while the text gives none; the draft's is the project's name. Every save Pilot makes of
+an item, of its own or of a registered document, must give a title one of the two ways, whatever
+its shape; the draft, the handbook, the opening, and a registered document as its worker's turn
+left it are outside the rule. Pilot's own item is born with the title it was added with written
+first into its front matter, unless that gives a `title` already (`with_title()`).
+
+**The body as shown.** `body(text)` splits a text without a fault the way a screen draws it: its
+prose parts and its blocks in order, the front matter and the heading that is the title left out.
+A prose part is the Markdown between two blocks, without blank lines at its ends, and one with
+nothing in it is left out.
+
+**The opening** is not read at all: its text is the person's words verbatim, and nothing in it is
+a block or a fault ([`engine.md`](engine.md)).
 
 **The prose** is never parsed: everything outside the front matter and the blocks is the agent's,
 and no fault comes from it. A fence is a line of three or more backticks or tildes, indented up to
@@ -117,8 +128,9 @@ The faults of the text itself:
   NUL or an unpaired surrogate into, which no row holds; a body or a front matter nested too deep
   to read, an alias of a list or mapping inside itself among them;
 - a key the block's kind does not take; a list or a mapping where one value is wanted; `options`
-  that is no list, or an entry that is no label with at most one line; `options` or `recommend`
-  beside `proposal`; `recommend` naming no option;
+  that is no list, or an entry that is no label with at most one line; two options with one label,
+  compared trimmed and case kept (`block D1: duplicate option label Dome`); `options` or
+  `recommend` beside `proposal`; `recommend` naming no option;
 - `type` other than `confirmation`; a confirmation without `proposal` or `because`;
   `answer: deferred` without `to`, or `to` without it; a `via` outside its values; an `at` or a
   `done` that is no time; `urgent` other than `true` or `false`.
@@ -130,7 +142,8 @@ The faults against the record, which `validate()` finds with the `Facts` the eng
 - `to` naming neither `plan` nor a task in the plan, unless the published text carries that same
   `to` on that block: a task removed after the deferral leaves it standing;
 - in the draft, a `slug` that is malformed, starts with `draft-` or is another project's;
-- Pilot's own item with a single block and no title.
+- a save Pilot makes of an item with no title: ``the item has no title: give it `title` in the
+  front matter or a first heading``.
 
 Never a fault: anything in the prose, an answer matching no option, an answer without `by`, `step`
 naming a removed task, and a code block in a fence of any other kind.
@@ -159,23 +172,38 @@ the fence, and double-quoted with escapes where it holds a character YAML breaks
 ## The merge by ownership
 
 An agent's save that has no fault is merged against the published text before it is published.
-The agent owns the prose, the front matter, every block's definition and its own answer lines; the
-record owns the answer lines of every block whose published `by` names a person.
+The agent owns the prose, the front matter, the blocks no person has answered and its own answer
+lines. Outside the draft, a person's answer, or an action's Done, freezes its block: once the
+published block's `by` names a person, the block is the record's whole. A `by: agent` answer
+freezes nothing, and Undo, which takes the answer lines out, unfreezes the block.
 
-- A save that keeps a person's answer lines as published, indentation and line endings aside,
-  stands as written, their order included. Where it changed, dropped or added one, the block's
-  answer lines in the save are taken out and the published ones written at the end of the block's
-  mapping, a fault per key.
-- A block the save gives a person's answer, where the record holds none, loses its answer lines, a
-  fault per key.
-- A block the save dropped is put back, its fence as published: after the nearest block before it
-  that the save kept, else before the nearest after it, else at the end. The draft is the
-  exception: a block may go from it, its answers with it.
-- The opening is the record's whole: a save that differs from it is reverted, with one fault.
+- **A frozen block** whose fence the save changed, line for line with line endings aside, gets its
+  published fence back where the save has it, with one fault at its opening line: `block D1
+  reverted: answered by a person`. A line reordered, added or commented inside it counts as a
+  change; the fence moved whole stays where the save put it.
+- **A block the save gives a person's answer**, where the record holds none, loses its answer lines,
+  a fault per key.
+- **A block the save dropped** is put back, its fence as published: after the nearest block before
+  it that the save kept, else before the nearest after it, else at the end.
+- **A registered document a person has answered in** freezes its body prose too, every line after
+  the front matter outside the blocks, blank lines all alike. Where the save changed it, the result
+  is the published body under the save's front matter, each block as the rules above left it and a
+  block the save added placed as a dropped one is put back, with one fault, `the body prose
+  reverted: a person has answered in the document`, at the first line that differs, or with no line
+  where the save only added at the end. A block the save added, with its one blank line, is no
+  change of the prose; a block it moved is. A title the save gave only in a first heading that this
+  reverted is written first into the merged front matter, so the text keeps one.
+- **The draft** keeps the merge by line: a person's answer lines alone are the record's. A save that
+  keeps them as published, indentation and line endings aside, stands as written, their order
+  included; where it changed, dropped or added one, the block's answer lines in the save are taken
+  out and the published ones written at the end of the block's mapping, a fault per key. A block may
+  go from the draft, its answers with it.
+- **The opening** is the record's whole: a save that differs from it is reverted, with one fault.
 
 Each fault of the merge is reported at its line in the merged text, and the merged text is
 published. A record line the agent never had, written while its save was held or behind a stale
-base, is put back and reported in the same way.
+base, is put back and reported in the same way. A save is gated before it is merged, so a frozen
+block's faulty definition in the save still holds the save.
 
 ## The corpus
 

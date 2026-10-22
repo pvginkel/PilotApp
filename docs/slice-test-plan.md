@@ -693,8 +693,11 @@ POD=$(cexec iac kubectl -n pilot-dev get pods -l app.kubernetes.io/name=pilot -o
 
 7. **The slice's own checks on dev**: every acceptance criterion in `verification.json` that only
    the deployment can show, exercised against `https://pilot-dev.home` as the test account, through
-   the API or the UI. A check may write; what it writes is invented, as on the dev stack. Through
-   the API, curl sends the session and keeps the cookies a refresh replaces:
+   the API or the UI. A check may write; what it writes is invented, as on the dev stack. Nothing in
+   the app creates a project yet, so a check makes its record through the record's testing
+   endpoints, which answer on dev to the signed-in test account ([`projects.md`](projects.md)): a
+   project with its opening, its items of each kind, an agent's save of one. Through the API, curl
+   sends the session and keeps the cookies a refresh replaces:
 
    ```bash
    S=tmp/dev-session/cookies.txt

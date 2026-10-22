@@ -66,7 +66,8 @@ The values the agent writes from a closed list:
 - `project`: `id`, `folder`, `name` (the draft's title, null without one), `state` (`draft`,
   `open` or `finished`), `archived`, `autopilot`.
 - `items`, in `seq` order, each with:
-  - `id`, `seq`, `kind` (an item kind's code) and `title`;
+  - `id`, `seq`, `kind` (an item kind's code) and `title` (null for a registered document whose
+    text gives none);
   - `path`, its document's within the folder (`items/4-card-layout.md`), null for an item with no
     document;
   - `step` (a task id, or null), `urgent`, `for` (a handle, or null) and `summary` (or null);

@@ -5,10 +5,10 @@ the KubeCoder fleet, and the operator decides and does only what their hands mus
 timeline per managed project shows its work, its decision documents and their asks; a side chat
 talks to Pilot's brain, a headless Claude Code session in a store environment.
 
-**Its first screens are in**: the handle step, the project list and a project's head, on the
-record's schema, the engine behind it (`backend/app/engine/`), the sync of the store's tree and the
-server's jobs on the KubeCoder controller. Every green build of `main` deploys itself to the dev
-stage at `https://pilot-dev.home`, and production at `https://pilot.ginbov.nl` runs what the
+**Its first screens are in**: the handle step, the project list, a project's head and its timeline,
+on the record's schema, the engine behind it (`backend/app/engine/`), the sync of the store's tree
+and the server's jobs on the KubeCoder controller. Every green build of `main` deploys itself to the
+dev stage at `https://pilot-dev.home`, and production at `https://pilot.ginbov.nl` runs what the
 operator promotes from there ([`docs/deployment.md`](docs/deployment.md)). Version 1 is built from
 the design record in `../PilotAppSpecs/design/` (start at its README), along the steps of its
 `implementation-plan.md`. Its `features.md` is the version-1 scope, and
@@ -142,8 +142,9 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
   and what runs there.
 - [`docs/sign-in.md`](docs/sign-in.md): who can use Pilot: the `editor` role the API requires, a
   signed-in test's session included, and the person on the record, with the handle they choose.
-- [`docs/ui.md`](docs/ui.md), [`docs/projects.md`](docs/projects.md): the UI's shell, tokens,
-  shared pieces and links in text; the projects' API and screens.
+- [`docs/ui.md`](docs/ui.md), [`docs/projects.md`](docs/projects.md),
+  [`docs/timeline.md`](docs/timeline.md): the UI's shell, tokens, shared pieces and links in text;
+  the projects' API and screens; the timeline's API, live event and screens.
 - [`docs/record.md`](docs/record.md), [`docs/block-dsl.md`](docs/block-dsl.md),
   [`docs/projection.md`](docs/projection.md), [`docs/engine.md`](docs/engine.md): the record's
   schema and the dev seed, the block DSL, the store's tree and its files, and the engine between

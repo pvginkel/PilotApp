@@ -3,8 +3,9 @@
 The React app is the mockup converted ([`change-discipline.md`](change-discipline.md)). This page
 is its frame as built: the shell every screen sits in, the tokens and the shared pieces, the keys,
 what the browser remembers, links in text and the PWA. The screens have their own pages:
-[`projects.md`](projects.md) for the project list and the head, and [`sign-in.md`](sign-in.md) for
-the handle step and the profile page.
+[`projects.md`](projects.md) for the project list and the head, [`timeline.md`](timeline.md) for a
+project's timeline and its items, and [`sign-in.md`](sign-in.md) for the handle step and the profile
+page.
 
 ## Where things go
 
@@ -61,27 +62,40 @@ a user icon for a name without initials.
 
 In `src/components/shared/`:
 
-- `Avatar({who, size?})`: a person `{name, initials, slot}`, or `'pilot'`.
+- `Avatar({who, size?})`: a person `{name, initials, slot}`, or `'pilot'`; `size` is `sm` or `xs`.
 - `Menu` and `MenuItem`, and `Popover`: each closes on a press outside it and on Esc
   (`src/hooks/use-dismiss.ts`).
 - `Dialog`, a modal dialog that a click beside it or Esc closes, and `ConfirmDialog({title, lines,
   note?, act, pending, onConfirm, onCancel, testId})`, which asks before an act; while `pending`,
   nothing closes it.
 - `EmptyState({icon, title, testId})`.
-- `Time({at})`: a time in the browser's time zone, the day and the month ("19 Oct"), with the full
-  stamp as its tooltip. The record and the API hold times in UTC.
+- `Time({at, format?})`: a time in the browser's time zone, with the full stamp as its tooltip: by
+  `format`, the day and the month ("19 Oct", the default), `clock`, the hour and the minute
+  ("14:05"), or `stamp`, the date and the time ("22 Oct 2026, 14:05"). The record and the API hold
+  times in UTC.
 - `LinkedText`: below.
+- `Markdown({text})`: GFM (react-markdown with remark-gfm) inside `.prose`, its text linked as the
+  record's words are except in code and inside a link, every link opening in a new tab.
+- `Fold({children, testId})`: a text cut at 13.5em, fading out, with Show more; one that fits shows
+  whole.
+- `TextField`: the text field every answer is typed into, a `textarea` one line at rest that grows
+  with its text to eight lines and then scrolls. Enter breaks the line; Ctrl+Enter, Cmd+Enter on a
+  Mac, calls its `onSend` where the field has one Send, and Esc its `onEscape` where something holds
+  it. While it has the focus, its parent, the row holding what sends it, is kept in view.
 
 `shared.css` has the mockup's buttons (`.btn` with `.btn-sm`, `.btn-icon`, `.btn-primary`,
 `.btn-soft`, `.btn-ghost`), the text field (`.field` in a `.field-row` with its button beside it,
-one line at rest), `.chip`, `.popover`, `.menu-pop`, `.dialog`, `.empty-state` and `.mention`.
+level with its bottom edge), `.chip`, `.popover`, `.menu-pop`, `.dialog`, `.empty-state`,
+`.mention`, `.prose`, `.fold` and `.link`.
 
 ## The keys
 
 `src/lib/keys.ts`. Esc closes the top-most open thing, one per press. The layers, bottom to top, are
-`overlay`, `panel`, `plan`, `menu`, `dialog` and `keys`; within a layer, the thing opened last is
-on top. An open thing registers with `useEscape(layer, open, close)`. `?` opens the keys list.
-Neither key acts in a text field or with a modifier held.
+`console`, `overlay`, `panel`, `plan`, `menu`, `dialog` and `keys`; within a layer, the thing opened
+last is on top. An open thing registers with `useEscape(layer, open, close)`. `?` opens the keys
+list, which names Ctrl+Enter, Esc and `?`. Neither key acts in a text field or with a modifier
+held; Esc in a console's own field closes the console, and Ctrl+Enter sends a text field that has
+one Send (`TextField`).
 
 ## What the browser remembers
 
@@ -89,6 +103,13 @@ Neither key acts in a text field or with a modifier held.
 the bare address opens), and the chevrons of *Other projects* and *Finished*. Nothing of it is on
 the server. A component reads it with `useBrowserState()` and changes it with
 `rememberInBrowser(change)`.
+
+The unsent text of every answer's field is a second entry, `pilot.unsent`, by field:
+`<item>/<block>/answer`, `/paste`, `/other` and `/no` ([`timeline.md`](timeline.md)).
+`useUnsentText(field, initial)` (`src/hooks/use-unsent-text.ts`) reads it when the field opens, so a
+field opened again, after a reload or in another tab, starts from what was left in it, and writes it
+on every keystroke over what the storage holds. An emptied field's entry is deleted, and so is a
+sent one's once the record holds it; a refused send keeps it.
 
 ## Toasts
 
@@ -160,11 +181,11 @@ The frontend suite's fixtures (`frontend/tests/support/fixtures.ts`):
 
 - `people`: `signIn({name?, handle?})` signs in a person with a handle, chosen through the API;
   `firstSignIn({name?})` one at their first sign-in, `null` for a token with no name;
-  `other(handle)` puts another person on the record; `self()` reads the signed-in person.
+  `other(handle, name?)` puts another person on the record; `self()` reads the signed-in person.
 - `shell`: `open(path)` opens an address once the signed-in person is read.
 - `links`: `set({ticket_url_template?, environment_link_base_url?})` sets the link settings for the
-  spec, a setting left out unset, and unsets both after it; `environment(id, name)` puts an
-  environment on the record. They use `PUT /api/testing/links`, which answers only in testing mode
-  and refuses what the boot refuses.
-- The page objects `handleStep`, `profile`, `projectList` and `projectHead`, and `projects`
-  ([`projects.md`](projects.md)).
+  spec, a setting left out unset, and unsets both after it, through `PUT /api/testing/links`, which
+  answers only in testing mode and refuses what the boot refuses; `environment(id, name)` puts an
+  environment on the record through `POST /api/testing/environments` ([`projects.md`](projects.md)).
+- The page objects `handleStep`, `profile`, `projectList`, `projectHead` and `timeline`, and
+  `projects` ([`projects.md`](projects.md), [`timeline.md`](timeline.md)).

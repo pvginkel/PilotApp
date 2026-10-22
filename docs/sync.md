@@ -117,8 +117,8 @@ waited for that (at least 0). It answers:
   computed at the check and never stored: a block answered `deferred` in the document of a done
   item, deferred to a plan task that is not done or to the plan of a project that is not finished,
   that no plan note names, a struck note's reference counting. `block` is `<item id>/<local id>`,
-  `document` its path from the tree's root, `title` its item's and `to` the task or `plan`, in
-  project, item and block order (`PlanService.homeless_deferrals()`).
+  `document` its path from the tree's root, `title` its item's (null while it has none) and `to`
+  the task or `plan`, in project, item and block order (`PlanService.homeless_deferrals()`).
 
 ## Settings and metrics
 

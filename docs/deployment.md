@@ -20,6 +20,7 @@ number):
 | Site | `https://pilot-dev.home`, internal | `https://pilot.ginbov.nl`, public |
 | Images | `:dev-<n>` | `:prd-<n>` |
 | `STAGE` | `dev` | `prd` |
+| The record's testing endpoints ([`projects.md`](projects.md)) | answer a signed-in editor | refused, `400` |
 | KubeCoder | `https://kubecoder-dev.home` | `https://kubecoder.home` |
 | OpenBao leaves | `eso/prd/pilot/dev/{oidc,kubecoder}` | `eso/prd/pilot/prd/{oidc,kubecoder}` |
 | Database | `pilot_dev_db` | `pilot_prd_db` |

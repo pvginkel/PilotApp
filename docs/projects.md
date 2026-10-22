@@ -3,20 +3,26 @@
 A project as a signed-in person reads and changes it: the project list, a project's head, its
 transitions and its members. The API is `backend/app/api/projects.py` on `ProjectService`
 (`backend/app/services/project_service.py`), the screens are `frontend/src/components/projects/`,
-the tables are [`record.md`](record.md)'s, and the frame the screens sit in is [`ui.md`](ui.md).
+the tables are [`record.md`](record.md)'s, and the frame the screens sit in is [`ui.md`](ui.md). The
+timeline under a project's head, and its items, are [`timeline.md`](timeline.md)'s.
 
-Nothing in the app creates a project yet: the dev seed and the suites' testing endpoints (below)
-make them. In a deployed stage the list is empty, and the centre reads "No projects yet".
+Nothing in the app creates a project yet: the dev seed and the record's testing endpoints (below)
+make them. In production the list is empty, and the centre reads "No projects yet"; the dev stage's
+holds what the slices' deployed checks made there.
 
 ## Reading them
 
 - **`GET /api/projects`** answers `{projects: [tab]}`, the unarchived projects in the order they
   were created (`Project.number`); with `?archived=true`, the archived ones, in the same shape. A
-  tab is `{id, name, ticket, state, finished_at, member, progress}`. `name` is null for a draft
-  without a title. `finished_at` is the latest `finished` transition's time, null unless the
-  project is finished. `member` is whether the caller has an open membership, false before they
-  have a handle. `progress` is `{done, total, in_progress}` over the plan's steps, removed steps
-  not counted, `in_progress` the titles of the steps in progress in the plan's order.
+  tab is `{id, name, ticket, state, finished_at, member, progress, badge}`. `name` is null for a
+  draft without a title. `finished_at` is the latest `finished` transition's time, null unless the
+  project is finished. `member` is whether the caller has an open membership, false before they have
+  a handle. `progress` is `{done, total, in_progress}` over the plan's steps, removed steps not
+  counted, `in_progress` the titles of the steps in progress in the plan's order. `badge` is
+  `{count, urgent}`: `count` the project's open items waiting on the caller, which are its prose
+  items but the opening, a notice only while it is urgent, and a work item whose session stopped or
+  failed to start, never a wait and never an item for another person (before the caller has a
+  handle, every item for someone is another's); `urgent` whether one of them is urgent.
 - **`GET /api/projects/<id>`** answers the project's head: `{id, name, ticket, repo, state,
   archived, autopilot, member, members, progress, tasks, notes, open_items}`. A member is `{handle,
   name, initials, avatar_slot}`, in the order they joined; a task is a step, `{id, title, status,
@@ -77,19 +83,22 @@ at its right, which holds *Archived*.
   else the step reading, which is the first step in progress (", …" after it while more are in
   progress), or "Not started", "N of M done" or "All steps done". `stepReading()` in
   `frontend/src/lib/utils/status-labels.ts` is that reading for the tab and the head's step button
-  alike.
+  alike. While `badge.count` is above 0, the status line ends in it, "N waiting on you" as its
+  tooltip, orange while `badge.urgent`; a finished tab's too.
 - **Archived** switches the column to the archived projects (D012): their tabs, flat, in the API's
   order, or "None yet", under a back arrow ("Back to the projects") that returns to the list. Which
   view shows is the column's own state, and the browser does not remember it.
 
-A project has its own address, `/projects/<id>`, by its id. The bare address opens the project
-the browser remembers while that project is in the list, else the list's first in the order shown;
-with no project the centre reads "No projects yet" and the address stays `/`. The project's route
-remounts on each project, so whatever it opened (the plan, the notes, the menu, a dialog) is closed
-on the next one; the drawer closes on any change of address ([`ui.md`](ui.md)).
+A project has its own address, `/projects/<id>`, by its id. The bare address opens the project the
+browser remembers while that project is in the list, else the list's first in the order shown; with
+no project the centre reads "No projects yet" and the address stays `/`. Under it are an item's
+address and a block's ([`timeline.md`](timeline.md)), at which the project's tab is current too. The
+project's route remounts on each project, so whatever it opened (the plan, the notes, the menu, a
+dialog) is closed on the next one; the drawer closes on any change of address ([`ui.md`](ui.md)).
 
-The list and the head are read again when the window regains focus and after each of the person's
-own writes, which invalidate every query. Nothing pushes them.
+The list and the head are read again when the window regains focus, after each of the person's
+own writes, which invalidate every query, on the server's `project_changed` event, and whenever the
+event stream comes up ([`timeline.md`](timeline.md)).
 
 ## The head
 
@@ -141,8 +150,13 @@ No dialog line and no toast names the notifications (D011).
 
 ## Testing it
 
-The testing endpoints make what the UI cannot. They answer only under `FLASK_ENV=testing`, on a
-stage other than `prd`, and need no sign-in:
+The testing endpoints make what the UI cannot. The record's own,
+`backend/app/api/testing_record.py`, sit on the API blueprint, behind its sign-in and the `editor`
+role as every route is, and answer on every `STAGE` but `prd`, whatever `FLASK_ENV` says (D027), so
+that the dev stage's deployed check makes its invented record through them. On `prd`, which an unset
+`STAGE` resolves to outside testing and development, each answers `400` "The record's testing
+endpoints are not available on prd". Every other testing endpoint, the test sign-in among them,
+answers only in testing mode ([`sign-in.md`](sign-in.md)).
 
 - `POST /api/testing/people` `{handle, name?}` puts a person on the record as the handle step does,
   under a subject no one signs in with, and answers `201` `{handle, name, avatar_slot}`; it refuses
@@ -152,13 +166,27 @@ stage other than `prd`, and need no sign-in:
 - `POST /api/testing/projects` makes a project in the standing given and answers `201` `{id}`:
   `name`, `state` (`draft`, `open` or `finished`, `open` by default), `archived`, `autopilot`,
   `members` (handles, at least one, the first the creator, joining in that order), `ticket`, `repo`,
-  `tasks`, `notes`, and `open_items` (open notices a session in `environment_id` added). The
-  transitions to that standing are made at one instant by the first member, and the plan is saved
-  through the engine. A finished project with auto pilot on, a member named twice, open items
-  without an environment and a plan with a fault are each a `400`; a handle that is no person's,
-  `agent` included, and an unknown environment a `404`.
+  `tasks`, `notes`, `environment_id`, `open_items` and `opening`. The transitions to that standing
+  are made at one instant by the first member, and the plan is saved through the engine. A project
+  past the draft is born with its opening first: the first member's words, `opening` (by default
+  "An invented project, started for a test."), verbatim, titled by its name or "New project". With
+  an `environment_id`, an idle work session of the project there adds `open_items` open notices. A
+  finished project with auto pilot on, a member named twice, open items without an environment and
+  a plan with a fault are each a `400`; a handle that is no person's, `agent` included, and an
+  unknown environment a `404`.
+- `POST /api/testing/projects/<id>/items` `{kind, title, text}` adds a prose item as Pilot adds one,
+  born through the engine's `bear_item` by the project's session started last, and answers `201`
+  `{id}`. `kind` is a prose kind but the opening; the text, front matter and blocks included, says
+  the rest ([`block-dsl.md`](block-dsl.md)). A project with no session, or a text with a fault, is a
+  `409`.
+- `POST /api/testing/items/<id>/saves` `{text}` ingests an agent's save of the item's file by that
+  session, on the tree's current hash, as the store's sync does, and answers `200` `{held, faults:
+  [{line, message}]}`. A held save leaves the item a concept until a clean one.
 
-The frontend suite's `projects` fixture (`frontend/tests/support/projects.ts`) wraps them
-(`make`, `list`, `head`, `transition`), and the page objects `projectList` and `projectHead` drive
-the screens. Each Playwright worker's database is a clone of the dev seed
+A project past the draft, born with its opening, an item placed and a save posted each raise
+`project_changed` through the engine, so an open screen follows them ([`timeline.md`](timeline.md)).
+The frontend suite's `projects` fixture (`frontend/tests/support/projects.ts`) wraps them (`make`,
+`makeWithSession`, `place`, `save`, `list`, `head`, `transition`, and the item writes of
+[`timeline.md`](timeline.md)), and the page objects `projectList` and `projectHead` drive the
+screens. Each Playwright worker's database is a clone of the dev seed
 ([`record.md`](record.md)), so every spec's list holds the seed's projects beside its own.

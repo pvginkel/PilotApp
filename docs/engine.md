@@ -30,28 +30,34 @@ cause `born`:
 - `bear_handbook(project, text="")`: the handbook, `handbook.md`.
 - `bear_item(project, kind, title, session, text="")`: a prose item of Pilot's own, of any prose
   kind but the opening, which `session` added; its version is of that session. It takes the next
-  `seq` under the project's row lock, and its path from the title.
+  `seq` under the project's row lock, and its path from the title. The title is written first into
+  the text's front matter, one opened at the top where the text has none, unless the front matter
+  gives a `title` already (`dsl.with_title`), so the text carries its title from birth.
 - `bear_opening(project, title, user, text)`: the opening, the words of the person who started the
-  project. Its kind and title are fixed at birth.
+  project, taken as written. The record reads nothing from its text: it has no blocks, and its kind,
+  title and caches stay as it was born.
 
-A birth refuses a text with a fault of its own (an unclosed fence, a body that is no mapping, and
-the like) and then writes nothing.
+A birth but the opening's refuses a text with a fault of its own (an unclosed fence, a body that is
+no mapping, and the like) and then writes nothing. The opening's is never refused, whatever it
+holds.
 
 ## Publishing
 
 `DocumentService.publish(document, text)` is the one write of a published text: an agent's merged
-save and the record's writes both go through it. It refuses a text with a fault of its own, sets
-the published text, hash and time, and rebuilds every cache in the same transaction:
+save and the record's writes both go through it. It refuses a text with a fault of its own, the
+opening's excepted, which it never reads; it sets the published text, hash and time, and rebuilds
+every cache in the same transaction:
 
 - the document's blocks, rewritten in place by local id; a block the text lost is deleted with its
   options, and a block's options are rewritten only when they changed;
-- for a prose item, its kind (a single block gives its kind, `confirmation` for a confirmation;
-  several make it a `document`; with none it keeps its kind), its title where the text gives one,
-  its task (`step`), `urgent`, its addressee (`for`) and its document's summary. The opening's
-  caches are fixed at birth; its blocks are read like any other's;
+- for a prose item but the opening, its kind (a single block gives its kind, `confirmation` for a
+  confirmation; several make it a `document`; with none it keeps its kind), its title, the text's
+  alone and none while the text gives none, its task (`step`), `urgent`, its addressee (`for`) and
+  its document's summary. The opening's text rebuilds nothing;
 - for the draft, the project's name: its title, or none.
 
-It validates nothing against the record and cuts no version.
+It validates nothing against the record and cuts no version. A publish that changes an item's
+published text raises `ProjectChanged` (below).
 
 ## The ingest
 
@@ -79,17 +85,21 @@ A save of a document runs in one transaction, under the document's row lock:
 3. The path's `parse` Save Errors go, in every environment: the save's faults replace them.
 4. The text is validated against the record ([`block-dsl.md`](block-dsl.md)): every user's
    handle, the plan's tasks and removed tasks, the confirmation reasons, the other projects' slugs,
-   and the published text's deferrals.
+   the published text's deferrals, and the title of a save Pilot makes of an item.
 5. With any fault the save is **held**: a `parse` Save Error per fault, under the save's
    environment. The published text stays as it was, and the tree keeps the agent's save.
 6. With none, the save is merged by ownership against the published text and the result
-   published, with a `reverted` Save Error per line the merge put back or took out; the answer
-   carries the merged text where it differs from the save. The `reverted` rows of earlier saves
-   stand.
+   published, with a `reverted` Save Error per fault the merge reports; the answer carries the
+   merged text where it differs from the save. The `reverted` rows of earlier saves stand.
+
+A save of the opening is never read: steps 4 and 5 pass it by, and the decoding's fault with them,
+so it is never held. A save that differs from the published text, an undecodable one included, is
+reverted whole, with one `reverted` fault: `the opening is the record's: the save is reverted`.
 
 A path is held while a `parse` Save Error stands on it, in any environment, so held means that the
 path's latest save was. A held document's tree hash is its ingest's, so a fix-up sent with the held
-save's hash as its base is not stale.
+save's hash as its base is not stale. A held item shows as a concept, its text as last published,
+and a save that holds an item or ends its hold raises `ProjectChanged`.
 
 A save of `plan.json` takes the project's row lock, removes the path's `parse` Save Errors and is
 parsed back into the plan's rows ([`projection.md`](projection.md)); a held one writes a `parse`
@@ -110,13 +120,15 @@ the next clean save's merge carries the write to the file.
 - `answer(document, local_id, user, answer, *, via=AnswerChannel.APP, note=None, to=None)`: a
   person's answer to a block, `deferred` with `to` naming a task in the plan or `plan`. It
   replaces the block's answer, Pilot's included. An answer to the one block of a one-ask item, an
-  item with a single block that is not the opening, marks the item done, cause `answered`, at the
-  answer's time.
+  item with a single block, marks the item done, cause `answered`, at the answer's time. Outside
+  the draft, a person's answer freezes its block against the agent's next saves
+  ([`block-dsl.md`](block-dsl.md)), and so does an action's Done.
 - `done_action(document, local_id, user, *, note=None)`: Done on an action without options; on a
   one-ask item it is the item's done as well.
 - `undo(item)`: clears a done prose item's mark while no session has taken its answers and its done
   cause offers undo. On cause `answered` it also takes out the answer lines of the block the person
-  answered.
+  answered, which unfreezes the block. `offers_undo(item)` says whether `undo` would take the item
+  now, by the same rule.
 - `done(item, user)`: Done on a document. A person's first answers every unanswered block that
   has a recommendation with it, `via: recommended`, and is refused while a block has neither an
   answer nor a recommendation; its cause is `marked`. Pilot's is refused while any block is
@@ -136,7 +148,8 @@ naming neither `plan` nor a task in the plan; an answer to an action without opt
 deferral; Done on an action with options or on a block that is no action; Done on an item that is
 not a `document`, Read on one that is not a notice, Reviewed on one that is not a review; undo of
 an item that is no prose item, is not done, has been consumed, or was done by a cause that offers
-none. A block the text does not have is a `RecordNotFoundException`.
+none. A block the text does not have is a `RecordNotFoundException`, and the opening has none: an
+answer or a Done on it is refused so.
 
 The writes but the close, which takes its caller's time, record their times to the second; they
 trim every value and read a blank note as none.
@@ -163,6 +176,7 @@ already emitted in the transaction is delivered once.
 | `ErrorsRaised(project_id, path)` | on every held save |
 | `ErrorsResolved(project_id, path)` | on a clean save after a held one, and when a held `plan.json` is written down |
 | `ManifestChanged()` | when the set of syncing projects changed; nothing in the record raises it yet, and the sync's testing endpoint does |
+| `ProjectChanged(project_id)` | when what the project's timeline, head or tab shows moved: with every `TreeHashMoved` of its `timeline.json`; on a publish that changes an item's published text, a record write on a held item included; on a save that holds an item or ends its hold; on a save of `plan.json` that moved its rendering. `ProjectEventService` sends it to the browsers ([`timeline.md`](timeline.md)) |
 
 ## Testing it
 

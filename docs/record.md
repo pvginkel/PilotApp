@@ -58,7 +58,7 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   `recommended`. Deleting a block deletes its options.
 - `save_errors`: a fault the engine holds against the latest save of a path, the path from the
   tree's root, under the Environment whose save raised it: `parse` (the save is held) or `reverted`
-  (a line the merge put back or took out), with its line and message.
+  (what the merge put back or took out), with its line and message.
 - `attachments`: a copy of a file kept for the reader, never edited, at
   `attachments/<batch>/<filename>` of its project's folder: its bytes, `title`, `content_type`,
   `size`, `sha256`, and its source environment and path, which the draft's copy has none of.
@@ -112,9 +112,13 @@ Some columns are caches of a document's published text, rebuilt in the transacti
 to it ([`engine.md`](engine.md)):
 
 - a prose item's `kind_code`, `title`, `plan_task_id`, `urgent` and `for_user_id`, and its
-  document's `summary`, read from the front matter and the blocks;
+  document's `summary`, read from the front matter and the blocks; `title` is none while the text
+  gives none;
 - the document's `blocks` and `block_options`, rewritten in place by local id;
 - the project's `name`, the draft's title.
+
+The opening's text is read for nothing: it has no `blocks`, and its item keeps the kind, title and
+caches it was born with.
 
 The project's `state_code`, `archived` and `autopilot` are caches of its transitions, written with
 each one ([`projects.md`](projects.md)). A session's `turns`, `turn_started_at` and
