@@ -7,10 +7,13 @@
 
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
+import { slowNetwork } from '../support/network';
 
 const ASK = 'Plug the lamp in.';
 const ACTION = `${ASK}\n\n\`\`\`action id=A1\n\`\`\`\n`;
 const OPTIONS = "```action id=A1\noptions:\n  - Works\n  - Doesn't\n```\n";
+const PILOTS = (answer: string) =>
+  `\`\`\`action id=A1\noptions:\n  - Works\n  - Doesn't\nanswer: ${answer}\nby: agent\nat: 2026-10-20T09:00:00Z\n\`\`\`\n`;
 const UNSENT_KEY = 'pilot.unsent';
 
 test.describe('An action without options', () => {
@@ -73,6 +76,27 @@ test.describe('An action without options', () => {
     await item.block.done.click();
     await expect(item.said).toHaveText('It hums');
     expect(await kept()).not.toHaveProperty(`${action}/A1/paste`);
+  });
+
+  test('reads Done in its block, not boxed, while Done saves', async ({ page, people, projects, timeline }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Saving'), members: [me.handle!] });
+    const action = await projects.place(id, { kind: 'action', title: 'Plug it in', text: ACTION });
+    await timeline.open(id);
+    const item = timeline.item(action);
+    const { block } = item;
+    await expect(block.said).toHaveCount(0);
+
+    const restore = await slowNetwork(page, 1_000);
+    await block.done.click();
+    const said = block.said.locator('.said');
+    await expect(said).toHaveText('Done');
+    // Read at once, while the write is on its way.
+    expect(await said.getAttribute('class')).not.toMatch(/\bboxed\b/);
+    await expect(block.done).toHaveCount(0);
+    await restore();
+
+    await expect(item.root).toHaveAttribute('data-state', 'done');
   });
 });
 
@@ -139,5 +163,68 @@ test.describe('An action with options', () => {
     await expect(block.console).toHaveCount(0);
     await expect(block.other).toBeVisible();
     await expect(block.paste).toHaveValue('flicker');
+  });
+
+  test('reads the option picked in its block, not boxed, while it saves', async ({ page, people, projects, timeline }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Picked'), members: [me.handle!] });
+    const action = await projects.place(id, { kind: 'action', title: 'Try the lamp', text: OPTIONS });
+    await timeline.open(id);
+    const item = timeline.item(action);
+    const { block } = item;
+
+    const restore = await slowNetwork(page, 1_000);
+    await block.act('Works').click();
+    const said = block.said.locator('.said');
+    await expect(said).toHaveText('Works');
+    // Read at once, while the write is on its way.
+    expect(await said.getAttribute('class')).not.toMatch(/\bboxed\b/);
+    await restore();
+
+    await expect(item.said).toHaveText('Works');
+  });
+
+  test('reads Other’s words in its block, boxed, while they save', async ({ page, people, projects, timeline }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Worded'), members: [me.handle!] });
+    const action = await projects.place(id, { kind: 'action', title: 'Try the lamp', text: OPTIONS });
+    await timeline.open(id);
+    const item = timeline.item(action);
+    const { block } = item;
+
+    await block.other.click();
+    await block.field.fill('Half works');
+    const restore = await slowNetwork(page, 1_000);
+    await block.field.press('Control+Enter');
+    const said = block.said.locator('.said');
+    await expect(said).toHaveText('Half works');
+    await expect(said).toHaveClass(/\bboxed\b/);
+    await restore();
+
+    await expect(item.said).toHaveText('Half works');
+  });
+
+  test('answered by Pilot stays open, Pilot’s answer in its block, boxed only when it is no option', async ({ people, projects, timeline }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Pilot’s'), members: [me.handle!] });
+    const option = await projects.place(id, { kind: 'action', title: 'Try the lamp', text: PILOTS('Works') });
+    const words = await projects.place(id, { kind: 'action', title: 'Try it again', text: PILOTS('Half works') });
+    await timeline.open(id);
+
+    for (const [action, answer, boxed] of [
+      [option, 'Works', false],
+      [words, 'Half works', true],
+    ] as const) {
+      const { root, block } = timeline.item(action);
+      await expect(root).toHaveAttribute('data-state', 'open');
+      await expect(block.who.locator('.avatar')).toHaveAttribute('title', 'Pilot');
+      const said = block.said.locator('.said');
+      await expect(said).toHaveText(answer);
+      if (boxed) {
+        await expect(said).toHaveClass(/\bboxed\b/);
+      } else {
+        await expect(said).not.toHaveClass(/\bboxed\b/);
+      }
+    }
   });
 });
