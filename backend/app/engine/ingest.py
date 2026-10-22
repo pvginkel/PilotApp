@@ -18,6 +18,7 @@ from app.engine.bus import (
     EngineBus,
     ErrorsRaised,
     ErrorsResolved,
+    ProjectChanged,
     TreeHashMoved,
 )
 from app.engine.documents import OPENING, DocumentService
@@ -172,6 +173,7 @@ class IngestService:
         canonical = self.plan_service.render(project)
         if canonical.hash != tree.hash:
             self.engine_bus.emit(TreeHashMoved(path, canonical.hash))
+            self.engine_bus.emit(ProjectChanged(project.id))
         if held_before:
             self.engine_bus.emit(ErrorsResolved(project.id, path))
         return Ingested(
@@ -234,6 +236,9 @@ class IngestService:
             self.engine_bus.emit(ErrorsRaised(project.id, path))
         elif held_before:
             self.engine_bus.emit(ErrorsResolved(project.id, path))
+        if item is not None and held != held_before:
+            # The item shows as a concept while its save is held (F78).
+            self.engine_bus.emit(ProjectChanged(project.id))
         return Ingested(
             kind=PathKind.DOCUMENT,
             content=_unless(tree_text.encode(), content),

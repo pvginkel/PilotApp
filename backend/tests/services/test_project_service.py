@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.database import scoped_session
-from app.engine.bus import EngineEvent, TreeHashMoved
+from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved
 from app.engine.paths import TIMELINE, tree_path
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.extensions import db
@@ -780,7 +780,8 @@ class TestTransition:
             TreeHashMoved(
                 tree_path(made, TIMELINE),
                 container.view_service().timeline(made).hash,
-            )
+            ),
+            ProjectChanged(made.id),
         ]
 
 

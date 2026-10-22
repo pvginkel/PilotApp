@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.engine import dsl
-from app.engine.bus import EngineBus, TreeHashMoved
+from app.engine.bus import EngineBus, ProjectChanged, TreeHashMoved
 from app.engine.paths import DRAFT, HANDBOOK, sha256_hex, tree_path
 from app.engine.tree import TreeService
 from app.engine.views import ViewService
@@ -113,6 +113,7 @@ class DocumentService:
         parsed = self._read(project, item, document, text)
         tree_hash = self.tree_service.hash(project, document)
         shown = self._shown(project, item, document)
+        published = document.published_text
         self._set_published(document, text)
         self._rebuild(project, item, document, parsed)
         moved = self.tree_service.hash(project, document)
@@ -122,6 +123,8 @@ class DocumentService:
             )
         if self._shown(project, item, document) != shown:
             self.view_service.timeline_moved(project)
+        if item is not None and text != published:
+            self.engine_bus.emit(ProjectChanged(project.id))
 
     def lock(self, document: Document) -> None:
         """Hold the document's row until the transaction ends, so that two

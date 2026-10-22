@@ -23,10 +23,12 @@ from app.services.fake_controller import FakeController
 from app.services.fleet_consumer import FleetConsumer
 from app.services.frontend_version_service import FrontendVersionService
 from app.services.health_service import HealthService
+from app.services.item_service import ItemService
 from app.services.link_service import LinkService
 from app.services.metrics_service import MetricsService
 from app.services.oidc_client_service import OidcClientService
 from app.services.people_service import PeopleService
+from app.services.project_event_service import ProjectEventService
 from app.services.project_service import ProjectService
 from app.services.relay_service import RelayService
 from app.services.relay_watchdog import RelayWatchdog
@@ -306,6 +308,21 @@ class ServiceContainer(containers.DeclarativeContainer):
     timeline_service = providers.Factory(
         TimelineService, db=db_session, record_service=record_service
     )
+    # What a person does to an item: its answers and marks (F14, F32.4)
+    item_service = providers.Factory(
+        ItemService,
+        db=db_session,
+        people_service=people_service,
+        record_service=record_service,
+    )
+    # A project's live event on the browsers' connections (F80.2)
+    project_event_service = providers.Singleton(
+        ProjectEventService,
+        container=__self__,
+        engine_bus=engine_bus,
+        sse_connection_manager=sse_connection_manager,
+    )
+    register_for_background_startup(lambda c: c.project_event_service())
     project_service = providers.Factory(
         ProjectService,
         db=db_session,

@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.database import scoped_session
-from app.engine.bus import EngineEvent, TreeHashMoved
+from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved
 from app.engine.paths import sha256_hex
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.extensions import db
@@ -1676,7 +1676,8 @@ class TestRecordServiceCloseUnanswered:
             TreeHashMoved(
                 f"draft-{project.number}/timeline.json",
                 container.view_service().timeline(project).hash,
-            )
+            ),
+            ProjectChanged(project.id),
         ]
 
     def test_with_nothing_open_nothing_moves(
@@ -1725,13 +1726,14 @@ class TestRecordServiceEvents:
                 f"draft-{project.number}/items/1-which-tent.md",
                 sha256_hex(document.published_text),
             ),
+            ProjectChanged(project.id),
             TreeHashMoved(
                 f"draft-{project.number}/timeline.json",
                 container.view_service().timeline(project).hash,
             ),
         ]
 
-    def test_an_answer_in_a_document_moves_its_path_alone(
+    def test_an_answer_in_a_document_moves_its_path_and_its_project(
         self,
         session: DbSession,
         container: ServiceContainer,
@@ -1761,7 +1763,8 @@ class TestRecordServiceEvents:
             TreeHashMoved(
                 f"draft-{project.number}/items/1-camp-plan.md",
                 sha256_hex(document.published_text),
-            )
+            ),
+            ProjectChanged(project.id),
         ]
 
     @pytest.mark.parametrize("write", ["read", "undo"])
@@ -1801,7 +1804,8 @@ class TestRecordServiceEvents:
             TreeHashMoved(
                 f"draft-{project.number}/timeline.json",
                 container.view_service().timeline(project).hash,
-            )
+            ),
+            ProjectChanged(project.id),
         ]
 
     def test_done_moves_its_path_and_the_timeline(
@@ -1835,6 +1839,7 @@ class TestRecordServiceEvents:
                 f"draft-{project.number}/items/1-camp-plan.md",
                 sha256_hex(document.published_text),
             ),
+            ProjectChanged(project.id),
             TreeHashMoved(
                 f"draft-{project.number}/timeline.json",
                 container.view_service().timeline(project).hash,

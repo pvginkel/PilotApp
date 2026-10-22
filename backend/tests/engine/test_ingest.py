@@ -24,6 +24,7 @@ from app.engine.bus import (
     EngineEvent,
     ErrorsRaised,
     ErrorsResolved,
+    ProjectChanged,
     TreeHashMoved,
 )
 from app.engine.documents import DocumentService
@@ -1238,6 +1239,7 @@ class TestIngestServiceEvents:
                 f"draft-{project.number}/timeline.json",
                 container.view_service().timeline(project).hash,
             ),
+            ProjectChanged(project.id),
             DocumentModified(project.id, path),
         ]
 
@@ -1312,6 +1314,70 @@ class TestIngestServiceEvents:
         _ingest(container, f"draft-{project.number}/timeline.json", "{}\n", environment)
 
         assert engine_events == []
+
+    def test_an_items_held_save_and_its_resolve_change_its_project(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+    ) -> None:
+        with scoped_session(container):
+            container.document_service().bear_item(
+                project, "decision", "Which tent?", project_session, UNANSWERED
+            )
+        path = f"draft-{project.number}/items/1-which-tent.md"
+        engine_events.clear()
+
+        _ingest(container, path, BROKEN, environment)
+        held = list(engine_events)
+        engine_events.clear()
+        _ingest(container, path, BROKEN, environment)
+        held_again = list(engine_events)
+        engine_events.clear()
+        _ingest(container, path, UNANSWERED, environment)
+
+        assert held == [
+            TreeHashMoved(path, sha256_hex(BROKEN)),
+            DocumentModified(project.id, path),
+            ErrorsRaised(project.id, path),
+            ProjectChanged(project.id),
+        ]
+        assert held_again == [
+            DocumentModified(project.id, path),
+            ErrorsRaised(project.id, path),
+        ]
+        assert engine_events == [
+            TreeHashMoved(path, sha256_hex(UNANSWERED)),
+            DocumentModified(project.id, path),
+            ErrorsResolved(project.id, path),
+            ProjectChanged(project.id),
+        ]
+
+    def test_an_items_clean_save_changes_its_project(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+    ) -> None:
+        with scoped_session(container):
+            container.document_service().bear_item(
+                project, "decision", "Which tent?", project_session, UNANSWERED
+            )
+        path = f"draft-{project.number}/items/1-which-tent.md"
+        saved = UNANSWERED + "\nTwo nights at the lake.\n"
+        engine_events.clear()
+
+        _ingest(container, path, saved, environment)
+
+        assert engine_events == [
+            TreeHashMoved(path, sha256_hex(saved)),
+            ProjectChanged(project.id),
+            DocumentModified(project.id, path),
+        ]
 
 
 class TestIngestServiceSequences:
@@ -1651,7 +1717,7 @@ class TestIngestServicePlan:
 
 
 class TestIngestServicePlanEvents:
-    def test_a_save_moves_the_plans_tree_hash_alone(
+    def test_a_save_moves_the_plans_tree_hash_and_its_project(
         self,
         container: ServiceContainer,
         engine_events: list[EngineEvent],
@@ -1663,8 +1729,11 @@ class TestIngestServicePlanEvents:
         _ingest(container, path, PLAN, environment)
 
         # timeline.json shows nothing a plan save writes, and the plan is no
-        # document: no *modified*.
-        assert engine_events == [TreeHashMoved(path, sha256_hex(PLAN))]
+        # document: no *modified*. The screens show its steps.
+        assert engine_events == [
+            TreeHashMoved(path, sha256_hex(PLAN)),
+            ProjectChanged(project.id),
+        ]
 
     def test_a_held_save_raises_its_errors(
         self,

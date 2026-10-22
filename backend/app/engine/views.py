@@ -11,7 +11,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.engine.bus import EngineBus, TreeHashMoved
+from app.engine.bus import EngineBus, ProjectChanged, TreeHashMoved
 from app.engine.paths import TIMELINE, attachment_path, folder, sha256_hex, tree_path
 from app.models import (
     Attachment,
@@ -136,11 +136,12 @@ class ViewService:
         )
 
     def timeline_moved(self, project: Project) -> None:
-        """Tell the bus the project's timeline has a new hash, once the
-        transaction commits."""
+        """Tell the bus the project's timeline has a new hash, and that what
+        its screens show moved, once the transaction commits."""
         self.engine_bus.emit(
             TreeHashMoved(tree_path(project, TIMELINE), self.timeline(project).hash)
         )
+        self.engine_bus.emit(ProjectChanged(project.id))
 
     def _handles(self, user_ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
         return dict(

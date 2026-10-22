@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.database import scoped_session
-from app.engine.bus import EngineEvent, TreeHashMoved
+from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved
 from app.engine.paths import sha256_hex
 from app.exceptions import InvalidOperationException
 from app.extensions import db
@@ -512,6 +512,7 @@ class TestDocumentServiceBirth:
                 f"{folder}/timeline.json",
                 container.view_service().timeline(project).hash,
             ),
+            ProjectChanged(project.id),
         ]
 
     def test_the_handbooks_birth_moves_its_path_alone(
@@ -551,6 +552,7 @@ class TestDocumentServiceBirth:
                 f"{folder}/timeline.json",
                 container.view_service().timeline(project).hash,
             ),
+            ProjectChanged(project.id),
         ]
 
 
@@ -640,6 +642,59 @@ class TestDocumentServicePublish:
             documents.publish(draft, "Some prose.\n")
 
         assert draft.published_text == "Some prose.\n"
+        assert engine_events == []
+
+    def test_a_held_items_publish_changes_its_project_alone(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+    ) -> None:
+        documents = container.document_service()
+        item = documents.bear_item(project, "notice", "The palette", project_session)
+        document = session.get_one(Document, item.id)
+        document.ingested_text = BROKEN
+        document.ingested_hash = sha256_hex(BROKEN)
+        document.ingested_at = datetime.now(UTC)
+        session.add(
+            SaveError(
+                environment_id=environment.id,
+                path=f"draft-{project.number}/items/1-the-palette.md",
+                kind_code=ErrorKind.PARSE,
+                line=1,
+                message="a fence opened with ``` is not closed",
+            )
+        )
+        with scoped_session(container):
+            pass
+        engine_events.clear()
+
+        with scoped_session(container):
+            documents.publish(document, "---\ntitle: The palette\n---\n\nBlue.\n")
+
+        assert engine_events == [ProjectChanged(project.id)]
+
+    def test_an_items_publish_of_the_same_text_changes_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        documents = container.document_service()
+        item = documents.bear_item(project, "notice", "The palette", project_session)
+        document = session.get_one(Document, item.id)
+        with scoped_session(container):
+            pass
+        engine_events.clear()
+
+        with scoped_session(container):
+            documents.publish(document, "---\ntitle: The palette\n---\n")
+
         assert engine_events == []
 
     def test_a_text_with_a_fault_is_not_published(
@@ -839,13 +894,15 @@ class TestDocumentServicePublish:
                 f"draft-{project.number}/timeline.json",
                 container.view_service().timeline(project).hash,
             ),
+            ProjectChanged(project.id),
         ]
 
         engine_events.clear()
         with scoped_session(container):
             documents.publish(document, "# Two colours\n\nBlue and green.\n")
         assert engine_events == [
-            TreeHashMoved(path, sha256_hex("# Two colours\n\nBlue and green.\n"))
+            TreeHashMoved(path, sha256_hex("# Two colours\n\nBlue and green.\n")),
+            ProjectChanged(project.id),
         ]
 
     @pytest.mark.parametrize(
@@ -904,6 +961,7 @@ class TestDocumentServicePublish:
                 f"{folder}/timeline.json",
                 container.view_service().timeline(project).hash,
             ),
+            ProjectChanged(project.id),
         ]
 
 

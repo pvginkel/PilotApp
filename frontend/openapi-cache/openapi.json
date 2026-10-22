@@ -1,6 +1,65 @@
 {
   "components": {
     "schemas": {
+      "ActionDoneRequestSchema.bfdf230": {
+        "additionalProperties": false,
+        "description": "Done on an action, with what the person pasted back.",
+        "properties": {
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The paste-back, the note under the Done",
+            "examples": [
+              "Key stored under kv/camp"
+            ],
+            "title": "Note"
+          }
+        },
+        "title": "ActionDoneRequestSchema",
+        "type": "object"
+      },
+      "AnswerRequestSchema.bfdf230": {
+        "additionalProperties": false,
+        "description": "A person's answer to a block.",
+        "properties": {
+          "answer": {
+            "description": "An option's label, `Agree` to a proposal, `Yes` or `No` to a confirmation, or free words",
+            "examples": [
+              "Dome"
+            ],
+            "title": "Answer",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The note under the answer: an action's paste-back, or a No's reason",
+            "examples": [
+              "Too much rain"
+            ],
+            "title": "Note"
+          }
+        },
+        "required": [
+          "answer"
+        ],
+        "title": "AnswerRequestSchema",
+        "type": "object"
+      },
       "ApiErrorResponseSchema.c2a0d71": {
         "description": "The error envelope every error handler answers with.\n\nIt mirrors ``build_error_response()`` in ``app/utils/flask_error_handlers.py``;\nchange both together. Use it to document error responses in ``@api.validate``,\nfor example ``HTTP_502=ApiErrorResponseSchema`` on an endpoint that calls an\nexternal service. One handler differs: a ``pydantic.ValidationError`` raised\nin a handler answers 400 with ``details.errors``, a list of\n``{\"message\", \"field\"}``, instead of ``details.message``.",
         "properties": {
@@ -3406,6 +3465,530 @@
         },
         "summary": "Get current authenticated user information.",
         "tags": []
+      }
+    },
+    "/api/items/{item_id}/blocks/{block_id}/answer": {
+      "post": {
+        "description": "A one-ask item is done by its answer.\n\nReturns:     204: The answer is recorded     400: The body is not an answer     401: No one is signed in     403: The caller lacks the editor role     404: No item has the id, or it has no block of the id     409: The caller has not chosen a handle, the item is done, or the         block takes no such answer",
+        "operationId": "post__api_items_{item_id}_blocks_{block_id}_answer",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "",
+            "in": "path",
+            "name": "block_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnswerRequestSchema.bfdf230"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Answer a block as the signed-in person, now, through the app.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/items/{item_id}/blocks/{block_id}/done": {
+      "post": {
+        "description": "A one-ask item is done by its action's Done.\n\nReturns:     204: The Done is recorded     400: The body is not a Done     401: No one is signed in     403: The caller lacks the editor role     404: No item has the id, or it has no block of the id     409: The caller has not chosen a handle, the item is done, or the         block is no action without options",
+        "operationId": "post__api_items_{item_id}_blocks_{block_id}_done",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "",
+            "in": "path",
+            "name": "block_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActionDoneRequestSchema.bfdf230"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Mark an action without options Done as the signed-in person, now, with the paste-back as its note.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/items/{item_id}/done": {
+      "post": {
+        "description": "Returns:     204: The document is done     401: No one is signed in     403: The caller lacks the editor role     404: No item has the id     409: The caller has not chosen a handle, the item is done or no         document, or a block has neither an answer nor a recommendation",
+        "operationId": "post__api_items_{item_id}_done",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Mark a document Done as the signed-in person, now: every unanswered block that has a recommendation answered with it first, `via: recommended`.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/items/{item_id}/read": {
+      "post": {
+        "description": "Returns:     204: The notice is done     401: No one is signed in     403: The caller lacks the editor role     404: No item has the id     409: The caller has not chosen a handle, or the item is done or no         notice",
+        "operationId": "post__api_items_{item_id}_read",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Mark a notice Read as the signed-in person, now.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/items/{item_id}/reviewed": {
+      "post": {
+        "description": "Returns:     204: The review is done     401: No one is signed in     403: The caller lacks the editor role     404: No item has the id     409: The caller has not chosen a handle, or the item is done or no         review",
+        "operationId": "post__api_items_{item_id}_reviewed",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Mark a review Reviewed as the signed-in person, now.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/items/{item_id}/undo": {
+      "post": {
+        "description": "Returns:     204: The item is open     401: No one is signed in     403: The caller lacks the editor role     404: No item has the id     409: The item is not done, a session has taken its answers, it was         done in a way that offers no undo, or it is no prose item",
+        "operationId": "post__api_items_{item_id}_undo",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Undo a done item's answer or mark, whoever gave it, while no session has taken it: the item open again, and a one-ask item's block unanswered.",
+        "tags": [],
+        "x-required-role": "editor"
       }
     },
     "/api/links": {

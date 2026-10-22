@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.database import scoped_session
-from app.engine.bus import EngineEvent, TreeHashMoved
+from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved
 from app.engine.views import READONLY, Rendering
 from app.models import (
     Attachment,
@@ -383,5 +383,6 @@ class TestViewService:
         assert engine_events == [
             TreeHashMoved(
                 f"draft-{project.number}/timeline.json", views.timeline(project).hash
-            )
+            ),
+            ProjectChanged(project.id),
         ]

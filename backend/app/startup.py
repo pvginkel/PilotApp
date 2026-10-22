@@ -32,11 +32,13 @@ def register_blueprints(api_bp: Blueprint, app: Flask) -> None:
     # api_bp is the process's one; a second app (the tests build several)
     # finds it registered already, with these on it.
     if not api_bp._got_registered_once:
+        from app.api.items import items_bp
         from app.api.links import links_bp
         from app.api.people import people_bp
         from app.api.projects import projects_bp
         from app.api.sessions import sessions_bp
 
+        api_bp.register_blueprint(items_bp)
         api_bp.register_blueprint(links_bp)
         api_bp.register_blueprint(people_bp)
         api_bp.register_blueprint(projects_bp)
