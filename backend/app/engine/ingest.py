@@ -100,8 +100,10 @@ class IngestService:
         A save of `plan.json` writes the plan's rows, or on any fault changes
         nothing, and is stored nowhere. A document's save is stored as its
         ingest and held on any fault, else merged by ownership against the
-        published text and published. Either's faults replace the path's
-        `parse` Save Errors. Refused for a path the store does not sync.
+        published text and published; the opening's is never read, and one
+        that differs is reverted whole, never held. Either's faults replace
+        the path's `parse` Save Errors. Refused for a path the store does not
+        sync.
         """
         resolved = self.tree_service.resolve(path)
         if isinstance(resolved, TreeFile):

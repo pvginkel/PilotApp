@@ -61,7 +61,7 @@ class DoneSchema(BaseModel):
     at: datetime = Field(description="When the item was done")
     cause: DoneCauseCode = Field(description="How it came to be done")
     by: UserSchema | None = Field(
-        description="Who did it; null when the server did, at a turn's end or Finish"
+        description="Who did it; null when the server did, at a turn's end"
     )
     undo: bool = Field(
         description=(
@@ -86,8 +86,13 @@ class ConfirmationReasonSchema(BaseModel):
     """The ground on which a confirmation asks (F22.1)."""
 
     code: str = Field(examples=["rider"])
-    name: str = Field(description="The reason line", examples=["Rider"])
-    description: str = Field(description="The reason line's tooltip")
+    name: str = Field(
+        description="The reason's name in the grants table, not the card's words",
+        examples=["Rider"],
+    )
+    description: str = Field(
+        description="When the agent uses the reason, one line, not the card's tooltip"
+    )
 
 
 class DeferralSchema(BaseModel):

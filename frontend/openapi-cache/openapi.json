@@ -2914,12 +2914,12 @@
             "type": "string"
           },
           "description": {
-            "description": "The reason line's tooltip",
+            "description": "When the agent uses the reason, one line, not the card's tooltip",
             "title": "Description",
             "type": "string"
           },
           "name": {
-            "description": "The reason line",
+            "description": "The reason's name in the grants table, not the card's words",
             "examples": [
               "Rider"
             ],
@@ -2987,7 +2987,7 @@
                 "type": "null"
               }
             ],
-            "description": "Who did it; null when the server did, at a turn's end or Finish"
+            "description": "Who did it; null when the server did, at a turn's end"
           },
           "cause": {
             "description": "How it came to be done",
