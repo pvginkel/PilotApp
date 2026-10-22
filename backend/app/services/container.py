@@ -341,6 +341,8 @@ class ServiceContainer(containers.DeclarativeContainer):
         record_service=record_service,
         plan_service=plan_service,
         people_service=people_service,
+        ingest_service=ingest_service,
+        tree_service=tree_service,
     )
 
 

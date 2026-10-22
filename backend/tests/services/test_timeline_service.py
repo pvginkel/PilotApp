@@ -283,10 +283,8 @@ class TestTimeline:
         with pytest.raises(RecordNotFoundException):
             container.timeline_service().timeline(uuid.uuid4())
 
-    def test_a_project_without_items_has_an_empty_timeline(
-        self, container: ServiceContainer
-    ) -> None:
-        project = _make(container)
+    def test_a_draft_has_an_empty_timeline(self, container: ServiceContainer) -> None:
+        project = _make(container, state="draft")
 
         timeline = container.timeline_service().timeline(project.id)
 
@@ -306,9 +304,9 @@ class TestTimeline:
             tasks=[{"id": "build", "title": "Build the camp", "status": "pending"}],
         )
         run = _run(session, project, environment)
-        opening = container.document_service().bear_opening(
-            project, "Camp", person, "Let's camp.\n"
-        )
+        opening = session.scalars(
+            select(Item).where(Item.project_id == project.id, Item.seq == 1)
+        ).one()
         decision = _bear(container, project, run, "decision", "Which tent?", DECISION)
         notice = _bear(
             container,
@@ -393,10 +391,9 @@ class TestTimeline:
     def test_the_opening_is_its_authors_words_verbatim(
         self, container: ServiceContainer
     ) -> None:
-        ben = _ben(container)
-        project = _make(container, members=["ben", "ada"])
+        _ben(container)
         words = "Look at this:\n\n```decision id=D1\noptions:\n  - Dome\n"
-        container.document_service().bear_opening(project, "Camp", ben, words)
+        project = _make(container, members=["ben", "ada"], opening=words)
 
         (opening,) = _items(container, project)
 
@@ -423,7 +420,7 @@ class TestTimeline:
             DECISION,
         )
 
-        (item,) = _items(container, project)
+        _opening, item = _items(container, project)
 
         assert item["author"] is None
         assert item["words"] is None
@@ -470,7 +467,7 @@ class TestTimeline:
         _bear(container, project, run, "decision", "Book the site", CONFIRMATION)
         _bear(container, project, run, "question", "Where do we camp?", QUESTION)
 
-        confirmation, question = _items(container, project)
+        _opening, confirmation, question = _items(container, project)
 
         assert confirmation["kind"] == "confirmation"
         (part,) = confirmation["body"]
@@ -513,7 +510,7 @@ class TestTimeline:
             _document(session, item), "D1", person, "Tunnel", note="More room."
         )
 
-        (line,) = _items(container, project)
+        _opening, line = _items(container, project)
 
         block = line["body"][1]["block"]
         assert (block["answer"], block["by"], block["note"], block["via"]) == (
@@ -547,7 +544,7 @@ class TestTimeline:
             SETTLED,
         )
 
-        (item,) = _items(container, project)
+        _opening, item = _items(container, project)
 
         block = item["body"][0]["block"]
         assert (
@@ -578,7 +575,7 @@ class TestTimeline:
             _document(session, item), "A1", person, note="Packed, with two gas cans."
         )
 
-        (line,) = _items(container, project)
+        _opening, line = _items(container, project)
 
         block = line["body"][0]["block"]
         assert (block["answer"], block["by"], block["note"]) == (
@@ -614,7 +611,7 @@ class TestTimeline:
         removed.position, removed.removed_at = None, datetime.now(UTC)
         session.flush()
 
-        (item,) = _items(container, project)
+        _opening, item = _items(container, project)
 
         assert [part["block"]["deferral"] for part in item["body"]] == [
             {"to": "build", "title": "Pitch the camp"},
@@ -644,7 +641,7 @@ class TestTimeline:
         item.consumed_session_id = run.id
         session.flush()
 
-        (line,) = _items(container, project)
+        _opening, line = _items(container, project)
 
         assert line["done"]["undo"] is False
 
@@ -657,9 +654,6 @@ class TestTimeline:
     ) -> None:
         project = _make(container)
         run = _run(session, project, environment)
-        container.document_service().bear_opening(
-            project, "Camp", person, "Let's camp.\n"
-        )
         _bear(container, project, run, "notice", "Opens in May", NOTICE)
         container.project_service().transition(ADA, project.id, TransitionKind.FINISHED)
 
@@ -693,7 +687,7 @@ class TestTimeline:
             done_cause_code="turn_ended",
         )
 
-        (work,) = _items(container, project)
+        _opening, work = _items(container, project)
 
         assert datetime.fromisoformat(work["done"]["at"]) == done_at
         assert work["done"] == {
@@ -714,7 +708,7 @@ class TestTimeline:
         item = _bear(container, project, run, "question", "Where?", QUESTION)
         other = _bear(container, project, run, "notice", "Opens in May", NOTICE)
         document = _document(session, item)
-        published = container.timeline_service().timeline(project.id).items[0].body
+        published = container.timeline_service().timeline(project.id).items[1].body
         ingested = container.ingest_service().ingest(
             tree_path(project, document.path),
             b"---\ntitle: Where?\n---\n```question id=Q1\ndefault: The hill\n",
@@ -724,7 +718,7 @@ class TestTimeline:
         )
         assert ingested.held
 
-        concept, clean = _items(container, project)
+        _opening, concept, clean = _items(container, project)
 
         assert concept["concept"] is True
         assert concept["body"] == [part.model_dump(mode="json") for part in published]
@@ -750,7 +744,7 @@ class TestTimeline:
         document.source_path = "/work/Camp/docs/refinement.md"
         container.document_service().publish(document, "The camp's refinement.\n")
 
-        (line,) = _items(container, project)
+        _opening, line = _items(container, project)
 
         assert (line["title"], line["file_name"]) == (None, "refinement.md")
         assert line["body"] == [{"type": "prose", "markdown": "The camp's refinement."}]
@@ -787,7 +781,6 @@ class TestBadges:
             tasks=[{"id": "build", "title": "Build the camp", "status": "pending"}],
         )
         run = _run(session, project, environment)
-        container.document_service().bear_opening(project, "Camp", person, "Hi.\n")
         _bear(container, project, run, "decision", "Which tent?", DECISION)
         _bear(container, project, run, "question", "Where?", QUESTION)
         _bear(container, project, run, "action", "Pack the stove", ACTION)

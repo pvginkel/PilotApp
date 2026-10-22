@@ -405,11 +405,12 @@ class TestGetTimeline:
                 container,
                 name="Camp",
                 tasks=[{"id": "build", "title": "Build the camp", "status": "pending"}],
+                opening="Let's camp.\n",
             ),
         )
         run = _run(session, camp, environment)
         documents = container.document_service()
-        opening = documents.bear_opening(camp, "Camp", person, "Let's camp.\n")
+        opening = session.scalars(select(Item).where(Item.project_id == camp.id)).one()
         decision = documents.bear_item(camp, "decision", "Which tent?", run, _DECISION)
         container.record_service().answer(
             session.get_one(Document, decision.id),
@@ -564,7 +565,7 @@ class TestGetTimeline:
         body = client.get(f"{PROJECTS}/{bikes}/timeline").get_json()
 
         assert datetime.fromisoformat(body["finished_at"]) == finished_at
-        assert body["items"] == []
+        assert [item["kind"] for item in body["items"]] == ["opening"]
 
     def test_an_unknown_project_is_not_found(self, client: FlaskClient) -> None:
         _sign_in(client)
@@ -640,7 +641,11 @@ class TestAddTransition:
         ]
         assert {
             item.done_cause_code
-            for item in session.scalars(select(Item).where(Item.project_id == recipes))
+            for item in session.scalars(
+                select(Item).where(
+                    Item.project_id == recipes, Item.kind_code != "opening"
+                )
+            )
         } == {"finished"}
 
     @pytest.mark.parametrize(

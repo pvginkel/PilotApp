@@ -307,6 +307,64 @@
         "title": "InventedEnvironmentSchema",
         "type": "object"
       },
+      "InventedItemCreateSchema.6d6b324": {
+        "description": "A prose item the project's session adds, as Pilot adds one.",
+        "properties": {
+          "kind": {
+            "description": "The kind it is added as; a text with blocks shows their kind",
+            "enum": [
+              "decision",
+              "confirmation",
+              "question",
+              "action",
+              "notice",
+              "document",
+              "review"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "text": {
+            "description": "Its Markdown as Pilot writes it, front matter and blocks included",
+            "examples": [
+              "```decision id=D1\noptions:\n  - Dome\n  - Tunnel\n```\n"
+            ],
+            "title": "Text",
+            "type": "string"
+          },
+          "title": {
+            "description": "The title it is added with: its file's name, and its front matter's `title` where the text gives none",
+            "examples": [
+              "Which tent?"
+            ],
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "title",
+          "text"
+        ],
+        "title": "InventedItemCreateSchema",
+        "type": "object"
+      },
+      "InventedItemSchema.6d6b324": {
+        "properties": {
+          "id": {
+            "description": "The item's id",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "InventedItemSchema",
+        "type": "object"
+      },
       "InventedPersonCreateSchema.6d6b324": {
         "description": "A person put on the record as the handle step puts one, never signed in.",
         "properties": {
@@ -398,7 +456,7 @@
               }
             ],
             "default": null,
-            "description": "The environment the session adding the open items runs in",
+            "description": "The environment of the project's session, which adds the open items and the items placed later; none without it",
             "examples": [
               "example-env-1"
             ],
@@ -449,6 +507,15 @@
             "minimum": 0,
             "title": "Open Items",
             "type": "integer"
+          },
+          "opening": {
+            "default": "An invented project, started for a test.",
+            "description": "The words that started the project, its opening, kept verbatim; the first member wrote them. A draft has no opening",
+            "examples": [
+              "Let us build a recipe box for the kitchen."
+            ],
+            "title": "Opening",
+            "type": "string"
           },
           "repo": {
             "anyOf": [
@@ -601,6 +668,73 @@
           "id"
         ],
         "title": "InventedProjectSchema",
+        "type": "object"
+      },
+      "InventedSaveCreateSchema.6d6b324": {
+        "description": "An agent's save of an item's file, as the store's sync puts it.",
+        "properties": {
+          "text": {
+            "description": "The file's whole text as the agent saved it",
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "InventedSaveCreateSchema",
+        "type": "object"
+      },
+      "InventedSaveSchema.6d6b324": {
+        "properties": {
+          "faults": {
+            "description": "What held the save, or what the merge reverted",
+            "items": {
+              "$ref": "#/components/schemas/InventedSaveSchema.6d6b324.InventedFaultSchema"
+            },
+            "title": "Faults",
+            "type": "array"
+          },
+          "held": {
+            "description": "Whether the save is held for a fault, the item shown as it was last published; else it was merged and published",
+            "title": "Held",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "held",
+          "faults"
+        ],
+        "title": "InventedSaveSchema",
+        "type": "object"
+      },
+      "InventedSaveSchema.6d6b324.InventedFaultSchema": {
+        "properties": {
+          "line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The fault's line, from 1; none for the text as a whole",
+            "title": "Line"
+          },
+          "message": {
+            "examples": [
+              "block D1: duplicate option label Dome"
+            ],
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "line",
+          "message"
+        ],
+        "title": "InventedFaultSchema",
         "type": "object"
       },
       "LinkSettingsSchema.fb10421": {
@@ -5663,6 +5797,84 @@
         "x-required-role": "editor"
       }
     },
+    "/api/testing/items/{item_id}/saves": {
+      "post": {
+        "description": "Returns:     200: Whether the save is held, and its faults     400: The text is missing     404: No item has the id, or its project is archived     409: The project has no session",
+        "operationId": "post__api_testing_items_{item_id}_saves",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventedSaveCreateSchema.6d6b324"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventedSaveSchema.6d6b324"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Ingest an agent's save of the item's file, by the project's session, as the store's sync does: held on a fault, the item then shown as it was last published (F78), else merged and published.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
     "/api/testing/links": {
       "put": {
         "description": "Returns:     200: The link settings as the app now holds them     400: A template without `{id}`, or a base that is not an http(s)         address",
@@ -5846,6 +6058,84 @@
           }
         ],
         "summary": "Make a project in the standing given, made now by its first member.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/projects/{project_id}/items": {
+      "post": {
+        "description": "Returns:     201: The item's id     400: The kind is no prose kind Pilot adds, or the title is empty     404: No project has the id     409: The project has no session, or the text holds a fault",
+        "operationId": "post__api_testing_projects_{project_id}_items",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventedItemCreateSchema.6d6b324"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventedItemSchema.6d6b324"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Add a prose item to the project's timeline, by the project's session, as Pilot adds one: its kind, urgency, person, step and blocks, Pilot's answers and deferrals among them, are what its text says.",
         "tags": [],
         "x-required-role": "editor"
       }

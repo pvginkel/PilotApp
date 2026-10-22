@@ -1,7 +1,7 @@
 """The invented record: the dev stack's seed, which `cli load-test-data`
 loads into the dev database and into the seed every Playwright worker clones,
-and the people, environments and projects a spec makes through
-`/api/testing/` (TEST-6).
+and the people, environments, projects, items and agent saves a spec or the
+dev stage's deployed check makes through `/api/testing/` (TEST-6, Ruling D1).
 
 Documents, the record's writes and the plan go through the engine's own
 operations, so the seed is a record the engine could have produced. The rows
@@ -21,8 +21,11 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.engine.documents import DocumentService
+from app.engine.ingest import Ingested, IngestService
+from app.engine.paths import tree_path
 from app.engine.plan import PlanService
 from app.engine.record import RecordService
+from app.engine.tree import TreeService
 from app.engine.views import utc_time
 from app.exceptions import (
     InvalidOperationException,
@@ -347,12 +350,16 @@ class TestDataService:
         record_service: RecordService,
         plan_service: PlanService,
         people_service: PeopleService,
+        ingest_service: IngestService,
+        tree_service: TreeService,
     ) -> None:
         self.db = db
         self.document_service = document_service
         self.record_service = record_service
         self.plan_service = plan_service
         self.people_service = people_service
+        self.ingest_service = ingest_service
+        self.tree_service = tree_service
 
     def load_all(self) -> dict[str, int]:
         """Seed the record into an empty database, in the caller's
@@ -530,8 +537,9 @@ class TestDataService:
     def project(self, spec: InventedProjectCreateSchema) -> Project:
         """A project in the standing `spec` gives, made now by its first
         member: the transitions to that standing, its members in order, its
-        draft titled by its name and its plan; with an environment, a session
-        there that adds its open items, notices.
+        draft titled by its name and its plan; past the draft, its opening,
+        the first member's words verbatim, titled by its name; with an
+        environment, a session there that adds its open items, notices.
 
         Raises:
             ValidationException: a finished project with auto pilot on, a
@@ -618,6 +626,13 @@ class TestDataService:
                 f"Cannot {operation} because its plan has a fault: "
                 + "; ".join(fault.message for fault in faults)
             )
+        if not draft:
+            self.document_service.bear_opening(
+                project,
+                "New project" if spec.name is None else spec.name,
+                people[0],
+                spec.opening,
+            )
         if environment is not None:
             session = self._session(project, environment, now)
             for number in range(1, spec.open_items + 1):
@@ -626,6 +641,60 @@ class TestDataService:
                     project, "notice", title, session, NOTICE_TEXT.format(title=title)
                 )
         return project
+
+    def item(self, project_id: uuid.UUID, kind: str, title: str, text: str) -> Item:
+        """A prose item of `kind` the project's session adds with `title` and
+        `text`, born through the engine's `bear_item`.
+
+        Raises:
+            RecordNotFoundException: no project has the id.
+            InvalidOperationException: the project has no session, or the text
+                holds a fault.
+        """
+        project = self.db.get(Project, project_id)
+        if project is None:
+            raise RecordNotFoundException("Project", str(project_id))
+        session = self._session_of(project, f"add an item to project {project.id}")
+        return self.document_service.bear_item(project, kind, title, session, text)
+
+    def save(self, item_id: uuid.UUID, text: str) -> Ingested:
+        """An agent's save of the item's file by the project's session, on the
+        tree's current hash, through the ingest the store's sync calls: held
+        on a fault, else merged and published.
+
+        Raises:
+            RecordNotFoundException: no item has the id, or its project is
+                archived, so the store does not sync its file.
+            InvalidOperationException: the project has no session.
+        """
+        item = self.db.get(Item, item_id)
+        if item is None:
+            raise RecordNotFoundException("Item", str(item_id))
+        project = self.db.get_one(Project, item.project_id)
+        document = self.db.get_one(Document, item.id)
+        session = self._session_of(project, f"save item {item.id}")
+        return self.ingest_service.ingest(
+            tree_path(project, document.path),
+            text.encode(),
+            self.tree_service.hash(project, document),
+            self.db.get_one(Environment, session.environment_id),
+            session,
+        )
+
+    def _session_of(self, project: Project, operation: str) -> AgentSession:
+        """The project's session started last."""
+        session = self.db.scalars(
+            select(AgentSession)
+            .where(AgentSession.project_id == project.id)
+            .order_by(AgentSession.started_at.desc().nulls_last(), AgentSession.id)
+            .limit(1)
+        ).first()
+        if session is None:
+            raise InvalidOperationException(
+                operation,
+                "the project has no session: make it with an environment_id",
+            )
+        return session
 
     def _invented_member(self, handle: str) -> User:
         person = self.db.scalars(

@@ -46,7 +46,7 @@ from app.models.reference import (
     UserKind,
     VersionCause,
 )
-from app.schemas.testing_record import InventedProjectCreateSchema
+from app.schemas.testing_record import OPENING_WORDS, InventedProjectCreateSchema
 from app.services import test_data_service
 from app.services.container import ServiceContainer
 from app.startup import load_test_data_hook
@@ -523,6 +523,14 @@ class TestTestDataService:
         assert session.scalars(select(Project)).all() == []
 
 
+DECISION_TEXT = """```decision id=D1
+options:
+  - Dome
+  - Tunnel
+```
+"""
+
+
 def _spec(**spec: Any) -> InventedProjectCreateSchema:
     spec.setdefault("members", ["ada"])
     return InventedProjectCreateSchema.model_validate(spec)
@@ -701,10 +709,60 @@ class TestProject:
             (item.kind_code, item.title, item.done_at, item.created_by_session_id)
             for item in _items(session, project)
         ] == [
+            ("opening", "New project", None, None),
             ("notice", "Notice 1", None, run.id),
             ("notice", "Notice 2", None, run.id),
         ]
         assert run.environment_id == environment.id
+
+    def test_past_the_draft_the_first_member_wrote_its_opening(
+        self, container: ServiceContainer, session: DbSession
+    ) -> None:
+        service = container.test_data_service()
+        ben = service.person("ben", "Ben Example")
+        words = "Let's camp.\n\n```decision id=D1\nnope: 1\n```\n\n```question id=Q1\n"
+
+        project = service.project(
+            _spec(name="Camp", members=["ben", "ada"], opening=words)
+        )
+
+        [opening] = _items(session, project)
+        assert (
+            opening.kind_code,
+            opening.title,
+            opening.created_by_user_id,
+            opening.created_by_session_id,
+            session.get_one(Document, opening.id).published_text,
+        ) == ("opening", "Camp", ben.id, None, words)
+        assert session.scalars(select(Block)).all() == []
+
+    @pytest.mark.parametrize(
+        ("spec", "title"),
+        [({"name": "Camp"}, "Camp"), ({}, "New project")],
+    )
+    def test_the_opening_is_titled_by_the_name(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        spec: dict[str, Any],
+        title: str,
+    ) -> None:
+        project = container.test_data_service().project(_spec(**spec))
+
+        [opening] = _items(session, project)
+        assert (
+            opening.title,
+            session.get_one(Document, opening.id).published_text,
+        ) == (title, OPENING_WORDS)
+
+    def test_a_draft_has_no_opening(
+        self, container: ServiceContainer, session: DbSession
+    ) -> None:
+        project = container.test_data_service().project(
+            _spec(name="Camp", state="draft", opening="Let's camp.")
+        )
+
+        assert _items(session, project) == []
 
     @pytest.mark.parametrize(
         ("spec", "message"),
@@ -756,3 +814,206 @@ class TestProject:
             container.test_data_service().project(_spec(**spec))
 
         assert raised.value.message == message
+
+
+@pytest.fixture
+def camp(
+    container: ServiceContainer, person: User, environment: Environment
+) -> Project:
+    """An open project with its session in `environment`."""
+    return container.test_data_service().project(
+        _spec(name="Camp", environment_id=environment.id)
+    )
+
+
+def _session_of(session: DbSession, project: Project) -> models.Session:
+    return session.scalars(
+        select(models.Session).where(models.Session.project_id == project.id)
+    ).one()
+
+
+class TestItem:
+    def test_the_projects_session_adds_it_with_its_title(
+        self, container: ServiceContainer, session: DbSession, camp: Project
+    ) -> None:
+        item = container.test_data_service().item(
+            camp.id, "decision", "Which tent?", DECISION_TEXT
+        )
+
+        assert (
+            item.project_id,
+            item.kind_code,
+            item.title,
+            item.seq,
+            item.created_by_session_id,
+        ) == (camp.id, "decision", "Which tent?", 2, _session_of(session, camp).id)
+        assert session.get_one(Document, item.id).published_text == (
+            "---\ntitle: Which tent?\n---\n" + DECISION_TEXT
+        )
+        assert _block(session, item, "D1").kind_code == "decision"
+
+    def test_the_session_started_last_adds_it(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        camp: Project,
+        environment: Environment,
+    ) -> None:
+        first = _session_of(session, camp)
+        later = models.Session(
+            project_id=camp.id,
+            environment_id=environment.id,
+            kind_code="work",
+            cwd="/work/Camp",
+            token_hash=uuid.uuid4().hex * 2,
+            state_code=first.state_code,
+            started_at=first.started_at + timedelta(minutes=5),
+        )
+        session.add(later)
+        session.flush()
+
+        item = container.test_data_service().item(
+            camp.id, "notice", "Palette", "Blue.\n"
+        )
+
+        assert item.created_by_session_id == later.id
+
+    def test_an_unknown_project_is_not_found(self, container: ServiceContainer) -> None:
+        project_id = uuid.uuid4()
+
+        with pytest.raises(RecordNotFoundException) as raised:
+            container.test_data_service().item(project_id, "notice", "N", "Hi")
+
+        assert raised.value.message == f"Project {project_id} was not found"
+
+    def test_a_project_without_a_session_is_refused(
+        self, container: ServiceContainer, person: User
+    ) -> None:
+        project = container.test_data_service().project(_spec())
+
+        with pytest.raises(InvalidOperationException) as raised:
+            container.test_data_service().item(project.id, "notice", "N", "Hi")
+
+        assert raised.value.message == (
+            f"Cannot add an item to project {project.id} because the project has "
+            "no session: make it with an environment_id"
+        )
+
+    @pytest.mark.parametrize("kind", ["opening", "work"])
+    def test_a_kind_pilot_does_not_add_is_refused(
+        self, container: ServiceContainer, camp: Project, kind: str
+    ) -> None:
+        with pytest.raises(InvalidOperationException):
+            container.test_data_service().item(camp.id, kind, "N", "Hi")
+
+    def test_a_text_with_a_fault_is_refused(
+        self, container: ServiceContainer, session: DbSession, camp: Project
+    ) -> None:
+        with pytest.raises(InvalidOperationException):
+            container.test_data_service().item(
+                camp.id, "decision", "N", "```decision id=D1\nnope: 1\n```\n"
+            )
+
+        assert len(_items(session, camp)) == 1
+
+
+class TestSave:
+    @pytest.fixture
+    def notice(self, container: ServiceContainer, camp: Project) -> Item:
+        return container.test_data_service().item(
+            camp.id, "notice", "Palette", "Blue and green.\n"
+        )
+
+    def test_a_save_with_a_fault_is_held(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        camp: Project,
+        notice: Item,
+    ) -> None:
+        document = session.get_one(Document, notice.id)
+        published = document.published_text
+
+        ingested = container.test_data_service().save(notice.id, "Red.\n")
+
+        assert (ingested.held, [fault.message for fault in ingested.faults]) == (
+            True,
+            [
+                "the item has no title: give it `title` in the front matter"
+                " or a first heading"
+            ],
+        )
+        assert container.tree_service().held(camp, document)
+        assert (document.published_text, document.ingested_text) == (
+            published,
+            "Red.\n",
+        )
+
+    def test_a_clean_save_is_published_by_the_session(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        camp: Project,
+        notice: Item,
+    ) -> None:
+        text = "---\ntitle: Palette\n---\nRed.\n"
+
+        ingested = container.test_data_service().save(notice.id, text)
+
+        assert (ingested.held, ingested.faults, ingested.stale) == (False, (), False)
+        document = session.get_one(Document, notice.id)
+        assert document.published_text == text
+        version = session.scalars(
+            select(DocumentVersion)
+            .where(DocumentVersion.document_id == document.id)
+            .order_by(DocumentVersion.id.desc())
+            .limit(1)
+        ).one()
+        assert version.session_id == _session_of(session, camp).id
+
+    def test_a_save_after_a_held_one_is_on_its_hash(
+        self, container: ServiceContainer, notice: Item
+    ) -> None:
+        service = container.test_data_service()
+        service.save(notice.id, "Red.\n")
+
+        ingested = service.save(notice.id, "---\ntitle: Palette\n---\nRed.\n")
+
+        assert (ingested.held, ingested.stale) == (False, False)
+
+    def test_an_unknown_item_is_not_found(self, container: ServiceContainer) -> None:
+        item_id = uuid.uuid4()
+
+        with pytest.raises(RecordNotFoundException) as raised:
+            container.test_data_service().save(item_id, "Red.")
+
+        assert raised.value.message == f"Item {item_id} was not found"
+
+    def test_an_archived_projects_item_is_not_found(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        environment: Environment,
+    ) -> None:
+        project = container.test_data_service().project(
+            _spec(archived=True, environment_id=environment.id)
+        )
+        [opening] = _items(session, project)
+
+        with pytest.raises(RecordNotFoundException):
+            container.test_data_service().save(opening.id, "Red.")
+
+    def test_a_project_without_a_session_is_refused(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        project = container.test_data_service().project(_spec())
+        [opening] = _items(session, project)
+
+        with pytest.raises(InvalidOperationException) as raised:
+            container.test_data_service().save(opening.id, "Red.")
+
+        assert raised.value.message == (
+            f"Cannot save item {opening.id} because the project has no session: "
+            "make it with an environment_id"
+        )

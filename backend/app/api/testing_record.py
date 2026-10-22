@@ -1,35 +1,60 @@
 """Testing endpoints that make the record's states the UI cannot make
-(TEST-6): people who never signed in, environments, and projects in every
-standing, with members, a plan and open items. Nothing in the UI creates a
-project before the definition chat (F46)."""
+(TEST-6): people who never signed in, environments, projects in every
+standing, with members, a plan, their opening and open items, the items a
+project's session adds, and an agent's saves of them. Nothing in the UI
+creates a project before the definition chat (F46).
 
+They answer on every STAGE but prd, whatever FLASK_ENV says, so that the dev
+stage's deployed check makes its record through them (Ruling D1). They sit on
+the API blueprint, behind its sign-in and the `editor` role.
+"""
+
+import uuid
 from typing import Any
 
 from dependency_injector.wiring import Provide, inject
 from flask import Blueprint, request
 from spectree import Response as SpectreeResponse
 
+from app.config import Settings
+from app.exceptions import RouteNotAvailableException
 from app.schemas.common import ApiErrorResponseSchema
 from app.schemas.testing_record import (
     InventedEnvironmentSchema,
+    InventedFaultSchema,
+    InventedItemCreateSchema,
+    InventedItemSchema,
     InventedPersonCreateSchema,
     InventedPersonSchema,
     InventedProjectCreateSchema,
     InventedProjectSchema,
+    InventedSaveCreateSchema,
+    InventedSaveSchema,
 )
 from app.services.container import ServiceContainer
 from app.services.test_data_service import TestDataService
+from app.utils.flask_error_handlers import build_error_response
 from app.utils.spectree_config import api
 
-testing_record_bp = Blueprint("testing_record", __name__, url_prefix="/api/testing")
+testing_record_bp = Blueprint("testing_record", __name__, url_prefix="/testing")
 
 
 @testing_record_bp.before_request
-def check_testing_mode() -> Any:
-    """Reject requests when the server is not running in testing mode."""
-    from app.api.testing_guard import reject_if_not_testing
-
-    return reject_if_not_testing()
+@inject
+def refuse_on_prd(config: Settings = Provide[ServiceContainer.config]) -> Any:
+    """Refuse every request on prd; an unset STAGE outside testing and
+    development resolves to prd (`default_stage`)."""
+    if config.stage != "prd":
+        return None
+    exception = RouteNotAvailableException(
+        "The record's testing endpoints are not available on prd"
+    )
+    return build_error_response(
+        exception.message,
+        {"message": "The record's testing endpoints require a STAGE other than prd"},
+        code=exception.error_code,
+        status_code=400,
+    )
 
 
 @testing_record_bp.route("/people", methods=["POST"])
@@ -115,3 +140,69 @@ def create_project(
     data = InventedProjectCreateSchema.model_validate(request.get_json())
     project = test_data_service.project(data)
     return InventedProjectSchema(id=project.id).model_dump(mode="json"), 201
+
+
+@testing_record_bp.route("/projects/<uuid:project_id>/items", methods=["POST"])
+@api.validate(
+    json=InventedItemCreateSchema,
+    resp=SpectreeResponse(
+        HTTP_201=InventedItemSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def create_item(
+    project_id: uuid.UUID,
+    test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
+) -> Any:
+    """Add a prose item to the project's timeline, by the project's session,
+    as Pilot adds one: its kind, urgency, person, step and blocks, Pilot's
+    answers and deferrals among them, are what its text says.
+
+    Returns:
+        201: The item's id
+        400: The kind is no prose kind Pilot adds, or the title is empty
+        404: No project has the id
+        409: The project has no session, or the text holds a fault
+    """
+    data = InventedItemCreateSchema.model_validate(request.get_json())
+    item = test_data_service.item(project_id, data.kind, data.title, data.text)
+    return InventedItemSchema(id=item.id).model_dump(mode="json"), 201
+
+
+@testing_record_bp.route("/items/<uuid:item_id>/saves", methods=["POST"])
+@api.validate(
+    json=InventedSaveCreateSchema,
+    resp=SpectreeResponse(
+        HTTP_200=InventedSaveSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def create_save(
+    item_id: uuid.UUID,
+    test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
+) -> Any:
+    """Ingest an agent's save of the item's file, by the project's session, as
+    the store's sync does: held on a fault, the item then shown as it was last
+    published (F78), else merged and published.
+
+    Returns:
+        200: Whether the save is held, and its faults
+        400: The text is missing
+        404: No item has the id, or its project is archived
+        409: The project has no session
+    """
+    data = InventedSaveCreateSchema.model_validate(request.get_json())
+    ingested = test_data_service.save(item_id, data.text)
+    return InventedSaveSchema(
+        held=ingested.held,
+        faults=[
+            InventedFaultSchema(line=fault.line, message=fault.message)
+            for fault in ingested.faults
+        ],
+    ).model_dump(), 200

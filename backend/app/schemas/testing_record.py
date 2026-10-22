@@ -1,11 +1,16 @@
 """Schemas for the testing endpoints that make the record's states the UI
-cannot make: people, environments and projects."""
+cannot make: people, environments, projects, their items and an agent's
+saves of them."""
 
 import uuid
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
 from app.models.reference import ProjectState, TaskStatus
+
+OPENING_WORDS = "An invented project, started for a test."
+"""The opening of a project made without words of its own."""
 
 
 class InventedPersonCreateSchema(BaseModel):
@@ -96,10 +101,72 @@ class InventedProjectCreateSchema(BaseModel):
     )
     environment_id: str | None = Field(
         default=None,
-        description="The environment the session adding the open items runs in",
+        description=(
+            "The environment of the project's session, which adds the open items "
+            "and the items placed later; none without it"
+        ),
         examples=["example-env-1"],
+    )
+    opening: str = Field(
+        default=OPENING_WORDS,
+        description=(
+            "The words that started the project, its opening, kept verbatim; "
+            "the first member wrote them. A draft has no opening"
+        ),
+        examples=["Let us build a recipe box for the kitchen."],
     )
 
 
 class InventedProjectSchema(BaseModel):
     id: uuid.UUID = Field(description="The project's id")
+
+
+class InventedItemCreateSchema(BaseModel):
+    """A prose item the project's session adds, as Pilot adds one."""
+
+    kind: Literal[
+        "decision", "confirmation", "question", "action", "notice", "document", "review"
+    ] = Field(
+        description="The kind it is added as; a text with blocks shows their kind"
+    )
+    title: str = Field(
+        min_length=1,
+        description=(
+            "The title it is added with: its file's name, and its front matter's "
+            "`title` where the text gives none"
+        ),
+        examples=["Which tent?"],
+    )
+    text: str = Field(
+        description="Its Markdown as Pilot writes it, front matter and blocks included",
+        examples=["```decision id=D1\noptions:\n  - Dome\n  - Tunnel\n```\n"],
+    )
+
+
+class InventedItemSchema(BaseModel):
+    id: uuid.UUID = Field(description="The item's id")
+
+
+class InventedSaveCreateSchema(BaseModel):
+    """An agent's save of an item's file, as the store's sync puts it."""
+
+    text: str = Field(description="The file's whole text as the agent saved it")
+
+
+class InventedFaultSchema(BaseModel):
+    line: int | None = Field(
+        description="The fault's line, from 1; none for the text as a whole"
+    )
+    message: str = Field(examples=["block D1: duplicate option label Dome"])
+
+
+class InventedSaveSchema(BaseModel):
+    held: bool = Field(
+        description=(
+            "Whether the save is held for a fault, the item shown as it was last "
+            "published; else it was merged and published"
+        )
+    )
+    faults: list[InventedFaultSchema] = Field(
+        description="What held the save, or what the merge reverted"
+    )

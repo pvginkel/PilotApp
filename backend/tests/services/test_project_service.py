@@ -607,7 +607,9 @@ class TestTransition:
             for transition in _transitions(session, made)
             if transition[0] is TransitionKind.FINISHED
         ]
-        items = session.scalars(select(Item).where(Item.project_id == made.id))
+        items = session.scalars(
+            select(Item).where(Item.project_id == made.id, Item.kind_code != "opening")
+        )
         assert [
             (item.done_at, item.done_cause_code, item.done_by_user_id) for item in items
         ] == [(at, "finished", person.id)] * 2
