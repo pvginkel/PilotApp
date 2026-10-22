@@ -20,9 +20,11 @@ from app.models import (
     ItemKind,
     PlanTask,
     Project,
+    ProjectTransition,
+    SaveError,
     User,
 )
-from app.models.reference import SessionState, TransitionKind
+from app.models.reference import ErrorKind, SessionState, TransitionKind
 from app.schemas.testing_record import InventedProjectCreateSchema
 from app.schemas.timeline import DoneCauseCode, ItemKindCode
 from app.services.auth_service import AuthContext
@@ -724,6 +726,30 @@ class TestTimeline:
         assert concept["body"] == [part.model_dump(mode="json") for part in published]
         assert (clean["id"], clean["concept"]) == (str(other.id), False)
 
+    def test_a_reverted_save_error_on_its_path_makes_no_concept(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        run = _run(session, project, environment)
+        item = _bear(container, project, run, "question", "Where?", QUESTION)
+        session.add(
+            SaveError(
+                environment_id=environment.id,
+                path=tree_path(project, _document(session, item).path),
+                kind_code=ErrorKind.REVERTED,
+                line=5,
+                message="block Q1 reverted: answered by a person",
+            )
+        )
+        session.flush()
+
+        _opening, line = _items(container, project)
+
+        assert line["concept"] is False
+
     def test_a_registered_document_without_a_title_shows_its_file_name(
         self,
         container: ServiceContainer,
@@ -758,6 +784,40 @@ class TestTimeline:
 
         assert timeline.finished_at is not None
         assert timeline.finished_at == project.created_at
+
+    def test_a_project_finished_again_has_the_time_of_its_second_finish(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        project = _make(container)
+        transition = container.project_service().transition
+        transition(ADA, project.id, TransitionKind.FINISHED)
+        transition(ADA, project.id, TransitionKind.REOPENED)
+        transition(ADA, project.id, TransitionKind.FINISHED)
+        first, second = session.scalars(
+            select(ProjectTransition.at)
+            .where(
+                ProjectTransition.project_id == project.id,
+                ProjectTransition.kind_code == TransitionKind.FINISHED,
+            )
+            .order_by(ProjectTransition.at)
+        ).all()
+
+        timeline = container.timeline_service().timeline(project.id)
+
+        assert first < second
+        assert timeline.finished_at == second
+
+    def test_a_reopened_project_has_no_finish(
+        self, container: ServiceContainer, person: User
+    ) -> None:
+        project = _make(container)
+        transition = container.project_service().transition
+        transition(ADA, project.id, TransitionKind.FINISHED)
+        transition(ADA, project.id, TransitionKind.REOPENED)
+
+        timeline = container.timeline_service().timeline(project.id)
+
+        assert timeline.finished_at is None
 
 
 @pytest.mark.usefixtures("person")
