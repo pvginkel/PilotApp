@@ -1,7 +1,8 @@
 /**
  * The project list and the archived projects, as GET /api/projects reads them, and a project's
- * head, as GET /api/projects/<id> does. Each refetches when the window comes back into focus, and
- * after the person's own writes, which invalidate every query; nothing pushes them (F1, F2).
+ * head, as GET /api/projects/<id> does. Each refetches when the window comes back into focus,
+ * after the person's own writes, which invalidate every query, and on a project's live event
+ * (F1, F2, F80.2; use-project-events.ts).
  */
 
 import { useGetProjects, useGetProjectsByProjectId } from '@/lib/api/generated/hooks';

@@ -3,7 +3,8 @@ import type { UiStateTestEvent } from '@/lib/test/test-events';
 import { waitTestEvent } from '../helpers';
 
 /**
- * A project's timeline (F8): its rows, the opening, its items open and as done lines, and where it
+ * A project's timeline (F8): its rows, the opening, its items open and as done lines, the urgent
+ * banners and the "N open above" chip (F10.2, F11), a finished timeline's end (F5.3), and where it
  * stands scrolled.
  */
 export class TimelinePage {
@@ -16,6 +17,10 @@ export class TimelinePage {
   readonly openingWords: Locator;
   readonly openingMore: Locator;
   readonly empty: Locator;
+  readonly banners: Locator;
+  readonly openAbove: Locator;
+  readonly finishedEnd: Locator;
+  readonly finishedTime: Locator;
 
   constructor(private readonly page: Page) {
     this.root = page.getByTestId('timeline');
@@ -26,6 +31,10 @@ export class TimelinePage {
     this.openingWords = this.opening.getByTestId('timeline.opening.words');
     this.openingMore = this.opening.getByTestId('timeline.opening.words.more');
     this.empty = this.root.getByTestId('timeline.empty');
+    this.banners = this.root.getByTestId('timeline.banner');
+    this.openAbove = this.root.getByTestId('timeline.open-above');
+    this.finishedEnd = this.root.getByTestId('timeline.divider.finished');
+    this.finishedTime = this.root.getByTestId('timeline.divider.finished.time');
   }
 
   /**
@@ -61,6 +70,16 @@ export class TimelinePage {
       said: root.getByTestId('timeline.line.said'),
       note: root.getByTestId('timeline.line.note'),
     };
+  }
+
+  /** The banner pinned for the urgent item `id`. */
+  banner(id: string): Locator {
+    return this.root.locator(`[data-testid="timeline.banner"][data-item-id="${id}"]`);
+  }
+
+  /** The items the banners point at, in their order. */
+  async bannerItems(): Promise<string[]> {
+    return this.banners.evaluateAll((banners) => banners.map((banner) => banner.getAttribute('data-item-id') ?? ''));
   }
 
   /** Each row as its test id and its text, in order. */

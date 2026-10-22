@@ -40,6 +40,11 @@ export class ProjectListPage {
       .filter({ has: this.page.getByTestId('projects.tab.name').getByText(name, { exact: true }) });
   }
 
+  /** The badge on the tab named `name` (F1.4). */
+  badge(name: string): Locator {
+    return this.tab(name).getByTestId('projects.tab.badge');
+  }
+
   group(group: Group): { root: Locator; toggle: Locator; count: Locator } {
     return {
       root: this.page.getByTestId(`projects.group.${group}`),

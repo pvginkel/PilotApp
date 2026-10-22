@@ -29,6 +29,23 @@
   .tab-name { display: flex; align-items: center; gap: 8px; font-weight: 600; line-height: 1.35; }
   .tab-name .card-id { margin-left: auto; font-weight: 400; font-size: 12px; color: hsl(var(--muted-foreground)); }
   .tab-status { display: flex; align-items: center; gap: 6px; margin-top: 2px; font-size: 13px; color: hsl(var(--muted-foreground)); }
+  .count-badge {
+    display: inline-grid;
+    flex: none;
+    place-items: center;
+    min-width: 20px;
+    height: 20px;
+    margin-left: auto;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: hsl(var(--primary-strong));
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .count-badge.urgent { background: hsl(var(--urgent-text)); }
+  /* Dark's urgent text colour is light: white on it misses 4.5:1. */
+  :root[data-theme="dark"] .count-badge.urgent { color: hsl(var(--background)); }
 
   /* Other projects and Finished: a group each, opened and closed on its chevron. */
   .tabs-group {

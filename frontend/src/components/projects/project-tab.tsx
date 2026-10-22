@@ -1,7 +1,8 @@
 /**
  * A project's tab (F1.1, F1.2): its name, its ticket id and its status line, opening the project
- * at its own address. The tab of the project on screen is the current page's. An <a> itself, its
- * text links through spans (F91, F93).
+ * at its own address, and the badge counting the items waiting on the person, orange when one of
+ * them is urgent (F1.4). The tab of the project on screen is the current page's. An <a> itself,
+ * its text links through spans (F91, F93).
  */
 
 import { Link } from '@tanstack/react-router';
@@ -42,6 +43,16 @@ export function ProjectTab({ project }: { project: Project }) {
             </>
           )}
         </span>
+        {project.badge.count > 0 && (
+          <span
+            className={cn('count-badge', project.badge.urgent && 'urgent')}
+            title={`${project.badge.count} waiting on you`}
+            data-testid="projects.tab.badge"
+            data-urgent={project.badge.urgent}
+          >
+            {project.badge.count}
+          </span>
+        )}
       </div>
     </Link>
   );

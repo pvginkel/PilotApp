@@ -72,6 +72,12 @@ export class Projects {
     expect(response.status(), await response.text()).toBe(204);
   }
 
+  /** The signed-in person undoes an item's answer or mark. */
+  async undo(itemId: string): Promise<void> {
+    const response = await this.page.request.post(`${this.backendUrl}/api/items/${itemId}/undo`);
+    expect(response.status(), await response.text()).toBe(204);
+  }
+
   /** A project's timeline, as the signed-in person reads it. */
   async timeline(id: string): Promise<Timeline> {
     const response = await this.page.request.get(`${this.backendUrl}/api/projects/${id}/timeline`);

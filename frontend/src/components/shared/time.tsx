@@ -8,6 +8,8 @@ const FORMATS = {
   day: new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' }),
   /** The hour and the minute, as the timeline shows them under its date dividers. */
   clock: new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' }),
+  /** The date and the time, as a finished timeline's end divider shows them. */
+  stamp: new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }),
 };
 const FULL_STAMP = new Intl.DateTimeFormat('en-GB', { dateStyle: 'full', timeStyle: 'long' });
 

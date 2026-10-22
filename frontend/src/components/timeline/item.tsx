@@ -1,8 +1,8 @@
 /**
  * A prose item on the timeline. Open, it is its head (F12), its title and its text, the prose drawn
- * as GFM (F29.1), the prose before its first block folding when long (F12.2); an item whose latest
- * save is held shows its last published text with a dashed border, a concept (F78). Done, it is its
- * line (F13.1, F13.2).
+ * as GFM (F29.1), the prose before its first block folding when long (F12.2); an urgent one is
+ * tinted (F10.1), and one whose latest save is held shows its last published text with a dashed
+ * border, a concept (F78). Done, it is its line (F13.1, F13.2).
  */
 
 import type { AnimationEvent } from 'react';
@@ -29,7 +29,13 @@ export function Item({ item, fresh, onFlashed }: ItemProps) {
   const flashed = (event: AnimationEvent) => event.target === event.currentTarget && onFlashed();
   return (
     <article
-      className={cn('item', done ? 'collapsed' : 'open', !done && item.concept && 'concept', fresh && 'fresh')}
+      className={cn(
+        'item',
+        done ? 'collapsed' : 'open',
+        !done && item.concept && 'concept',
+        !done && item.urgent && 'urgent',
+        fresh && 'fresh',
+      )}
       onAnimationEnd={flashed}
       data-testid="timeline.item"
       data-item-id={item.id}

@@ -13,6 +13,7 @@ import { ProjectColumn } from '@/components/projects/project-column';
 import { KeysList } from '@/components/shell/keys-list';
 import { LinksProvider } from '@/components/shared/linked-text';
 import { TopBar } from '@/components/shell/top-bar';
+import { useProjectEvents } from '@/hooks/use-project-events';
 import { isPerson, PersonProvider, useSelf } from '@/hooks/use-self';
 import { useShellKeys } from '@/lib/keys';
 import { registerServiceWorker } from '@/lib/service-worker';
@@ -35,6 +36,7 @@ function Shell() {
   const drawerOpen = drawerOn === pathname;
   const [keysList, setKeysList] = useState(false);
   useShellKeys(() => setKeysList(!keysList));
+  useProjectEvents();
   const person = self !== undefined && isPerson(self) ? self : null;
 
   return (

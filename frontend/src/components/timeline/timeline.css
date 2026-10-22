@@ -1,5 +1,5 @@
-/* A project's timeline (PilotAppSpecs design/mockup/style.css, "Dividers", "Items", "The collapsed
-   line" and "The prompt that started a project"). */
+/* A project's timeline (PilotAppSpecs design/mockup/style.css, "Layout", "Dividers", "Items", "The
+   collapsed line" and "The prompt that started a project"). */
 
 @layer components {
   .feed { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; scrollbar-gutter: stable; }
@@ -14,6 +14,33 @@
     margin: 0 auto;
     padding: 20px 24px 64px;
   }
+
+  /* The banners pinned to the top, and the "N open above" chip under them. */
+  .pins { position: sticky; top: 0; z-index: 5; flex: none; width: 100%; max-width: var(--column); margin: 0 auto; }
+  .pinned { padding: 12px 24px 0; background: linear-gradient(hsl(var(--background)) 85%, hsl(var(--background) / 0)); }
+  .pin-banner {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    width: 100%;
+    margin-bottom: 6px;
+    padding: 8px 14px;
+    border: 1px solid hsl(var(--urgent) / 0.7);
+    border-radius: var(--radius);
+    background: linear-gradient(hsl(var(--urgent) / 0.1), hsl(var(--urgent) / 0.1)), hsl(var(--background));
+    box-shadow: var(--shadow-md);
+    color: hsl(var(--urgent-text));
+    font: inherit;
+    font-size: 14px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .pin-banner > .icon { position: relative; top: calc(0.5em - 0.5cap); }
+  .pin-banner .what { font-weight: 600; }
+  .pin-banner .sep { opacity: 0.5; }
+  .pin-banner .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: hsl(var(--foreground)); }
+  .pin-banner .go { flex: none; font-size: 13px; }
+  .open-above { position: absolute; top: calc(100% + 10px); left: 50%; transform: translateX(-50%); box-shadow: var(--shadow-md); }
 
   /* ---- Dividers ------------------------------------------------------------------------- */
 
@@ -30,6 +57,8 @@
   .divider.date { font-weight: 600; margin-top: 26px; }
   .divider.step::before { flex: 0 0 24px; }
   .divider.step { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px; }
+  .divider.finished { margin-top: 22px; font-weight: 600; color: hsl(var(--foreground)); }
+  .divider.finished .icon { margin-right: 6px; color: hsl(var(--primary)); }
 
   /* ---- Items ---------------------------------------------------------------------------- */
 
@@ -41,6 +70,10 @@
     scroll-margin: 80px;
   }
   .item.open { border-color: hsl(var(--primary) / 0.45); box-shadow: var(--shadow-md); }
+  .item.urgent {
+    border-color: hsl(var(--urgent) / 0.7);
+    background: linear-gradient(hsl(var(--urgent) / 0.06), hsl(var(--urgent) / 0.06)), hsl(var(--background));
+  }
   .item.concept { border-style: dashed; }
   .item.fresh { animation: fresh 1.6s ease-out; }
   @keyframes fresh { from { box-shadow: 0 0 0 4px hsl(var(--primary) / 0.35); } }
@@ -58,6 +91,7 @@
   .item-head .kind { display: inline-flex; align-items: baseline; gap: 6px; font-weight: 600; color: hsl(var(--primary-muted-foreground)); }
   /* A kind's icon hangs from the text's baseline, as an inline icon does, whatever the font. */
   .item-head .kind .icon { position: relative; top: calc(0.5em - 0.5cap); }
+  .item.urgent .item-head .kind { color: hsl(var(--urgent-text)); }
   .item-head .sep { opacity: 0.5; }
   .chip.for { background: hsl(330 60% 50% / 0.12); color: hsl(330 55% 38%); }
   :root[data-theme="dark"] .chip.for { color: hsl(330 70% 78%); }
@@ -118,5 +152,6 @@
 
   @media (max-width: 900px) {
     .feed-inner { padding: 12px 12px 64px; }
+    .pinned { padding: 8px 12px 0; }
   }
 }

@@ -1,7 +1,7 @@
 /**
  * A project's timeline, as GET /api/projects/<id>/timeline reads it whole (F8). It refetches when
- * the window comes back into focus, and after the person's own writes, which invalidate every
- * query.
+ * the window comes back into focus, after the person's own writes, which invalidate every query,
+ * and on its project's live event (F80.2; use-project-events.ts).
  */
 
 import { useGetProjectsTimelineByProjectId } from '@/lib/api/generated/hooks';
