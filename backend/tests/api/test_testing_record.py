@@ -11,7 +11,8 @@ from flask.testing import FlaskClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.config import STAGES, Stage, default_stage
+from app.config import STAGES, Settings, Stage, default_stage
+from app.config import Environment as SettingsEnvironment
 from app.models import Document, Environment, Item, Project, User
 from app.models.reference import ProjectState
 from app.schemas.testing_record import OPENING_WORDS
@@ -721,6 +722,17 @@ class TestTheStage:
         assert [
             _count(session, model) for model in (User, Environment, Project)
         ] == before
+
+    def test_a_deployment_that_forgets_stage_loads_as_prd(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("STAGE", raising=False)
+
+        settings = Settings.load(
+            SettingsEnvironment(_env_file=None, FLASK_ENV="production")
+        )
+
+        assert settings.stage.value == "prd"
 
     @pytest.mark.parametrize("stage", [stage for stage in STAGES if stage != "prd"])
     def test_every_other_stage_answers_outside_testing_mode(
