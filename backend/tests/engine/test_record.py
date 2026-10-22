@@ -1085,6 +1085,104 @@ class TestRecordServiceUndo:
         assert refused.value.cause == "a work item offers no undo"
 
 
+class TestRecordServiceOffersUndo:
+    """`offers_undo` reads `undo`'s own rule (DB 164, F14.1)."""
+
+    def _decision(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> tuple[Item, Document]:
+        return _bear(
+            session,
+            container,
+            project,
+            project_session,
+            "decision",
+            "Which tent?",
+            DECISION,
+        )
+
+    def test_an_answered_item_offers_undo(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        item, document = self._decision(session, container, project, project_session)
+        records = container.record_service()
+        records.answer(document, "D1", person, "Tunnel")
+
+        assert records.offers_undo(item) is True
+
+    def test_an_item_a_session_took_offers_none(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        item, document = self._decision(session, container, project, project_session)
+        records = container.record_service()
+        records.answer(document, "D1", person, "Tunnel")
+        item.consumed_at = datetime.now(UTC)
+        item.consumed_session_id = project_session.id
+        session.flush()
+
+        assert records.offers_undo(item) is False
+
+    def test_an_item_done_by_a_cause_that_offers_none_offers_none(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        item, _ = self._decision(session, container, project, project_session)
+        item.done_at = datetime.now(UTC)
+        item.done_cause_code = "finished"
+        session.flush()
+
+        assert container.record_service().offers_undo(item) is False
+
+    def test_an_open_item_offers_none(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        item, _ = self._decision(session, container, project, project_session)
+
+        assert container.record_service().offers_undo(item) is False
+
+    def test_work_offers_none(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        work = Item(
+            project_id=project.id,
+            seq=1,
+            kind_code="work",
+            title="Build the camp",
+            created_by_session_id=project_session.id,
+            done_at=datetime.now(UTC),
+            done_cause_code="marked",
+        )
+        session.add(work)
+        session.flush()
+
+        assert container.record_service().offers_undo(work) is False
+
+
 class TestRecordServiceDone:
     def test_done_records_the_recommendations_and_cuts_a_version(
         self,

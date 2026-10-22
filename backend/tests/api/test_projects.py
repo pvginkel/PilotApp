@@ -12,8 +12,17 @@ from flask.testing import FlaskClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Environment, Item, ProjectMember, ProjectTransition, User
-from app.models.reference import TransitionKind
+from app import models
+from app.models import (
+    Document,
+    Environment,
+    Item,
+    Project,
+    ProjectMember,
+    ProjectTransition,
+    User,
+)
+from app.models.reference import SessionState, TransitionKind
 from app.schemas.testing_record import InventedProjectCreateSchema
 from app.services.container import ServiceContainer
 
@@ -30,6 +39,23 @@ def _sign_in(
         json={"subject": subject, "name": "Ada Example", "roles": list(roles)},
     )
     assert response.status_code == 201
+
+
+def _run(
+    session: Session, project: Project, environment: Environment
+) -> models.Session:
+    """An idle work session of `project`, which adds its items."""
+    run = models.Session(
+        project_id=project.id,
+        environment_id=environment.id,
+        kind_code="work",
+        cwd="/work/Camp",
+        token_hash=uuid.uuid4().hex * 2,
+        state_code=SessionState.IDLE,
+    )
+    session.add(run)
+    session.flush()
+    return run
 
 
 def _make(container: ServiceContainer, **spec: Any) -> uuid.UUID:
@@ -89,6 +115,7 @@ class TestListProjects:
                     "finished_at": None,
                     "member": True,
                     "progress": {"done": 0, "total": 0, "in_progress": []},
+                    "badge": {"count": 0, "urgent": False},
                 },
                 {
                     "id": str(recipes),
@@ -102,6 +129,7 @@ class TestListProjects:
                         "total": 3,
                         "in_progress": ["Build the card page"],
                     },
+                    "badge": {"count": 0, "urgent": False},
                 },
                 {
                     "id": str(finished),
@@ -111,9 +139,39 @@ class TestListProjects:
                     "finished_at": "<the finish>",
                     "member": True,
                     "progress": {"done": 0, "total": 0, "in_progress": []},
+                    "badge": {"count": 0, "urgent": False},
                 },
             ]
         }
+
+    def test_a_tab_counts_the_items_waiting_on_the_caller(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        environment: Environment,
+    ) -> None:
+        container.test_data_service().person("ben", "Ben Example")
+        camp = session.get_one(Project, _make(container, name="Camp"))
+        run = _run(session, camp, environment)
+        for title, front_matter in (
+            ("Where?", ""),
+            ("Storm", "urgent: true\n"),
+            ("Opens in May", ""),
+            ("Boots?", "for: ben\n"),
+        ):
+            container.document_service().bear_item(
+                camp,
+                "notice" if title in ("Storm", "Opens in May") else "question",
+                title,
+                run,
+                f"---\ntitle: {title}\n{front_matter}---\n",
+            )
+        _sign_in(client)
+
+        (tab,) = client.get(PROJECTS).get_json()["projects"]
+
+        assert tab["badge"] == {"count": 2, "urgent": True}
 
     def test_archived_reads_the_archived_projects(
         self, client: FlaskClient, container: ServiceContainer
@@ -299,6 +357,241 @@ class TestGetProject:
         self, oidc_client: FlaskClient
     ) -> None:
         assert oidc_client.get(f"{PROJECTS}/{uuid.uuid4()}").status_code == 401
+
+
+_DECISION = """---
+title: Which tent?
+step: build
+---
+
+# Which tent?
+
+The dome stands up in five minutes.
+
+```decision id=D1
+options:
+  - Dome: up in five minutes
+  - Tunnel
+recommend: Dome
+```
+"""
+
+
+def _stamped(body: dict[str, Any], path: tuple[str | int, ...]) -> datetime:
+    """The time at `path` in `body`, replaced by a placeholder."""
+    *parents, key = path
+    holder: Any = body
+    for parent in parents:
+        holder = holder[parent]
+    moment = datetime.fromisoformat(holder[key])
+    holder[key] = "<time>"
+    return moment
+
+
+@pytest.mark.usefixtures("person")
+class TestGetTimeline:
+    def test_the_timeline_of_a_project(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        container.test_data_service().person("ben", "Ben Example")
+        camp = session.get_one(
+            Project,
+            _make(
+                container,
+                name="Camp",
+                tasks=[{"id": "build", "title": "Build the camp", "status": "pending"}],
+            ),
+        )
+        run = _run(session, camp, environment)
+        documents = container.document_service()
+        opening = documents.bear_opening(camp, "Camp", person, "Let's camp.\n")
+        decision = documents.bear_item(camp, "decision", "Which tent?", run, _DECISION)
+        container.record_service().answer(
+            session.get_one(Document, decision.id),
+            "D1",
+            person,
+            "Tunnel",
+            note="More room.",
+        )
+        notice = documents.bear_item(
+            camp,
+            "notice",
+            "Storm",
+            run,
+            "---\ntitle: Storm\nurgent: true\nfor: ben\n---\n\nA storm comes.\n",
+        )
+        _sign_in(client)
+
+        response = client.get(f"{PROJECTS}/{camp.id}/timeline")
+
+        assert response.status_code == 200
+        body = response.get_json()
+        assert [
+            _stamped(body, ("items", index, "created_at")) for index in range(3)
+        ] == [opening.created_at, decision.created_at, notice.created_at]
+        assert _stamped(body, ("items", 1, "done", "at")) == decision.done_at
+        assert (
+            _stamped(body, ("items", 1, "body", 1, "block", "at")) == decision.done_at
+        )
+        ada = {
+            "kind": "person",
+            "handle": "ada",
+            "name": "Ada Example",
+            "initials": "AE",
+            "avatar_slot": 1,
+        }
+        assert body == {
+            "finished_at": None,
+            "items": [
+                {
+                    "id": str(opening.id),
+                    "seq": 1,
+                    "kind": "opening",
+                    "form": "prose",
+                    "title": "Camp",
+                    "file_name": None,
+                    "created_at": "<time>",
+                    "step": None,
+                    "urgent": False,
+                    "for_user": None,
+                    "done": None,
+                    "concept": False,
+                    "author": ada,
+                    "words": "Let's camp.\n",
+                    "body": None,
+                },
+                {
+                    "id": str(decision.id),
+                    "seq": 2,
+                    "kind": "decision",
+                    "form": "prose",
+                    "title": "Which tent?",
+                    "file_name": None,
+                    "created_at": "<time>",
+                    "step": {"id": "build", "title": "Build the camp"},
+                    "urgent": False,
+                    "for_user": None,
+                    "done": {
+                        "at": "<time>",
+                        "cause": "answered",
+                        "by": ada,
+                        "undo": True,
+                    },
+                    "concept": False,
+                    "author": None,
+                    "words": None,
+                    "body": [
+                        {
+                            "type": "prose",
+                            "markdown": "The dome stands up in five minutes.",
+                        },
+                        {
+                            "type": "block",
+                            "block": {
+                                "id": "D1",
+                                "kind": "decision",
+                                "confirmation": False,
+                                "because": None,
+                                "proposal": None,
+                                "default": None,
+                                "check": None,
+                                "options": [
+                                    {
+                                        "label": "Dome",
+                                        "text": "up in five minutes",
+                                        "recommended": True,
+                                    },
+                                    {
+                                        "label": "Tunnel",
+                                        "text": None,
+                                        "recommended": False,
+                                    },
+                                ],
+                                "answer": "Tunnel",
+                                "by": ada,
+                                "at": "<time>",
+                                "note": "More room.",
+                                "via": "app",
+                                "done": None,
+                                "deferral": None,
+                            },
+                        },
+                    ],
+                },
+                {
+                    "id": str(notice.id),
+                    "seq": 3,
+                    "kind": "notice",
+                    "form": "prose",
+                    "title": "Storm",
+                    "file_name": None,
+                    "created_at": "<time>",
+                    "step": None,
+                    "urgent": True,
+                    "for_user": {
+                        "kind": "person",
+                        "handle": "ben",
+                        "name": "Ben Example",
+                        "initials": "BE",
+                        "avatar_slot": 2,
+                    },
+                    "done": None,
+                    "concept": False,
+                    "author": None,
+                    "words": None,
+                    "body": [{"type": "prose", "markdown": "A storm comes."}],
+                },
+            ],
+        }
+
+    def test_a_finished_project_has_its_finish(
+        self, client: FlaskClient, container: ServiceContainer, session: Session
+    ) -> None:
+        bikes = _make(container, name="Bike log", state="finished")
+        finished_at = session.scalars(
+            select(ProjectTransition.at).where(
+                ProjectTransition.project_id == bikes,
+                ProjectTransition.kind_code == TransitionKind.FINISHED,
+            )
+        ).one()
+        _sign_in(client)
+
+        body = client.get(f"{PROJECTS}/{bikes}/timeline").get_json()
+
+        assert datetime.fromisoformat(body["finished_at"]) == finished_at
+        assert body["items"] == []
+
+    def test_an_unknown_project_is_not_found(self, client: FlaskClient) -> None:
+        _sign_in(client)
+        unknown = uuid.uuid4()
+
+        response = client.get(f"{PROJECTS}/{unknown}/timeline")
+
+        assert response.status_code == 404
+        assert response.get_json()["error"] == f"Project {unknown} was not found"
+
+    def test_an_id_that_is_no_uuid_is_not_found(self, client: FlaskClient) -> None:
+        _sign_in(client)
+
+        assert client.get(f"{PROJECTS}/camp/timeline").status_code == 404
+
+    def test_without_editor_it_is_refused(
+        self, client: FlaskClient, container: ServiceContainer
+    ) -> None:
+        camp = _make(container, name="Camp")
+        _sign_in(client, roles=())
+
+        assert client.get(f"{PROJECTS}/{camp}/timeline").status_code == 403
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        assert oidc_client.get(f"{PROJECTS}/{uuid.uuid4()}/timeline").status_code == 401
 
 
 @pytest.mark.usefixtures("person")

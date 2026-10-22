@@ -1,7 +1,7 @@
 """The projects as the signed-in person reads them, the project list, the
-archived projects and a project's head (F1, F2, F3, D012); and what they change
-of a project's standing: its transitions and their membership (F4.1, F5, F6,
-F127, F128)."""
+archived projects, a project's head and its timeline (F1, F2, F3, F8, D012);
+and what they change of a project's standing: its transitions and their
+membership (F4.1, F5, F6, F127, F128)."""
 
 import uuid
 from typing import Any
@@ -15,6 +15,7 @@ from app.models import PlanNote, User
 from app.models.reference import TransitionKind
 from app.schemas.common import ApiErrorResponseSchema
 from app.schemas.projects import (
+    BadgeSchema,
     MemberSchema,
     PlanNoteSchema,
     PlanProgressSchema,
@@ -25,9 +26,11 @@ from app.schemas.projects import (
     ProjectTabSchema,
     TransitionRequestSchema,
 )
+from app.schemas.timeline import TimelineSchema
 from app.services.container import ServiceContainer
 from app.services.people_service import initials
 from app.services.project_service import PlanProgress, ProjectHead, ProjectService
+from app.services.timeline_service import TimelineService
 from app.utils.spectree_config import api
 
 projects_bp = Blueprint("projects", __name__, url_prefix="/projects")
@@ -98,7 +101,8 @@ def _head(head: ProjectHead) -> dict[str, Any]:
 def list_projects(
     project_service: ProjectService = Provide[ServiceContainer.project_service],
 ) -> Any:
-    """Read the project list's tabs, or with `archived` the archived projects'.
+    """Read the project list's tabs, or with `archived` the archived projects',
+    each with its badge for the caller.
 
     Returns:
         200: The projects, in the order they were created
@@ -117,6 +121,7 @@ def list_projects(
                 finished_at=tab.finished_at,
                 member=tab.member,
                 progress=_progress(tab.progress),
+                badge=BadgeSchema(count=tab.badge.count, urgent=tab.badge.urgent),
             )
             for tab in project_service.tabs(caller(), query.archived)
         ]
@@ -146,6 +151,32 @@ def get_project(
         404: No project has the id
     """
     return _head(project_service.head(caller(), project_id))
+
+
+@projects_bp.route("/<uuid:project_id>/timeline", methods=["GET"])
+@api.validate(
+    resp=SpectreeResponse(
+        HTTP_200=TimelineSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+    )
+)
+@inject
+def get_timeline(
+    project_id: uuid.UUID,
+    timeline_service: TimelineService = Provide[ServiceContainer.timeline_service],
+) -> Any:
+    """Read a project's timeline whole: every item in order, as its line and
+    its open form show it.
+
+    Returns:
+        200: The timeline
+        401: No one is signed in
+        403: The caller lacks the editor role
+        404: No project has the id
+    """
+    return timeline_service.timeline(project_id).model_dump(mode="json")
 
 
 @projects_bp.route("/<uuid:project_id>/transitions", methods=["POST"])

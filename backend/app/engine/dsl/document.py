@@ -105,7 +105,8 @@ class ParsedDocument:
     holds on its own: those that need the record are `validate()`'s.
 
     `title_heading_line` is the line of the first heading where that heading
-    is the title, which a display strips from the body (decision 32).
+    is the title, the front matter giving none or the same words, which a
+    display strips from the body (decision 32, DB 223).
     """
 
     front_matter: FrontMatter

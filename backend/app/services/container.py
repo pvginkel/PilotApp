@@ -41,6 +41,7 @@ from app.services.task_service import TaskService
 from app.services.test_data_service import TestDataService
 from app.services.testing_service import TestingService
 from app.services.testing_sync_service import TestingSyncService
+from app.services.timeline_service import TimelineService
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
 from app.utils.temp_file_manager import TempFileManager
 
@@ -301,12 +302,17 @@ class ServiceContainer(containers.DeclarativeContainer):
 
     # The projects as the signed-in person reads them (F1, F2, F3), and their
     # transitions and membership (F4.1, F5, F6, F127, F128)
+    # A project's timeline as a screen draws it, and the badge (F8, F1.4)
+    timeline_service = providers.Factory(
+        TimelineService, db=db_session, record_service=record_service
+    )
     project_service = providers.Factory(
         ProjectService,
         db=db_session,
         people_service=people_service,
         record_service=record_service,
         view_service=view_service,
+        timeline_service=timeline_service,
     )
 
     # The invented record: the dev stack's seed, loaded by `cli

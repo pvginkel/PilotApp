@@ -32,6 +32,20 @@ class PlanProgressSchema(BaseModel):
     )
 
 
+class BadgeSchema(BaseModel):
+    """A tab's badge: the items waiting on the signed-in person (F1.4)."""
+
+    count: int = Field(
+        description=(
+            "The project's open items waiting on the signed-in person: prose items "
+            "but the opening, a notice only when it is urgent, a work item stopped "
+            "or failed to start, never a wait; not those for another person"
+        ),
+        examples=[2],
+    )
+    urgent: bool = Field(description="Whether one of them is urgent")
+
+
 class ProjectTabSchema(BaseModel):
     """What a project's tab in the list shows."""
 
@@ -52,6 +66,7 @@ class ProjectTabSchema(BaseModel):
         description="Whether the signed-in person is a member of the project"
     )
     progress: PlanProgressSchema
+    badge: BadgeSchema
 
 
 class ProjectListResponseSchema(BaseModel):

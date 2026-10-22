@@ -156,7 +156,7 @@ def parse(text: str) -> ParsedDocument:
         index = close + 1
 
     title, title_heading_line = front_matter.title, None
-    if title is None and heading is not None:
+    if heading is not None and title in (None, heading[1]):
         title_heading_line, title = heading
     return ParsedDocument(
         front_matter=front_matter,
@@ -165,6 +165,40 @@ def parse(text: str) -> ParsedDocument:
         blocks=tuple(blocks),
         faults=tuple(sorted(faults, key=_by_line)),
     )
+
+
+def body(text: str) -> tuple[str | Block, ...]:
+    """A text without a fault as a display draws it (decision 32): its prose
+    parts and its blocks in order, the front matter and the heading that is
+    the title left out. A prose part is the Markdown between two blocks,
+    without blank lines at its ends; one with nothing in it is left out."""
+    document = parse(text)
+    lines = [line.removesuffix("\r") for line in text.split("\n")]
+    left_out: set[int] = set()
+    if document.front_matter.span is not None:
+        span = document.front_matter.span
+        left_out.update(range(span.first, span.last + 1))
+    if document.title_heading_line is not None:
+        left_out.add(document.title_heading_line)
+    parts: list[str | Block] = []
+    number = 1
+    for block in (*document.blocks, None):
+        end = len(lines) if block is None else block.fence.first - 1
+        prose = [
+            lines[index - 1]
+            for index in range(number, end + 1)
+            if index not in left_out
+        ]
+        while prose and not prose[0].strip():
+            prose.pop(0)
+        while prose and not prose[-1].strip():
+            prose.pop()
+        if prose:
+            parts.append("\n".join(prose))
+        if block is not None:
+            parts.append(block)
+            number = block.fence.last + 1
+    return tuple(parts)
 
 
 def validate(document: ParsedDocument, facts: Facts) -> list[Fault]:

@@ -639,6 +639,14 @@ class TestParse:
         assert document.title == "From front matter"
         assert document.title_heading_line is None
 
+    def test_a_first_heading_matching_the_front_matter_title_is_the_title(
+        self,
+    ) -> None:
+        document = parse("---\ntitle: Which tent?\n---\n\n# Which tent?\n")
+
+        assert document.title == "Which tent?"
+        assert document.title_heading_line == 5
+
     def test_an_empty_front_matter_title_falls_back_to_the_heading(self) -> None:
         document = parse("---\ntitle:\n---\n# From heading\n")
 
@@ -748,6 +756,72 @@ class TestParse:
         document = parse("```question id=Q1\n```\n```question id=Q1\nnote: [a]\n```\n")
 
         assert [fault.line for fault in document.faults] == [3, 4]
+
+
+class TestBody:
+    """What a display draws of a text (decision 32, DB 223)."""
+
+    def test_prose_and_blocks_in_order(self) -> None:
+        text = (
+            "Before.\n\n"
+            "```decision id=D1\noptions:\n  - Dome\n```\n\n"
+            "Between,\nover two lines.\n\n"
+            "```question id=Q1\n```\n\n"
+            "After.\n"
+        )
+
+        parts = dsl.body(text)
+
+        assert [part if isinstance(part, str) else part.local_id for part in parts] == [
+            "Before.",
+            "D1",
+            "Between,\nover two lines.",
+            "Q1",
+            "After.",
+        ]
+        assert parts[1] == parse(text).blocks[0]
+
+    def test_the_front_matter_is_left_out(self) -> None:
+        assert dsl.body("---\ntitle: Tent\nurgent: true\n---\nThe dome.\n") == (
+            "The dome.",
+        )
+
+    def test_a_heading_matching_the_front_matter_title_is_left_out(self) -> None:
+        text = "---\ntitle: Which tent?\n---\n\n# Which tent?\n\nThe dome.\n"
+
+        assert dsl.body(text) == ("The dome.",)
+
+    def test_a_heading_that_is_the_title_is_left_out(self) -> None:
+        assert dsl.body("# Which tent?\n\nThe dome.\n") == ("The dome.",)
+
+    def test_a_heading_other_than_the_front_matter_title_stays(self) -> None:
+        text = "---\ntitle: Which tent?\n---\n# Camping\n\nThe dome.\n"
+
+        assert dsl.body(text) == ("# Camping\n\nThe dome.",)
+
+    def test_only_the_first_heading_is_left_out(self) -> None:
+        text = "# Which tent?\n\n## Which tent?\n"
+
+        assert dsl.body(text) == ("## Which tent?",)
+
+    def test_a_code_fence_stays_in_the_prose(self) -> None:
+        text = "Run:\n\n```sh\nmake tent\n```\n"
+
+        assert dsl.body(text) == ("Run:\n\n```sh\nmake tent\n```",)
+
+    def test_carriage_returns_are_left_out(self) -> None:
+        assert dsl.body("One.\r\n\r\nTwo.\r\n") == ("One.\n\nTwo.",)
+
+    def test_blank_prose_is_left_out(self) -> None:
+        text = "---\ntitle: T\n---\n\n```question id=Q1\n```\n\n"
+
+        (part,) = dsl.body(text)
+
+        assert isinstance(part, dsl.Block)
+        assert part.local_id == "Q1"
+
+    def test_an_empty_text_has_no_parts(self) -> None:
+        assert dsl.body("") == ()
 
 
 class TestValidate:

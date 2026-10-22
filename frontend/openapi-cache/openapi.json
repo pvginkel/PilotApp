@@ -1008,6 +1008,30 @@
         "title": "ProjectListResponseSchema",
         "type": "object"
       },
+      "ProjectListResponseSchema.e86ccd6.BadgeSchema": {
+        "description": "A tab's badge: the items waiting on the signed-in person (F1.4).",
+        "properties": {
+          "count": {
+            "description": "The project's open items waiting on the signed-in person: prose items but the opening, a notice only when it is urgent, a work item stopped or failed to start, never a wait; not those for another person",
+            "examples": [
+              2
+            ],
+            "title": "Count",
+            "type": "integer"
+          },
+          "urgent": {
+            "description": "Whether one of them is urgent",
+            "title": "Urgent",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "count",
+          "urgent"
+        ],
+        "title": "BadgeSchema",
+        "type": "object"
+      },
       "ProjectListResponseSchema.e86ccd6.PlanProgressSchema": {
         "description": "Where the plan stands, as the head's step and a tab's status line read it.",
         "properties": {
@@ -1061,6 +1085,9 @@
       "ProjectListResponseSchema.e86ccd6.ProjectTabSchema": {
         "description": "What a project's tab in the list shows.",
         "properties": {
+          "badge": {
+            "$ref": "#/components/schemas/ProjectListResponseSchema.e86ccd6.BadgeSchema"
+          },
           "finished_at": {
             "anyOf": [
               {
@@ -1130,7 +1157,8 @@
           "state",
           "finished_at",
           "member",
-          "progress"
+          "progress",
+          "badge"
         ],
         "title": "ProjectTabSchema",
         "type": "object"
@@ -2430,6 +2458,722 @@
         "title": "TestingSyncAnswerResponseSchema",
         "type": "object"
       },
+      "TimelineSchema.1fdd8ae": {
+        "description": "A project's timeline, whole.",
+        "properties": {
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the project finished, its end divider's stamp; null unless it is finished",
+            "title": "Finished At"
+          },
+          "items": {
+            "description": "The items, in their order",
+            "items": {
+              "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.TimelineItemSchema"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "finished_at",
+          "items"
+        ],
+        "title": "TimelineSchema",
+        "type": "object"
+      },
+      "TimelineSchema.1fdd8ae.AnswerChannel": {
+        "enum": [
+          "app",
+          "chat",
+          "recommended",
+          "autopilot"
+        ],
+        "title": "AnswerChannel",
+        "type": "string"
+      },
+      "TimelineSchema.1fdd8ae.BlockKind": {
+        "enum": [
+          "decision",
+          "question",
+          "action"
+        ],
+        "title": "BlockKind",
+        "type": "string"
+      },
+      "TimelineSchema.1fdd8ae.BlockPartSchema": {
+        "description": "A block, in its place in the text.",
+        "properties": {
+          "block": {
+            "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.BlockSchema"
+          },
+          "type": {
+            "const": "block",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "block"
+        ],
+        "title": "BlockPartSchema",
+        "type": "object"
+      },
+      "TimelineSchema.1fdd8ae.BlockSchema": {
+        "description": "An ask in its item's text, with its definition and its answer (F30, F31).",
+        "properties": {
+          "answer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The answer: an option's label, `Agree`, `Yes`, `No`, free words or `deferred`; null while unanswered and on an action marked Done",
+            "examples": [
+              "Dome"
+            ],
+            "title": "Answer"
+          },
+          "at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When it was answered",
+            "title": "At"
+          },
+          "because": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.ConfirmationReasonSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A confirmation's reason; null for any other block"
+          },
+          "by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.UserSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who answered, or marked the action Done"
+          },
+          "check": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What Pilot checks after the answer",
+            "title": "Check"
+          },
+          "confirmation": {
+            "description": "Whether the decision is a confirmation",
+            "title": "Confirmation",
+            "type": "boolean"
+          },
+          "default": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A question's default answer",
+            "title": "Default"
+          },
+          "deferral": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.DeferralSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where a deferred block went; null unless `answer` is `deferred`"
+          },
+          "done": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the action was marked Done",
+            "title": "Done"
+          },
+          "id": {
+            "description": "The block's local id, unique within its item",
+            "examples": [
+              "D1"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.BlockKind",
+            "description": "The block's kind"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why it was answered so, or what was pasted back (F17.4)",
+            "title": "Note"
+          },
+          "options": {
+            "description": "The choices, in their order",
+            "items": {
+              "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.OptionSchema"
+            },
+            "title": "Options",
+            "type": "array"
+          },
+          "proposal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A decision's one proposal; null where it offers options",
+            "title": "Proposal"
+          },
+          "via": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.AnswerChannel"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How the answer reached the record: `app` for a person's unless the text names another; null for Pilot's unless it names one, and while unanswered"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "confirmation",
+          "because",
+          "proposal",
+          "default",
+          "check",
+          "options",
+          "answer",
+          "by",
+          "at",
+          "note",
+          "via",
+          "done",
+          "deferral"
+        ],
+        "title": "BlockSchema",
+        "type": "object"
+      },
+      "TimelineSchema.1fdd8ae.ConfirmationReasonSchema": {
+        "description": "The ground on which a confirmation asks (F22.1).",
+        "properties": {
+          "code": {
+            "examples": [
+              "rider"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "description": {
+            "description": "The reason line's tooltip",
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "description": "The reason line",
+            "examples": [
+              "Rider"
+            ],
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "description"
+        ],
+        "title": "ConfirmationReasonSchema",
+        "type": "object"
+      },
+      "TimelineSchema.1fdd8ae.DeferralSchema": {
+        "description": "Where a deferred block went (decision 47).",
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The task's title, live from the plan, a removed task's last; null for `plan`",
+            "examples": [
+              "Ship it"
+            ],
+            "title": "Title"
+          },
+          "to": {
+            "description": "The task's id, or `plan` for the project's end",
+            "examples": [
+              "ship"
+            ],
+            "title": "To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "to",
+          "title"
+        ],
+        "title": "DeferralSchema",
+        "type": "object"
+      },
+      "TimelineSchema.1fdd8ae.DoneSchema": {
+        "description": "How a done item came to be done: its done line (F13).",
+        "properties": {
+          "at": {
+            "description": "When the item was done",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.UserSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who did it; null when the server did, at a turn's end or Finish"
+          },
+          "cause": {
+            "description": "How it came to be done",
+            "enum": [
+              "answered",
+              "marked",
+              "settled",
+              "turn_ended",
+              "finished"
+            ],
+            "title": "Cause",
+            "type": "string"
+          },
+          "undo": {
+            "description": "Whether the record takes Undo now: a prose item, done by a cause that offers it, whose answers no session has taken (F14.1)",
+            "title": "Undo",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "at",
+          "cause",
+          "by",
+          "undo"
+        ],
+        "title": "DoneSchema",
+        "type": "object"
+      },
+      "TimelineSchema.1fdd8ae.OptionSchema": {
+        "description": "A choice a block offers.",
+        "properties": {
+          "label": {
+            "examples": [
+              "Dome"
+            ],
+            "title": "Label",
+            "type": "string"
+          },
+          "recommended": {
+            "description": "Whether the block recommends it",
+            "title": "Recommended",
+            "type": "boolean"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The option's one line; null for a bare label",
+            "examples": [
+              "Up in five minutes"
+            ],
+            "title": "Text"
+          }
+        },
+        "required": [
+          "label",
+          "text",
+          "recommended"
+        ],
+        "title": "OptionSchema",
+        "type": "object"
+      },
+      "TimelineSchema.1fdd8ae.ProsePartSchema": {
+        "description": "Markdown between blocks, drawn as GFM (F29.1).",
+        "properties": {
+          "markdown": {
+            "examples": [
+              "The dome stands up in five minutes."
+            ],
+            "title": "Markdown",
+            "type": "string"
+          },
+          "type": {
+            "const": "prose",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "markdown"
+        ],
+        "title": "ProsePartSchema",
+        "type": "object"
+      },
+      "TimelineSchema.1fdd8ae.StepSchema": {
+        "description": "The plan task an item serves, whose title its step divider carries (F9).",
+        "properties": {
+          "id": {
+            "description": "The task's id in `plan.json`",
+            "examples": [
+              "build"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "description": "The task's title, live from the plan; a removed task's last",
+            "examples": [
+              "Build the recipe card page"
+            ],
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title"
+        ],
+        "title": "StepSchema",
+        "type": "object"
+      },
+      "TimelineSchema.1fdd8ae.TimelineItemSchema": {
+        "description": "An entry on the timeline, with what its line and its open form show.",
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.UserSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The opening's author (F18.1); null for every other item"
+          },
+          "body": {
+            "anyOf": [
+              {
+                "items": {
+                  "discriminator": {
+                    "mapping": {
+                      "block": "#/components/schemas/TimelineSchema.1fdd8ae.BlockPartSchema",
+                      "prose": "#/components/schemas/TimelineSchema.1fdd8ae.ProsePartSchema"
+                    },
+                    "propertyName": "type"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.ProsePartSchema"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.BlockPartSchema"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A prose item's text but the opening's, as drawn: its prose parts and blocks in order, without the front matter and a first heading that is its title; null for the opening, work and waits",
+            "title": "Body"
+          },
+          "concept": {
+            "description": "Whether the latest save of its text is held, its text shown as last published until a parseable save arrives (F78)",
+            "title": "Concept",
+            "type": "boolean"
+          },
+          "created_at": {
+            "description": "When the item was placed",
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "done": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.DoneSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its done line; null while open"
+          },
+          "file_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A registered document's file name, from its source path, which its line shows while `title` is null (F35); null for any other item",
+            "examples": [
+              "refinement.md"
+            ],
+            "title": "File Name"
+          },
+          "for_user": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.UserSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The person it is for (F107); null for everyone"
+          },
+          "form": {
+            "description": "Which subtype the item is",
+            "enum": [
+              "prose",
+              "work",
+              "wait"
+            ],
+            "title": "Form",
+            "type": "string"
+          },
+          "id": {
+            "description": "The item's id",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "description": "The item's kind",
+            "enum": [
+              "opening",
+              "decision",
+              "confirmation",
+              "question",
+              "action",
+              "notice",
+              "document",
+              "review",
+              "work",
+              "card_wait",
+              "timed_wait"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "seq": {
+            "description": "Its place in the timeline, from 1",
+            "examples": [
+              3
+            ],
+            "title": "Seq",
+            "type": "integer"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.StepSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The plan task it serves, if any"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The line's title; null for a registered document while its text gives none",
+            "examples": [
+              "Which tent?"
+            ],
+            "title": "Title"
+          },
+          "urgent": {
+            "description": "Whether it is urgent (F10)",
+            "title": "Urgent",
+            "type": "boolean"
+          },
+          "words": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The opening's words, verbatim; null for every other item",
+            "title": "Words"
+          }
+        },
+        "required": [
+          "id",
+          "seq",
+          "kind",
+          "form",
+          "title",
+          "file_name",
+          "created_at",
+          "step",
+          "urgent",
+          "for_user",
+          "done",
+          "concept",
+          "author",
+          "words",
+          "body"
+        ],
+        "title": "TimelineItemSchema",
+        "type": "object"
+      },
+      "TimelineSchema.1fdd8ae.UserKind": {
+        "enum": [
+          "person",
+          "agent"
+        ],
+        "title": "UserKind",
+        "type": "string"
+      },
+      "TimelineSchema.1fdd8ae.UserSchema": {
+        "description": "A person, or Pilot, as an avatar draws them (F106, F132).",
+        "properties": {
+          "avatar_slot": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The avatar's palette slot, from 1; null for Pilot",
+            "examples": [
+              1
+            ],
+            "title": "Avatar Slot"
+          },
+          "handle": {
+            "description": "The handle; Pilot's is `agent`",
+            "examples": [
+              "ada"
+            ],
+            "title": "Handle",
+            "type": "string"
+          },
+          "initials": {
+            "description": "The avatar's initials",
+            "examples": [
+              "AE"
+            ],
+            "title": "Initials",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.UserKind",
+            "description": "A person, or Pilot itself"
+          },
+          "name": {
+            "description": "The full name, the avatar's tooltip",
+            "examples": [
+              "Ada Example"
+            ],
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "handle",
+          "name",
+          "initials",
+          "avatar_slot"
+        ],
+        "title": "UserSchema",
+        "type": "object"
+      },
       "TransitionRequestSchema.e86ccd6": {
         "description": "A change of a project's standing the signed-in person makes.",
         "properties": {
@@ -2920,7 +3664,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Read the project list's tabs, or with `archived` the archived projects'.",
+        "summary": "Read the project list's tabs, or with `archived` the archived projects', each with its badge for the caller.",
         "tags": [],
         "x-required-role": "editor"
       }
@@ -3173,6 +3917,84 @@
           }
         ],
         "summary": "Join the project as the signed-in person.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/projects/{project_id}/timeline": {
+      "get": {
+        "description": "Returns:     200: The timeline     401: No one is signed in     403: The caller lacks the editor role     404: No project has the id",
+        "operationId": "get__api_projects_{project_id}_timeline",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimelineSchema.1fdd8ae"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read a project's timeline whole: every item in order, as its line and its open form show it.",
         "tags": [],
         "x-required-role": "editor"
       }

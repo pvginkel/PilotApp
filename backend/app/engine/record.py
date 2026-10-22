@@ -150,16 +150,9 @@ class RecordService:
             )
         document = self.db.get_one(Document, item.id)
         project, _ = self._locked(document)
-        if item.done_at is None:
-            raise InvalidOperationException(operation, "the item is not done")
-        if item.consumed_at is not None:
-            raise InvalidOperationException(
-                operation, "a session has taken the item's answers"
-            )
-        if not self.db.get_one(DoneCause, item.done_cause_code).undo_offered:
-            raise InvalidOperationException(
-                operation, f"an item done as {item.done_cause_code} offers no undo"
-            )
+        refusal = self._undo_refusal(item)
+        if refusal is not None:
+            raise InvalidOperationException(operation, refusal)
         if item.done_cause_code == ANSWERED:
             # The one answer a person gave the one-ask item: a done item takes
             # no other.
@@ -175,6 +168,13 @@ class RecordService:
         item.done_cause_code = None
         item.done_by_user_id = None
         self.view_service.timeline_moved(project)
+
+    def offers_undo(self, item: Item) -> bool:
+        """Whether `undo` takes the item now, as it stands."""
+        return (
+            self.db.get_one(ItemKind, item.kind_code).form == PROSE
+            and self._undo_refusal(item) is None
+        )
 
     def done(self, item: Item, user: User) -> None:
         """Done on a document (F32.5): first every unanswered block that has a
@@ -275,6 +275,16 @@ class RecordService:
             )
         _not_done(item, operation)
         self._mark(project, item, MARKED, user, _now())
+
+    def _undo_refusal(self, item: Item) -> str | None:
+        """Why a prose item takes no undo now, or none."""
+        if item.done_at is None:
+            return "the item is not done"
+        if item.consumed_at is not None:
+            return "a session has taken the item's answers"
+        if not self.db.get_one(DoneCause, item.done_cause_code).undo_offered:
+            return f"an item done as {item.done_cause_code} offers no undo"
+        return None
 
     def _locked(self, document: Document) -> tuple[Project, Item | None]:
         self.document_service.lock(document)

@@ -19,6 +19,7 @@ from app.engine.dsl.reader import (
     PLAN,
     DocumentKind,
     Facts,
+    body,
     parse,
     validate,
 )
@@ -49,6 +50,7 @@ __all__ = [
     "Option",
     "ParsedDocument",
     "Span",
+    "body",
     "clear_answer",
     "merge",
     "parse",

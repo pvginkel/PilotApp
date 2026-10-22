@@ -15,6 +15,7 @@ from sqlalchemy import text as sql
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session as DbSession
 
+from app import models
 from app.database import scoped_session
 from app.engine.bus import EngineEvent, TreeHashMoved
 from app.engine.paths import TIMELINE, tree_path
@@ -30,7 +31,13 @@ from app.models import (
     ProjectTransition,
     User,
 )
-from app.models.reference import ProjectState, TaskStatus, TransitionKind, UserKind
+from app.models.reference import (
+    ProjectState,
+    SessionState,
+    TaskStatus,
+    TransitionKind,
+    UserKind,
+)
 from app.schemas.testing_record import InventedProjectCreateSchema
 from app.services.auth_service import AuthContext
 from app.services.container import ServiceContainer
@@ -39,6 +46,7 @@ from app.services.project_service import (
     PlanProgress,
     plan_progress,
 )
+from app.services.timeline_service import Badge
 
 ADA = AuthContext(
     subject="subject-ada", email=None, name="Ada Example", roles={"editor"}
@@ -253,6 +261,35 @@ class TestTabs:
         assert {tab.project.id: tab.progress for tab in tabs} == {
             planned.id: PlanProgress(done=1, total=4, in_progress=("Step 2", "Step 4")),
             unplanned.id: PlanProgress(done=0, total=0, in_progress=()),
+        }
+
+    def test_a_tab_has_its_badge_for_the_caller(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        waiting = _make(container, name="Waiting")
+        quiet = _make(container, name="Quiet")
+        run = models.Session(
+            project_id=waiting.id,
+            environment_id=environment.id,
+            kind_code="work",
+            cwd="/work/Waiting",
+            token_hash="2" * 64,
+            state_code=SessionState.IDLE,
+        )
+        session.add(run)
+        session.flush()
+        container.document_service().bear_item(
+            waiting, "question", "Where?", run, "---\nurgent: true\n---\n"
+        )
+
+        tabs = container.project_service().tabs(ADA, archived=False)
+
+        assert {tab.project.id: tab.badge for tab in tabs} == {
+            waiting.id: Badge(1, True),
+            quiet.id: Badge(0, False),
         }
 
     def test_no_project_is_an_empty_list(self, container: ServiceContainer) -> None:

@@ -26,6 +26,7 @@ from app.models import (
 from app.models.reference import ProjectState, TaskStatus, TransitionKind
 from app.services.auth_service import AuthContext
 from app.services.people_service import PeopleService
+from app.services.timeline_service import Badge, TimelineService
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,7 @@ class ProjectTab:
     finished_at: datetime | None
     member: bool
     progress: PlanProgress
+    badge: Badge
 
 
 @dataclass(frozen=True)
@@ -94,15 +96,18 @@ class ProjectService:
         people_service: PeopleService,
         record_service: RecordService,
         view_service: ViewService,
+        timeline_service: TimelineService,
     ) -> None:
         self.db = db
         self.people_service = people_service
         self.record_service = record_service
         self.view_service = view_service
+        self.timeline_service = timeline_service
 
     def tabs(self, auth: AuthContext, archived: bool) -> list[ProjectTab]:
         """The archived projects, or every other, in the order they were
-        created, with what their tabs show to the caller."""
+        created, with what their tabs show to the caller, the badge counting
+        what waits on them (F1.4)."""
         projects = list(
             self.db.scalars(
                 select(Project)
@@ -125,6 +130,7 @@ class ProjectService:
         steps: dict[uuid.UUID, list[PlanTask]] = {}
         for task in self._steps(ids):
             steps.setdefault(task.project_id, []).append(task)
+        badges = self.timeline_service.badges(self.people_service.find(auth), ids)
         return [
             ProjectTab(
                 project=project,
@@ -135,6 +141,7 @@ class ProjectService:
                 ),
                 member=project.id in memberships,
                 progress=plan_progress(steps.get(project.id, [])),
+                badge=badges.get(project.id, Badge(0, False)),
             )
             for project in projects
         ]
