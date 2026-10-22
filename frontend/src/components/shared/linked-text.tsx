@@ -4,12 +4,11 @@
  * button, where a link cannot nest, each is a span that opens it on a click or on Enter.
  */
 
-import { createContext, useContext, useMemo, type ReactNode, type SyntheticEvent } from 'react';
+import { useMemo, type ReactNode, type SyntheticEvent } from 'react';
+import { LinksContext, useLinker } from '@/components/shared/links-context';
 import { useGetLinks } from '@/lib/api/generated/hooks';
-import { linker, unlinked, type Linker } from '@/lib/links';
+import { linker, unlinked } from '@/lib/links';
 import { useUiStateInstrumentation } from '@/lib/test/ui-state';
-
-const LinksContext = createContext<Linker | null>(null);
 
 /** Reads what links once for every text under it; until then, text shows unlinked. */
 export function LinksProvider({ children }: { children: ReactNode }) {
@@ -26,8 +25,7 @@ interface LinkedTextProps {
 }
 
 export function LinkedText({ text, nested = false }: LinkedTextProps) {
-  const link = useContext(LinksContext);
-  if (link === null) throw new Error('LinkedText is read only under the shell');
+  const link = useLinker();
   return link(text).map((piece, index) => {
     if (piece.link === undefined) return piece.text;
     const { href, title } = piece.link;

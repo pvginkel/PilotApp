@@ -1,0 +1,122 @@
+/* A project's timeline (PilotAppSpecs design/mockup/style.css, "Dividers", "Items", "The collapsed
+   line" and "The prompt that started a project"). */
+
+@layer components {
+  .feed { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; scrollbar-gutter: stable; }
+  /* Anchored to the bottom, like a chat: a short timeline sits at the bottom of the page. */
+  .feed-inner {
+    display: flex;
+    flex: 1 0 auto;
+    flex-direction: column;
+    justify-content: flex-end;
+    width: 100%;
+    max-width: var(--column);
+    margin: 0 auto;
+    padding: 20px 24px 64px;
+  }
+
+  /* ---- Dividers ------------------------------------------------------------------------- */
+
+  .divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 18px 0 10px;
+    font-size: 12px;
+    color: hsl(var(--muted-foreground));
+    white-space: nowrap;
+  }
+  .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: hsl(var(--border)); }
+  .divider.date { font-weight: 600; margin-top: 26px; }
+  .divider.step::before { flex: 0 0 24px; }
+  .divider.step { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px; }
+
+  /* ---- Items ---------------------------------------------------------------------------- */
+
+  .item {
+    margin: 8px 0;
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+    background: hsl(var(--card));
+    scroll-margin: 80px;
+  }
+  .item.open { border-color: hsl(var(--primary) / 0.45); box-shadow: var(--shadow-md); }
+  .item.concept { border-style: dashed; }
+  .item.fresh { animation: fresh 1.6s ease-out; }
+  @keyframes fresh { from { box-shadow: 0 0 0 4px hsl(var(--primary) / 0.35); } }
+
+  .item-body { padding: 12px 16px 14px; }
+  /* The head's text shares a baseline, its line as tall as a small button so it centres. */
+  .item-head {
+    display: flex;
+    align-items: baseline;
+    line-height: 28px;
+    gap: 8px;
+    font-size: 13px;
+    color: hsl(var(--muted-foreground));
+  }
+  .item-head .kind { display: inline-flex; align-items: baseline; gap: 6px; font-weight: 600; color: hsl(var(--primary-muted-foreground)); }
+  /* A kind's icon hangs from the text's baseline, as an inline icon does, whatever the font. */
+  .item-head .kind .icon { position: relative; top: calc(0.5em - 0.5cap); }
+  .item-head .sep { opacity: 0.5; }
+  .chip.for { background: hsl(330 60% 50% / 0.12); color: hsl(330 55% 38%); }
+  :root[data-theme="dark"] .chip.for { color: hsl(330 70% 78%); }
+  .chip.urgent { background: hsl(var(--urgent) / 0.15); color: hsl(var(--urgent-text)); font-weight: 600; }
+  .item-title { margin: 6px 0 4px; font-size: 16px; font-weight: 600; line-height: 1.4; }
+  .item-after { margin-top: 12px; }
+
+  /* ---- The done line -------------------------------------------------------------------- */
+
+  /* The same shape for every kind, so history reads as a log. Its text, icons and time share a
+     baseline, the text's line filling the row so it centres. */
+  .line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 10px;
+    width: 100%;
+    min-height: 38px;
+    padding: 6px 12px;
+    font-size: 14px;
+    line-height: 26px;
+  }
+  .item.collapsed { border-color: transparent; background: none; margin: 2px 0; }
+  .line .kind-icon { color: hsl(var(--primary)); }
+  .line .title, .line .said-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .line .title { flex: 1; }
+  /* The answer wraps to a line of its own, under the title and on to the row's end. */
+  .line .said {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+    flex-basis: 100%;
+    margin: 0 0 2px 24px;
+    font-size: 13.5px;
+    line-height: 20px;
+    color: hsl(var(--muted-foreground));
+  }
+  /* The avatar keeps its size and centre, and claims only 16px of the line, so it adds no height. */
+  .line .said .avatar { display: inline-grid; margin: -2px 6px -2px 0; vertical-align: calc(0.5cap - 8px); }
+  .line .said .note { white-space: nowrap; }
+  .line .said .note .icon { margin-right: 4px; }
+  .line time { flex: none; font-size: 12.5px; color: hsl(var(--muted-foreground)); font-variant-numeric: tabular-nums; }
+
+  /* ---- The opening ---------------------------------------------------------------------- */
+
+  .prompt { display: flex; gap: 10px; margin: 10px 0; }
+  .prompt .bubble {
+    max-width: 85%;
+    padding: 10px 14px;
+    border-radius: 4px 14px 14px 14px;
+    background: hsl(var(--muted));
+  }
+  .prompt .who { font-size: 13px; color: hsl(var(--muted-foreground)); }
+  .prompt .who b { color: hsl(var(--foreground)); }
+  .prompt .said { margin-top: 2px; white-space: pre-wrap; }
+  .prompt .fold.long::after { background: linear-gradient(hsl(var(--muted) / 0), hsl(var(--muted))); }
+
+  @media (max-width: 900px) {
+    .feed-inner { padding: 12px 12px 64px; }
+  }
+}

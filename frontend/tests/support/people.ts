@@ -43,9 +43,9 @@ export class People {
     return (await response.json()) as Self;
   }
 
-  /** Another person on the record, who holds `handle`; the spec stays signed in as it was. */
-  async other(handle: string): Promise<void> {
-    const response = await this.page.request.post(`${this.backendUrl}/api/testing/people`, { data: { handle } });
+  /** Another person on the record, who holds `handle`, named `name` or by the handle; the spec stays signed in as it was. */
+  async other(handle: string, name?: string): Promise<void> {
+    const response = await this.page.request.post(`${this.backendUrl}/api/testing/people`, { data: { handle, name } });
     expect(response.status(), await response.text()).toBe(201);
   }
 

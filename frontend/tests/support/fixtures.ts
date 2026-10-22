@@ -4,7 +4,8 @@
  *
  * `people` signs the spec in as a fresh person, `projects` puts projects on the record, `links` sets
  * what links in text, `shell` is the frame every screen sits in, `handleStep` and `profile` the
- * person's own pages, `projectList` the side column's list, `projectHead` a project's head.
+ * person's own pages, `projectList` the side column's list, `projectHead` a project's head, `timeline`
+ * its timeline.
  */
 
 /* eslint-disable react-hooks/rules-of-hooks */
@@ -15,6 +16,7 @@ import { ProfilePage } from './page-objects/profile-page';
 import { ProjectHeadPage } from './page-objects/project-head-page';
 import { ProjectListPage } from './page-objects/project-list-page';
 import { ShellPage } from './page-objects/shell-page';
+import { TimelinePage } from './page-objects/timeline-page';
 import { People } from './people';
 import { Projects } from './projects';
 
@@ -27,6 +29,7 @@ interface DomainFixtures {
   profile: ProfilePage;
   projectList: ProjectListPage;
   projectHead: ProjectHeadPage;
+  timeline: TimelinePage;
 }
 
 export const test = infrastructureFixtures.extend<DomainFixtures>({
@@ -55,6 +58,9 @@ export const test = infrastructureFixtures.extend<DomainFixtures>({
   },
   projectHead: async ({ page }, use) => {
     await use(new ProjectHeadPage(page));
+  },
+  timeline: async ({ page }, use) => {
+    await use(new TimelinePage(page));
   },
 });
 

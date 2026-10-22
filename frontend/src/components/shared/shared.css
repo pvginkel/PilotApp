@@ -61,6 +61,17 @@
   .btn-ghost { border-color: transparent; background: none; color: hsl(var(--muted-foreground)); }
   .btn-ghost:hover:not(:disabled) { color: hsl(var(--foreground)); }
 
+  /* A button that reads as a link: Show more. */
+  .link {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: hsl(var(--link));
+    font: inherit;
+    cursor: pointer;
+  }
+  .link:hover { text-decoration: underline; }
+
   /* ---- Text fields (F115's look) --------------------------------------------------------- */
 
   /* One line at rest, its button beside it in a .field-row, level with its bottom edge. */
@@ -90,6 +101,37 @@
   /* A ticket id, a repo or an environment, in the colour of the text around it. */
   .mention { color: inherit; text-decoration: none; cursor: pointer; }
   .mention:hover { text-decoration: underline; }
+
+  /* ---- Markdown (markdown.tsx) ---------------------------------------------------------- */
+
+  .prose { font-size: 14.5px; overflow-wrap: break-word; }
+  .prose > :first-child { margin-top: 0; }
+  .prose > :last-child { margin-bottom: 0; }
+  .prose p { margin: 0 0 0.7em; }
+  .prose ul, .prose ol { margin: 0 0 0.7em; padding-left: 1.4em; }
+  .prose li { margin: 0.15em 0; }
+  .prose h1 { font-size: 19px; margin: 1.4em 0 0.5em; line-height: 1.35; }
+  .prose h2 { font-size: 17px; margin: 1.4em 0 0.5em; line-height: 1.35; }
+  .prose h3 { font-size: 15.5px; margin: 1.2em 0 0.4em; }
+  .prose h1, .prose h2, .prose h3 { font-weight: 600; }
+  .prose blockquote { margin: 0 0 0.7em; padding: 2px 12px; border-left: 3px solid hsl(var(--border)); color: hsl(var(--muted-foreground)); }
+  .prose table { border-collapse: collapse; margin: 0 0 1em; font-size: 13.5px; display: block; overflow-x: auto; }
+  .prose th, .prose td { padding: 5px 9px; border: 1px solid hsl(var(--border)); vertical-align: top; text-align: left; }
+  .prose th { background: hsl(var(--muted)); }
+  .prose hr { border: 0; border-top: 1px solid hsl(var(--border)); margin: 1.4em 0; }
+  .prose del { color: hsl(var(--muted-foreground)); }
+
+  /* ---- Long texts folded (fold.tsx) ----------------------------------------------------- */
+
+  .fold { position: relative; max-height: 13.5em; overflow: hidden; }
+  .fold.long::after {
+    content: "";
+    position: absolute;
+    inset: auto 0 0;
+    height: 3em;
+    background: linear-gradient(hsl(var(--card) / 0), hsl(var(--card)));
+  }
+  .more { margin-top: 4px; font-size: 13px; }
 
   /* ---- Chips ---------------------------------------------------------------------------- */
 
@@ -146,8 +188,10 @@
     line-height: 1;
   }
   .avatar.sm { width: 24px; height: 24px; font-size: 10px; }
+  .avatar.xs { width: 20px; height: 20px; font-size: 8.5px; }
   .avatar .icon { font-size: 18px; }
   .avatar.sm .icon { font-size: 14px; }
+  .avatar.xs .icon { font-size: 12px; }
   .avatar[data-colour="1"] { background: hsl(var(--avatar-1)); color: hsl(var(--avatar-1-text)); }
   .avatar[data-colour="2"] { background: hsl(var(--avatar-2)); color: hsl(var(--avatar-2-text)); }
   .avatar[data-colour="3"] { background: hsl(var(--avatar-3)); color: hsl(var(--avatar-3-text)); }

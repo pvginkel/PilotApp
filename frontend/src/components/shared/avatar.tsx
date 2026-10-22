@@ -22,7 +22,8 @@ interface Person {
 
 interface AvatarProps {
   who: Person | 'pilot';
-  size?: 'sm';
+  /** 24px, or 20px for an answer's line; 32px by default. */
+  size?: 'sm' | 'xs';
 }
 
 export function Avatar({ who, size }: AvatarProps) {

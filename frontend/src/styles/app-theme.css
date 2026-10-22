@@ -14,6 +14,7 @@
 @import "../components/people/people.css";
 @import "../components/projects/projects.css";
 @import "../components/projects/project-head.css";
+@import "../components/timeline/timeline.css";
 
 /* Tailwind's `dark:` variant follows the page's theme, not the system's. */
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
