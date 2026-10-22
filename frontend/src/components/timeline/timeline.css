@@ -112,7 +112,8 @@
   }
   .item.confirm .item-body { padding: 6px 14px 10px; }
   .item.confirm:not(.urgent) .item-head .kind, .item-head .why { color: hsl(var(--warning-text)); }
-  .confirm-row { display: flex; align-items: center; gap: 12px; }
+  .confirm-row { display: flex; align-items: center; gap: 12px; border-radius: 6px; scroll-margin: 90px; }
+  .confirm-row.flash { animation: fresh 1.6s ease-out; }
   .confirm-text { flex: 1; min-width: 0; }
   .confirm-row .item-title { margin: 0; font-size: 15px; }
   .proposal { font-size: 14px; line-height: 1.45; color: hsl(var(--muted-foreground)); }
@@ -150,6 +151,7 @@
     background: hsl(var(--muted) / 0.35);
     scroll-margin: 90px;
   }
+  .block.flash { animation: fresh 1.6s ease-out; }
   /* A one-ask item's panel. */
   .block.solo { margin: 12px 0 0; }
   .block-head {
@@ -320,7 +322,8 @@
 
   /* ---- The opening ---------------------------------------------------------------------- */
 
-  .prompt { display: flex; gap: 10px; margin: 10px 0; }
+  .prompt { display: flex; gap: 10px; margin: 10px 0; scroll-margin: 80px; }
+  .prompt.fresh .bubble { animation: fresh 1.6s ease-out; }
   .prompt .bubble {
     max-width: 85%;
     padding: 10px 14px;
@@ -335,5 +338,16 @@
   @media (max-width: 900px) {
     .feed-inner { padding: 12px 12px 64px; }
     .pinned { padding: 8px 12px 0; }
+    /* On the phone an option's line goes under its label, Recommended staying at the label's end
+       (F98.3). */
+    .option .label { flex: 1; max-width: none; }
+    .option .desc { order: 1; flex-basis: 100%; }
+    .option .note { order: 2; }
+  }
+  /* A narrow block head wraps what does not fit, and Answered keeps its icon alone, its word left
+     to a screen reader (F98.3). */
+  @media (max-width: 600px) {
+    .block-head { flex-wrap: wrap; }
+    .block-head .chip-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   }
 }

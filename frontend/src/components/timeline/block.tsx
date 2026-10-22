@@ -6,7 +6,8 @@
  * answer in a done item, reads closed: the answer only, which opens, as the chevron does, to the
  * block's controls, live while the item is not done (F31.2). A deferred block reads "Deferred to
  * <task>", or to the project's end, its note under it; opened, its controls, nothing chosen, stand
- * under that line (F31.4). A note sits under its answer with its icon (F17.4).
+ * under that line (F31.4). A note sits under its answer with its icon (F17.4). Gone to at its
+ * address, it flashes (F97).
  */
 
 import { useState } from 'react';
@@ -15,6 +16,7 @@ import { Time } from '@/components/shared/time';
 import { ActionAnswer } from '@/components/timeline/action';
 import { ConfirmControls, Proposal } from '@/components/timeline/confirmation';
 import { DecisionOptions } from '@/components/timeline/decision';
+import { useBlockFlash } from '@/components/timeline/flash';
 import { blockKindOf } from '@/components/timeline/kinds';
 import { Note } from '@/components/timeline/note';
 import { QuestionAnswer } from '@/components/timeline/question';
@@ -26,6 +28,7 @@ import { cn } from '@/lib/utils';
 
 export function Block({ item, block }: { item: TimelineItem; block: BlockData }) {
   const { answer, done, saving } = useAnswer(item.id, block.id);
+  const { flashing, onAnimationEnd } = useBlockFlash(item.id, block.id);
   const [opened, setOpened] = useState(false);
   const answered = block.answer !== null || block.done !== null;
   const closable = answered && (block.by?.kind !== 'person' || item.done !== null);
@@ -69,7 +72,8 @@ export function Block({ item, block }: { item: TimelineItem; block: BlockData })
 
   return (
     <section
-      className={cn('block solo', answered ? 'answered' : 'open')}
+      className={cn('block solo', answered ? 'answered' : 'open', flashing && 'flash')}
+      onAnimationEnd={onAnimationEnd}
       data-testid="timeline.block"
       data-block-id={block.id}
       data-closed={closed}

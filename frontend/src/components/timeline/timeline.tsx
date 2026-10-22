@@ -9,12 +9,17 @@
  * it; a finished project's has none (F10.2). While open items are scrolled out above, a chip under
  * the banners counts them and scrolls to the nearest (F11). A finished project's timeline ends in
  * "Finished · <stamp>", every item but the opening done by Finish (F5.3).
+ *
+ * Opened at an item's address, the timeline goes to the item and flashes it; at a block's, to the
+ * block, or to its item where its line stands for it; an address it draws nothing for leaves it at
+ * its end (F97).
  */
 
 import { useLayoutEffect, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, Flag, TriangleAlert } from 'lucide-react';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Time } from '@/components/shared/time';
+import { blockKey, FlashContext } from '@/components/timeline/flash';
 import { Item } from '@/components/timeline/item';
 import { Opening } from '@/components/timeline/opening';
 import { rowsOf, type Row } from '@/components/timeline/rows';
@@ -25,7 +30,13 @@ const END_SLACK = 48;
 /** How far under the banners an item's end may stand, in pixels, and still read as scrolled out above. */
 const ABOVE_SLACK = 8;
 
-export function Timeline({ projectId }: { projectId: string }) {
+/** Where the timeline is opened: an item, or one of its blocks. */
+interface Address {
+  item: string;
+  block: string | null;
+}
+
+export function Timeline({ projectId, address }: { projectId: string; address: Address | null }) {
   const { data } = useTimeline(projectId);
   const items = data?.items.filter((item) => item.form === 'prose');
   const finishedAt = data?.finished_at ?? null;
@@ -60,32 +71,58 @@ export function Timeline({ projectId }: { projectId: string }) {
       element.scrollTop === pinned.current || element.scrollHeight - element.scrollTop - element.clientHeight < END_SLACK;
     countAbove();
   };
-  // The reader goes to an item, its middle to the timeline's or its top to its scroll margin. A
-  // scroll that moves the timeline no longer follows its end until its scroll events put it back
-  // there; one that would not move it fires none, and leaves following as it stands.
-  const scrollTo = (id: string, block: 'center' | 'start') => {
+  const articleOf = (id: string) =>
+    feed.current!.querySelector<HTMLElement>(`.feed-inner > [data-item-id="${CSS.escape(id)}"]`);
+  // The reader goes to an item or a block, its middle to the timeline's or its top to its scroll
+  // margin. A scroll that moves the timeline no longer follows its end until its scroll events put
+  // it back there; one that would not move it fires none, and leaves following as it stands.
+  const scrollTo = (goal: HTMLElement, block: 'center' | 'start', behavior: ScrollBehavior = 'smooth') => {
     const element = feed.current!;
-    const article = element.querySelector<HTMLElement>(`.feed-inner > [data-item-id="${CSS.escape(id)}"]`)!;
-    const box = article.getBoundingClientRect();
+    const box = goal.getBoundingClientRect();
     const top = box.top - element.getBoundingClientRect().top - element.clientTop + element.scrollTop;
     const wanted =
       block === 'center'
         ? top + box.height / 2 - element.clientHeight / 2
-        : top - parseFloat(getComputedStyle(article).scrollMarginTop);
+        : top - parseFloat(getComputedStyle(goal).scrollMarginTop);
     const target = Math.min(Math.max(wanted, 0), element.scrollHeight - element.clientHeight);
     if (Math.abs(target - element.scrollTop) < 1) return;
     atEnd.current = false;
-    element.scrollTo({ top: target, behavior: 'smooth' });
+    element.scrollTo({ top: target, behavior });
   };
+  // Only an item the timeline draws has a banner.
   const show = (id: string) => {
-    scrollTo(id, 'center');
+    scrollTo(articleOf(id)!, 'center');
     flash(id);
   };
+  // An address jumps: a smooth scroll's first frames, still near the end, read as following it,
+  // and the head drawn above the timeline in them would pin it back there.
+  const goTo = ({ item, block }: Address) => {
+    const article = articleOf(item);
+    if (article === null) return;
+    const found = block === null ? null : article.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(block)}"]`);
+    scrollTo(found ?? article, 'center', 'instant');
+    flash(found === null ? item : blockKey(item, block!));
+  };
+  // The address last gone to: each is gone to once, when the timeline is read, or when it is opened
+  // with the timeline on screen.
+  const reached = useRef<string | null>(null);
 
   useLayoutEffect(() => {
     if (atEnd.current) toEnd();
     countAbove();
   }, [data]);
+
+  // After the pin to the end above, on every render.
+  useLayoutEffect(() => {
+    if (address === null) {
+      reached.current = null;
+      return;
+    }
+    const key = address.block === null ? address.item : blockKey(address.item, address.block);
+    if (data === undefined || reached.current === key) return;
+    reached.current = key;
+    goTo(address);
+  });
 
   // The timeline's own height changes, as when the head above it is drawn or the window is
   // resized, and nothing scrolls it: at its end, it stays there.
@@ -112,7 +149,7 @@ export function Timeline({ projectId }: { projectId: string }) {
           <button
             type="button"
             className="btn btn-soft btn-sm open-above"
-            onClick={() => scrollTo(above[above.length - 1], 'start')}
+            onClick={() => scrollTo(articleOf(above[above.length - 1])!, 'start')}
             data-testid="timeline.open-above"
           >
             <ArrowUp className="icon" aria-hidden="true" />
@@ -126,7 +163,9 @@ export function Timeline({ projectId }: { projectId: string }) {
             Nothing yet
           </div>
         )}
-        {items && rowsOf(items).map((row) => <TimelineRow key={row.key} row={row} fresh={fresh} flashed={flashed} />)}
+        <FlashContext.Provider value={{ fresh, flashed }}>
+          {items && rowsOf(items).map((row) => <TimelineRow key={row.key} row={row} fresh={fresh} flashed={flashed} />)}
+        </FlashContext.Provider>
         {finishedAt !== null && (
           <div className="divider finished" data-testid="timeline.divider.finished">
             <span>
@@ -179,7 +218,7 @@ function TimelineRow({ row, fresh, flashed }: TimelineRowProps) {
     );
   }
   return row.item.kind === 'opening' ? (
-    <Opening item={row.item} />
+    <Opening item={row.item} fresh={fresh.has(row.item.id)} onFlashed={() => flashed(row.item.id)} />
   ) : (
     <Item item={row.item} fresh={fresh.has(row.item.id)} onFlashed={() => flashed(row.item.id)} />
   );
@@ -191,8 +230,8 @@ interface Seen {
 }
 
 /**
- * The items that arrived since the timeline was first read, and those flashed on purpose, until
- * each has flashed. The first read flashes nothing.
+ * The items that arrived since the timeline was first read, and the items and blocks flashed on
+ * purpose, until each has flashed. The first read flashes nothing.
  */
 function useFresh(items: TimelineItem[] | undefined) {
   const [seen, setSeen] = useState<Seen>({ items: undefined, fresh: new Set() });
@@ -203,13 +242,13 @@ function useFresh(items: TimelineItem[] | undefined) {
     const arrived = ids(items).filter((id) => !known.has(id));
     setSeen({ items, fresh: new Set([...seen.fresh, ...arrived]) });
   }
-  const flashed = (id: string) =>
-    setSeen((current) => ({ ...current, fresh: new Set([...current.fresh].filter((other) => other !== id)) }));
-  const flash = (id: string) => {
-    flashed(id);
+  const flashed = (key: string) =>
+    setSeen((current) => ({ ...current, fresh: new Set([...current.fresh].filter((other) => other !== key)) }));
+  const flash = (key: string) => {
+    flashed(key);
     // Back on two frames later, once a frame has been drawn without it, so its animation starts again.
     requestAnimationFrame(() =>
-      requestAnimationFrame(() => setSeen((current) => ({ ...current, fresh: new Set([...current.fresh, id]) }))),
+      requestAnimationFrame(() => setSeen((current) => ({ ...current, fresh: new Set([...current.fresh, key]) }))),
     );
   };
   return { fresh: seen.fresh, flashed, flash };

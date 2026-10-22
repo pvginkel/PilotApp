@@ -5,7 +5,8 @@ import { waitTestEvent } from '../helpers';
 /**
  * A project's timeline (F8): its rows, the opening, its items open and as done lines with Undo, an
  * open item's block (F31) or a confirmation's card (F22), the urgent banners and the "N open above" chip (F10.2, F11), a finished
- * timeline's end (F5.3), and where it stands scrolled.
+ * timeline's end (F5.3), and where it stands scrolled; opened at its project's address or at an
+ * item's or a block's under it (F97).
  */
 export class TimelinePage {
   readonly root: Locator;
@@ -42,12 +43,21 @@ export class TimelinePage {
    * StrictMode's first unmount reports, marked aborted.
    */
   async open(id: string): Promise<void> {
+    await this.goto(`/projects/${id}`);
+  }
+
+  /** Opens the project at an item's address, or a block's under it, once its timeline is read and drawn. */
+  async openAt(id: string, itemId: string, blockId?: string): Promise<void> {
+    await this.goto(addressOf(id, itemId, blockId));
+  }
+
+  private async goto(path: string): Promise<void> {
     const read = waitTestEvent<UiStateTestEvent>(
       this.page,
       'ui_state',
       (event) => event.scope === 'project.timeline' && event.phase === 'ready' && event.metadata?.status !== 'aborted',
     );
-    await this.page.goto(`/projects/${id}`);
+    await this.page.goto(path);
     await read;
   }
 
@@ -162,4 +172,9 @@ export class TimelinePage {
   async refocus(): Promise<void> {
     await this.page.evaluate(() => document.dispatchEvent(new Event('visibilitychange', { bubbles: true })));
   }
+}
+
+/** An item's address under its project's, or a block's under the item's (F97). */
+export function addressOf(projectId: string, itemId: string, blockId?: string): string {
+  return `/projects/${projectId}/items/${itemId}${blockId === undefined ? '' : `/blocks/${blockId}`}`;
 }
