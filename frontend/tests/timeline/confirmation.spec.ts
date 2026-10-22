@@ -37,7 +37,7 @@ test.describe('A confirmation', () => {
     await expect(item.kind).toHaveText('Confirm');
     await expect(item.kind.locator('svg')).toHaveClass(/\blucide-shield\b/);
     await expect(item.why).toHaveText('Auto pilot off');
-    await expect(item.why).toHaveAttribute('title', /asked only while auto pilot is off/);
+    await expect(item.why).toHaveAttribute('title', 'Pilot asks because auto pilot is off; under auto pilot it would go ahead');
     await expect(item.title).toHaveText('Ship 1.2?');
     await expect(confirm.proposal).toHaveText('Push the release to production');
     await expect(confirm.root).toHaveAttribute('data-block-id', 'C1');
@@ -54,6 +54,34 @@ test.describe('A confirmation', () => {
 
     await expect(confirm.prose).toHaveCount(0);
     await expect(item.root).not.toContainText(BEFORE);
+  });
+
+  test('says plainly why Pilot asks, on every ground the record holds, never in the grants table’s terms', async ({
+    people,
+    projects,
+    timeline,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Why'), members: [me.handle!] });
+    const grounds = [
+      ['auto-pilot-off', 'Auto pilot off', 'Pilot asks because auto pilot is off; under auto pilot it would go ahead'],
+      ['rider', 'Auto pilot off: other commits go too', "The push carries commits that are not this project's; under auto pilot it would go ahead"],
+      ['irreversible', 'Always asks: cannot be undone', 'Pilot asks for an act that cannot be undone, even under auto pilot'],
+      ['product-hold', 'Always asks: you held this back', 'You held this back; Pilot asks even under auto pilot'],
+      ['self-approval', 'Always asks: overrules a check', 'Going ahead would overrule a hold or a failed check; Pilot asks even under auto pilot'],
+    ] as const;
+    const placed = [];
+    for (const [code] of grounds) {
+      const text = `\`\`\`decision id=C1\ntype: confirmation\nproposal: Push the release\nbecause: ${code}\n\`\`\`\n`;
+      placed.push(await projects.place(id, { kind: 'confirmation', title: `Ship on ${code}?`, text }));
+    }
+    await timeline.open(id);
+
+    for (const [index, [, label, tooltip]] of grounds.entries()) {
+      const { why } = timeline.item(placed[index]);
+      await expect(why).toHaveText(label);
+      await expect(why).toHaveAttribute('title', tooltip);
+    }
   });
 
   test('unfolds its prose under Details, which Less folds again; with no prose it has no Details', async ({ people, projects, timeline }) => {
