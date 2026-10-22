@@ -60,11 +60,22 @@ export function Timeline({ projectId }: { projectId: string }) {
       element.scrollTop === pinned.current || element.scrollHeight - element.scrollTop - element.clientHeight < END_SLACK;
     countAbove();
   };
-  // The reader goes to an item: the timeline no longer follows its end.
-  const scrollTo = (id: string, block: ScrollLogicalPosition) => {
+  // The reader goes to an item, its middle to the timeline's or its top to its scroll margin. A
+  // scroll that moves the timeline no longer follows its end until its scroll events put it back
+  // there; one that would not move it fires none, and leaves following as it stands.
+  const scrollTo = (id: string, block: 'center' | 'start') => {
+    const element = feed.current!;
+    const article = element.querySelector<HTMLElement>(`.feed-inner > [data-item-id="${CSS.escape(id)}"]`)!;
+    const box = article.getBoundingClientRect();
+    const top = box.top - element.getBoundingClientRect().top - element.clientTop + element.scrollTop;
+    const wanted =
+      block === 'center'
+        ? top + box.height / 2 - element.clientHeight / 2
+        : top - parseFloat(getComputedStyle(article).scrollMarginTop);
+    const target = Math.min(Math.max(wanted, 0), element.scrollHeight - element.clientHeight);
+    if (Math.abs(target - element.scrollTop) < 1) return;
     atEnd.current = false;
-    const article = feed.current!.querySelector(`.feed-inner > [data-item-id="${CSS.escape(id)}"]`)!;
-    article.scrollIntoView({ behavior: 'smooth', block });
+    element.scrollTo({ top: target, behavior: 'smooth' });
   };
   const show = (id: string) => {
     scrollTo(id, 'center');

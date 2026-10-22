@@ -78,6 +78,30 @@ test.describe('An urgent item', () => {
     await expect(item.line).toBeVisible();
     await expect(timeline.banners).toHaveCount(0);
   });
+
+  test('is shown by Show on a timeline that does not scroll, which keeps following its end', async ({
+    deploymentSse,
+    people,
+    projects,
+    timeline,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Fits'), members: [me.handle!] });
+    const storm = await projects.place(id, { kind: 'question', title: 'Storm coming?', text: URGENT_QUESTION });
+    await timeline.open(id);
+    await deploymentSse.ensureConnected();
+    expect(await timeline.root.evaluate((feed) => feed.scrollHeight - feed.clientHeight)).toBeLessThan(1);
+
+    await timeline.banner(storm).click();
+    await expect(timeline.item(storm).root).toHaveClass(/\bfresh\b/);
+
+    let last = '';
+    for (let index = 0; index < 8; index += 1) {
+      last = await projects.place(id, { kind: 'notice', title: `Notice ${index + 1}`, text: NOTICE });
+    }
+    await expect(timeline.item(last).root).toBeAttached();
+    await expect.poll(() => timeline.fromEnd()).toBeLessThan(2);
+  });
 });
 
 test.describe('“N open above”', () => {
