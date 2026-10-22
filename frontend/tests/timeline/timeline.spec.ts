@@ -387,6 +387,8 @@ test.describe('Anchored to its end', () => {
     const me = await people.signIn();
     const id = await longProject(projects, me.handle!, makeUnique('Anchor'));
     await timeline.open(id);
+    // The first read flashes nothing: counted at once, before a flash could have ended.
+    expect(await timeline.root.locator('.fresh').count()).toBe(0);
     await expect.poll(() => timeline.fromEnd()).toBeLessThan(2);
     expect(await timeline.scrollTop()).toBeGreaterThan(0);
 
