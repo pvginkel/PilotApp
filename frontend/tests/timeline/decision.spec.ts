@@ -330,6 +330,33 @@ test.describe('An answer Pilot gave', () => {
     await expect(timeline.item(decision).said).toHaveText('The van, not a tent');
     expect(await blockOf(projects, id, decision)).toMatchObject({ answer: 'The van, not a tent', by: { handle: me.handle } });
   });
+
+  test('in free words keeps them in Other’s row, unchosen and faded, while another option saves', async ({
+    page,
+    people,
+    projects,
+    timeline,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Kept words'), members: [me.handle!] });
+    const decision = await projects.place(id, { kind: 'decision', title: 'Which tent?', text: PILOTS('The van, not a tent') });
+    await timeline.open(id);
+    const item = timeline.item(decision);
+    const { block } = item;
+    await block.options.click();
+    await expect(block.other).toHaveAttribute('data-chosen', 'true');
+
+    const restore = await slowNetwork(page, 1_000);
+    await block.option('Tunnel').click();
+    await expect(block.option('Tunnel')).toHaveClass(/\bchosen\b/);
+    await expect(block.other.locator('.desc')).toHaveText('The van, not a tent');
+    await expect(block.other).toHaveAttribute('data-chosen', 'false');
+    await expect(block.other).toHaveClass(/\bfaded\b/);
+    await restore();
+
+    await expect(item.said).toHaveText('Tunnel');
+    expect(await blockOf(projects, id, decision)).toMatchObject({ answer: 'Tunnel', by: { handle: me.handle } });
+  });
 });
 
 test.describe('A deferred block', () => {
