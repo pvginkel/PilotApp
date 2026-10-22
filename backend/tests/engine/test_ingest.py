@@ -997,6 +997,40 @@ class TestIngestServiceMerge:
         assert document.published_text == merged
         assert item.title == "Which tent for the lake?"
 
+    def test_a_title_moved_into_a_reverted_heading_stays_in_the_front_matter(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+    ) -> None:
+        published = ANSWERED.replace(
+            TENT_FRONT_MATTER, TENT_FRONT_MATTER + "\nRain is due.\n"
+        )
+        with scoped_session(container):
+            item = container.document_service().bear_item(
+                project, "decision", "Which tent?", project_session, published
+            )
+        document = session.get_one(Document, item.id)
+        document.source_environment_id = environment.id
+        document.source_path = "/work/Example/tents.md"
+        session.flush()
+        save = published.replace(TENT_FRONT_MATTER, "# Which tent?\n")
+
+        answer = _ingest(
+            container,
+            f"draft-{project.number}/items/1-which-tent.md",
+            save,
+            environment,
+        )
+
+        prose = "the body prose reverted: a person has answered in the document"
+        assert answer.content == published.encode()
+        assert answer.faults == (dsl.Fault(4, prose),)
+        assert document.published_text == published
+        assert item.title == "Which tent?"
+
     def test_a_block_a_non_draft_drops_is_restored(
         self,
         session: DbSession,

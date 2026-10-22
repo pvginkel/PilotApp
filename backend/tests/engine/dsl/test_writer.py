@@ -896,6 +896,29 @@ class TestMerge:
 
         assert merged == Merge(published, (Fault(7, PROSE),))
 
+    @pytest.mark.parametrize(
+        ("save", "expected", "line"),
+        [
+            (REGISTERED.replace("---\ntitle: Tent\n---\n", "# Tent\n"), REGISTERED, 4),
+            (
+                REGISTERED.replace("title: Tent", "summary: Which tent").replace(
+                    "\n\nRain", "\n\n# Shelter\n\nRain"
+                ),
+                REGISTERED.replace(
+                    "title: Tent", "title: Shelter\nsummary: Which tent"
+                ),
+                6,
+            ),
+        ],
+        ids=["no-front-matter", "front-matter-without-title"],
+    )
+    def test_a_title_the_reverted_body_took_is_written_into_the_front_matter(
+        self, save: str, expected: str, line: int
+    ) -> None:
+        merged = merge(REGISTERED, save, DocumentKind.REGISTERED_ITEM)
+
+        assert merged == Merge(expected, (Fault(line, PROSE),))
+
     def test_a_reverted_body_takes_the_save_s_line_endings(self) -> None:
         save = REGISTERED.replace("Rain", "Sun").replace("\n", "\r\n")
 

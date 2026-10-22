@@ -112,16 +112,27 @@ def with_title(text: str, title: str) -> str:
     """`title` written first in the text's front matter, one opened at the
     top where the text has none; the text as it is where its front matter
     gives a title (DB decision 50)."""
-    front_matter = parse(text).front_matter
-    if front_matter.title is not None:
+    if parse(text).front_matter.title is not None:
         return text
-    edit = _Edit(text)
+    return _titled(text, title, ())[0]
+
+
+def _titled(
+    text: str, title: str, faults: Sequence[Fault]
+) -> tuple[str, tuple[Fault, ...]]:
+    """`title` written first in the front matter of `text`, one opened at the
+    top where it has none; each of `faults` kept at its line."""
+    span = parse(text).front_matter.span
     lines = _render([("title", title)])
-    if front_matter.span is None:
-        edit.insert(0, ["---", *lines, "---"])
-    else:
-        edit.insert(front_matter.span.first, lines)
-    return edit.apply()[0]
+    at, lines = (0, ["---", *lines, "---"]) if span is None else (span.first, lines)
+    edit = _Edit(text)
+    edit.insert(at, lines)
+    return edit.apply()[0], tuple(
+        fault
+        if fault.line is None or fault.line <= at
+        else Fault(fault.line + len(lines), fault.message)
+        for fault in faults
+    )
 
 
 def recommendation(block: Block) -> str | None:
@@ -307,7 +318,9 @@ def _carry_prose(published: str, merged: str, reverted: tuple[Fault, ...]) -> Me
     """A registered document a person has answered in (F32.7): where the
     merged save's body prose differs from the published one, the published
     body under the save's front matter, each block as the merge left it, and
-    each block the save added placed beside its neighbours."""
+    each block the save added placed beside its neighbours; the save's title
+    written into that front matter where it stood in a first heading of the
+    body reverted."""
     ours, theirs = parse(published), parse(merged)
     source = _Edit(merged)
     known = {block.local_id for block in ours.blocks}
@@ -355,6 +368,8 @@ def _carry_prose(published: str, merged: str, reverted: tuple[Fault, ...]) -> Me
     if differs < len(held):
         edit.mark(held[differs][1], _PROSE_REVERTED)
     text, faults = edit.apply()
+    if parse(text).title is None and theirs.title is not None:
+        text, faults = _titled(text, theirs.title, faults)
     if differs == len(held):
         faults = (*faults, Fault(None, _PROSE_REVERTED))
     return Merge(text, faults)
