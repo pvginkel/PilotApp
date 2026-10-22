@@ -1,6 +1,6 @@
 """/api/testing/{people,environments,projects,items}: the record's states the
 UI cannot make (TEST-6), on every stage but prd, behind the API's sign-in
-(Ruling D1)."""
+(D027)."""
 
 import uuid
 from typing import Any

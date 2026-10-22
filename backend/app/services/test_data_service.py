@@ -1,7 +1,7 @@
 """The invented record: the dev stack's seed, which `cli load-test-data`
 loads into the dev database and into the seed every Playwright worker clones,
 and the people, environments, projects, items and agent saves a spec or the
-dev stage's deployed check makes through `/api/testing/` (TEST-6, Ruling D1).
+dev stage's deployed check makes through `/api/testing/` (TEST-6, D027).
 
 Documents, the record's writes and the plan go through the engine's own
 operations, so the seed is a record the engine could have produced. The rows

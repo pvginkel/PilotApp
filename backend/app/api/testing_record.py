@@ -5,7 +5,7 @@ project's session adds, and an agent's saves of them. Nothing in the UI
 creates a project before the definition chat (F46).
 
 They answer on every STAGE but prd, whatever FLASK_ENV says, so that the dev
-stage's deployed check makes its record through them (Ruling D1). They sit on
+stage's deployed check makes its record through them (D027). They sit on
 the API blueprint, behind its sign-in and the `editor` role.
 """
 
