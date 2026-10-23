@@ -281,6 +281,39 @@
   .option .note { flex-basis: 100%; }
   .option.chosen .note { color: hsl(var(--primary-foreground) / 0.85); }
 
+  /* ---- A document inline: its prose and blocks, its bar beside Send answers, its chips ------ */
+
+  .inline-doc > .prose + .prose { margin-top: 0.7em; }
+  .inline-doc > .block { margin: 12px 0 0; }
+  .inline-doc > .block + .prose { margin-top: 12px; }
+  .doc-actions .grow { flex: 1; }
+  /* A darker orange, its text a lighter one, in both themes. */
+  .chip.unsent { background: hsl(30 85% 28%); color: hsl(40 95% 74%); font-weight: 600; }
+  .item-head .edited { display: inline-flex; align-items: baseline; gap: 6px; }
+  .item-head .edited .avatar { align-self: center; }
+
+  /* A document's progress: a segment per block, filled once answered; a segment goes to its block. */
+  .segbar { display: flex; align-items: center; gap: 3px; min-width: 0; }
+  .seg {
+    flex: 0 1 auto;
+    width: 26px;
+    min-width: 6px;
+    height: 8px;
+    padding: 0;
+    border: 0;
+    border-radius: 2px;
+    background: hsl(var(--muted-foreground) / 0.25);
+    cursor: pointer;
+  }
+  .seg.done { background: hsl(var(--primary)); }
+  .seg:hover { outline: 2px solid hsl(var(--primary) / 0.4); outline-offset: 1px; }
+
+  /* Pilot writing: its avatar and the dancing dots at the end of the text, 6px, 2px apart, grey at
+     half strength, squishing toward their foot (writing.tsx). */
+  .typing { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+  .dots { display: inline-flex; align-items: center; gap: 2px; }
+  .dots span { display: inline-block; width: 6px; height: 6px; border-radius: 999px; background: hsl(218 11% 65%); opacity: 0.5; transform-origin: bottom; }
+
   /* ---- The done line -------------------------------------------------------------------- */
 
   /* The same shape for every kind, so history reads as a log. Its text, icons and time share a

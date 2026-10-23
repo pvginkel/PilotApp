@@ -1,8 +1,9 @@
 /**
  * A prose item on the timeline. Open, it is its head (F12), its title and its text, the prose drawn
  * as GFM (F29.1), the prose before its first block folding when long (F12.2), a one-ask item's
- * block answered in its place (F19.1, F20, F21) and a notice's Read under its text (F23); a
- * confirmation is a card of its own (F22). An urgent one is tinted (F10.1), and one whose latest
+ * block answered in its place (F19.1, F20, F21) and a notice's Read under its text (F23), and
+ * Pilot's dots at its end while Pilot writes it (F35); a confirmation is a card of its own (F22),
+ * and a short document stands inline (F24.1). An urgent one is tinted (F10.1), and one whose latest
  * save is held shows its last published text with a dashed border, a concept (F78). Done, it is
  * its line (F13.1, F13.2), with Undo while the record offers it (F14.1).
  */
@@ -15,9 +16,12 @@ import { Markdown } from '@/components/shared/markdown';
 import { Time } from '@/components/shared/time';
 import { Block } from '@/components/timeline/block';
 import { Confirmation } from '@/components/timeline/confirmation';
+import { InlineDocument } from '@/components/timeline/document';
+import { isInline } from '@/components/timeline/document-state';
 import { ItemHead } from '@/components/timeline/item-head';
 import { kindOf } from '@/components/timeline/kinds';
 import { UserAvatar } from '@/components/timeline/user-avatar';
+import { PilotWriting } from '@/components/timeline/writing';
 import { useRead, useUndo } from '@/hooks/use-marks';
 import { blocksOf, isProse, titleOf, type BodyPart, type TimelineItem, type TimelineUser } from '@/hooks/use-timeline';
 import { usePerson } from '@/hooks/use-self';
@@ -57,6 +61,7 @@ export function Item({ item, fresh, onFlashed }: ItemProps) {
 
 function OpenItem({ item }: { item: TimelineItem }) {
   if (item.kind === 'confirmation') return <Confirmation item={item} />;
+  if (item.kind === 'document' && isInline(item)) return <InlineDocument item={item} />;
   return (
     <div className="item-body">
       <ItemHead item={item} />
@@ -65,6 +70,7 @@ function OpenItem({ item }: { item: TimelineItem }) {
       </div>
       {/* The API gives every prose item but the opening its text. */}
       <ItemText body={item.body!} ask={askOf(item)} />
+      {item.writing && <PilotWriting />}
     </div>
   );
 }
@@ -75,7 +81,7 @@ function askOf(item: TimelineItem): ReactNode {
     case 'decision':
     case 'question':
     case 'action':
-      return <Block item={item} block={blocksOf(item)[0]} />;
+      return <Block item={item} block={blocksOf(item)[0]} solo />;
     case 'notice':
       return <Read item={item} />;
     default:

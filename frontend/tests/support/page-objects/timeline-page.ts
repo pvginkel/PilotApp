@@ -4,9 +4,10 @@ import { waitTestEvent } from '../helpers';
 
 /**
  * A project's timeline (F8): its rows, the opening, its items open and as done lines with Undo, an
- * open item's block (F31) or a confirmation's card (F22), the urgent banners and the "N open above" chip (F10.2, F11), a finished
- * timeline's end (F5.3), and where it stands scrolled; opened at its project's address or at an
- * item's or a block's under it (F97).
+ * open item's block (F31) or a confirmation's card (F22), an inline document's blocks, segments and
+ * *Send answers* with its dialog (F24.1, F33, F32.5), Pilot's dots (F35), the urgent banners and
+ * the "N open above" chip (F10.2, F11), a finished timeline's end (F5.3), and where it stands
+ * scrolled; opened at its project's address or at an item's or a block's under it (F97).
  */
 export class TimelinePage {
   readonly root: Locator;
@@ -22,6 +23,8 @@ export class TimelinePage {
   readonly openAbove: Locator;
   readonly finishedEnd: Locator;
   readonly finishedTime: Locator;
+  /** *Send answers*' dialog over unanswered recommended blocks. */
+  readonly sendDialog: { root: Locator; lines: Locator; note: Locator; cancel: Locator; confirm: Locator };
 
   constructor(private readonly page: Page) {
     this.root = page.getByTestId('timeline');
@@ -36,6 +39,14 @@ export class TimelinePage {
     this.openAbove = this.root.getByTestId('timeline.open-above');
     this.finishedEnd = this.root.getByTestId('timeline.divider.finished');
     this.finishedTime = this.root.getByTestId('timeline.divider.finished.time');
+    const dialog = page.getByTestId('timeline.send-dialog');
+    this.sendDialog = {
+      root: dialog,
+      lines: dialog.getByTestId('timeline.send-dialog.line'),
+      note: dialog.getByTestId('timeline.send-dialog.note'),
+      cancel: dialog.getByTestId('timeline.send-dialog.cancel'),
+      confirm: dialog.getByTestId('timeline.send-dialog.confirm'),
+    };
   }
 
   /**
@@ -83,17 +94,28 @@ export class TimelinePage {
       said: root.getByTestId('timeline.line.said'),
       note: root.getByTestId('timeline.line.note'),
       undo: root.getByTestId('timeline.line.undo'),
-      block: this.block(root),
+      block: this.block(root.getByTestId('timeline.block')),
       confirm: this.confirm(root),
+      edited: root.getByTestId('timeline.item.edited'),
+      editedTime: root.getByTestId('timeline.item.edited.time'),
+      unsent: root.getByTestId('timeline.item.unsent'),
+      writing: root.getByTestId('timeline.writing'),
+      document: root.getByTestId('timeline.item.document'),
+      blocks: root.getByTestId('timeline.block'),
+      /** A document's block by its id. */
+      blockAt: (blockId: string) => this.block(root.locator(`[data-testid="timeline.block"][data-block-id="${blockId}"]`)),
+      segments: root.getByTestId('timeline.segment'),
+      segment: (blockId: string) => root.locator(`[data-testid="timeline.segment"][data-segment="${blockId}"]`),
+      send: root.getByTestId('timeline.item.send'),
     };
   }
 
   /**
    * An open item's block, its head, its answer; a decision's options, a question's field and Send,
-   * an action's paste-back, Done and its options as buttons; Other and its console.
+   * an action's paste-back, Done and its options as buttons; Other and its console; a confirmation
+   * block's check and cross, and No's console.
    */
-  private block(item: Locator) {
-    const root = item.getByTestId('timeline.block');
+  private block(root: Locator) {
     return {
       root,
       head: root.getByTestId('timeline.block.head'),
@@ -118,6 +140,10 @@ export class TimelinePage {
       field: root.getByTestId('timeline.block.console.field'),
       send: root.getByTestId('timeline.block.console.send'),
       cancel: root.getByTestId('timeline.block.console.cancel'),
+      yes: root.getByTestId('timeline.confirm.yes'),
+      no: root.getByTestId('timeline.confirm.no'),
+      noField: root.getByTestId('timeline.confirm.console.field'),
+      noSend: root.getByTestId('timeline.confirm.console.send'),
     };
   }
 

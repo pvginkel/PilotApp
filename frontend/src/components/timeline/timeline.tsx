@@ -19,7 +19,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, Flag, TriangleAlert } from 'lucide-react';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Time } from '@/components/shared/time';
-import { blockKey, FlashContext } from '@/components/timeline/flash';
+import { blockKey, FlashContext, GoToContext } from '@/components/timeline/flash';
 import { Item } from '@/components/timeline/item';
 import { Opening } from '@/components/timeline/opening';
 import { rowsOf, type Row } from '@/components/timeline/rows';
@@ -95,14 +95,15 @@ export function Timeline({ projectId, address }: { projectId: string; address: A
     flash(id);
   };
   // An address jumps: a smooth scroll's first frames, still near the end, read as following it,
-  // and the head drawn above the timeline in them would pin it back there.
-  const goTo = ({ item, block }: Address) => {
+  // and the head drawn above the timeline in them would pin it back there. A segment glides.
+  const goTo = ({ item, block }: Address, behavior: ScrollBehavior = 'instant') => {
     const article = articleOf(item);
     if (article === null) return;
     const found = block === null ? null : article.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(block)}"]`);
-    scrollTo(found ?? article, 'center', 'instant');
+    scrollTo(found ?? article, 'center', behavior);
     flash(found === null ? item : blockKey(item, block!));
   };
+  const goToBlock = (item: string, block: string) => goTo({ item, block }, 'smooth');
   // The address last gone to: each is gone to once, when the timeline is read, or when it is opened
   // with the timeline on screen.
   const reached = useRef<string | null>(null);
@@ -164,7 +165,9 @@ export function Timeline({ projectId, address }: { projectId: string; address: A
           </div>
         )}
         <FlashContext.Provider value={{ fresh, flashed }}>
-          {items && rowsOf(items).map((row) => <TimelineRow key={row.key} row={row} fresh={fresh} flashed={flashed} />)}
+          <GoToContext.Provider value={goToBlock}>
+            {items && rowsOf(items).map((row) => <TimelineRow key={row.key} row={row} fresh={fresh} flashed={flashed} />)}
+          </GoToContext.Provider>
         </FlashContext.Provider>
         {finishedAt !== null && (
           <div className="divider finished" data-testid="timeline.divider.finished">

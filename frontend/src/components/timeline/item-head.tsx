@@ -1,10 +1,13 @@
 /**
  * An open item's head (F12): its kind's icon and label, its time with the full stamp as tooltip, a
  * confirmation's reason line with its tooltip (F22.1), and the Urgent and "for <user>" chips (F10.1,
- * F107).
+ * F107); after them what a document's head adds. A document Pilot changed in a turn after the text
+ * it was first shown with says so, *Edited <time>* beside Pilot's mark (F28.7).
  */
 
+import type { ReactNode } from 'react';
 import { TriangleAlert } from 'lucide-react';
+import { Avatar } from '@/components/shared/avatar';
 import { Time } from '@/components/shared/time';
 import { kindOf } from '@/components/timeline/kinds';
 import type { Block, TimelineItem } from '@/hooks/use-timeline';
@@ -43,8 +46,15 @@ function whyOf(because: Reason) {
   return WHY[because.code] ?? { label: because.name, tooltip: because.description };
 }
 
-/** `because`: the ground a confirmation asks on. */
-export function ItemHead({ item, because = null }: { item: TimelineItem; because?: Block['because'] }) {
+interface ItemHeadProps {
+  item: TimelineItem;
+  /** The ground a confirmation asks on. */
+  because?: Block['because'];
+  /** What a document's head adds after the chips. */
+  children?: ReactNode;
+}
+
+export function ItemHead({ item, because = null, children }: ItemHeadProps) {
   const { icon: Icon, label } = kindOf(item);
   const why = because === null ? null : whyOf(because);
   return (
@@ -74,6 +84,17 @@ export function ItemHead({ item, because = null }: { item: TimelineItem; because
           for {item.for_user.name}
         </span>
       )}
+      {children}
     </div>
+  );
+}
+
+/** *Edited <time>*, the time of Pilot's latest such turn. */
+export function Edited({ at }: { at: string }) {
+  return (
+    <span className="edited" data-testid="timeline.item.edited">
+      <Avatar who="pilot" size="xs" />
+      Edited <Time at={at} format="clock" testId="timeline.item.edited.time" />
+    </span>
   );
 }

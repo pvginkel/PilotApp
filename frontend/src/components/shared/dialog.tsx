@@ -91,8 +91,8 @@ export function ConfirmDialog({ title, lines, note, act, pending, onConfirm, onC
   return (
     <Dialog title={title} onClose={cancel} initialFocus={cancelButton} returnFocus={returnFocus} className="confirm" testId={testId}>
       <ul className="dialog-list">
-        {lines.map((line) => (
-          <li key={line} data-testid={`${testId}.line`}>
+        {lines.map((line, index) => (
+          <li key={index} data-testid={`${testId}.line`}>
             {line}
           </li>
         ))}

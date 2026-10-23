@@ -28,6 +28,9 @@ export function blocksOf(item: TimelineItem): Block[] {
   return (item.body ?? []).flatMap((part) => (part.type === 'block' ? [part.block] : []));
 }
 
+/** Whether the record counts the block answered: an answer, a deferral included, or an action's Done. */
+export const isAnswered = (block: Block) => block.answer !== null || block.done !== null;
+
 /** The line's title: a registered document's file name while its text gives none (F35). */
 export function titleOf(item: TimelineItem): string {
   // The API gives a file name wherever it gives no title.

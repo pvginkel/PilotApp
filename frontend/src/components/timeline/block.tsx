@@ -1,8 +1,9 @@
 /**
- * A one-ask item's block (F31), in a panel of its own under the prose that asks: a decision's
- * options, a question's field, an action's paste-back and buttons, a confirmation's check and cross.
- * Answered, it has a head: its kind, a chevron where it opens, Answered, and when and by whom,
- * Pilot's mark on a block Pilot settled (F31.1, F31.3). An answer that is not a person's, and every
+ * A block (F31), in a panel of its own under the prose that asks, in a one-ask item and in a
+ * document alike: a decision's options, a question's field, an action's paste-back and buttons, a
+ * confirmation's check and cross. Its head names its kind in a document, where the item's head does
+ * not; answered, the head has a chevron where it opens, Answered, and when and by whom, Pilot's
+ * mark on a block Pilot settled (F31.1, F31.3). An answer that is not a person's, and every
  * answer in a done item, reads closed: the answer only, which opens, as the chevron does, to the
  * block's controls, live while the item is not done (F31.2). A deferred block reads "Deferred to
  * <task>", or to the project's end, its note under it; opened, its controls, nothing chosen, stand
@@ -23,14 +24,21 @@ import { QuestionAnswer } from '@/components/timeline/question';
 import { Deferral, DEFERRED } from '@/components/timeline/said';
 import { UserAvatar } from '@/components/timeline/user-avatar';
 import { useAnswer } from '@/hooks/use-answer';
-import type { Block as BlockData, TimelineItem } from '@/hooks/use-timeline';
+import { isAnswered, type Block as BlockData, type TimelineItem } from '@/hooks/use-timeline';
 import { cn } from '@/lib/utils';
 
-export function Block({ item, block }: { item: TimelineItem; block: BlockData }) {
+interface BlockProps {
+  item: TimelineItem;
+  block: BlockData;
+  /** A one-ask item's one block, whose kind the item's head names. */
+  solo?: boolean;
+}
+
+export function Block({ item, block, solo = false }: BlockProps) {
   const { answer, done, saving } = useAnswer(item.id, block.id);
   const { flashing, onAnimationEnd } = useBlockFlash(item.id, block.id);
   const [opened, setOpened] = useState(false);
-  const answered = block.answer !== null || block.done !== null;
+  const answered = isAnswered(block);
   const closable = answered && (block.by?.kind !== 'person' || item.done !== null);
   const closed = closable && !opened;
   const deferred = saving === null && block.answer === DEFERRED;
@@ -72,13 +80,15 @@ export function Block({ item, block }: { item: TimelineItem; block: BlockData })
 
   return (
     <section
-      className={cn('block solo', answered ? 'answered' : 'open', flashing && 'flash')}
+      className={cn('block', solo && 'solo', answered ? 'answered' : 'open', flashing && 'flash')}
       onAnimationEnd={onAnimationEnd}
       data-testid="timeline.block"
       data-block-id={block.id}
       data-closed={closed}
     >
-      {answered && <BlockHead block={block} closable={closable} closed={closed} onToggle={() => setOpened(!opened)} />}
+      {(answered || !solo) && (
+        <BlockHead block={block} answered={answered} closable={closable} closed={closed} onToggle={() => setOpened(!opened)} />
+      )}
       <div className="block-controls">
         {deferred && <Deferral block={block} />}
         {!(closed && deferred) && controls()}
@@ -89,13 +99,14 @@ export function Block({ item, block }: { item: TimelineItem; block: BlockData })
 
 interface BlockHeadProps {
   block: BlockData;
+  answered: boolean;
   /** The answer reads closed until opened, and the chevron toggles it. */
   closable: boolean;
   closed: boolean;
   onToggle: () => void;
 }
 
-function BlockHead({ block, closable, closed, onToggle }: BlockHeadProps) {
+function BlockHead({ block, answered, closable, closed, onToggle }: BlockHeadProps) {
   const { icon: Icon, label } = blockKindOf(block);
   const toggle = closed ? 'Show every option' : 'Show only the answer';
   return (
@@ -117,15 +128,19 @@ function BlockHead({ block, closable, closed, onToggle }: BlockHeadProps) {
           {closed ? <ChevronDown className="icon" aria-hidden="true" /> : <ChevronUp className="icon" aria-hidden="true" />}
         </button>
       )}
-      <span className="chip" title="Answered" data-testid="timeline.block.answered">
-        <Check className="icon" aria-hidden="true" />
-        <span className="chip-label">Answered</span>
-      </span>
-      <span className="grow" />
-      <span className="who" data-testid="timeline.block.who">
-        {block.at !== null && <Time at={block.at} format="clock" testId="timeline.block.time" />}
-        {block.by !== null && <UserAvatar user={block.by} size="xs" />}
-      </span>
+      {answered && (
+        <>
+          <span className="chip" title="Answered" data-testid="timeline.block.answered">
+            <Check className="icon" aria-hidden="true" />
+            <span className="chip-label">Answered</span>
+          </span>
+          <span className="grow" />
+          <span className="who" data-testid="timeline.block.who">
+            {block.at !== null && <Time at={block.at} format="clock" testId="timeline.block.time" />}
+            {block.by !== null && <UserAvatar user={block.by} size="xs" />}
+          </span>
+        </>
+      )}
     </div>
   );
 }

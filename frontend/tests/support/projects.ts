@@ -4,7 +4,8 @@
  * lists read them. Every list also holds the seed's projects and those earlier specs of the
  * worker made. A project made with a session has items placed on its timeline as Pilot places
  * them, and saves of them as Pilot's (POST /api/testing/projects/<id>/items and
- * /api/testing/items/<id>/saves); they are answered through the items API.
+ * /api/testing/items/<id>/saves), its session's turn ended and a document it settled whole marked
+ * Done by Pilot; they are answered through the items API.
  */
 
 import { expect, type Page } from '@playwright/test';
@@ -56,6 +57,18 @@ export class Projects {
     const response = await this.page.request.post(`${this.backendUrl}/api/testing/items/${itemId}/saves`, { data: { text } });
     expect(response.status(), await response.text()).toBe(200);
     return (await response.json()) as Save;
+  }
+
+  /** The project's session's turn ends, as the relay ends it: no text is being written, and a change is an edit. */
+  async endTurn(projectId: string): Promise<void> {
+    const response = await this.page.request.post(`${this.backendUrl}/api/testing/projects/${projectId}/turn-ends`);
+    expect(response.status(), await response.text()).toBe(204);
+  }
+
+  /** Pilot marks Done a document whose every block it answered or deferred. */
+  async doneByPilot(itemId: string): Promise<void> {
+    const response = await this.page.request.post(`${this.backendUrl}/api/testing/items/${itemId}/done`);
+    expect(response.status(), await response.text()).toBe(204);
   }
 
   /** The signed-in person's answer to a block, with a note. */
