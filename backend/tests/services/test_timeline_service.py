@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import Any, get_args
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
@@ -1198,6 +1198,46 @@ class TestTimeline:
                 _attachment(notes, "text/plain", 12, 2, source),
             ],
             [_attachment(log, "text/plain", 2, 3, source)],
+        ]
+
+    def test_an_items_attachments_go_by_their_position_not_the_order_they_were_hung_in(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container, environment_id=environment.id)
+        source = f"{environment.id}:{_session_of(session, project).cwd}"
+        data = container.test_data_service()
+        notice = data.item(project.id, "notice", "Opens in May", NOTICE)
+        sketch, photo = data.attach(
+            notice.id,
+            [_file("sketch.md", b"# Sketch\n"), _file("map.png", b"PNG", "image/png")],
+        )
+        (notes,) = data.attach(
+            notice.id, [_file("notes.txt", b"Bring boots.", "text/plain")]
+        )
+        session.flush()
+        # The file hung last moves to the front, its row written last of the
+        # three: only the order by position puts it first.
+        session.execute(
+            update(ItemAttachment)
+            .where(
+                ItemAttachment.item_id == notice.id,
+                ItemAttachment.attachment_id == notes.id,
+            )
+            .values(position=0)
+        )
+
+        timeline = container.timeline_service().timeline(project.id)
+
+        assert [item.attachments for item in timeline.items] == [
+            [],
+            [
+                _attachment(notes, "text/plain", 12, 2, source),
+                _attachment(sketch, "text/markdown", 9, 1, source),
+                _attachment(photo, "image/png", 3, 1, source),
+            ],
         ]
 
     def test_the_copy_of_the_draft_has_no_source(
