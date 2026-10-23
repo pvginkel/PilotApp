@@ -1,6 +1,7 @@
 /**
- * What a document's screens read from its item: whether it stands inline (F24.1), whether it reads
- * *Unsent* (D026), what a block asks and the answer Done records for it unanswered (F32.5).
+ * What a document's screens read from its item: whether it leaves a card (F24.1, F24.2, F25.1),
+ * what its card counts (F24.2), whether it reads *Unsent* (D026), what a block asks and the answer
+ * Done records for it unanswered (F32.5).
  */
 
 import { blockKindOf } from '@/components/timeline/kinds';
@@ -10,10 +11,29 @@ import { blocksOf, type Block, type TimelineItem } from '@/hooks/use-timeline';
 /** Up to this many words of its own, a document stands inline; past it, it leaves a card. */
 const INLINE_WORDS = 150;
 
-/** Whether a document stands inline, by its own count, which no answer moves. */
-export function isInline(item: TimelineItem): boolean {
+/** Whether the item leaves a card: every review, and a document by its own count, which no answer moves. */
+export function isCard(item: TimelineItem): boolean {
   // The API counts the words of every item it gives a text.
-  return item.word_count! <= INLINE_WORDS;
+  return item.kind === 'review' || (item.kind === 'document' && item.word_count! > INLINE_WORDS);
+}
+
+/** What a card counts: the blocks still the person's to answer or not, by kind, and what Pilot settled and deferred. */
+export interface Counts {
+  decision: number;
+  question: number;
+  action: number;
+  settled: number;
+  deferred: number;
+}
+
+export function countsOf(item: TimelineItem): Counts {
+  const counts: Counts = { decision: 0, question: 0, action: 0, settled: 0, deferred: 0 };
+  for (const block of blocksOf(item)) {
+    if (block.answer === DEFERRED) counts.deferred += 1;
+    else if (block.by?.kind === 'agent') counts.settled += 1;
+    else counts[block.kind] += 1;
+  }
+  return counts;
 }
 
 /**

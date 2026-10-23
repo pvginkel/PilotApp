@@ -1,34 +1,48 @@
 /**
- * A document item (F24): many blocks under one title. One under about 150 words of its own (F24.1)
- * stands inline: its head, with *Edited <time>* (F28.7) and *Unsent* while it has an answer and no
- * Done (D026); its title; its prose with every block answered in place, each in a panel of its own;
- * Pilot's dots while it writes (F35); then its segment bar beside *Send answers* (F33). A segment
- * goes to its block. *Send answers* is the document's Done (F24.3): it enables once every block is
- * answered or has a recommendation, and clicked with unanswered recommended blocks it lists them in
- * a dialog whose Confirm sends, the record answering them with their recommendation (F32.5).
+ * A document item (F24): many blocks under one title, its head carrying *Edited <time>* (F28.7) and
+ * *Unsent* while it has an answer and no Done (D026). One under about 150 words of its own (F24.1)
+ * stands inline: its head; its title; its prose with every block answered in place, each in a panel
+ * of its own; Pilot's dots while it writes (F35); then its segment bar beside *Send answers* (F33).
+ * A segment goes to its block. *Send answers* is the document's Done (F24.3): it enables once every
+ * block is answered or has a recommendation, and clicked with unanswered recommended blocks it
+ * lists them in a dialog whose Confirm sends, the record answering them with their recommendation
+ * (F32.5).
+ *
+ * A larger one, and every review (F25.1), leaves a card: its head, its title, its summary (F34),
+ * its count chips (F24.2), its segment bar, or for a text with no block "N min read", Open, which
+ * reads Continue while the document reads *Unsent*, and on a review Reviewed (F25.2); Pilot's dots
+ * end it while Pilot writes. Open opens the overlay at the document's address, and a segment opens
+ * it at its block (F33).
  */
 
 import { useContext, useState } from 'react';
-import { Check } from 'lucide-react';
+import { Link, useNavigate, useParams } from '@tanstack/react-router';
+import { Check, FileText } from 'lucide-react';
 import { ConfirmDialog } from '@/components/shared/dialog';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Markdown } from '@/components/shared/markdown';
 import { Block } from '@/components/timeline/block';
-import { askOf, isUnsent, recommendationOf } from '@/components/timeline/document-state';
+import { askOf, countsOf, isUnsent, recommendationOf, type Counts } from '@/components/timeline/document-state';
 import { GoToContext } from '@/components/timeline/flash';
 import { Edited, ItemHead } from '@/components/timeline/item-head';
 import { PilotWriting } from '@/components/timeline/writing';
-import { useSend } from '@/hooks/use-marks';
+import { useReviewed, useSend } from '@/hooks/use-marks';
 import { blocksOf, isAnswered, titleOf, type Block as BlockData, type TimelineItem } from '@/hooks/use-timeline';
 import { cn } from '@/lib/utils';
+
+function DocumentHead({ item }: { item: TimelineItem }) {
+  return (
+    <ItemHead item={item}>
+      {item.edited_at !== null && <Edited at={item.edited_at} />}
+      {isUnsent(item) && <UnsentChip />}
+    </ItemHead>
+  );
+}
 
 export function InlineDocument({ item }: { item: TimelineItem }) {
   return (
     <div className="item-body">
-      <ItemHead item={item}>
-        {item.edited_at !== null && <Edited at={item.edited_at} />}
-        {isUnsent(item) && <UnsentChip />}
-      </ItemHead>
+      <DocumentHead item={item} />
       <div className="item-title" data-testid="timeline.item.title">
         <LinkedText text={titleOf(item)} />
       </div>
@@ -44,6 +58,88 @@ export function InlineDocument({ item }: { item: TimelineItem }) {
         </div>
       )}
     </div>
+  );
+}
+
+export function DocumentCard({ item }: { item: TimelineItem }) {
+  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  const navigate = useNavigate();
+  const blocks = blocksOf(item);
+  const params = { projectId, documentId: item.id };
+  const openAt = (_itemId: string, blockId: string) =>
+    void navigate({ to: '/projects/$projectId/documents/$documentId', params, search: { block: blockId } });
+  return (
+    <div className="item-body">
+      <DocumentHead item={item} />
+      <div className="doc-card" data-testid="timeline.item.card">
+        <div className="item-title" data-testid="timeline.item.title">
+          <LinkedText text={titleOf(item)} />
+        </div>
+        {item.summary !== null && (
+          <p className="item-sub" data-testid="timeline.item.summary">
+            <LinkedText text={item.summary} />
+          </p>
+        )}
+        <CountChips counts={countsOf(item)} />
+        <div className="progress">
+          {blocks.length > 0 ? (
+            <GoToContext.Provider value={openAt}>
+              <SegmentBar item={item} />
+            </GoToContext.Provider>
+          ) : (
+            // The API counts the words of every item it gives a text.
+            <span data-testid="timeline.item.read-time">{item.read_minutes!} min read</span>
+          )}
+        </div>
+        <div className="item-actions">
+          <Link
+            to="/projects/$projectId/documents/$documentId"
+            params={params}
+            className="btn btn-primary"
+            data-testid="timeline.item.open"
+          >
+            <FileText className="icon" aria-hidden="true" />
+            {isUnsent(item) ? 'Continue' : 'Open'}
+          </Link>
+          {item.kind === 'review' && <Reviewed item={item} />}
+        </div>
+      </div>
+      {item.writing && <PilotWriting />}
+    </div>
+  );
+}
+
+const COUNTED: [keyof Counts, (count: number) => string][] = [
+  ['decision', (count) => `${count} ${count === 1 ? 'decision' : 'decisions'}`],
+  ['question', (count) => `${count} ${count === 1 ? 'question' : 'questions'}`],
+  ['action', (count) => `${count} ${count === 1 ? 'action' : 'actions'}`],
+  ['settled', (count) => `${count} settled by Pilot`],
+  ['deferred', (count) => `${count} deferred`],
+];
+
+/** A chip for each count but none. */
+function CountChips({ counts }: { counts: Counts }) {
+  const shown = COUNTED.filter(([key]) => counts[key] > 0);
+  if (shown.length === 0) return null;
+  return (
+    <div className="counts" data-testid="timeline.item.counts">
+      {shown.map(([key, words]) => (
+        <span key={key} className="chip" data-testid="timeline.item.count" data-count={key}>
+          {words(counts[key])}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** A review's one mark: read, nothing to answer (F25.2). */
+function Reviewed({ item }: { item: TimelineItem }) {
+  const { mark, pending } = useReviewed(item.id);
+  return (
+    <button type="button" className="btn" onClick={mark} disabled={pending} data-testid="timeline.item.reviewed">
+      <Check className="icon" aria-hidden="true" />
+      Reviewed
+    </button>
   );
 }
 

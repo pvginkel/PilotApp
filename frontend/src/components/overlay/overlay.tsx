@@ -3,10 +3,11 @@
  * mockup's width, opening in place, and the whole page once maximized; its cross, Esc and its
  * backdrop close it. Its body keeps its scroll while what it shows is read again, and starts at
  * its top for each thing it shows. A segment in it goes to its block in its body, which flashes
- * (F33). On a phone it is the whole screen, with no maximize (F98.3).
+ * (F33), and opened at a block it goes there once its body draws it. On a phone it is the whole
+ * screen, with no maximize (F98.3).
  */
 
-import { useRef, useState, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Maximize2, Minimize2, X } from 'lucide-react';
 import { blockKey, FlashContext, GoToContext, useFlashes } from '@/components/timeline/flash';
 import { useEscape } from '@/lib/keys';
@@ -15,6 +16,8 @@ import { cn } from '@/lib/utils';
 interface OverlayProps {
   /** What it shows, by a key of its own. */
   showing: string;
+  /** A block of what it shows, to go to once its body draws it. */
+  at?: { item: string; block: string } | null;
   /** Its head's titles: the title and the line under it. */
   titles: ReactNode;
   foot: ReactNode;
@@ -22,24 +25,34 @@ interface OverlayProps {
   children: ReactNode;
 }
 
-export function Overlay({ showing, titles, foot, onClose, children }: OverlayProps) {
+export function Overlay({ showing, at = null, titles, foot, onClose, children }: OverlayProps) {
   const [max, setMax] = useState(false);
   const body = useRef<HTMLDivElement>(null);
   const { fresh, flashed, flash } = useFlashes();
   useEscape('overlay', true, onClose);
+  const blockIn = (blockId: string) => body.current!.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(blockId)}"]`);
   // A segment's block is in the body.
-  const goTo = (itemId: string, blockId: string) => {
+  const goTo = (itemId: string, blockId: string, behavior: ScrollBehavior = 'smooth') => {
     const element = body.current!;
-    const block = element.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(blockId)}"]`)!;
+    const block = blockIn(blockId)!;
     const top =
       block.getBoundingClientRect().top -
       element.getBoundingClientRect().top -
       element.clientTop +
       element.scrollTop -
       parseFloat(getComputedStyle(block).scrollMarginTop);
-    element.scrollTo({ top, behavior: 'smooth' });
+    element.scrollTo({ top, behavior });
     flash(blockKey(itemId, blockId));
   };
+  // The block it was opened at, once gone to.
+  const reached = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (at === null) return;
+    const key = blockKey(at.item, at.block);
+    if (reached.current === key || blockIn(at.block) === null) return;
+    reached.current = key;
+    goTo(at.item, at.block, 'instant');
+  });
   const resize = max ? 'Restore' : 'Maximize';
 
   return (

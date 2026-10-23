@@ -6,8 +6,8 @@
  * lead, then its prose with every block answered in place, then Pilot's dots while it writes
  * (F28.3); its foot "Done · <stamp> · <who>", naming who did it unless it was the person, or
  * Reviewed on an open review, or *Send answers* on an open document, which closes the overlay
- * (F28.4). A read that fails, or finds no document of the project, reads "The document did not
- * load" (F113).
+ * (F28.4). Opened at a block, it goes to the block once it draws it (F33). A read that fails, or
+ * finds no document of the project, reads "The document did not load" (F113).
  */
 
 import type { ReactNode } from 'react';
@@ -31,9 +31,11 @@ interface DocumentOverlayProps {
   /** The project's head, once read. */
   project: ProjectHead | undefined;
   documentId: string;
+  /** The block it opens at. */
+  block: string | null;
 }
 
-export function DocumentOverlay({ projectId, project, documentId }: DocumentOverlayProps) {
+export function DocumentOverlay({ projectId, project, documentId, block }: DocumentOverlayProps) {
   const navigate = useNavigate();
   const { handle } = usePerson();
   const close = () => void navigate({ to: '/projects/$projectId', params: { projectId } });
@@ -44,6 +46,7 @@ export function DocumentOverlay({ projectId, project, documentId }: DocumentOver
   return (
     <Overlay
       showing={documentId}
+      at={block === null ? null : { item: documentId, block }}
       titles={item && <Titles item={item} project={project} />}
       foot={item && footOf(item, handle, close)}
       onClose={close}

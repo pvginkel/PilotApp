@@ -97,6 +97,7 @@
   :root[data-theme="dark"] .chip.for { color: hsl(330 70% 78%); }
   .chip.urgent { background: hsl(var(--urgent) / 0.15); color: hsl(var(--urgent-text)); font-weight: 600; }
   .item-title { margin: 6px 0 4px; font-size: 16px; font-weight: 600; line-height: 1.4; }
+  .item-sub { margin: 0 0 6px; font-size: 14px; color: hsl(var(--muted-foreground)); }
   .item-after { margin-top: 12px; }
   .item-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
 
@@ -291,6 +292,10 @@
   .chip.unsent { background: hsl(30 85% 28%); color: hsl(40 95% 74%); font-weight: 600; }
   .item-head .edited { display: inline-flex; align-items: baseline; gap: 6px; }
   .item-head .edited .avatar { align-self: center; }
+
+  /* The card a larger document or a review leaves: what is in it, how far the answers are. */
+  .doc-card .counts { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
+  .progress { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 13px; color: hsl(var(--muted-foreground)); }
 
   /* A document's progress: a segment per block, filled once answered; a segment goes to its block. */
   .segbar { display: flex; align-items: center; gap: 3px; min-width: 0; }

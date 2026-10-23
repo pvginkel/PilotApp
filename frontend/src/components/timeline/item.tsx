@@ -3,9 +3,10 @@
  * as GFM (F29.1), the prose before its first block folding when long (F12.2), a one-ask item's
  * block answered in its place (F19.1, F20, F21) and a notice's Read under its text (F23), and
  * Pilot's dots at its end while Pilot writes it (F35); a confirmation is a card of its own (F22),
- * and a short document stands inline (F24.1). An urgent one is tinted (F10.1), and one whose latest
- * save is held shows its last published text with a dashed border, a concept (F78). Done, it is
- * its line (F13.1, F13.2), with Open (F13.3) and Undo while the record offers it (F14.1).
+ * a short document stands inline (F24.1), and a larger one and a review leave a card (F24.2,
+ * F25.1). An urgent one is tinted (F10.1), and one whose latest save is held shows its last
+ * published text with a dashed border, a concept (F78). Done, it is its line (F13.1, F13.2), with
+ * Open (F13.3) and Undo while the record offers it (F14.1).
  */
 
 import type { AnimationEvent, ReactNode } from 'react';
@@ -17,8 +18,8 @@ import { Markdown } from '@/components/shared/markdown';
 import { Time } from '@/components/shared/time';
 import { Block } from '@/components/timeline/block';
 import { Confirmation } from '@/components/timeline/confirmation';
-import { InlineDocument } from '@/components/timeline/document';
-import { isInline } from '@/components/timeline/document-state';
+import { DocumentCard, InlineDocument } from '@/components/timeline/document';
+import { isCard } from '@/components/timeline/document-state';
 import { ItemHead } from '@/components/timeline/item-head';
 import { kindOf } from '@/components/timeline/kinds';
 import { UserAvatar } from '@/components/timeline/user-avatar';
@@ -62,7 +63,8 @@ export function Item({ item, fresh, onFlashed }: ItemProps) {
 
 function OpenItem({ item }: { item: TimelineItem }) {
   if (item.kind === 'confirmation') return <Confirmation item={item} />;
-  if (item.kind === 'document' && isInline(item)) return <InlineDocument item={item} />;
+  if (isCard(item)) return <DocumentCard item={item} />;
+  if (item.kind === 'document') return <InlineDocument item={item} />;
   return (
     <div className="item-body">
       <ItemHead item={item} />

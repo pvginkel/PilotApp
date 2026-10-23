@@ -63,7 +63,6 @@
   .sheet-foot .state { font-size: 13px; color: hsl(var(--muted-foreground)); }
 
   .lead { margin-bottom: 18px; padding: 10px 14px; border-radius: var(--radius); background: hsl(var(--primary-muted) / 0.6); font-size: 14.5px; }
-  .item-sub { margin: 0 0 6px; font-size: 14px; color: hsl(var(--muted-foreground)); }
 
   /* A document's prose and its blocks in the body. */
   .sheet-doc > .prose + .prose { margin-top: 0.7em; }

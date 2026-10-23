@@ -5,9 +5,10 @@ import { waitTestEvent } from '../helpers';
 /**
  * A project's timeline (F8): its rows, the opening, its items open and as done lines with Open and
  * Undo, an open item's block (F31) or a confirmation's card (F22), an inline document's blocks,
- * segments and *Send answers* with its dialog (F24.1, F33, F32.5), Pilot's dots (F35), the urgent
- * banners and the "N open above" chip (F10.2, F11), a finished timeline's end (F5.3), and where it
- * stands scrolled; opened at its project's address or at an item's or a block's under it (F97).
+ * segments and *Send answers* with its dialog (F24.1, F33, F32.5), a larger document's or a
+ * review's card (F24.2, F25), Pilot's dots (F35), the urgent banners and the "N open above" chip
+ * (F10.2, F11), a finished timeline's end (F5.3), and where it stands scrolled; opened at its
+ * project's address or at an item's or a block's under it (F97).
  */
 export class TimelinePage {
   readonly root: Locator;
@@ -108,6 +109,14 @@ export class TimelinePage {
       segments: root.getByTestId('timeline.segment'),
       segment: (blockId: string) => root.locator(`[data-testid="timeline.segment"][data-segment="${blockId}"]`),
       send: root.getByTestId('timeline.item.send'),
+      card: {
+        root: root.getByTestId('timeline.item.card'),
+        summary: root.getByTestId('timeline.item.summary'),
+        counts: root.getByTestId('timeline.item.count'),
+        readTime: root.getByTestId('timeline.item.read-time'),
+        open: root.getByTestId('timeline.item.open'),
+        reviewed: root.getByTestId('timeline.item.reviewed'),
+      },
     };
   }
 

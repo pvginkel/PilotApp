@@ -274,6 +274,7 @@ test.describe('A short document', () => {
 
     await expect(item.kind).toHaveText('Document · 2');
     await expect(item.title).toHaveText('The long trip');
+    await expect(item.card.root).toBeVisible();
     await expect(item.document).toHaveCount(0);
     await expect(item.send).toHaveCount(0);
   });
