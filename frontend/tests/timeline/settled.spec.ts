@@ -238,6 +238,22 @@ test.describe('A section Pilot settled', () => {
     await expect(item.settledLines).toHaveCount(0);
     await expect(item.blockAt('A1').said).toHaveText('Done');
   });
+
+  test('draws as an open block where Pilot’s mark has no answer', async ({ people, projects, timeline }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Unanswered'), members: [me.handle!] });
+    const unanswered = `\`\`\`decision id=D1\noptions:\n  - Dome\n  - Tunnel\nby: agent\n${AT}\n\`\`\`\n`;
+    const text = ['## Which tent?\n', unanswered, '## Book the van\n', VAN].join('\n');
+    const trip = await projects.place(id, { kind: 'document', title: 'The trip', text });
+    await timeline.open(id);
+    const item = timeline.item(trip);
+
+    await expect(item.settledLines).toHaveCount(0);
+    await expect(item.blocks).toHaveCount(2);
+    await expect(item.blockAt('D1').root).toBeVisible();
+    await expect(item.document.locator('h2')).toHaveText(['Which tent?', 'Book the van']);
+    await expect(item.segment('D1')).not.toHaveClass(/\bdone\b/);
+  });
 });
 
 test.describe('A section Pilot settled in the overlay', () => {

@@ -7,7 +7,7 @@
  */
 
 import { createContext, useState } from 'react';
-import type { Block, BodyPart } from '@/hooks/use-timeline';
+import { isAnswered, type Block, type BodyPart } from '@/hooks/use-timeline';
 
 interface Sections {
   /** The blocks, by `<item>/<block>`, whose sections stand open. */
@@ -26,8 +26,8 @@ export function useSections(at: string | null): Sections {
   return { opened, open };
 }
 
-/** Whether the block's section collapses while it is not opened: its own section, its answer Pilot's. */
-export const isSettled = (block: Block) => block.section !== null && block.by?.kind === 'agent';
+/** Whether the block's section collapses while it is not opened: its own section, answered, its answer Pilot's. */
+export const isSettled = (block: Block) => block.section !== null && block.by?.kind === 'agent' && isAnswered(block);
 
 /** What a document's body draws: a part as it is, or the blocks of consecutive collapsed sections, each its line. */
 type Piece = { type: 'part'; part: BodyPart; index: number } | { type: 'settled'; blocks: Block[] };
