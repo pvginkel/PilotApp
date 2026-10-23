@@ -12,6 +12,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import type { Locator } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import { documentAddress } from '../support/page-objects/overlay-page';
@@ -120,7 +121,13 @@ test.describe('A document’s address', () => {
     expect(box.y + box.height).toBe(app.y + app.height);
   });
 
-  test('maximized it takes the page beside the side panel, and restored it is the mockup’s width again', async ({ people, projects, overlay, panel }) => {
+  test('maximized it takes the page beside the side panel, and restored it is the mockup’s width again; with the panel closed it and its backdrop reach the window’s right, maximized the whole of it', async ({
+    page,
+    people,
+    projects,
+    overlay,
+    panel,
+  }) => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Maximize'), members: [me.handle!] });
     const trip = await projects.place(id, { kind: 'document', title: 'The trip', text: TRIP });
@@ -137,6 +144,19 @@ test.describe('A document’s address', () => {
     await expect(overlay.root).not.toHaveClass(/\bmax\b/);
     await expect(overlay.maximize).toHaveAttribute('title', 'Maximize');
     await expect.poll(width).toBe(844);
+
+    const viewport = page.viewportSize()!;
+    const right = async (locator: Locator) => {
+      const box = (await locator.boundingBox())!;
+      return box.x + box.width;
+    };
+    await panel.close.click();
+    await expect(panel.root).toHaveCount(0);
+    await expect.poll(() => right(overlay.root)).toBe(viewport.width);
+    await expect.poll(() => right(overlay.backdrop)).toBe(viewport.width);
+    expect(await width()).toBe(844);
+    await overlay.maximize.click();
+    await expect.poll(width).toBe(viewport.width);
   });
 
   test('closes by its cross, by Esc and by its backdrop, the side column’s part included, each back at the project’s address', async ({

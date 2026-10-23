@@ -176,6 +176,14 @@ test.describe('The side panel on a wide window', () => {
     await panel.document(p.survey).root.click();
     await expect(page).toHaveURL(documentAddress(p.id, p.survey));
     await expect(overlay.title).toHaveText('Campsites');
+    // The panel's tab chosen beside the overlay: Esc still closes the overlay.
+    await panel.documentsTab.click();
+    await page.keyboard.press('Escape');
+    await expect(overlay.root).toHaveCount(0);
+    await expect(panel.root).toBeVisible();
+
+    await panel.document(p.survey).root.click();
+    await expect(overlay.title).toHaveText('Campsites');
     await overlay.backdrop.click({ position: { x: 5, y: 5 } });
     await expect(overlay.root).toHaveCount(0);
     await expect(panel.root).toBeVisible();
