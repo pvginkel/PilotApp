@@ -5,7 +5,9 @@
  * "The document did not load" for a read that fails (F113). The handbook's button stands in the
  * head's icon group, left of the notes button (F2.3, F2.7); a draft has none, nor a handbook
  * (F129.2). A save shows on the overlay's next read: the project document's live where it renames
- * the project. On a phone it is the whole screen (F98.3), and switching projects closes it (F1.6).
+ * the project, the handbook's on the project's next live event, and either's once a stream that went
+ * down comes back up. On a phone it is the whole screen (F98.3), and switching projects closes it
+ * (F1.6).
  */
 
 import { randomUUID } from 'node:crypto';
@@ -98,6 +100,24 @@ test.describe('The handbook', () => {
     await expect(page).toHaveURL(handbookAddress(id));
   });
 
+  test('open, reads a save again on the project’s next live event, which the save itself does not send', async ({
+    people,
+    projects,
+    overlay,
+    deploymentSse,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Live'), members: [me.handle!] });
+    await overlay.openProjectDocument(id, 'handbook');
+    await deploymentSse.ensureConnected();
+    await expect(overlay.empty).toBeVisible();
+
+    await projects.saveProjectDocument(id, 'handbook', HANDBOOK);
+    await projects.place(id, { kind: 'notice', title: 'We leave on Friday', text: '# We leave on Friday\n' });
+    await expect(overlay.document).toContainText('How the trip is planned.');
+    await expect(overlay.empty).toHaveCount(0);
+  });
+
   test('a draft has none: no button in its head, and the handbook’s address reads “The document did not load”', async ({
     page,
     people,
@@ -181,6 +201,43 @@ test.describe('The project document', () => {
     await expect(overlay.failed).toHaveText('The document did not load.');
     await expect(overlay.title).toHaveCount(0);
   });
+});
+
+test.describe('A stream that comes back up', () => {
+  for (const role of ['handbook', 'draft'] as const) {
+    test(`reads again the ${role === 'handbook' ? 'handbook' : 'project document'} open in the overlay, saved while the stream was down`, async ({
+      page,
+      backendUrl,
+      auth,
+      people,
+      projects,
+      overlay,
+      deploymentSse,
+      toastHelper,
+    }) => {
+      const me = await people.signIn();
+      const name = makeUnique('Down');
+      const id = await projects.makeWithSession({ name, members: [me.handle!] });
+      await overlay.openProjectDocument(id, role);
+      await deploymentSse.ensureConnected();
+      await expect(overlay.empty).toBeVisible();
+
+      // The stream goes down and stays down: its next connect is refused, and the session check
+      // that would open it again fails.
+      const refusal = await page.request.post(`${backendUrl}/api/testing/sse/force-callback-error?status=403`);
+      expect(refusal.status()).toBe(204);
+      await auth.forceError(500);
+      await page.evaluate(() => window.__sseForceReconnect!());
+      await toastHelper.expectErrorToast(/refresh the page/i);
+      expect((await deploymentSse.getStatus()).isConnected).toBe(false);
+
+      // Neither save sends an event: a handbook's never does, and this one keeps the project's name.
+      await projects.saveProjectDocument(id, role, role === 'handbook' ? HANDBOOK : `# ${name}\n\nHow the trip is planned.\n`);
+      await deploymentSse.connect();
+      await expect(overlay.document).toContainText('How the trip is planned.');
+      await expect(overlay.empty).toHaveCount(0);
+    });
+  }
 });
 
 test.describe('On a phone', () => {
