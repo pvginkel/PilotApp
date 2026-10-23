@@ -1164,6 +1164,7 @@ def _starts(
             session_streams=container.session_stream_service(),
             environment_service=environments,
         ),
+        controller_outage=container.controller_outage(),
         controller_configured=controller_configured,
     )
 
@@ -1228,6 +1229,43 @@ class TestCreateWork:
         )
         work = session.get_one(Work, run.id)
         assert work.autopilot is False
+
+    @pytest.mark.parametrize("answer", ["none", "ingress"])
+    def test_with_the_controller_unreachable_it_places_the_work_item_held(
+        self,
+        client: FlaskClient,
+        served: None,
+        session: Session,
+        fake_controller: ServedFakeController,
+        answer: str,
+    ) -> None:
+        project_id = _make(client)
+        fake_controller.outage(answer=answer)
+
+        response = client.post(_work_path(project_id), json=WORK)
+
+        assert response.status_code == 201, response.get_json()
+        work_id = response.get_json()["id"]
+        run = session.get_one(models.Session, uuid.UUID(work_id))
+        assert run.state_code == SessionState.HELD
+        work = _timeline_item(client, project_id, work_id)["work"]
+        assert (work["state"], work["held_reason"]) == (
+            "held",
+            "controller_unreachable",
+        )
+
+    def test_in_a_paused_project_it_places_the_work_item_held(
+        self, client: FlaskClient, served: None, session: Session
+    ) -> None:
+        project_id = _make(client)
+        session.get_one(Project, uuid.UUID(project_id)).paused = True
+        session.flush()
+
+        response = client.post(_work_path(project_id), json=WORK)
+
+        assert response.status_code == 201, response.get_json()
+        work = _timeline_item(client, project_id, response.get_json()["id"])["work"]
+        assert (work["state"], work["held_reason"]) == ("held", "paused")
 
     def test_without_a_step_it_works_on_none(
         self, client: FlaskClient, served: None, session: Session

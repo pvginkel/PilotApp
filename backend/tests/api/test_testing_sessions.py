@@ -55,6 +55,7 @@ def _serving(
             session_streams=container.session_stream_service(),
             environment_service=environments,
         ),
+        controller_outage=container.controller_outage(),
         controller_configured=controller_configured,
     )
     container.session_start_service.override(providers.Object(starts))

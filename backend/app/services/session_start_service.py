@@ -1,23 +1,33 @@
 """The session start: a Session brought up end to end, from its row to its
-brief's send (design 2 §13.2, §7.1; F88.1, F125; decision 38).
+brief's send (design 2 §13.2, §13.4, §7.1; F88.1, F125, F141.5; decision 38).
 
-`start_session` writes, in the caller's transaction, the Session `starting` and
-its first Turn, the brief, before the environment is up; `start_work` writes a
-work item's so, its Item and its Work with it. Once that commits, the
-Session's start loop, `start:<id>`, brings the environment up, creates the
-headless session and sends the brief, whose `202` starts the relay. Each phase
-the start enters is a `server` record in no Turn (DB assertion 220), and each
-such record rebuilds the current line in its transaction.
+`start_session` writes, in the caller's transaction, the Session and its first
+Turn, the brief, before the environment is up; `start_work` writes a work
+item's so, its Item and its Work with it. The gate (§13.4) decides the
+Session's state: `held` while it is closed, with nothing run for it, else
+`starting`. A `starting` Session's start loop, `start:<id>`, runs once that
+commits: it brings the environment up, creates the headless session and sends
+the brief, whose `202` starts the relay. Each phase the start enters is a
+`server` record in no Turn (DB assertion 220), and each such record rebuilds
+the current line in its transaction.
 
-Every failure of the controller during the start leaves the Session `failed`
-with its `error` and a `server` record saying so, its brief no longer in
-flight, and nothing is retried (F125).
+A start that meets a call the controller does not answer goes back to `held`
+with its rows as they stand, the outage on (DB 230). Every other failure of the
+controller during the start leaves the Session `failed` with its `error` and a
+`server` record saying so, its brief no longer in flight, and nothing is
+retried (F125).
+
+When the gate opens — the outage off, at the probe's success or the fleet
+stream's reconnect — the held Sessions it opens for move to `starting` in
+`created_at` order, each under its lock while it is still `held`, and each
+loop resumes its start where the rows left it. The probe, the controller's
+readiness call, runs on the scheduler's tick while the outage holds.
 
 At STARTUP the job's reconcile runs the start loop of every Session still
-`starting`, which resumes where its rows left it (§8.2). Each write the run makes
-is conditional on the rows it read, under the Session's lock, so a second
-process running the same start during a roll's overlap (§8.1) changes nothing
-the first has written.
+`starting`, which resumes where its rows left it, and opens the gate for the
+held ones (§8.2). Each write the run makes is conditional on the rows it read,
+under the Session's lock, so a second process running the same start during a
+roll's overlap (§8.1) changes nothing the first has written.
 """
 
 import hashlib
@@ -38,12 +48,18 @@ from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import Environment, Project, Turn, Work
 from app.models import Session as AgentSession
 from app.models.reference import RecordKind, SessionState
-from app.services.controller_client import ControllerClient, HeadlessCreateRequest
+from app.services.controller_client import (
+    ControllerClient,
+    ControllerUnreachable,
+    HeadlessCreateRequest,
+)
+from app.services.controller_outage import ControllerOutage
 from app.services.current_line import while_starting
 from app.services.environment_service import EnvironmentService
 from app.services.relay_service import RelayService
 from app.services.session_record_service import SessionRecordService
 from app.services.session_stream_service import SessionStreamService
+from app.services.start_gate import held_reason
 from app.services.supervisor import LoopHandle, Supervisor
 from app.services.work_status import work_moved
 from app.utils.after_commit import after_commit
@@ -54,6 +70,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 START_JOB = "start"
+
+RELEASE_KEY = "held"
+"""The key of the start job's loop that moves the held Sessions on."""
+
+PROBE_TIMER = "controller-probe"
 
 STARTING = "starting"
 """The `type` of the `server` record that names a phase of the start."""
@@ -88,6 +109,19 @@ class _LoopStart:
 
 
 @dataclass(frozen=True)
+class _HeldWritten:
+    # `after_commit()` runs a callback equal to one it holds once.
+    starts: "SessionStartService"
+
+    def __call__(self) -> None:
+        # The gate may have opened between the write's read of it and this
+        # commit, its release missing the Session; the release reads the
+        # project's pause itself.
+        if not self.starts._outage.holds:
+            self.starts.release_held()
+
+
+@dataclass(frozen=True)
 class _Pending:
     """A `starting` Session, as its start loop's run reads it."""
 
@@ -98,7 +132,9 @@ class _Pending:
 
 
 class SessionStartService:
-    """Brings Sessions up: writes each `starting`, then runs its start loop."""
+    """Brings Sessions up through the gate: writes each `held` or `starting`,
+    runs the start loop of each `starting` one, and moves the held ones on
+    when the gate opens."""
 
     def __init__(
         self,
@@ -107,19 +143,24 @@ class SessionStartService:
         session_streams: SessionStreamService,
         environment_service: EnvironmentService,
         relay_service: RelayService,
+        controller_outage: ControllerOutage,
         controller_configured: bool,
     ) -> None:
-        """Register the `start` job, whose loops are one per Session, and whose
-        reconcile runs the start of every Session still `starting`.
+        """Register the `start` job, whose loops are one per Session and one
+        that moves the held Sessions on, and whose reconcile runs the start of
+        every Session still `starting` and opens the gate; and the probe's
+        timer.
 
         Args:
             container: Gives each start transaction its database session, and
                 the client
-            supervisor: Runs the start loops
+            supervisor: Runs the start loops and the probe
             session_streams: Woken by the records the start writes
             environment_service: Makes the Environment row, starts the
                 environment, and clears and arms its shutdown timer
             relay_service: Sends the brief, and relays its turn
+            controller_outage: The gate's outage, which the probe turns off;
+                its turning off opens the gate
             controller_configured: False refuses every start
         """
         self._container = container
@@ -127,10 +168,13 @@ class SessionStartService:
         self._streams = session_streams
         self._environments = environment_service
         self._relays = relay_service
+        self._outage = controller_outage
         self._controller_configured = controller_configured
         supervisor.register_job(
             START_JOB, needs_controller=True, reconcile=self._reconcile
         )
+        supervisor.register_timer(PROBE_TIMER, self.run_probe, needs_controller=True)
+        controller_outage.subscribe(self._outage_moved)
 
     def start_session(
         self,
@@ -143,15 +187,18 @@ class SessionStartService:
         brief: str,
         options: SessionOptions | None = None,
     ) -> AgentSession:
-        """Write a Session `starting` in the environment, its first Turn the
-        brief, in the caller's transaction, and run its start once that commits.
+        """Write a Session in the environment, its first Turn the brief, in
+        the caller's transaction, through the gate (§13.4): `held` while the
+        gate is closed for it, with nothing run; else `starting`, its start
+        run once that commits.
 
-        The Environment row is made on Pilot's first touch, the Session gets
-        the hash of a token minted for it, its first `server` record names the
-        environment's start, and the environment's shutdown timer is cleared.
+        The Environment row is made on Pilot's first touch, and the Session
+        gets the hash of a token minted for it. A `starting` one's first
+        `server` record names the environment's start, and the environment's
+        shutdown timer is cleared.
 
         Returns:
-            The Session, `starting`
+            The Session, `starting`, or `held` while the gate is closed
 
         Raises:
             InvalidOperationException: No controller is configured
@@ -165,11 +212,16 @@ class SessionStartService:
                 f"start a session in environment {env_id}",
                 "no controller is configured",
             )
-        if db.get(Project, project_id) is None:
+        project = db.get(Project, project_id)
+        if project is None:
             raise RecordNotFoundException("Project", str(project_id))
         options = options or SessionOptions()
-        self._environments.ensure_environment(db, env_id)
-        environment = db.get_one(Environment, env_id)
+        self._environments.ensure_for_start(db, env_id)
+        held = held_reason(
+            paused=project.paused,
+            kind_code=kind_code,
+            unreachable=self._outage.holds,
+        )
         now = datetime.now(UTC)
         session = AgentSession(
             project_id=project_id,
@@ -181,7 +233,7 @@ class SessionStartService:
             reasoning_effort=options.reasoning_effort,
             conversation_id=options.resume,
             token_hash=hashlib.sha256(secrets.token_urlsafe(32).encode()).hexdigest(),
-            state_code=SessionState.STARTING,
+            state_code=SessionState.STARTING if held is None else SessionState.HELD,
             turns=1,
             turn_started_at=now,
         )
@@ -189,9 +241,11 @@ class SessionStartService:
         db.flush()
         db.add(Turn(session_id=session.id, seq=1, message=brief, started_at=now))
         db.flush()
-        self._phase(db, session.id, f"Starting {environment.name}…")
-        self._environments.clear_shutdown_timer(db, env_id)
-        after_commit(_LoopStart(self, session.id))
+        if held is None:
+            self._begin(db, session)
+        else:
+            after_commit(_HeldWritten(self))
+            logger.info("Session %s is held at its start: %s", session.id, held)
         return session
 
     def start_work(
@@ -207,9 +261,9 @@ class SessionStartService:
     ) -> Work:
         """Place a work item titled `title` on the project's timeline, on the
         plan's task `plan_task_id` when given, and write its `work` Session's
-        start in the environment as `start_session` writes one, in the
-        caller's transaction: its Item, its Work and its Session one id (DB
-        Work, decision 3).
+        start in the environment through the gate as `start_session` writes
+        one, in the caller's transaction: its Item, its Work and its Session
+        one id (DB Work, decision 3).
 
         Returns:
             The Work
@@ -236,7 +290,9 @@ class SessionStartService:
         controller has it already. Returns at once for a Session no longer
         `starting`, and between the phases when the loop is told to stop. A
         controller session another process recorded first stands, and the one
-        this run created is left to the controller's reaper.
+        this run created is left to the controller's reaper. A call the
+        controller does not answer returns the Session to `held`; any other
+        failure fails it (F125).
         """
         with scoped_session(self._container) as db:
             pending = _pending(db, session_id)
@@ -258,6 +314,10 @@ class SessionStartService:
                     if pending.controller_session is None
                     else None
                 )
+            except ControllerUnreachable as error:
+                with scoped_session(self._container) as db:
+                    self._hold(db, session_id, error)
+                return
             except ExternalServiceException as error:
                 with scoped_session(self._container) as db:
                     self._fail(db, session_id, str(error), recorded=False)
@@ -275,12 +335,56 @@ class SessionStartService:
             if handle.stopping:
                 return
         with scoped_session(self._container) as db:
-            brief = self._relays.send_turn(db, pending.brief_id)
+            try:
+                brief = self._relays.send_turn(db, pending.brief_id)
+            except ControllerUnreachable as error:
+                self._hold(db, session_id, error)
+                return
             if brief.error is not None:
                 self._fail(db, session_id, brief.error, recorded=True)
 
+    def release_held(self) -> None:
+        """Move on the held Sessions the gate is open for, on a loop of their
+        own: called once the gate may have opened. A call while that loop runs
+        has it run once more."""
+        self._supervisor.start_loop(
+            START_JOB, self.release, key=RELEASE_KEY, again=True
+        )
+
+    def release(self, handle: LoopHandle) -> None:
+        """The release loop's run: each held Session in `created_at` order,
+        moved to `starting` under its lock while it is still `held` and the
+        gate is open for it, its loop run once that commits. Ends while the
+        outage holds, which holds every start."""
+        with scoped_session(self._container) as db:
+            held = db.scalars(
+                select(AgentSession.id)
+                .where(AgentSession.state_code == SessionState.HELD)
+                .order_by(AgentSession.created_at, AgentSession.id)
+            ).all()
+        for session_id in held:
+            if handle.stopping or self._outage.holds:
+                return
+            with scoped_session(self._container) as db:
+                self._release_one(db, session_id)
+
+    def run_probe(self, db: Session) -> None:
+        """The gate's probe, on the scheduler's tick (§8.2, §13.4): while the
+        outage holds, the controller's readiness call, whose answer turns it
+        off; one with no answer keeps it on."""
+        if not self._outage.holds:
+            return
+        try:
+            self._client().probe()
+        except ExternalServiceException as error:
+            logger.debug("The probe found the controller unreachable: %s", error)
+            return
+        self._outage.probe_answered()
+
     def _reconcile(self, db: Session) -> None:
-        """At STARTUP: run the start of every Session still `starting` (§8.2)."""
+        """At STARTUP: run the start of every Session still `starting`, and
+        open the gate for the held ones, the outage off in a fresh process
+        (§8.2)."""
         for session_id in db.scalars(
             select(AgentSession.id)
             .where(AgentSession.state_code == SessionState.STARTING)
@@ -288,10 +392,60 @@ class SessionStartService:
         ):
             logger.info("Resuming the start of session %s", session_id)
             self._start_loop(session_id)
+        self.release_held()
+
+    def _release_one(self, db: Session, session_id: uuid.UUID) -> None:
+        session = self._records(db).lock_session(session_id)
+        if session.state_code != SessionState.HELD:
+            return
+        project = db.get_one(Project, session.project_id, populate_existing=True)
+        if (
+            held_reason(
+                paused=project.paused,
+                kind_code=session.kind_code,
+                unreachable=self._outage.holds,
+            )
+            is not None
+        ):
+            return
+        session.state_code = SessionState.STARTING
+        self._begin(db, session)
+        self._moved(session, state=True)
+        logger.info("Session %s goes on from held", session_id)
+
+    def _begin(self, db: Session, session: AgentSession) -> None:
+        """The start of a `starting` Session begun: the phase that starts its
+        environment, unless it has its controller session already, the
+        environment's shutdown timer cleared, and its loop run once the
+        transaction commits."""
+        if session.controller_session is None:
+            environment = db.get_one(Environment, session.environment_id)
+            self._phase(db, session.id, f"Starting {environment.name}…")
+        self._environments.clear_shutdown_timer(db, session.environment_id)
+        after_commit(_LoopStart(self, session.id))
+
+    def _hold(
+        self, db: Session, session_id: uuid.UUID, error: ControllerUnreachable
+    ) -> None:
+        """The Session back to `held` where its rows stand, the outage on,
+        while it is still `starting` (DB 230)."""
+        session = self._records(db).lock_session(session_id)
+        if session.state_code != SessionState.STARTING:
+            return
+        session.state_code = SessionState.HELD
+        self._moved(session, state=True)
+        after_commit(_HeldWritten(self))
+        logger.warning("Session %s is held: %s", session_id, error)
+
+    def _outage_moved(self) -> None:
+        if not self._outage.holds:
+            self.release_held()
 
     def _start_loop(self, session_id: uuid.UUID) -> None:
+        # A run that held the Session still counts as live until its thread
+        # ends: `again` has it run once more, which resumes the start.
         self._supervisor.start_loop(
-            START_JOB, partial(self.run, session_id), key=str(session_id)
+            START_JOB, partial(self.run, session_id), key=str(session_id), again=True
         )
 
     def _creating(self, db: Session, session_id: uuid.UUID) -> _Pending | None:

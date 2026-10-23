@@ -19,7 +19,9 @@ from app.engine.views import ViewService
 from app.exceptions import ConfigurationError
 from app.services.attachment_service import AttachmentService
 from app.services.auth_service import AuthService
+from app.services.condition_service import ConditionService
 from app.services.controller_client import ControllerClient
+from app.services.controller_outage import ControllerOutage
 from app.services.environment_service import EnvironmentService
 from app.services.fake_controller import FakeController
 from app.services.fleet_consumer import FleetConsumer
@@ -108,6 +110,10 @@ class ServiceContainer(containers.DeclarativeContainer):
         settings=config,
     )
 
+    # The controller unreachable, as this process last met it (design 2
+    # §13.4): every call of the client's, and the fleet stream, turn it.
+    controller_outage = providers.Singleton(ControllerOutage)
+
     # The KubeCoder controller's client (design 2 §14). Its starter is
     # registered before any that starts a thread, so a refusal starts none.
     controller_client = providers.Singleton(
@@ -115,6 +121,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         base_url=app_config.provided.controller_url,
         token=app_config.provided.controller_token,
         health_service=health_service,
+        outage=controller_outage,
         ca_file=app_config.provided.controller_ca_file,
     )
     register_for_background_startup(lambda c: start_controller_client(c))
@@ -141,7 +148,10 @@ class ServiceContainer(containers.DeclarativeContainer):
     # service starts environments and runs the shutdown timer (design 2 §13).
     # Each registers its job on the supervisor when built, before STARTUP.
     fleet_consumer = providers.Singleton(
-        FleetConsumer, container=__self__, supervisor=supervisor
+        FleetConsumer,
+        container=__self__,
+        supervisor=supervisor,
+        controller_outage=controller_outage,
     )
     register_for_background_startup(lambda c: c.fleet_consumer())
     environment_service = providers.Singleton(
@@ -218,6 +228,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         session_streams=session_stream_service,
         environment_service=environment_service,
         relay_service=relay_service,
+        controller_outage=controller_outage,
         controller_configured=providers.Callable(
             lambda url: url is not None, app_config.provided.controller_url
         ),
@@ -314,7 +325,10 @@ class ServiceContainer(containers.DeclarativeContainer):
     # transitions and membership (F4.1, F5, F6, F127, F128)
     # A project's timeline as a screen draws it, and the badge (F8, F1.4)
     timeline_service = providers.Factory(
-        TimelineService, db=db_session, record_service=record_service
+        TimelineService,
+        db=db_session,
+        record_service=record_service,
+        controller_outage=controller_outage,
     )
     # An attachment's bytes, streamed (F28.5, F36)
     attachment_service = providers.Factory(
@@ -335,6 +349,15 @@ class ServiceContainer(containers.DeclarativeContainer):
         sse_connection_manager=sse_connection_manager,
     )
     register_for_background_startup(lambda c: c.project_event_service())
+    # The conditions that hold all work, on the gold bar (UC), told to every
+    # browser as they turn
+    condition_service = providers.Singleton(
+        ConditionService,
+        container=__self__,
+        controller_outage=controller_outage,
+        sse_connection_manager=sse_connection_manager,
+    )
+    register_for_background_startup(lambda c: c.condition_service())
     project_service = providers.Factory(
         ProjectService,
         db=db_session,

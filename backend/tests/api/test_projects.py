@@ -620,6 +620,7 @@ class TestGetTimeline:
             "started_at": "<time>",
             "error": None,
             "autopilot": False,
+            "held_reason": None,
         }
 
     def test_a_block_s_own_section_rides_with_its_text(

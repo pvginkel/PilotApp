@@ -56,7 +56,11 @@ class ProjectEventService:
         payload: dict[str, Any] = {"project_id": str(event.project_id)}
         with self._open_session() as db:
             if isinstance(event, WorkMoved):
-                work = work_status(db, [event.work_id]).get(event.work_id)
+                work = work_status(
+                    db,
+                    [event.work_id],
+                    unreachable=self._container.controller_outage().holds,
+                ).get(event.work_id)
                 if work is None:
                     return
                 name = WORK_EVENT_NAME

@@ -33,6 +33,7 @@ def register_blueprints(api_bp: Blueprint, app: Flask) -> None:
     # finds it registered already, with these on it.
     if not api_bp._got_registered_once:
         from app.api.attachments import attachments_bp
+        from app.api.conditions import conditions_bp
         from app.api.items import items_bp
         from app.api.links import links_bp
         from app.api.people import people_bp
@@ -41,6 +42,7 @@ def register_blueprints(api_bp: Blueprint, app: Flask) -> None:
         from app.api.testing_record import testing_record_bp
 
         api_bp.register_blueprint(attachments_bp)
+        api_bp.register_blueprint(conditions_bp)
         api_bp.register_blueprint(items_bp)
         api_bp.register_blueprint(links_bp)
         api_bp.register_blueprint(people_bp)

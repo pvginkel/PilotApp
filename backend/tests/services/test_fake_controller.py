@@ -3,6 +3,7 @@ never sends it (design 2 §12). Its controller routes are under test through
 the real client, in `test_controller_client.py`."""
 
 import json
+import socket
 
 import pytest
 from pydantic import ValidationError
@@ -61,6 +62,7 @@ class TestFakeController:
             "restart",
             "recreate-pod",
             "unreachable",
+            "outage",
             "capped",
             "unprojectable",
             "busy",
@@ -288,9 +290,70 @@ class TestFakeController:
         assert fake.sessions("env-1") == []
         assert fake.environment("env-1").status == "starting"
 
+    def test_an_outage_answers_every_call_as_an_ingress_and_still_takes_verbs(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.outage(answer="ingress")
+
+        listing = http.get("/environments", headers=BEARER)
+        ready = http.get("/readyz")
+        added = http.post("/fake/add-environment", json={"env_id": "env-1"})
+
+        for response in (listing, ready):
+            assert response.status_code == 502
+            assert response.headers["Content-Type"].startswith("text/html")
+            assert "502 Bad Gateway" in response.get_data(as_text=True)
+        assert added.status_code == 204
+        assert fake.calls == []
+
+    def test_an_outage_with_no_answer_shuts_the_calls_connection(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        class _Connection:
+            shut: int | None = None
+
+            def shutdown(self, how: int) -> None:
+                self.shut = how
+
+        connection = _Connection()
+        fake.outage()
+
+        http.get(
+            "/environments",
+            headers=BEARER,
+            environ_overrides={"werkzeug.socket": connection},
+        )
+
+        assert connection.shut == socket.SHUT_RDWR
+        assert fake.calls == []
+
+    def test_an_outage_ends_every_open_stream(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.add_environment("env-1")
+        response = http.get("/stream", headers=BEARER, buffered=False)
+        frames = iter(response.response)
+        assert next(frames) == b""
+        next(frames)
+
+        fake.outage(answer="ingress")
+
+        assert list(frames) == []
+        response.close()
+
+    def test_answering_again_ends_the_outage(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.outage(answer="ingress")
+
+        fake.outage(on=False)
+
+        assert http.get("/environments", headers=BEARER).status_code == 200
+
     def test_reset_forgets_everything(self, fake: FakeController, http: Client) -> None:
         fake.add_environment("env-1")
         http.get("/environments", headers=BEARER)
+        fake.outage(answer="ingress")
 
         fake.reset()
 

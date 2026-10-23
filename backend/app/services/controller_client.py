@@ -25,6 +25,7 @@ from pydantic.alias_generators import to_camel
 from urllib3.exceptions import HTTPError
 
 from app.core_exceptions import ExternalServiceException
+from app.services.controller_outage import ControllerOutage
 from app.services.health_service import CheckResult, CheckStatus, HealthService
 
 STREAM_READ_TIMEOUT_SECONDS = 60
@@ -80,6 +81,12 @@ class ControllerProblem(ExternalServiceException):
             f"the controller answered {_PROBLEM_STATUS[problem_type]} "
             f"{problem_type}: {title}",
         )
+
+
+class ControllerUnreachable(ExternalServiceException):
+    """The controller did not answer: a connection error, a timeout, or a 5xx
+    without its own problem+json, which an ingress in front of it writes. The
+    call turned the outage on (review O2)."""
 
 
 class _ControllerModel(BaseModel):
@@ -390,7 +397,9 @@ class ControllerClient:
     """The KubeCoder controller, under Pilot's named client credential.
 
     A call the controller answers with a problem its callers switch on raises
-    ControllerProblem; any other failure raises ExternalServiceException.
+    ControllerProblem; a call it does not answer raises ControllerUnreachable
+    and turns the outage on; any other failure raises ExternalServiceException.
+    A stream that drops once its call was answered turns nothing on.
     """
 
     def __init__(
@@ -398,9 +407,11 @@ class ControllerClient:
         base_url: str,
         token: str,
         health_service: HealthService,
+        outage: ControllerOutage,
         ca_file: Path | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
+        self._outage = outage
         self._headers = {"Authorization": f"Bearer {token}"}
         self._verify: str | bool = str(ca_file) if ca_file is not None else True
         # Not critical: Pilot serves its record without the controller.
@@ -420,6 +431,17 @@ class ControllerClient:
                 CheckStatus.ERROR, f"the controller answered {response.status_code}"
             )
         return CheckResult(CheckStatus.OK)
+
+    def probe(self) -> None:
+        """The gate's probe (design 2 §13.4): returns once the controller
+        answers its own `/readyz` with `200`."""
+        self._call(
+            "GET",
+            "/readyz",
+            "probe the controller",
+            expect=(200,),
+            timeout=_READINESS_TIMEOUT_SECONDS,
+        )
 
     def list_environments(self) -> EnvironmentList:
         operation = "list the controller's environments"
@@ -624,21 +646,31 @@ class ControllerClient:
                 verify=self._verify,
             )
         except requests.RequestException as error:
-            raise ExternalServiceException(
+            self._outage.call_unanswered()
+            raise ControllerUnreachable(
                 operation, f"the controller did not answer: {error}"
             ) from error
         if response.status_code in expect:
             return response
         failure = _failure(operation, response)
         response.close()
+        if isinstance(failure, ControllerUnreachable):
+            self._outage.call_unanswered()
         raise failure
 
 
 def _failure(operation: str, response: requests.Response) -> ExternalServiceException:
-    """What a status the call did not expect means."""
+    """What a status the call did not expect means: a 5xx without the
+    controller's own problem+json is not the controller's answer."""
     problem = _ProblemData()
     if response.headers.get("Content-Type", "").startswith("application/problem+json"):
         problem = _parse(_ProblemData, response.text, operation)
+    elif response.status_code >= 500:
+        return ControllerUnreachable(
+            operation,
+            f"the controller did not answer: {response.status_code} "
+            f"{response.reason}, not the controller's own",
+        )
     title = problem.title or response.reason
     for known, status in _PROBLEM_STATUS.items():
         if problem.type == known and response.status_code == status:

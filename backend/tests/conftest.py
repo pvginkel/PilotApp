@@ -20,6 +20,7 @@ Without one the suite passes where ``.env`` sets it, and fails in CI.
 from collections.abc import Generator
 
 import pytest
+from dependency_injector import providers
 from flask import Flask
 from flask.testing import FlaskClient
 from sqlalchemy.orm import Session as DbSession
@@ -31,6 +32,7 @@ from app.models import Document, Environment, Item, Project, User
 from app.models.reference import DocumentRole, SessionState, UserKind
 from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerClient
+from app.services.controller_outage import ControllerOutage
 from app.services.supervisor import Supervisor
 from app.utils.after_commit import clear_after_commit_callbacks
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
@@ -55,6 +57,18 @@ def test_app_settings() -> AppSettings:
         store_environment_id=STORE_ENVIRONMENT_ID,
         sync_heartbeat_seconds=0.01,
     )
+
+
+@pytest.fixture(autouse=True)
+def controller_outage(app: Flask, session_app_isolation: None) -> ControllerOutage:
+    """The session app's outage for this test alone, off: the container's
+    Singleton outlives the test, and a test that turns it leaves the next
+    one as it found it. The isolation's teardown takes the override off. The
+    condition service, a Singleton on it, is built afresh on it."""
+    outage = ControllerOutage()
+    app.container.controller_outage.override(providers.Object(outage))
+    app.container.condition_service.reset()
+    return outage
 
 
 @pytest.fixture

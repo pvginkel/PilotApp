@@ -19,6 +19,7 @@ from app.services.controller_client import (
     ControllerClient,
     ControllerProblem,
     ControllerProblemType,
+    ControllerUnreachable,
     GoneFrame,
     HeadlessCreateRequest,
     IncompleteFrame,
@@ -27,6 +28,7 @@ from app.services.controller_client import (
     SessionsFrame,
     StateFrame,
 )
+from app.services.controller_outage import ControllerOutage
 from app.services.fake_controller import FinishOutcome
 from app.services.health_service import CheckStatus, HealthService
 from tests.support.fake_controller import (
@@ -146,7 +148,9 @@ class TestControllerClient:
     def test_a_wrong_credential_is_a_failure_no_caller_switches_on(
         self, fake_controller: ServedFakeController, health_service: HealthService
     ) -> None:
-        client = ControllerClient(fake_controller.url, "not-the-token", health_service)
+        client = ControllerClient(
+            fake_controller.url, "not-the-token", health_service, ControllerOutage()
+        )
 
         with pytest.raises(ExternalServiceException) as caught:
             client.list_environments()
@@ -804,7 +808,9 @@ class TestControllerClient:
         fake = ServedFakeController(keepalive_seconds=30)
         try:
             fake.add_environment(ENV, status="running")
-            client = ControllerClient(fake.url, FAKE_CONTROLLER_TOKEN, health_service)
+            client = ControllerClient(
+                fake.url, FAKE_CONTROLLER_TOKEN, health_service, ControllerOutage()
+            )
             name = client.create_headless_session(ENV, HeadlessCreateRequest()).name
             client.send_message(ENV, name, "Check the badge.")
             monkeypatch.setattr(
@@ -825,7 +831,9 @@ class TestControllerClient:
         fake = ServedFakeController(keepalive_seconds=30)
         try:
             fake.add_environment(ENV, status="running")
-            client = ControllerClient(fake.url, FAKE_CONTROLLER_TOKEN, health_service)
+            client = ControllerClient(
+                fake.url, FAKE_CONTROLLER_TOKEN, health_service, ControllerOutage()
+            )
             name = client.create_headless_session(ENV, HeadlessCreateRequest()).name
             client.send_message(ENV, name, "Check the badge.")
             fake.play(ENV, name, ["one line"])
@@ -915,7 +923,7 @@ class TestControllerClient:
             b"event: state\ndata: " + json.dumps(environment).encode() + b"\n\n",
         ]
         with _scripted("200 OK", [("Content-Type", "text/event-stream")], body) as url:
-            client = ControllerClient(url, "t", health_service)
+            client = ControllerClient(url, "t", health_service, ControllerOutage())
             with client.open_fleet_stream() as stream:
                 frames = iter(stream)
                 frame = next(frames)
@@ -938,22 +946,64 @@ class TestControllerClient:
     def test_a_problem_no_caller_switches_on_is_a_failing_upstream(
         self, health_service: HealthService
     ) -> None:
+        outage = ControllerOutage()
         with _scripted(*_problem(500, "internal")) as url:
-            client = ControllerClient(url, "t", health_service)
+            client = ControllerClient(url, "t", health_service, outage)
             with pytest.raises(ExternalServiceException) as caught:
                 client.list_environments()
 
-        assert not isinstance(caught.value, ControllerProblem)
+        assert not isinstance(caught.value, ControllerProblem | ControllerUnreachable)
         assert (
             caught.value.cause
             == "the controller answered 500 internal: a scripted problem"
         )
+        # The controller answered, about the call (review O2).
+        assert not outage.holds
+
+    @pytest.mark.parametrize(
+        ("status", "problem_type"),
+        [(502, "worker-unreachable"), (503, "environment-unreadable")],
+    )
+    def test_a_5xx_carrying_the_controllers_own_problem_turns_no_outage_on(
+        self, health_service: HealthService, status: int, problem_type: str
+    ) -> None:
+        outage = ControllerOutage()
+        with _scripted(*_problem(status, problem_type)) as url:
+            client = ControllerClient(url, "t", health_service, outage)
+            with pytest.raises(ExternalServiceException) as caught:
+                client.list_sessions(ENV)
+
+        assert not isinstance(caught.value, ControllerUnreachable)
+        assert not outage.holds
+
+    @pytest.mark.parametrize(
+        ("status", "content_type"),
+        [
+            ("502 Bad Gateway", "text/html"),
+            ("503 Service Unavailable", "text/html"),
+            ("504 Gateway Timeout", "text/plain"),
+        ],
+    )
+    def test_an_ingress_5xx_is_the_controller_not_answering(
+        self, health_service: HealthService, status: str, content_type: str
+    ) -> None:
+        outage = ControllerOutage()
+        body = [b"<html><body><h1>Bad Gateway</h1></body></html>"]
+        with _scripted(status, [("Content-Type", content_type)], body) as url:
+            client = ControllerClient(url, "t", health_service, outage)
+            with pytest.raises(ControllerUnreachable) as caught:
+                client.start_environment(ENV)
+
+        assert caught.value.cause == (
+            f"the controller did not answer: {status}, not the controller's own"
+        )
+        assert outage.holds
 
     def test_a_problem_type_under_another_status_is_not_switched_on(
         self, health_service: HealthService
     ) -> None:
         with _scripted(*_problem(500, "not-found")) as url:
-            client = ControllerClient(url, "t", health_service)
+            client = ControllerClient(url, "t", health_service, ControllerOutage())
             with pytest.raises(ExternalServiceException) as caught:
                 client.get_environment(ENV)
 
@@ -966,7 +1016,7 @@ class TestControllerClient:
         with _scripted(
             "404 Not Found", [("Content-Type", "application/json")], body
         ) as url:
-            client = ControllerClient(url, "t", health_service)
+            client = ControllerClient(url, "t", health_service, ControllerOutage())
             with pytest.raises(ExternalServiceException) as caught:
                 client.get_environment(ENV)
 
@@ -979,7 +1029,7 @@ class TestControllerClient:
         with _scripted(
             "200 OK", [("Content-Type", "application/json")], [b"{}"]
         ) as url:
-            client = ControllerClient(url, "t", health_service)
+            client = ControllerClient(url, "t", health_service, ControllerOutage())
             with pytest.raises(ExternalServiceException) as caught:
                 client.send_message(ENV, "claude-1", "Check the badge.")
 
@@ -990,21 +1040,106 @@ class TestControllerClient:
     ) -> None:
         body = [b'{"items": [{"envId": "x"}], "unprojectable": []}']
         with _scripted("200 OK", [("Content-Type", "application/json")], body) as url:
-            client = ControllerClient(url, "t", health_service)
+            client = ControllerClient(url, "t", health_service, ControllerOutage())
             with pytest.raises(ExternalServiceException) as caught:
                 client.list_environments()
 
         assert caught.value.cause.startswith("the controller's answer does not parse")
 
-    def test_a_controller_that_does_not_answer_is_a_failing_upstream(
+    def test_a_controller_that_does_not_answer_is_unreachable(
         self, health_service: HealthService
     ) -> None:
-        client = ControllerClient("http://127.0.0.1:9", "t", health_service)
+        outage = ControllerOutage()
+        client = ControllerClient("http://127.0.0.1:9", "t", health_service, outage)
 
-        with pytest.raises(ExternalServiceException) as caught:
+        with pytest.raises(ControllerUnreachable) as caught:
             client.list_environments()
 
         assert caught.value.cause.startswith("the controller did not answer")
+        assert outage.holds
+
+    def test_a_call_that_times_out_is_the_controller_not_answering(
+        self, health_service: HealthService
+    ) -> None:
+        def silent(environ: Any, start_response: Callable[..., Any]) -> Iterable[bytes]:
+            time.sleep(3)
+            start_response("200 OK", [("Content-Type", "application/json")])
+            return [b"{}"]
+
+        outage = ControllerOutage()
+        server = make_server("127.0.0.1", 0, silent, threaded=True)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            client = ControllerClient(
+                f"http://127.0.0.1:{server.server_port}", "t", health_service, outage
+            )
+            # The probe waits 2 s for its answer.
+            with pytest.raises(ControllerUnreachable) as caught:
+                client.probe()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
+        assert "timed out" in caught.value.cause
+        assert outage.holds
+
+    @pytest.mark.parametrize("answer", ["none", "ingress"])
+    def test_a_controller_out_as_a_whole_is_unreachable(
+        self,
+        fake_controller: ServedFakeController,
+        controller_client: ControllerClient,
+        controller_outage: ControllerOutage,
+        answer: str,
+    ) -> None:
+        fake_controller.outage(answer=answer)
+
+        with pytest.raises(ControllerUnreachable) as caught:
+            controller_client.list_environments()
+
+        assert caught.value.cause.startswith("the controller did not answer")
+        assert controller_outage.holds
+
+    def test_a_response_stream_that_drops_once_answered_turns_no_outage_on(
+        self,
+        running: ServedFakeController,
+        controller_client: ControllerClient,
+        controller_outage: ControllerOutage,
+        session_name: str,
+    ) -> None:
+        controller_client.send_message(ENV, session_name, "Check the badge.")
+        stream = controller_client.open_response_stream(ENV, session_name, 0)
+        threading.Timer(0.3, running.drop_streams).start()
+
+        with stream, pytest.raises(ExternalServiceException) as caught:
+            list(stream)
+
+        assert not isinstance(caught.value, ControllerUnreachable)
+        assert not controller_outage.holds
+
+    def test_the_probe_returns_once_the_controller_answers(
+        self,
+        fake_controller: ServedFakeController,
+        controller_client: ControllerClient,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        controller_client.probe()
+
+        assert not controller_outage.holds
+
+    def test_the_probe_of_a_controller_out_is_unreachable(
+        self,
+        fake_controller: ServedFakeController,
+        controller_client: ControllerClient,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        fake_controller.outage(answer="ingress")
+
+        with pytest.raises(ControllerUnreachable):
+            controller_client.probe()
+
+        assert controller_outage.holds
 
     @pytest.mark.parametrize(
         ("body", "cause"),
@@ -1022,7 +1157,7 @@ class TestControllerClient:
         with _scripted(
             "200 OK", [("Content-Type", "text/event-stream")], [body]
         ) as url:
-            client = ControllerClient(url, "t", health_service)
+            client = ControllerClient(url, "t", health_service, ControllerOutage())
             with client.open_response_stream(ENV, "claude-1", 0) as stream:
                 with pytest.raises(ExternalServiceException) as caught:
                     list(stream)
@@ -1039,7 +1174,7 @@ class TestControllerClient:
             b'{"turn":1}\n\n',
         ]
         with _scripted("200 OK", [("Content-Type", "text/event-stream")], body) as url:
-            client = ControllerClient(url, "t", health_service)
+            client = ControllerClient(url, "t", health_service, ControllerOutage())
             with client.open_response_stream(ENV, "claude-1", 0) as stream:
                 frames = list(stream)
 
@@ -1057,7 +1192,12 @@ class TestControllerClient:
         fake_controller: ServedFakeController,
         health_service: HealthService,
     ) -> None:
-        ControllerClient(fake_controller.url, FAKE_CONTROLLER_TOKEN, health_service)
+        ControllerClient(
+            fake_controller.url,
+            FAKE_CONTROLLER_TOKEN,
+            health_service,
+            ControllerOutage(),
+        )
 
         with app.app_context():
             body, status = health_service.check_readyz()
@@ -1068,7 +1208,7 @@ class TestControllerClient:
     def test_a_controller_down_degrades_readiness_without_failing_it(
         self, app: Flask, health_service: HealthService
     ) -> None:
-        ControllerClient("http://127.0.0.1:9", "t", health_service)
+        ControllerClient("http://127.0.0.1:9", "t", health_service, ControllerOutage())
 
         with app.app_context():
             body, status = health_service.check_readyz()
@@ -1084,7 +1224,9 @@ class TestControllerClient:
         with _scripted(
             "503 Unavailable", [("Content-Type", "application/json")], body
         ) as url:
-            result = ControllerClient(url, "t", health_service).check_readiness()
+            result = ControllerClient(
+                url, "t", health_service, ControllerOutage()
+            ).check_readiness()
 
         assert result.status is CheckStatus.ERROR
         assert result.detail == "the controller answered 503"
@@ -1118,6 +1260,7 @@ class TestControllerTls:
             tls_controller.url,
             FAKE_CONTROLLER_TOKEN,
             health_service,
+            ControllerOutage(),
             ca_file=authority.ca_file,
         )
 
@@ -1147,7 +1290,11 @@ class TestControllerTls:
             directory.mkdir()
             other = invent_ca(directory).ca_file
         client = ControllerClient(
-            tls_controller.url, FAKE_CONTROLLER_TOKEN, health_service, ca_file=other
+            tls_controller.url,
+            FAKE_CONTROLLER_TOKEN,
+            health_service,
+            ControllerOutage(),
+            ca_file=other,
         )
 
         with pytest.raises(ExternalServiceException) as caught:

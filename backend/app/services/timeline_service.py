@@ -71,7 +71,9 @@ from app.schemas.timeline import (
     UserSchema,
     WorkSchema,
 )
+from app.services.controller_outage import ControllerOutage
 from app.services.people_service import initials
+from app.services.start_gate import held_reason
 
 WORK = "work"
 
@@ -123,21 +125,23 @@ def waiting_on(person: User | None) -> ColumnElement[bool]:
 
 
 def work_status(
-    db: Session, item_ids: Collection[uuid.UUID]
+    db: Session, item_ids: Collection[uuid.UUID], *, unreachable: bool
 ) -> dict[uuid.UUID, WorkSchema]:
     """The work status of each work item among `item_ids`, as its line and
-    head show it; an item of another kind is left out. A failed one's error is
-    its latest Turn's, else its Session's: a turn's failure is its Turn's, a
-    start's the Session's (DB Session `error?`)."""
+    head show it, the controller `unreachable` or not; an item of another kind
+    is left out. A failed one's error is its latest Turn's, else its
+    Session's: a turn's failure is its Turn's, a start's the Session's (DB
+    Session `error?`). A held one's reason is the gate's as it reads now."""
     rows = db.execute(
-        select(AgentSession, Environment.name, Work.autopilot)
+        select(AgentSession, Environment.name, Work.autopilot, Project.paused)
         .join(Work, Work.id == AgentSession.id)
         .join(Environment, Environment.id == AgentSession.environment_id)
+        .join(Project, Project.id == AgentSession.project_id)
         .where(AgentSession.id.in_(list(item_ids)))
     ).all()
     failed = [
         session.id
-        for session, _, _ in rows
+        for session, _, _, _ in rows
         if session.state_code is SessionState.FAILED
     ]
     turn_errors: dict[uuid.UUID, str | None] = (
@@ -164,15 +168,30 @@ def work_status(
                 else None
             ),
             autopilot=autopilot,
+            held_reason=(
+                held_reason(
+                    paused=paused,
+                    kind_code=session.kind_code,
+                    unreachable=unreachable,
+                )
+                if session.state_code is SessionState.HELD
+                else None
+            ),
         )
-        for session, name, autopilot in rows
+        for session, name, autopilot, paused in rows
     }
 
 
 class TimelineService:
-    def __init__(self, db: Session, record_service: RecordService) -> None:
+    def __init__(
+        self,
+        db: Session,
+        record_service: RecordService,
+        controller_outage: ControllerOutage,
+    ) -> None:
         self.db = db
         self.record_service = record_service
+        self.controller_outage = controller_outage
 
     def badges(
         self, person: User | None, project_ids: Iterable[uuid.UUID]
@@ -296,7 +315,9 @@ class TimelineService:
         edited = self._edited(list(texts))
         attachments = self._attachments([item.id for item, _, _ in rows])
         works = work_status(
-            self.db, [item.id for item, _, form in rows if form == WORK]
+            self.db,
+            [item.id for item, _, form in rows if form == WORK],
+            unreachable=self.controller_outage.holds,
         )
         reader = self._reader(
             project,

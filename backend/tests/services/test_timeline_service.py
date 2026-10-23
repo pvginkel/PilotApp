@@ -39,9 +39,15 @@ from app.models.reference import (
     VersionCause,
 )
 from app.schemas.testing_record import InventedFileSchema, InventedProjectCreateSchema
-from app.schemas.timeline import AttachmentSchema, DoneCauseCode, ItemKindCode
+from app.schemas.timeline import (
+    AttachmentSchema,
+    DoneCauseCode,
+    HeldReason,
+    ItemKindCode,
+)
 from app.services.auth_service import AuthContext
 from app.services.container import ServiceContainer
+from app.services.controller_outage import ControllerOutage
 from app.services.timeline_service import Badge, work_status
 
 ADA = AuthContext(
@@ -1388,6 +1394,7 @@ class TestTimeline:
             "started_at": datetime(2026, 10, 24, 9, 0, tzinfo=UTC),
             "error": None,
             "autopilot": False,
+            "held_reason": None,
         }
 
     def test_a_work_item_coming_up_has_the_servers_words_and_no_start_yet(
@@ -1556,13 +1563,60 @@ class TestWorkStatus:
         no_work = _run(session, project, environment, SessionState.RUNNING)
         notice = _bear(container, project, no_work, "notice", "The site", NOTICE)
 
-        found = work_status(session, [work.id, no_work.id, notice.id, uuid.uuid4()])
+        found = work_status(
+            session, [work.id, no_work.id, notice.id, uuid.uuid4()], unreachable=False
+        )
 
         assert list(found) == [work.id]
         assert found[work.id].state == SessionState.RUNNING
 
     def test_no_ids_read_nothing(self, session: DbSession) -> None:
-        assert work_status(session, []) == {}
+        assert work_status(session, [], unreachable=False) == {}
+
+    @pytest.mark.parametrize(
+        ("paused", "unreachable", "reason"),
+        [
+            (True, False, HeldReason.PAUSED),
+            (False, True, HeldReason.CONTROLLER_UNREACHABLE),
+            (True, True, HeldReason.PAUSED),
+            # The gate open, its release on the way.
+            (False, False, None),
+        ],
+    )
+    def test_a_held_one_says_why_the_gate_holds_it_as_it_reads_now(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        paused: bool,
+        unreachable: bool,
+        reason: HeldReason | None,
+    ) -> None:
+        project = _make(container)
+        project.paused = paused
+        held = _work(session, project, environment, SessionState.HELD)
+        running = _work(session, project, environment, SessionState.RUNNING)
+
+        found = work_status(session, [held.id, running.id], unreachable=unreachable)
+
+        assert found[held.id].held_reason == reason
+        assert found[running.id].held_reason is None
+
+    def test_the_timeline_reads_the_outage_as_it_stands(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        project = _make(container)
+        _work(session, project, environment, SessionState.HELD)
+        controller_outage.call_unanswered()
+
+        _opening, item = container.timeline_service().timeline(project.id).items
+
+        assert item.work is not None
+        assert item.work.held_reason == HeldReason.CONTROLLER_UNREACHABLE
 
 
 CAMP_PLAN = """---
@@ -2073,7 +2127,7 @@ class TestBadges:
 
         assert self._badges(container, None, project) == {project.id: Badge(1, False)}
 
-    def test_a_stopped_or_failed_work_item_waits_and_a_running_one_does_not(
+    def test_a_stopped_or_failed_work_item_waits_and_a_running_or_held_one_does_not(
         self,
         container: ServiceContainer,
         session: DbSession,
@@ -2083,7 +2137,13 @@ class TestBadges:
         project = _make(container)
         _work(session, project, environment, SessionState.STOPPED, urgent=True)
         _work(session, project, environment, SessionState.FAILED)
-        for state in (SessionState.RUNNING, SessionState.IDLE, SessionState.STARTING):
+        for state in (
+            SessionState.RUNNING,
+            SessionState.IDLE,
+            SessionState.STARTING,
+            # A held start waits on nobody (UC; F141.5).
+            SessionState.HELD,
+        ):
             _work(session, project, environment, state)
         _work(
             session,

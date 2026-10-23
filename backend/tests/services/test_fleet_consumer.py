@@ -1,6 +1,7 @@
 """The fleet consumer: the Environment rows kept current from the fleet stream
-(design 2 §13.1; F73.1). Each test runs it as the supervisor does, on a
-database of its own, against the fake controller."""
+(design 2 §13.1; F73.1), and the stream down the controller unreachable
+(§13.4). Each test runs it as the supervisor does, on a database of its own,
+against the fake controller."""
 
 from collections.abc import Callable, Generator
 from datetime import UTC, datetime, timedelta
@@ -53,7 +54,9 @@ def consume(committed_app: Flask, supervise: Supervise) -> Consume:
     ) -> tuple[FleetConsumer, LifecycleCoordinator]:
         supervisor, coordinator = supervise(committed_app.container, backoff=backoff)
         consumer = FleetConsumer(
-            container=committed_app.container, supervisor=supervisor
+            container=committed_app.container,
+            supervisor=supervisor,
+            controller_outage=committed_app.container.controller_outage(),
         )
         coordinator.fire_startup()
         wait_until(_connected, "connected")
@@ -338,6 +341,55 @@ class TestFleetConsumer:
         fleet_log.wait_for(r"Fleet stream connected; 1 environments listed", count=2)
         assert _column(container, "env-a", "last_state") == "stopped"
         assert fake_controller.calls.count("GET /environments") == 2
+        assert not container.controller_outage().holds
+
+    @pytest.mark.parametrize("answer", ["none", "ingress"])
+    def test_the_stream_down_holds_the_outage_on_until_it_reconnects(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        consume: Consume,
+        fleet_log: LogWaiter,
+        answer: str,
+    ) -> None:
+        outage = committed_app.container.controller_outage()
+        consume(backoff=(0.1, 0.2))
+        assert not outage.holds
+
+        fake_controller.outage(answer=answer)
+
+        fleet_log.wait_for(r"Loop fleet raised; restarting in .*", count=2)
+        assert outage.holds
+        # The probe's answer turns nothing off while the stream is down.
+        outage.probe_answered()
+        assert outage.holds
+        fake_controller.outage(on=False)
+        wait_until(lambda: not outage.holds, "the outage off at the reconnect")
+        assert _connected()
+
+    def test_a_stream_that_cannot_open_turns_the_outage_on(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        supervise: Supervise,
+        fleet_log: LogWaiter,
+    ) -> None:
+        container = committed_app.container
+        outage = container.controller_outage()
+        fake_controller.outage()
+        supervisor, coordinator = supervise(container, backoff=(0.1, 0.2))
+        FleetConsumer(
+            container=container, supervisor=supervisor, controller_outage=outage
+        )
+
+        coordinator.fire_startup()
+
+        wait_until(lambda: outage.holds, "the outage on")
+        fake_controller.outage(on=False)
+        wait_until(_connected, "connected")
+        wait_until(lambda: not outage.holds, "the outage off at the connect")
 
     def test_shutdown_ends_it_and_says_it_is_disconnected(
         self,
@@ -356,6 +408,7 @@ class TestFleetConsumer:
         fleet_log.wait_for(r"Loop fleet ended")
         assert not fleet_log.matching(r"Loop fleet raised.*")
         assert metric_value(FLEET_STREAM_CONNECTED) == 0
+        assert not committed_app.container.controller_outage().holds
         assert consumer.sessions("env-a") is None
         assert consumer.environment("env-a") is None
 
@@ -369,7 +422,11 @@ class TestFleetConsumer:
         supervisor, coordinator = supervise(
             committed_app.container, controller_configured=False
         )
-        FleetConsumer(container=committed_app.container, supervisor=supervisor)
+        FleetConsumer(
+            container=committed_app.container,
+            supervisor=supervisor,
+            controller_outage=committed_app.container.controller_outage(),
+        )
 
         coordinator.fire_startup()
 

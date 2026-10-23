@@ -101,7 +101,11 @@ def _watch(
 ) -> tuple[RelayService, LifecycleCoordinator]:
     """The fleet consumer, the relays and the watchdog on one supervisor."""
     supervisor, coordinator = supervise(container)
-    fleet = FleetConsumer(container=container, supervisor=supervisor)
+    fleet = FleetConsumer(
+        container=container,
+        supervisor=supervisor,
+        controller_outage=container.controller_outage(),
+    )
     environments = EnvironmentService(
         container=container,
         supervisor=supervisor,
@@ -238,7 +242,11 @@ class TestRelayWatchdog:
         self, app: Flask, supervise: Supervise
     ) -> None:
         supervisor, coordinator = supervise(app.container, controller_configured=False)
-        fleet = FleetConsumer(container=app.container, supervisor=supervisor)
+        fleet = FleetConsumer(
+            container=app.container,
+            supervisor=supervisor,
+            controller_outage=app.container.controller_outage(),
+        )
         RelayWatchdog(supervisor=supervisor, fleet_consumer=fleet)
 
         with listening("app.services.supervisor") as log:
@@ -356,7 +364,11 @@ class TestRelayWatchdog:
             db.get_one(models.Session, run_id).state_code = SessionState.RUNNING
         # Another process relays it: here, the watchdog and the fleet alone.
         supervisor, coordinator = supervise(container)
-        fleet = FleetConsumer(container=container, supervisor=supervisor)
+        fleet = FleetConsumer(
+            container=container,
+            supervisor=supervisor,
+            controller_outage=container.controller_outage(),
+        )
         RelayWatchdog(supervisor=supervisor, fleet_consumer=fleet)
         coordinator.fire_startup()
         ticks = _ticks()
@@ -372,7 +384,11 @@ class _Fleet(FleetConsumer):
     session set."""
 
     def __init__(self, container: ServiceContainer, supervisor: Supervisor) -> None:
-        super().__init__(container=container, supervisor=supervisor)
+        super().__init__(
+            container=container,
+            supervisor=supervisor,
+            controller_outage=container.controller_outage(),
+        )
         self.states: dict[str, ControllerEnvironment] = {}
         self.views: dict[str, tuple[SessionView, ...]] = {}
 

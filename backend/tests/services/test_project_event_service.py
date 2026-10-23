@@ -248,6 +248,7 @@ class TestProjectEventService:
                     "started_at": None,
                     "error": None,
                     "autopilot": False,
+                    "held_reason": None,
                 },
             },
         }

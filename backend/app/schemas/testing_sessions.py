@@ -36,6 +36,7 @@ class TestingSessionStartSchema(BaseModel):
 
 
 class TestingSessionStartedSchema(BaseModel):
-    """The Session the start wrote, `starting`."""
+    """The Session the start wrote, `starting`, or `held` while the gate is
+    closed."""
 
     id: uuid.UUID = Field(description="The Session's id")

@@ -3,6 +3,9 @@ controller's fleet stream (design 2 §8.2, §13.1).
 
 On every connect it subscribes to `/stream`, lists the environments, applies the
 list, and then the frames. It updates the rows that exist and creates none.
+
+The stream down is the controller unreachable (design 2 §13.4): its failure to
+open or its drop turns the outage on, and its reconnect turns it off.
 """
 
 import logging
@@ -14,6 +17,7 @@ from prometheus_client import Gauge
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
+from app.core_exceptions import ExternalServiceException
 from app.database import scoped_session
 from app.models import Environment
 from app.services.controller_client import (
@@ -26,6 +30,7 @@ from app.services.controller_client import (
     SessionView,
     StateFrame,
 )
+from app.services.controller_outage import ControllerOutage
 from app.services.environment_service import reported_columns
 from app.services.supervisor import LoopHandle, Supervisor
 
@@ -49,15 +54,22 @@ class FleetConsumer:
     """Keeps the Environment rows current, and each environment's latest
     state and session set."""
 
-    def __init__(self, container: "ServiceContainer", supervisor: Supervisor) -> None:
+    def __init__(
+        self,
+        container: "ServiceContainer",
+        supervisor: Supervisor,
+        controller_outage: ControllerOutage,
+    ) -> None:
         """Register the `fleet` job, whose reconcile starts its loop.
 
         Args:
             container: Gives each update its database session, and the client
             supervisor: Runs the loop from STARTUP, and restarts it after a drop
+            controller_outage: Holds on while the stream is down
         """
         self._container = container
         self._supervisor = supervisor
+        self._outage = controller_outage
         self._lock = threading.Lock()
         self._environments: dict[str, ControllerEnvironment] = {}
         self._sessions: dict[str, tuple[SessionView, ...]] = {}
@@ -82,6 +94,13 @@ class FleetConsumer:
         self._supervisor.start_loop(FLEET_JOB, self._consume)
 
     def _consume(self, handle: LoopHandle) -> None:
+        try:
+            self._connect(handle)
+        except ExternalServiceException:
+            self._outage.fleet_stream_down()
+            raise
+
+    def _connect(self, handle: LoopHandle) -> None:
         client: ControllerClient = self._container.controller_client()
         # The list is applied before the frames that came while it was in
         # flight: a `gone` frame carries no state, and a list applied after it
@@ -96,6 +115,7 @@ class FleetConsumer:
                     "Fleet stream connected; %d environments listed",
                     len(listing.items),
                 )
+                self._outage.fleet_stream_up()
                 for frame in stream:
                     self._apply(frame)
             finally:

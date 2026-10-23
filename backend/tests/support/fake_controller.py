@@ -62,6 +62,7 @@ def client_of(
             lifecycle_coordinator=container.lifecycle_coordinator(),
             settings=container.config(),
         ),
+        outage=container.controller_outage(),
     )
     container.controller_client.override(providers.Object(client))
     return client

@@ -30,6 +30,7 @@ from app.services.controller_client import (
     ControllerEnvironment,
     ControllerProblem,
     ControllerProblemType,
+    ControllerUnreachable,
 )
 from app.services.supervisor import Supervisor
 
@@ -113,6 +114,26 @@ class EnvironmentService:
             .on_conflict_do_nothing(index_elements=[Environment.id])
         )
 
+    def ensure_for_start(self, db: Session, env_id: str) -> None:
+        """Make the environment's row on Pilot's first touch, as
+        `ensure_environment` does, for a start the gate may hold: while the
+        controller does not answer, named by its id and exempt, until the
+        fleet consumer's report gives its columns. Exempt, the timer arms
+        nothing there before the report says it may.
+
+        Raises:
+            ControllerProblem: `not-found` if the controller has no such
+                environment
+        """
+        try:
+            self.ensure_environment(db, env_id)
+        except ControllerUnreachable:
+            db.execute(
+                insert(Environment)
+                .values(id=env_id, name=env_id, exempt=True)
+                .on_conflict_do_nothing(index_elements=[Environment.id])
+            )
+
     def start(self, env_id: str) -> ControllerEnvironment:
         """Bring the environment up and wait until it settles (§13.2).
 
@@ -131,6 +152,7 @@ class EnvironmentService:
             EnvironmentStartFailed: The controller refused the start (`409
                 admission-blocked`), or the environment settled `error`,
                 `stopped` or `deleting`
+            ControllerUnreachable: The controller did not answer a call
             ExternalServiceException: The wait ran out before it settled, or
                 the controller failed otherwise
         """

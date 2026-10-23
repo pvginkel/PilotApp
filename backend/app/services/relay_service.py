@@ -49,6 +49,7 @@ from app.services.controller_client import (
     ControllerClient,
     ControllerProblem,
     ControllerProblemType,
+    ControllerUnreachable,
     HeadlessCreateRequest,
     RawFrame,
     ResultFrame,
@@ -222,6 +223,9 @@ class RelayService:
         Raises:
             RecordNotFoundException: No Turn or Session has the id
             InvalidOperationException: The Session has no controller session
+            ControllerUnreachable: The controller did not answer; nothing is
+                written, and the Turn is still unsent as far as the record
+                knows
         """
         turn = db.get(Turn, turn_id)
         if turn is None:
@@ -232,6 +236,8 @@ class RelayService:
         failure: ExternalServiceException | None = None
         try:
             self._deliver_once(session.environment_id, name, recorded, turn.message)
+        except ControllerUnreachable:
+            raise
         except ExternalServiceException as error:
             failure = error
         session = self._records(db).lock_session(session.id)

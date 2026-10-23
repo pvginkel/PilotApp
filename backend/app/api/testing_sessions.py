@@ -57,7 +57,7 @@ def start_testing_session(
     configured controller; its start runs once the request commits.
 
     Returns:
-        201: The Session, `starting`
+        201: The Session, `starting`, or `held` while the gate is closed
         404: No Project has the id
         409: No controller is configured
         502: The controller has no such environment, or failed

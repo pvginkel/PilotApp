@@ -5,6 +5,7 @@ F37.4, F129.4)."""
 
 import uuid
 from datetime import datetime
+from enum import StrEnum
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
@@ -26,6 +27,16 @@ ItemKindCode = Literal[
     "timed_wait",
 ]
 """Item Kind's codes (DB §2.4)."""
+
+
+class HeldReason(StrEnum):
+    """Why the gate holds a start (design 2 §13.4; F26.1): its project paused,
+    or the controller unreachable. Read at display, never stored (decision
+    53)."""
+
+    PAUSED = "paused"
+    CONTROLLER_UNREACHABLE = "controller_unreachable"
+
 
 ItemForm = Literal["prose", "work", "wait"]
 """Item Kind's forms: which subtype an item is."""
@@ -310,6 +321,13 @@ class WorkSchema(BaseModel):
     )
     autopilot: bool = Field(
         description="The auto pilot setting its start was briefed under (F4.3)"
+    )
+    held_reason: HeldReason | None = Field(
+        description=(
+            "Why the gate holds its start, which its line says: its project "
+            "paused, or the controller unreachable; null unless `state` is "
+            "`held`, and while the gate opens for it (F26.1, F141.5)"
+        )
     )
 
 

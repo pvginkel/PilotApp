@@ -19,6 +19,7 @@ headless session; `wait=settled` is `wait=ready`, since no setup runs here.
 from __future__ import annotations
 
 import json
+import socket
 import threading
 import time
 import uuid
@@ -41,6 +42,10 @@ from app.services.controller_client import (
 
 if TYPE_CHECKING:
     from _typeshed.wsgi import StartResponse, WSGIEnvironment
+
+Unanswered = Literal["none", "ingress"]
+"""How a call goes unanswered while the controller is down as a whole: its
+connection closed with no answer, or a `502` page an ingress writes."""
 
 FinishOutcome = Literal["success", "error", "interrupted", "spawn-failure", "ended"]
 """How a turn ends: `claude`'s own result, a failed one, an interrupt, or one of
@@ -69,6 +74,11 @@ _CREATE_FIELDS = {
 }
 
 _KEEPALIVE = b": keepalive\n\n"
+
+_INGRESS_PAGE = (
+    "<html><head><title>502 Bad Gateway</title></head>"
+    "<body><center><h1>502 Bad Gateway</h1></center></body></html>"
+)
 
 
 class FakeControllerProblem(Exception):
@@ -253,6 +263,7 @@ class FakeController:
         self._subscribers: list[_Subscriber] = []
         self._drops = 0
         self._closed = False
+        self._unanswered: Unanswered | None = None
         self._last_pod_started_at = datetime.min.replace(tzinfo=UTC)
         self.calls: list[str] = []
         self._endpoints: dict[str, Callable[..., Response]] = {
@@ -281,6 +292,7 @@ class FakeController:
             "restart": self.restart,
             "recreate-pod": self.recreate_pod,
             "unreachable": self.unreachable,
+            "outage": self.outage,
             "capped": self.capped,
             "unprojectable": self.unprojectable,
             "busy": self.busy,
@@ -390,6 +402,19 @@ class FakeController:
             self._environment(env_id).unreachable = on
 
     @validate_call
+    def outage(self, on: bool = True, answer: Unanswered = "none") -> None:
+        """The controller does not answer as a whole: every call, `/readyz`
+        among them and the verbs not, has its connection closed with no
+        answer (`none`, under werkzeug's server, which hands the app its
+        socket) or a `502` page an ingress writes (`ingress`), and every open
+        stream ends at once. `on=False` answers again."""
+        with self._changed:
+            self._unanswered = answer if on else None
+            if on:
+                self._drops += 1
+                self._changed.notify_all()
+
+    @validate_call
     def capped(self, env_id: str, on: bool = True) -> None:
         """The node is at its cap: a start is `409 admission-blocked`, unless
         the environment is exempt."""
@@ -472,8 +497,10 @@ class FakeController:
             self._changed.notify_all()
 
     def reset(self) -> None:
-        """Forget every environment, session and call; drop every stream."""
+        """Forget every environment, session and call, and any outage; drop
+        every stream."""
         with self._changed:
+            self._unanswered = None
             self._environments.clear()
             self._sessions.clear()
             self.calls.clear()
@@ -500,6 +527,11 @@ class FakeController:
                 status=error.code,
                 content_type="application/json",
             )
+        if endpoint != "verb":
+            with self._changed:
+                unanswered = self._unanswered
+            if unanswered is not None:
+                return _unanswered(request, unanswered)
         try:
             if endpoint not in ("readyz", "verb"):
                 with self._changed:
@@ -856,6 +888,15 @@ class FakeController:
         views = [s.view() for s in self._sessions.values() if s.env_id == env_id]
         data = _compact({"envId": env_id, "sessions": views})
         return f"event: sessions\ndata: {data}\n\n".encode()
+
+
+def _unanswered(request: Request, answer: Unanswered) -> Response:
+    if answer == "ingress":
+        return Response(_INGRESS_PAGE, status=502, content_type="text/html")
+    # The connection shut, the server's write of this answer fails, and it
+    # drops the connection with nothing sent.
+    request.environ["werkzeug.socket"].shutdown(socket.SHUT_RDWR)
+    return Response(status=204)
 
 
 def _compact(body: Any) -> str:

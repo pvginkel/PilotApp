@@ -1,10 +1,10 @@
 """The session start (design 2 §13.2, §7.1; F88.1, F125; decision 38; V05, V15,
-V19), and a work item's (DB Work, decision 3).
+V19), and a work item's (DB Work, decision 3); the gate every start passes, the
+held start and its release (§13.4, §8.2; F141.5; DB 229, 230; V16, V24).
 
 The start's write and its loop's run are on the test's session: the run is
-called as its loop calls it. `TestStartLoop` runs the loop from the write's
-commit on a database of its own, as the supervisor does, to the turn's end and
-the shutdown timer's stop."""
+called as its loop calls it. `TestStartLoop` and `TestHeldLoop` run the loops
+from the write's commit on a database of their own, as the supervisor does."""
 
 import uuid
 from collections.abc import Callable, Iterator
@@ -23,12 +23,14 @@ from app.engine.bus import EngineEvent, ProjectChanged, WorkMoved
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import Environment, Item, PlanTask, Project, Turn, User, Work
 from app.models.reference import RecordKind, SessionState, TaskStatus, UserKind
+from app.schemas.timeline import HeldReason
 from app.services.container import ServiceContainer
 from app.services.controller_client import (
     ControllerProblem,
     ControllerProblemType,
     HeadlessCreateRequest,
 )
+from app.services.controller_outage import ControllerOutage
 from app.services.environment_service import EnvironmentService
 from app.services.fake_controller import FakeControllerProblem
 from app.services.relay_service import SEND_FAILED, RelayService
@@ -40,6 +42,7 @@ from app.services.session_start_service import (
     SessionStartService,
 )
 from app.services.supervisor import LoopHandle
+from app.services.timeline_service import work_status
 from app.utils.after_commit import clear_after_commit_callbacks
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
 from tests.support.fake_controller import ServedFakeController, client_of, raw_turn
@@ -56,16 +59,32 @@ SUPERVISOR_LOGGER = "app.services.supervisor"
 
 class _Recording(ServedFakeController):
     """The fake, keeping each headless create's body, and refusing every send
-    with `502 worker-unreachable` while `refuse_sends` is set. `during_create`
-    and `during_settle`, when set, run once, as a create or an environment's
-    `wait` is answered: another process's action then."""
+    with `502 worker-unreachable` while `refuse_sends` is set. `during_start`,
+    `during_settle`, `during_create` and `during_snapshot`, when set, run once,
+    as an environment's start, its `wait`, a create or a session's snapshot
+    is answered: another process's action then, or the controller going down
+    after that call."""
 
     def __init__(self, keepalive_seconds: float) -> None:
         super().__init__(keepalive_seconds)
         self.create_bodies: list[dict[str, Any]] = []
         self.refuse_sends = False
+        self.during_start: Callable[[], None] | None = None
         self.during_create: Callable[[], None] | None = None
         self.during_settle: Callable[[], None] | None = None
+        self.during_snapshot: Callable[[], None] | None = None
+
+    def _start(self, request: Request, env_id: str) -> Response:
+        hook, self.during_start = self.during_start, None
+        if hook is not None:
+            hook()
+        return super()._start(request, env_id)
+
+    def _get_session(self, request: Request, env_id: str, name: str) -> Response:
+        hook, self.during_snapshot = self.during_snapshot, None
+        if hook is not None:
+            hook()
+        return super()._get_session(request, env_id, name)
 
     def _get_environment(self, request: Request, env_id: str) -> Response:
         if "wait" in request.args:
@@ -115,7 +134,10 @@ def _services(
     *,
     stop_after: timedelta = STOP_AFTER,
     controller_configured: bool = True,
+    outage: ControllerOutage | None = None,
 ) -> tuple[SessionStartService, EnvironmentService, LifecycleCoordinator]:
+    """The start's services on a supervisor of their own, on the client's
+    outage unless `outage` gives another, as a process of its own has."""
     supervisor, coordinator = supervise(container)
     environments = EnvironmentService(
         container=container,
@@ -134,6 +156,7 @@ def _services(
         session_streams=container.session_stream_service(),
         environment_service=environments,
         relay_service=relays,
+        controller_outage=outage or container.controller_outage(),
         controller_configured=controller_configured,
     )
     return starts, environments, coordinator
@@ -729,6 +752,7 @@ class TestRunFails:
         fake: _Recording,
         session: DbSession,
         project: Project,
+        controller_outage: ControllerOutage,
     ) -> None:
         fake.unreachable(ENV)
         run = _start(starts, session, project)
@@ -738,6 +762,8 @@ class TestRunFails:
         run = _assert_failed(session, run.id)
         assert run.error is not None and "worker-unreachable" in run.error
         assert run.controller_session is None
+        # The controller answered, about one environment (review O2).
+        assert not controller_outage.holds
         assert _server(session, run.id) == [
             (None, STARTING_ENV),
             (None, CREATING),
@@ -750,6 +776,7 @@ class TestRunFails:
         fake: _Recording,
         session: DbSession,
         project: Project,
+        controller_outage: ControllerOutage,
     ) -> None:
         fake.refuse_sends = True
         run = _start(starts, session, project)
@@ -758,6 +785,7 @@ class TestRunFails:
 
         (brief,) = _turns(session, run.id)
         assert brief.error is not None and "worker-unreachable" in brief.error
+        assert not controller_outage.holds
         run = _assert_failed(session, run.id, brief.error)
         assert run.controller_session is not None
         # The send's own record says so, in the brief's Turn.
@@ -830,6 +858,399 @@ class TestRunFails:
         _assert_failed(session, run.id)
         row = _row(session)
         assert (row.server_started_at, row.stop_due_at) == (None, None)
+
+
+def _held(
+    starts: SessionStartService,
+    db: DbSession,
+    project: Project,
+    *,
+    kind_code: str = "work",
+) -> models.Session:
+    """A start the gate held, written as `_start` writes one."""
+    run = starts.start_session(
+        db, project.id, ENV, kind_code=kind_code, cwd=CWD, brief=BRIEF
+    )
+    clear_after_commit_callbacks()
+    assert run.state_code == SessionState.HELD
+    return run
+
+
+def _release(starts: SessionStartService) -> None:
+    """The release loop's run, as its loop calls it."""
+    starts.release(LoopHandle("start:held"))
+
+
+class TestStartThroughTheGate:
+    def test_with_the_controller_unreachable_the_start_is_held_and_runs_nothing(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        _run(starts, _start(starts, session, project))
+        due = datetime.now(UTC) + timedelta(minutes=5)
+        _row(session).stop_due_at = due
+        session.flush()
+        controller_outage.call_unanswered()
+        before = len(fake.calls)
+
+        run = _start(starts, session, project)
+        _run(starts, run)
+
+        run = _read(session, run.id)
+        assert run.state_code == SessionState.HELD
+        assert (run.current_line, run.error, run.controller_session) == (
+            None,
+            None,
+            None,
+        )
+        (brief,) = _turns(session, run.id)
+        assert (brief.message, brief.ended_at, brief.error) == (BRIEF, None, None)
+        assert _server(session, run.id) == []
+        assert fake.calls[before:] == []
+        # A held start does not hold the environment's timer.
+        assert _row(session).stop_due_at == due
+
+    def test_in_a_paused_project_the_start_is_held(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        project.paused = True
+        session.flush()
+
+        run = _start(starts, session, project)
+
+        assert _read(session, run.id).state_code == SessionState.HELD
+        assert _server(session, run.id) == []
+
+    def test_a_chats_start_is_never_held_for_the_pause(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        project.paused = True
+        session.flush()
+
+        chat = starts.start_session(
+            session, project.id, ENV, kind_code="chat", cwd=CWD, brief=BRIEF
+        )
+        controller_outage.call_unanswered()
+        held = starts.start_session(
+            session, project.id, ENV, kind_code="chat", cwd=CWD, brief=BRIEF
+        )
+        clear_after_commit_callbacks()
+
+        assert _read(session, chat.id).state_code == SessionState.STARTING
+        assert _server(session, chat.id) == [(None, STARTING_ENV)]
+        # The outage holds a Chat's start as it holds every other.
+        assert _read(session, held.id).state_code == SessionState.HELD
+
+    @pytest.mark.parametrize(
+        ("paused", "reason"),
+        [(True, HeldReason.PAUSED), (False, HeldReason.CONTROLLER_UNREACHABLE)],
+    )
+    def test_a_held_work_item_is_placed_its_line_saying_why(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        controller_outage: ControllerOutage,
+        paused: bool,
+        reason: HeldReason,
+    ) -> None:
+        project.paused = paused
+        session.flush()
+        if not paused:
+            controller_outage.call_unanswered()
+
+        work = _start_work(starts, session, project)
+
+        assert session.get_one(Item, work.id).done_at is None
+        status = work_status(session, [work.id], unreachable=controller_outage.holds)[
+            work.id
+        ]
+        assert (status.state, status.held_reason) == (SessionState.HELD, reason)
+        assert status.current_line is None
+
+    def test_its_first_touch_while_the_controller_does_not_answer_names_the_environment_by_its_id(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        fake.outage()
+
+        run = starts.start_session(
+            session, project.id, "env-new", kind_code="work", cwd=CWD, brief=BRIEF
+        )
+        clear_after_commit_callbacks()
+
+        assert controller_outage.holds
+        assert _read(session, run.id).state_code == SessionState.HELD
+        row = session.get_one(Environment, "env-new")
+        # Exempt until the fleet consumer's report says otherwise: the timer
+        # arms nothing on a row the controller never described.
+        assert (row.name, row.exempt, row.last_state) == ("env-new", True, None)
+
+
+class TestRunHeld:
+    @pytest.mark.parametrize("answer", ["none", "ingress"])
+    @pytest.mark.parametrize(
+        ("call", "phases", "created", "claim"),
+        [
+            ("start", [STARTING_ENV], False, "none"),
+            ("settle", [STARTING_ENV], False, "no-pod"),
+            ("create", [STARTING_ENV, CREATING], False, "pod"),
+            ("snapshot", [STARTING_ENV, CREATING], True, "pod"),
+            ("send", [STARTING_ENV, CREATING], True, "pod"),
+        ],
+    )
+    def test_a_start_whose_call_the_controller_does_not_answer_is_held_where_its_rows_stand(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        controller_outage: ControllerOutage,
+        engine_events: list[EngineEvent],
+        answer: str,
+        call: str,
+        phases: list[dict[str, str]],
+        created: bool,
+        claim: str,
+    ) -> None:
+        def down() -> None:
+            fake.outage(answer=answer)
+
+        run = _start(starts, session, project)
+        if call == "start":
+            down()
+        else:
+            hooks = {
+                "settle": "during_start",
+                "create": "during_settle",
+                "snapshot": "during_create",
+                "send": "during_snapshot",
+            }
+            setattr(fake, hooks[call], down)
+
+        _run(starts, run)
+
+        run = _read(session, run.id)
+        assert (run.state_code, run.error) == (SessionState.HELD, None)
+        assert (run.controller_session is not None) is created
+        (brief,) = _turns(session, run.id)
+        assert (brief.ended_at, brief.error) == (None, None)
+        assert [payload for _, payload in _server(session, run.id)] == phases
+        row = _row(session)
+        assert {
+            "none": (None, None),
+            "no-pod": (row.server_started_at, None),
+            "pod": (row.server_started_at, fake.environment(ENV).pod_started_at),
+        }[claim] == (row.server_started_at, row.started_pod_at)
+        if claim != "none":
+            assert row.server_started_at is not None
+        assert controller_outage.holds
+        assert _moves(engine_events)[-2:] == [
+            WorkMoved(project.id, run.id),
+            ProjectChanged(project.id),
+        ]
+
+
+class TestRelease:
+    def test_once_the_gate_opens_every_held_start_goes_on(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        _run(starts, _start(starts, session, project))
+        controller_outage.call_unanswered()
+        held = [_held(starts, session, project) for _ in range(2)]
+        _row(session).stop_due_at = datetime.now(UTC) + timedelta(minutes=5)
+        session.flush()
+        controller_outage.probe_answered()
+
+        _release(starts)
+
+        for run in held:
+            run = _read(session, run.id)
+            assert run.state_code == SessionState.STARTING
+            assert _server(session, run.id) == [(None, STARTING_ENV)]
+            assert run.current_line is not None
+        assert _row(session).stop_due_at is None
+
+    def test_nothing_goes_on_while_the_outage_holds(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        controller_outage.call_unanswered()
+        run = _held(starts, session, project)
+
+        _release(starts)
+
+        assert _read(session, run.id).state_code == SessionState.HELD
+
+    def test_a_paused_projects_start_stays_held_and_a_chats_goes_on(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        project.paused = True
+        session.flush()
+        controller_outage.call_unanswered()
+        work = _held(starts, session, project)
+        chat = _held(starts, session, project, kind_code="chat")
+        controller_outage.probe_answered()
+
+        _release(starts)
+
+        assert _read(session, work.id).state_code == SessionState.HELD
+        assert _read(session, chat.id).state_code == SessionState.STARTING
+
+    @pytest.mark.parametrize("state", [SessionState.STARTING, SessionState.FAILED])
+    def test_a_session_no_longer_held_is_left_alone(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        controller_outage: ControllerOutage,
+        state: SessionState,
+    ) -> None:
+        controller_outage.call_unanswered()
+        run = _held(starts, session, project)
+        run.state_code = state
+        session.flush()
+        controller_outage.probe_answered()
+
+        _release(starts)
+
+        assert _read(session, run.id).state_code == state
+        assert _server(session, run.id) == []
+
+    def test_a_start_held_once_its_session_was_created_goes_on_to_its_brief_alone(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        fake.during_snapshot = fake.outage
+        run = _start(starts, session, project)
+        _run(starts, run)
+        name = _read(session, run.id).controller_session
+        assert name is not None
+        fake.outage(on=False)
+        controller_outage.probe_answered()
+
+        _release(starts)
+        _run(starts, run)
+
+        run = _read(session, run.id)
+        assert (run.state_code, run.controller_session) == (SessionState.RUNNING, name)
+        assert _server(session, run.id) == [(None, STARTING_ENV), (None, CREATING)]
+        assert fake.create_bodies == [{"cwd": CWD}]
+        assert _sends(fake, name) == 1
+
+    def test_a_start_held_before_its_session_was_created_starts_its_environment_again(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        # Its `202` recorded, and its settle cut (review O1).
+        fake.during_start = fake.outage
+        run = _start(starts, session, project)
+        _run(starts, run)
+        claimed = _row(session).server_started_at
+        assert claimed is not None and _row(session).started_pod_at is None
+        fake.outage(on=False)
+        controller_outage.probe_answered()
+
+        _release(starts)
+        _run(starts, run)
+
+        assert _read(session, run.id).state_code == SessionState.RUNNING
+        assert _server(session, run.id) == [
+            (None, STARTING_ENV),
+            (None, STARTING_ENV),
+            (None, CREATING),
+        ]
+        # The `200` keeps the claim, and takes the settled pod as its own.
+        row = _row(session)
+        assert row.server_started_at == claimed
+        assert row.started_pod_at == fake.environment(ENV).pod_started_at
+
+
+class TestProbe:
+    def test_while_the_outage_does_not_hold_it_calls_nothing(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        # A call would go unanswered, and turn the outage on.
+        fake.outage()
+
+        starts.run_probe(session)
+
+        assert not controller_outage.holds
+
+    def test_the_controllers_answer_turns_the_outage_off(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        controller_outage.call_unanswered()
+
+        starts.run_probe(session)
+
+        assert not controller_outage.holds
+
+    @pytest.mark.parametrize("answer", ["none", "ingress"])
+    def test_a_controller_still_out_keeps_it_on(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        controller_outage: ControllerOutage,
+        answer: str,
+    ) -> None:
+        controller_outage.call_unanswered()
+        since = controller_outage.since
+        fake.outage(answer=answer)
+
+        starts.run_probe(session)
+
+        assert controller_outage.since == since
 
 
 def _committed_project(container: ServiceContainer) -> uuid.UUID:
@@ -1178,3 +1599,181 @@ def _sends(fake: ServedFakeController, name: str) -> int:
     return fake.calls.count(
         f"POST /environments/{ENV}/sessions/headless/{name}/messages"
     )
+
+
+class TestHeldLoop:
+    @pytest.fixture
+    def loop_log(self) -> Iterator[LogWaiter]:
+        with listening(SUPERVISOR_LOGGER, START_LOGGER) as waiter:
+            yield waiter
+
+    @pytest.fixture
+    def committed_fake(self, committed_app: Flask) -> Iterator[_Recording]:
+        served = _Recording(keepalive_seconds=0.2)
+        client_of(committed_app.container, served)
+        served.add_environment(ENV, name="Env-A")
+        try:
+            yield served
+        finally:
+            served.close()
+
+    def test_a_work_item_started_while_the_controller_is_unreachable_runs_once_it_answers(
+        self,
+        committed_app: Flask,
+        committed_fake: _Recording,
+        supervise: Supervise,
+        loop_log: LogWaiter,
+    ) -> None:
+        container = committed_app.container
+        outage = container.controller_outage()
+        starts, _, coordinator = _services(container, supervise)
+        project_id = _committed_project(container)
+        _add_environment(container)
+        coordinator.fire_startup()
+        committed_fake.outage(answer="ingress")
+        outage.call_unanswered()
+
+        with scoped_session(container) as db:
+            work_id = starts.start_work(
+                db, project_id, ENV, title="Renaming", brief=BRIEF, cwd=CWD
+            ).id
+
+        assert _committed(container, work_id).state_code == SessionState.HELD
+        committed_fake.outage(on=False)
+        loop_log.wait_for(rf"Session {work_id} goes on from held")
+        loop_log.wait_for(rf"Loop relay:{work_id} started")
+        assert _committed(container, work_id).state_code == SessionState.RUNNING
+        assert not outage.holds
+
+    def test_a_start_that_meets_the_outage_resumes_from_its_rows_once_the_controller_answers(
+        self,
+        committed_app: Flask,
+        committed_fake: _Recording,
+        supervise: Supervise,
+        loop_log: LogWaiter,
+    ) -> None:
+        container = committed_app.container
+        starts, _, coordinator = _services(container, supervise)
+        project_id = _committed_project(container)
+        coordinator.fire_startup()
+        committed_fake.during_start = committed_fake.outage
+
+        with scoped_session(container) as db:
+            run_id = starts.start_session(
+                db, project_id, ENV, kind_code="work", cwd=CWD, brief=BRIEF
+            ).id
+
+        loop_log.wait_for(rf"Session {run_id} is held: .*")
+        with scoped_session(container) as db:
+            claimed = _row(db).server_started_at
+        assert claimed is not None
+        committed_fake.outage(on=False)
+        loop_log.wait_for(rf"Loop relay:{run_id} started")
+        run = _committed(container, run_id)
+        assert run.state_code == SessionState.RUNNING
+        assert run.controller_session is not None
+        with scoped_session(container) as db:
+            row = _row(db)
+            assert row.server_started_at == claimed
+            assert row.started_pod_at == committed_fake.environment(ENV).pod_started_at
+        assert committed_fake.create_bodies == [{"cwd": CWD}]
+        assert _sends(committed_fake, run.controller_session) == 1
+
+    def test_held_starts_go_on_in_the_order_they_were_asked(
+        self,
+        committed_app: Flask,
+        committed_fake: _Recording,
+        supervise: Supervise,
+    ) -> None:
+        container = committed_app.container
+        outage = container.controller_outage()
+        # No loop of theirs runs: the supervisor never starts.
+        starts, _, _ = _services(container, supervise)
+        project_id = _committed_project(container)
+        outage.call_unanswered()
+        ids = []
+        for _ in range(3):
+            with scoped_session(container) as db:
+                ids.append(
+                    starts.start_session(
+                        db, project_id, ENV, kind_code="work", cwd=CWD, brief=BRIEF
+                    ).id
+                )
+        # Asked in an order neither their writes' nor their ids'.
+        asked = [ids[1], ids[2], ids[0]]
+        first = datetime.now(UTC)
+        with scoped_session(container) as db:
+            for offset, run_id in enumerate(asked):
+                run = db.get_one(models.Session, run_id)
+                run.created_at = first + timedelta(seconds=offset)
+        outage.probe_answered()
+
+        starts.release(LoopHandle("start:held"))
+
+        with scoped_session(container) as db:
+            begun = {run_id: _records(db, run_id)[0].record.at for run_id in ids}
+            states = {_read(db, run_id).state_code for run_id in ids}
+        assert states == {SessionState.STARTING}
+        assert sorted(ids, key=begun.__getitem__) == asked
+
+    def test_startup_resumes_the_held_starts(
+        self,
+        committed_app: Flask,
+        committed_fake: _Recording,
+        supervise: Supervise,
+        loop_log: LogWaiter,
+    ) -> None:
+        container = committed_app.container
+        project_id = _committed_project(container)
+        # A process that met the outage and was gone before it ended.
+        cut_outage = ControllerOutage()
+        cut_outage.call_unanswered()
+        cut, _, _ = _services(container, supervise, outage=cut_outage)
+        with scoped_session(container) as db:
+            run_id = cut.start_session(
+                db, project_id, ENV, kind_code="work", cwd=CWD, brief=BRIEF
+            ).id
+        assert _committed(container, run_id).state_code == SessionState.HELD
+        # A fresh process starts with the outage off.
+        _, _, coordinator = _services(container, supervise, outage=ControllerOutage())
+
+        coordinator.fire_startup()
+
+        loop_log.wait_for(rf"Session {run_id} goes on from held")
+        loop_log.wait_for(rf"Loop relay:{run_id} started")
+        assert _committed(container, run_id).state_code == SessionState.RUNNING
+
+    def test_a_held_write_asks_the_gate_again_once_it_commits(
+        self,
+        committed_app: Flask,
+        committed_fake: _Recording,
+        supervise: Supervise,
+        loop_log: LogWaiter,
+    ) -> None:
+        container = committed_app.container
+        starts, _, coordinator = _services(container, supervise)
+        project_id = _committed_project(container)
+        with scoped_session(container) as db:
+            db.get_one(Project, project_id).paused = True
+        coordinator.fire_startup()
+
+        with scoped_session(container) as db:
+            run_id = starts.start_session(
+                db, project_id, ENV, kind_code="work", cwd=CWD, brief=BRIEF
+            ).id
+            # The pause lifted, committed before this write's commit: the
+            # release it opened found nothing held.
+            other: DbSession = container.session_maker()()
+            try:
+                other.get_one(Project, project_id).paused = False
+                other.commit()
+            finally:
+                other.close()
+
+        loop_log.wait_for(rf"Session {run_id} goes on from held")
+        loop_log.wait_for(rf"Loop relay:{run_id} started")
+
+
+def _add_environment(container: ServiceContainer) -> None:
+    with scoped_session(container) as db:
+        db.add(Environment(id=ENV, name="Env-A", exempt=False))

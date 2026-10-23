@@ -17,6 +17,7 @@ from app.services.controller_client import (
     ResultFrame,
     SessionsFrame,
 )
+from app.services.controller_outage import ControllerOutage
 from app.services.fake_controller import FakeController, FakeControllerProblem
 from app.services.health_service import HealthService
 from tests.conftest_infrastructure import _create_test_app, _dispose_app
@@ -75,6 +76,7 @@ class TestTestingControllerApi:
             HealthService(
                 app.container.lifecycle_coordinator(), app.container.config()
             ),
+            ControllerOutage(),
         )
 
         with client.open_fleet_stream() as fleet:
