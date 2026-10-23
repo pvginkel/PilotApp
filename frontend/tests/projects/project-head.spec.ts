@@ -325,7 +325,12 @@ test.describe('Auto pilot', () => {
 });
 
 test.describe('A draft’s head', () => {
-  test('has its name, the Draft chip and its members, and no switch or step', async ({ people, projects, projectHead }) => {
+  test('has its name, the Draft chip and its members, and no switch, step or Documents button, nor a side panel on a wide window', async ({
+    people,
+    projects,
+    projectHead,
+    panel,
+  }) => {
     const me = await people.signIn();
     const name = makeUnique('Draft');
     const named = await projects.make({ name, state: 'draft', members: [me.handle!] });
@@ -337,6 +342,8 @@ test.describe('A draft’s head', () => {
     await expect(projectHead.members.locator('.avatar')).toHaveCount(1);
     await expect(projectHead.autopilot).toHaveCount(0);
     await expect(projectHead.step).toHaveCount(0);
+    await expect(projectHead.documentsButton).toHaveCount(0);
+    await expect(panel.root).toHaveCount(0);
 
     await projectHead.open(untitled);
     await expect(projectHead.name).toHaveText('New project');
