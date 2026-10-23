@@ -38,6 +38,8 @@ class TransitionKind(StrEnum):
     BROUGHT_BACK = "brought_back"
     AUTOPILOT_ON = "autopilot_on"
     AUTOPILOT_OFF = "autopilot_off"
+    PAUSED = "paused"
+    RESUMED = "resumed"
 
 
 class DocumentRole(StrEnum):
@@ -95,6 +97,7 @@ class AttachmentSource(StrEnum):
 
 
 class SessionState(StrEnum):
+    HELD = "held"
     STARTING = "starting"
     RUNNING = "running"
     IDLE = "idle"

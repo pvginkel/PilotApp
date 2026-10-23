@@ -97,6 +97,16 @@ class TestSession:
         assert run.created_at is not None
         assert run.current_line is None
 
+    def test_a_start_the_gate_holds_is_held(
+        self, session: DbSession, project: Project, environment: Environment
+    ) -> None:
+        run = _session(project, environment, state_code=SessionState.HELD)
+        session.add(run)
+        session.flush()
+        session.expire(run)
+
+        assert run.state_code == SessionState.HELD
+
     def test_its_kind_is_a_session_kind(
         self, session: DbSession, project: Project, environment: Environment
     ) -> None:

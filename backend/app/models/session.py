@@ -42,6 +42,15 @@ class Session(db.Model):  # type: ignore[name-defined]
     __tablename__ = "sessions"
     __table_args__ = (
         Index("ix_sessions_state_code", "state_code"),
+        # What a Work's key references, so its Session is of its Project and
+        # its Session Kind is one the Work's checks read.
+        UniqueConstraint("project_id", "id", "kind_code"),
+        # The gate starts held Sessions in `created_at` order.
+        Index(
+            "ix_sessions_held",
+            "created_at",
+            postgresql_where=text("state_code = 'held'"),
+        ),
         # The MCP server's bearer check resolves a token to one Session.
         Index("uq_sessions_token_hash", "token_hash", unique=True),
         Index(

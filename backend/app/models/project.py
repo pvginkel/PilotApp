@@ -32,8 +32,8 @@ class Project(db.Model):  # type: ignore[name-defined]
     """A piece of multi-step work Pilot manages front to end.
 
     `name` is a cache of the draft's title, rebuilt on every publish of the
-    draft. `state_code`, `archived` and `autopilot` are caches of the Project
-    Transitions, rebuilt with each (DB §7.4).
+    draft. `state_code`, `archived`, `autopilot` and `paused` are caches of the
+    Project Transitions, rebuilt with each (DB §7.4).
     """
 
     __tablename__ = "projects"
@@ -60,6 +60,7 @@ class Project(db.Model):  # type: ignore[name-defined]
     autopilot: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=false()
     )
+    paused: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     ticket: Mapped[str | None] = mapped_column(Text)
     repo: Mapped[str | None] = mapped_column(Text)
     created_by_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))

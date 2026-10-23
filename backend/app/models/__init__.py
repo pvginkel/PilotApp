@@ -19,3 +19,4 @@ from app.models.reference import (
 from app.models.save_error import SaveError
 from app.models.session import Session, SessionRecord, Turn
 from app.models.user import User
+from app.models.work import Work

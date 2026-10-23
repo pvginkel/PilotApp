@@ -38,6 +38,8 @@ class Item(db.Model):  # type: ignore[name-defined]
     __tablename__ = "items"
     __table_args__ = (
         UniqueConstraint("project_id", "seq"),
+        # What a Work's keys reference, so its Item is of its Project.
+        UniqueConstraint("project_id", "id"),
         # The task is of the Item's Project, the key carrying `project_id`
         # once (DB assertion 176).
         ForeignKeyConstraint(

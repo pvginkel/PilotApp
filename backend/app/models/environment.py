@@ -28,6 +28,7 @@ class Environment(db.Model):  # type: ignore[name-defined]
     id: Mapped[str] = mapped_column(Text, primary_key=True)
     name: Mapped[str] = mapped_column(Text)
     server_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    started_pod_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     stop_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     exempt: Mapped[bool] = mapped_column(Boolean)
     last_state: Mapped[str | None] = mapped_column(Text)

@@ -21,6 +21,7 @@ class TestProject:
         assert project.name is None
         assert project.archived is False
         assert project.autopilot is False
+        assert project.paused is False
         assert project.created_at is not None
 
     def test_the_database_makes_a_new_project_a_draft(
@@ -30,12 +31,12 @@ class TestProject:
         row = session.execute(
             text(
                 "INSERT INTO projects (id, created_by_user_id) VALUES (:id, :user)"
-                " RETURNING state_code, archived, autopilot"
+                " RETURNING state_code, archived, autopilot, paused"
             ),
             {"id": uuid.uuid4(), "user": person.id},
         ).one()
 
-        assert tuple(row) == ("draft", False, False)
+        assert tuple(row) == ("draft", False, False, False)
 
     def test_numbers_count_up(self, session: Session, person: User) -> None:
         first = Project(created_by_user_id=person.id)
@@ -152,3 +153,26 @@ class TestProjectTransition:
         session.flush()
 
         assert transition.id is not None
+
+    def test_a_pause_and_a_resume_are_transitions(
+        self, session: Session, project: Project, person: User
+    ) -> None:
+        paused_at = datetime(2026, 10, 23, 9, tzinfo=UTC)
+        resumed_at = datetime(2026, 10, 23, 10, tzinfo=UTC)
+        session.add_all(
+            ProjectTransition(
+                project_id=project.id, kind_code=kind, at=at, by_user_id=person.id
+            )
+            for kind, at in (
+                (TransitionKind.PAUSED, paused_at),
+                (TransitionKind.RESUMED, resumed_at),
+            )
+        )
+        session.flush()
+
+        kinds = session.scalars(
+            select(ProjectTransition.kind_code)
+            .where(ProjectTransition.project_id == project.id)
+            .order_by(ProjectTransition.at)
+        ).all()
+        assert kinds == [TransitionKind.PAUSED, TransitionKind.RESUMED]
