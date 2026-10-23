@@ -81,13 +81,11 @@ test.describe('A finished project’s timeline', () => {
     await expect(projectList.tab(name, projectList.mine)).toHaveCount(0);
   });
 
-  test('pins no banner, not even over an urgent item Undo reopened after Finish', async ({ people, projects, timeline }) => {
+  test('pins no banner, not even over an urgent item placed after Finish', async ({ people, projects, timeline }) => {
     const me = await people.signIn();
-    const id = await projects.makeWithSession({ name: makeUnique('Reopened'), members: [me.handle!] });
-    const storm = await projects.place(id, { kind: 'question', title: 'Storm coming?', text: URGENT_QUESTION });
-    await projects.answer(storm, 'Q1', 'Inside');
+    const id = await projects.makeWithSession({ name: makeUnique('Late'), members: [me.handle!] });
     await projects.transition(id, 'finished');
-    await projects.undo(storm);
+    const storm = await projects.place(id, { kind: 'question', title: 'Storm coming?', text: URGENT_QUESTION });
     await timeline.open(id);
 
     await expect(timeline.item(storm).root).toHaveAttribute('data-state', 'open');
