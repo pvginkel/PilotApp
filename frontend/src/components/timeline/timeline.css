@@ -310,12 +310,19 @@
     cursor: pointer;
   }
   .settled:hover { background: hsl(var(--muted) / 0.6); }
-  .settled-main { display: flex; align-items: center; gap: 8px; min-width: 0; }
-  .settled-main .avatar { flex: none; }
-  .settled-main .heading { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-  .settled-main .sep { flex: none; opacity: 0.5; }
-  .settled-main .answer { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .settled-main .chevron { flex: none; color: hsl(var(--muted-foreground)); }
+  /* The heading and the answer grow alike from nothing, each up to its own width, so the one that
+     fits shows whole and the two split what is left; the chevron at the line's end. */
+  .settled-main {
+    display: grid;
+    grid-template-columns: auto minmax(0, max-content) auto minmax(0, max-content) 1fr;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  .settled-main .heading, .settled-main .answer { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .settled-main .heading { font-weight: 600; }
+  .settled-main .sep { opacity: 0.5; }
+  .settled-main .chevron { justify-self: end; color: hsl(var(--muted-foreground)); }
   .settled-note {
     display: block;
     min-width: 0;

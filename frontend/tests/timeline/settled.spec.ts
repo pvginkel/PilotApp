@@ -8,6 +8,7 @@
  * leaves it open; the counts, the bar and *Send answers* count it as the answered block it is.
  */
 
+import type { Locator } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import { addressOf } from '../support/page-objects/timeline-page';
@@ -93,6 +94,42 @@ test.describe('A section Pilot settled', () => {
     for (const block of ['D1', 'Q1', 'D3']) await expect(item.segment(block)).toHaveClass(/\bdone\b/);
     await expect(item.segment('A1')).not.toHaveClass(/\bdone\b/);
     await expect(item.send).toBeDisabled();
+  });
+
+  test('keeps the answer beside a heading wider than the line on a phone: a short answer whole, a long one sharing the line', async ({
+    page,
+    people,
+    projects,
+    timeline,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Narrow'), members: [me.handle!] });
+    const camp = [
+      '## Which of the three campsites around the lake do we book for the second weekend of the trip?\n',
+      `\`\`\`question id=Q1\nanswer: Lake Garda\nby: agent\n${AT}\n\`\`\`\n`,
+      '## Which of the two ferries across the lake do we take on the way back home on Sunday?\n',
+      `\`\`\`question id=Q2\nanswer: The late ferry from Riva, which leaves after dinner and lands before midnight\nby: agent\n${AT}\n\`\`\`\n`,
+    ].join('\n');
+    const trip = await projects.place(id, { kind: 'document', title: 'The trip', text: camp });
+    await timeline.open(id);
+    const item = timeline.item(trip);
+    const clipped = (part: Locator) => part.evaluate((element) => element.scrollWidth > element.clientWidth);
+    const width = async (part: Locator) => (await part.boundingBox())!.width;
+
+    const pitch = item.settledLine('Q1');
+    await expect(pitch.answer).toHaveText('Lake Garda');
+    expect(await clipped(pitch.heading)).toBe(true);
+    expect(await clipped(pitch.answer)).toBe(false);
+    expect(await width(pitch.answer)).toBeGreaterThan(0);
+
+    // Both too long for the line, each keeps a fair part of it.
+    const ferry = item.settledLine('Q2');
+    expect(await clipped(ferry.heading)).toBe(true);
+    expect(await clipped(ferry.answer)).toBe(true);
+    const [heading, answer] = [await width(ferry.heading), await width(ferry.answer)];
+    expect(answer).toBeGreaterThan((heading + answer) / 3);
+    expect(heading).toBeGreaterThan((heading + answer) / 3);
   });
 
   test('opens to the whole section on a click, its block read closed, and stays open as the timeline is read again', async ({
