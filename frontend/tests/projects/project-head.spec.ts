@@ -1,6 +1,7 @@
 /**
  * A project's head (F2): the name, the ticket and the repo, linked; the step button and the plan
- * popover (F2.2, F3); the plan's notes and a step's (F2.7, F3.6); the members (F2.5); the auto
+ * popover (F2.2, F3); the handbook's button (F129.4; its overlay in
+ * timeline/project-documents.spec.ts); the plan's notes and a step's (F2.7, F3.6); the members (F2.5); the auto
  * pilot switch, the Finished chip in its place (F2.6, F4.1); a draft's and an archived project's
  * head (D012); everything it opens closed on another project (F1.6); two rows on a narrow window.
  */
@@ -413,8 +414,8 @@ test.describe('The head on a narrow window', () => {
 
     await expect(projectHead.ticket).toBeVisible();
     await expect(projectHead.repo).toBeHidden();
-    const [name, autopilot, stepButton, members, notes] = await Promise.all(
-      [projectHead.name, projectHead.autopilot, projectHead.step, projectHead.members, projectHead.notesButton].map(
+    const [name, autopilot, stepButton, members, handbook, notes] = await Promise.all(
+      [projectHead.name, projectHead.autopilot, projectHead.step, projectHead.members, projectHead.handbookButton, projectHead.notesButton].map(
         async (locator) => (await locator.boundingBox())!,
       ),
     );
@@ -422,6 +423,8 @@ test.describe('The head on a narrow window', () => {
     expect(middle(autopilot)).toBeCloseTo(middle(name), -1);
     expect(stepButton.y).toBeGreaterThanOrEqual(autopilot.y + autopilot.height);
     expect(middle(members)).toBeCloseTo(middle(stepButton), -1);
+    expect(middle(handbook)).toBeCloseTo(middle(stepButton), -1);
+    expect(handbook.x).toBeGreaterThan(members.x + members.width);
     expect(middle(notes)).toBeCloseTo(middle(stepButton), -1);
     expect(notes.x + notes.width).toBeLessThanOrEqual(390);
   });

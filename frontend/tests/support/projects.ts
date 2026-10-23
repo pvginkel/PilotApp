@@ -4,7 +4,8 @@
  * lists read them. Every list also holds the seed's projects and those earlier specs of the
  * worker made. A project made with a session has items placed on its timeline as Pilot places
  * them, and saves of them as Pilot's (POST /api/testing/projects/<id>/items and
- * /api/testing/items/<id>/saves), its session's turn ended, a document it settled whole marked
+ * /api/testing/items/<id>/saves), its handbook and its project document saved
+ * (/api/testing/projects/<id>/{handbook,draft}/saves), its session's turn ended, a document it settled whole marked
  * Done by Pilot and files it copied attached to an item (/api/testing/items/<id>/attachments); they
  * are answered through the items API.
  */
@@ -59,6 +60,15 @@ export class Projects {
   /** A save of the item's text by the project's session: held for a fault, or published. */
   async save(itemId: string, text: string): Promise<Save> {
     const response = await this.page.request.post(`${this.backendUrl}/api/testing/items/${itemId}/saves`, { data: { text } });
+    expect(response.status(), await response.text()).toBe(200);
+    return (await response.json()) as Save;
+  }
+
+  /** A save of the project's handbook, or of its project document (`draft`), by the project's session. */
+  async saveProjectDocument(projectId: string, role: 'handbook' | 'draft', text: string): Promise<Save> {
+    const response = await this.page.request.post(`${this.backendUrl}/api/testing/projects/${projectId}/${role}/saves`, {
+      data: { text },
+    });
     expect(response.status(), await response.text()).toBe(200);
     return (await response.json()) as Save;
   }

@@ -1,7 +1,8 @@
 /**
  * A project's head (F2): its name, ticket and repo, linked (F2.1); auto pilot's switch, or the
  * Finished chip once finished (F2.6, F4.1); the step button and its plan (F2.2, F3); the members
- * (F2.5); the plan's notes (F2.7); the project's menu (F2.4). A draft's head has its name, the
+ * (F2.5); the handbook, opening in the overlay (F2.3, F129.4); the plan's notes (F2.7); the
+ * project's menu (F2.4). A draft, which has no handbook (F129.2), has in its head its name, the
  * Draft chip, its members and its menu. An archived project's reads as it was left, marked
  * archived, its switch not to be flipped (D012).
  *
@@ -10,7 +11,8 @@
  */
 
 import { useQueryClient } from '@tanstack/react-query';
-import { Archive, Flag } from 'lucide-react';
+import { Link } from '@tanstack/react-router';
+import { Archive, Flag, NotebookText } from 'lucide-react';
 import { NotesButton } from '@/components/projects/plan-notes';
 import { StepButton } from '@/components/projects/plan-popover';
 import { ProjectMenu } from '@/components/projects/project-menu';
@@ -57,10 +59,27 @@ export function ProjectHead({ project }: { project: Project }) {
       <div className="head-row">
         {!draft && <StepButton progress={project.progress} tasks={project.tasks} />}
         <Members members={project.members} />
+        {!draft && <HandbookButton projectId={project.id} />}
         {!draft && <NotesButton notes={project.notes} />}
         <ProjectMenu project={project} />
       </div>
     </header>
+  );
+}
+
+/** The handbook at its address, in the overlay. */
+function HandbookButton({ projectId }: { projectId: string }) {
+  return (
+    <Link
+      to="/projects/$projectId/handbook"
+      params={{ projectId }}
+      className="btn btn-ghost btn-sm btn-icon head-icon"
+      title="The handbook"
+      aria-label="The handbook"
+      data-testid="project.handbook"
+    >
+      <NotebookText className="icon" aria-hidden="true" />
+    </Link>
   );
 }
 

@@ -5,13 +5,15 @@
  * the document in the overlay over the timeline (F97), as a block's does where its document is a
  * card, at the block (F33). An attachment's address under an item's opens it in the overlay over
  * the timeline where the timeline stands, and under a document's in the document's overlay
- * (F28.5). Another project's address closes it.
+ * (F28.5). The handbook's address, and the project document's, open it in the overlay over the
+ * timeline (F129.4, F37.4). Another project's address closes it.
  */
 
 import { useEffect } from 'react';
-import { createFileRoute, useParams } from '@tanstack/react-router';
+import { createFileRoute, useMatch, useParams } from '@tanstack/react-router';
 import { ItemAttachmentOverlay } from '@/components/overlay/attachment-overlay';
 import { DocumentOverlay } from '@/components/overlay/document-overlay';
+import { HandbookOverlay, ProjectDocumentOverlay } from '@/components/overlay/project-document-overlay';
 import { ProjectHead } from '@/components/projects/project-head';
 import { isCard } from '@/components/timeline/document-state';
 import { Timeline } from '@/components/timeline/timeline';
@@ -36,12 +38,16 @@ function Project() {
     documentId !== undefined ? { documentId, block: null, attachment: attachmentId ?? null } : cardAt(addressed, blockId);
   const attached = itemId !== undefined && attachmentId !== undefined ? { itemId, attachmentId } : null;
   const goneTo = itemId === undefined || attached !== null ? null : { item: itemId, block: blockId ?? null };
+  const handbook = useMatch({ from: '/_shell/projects/$projectId/handbook', shouldThrow: false }) !== undefined;
+  const projectDocument = useMatch({ from: '/_shell/projects/$projectId/project-document', shouldThrow: false }) !== undefined;
   return (
     <>
       {data && <ProjectHead project={data} />}
       <Timeline projectId={projectId} address={goneTo} />
       {overlaid !== null && <DocumentOverlay projectId={projectId} project={data} {...overlaid} />}
       {attached !== null && <ItemAttachmentOverlay projectId={projectId} {...attached} />}
+      {handbook && <HandbookOverlay projectId={projectId} project={data} />}
+      {projectDocument && <ProjectDocumentOverlay projectId={projectId} project={data} />}
     </>
   );
 }

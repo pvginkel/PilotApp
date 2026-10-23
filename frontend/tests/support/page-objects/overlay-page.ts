@@ -10,7 +10,8 @@ import { blockParts, settledParts } from './timeline-page';
  * Pilot settled as their lines, its attachments, Pilot's dots, or "The document did not load"; its
  * foot; maximize, the cross and the backdrop. Showing an attachment (F28.5), its head is its title
  * over "Attachment of “<item>”" and, opened from the document, Back; its body the attachment by
- * its type.
+ * its type. Showing the handbook or the project document (F129.4, F37.4), its head is the title over
+ * the project and what it is; its body the prose and Pilot's dots, or *Empty*.
  */
 export class OverlayPage {
   readonly root: Locator;
@@ -20,6 +21,8 @@ export class OverlayPage {
   readonly sub: Locator;
   readonly back: Locator;
   readonly project: Locator;
+  /** What a read-only document of the project is: Handbook, Project document. */
+  readonly role: Locator;
   readonly step: Locator;
   readonly segments: Locator;
   readonly unsent: Locator;
@@ -35,6 +38,7 @@ export class OverlayPage {
   readonly settled: Locator;
   readonly settledLines: Locator;
   readonly writing: Locator;
+  readonly empty: Locator;
   readonly failed: Locator;
   readonly foot: Locator;
   readonly done: Locator;
@@ -62,6 +66,7 @@ export class OverlayPage {
     this.sub = this.root.getByTestId('overlay.sub');
     this.back = this.root.getByTestId('overlay.back');
     this.project = this.root.getByTestId('overlay.project');
+    this.role = this.root.getByTestId('overlay.role');
     this.step = this.root.getByTestId('overlay.step');
     this.segments = this.head.getByTestId('timeline.segment');
     this.unsent = this.head.getByTestId('timeline.item.unsent');
@@ -77,6 +82,7 @@ export class OverlayPage {
     this.settled = this.root.getByTestId('timeline.settled');
     this.settledLines = this.root.getByTestId('timeline.settled.line');
     this.writing = this.root.getByTestId('timeline.writing');
+    this.empty = this.root.getByTestId('overlay.empty');
     this.failed = this.root.getByTestId('overlay.failed');
     this.foot = this.root.getByTestId('overlay.foot');
     this.done = this.root.getByTestId('overlay.done');
@@ -103,14 +109,24 @@ export class OverlayPage {
 
   /** Opens a document at its own address, once its project's timeline and the document are read. */
   async open(projectId: string, documentId: string): Promise<void> {
-    const read = (scope: string) =>
-      waitTestEvent<UiStateTestEvent>(
-        this.page,
-        'ui_state',
-        (event) => event.scope === scope && event.phase === 'ready' && event.metadata?.status !== 'aborted',
-      );
-    const reads = Promise.all([read('project.timeline'), read('overlay.document')]);
+    const reads = Promise.all([this.read('project.timeline'), this.read('overlay.document')]);
     await this.page.goto(documentAddress(projectId, documentId));
+    await reads;
+  }
+
+  /** The next read of the scope, done. */
+  private read(scope: string) {
+    return waitTestEvent<UiStateTestEvent>(
+      this.page,
+      'ui_state',
+      (event) => event.scope === scope && event.phase === 'ready' && event.metadata?.status !== 'aborted',
+    );
+  }
+
+  /** Opens the project's handbook, or its project document, at its address, once its project's timeline and it are read. */
+  async openProjectDocument(projectId: string, role: 'handbook' | 'draft'): Promise<void> {
+    const reads = Promise.all([this.read('project.timeline'), this.read(`overlay.${role}`)]);
+    await this.page.goto(role === 'handbook' ? handbookAddress(projectId) : projectDocumentAddress(projectId));
     await reads;
   }
 
@@ -142,4 +158,14 @@ export function documentAttachmentAddress(projectId: string, documentId: string,
 /** A document's address under its project's (F97). */
 export function documentAddress(projectId: string, documentId: string): string {
   return `/projects/${projectId}/documents/${documentId}`;
+}
+
+/** The project's handbook's address under its project's (F129.4). */
+export function handbookAddress(projectId: string): string {
+  return `/projects/${projectId}/handbook`;
+}
+
+/** The project document's address under its project's (F37.4). */
+export function projectDocumentAddress(projectId: string): string {
+  return `/projects/${projectId}/project-document`;
 }
