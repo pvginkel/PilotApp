@@ -22,7 +22,9 @@ number):
 | `STAGE` | `dev` | `prd` |
 | The record's testing endpoints ([`projects.md`](projects.md)) | answer a signed-in editor | refused, `400` |
 | KubeCoder | `https://kubecoder-dev.home` | `https://kubecoder.home` |
-| OpenBao leaves | `eso/prd/pilot/dev/{oidc,kubecoder}` | `eso/prd/pilot/prd/{oidc,kubecoder}` |
+| Store environment | `pvginkel-pilotprojects-d75970` | `pvginkel-pilotprojects-8b0225` |
+| The store's `pilot-sync` | `:dev-latest` | `:prd-latest` |
+| OpenBao leaves | `eso/prd/pilot/dev/{oidc,kubecoder,sync}` | `eso/prd/pilot/prd/{oidc,kubecoder,sync}` |
 | Database | `pilot_dev_db` | `pilot_prd_db` |
 
 ## How a change gets to dev
@@ -63,23 +65,27 @@ succeeded, so `prd` never pins a tag that does not exist:
    it is.
 2. **Advance `prd`.** `prd` fast-forwards to the commit, in a push with no force, which is refused
    unless it fast-forwards. `pilot-prd` syncs it and rolls its pod (below).
-3. **Tag the release.** An annotated tag `release-<m>`, `<m>` the job's build number, goes on the
+3. **Move `pilot-sync:prd-latest`** to that build's `pilot-sync:prd-<n>`, so it names the sidecar
+   of the build `prd` runs, a rollback's older build included. Production's store runs it
+   ([the store environments](#the-store-environments)).
+4. **Tag the release.** An annotated tag `release-<m>`, `<m>` the job's build number, goes on the
    commit, its message naming the three images.
 
 Production therefore runs only commits of `main`, which dev follows, and images retagged from a
-build's `dev-<n>`. A re-run for the commit `prd` already names finishes a promotion whose tag
-failed, or changes nothing when a release tag records it. A run with `commit` empty that would move
-`prd` refuses while no release tag records `prd`'s tip, so a stuck promotion is never passed over;
-the one tip it admits unrecorded is the commit `prd` was created at by hand before the first
-promotion, whose `config/prd` pins bare build numbers. A second run waits for the first: an abort
-between its pushes would leave a promotion half made.
+build's `dev-<n>`. A re-run for the commit `prd` already names finishes a promotion whose
+`prd-latest` move or tag failed, running those two steps alone, or changes nothing when a release
+tag records it. A run with `commit` empty that would move `prd` refuses while no release tag
+records `prd`'s tip, so a stuck promotion is never passed over; the one tip it admits unrecorded is
+the commit `prd` was created at by hand before the first promotion, whose `config/prd` pins bare
+build numbers. A second run waits for the first: an abort between its steps would leave a promotion
+half made.
 
 **A rollback is a revert on PilotDeploy's `main`, promoted** like any other commit: the job has no
 rollback parameter and never moves `prd` backwards. The revert of a pin commit pins the build
-before it again, which the promotion retags unless an earlier one already has, and rolls dev back
-first, as every commit on `main` does. The next green PilotApp build pins its own images over the
-revert. A revert cannot take production back past its first promotion: the commit before it pins
-bare build numbers, which the job refuses.
+before it again, which the promotion retags unless an earlier one already has, moving `prd-latest`
+back to that build's sidecar, and rolls dev back first, as every commit on `main` does. The next
+green PilotApp build pins its own images over the revert. A revert cannot take production back past
+its first promotion: the commit before it pins bare build numbers, which the job refuses.
 
 ## The roll
 
@@ -104,9 +110,12 @@ objects into each stage's namespace:
   Flask API and the SSE stream, port 3501) and `ui` (the SPA's nginx, port 3500, which proxies
   `/api/` to the backend). `migrate` and `backend` run with the stage's `STAGE` and with
   `HOMELAB_INTERNAL` true in both stages.
-  The backend serves the store's sync routes, `/api/sync/` ([`sync.md`](sync.md)), and refuses
-  every call to them: the chart sets neither `SYNC_TOKEN` nor `STORE_ENVIRONMENT_ID`, and either
-  one empty refuses all (D007).
+  The backend serves the store's sync routes, `/api/sync/` ([`sync.md`](sync.md)), to the stage's
+  store environment alone ([below](#the-store-environments)): `store.environmentId` in the values
+  as `STORE_ENVIRONMENT_ID`, and the store's bearer as `SYNC_TOKEN`, from the Secret `pilot-sync`.
+  That reference is optional: a backend started while the Secret is absent runs with `SYNC_TOKEN`
+  unset, which refuses every sync call, until its next start, and never fails to start for it.
+  `migrate` sets neither.
   The backend's link settings ([`ui.md`](ui.md)) come from `links` in the values:
   `ticketUrlTemplate` as `TICKET_URL_TEMPLATE` and `environmentLinkBaseUrl` as
   `ENVIRONMENT_LINK_BASE_URL`, each left unset where the values say nothing. Both stages' ticket
@@ -130,9 +139,33 @@ objects into each stage's namespace:
   hand step. Prometheus scrapes the backend's `/metrics` on port 3501.
 - The secrets below.
 
-`pilot-sync`, the third image, is built for the store environment's pod, which KubeCoder composes
-from its catalog; nothing PilotDeploy renders runs it, and nothing pins it (D007). Each build tags
-it `dev-<n>` and `dev-latest`, and a promotion tags it `prd-<n>` with the two pinned images.
+## The store environments
+
+Each stage has a store: a KubeCoder environment of `pvginkel/PilotProjects` on the stage's fleet,
+whose `pilot-sync` sidecar is the one sidecar the stage's sync admits ([`sync.md`](sync.md)). The
+dev stage's is `pvginkel-pilotprojects-d75970` on `kubecoder-dev`, production's
+`pvginkel-pilotprojects-8b0225` on KubeCoder's production fleet, each named by
+`store.environmentId` in `config/<stage>/values.yaml`. Nothing PilotDeploy renders runs
+`pilot-sync`, the third image: KubeCoder composes it into the store's pod from its catalog entry,
+which is KubeCoderDeploy's.
+
+**The image floats per stage and is pinned nowhere** (D029). Each build tags it `dev-<n>` and
+`dev-latest`, and a promotion tags it `prd-<n>` with the two pinned images and then moves
+`prd-latest` to it (above). The catalog entry names `registry:5000/pilot-sync:dev-latest` in
+KubeCoderDeploy's `config/dev/values.yaml` and `:prd-latest` in its `config/prd/values.yaml`, with
+no pull policy: `registry:5000` is one of KubeCoder's digest registries, so each start of the store
+composes the sidecar at the digest its tag names then. A new build reaches the dev store at its next
+start, and a promotion reaches production's at its next. A pinned tag would make every sidecar
+change a KubeCoderDeploy commit, and on production a KubeCoder promotion after each of Pilot's.
+Until the store's next start its sidecar may be older than the server, and the sync's protocol
+version keeps an incompatible one out: a sidecar outside the server's range is answered `426`.
+
+**How a change reaches a store.** A push to KubeCoderDeploy's `main` rolls `kubecoder-dev`'s
+controller onto the catalog entry, and production's reaches KubeCoder's production fleet through
+KubeCoder's own promotion, `KubeCoder/Promote-PRD`. PilotProjects' files, the service list and the
+hook among them, reach a store's checkout when the stopped environment is reset
+(`POST /environments/<id>/reset` on the stage's controller), which clones it again from the repo
+and empties the sidecar's data, its shadow with it.
 
 ## The database
 
@@ -160,6 +193,13 @@ reads its own OpenBao leaves, under `eso/prd/pilot/<stage>/`, through the `openb
   is the operator's to write, to the stage's `kubecoder` leaf (`token`): production's is for
   `https://kubecoder.home`, dev's for `https://kubecoder-dev.home`. The ExternalSecret
   `pilot-kubecoder` brings it into the namespace.
+- **The store's sync bearer** is the operator's to write: a random token per stage, the same value
+  in two leaves (D030). Pilot's is the stage's `sync` leaf (`token`), which the ExternalSecret
+  `pilot-sync` brings into the namespace for the backend's `SYNC_TOKEN`. It reads that leaf alone
+  and no other ExternalSecret reads it, so a missing leaf leaves only the sync refused. KubeCoder's
+  is the key `pilot-sync-token` of the same stage's KubeCoder catalog leaf,
+  `eso/prd/kubecoder/<stage>/catalog`, which KubeCoder reads whole and hands to the store's sidecar
+  as `PILOT_SYNC_TOKEN`.
 - **Flask's `SECRET_KEY` and the drain endpoint's `DRAIN_AUTH_KEY`** are generated in each
   namespace, once, by External Secrets `Password` generators, into the Secrets `pilot-secret-key`
   and `pilot-drain-auth`.

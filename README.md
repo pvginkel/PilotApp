@@ -16,11 +16,12 @@ project yet, so production's list is empty. Beneath the screens are the record's
 engine behind it: the block DSL, the parse gate and the merge by ownership, the record's own writes,
 and the rendered `timeline.json`, `reference.json` and `plan.json`
 ([`docs/engine.md`](docs/engine.md)); and the sync that keeps the store environment's tree in step
-with the record: the `/api/sync` routes and `pilot-sync`, the Go sidecar
-([`docs/sync.md`](docs/sync.md)), which no deployed stage switches on yet; and the server's jobs on
-the KubeCoder controller: the environments Pilot starts and stops, and the sessions it runs there,
-recorded and streamed live ([`docs/sessions.md`](docs/sessions.md)). Each stage follows its own
-KubeCoder's fleet stream and starts nothing yet. It is built on the ModernAppTemplate stack (Flask
-on PostgreSQL, React + Vite, Playwright), which CI builds and Argo CD deploys: every green build to
-the dev stage at `https://pilot-dev.home`, and production at `https://pilot.ginbov.nl` when the
-operator promotes it ([`docs/deployment.md`](docs/deployment.md)).
+with the record: the `/api/sync` routes and `pilot-sync`, the Go sidecar, in each stage's store
+environment, with the hook that tells the brain what the record made of each edit
+([`docs/sync.md`](docs/sync.md)); and the server's jobs on the KubeCoder controller: the
+environments Pilot starts and stops, and the sessions it runs there, recorded and streamed live
+([`docs/sessions.md`](docs/sessions.md)). Each stage follows its own KubeCoder's fleet stream and
+starts nothing yet. It is built on the ModernAppTemplate stack (Flask on PostgreSQL, React + Vite,
+Playwright), which CI builds and Argo CD deploys: every green build to the dev stage at
+`https://pilot-dev.home`, and production at `https://pilot.ginbov.nl` when the operator promotes it
+([`docs/deployment.md`](docs/deployment.md)).

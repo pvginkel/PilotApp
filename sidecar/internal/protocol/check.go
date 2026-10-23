@@ -13,9 +13,11 @@ import (
 type CheckAnswer struct {
 	// Checked says whether the server agrees the file holds the hash posted.
 	Checked bool `json:"checked"`
-	// Errors is every Save Error of the store's tree, in path order.
+	// Errors is the Save Errors of the file's project folder, in path order,
+	// or the file's own under no syncing project's folder.
 	Errors []SaveError `json:"errors"`
-	// HomelessDeferrals is every deferral without a home.
+	// HomelessDeferrals is the file's project's deferrals without a home,
+	// none under no syncing project's folder.
 	HomelessDeferrals []HomelessDeferral `json:"homeless_deferrals"`
 }
 

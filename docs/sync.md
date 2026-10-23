@@ -22,7 +22,12 @@ this order before anything is read:
 | `X-Pilot-Sync-Protocol: <version>` | `426` with `{"min", "max"}`, the versions the server serves, for a version outside them, a value that is not decimal digits, or none |
 
 A call the gate refuses touches nothing. One it lets through makes the store's Environment row when
-there is none, its `name` its id.
+there is none. While a controller is configured ([`controller.md`](controller.md)), the row is the
+controller's report of the store (`EnvironmentService.ensure_environment`), so its name and its
+exemption, PilotProjects' `capacityExempt`, are the fleet's from the row's first moment: the start
+job can start the store, and the shutdown timer never stops it. While that row is still to be
+made, a call is answered `502`, and makes none, when the controller does not report the store or
+cannot be reached. With no controller, the row is named by the store's id and not exempt.
 
 **The protocol version.** The server serves `SYNC_PROTOCOL_MIN` to `SYNC_PROTOCOL_MAX`
 (`backend/app/services/sync_service.py`), both 1, and `pilot-sync` speaks `protocol.Version`, 1. A
@@ -33,8 +38,8 @@ server's `SYNC_PROTOCOL_MAX` in one commit.
 
 A path is from the tree's root, with forward slashes (`recipe-box/items/4-card-layout.md`). A hash
 is the sha256 of a file's bytes in lowercase hex, and a path's tree hash is the hash of what its
-file must hold ([`projection.md`](projection.md)). Every route answers the gate's `401`, `403` and
-`426` besides its own statuses.
+file must hold ([`projection.md`](projection.md)). Every route answers the gate's `401`, `403`,
+`426` and `502` besides its own statuses.
 
 | Route | Takes | Answers |
 |---|---|---|
@@ -65,8 +70,8 @@ is not 64 lowercase hex digits included, is a `400`.
   NUL, `1` for a read-only path or `0`, and a newline.
 - `change`, `{"path", "hash"}`: a path's tree hash moved, sent once the transaction that moved it
   has committed (the bus's `TreeHashMoved`, [`engine.md`](engine.md)).
-- `manifest`, `{}`: the set of syncing projects changed (the bus's `ManifestChanged`). Nothing in
-  the record raises it yet; the testing endpoint below does.
+- `manifest`, `{}`: the set of syncing projects changed (the bus's `ManifestChanged`): a project
+  archived or brought back ([`projects.md`](projects.md)), and the testing endpoint below.
 
 A `: heartbeat` comment follows `SYNC_HEARTBEAT_SECONDS` without an event. There is no `id:` field
 and no replay: the sidecar's hashes are its cursor, and a reconnect reconciles. The stream ends on
@@ -110,15 +115,20 @@ waited for that (at least 0). It answers:
   checks true by the save's hash as well as by the bytes written. A held `plan.json`, whose save is
   stored nowhere, agrees with any hash while its `parse` Save Errors stand. Otherwise, and for a
   path that names nothing, it is false, logged.
-- `errors`: every Save Error of the store's Environment, `{"path", "kind", "line", "message"}`, by
-  path and then in the order raised. A `reverted` one is reported once: the statement that reads
-  them deletes them. A `parse` one stands until a clean save of its path.
-- `homeless_deferrals`: every deferral without a home, `{"block", "document", "title", "to"}`,
-  computed at the check and never stored: a block answered `deferred` in the document of a done
-  item, deferred to a plan task that is not done or to the plan of a project that is not finished,
-  that no plan note names, a struck note's reference counting. `block` is `<item id>/<local id>`,
-  `document` its path from the tree's root, `title` its item's (null while it has none) and `to`
-  the task or `plan`, in project, item and block order (`PlanService.homeless_deferrals()`).
+- `errors`: the Save Errors of the store's Environment in the file's project folder, `{"path",
+  "kind", "line", "message"}`, by path and then in the order raised. The folder is the `<slug>/` or
+  `draft-<number>/` the path starts with, when a syncing project has it
+  (`TreeService.project_of`); a path under no syncing project's folder, at the tree's root or in an
+  archived project's, is answered its own Save Errors alone. A `reverted` one is reported once, to
+  its project's check: the statement that reads them deletes them, so another project's check never
+  takes it. A `parse` one stands until a clean save of its path.
+- `homeless_deferrals`: the deferrals without a home of the file's project, `{"block", "document",
+  "title", "to"}`, computed at the check and never stored: a block answered `deferred` in the
+  document of one of its done items, deferred to a plan task that is not done or to the plan while
+  the project is not finished, that no plan note names, a struck note's reference counting. `block`
+  is `<item id>/<local id>`, `document` its path from the tree's root, `title` its item's (null
+  while it has none) and `to` the task or `plan`, in item and block order
+  (`PlanService.homeless_deferrals(project)`). None for a path under no syncing project's folder.
 
 ## Settings and metrics
 
@@ -179,9 +189,10 @@ writes a file of the record back down.
 
 **Down.** The sidecar holds the change stream open. It reconciles on every connect, then applies
 the events until the stream drops: a path's `change` events are gathered for 100 ms, and the path
-is fetched unless the hash is its shadow's; a `manifest` asks for a reconcile; an event it does not
-know is logged and ignored. A drop, a `401` or a `403` reconnects after 1 s, doubling to 30 s, and
-back to 1 s once a connection has reconciled. A `426` retries every 60 s, logging the server's
+is fetched unless the hash is its shadow's, a fetch answered `404`, a path no longer the record's,
+left for the reconcile; a `manifest` asks for a reconcile; an event it does not know is logged and
+ignored. A drop or any refusal but a `426`, a `401`, a `403` or the gate's `502` among them,
+reconnects after 1 s, doubling to 30 s, and back to 1 s once a connection has reconciled. A `426` retries every 60 s, logging the server's
 range and its own version.
 
 **The reconcile** runs on every connect, on `manifest`, and when the watch's kernel queue overflows,
@@ -206,7 +217,7 @@ shadow does not hold goes up, and the rendering the server answers is written 04
 
 ## The local check
 
-The sidecar serves the store's hook on `127.0.0.1:<PILOT_SYNC_LOCAL_PORT>`, in `text/plain`:
+The sidecar serves the store's hook (below) on `127.0.0.1:<PILOT_SYNC_LOCAL_PORT>`, in `text/plain`:
 
 - `GET /healthz`: `200`, `ok`.
 - `GET /check?path=<absolute path>`: the check of a file of the tree after an edit. When the file
@@ -227,6 +238,16 @@ notes are what the sidecar knows of a file that the server holds no Save Error f
   answered `404`, kept until the file is taken by a put, written down, deleted or gone;
 - `a read-only view; re-projected`, on a view whose write was undone, printed by one check.
 
+**The hook** is `pvginkel/PilotProjects`' `.claude/hooks/pilot-sync-check.py`, which its
+`.claude/settings.json` runs after every `Edit` and `Write` (`PostToolUse`, a 5 s timeout), so a
+session whose project directory is the store's checkout of PilotProjects has it. It reads the tool's
+`file_path` and asks nothing for a path outside `/work/Projects/`. For one inside, it calls
+`/check?path=` on `127.0.0.1`, at the port its own `PILOT_SYNC_LOCAL_PORT` names or `3510`, the port
+both stages' sidecars serve, with a 3 s cap, and hands a non-empty answer to the agent as the tool
+result's `additionalContext`. An empty answer, an error status, a refused connection or the cap
+adds nothing, and it exits 0 every time, so it never stops a turn. PilotProjects' `kc project test`
+runs it against a stand-in for the sidecar.
+
 ## The image
 
 `sidecar/Dockerfile` builds `pilot-sync` static (`CGO_ENABLED=0`) on the Go toolchain image the
@@ -234,6 +255,23 @@ tests run on, into `scratch` with the CA bundle and `/pilot-sync` as its entrypo
 user: the pod's security context gives it the environment's uid, so what it writes the agent can
 edit. `kaniko --no-push --context sidecar` builds it here; every green build of `main` pushes it
 ([`deployment.md`](deployment.md)).
+
+## In the store
+
+`pilot-sync` runs in each stage's store environment, a KubeCoder environment of
+`pvginkel/PilotProjects` on the stage's fleet, the one `STORE_ENVIRONMENT_ID` names
+([`deployment.md`](deployment.md)). PilotProjects' `.kubecoder/config.yaml` lists the service
+`pilot-sync`, and KubeCoder composes the sidecar into the store's pod from its catalog entry,
+`controllerConfig.services.pilot-sync` in `pvginkel/KubeCoderDeploy`. Its `chart/values.yaml` holds
+what the stages share: `mountWork: true`, so the sidecar sees `/work` and the tree in it;
+`dataPath: /var/lib/pilot-sync`, where the shadow is kept for the environment; the bearer,
+`PILOT_SYNC_TOKEN`, from the catalog secret `pilot-sync-token`; a 128 MiB memory limit; no security
+context, so it runs as the pod's uid; and no ports, since the hook calls it on the pod's own
+localhost. Each `config/<stage>/values.yaml` sets the stage's image and its `env` whole:
+`PILOT_URL`, `https://pilot-dev.home` or `https://pilot.ginbov.nl`, and `PILOT_SYNC_LOCAL_PORT`
+`3510`. KubeCoder gives it `KUBECODER_ENVIRONMENT_ID`. The image has no shell; its log is the
+container's, `kubectl logs <store id> -c pilot-sync -n kubecoder-dev`, `-n kubecoder-prd` for
+production's store.
 
 ## Testing it
 
@@ -244,7 +282,8 @@ edit. `kaniko --no-push --context sidecar` builds it here; every green build of 
   bytes and to hash, and its change stream is open from the start. `write` and `remove` are the
   agent's edits, unseen; `save` writes and uploads, asserting the server took the path; `upload`
   puts one path, a `404` noted as the sidecar notes it; `drain()` applies what the stream carried up
-  to its heartbeat (the suite's is 0.01 s), fetching each `change` and reconciling on `manifest`;
+  to its heartbeat (the suite's is 0.01 s), fetching each `change`, one answered `404` left for the
+  reconcile as the sidecar leaves it, and reconciling on `manifest`;
   `connect()` reopens the stream and reconciles, `overflow()` reconciles; `check(path)` answers
   whether the server agreed and the text for the agent. The engine's tests use it too.
 - **The sidecar.** `kc project test --project sidecar` runs `go test -race ./...`. The tests play

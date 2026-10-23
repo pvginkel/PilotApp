@@ -177,7 +177,7 @@ already emitted in the transaction is delivered once.
 | `DocumentModified(project_id, path)` | on every save of a document, held or published; the record's own writes raise none |
 | `ErrorsRaised(project_id, path)` | on every held save |
 | `ErrorsResolved(project_id, path)` | on a clean save after a held one, and when a held `plan.json` is written down |
-| `ManifestChanged()` | when the set of syncing projects changed; nothing in the record raises it yet, and the sync's testing endpoint does |
+| `ManifestChanged()` | when the set of syncing projects changed: a project archived or brought back ([`projects.md`](projects.md)), and the sync's testing endpoint |
 | `ProjectChanged(project_id)` | when what the project's timeline, head or tab shows moved: with every `TreeHashMoved` of its `timeline.json`; on a publish that changes an item's published text, a record write on a held item included; on a save that holds an item or ends its hold; on a save of `plan.json` that moved its rendering. `ProjectEventService` sends it to the browsers ([`timeline.md`](timeline.md)) |
 
 ## Testing it

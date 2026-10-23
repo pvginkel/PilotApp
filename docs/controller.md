@@ -92,8 +92,8 @@ Session is `running` or `starting` there.
 
 - `ensure_environment(db, env_id)` makes the Environment row from the controller's own report on
   Pilot's first touch of the environment, in the caller's transaction, and leaves a row that exists
-  as it is. A Session's row needs it; the controller's `404` raises `ControllerProblem`
-  `not-found`.
+  as it is. A Session's row needs it, and the sync's gate makes the store's row through it
+  ([`sync.md`](sync.md)); the controller's `404` raises `ControllerProblem` `not-found`.
 - `start(env_id) -> ControllerEnvironment` brings the environment up and waits until it settles.
   The `start` goes without `wait`, since only then does its answer say whether this call
   scheduled the bring-up: on `202` it commits `server_started_at` (`Started environment <id>`), on

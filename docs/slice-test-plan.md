@@ -37,8 +37,9 @@ Three things follow:
   driver writes beside the lease. Nothing in this doc takes or frees it.
 
 What the checks cannot show from here is reported as *not verified*: production after a promotion,
-and anything that needs a part of the fleet no slice has wired into the deployment yet (a store
-environment, YouTrack). The KubeCoder controller is wired: what Pilot does with it is proven on a
+its store included, and anything that needs a part of the fleet no slice has wired into the
+deployment yet (YouTrack). The dev stage's store is wired, and a check that needs it works it
+(step 4.7). The KubeCoder controller is wired: what Pilot does with it is proven on a
 real turn against `kubecoder-dev` (§2, the fleet's live check), and `pilot-dev` shows only that its
 backend reaches that controller (step 4.3), since no route of a deployed stage starts anything yet.
 
@@ -629,9 +630,10 @@ POD=$(cexec iac kubectl -n pilot-dev get pods -l app.kubernetes.io/name=pilot -o
    cexec iac kubectl -n pilot-dev logs $POD -c backend | grep -E 'Fleet stream connected|Loop fleet'
    ```
 
-4. **The secrets.** Four ExternalSecrets, each `SecretSynced` and ready: `pilot-oidc` and
-   `pilot-kubecoder` (from `openbao-prd`, `eso/prd/pilot/dev/oidc` and
-   `eso/prd/pilot/dev/kubecoder`) and the generated `pilot-secret-key` and `pilot-drain-auth`:
+4. **The secrets.** Five ExternalSecrets, each `SecretSynced` and ready: `pilot-oidc`,
+   `pilot-kubecoder` and `pilot-sync` (from `openbao-prd`, `eso/prd/pilot/dev/oidc`,
+   `eso/prd/pilot/dev/kubecoder` and `eso/prd/pilot/dev/sync`) and the generated `pilot-secret-key`
+   and `pilot-drain-auth`:
 
    ```bash
    cexec iac kubectl -n pilot-dev get externalsecrets
@@ -639,7 +641,8 @@ POD=$(cexec iac kubectl -n pilot-dev get pods -l app.kubernetes.io/name=pilot -o
    ```
 
    The Secrets themselves are unreadable here: the running backend (step 3's database connection and
-   fleet stream, step 6's sign-in) is what shows they reached it.
+   fleet stream, step 6's sign-in, the store's sync calls answered with no `401`) is what shows they
+   reached it.
 
 5. **The site and its certificate.** `200`, curl exit `0`, against the homelab root alone; the
    certificate the homelab CA's (issuer `homelab-ca Intermediate CA`), for `pilot-dev.home`; the
@@ -730,6 +733,21 @@ POD=$(cexec iac kubectl -n pilot-dev get pods -l app.kubernetes.io/name=pilot -o
 
    The UI shows the signed-in person, so a check reads what it checks, never a page's text whole.
    When the phase ends, `rm -rf tmp/dev-session tmp/dev-ui`: the cookies are a live session.
+
+   **The dev stage's store**, `pvginkel-pilotprojects-d75970` on `kubecoder-dev`
+   ([`deployment.md`](deployment.md)), is the slices' own, as `pilot-dev` is. A check that needs it
+   reads its sidecar's log, and stops, starts or resets it through `kubecoder-dev`'s API with
+   Pilot's dev credential. A reset, of a stopped store, clones PilotProjects' `main` again and
+   empties the sidecar's data, so a push to PilotProjects reaches the store that way. A session
+   there whose working directory is `/work/PilotProjects` gets the hook ([`sync.md`](sync.md)).
+   Production's store is never touched:
+
+   ```bash
+   STORE=pvginkel-pilotprojects-d75970
+   cexec iac kubectl -n kubecoder-dev logs $STORE -c pilot-sync --tail=50
+   curl -s -m 15 -o /dev/null -w '%{http_code}\n' -X POST -H "Authorization: Bearer $PILOT_DEV_CONTROLLER_TOKEN" \
+     "https://kubecoder-dev.home/environments/$STORE/stop"   # or start, or reset once stopped; 200 or 202
+   ```
 
 8. **The builds.** Each of `PilotApp/Build-Main` and `AaC/PilotApp` has a green latest build, and
    `AaC/PilotDeploy` too where the phase pushed `prd` (a first deploy's step 2). `PilotApp/Promote-PRD`

@@ -178,8 +178,10 @@ secure context). The worker caches nothing. It answers only a navigation the net
 with one line, "Pilot is unreachable. Try again when you are back on the network.", and never a
 request under `/api/`, where sign-in, its callback and sign-out are. The UI's nginx caches the
 build's hashed `/assets/` for a year and has the browser revalidate the root's files — the icons,
-the logo, the manifest, the worker — on every load, so a changed icon shows under its name (a
-standing edit of the template's `nginx.conf`, `CLAUDE.md`).
+the logo, the manifest, the worker — on every load, so a changed icon shows under its name. It hands
+every path under `/api/` to the backend, whatever its extension, so the cache rule never answers
+one from the static root, the sync's `/api/sync/files/*.json` among them. Both are standing edits
+of the template's `nginx.conf` (`CLAUDE.md`), which `tests/infrastructure/nginx.spec.ts` pins.
 
 ## Testing it
 

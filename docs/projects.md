@@ -66,6 +66,8 @@ The `editor` role is the whole of the check: anyone who holds it changes any pro
 holds the project's row first (`FOR NO KEY UPDATE`), so two changes of one project never
 interleave. A transition emits a `TreeHashMoved` of the project's `timeline.json`, which shows its
 state, `archived` and `autopilot` ([`projection.md`](projection.md)); a membership moves no file.
+Archive and Bring back emit `ManifestChanged` too: the project's folder leaves the store's tree, or
+comes back to it as the record renders it, once the transition commits ([`sync.md`](sync.md)).
 
 ## The project list
 

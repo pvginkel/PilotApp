@@ -66,9 +66,10 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
 
 **Sessions and environments**
 
-- `environments`: a KubeCoder environment Pilot has touched, keyed by its environment id. The
-  store's row is made by its sidecar's first sync call ([`sync.md`](sync.md)), and a session start
-  makes one from the controller's report when it first touches the environment. The fleet stream
+- `environments`: a KubeCoder environment Pilot has touched, keyed by its environment id. A
+  session start makes the row from the controller's report when it first touches the environment,
+  and the store's sidecar's first sync call makes the store's the same way ([`sync.md`](sync.md)),
+  or by its id alone while no controller is configured. The fleet stream
   keeps its `name`, `last_state`, `last_seen_at` and `exempt` current; `server_started_at` says that
   Pilot started it, and `stop_due_at` is when Pilot stops it ([`controller.md`](controller.md)).
 - `sessions`: a run of a Claude Code conversation in one environment, for one project, of a session
