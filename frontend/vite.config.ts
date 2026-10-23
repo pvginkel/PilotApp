@@ -116,6 +116,9 @@ const backendProxyTarget = process.env.BACKEND_URL || 'http://localhost:3501'
 
 export default defineConfig({
   plugins: [tailwindcss(), react(), versionPlugin(), backendProxyStatusPlugin(backendProxyTarget)],
+  // A Playwright dev server's own (tests/support/process/servers.ts):
+  // node_modules/.vite when unset.
+  cacheDir: process.env.VITE_CACHE_DIR,
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

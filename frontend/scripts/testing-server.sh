@@ -1,9 +1,10 @@
 #!/bin/bash
 
 # Frontend testing server script for Playwright integration.
-# Runs the Vite dev server per worker with isolated optimize cache directories,
-# or, with --preview, `vite preview` on dist/: a production build made with
-# `VITE_TEST_MODE=true pnpm build`, so the Playwright bridges are in it.
+# Runs the Vite dev server, pre-bundling into the VITE_CACHE_DIR its caller
+# gives it (tests/support/process/servers.ts), or, with --preview, `vite
+# preview` on dist/: a production build made with `VITE_TEST_MODE=true pnpm
+# build`, so the Playwright bridges are in it.
 
 set -euo pipefail
 
@@ -80,10 +81,5 @@ if [ "${PREVIEW_MODE}" = "true" ]; then
   echo "Preview mode: serving the production build in dist/" >&2
   exec node_modules/.bin/vite preview --host "${HOST}" --port "${PORT}" --strictPort --mode test
 fi
-
-cache_root="node_modules/.tmp/vite-playwright"
-cache_dir="${cache_root}-${PORT}"
-mkdir -p "${cache_root}"
-export VITE_CACHE_DIR="${cache_dir}"
 
 exec node_modules/.bin/vite --host "${HOST}" --port "${PORT}" --strictPort --mode test

@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { rm } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import getPort from 'get-port';
@@ -89,6 +90,11 @@ export async function startFrontend(options: {
         });
 
   const scriptPath = resolve(getFrontendRepoRoot(), './scripts/testing-server.sh');
+  // The server's own dependency cache, removed when it stops. Two dev servers
+  // sharing one swap its deps/ under each other's pages on a cold start, which
+  // then get 504 Outdated Optimize Dep.
+  const cacheDir = resolve(getFrontendRepoRoot(), 'node_modules/.tmp/vite-playwright', String(port));
+  const removeCache = () => rm(cacheDir, { recursive: true, force: true });
   const args = ['--host', HOSTNAME, '--port', String(port)];
   // Serve the production build in dist/ instead of the dev server. It must be
   // built with VITE_TEST_MODE=true, or the Playwright bridges are missing.
@@ -96,7 +102,7 @@ export async function startFrontend(options: {
     args.push('--preview');
   }
 
-  return startService({
+  const handle = await startService({
     workerIndex: options.workerIndex,
     port,
     serviceLabel: 'frontend',
@@ -109,8 +115,20 @@ export async function startFrontend(options: {
       ...process.env,
       BACKEND_URL: options.backendUrl,
       VITE_TEST_MODE: 'true',
+      VITE_CACHE_DIR: cacheDir,
     },
+  }).catch(async (error: unknown) => {
+    await removeCache();
+    throw error;
   });
+
+  return {
+    ...handle,
+    dispose: async () => {
+      await handle.dispose();
+      await removeCache();
+    },
+  };
 }
 
 type ServiceLabel = 'backend' | 'frontend';
