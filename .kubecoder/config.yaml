@@ -19,6 +19,7 @@ repos:
 
 capabilities:
   github: rw
+  fleetAdmin: true
 
 secrets:
   # Pilot's KubeCoder client token for kubecoder-dev.home, the controller the
