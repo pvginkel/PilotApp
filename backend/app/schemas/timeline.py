@@ -286,8 +286,9 @@ class TimelineItemSchema(BaseModel):
     )
     word_count: int | None = Field(
         description=(
-            "The text's own words past its front matter, every block's included, "
-            "whatever a display collapses: under about 150 a document draws inline, "
+            "The text's own words past its front matter, every block's included "
+            "but its answer lines, whatever a display collapses and whatever is "
+            "answered: under about 150 a document draws inline, "
             "else it leaves a card (F24.1); null where `body` is"
         ),
         examples=[412],

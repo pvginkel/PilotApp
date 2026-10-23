@@ -201,7 +201,8 @@ at: 2026-10-12T09:30:00Z
 ```
 """
 """Its own count past the front matter, whatever collapses: `# Camp kit` 3,
-the prose 3, the heading 3, the fence's lines 2, 1, 2, 2, 2, 2, 2 and 1."""
+the prose 3, the heading 3, the fence's lines 2, 1, 2, 2 and 1, its answer
+lines left out."""
 
 
 def _make(container: ServiceContainer, **spec: Any) -> Project:
@@ -1011,10 +1012,37 @@ class TestTimeline:
 
         assert (item["summary"], item["word_count"], item["read_minutes"]) == (
             "What we bring, and the stove.",
-            23,
+            17,
             1,
         )
         assert item["body"][2]["block"]["section"] == {"heading": "Which stove?"}
+
+    def test_a_persons_answers_and_done_leave_its_own_count(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        project = _make(container)
+        run = _run(session, project, environment)
+        item = _bear(container, project, run, "document", "Camp plan", TWO_ASKS)
+        _opening, born = _items(container, project)
+        container.record_service().answer(
+            _document(session, item),
+            "Q1",
+            person,
+            "Three nights, since the forecast is dry until Sunday evening",
+            note="Ben agrees.",
+        )
+        _opening, answered = _items(container, project)
+        container.record_service().done(item, person)
+
+        _opening, done = _items(container, project)
+
+        assert [line["word_count"] for line in (answered, done)] == [
+            born["word_count"]
+        ] * 2
 
     @pytest.mark.parametrize(
         ("words", "minutes"),

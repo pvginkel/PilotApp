@@ -900,14 +900,39 @@ class TestWords:
 
         assert dsl.words(text) == 4
 
-    def test_every_blocks_fence_and_body_count_whatever_collapses(self) -> None:
+    def test_every_blocks_fence_and_body_count_but_its_answer_lines(self) -> None:
         text = (
             "## Which stove?\n\n"
             "```decision id=D1\noptions:\n  - Gas\n  - Wood\n"
             "answer: Gas\nby: agent\n```\n"
         )
 
-        assert dsl.words(text) == 3 + 2 + 1 + 2 + 2 + 2 + 2 + 1
+        assert dsl.words(text) == 3 + 2 + 1 + 2 + 2 + 1
+
+    def test_an_answer_written_done_or_undone_leaves_the_count(self) -> None:
+        text = (
+            "# Camp\n\n"
+            "```decision id=D1\noptions:\n  - Gas\n  - Wood\nrecommend: Gas\n```\n\n"
+            "```question id=Q1\ndefault: Two nights\n```\n\n"
+            "```action id=A1\ncheck: The car is packed.\n```\n"
+        )
+        at = datetime(2026, 10, 12, 9, 30, tzinfo=UTC)
+        answered = dsl.write_answer(
+            text,
+            "Q1",
+            answer="Three nights, since the forecast is dry until Sunday",
+            by="ada",
+            at=at,
+            via=dsl.AnswerChannel.CHAT,
+            note="Ask Ben.\nHe knows the site.",
+        )
+        done = dsl.write_done(answered, "A1", by="ada", at=at, note="Packed.")
+        recommended = dsl.write_recommended(done, by="ada", at=at)
+        undone = dsl.clear_answer(recommended, "Q1")
+
+        assert [dsl.words(t) for t in (answered, done, recommended, undone)] == [
+            dsl.words(text)
+        ] * 4
 
     def test_any_whitespace_parts_two_words(self) -> None:
         assert dsl.words("One\ttwo\r\nthree  four\u00a0five\n") == 5

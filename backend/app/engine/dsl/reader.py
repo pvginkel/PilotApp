@@ -263,12 +263,25 @@ def body(text: str) -> tuple[Prose | Block, ...]:
 
 def words(text: str) -> int:
     """The text's words past its front matter, its headings and every block's
-    fence and body included: a document's own count (F24.1), whatever a
-    display collapses. A word is a run of characters between whitespace."""
+    fence and body included but for the block's answer lines: a document's
+    own count (F24.1), whatever a display collapses, and the same before and
+    after any answer, Done or Undo. A word is a run of characters between
+    whitespace."""
     lines = text.split("\n")
     close = _front_matter_close(lines)
     first = 0 if close is None else close + 1
-    return sum(len(line.split()) for line in lines[first:])
+    answers = {
+        number
+        for block in parse(text).blocks
+        for key, span in block.lines.items()
+        if key in ANSWER_KEYS
+        for number in range(span.first, span.last + 1)
+    }
+    return sum(
+        len(line.split())
+        for number, line in enumerate(lines[first:], start=first + 1)
+        if number not in answers
+    )
 
 
 def _prose(lines: list[str], section: str | None) -> tuple[Prose, ...]:

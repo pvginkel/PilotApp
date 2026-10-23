@@ -534,7 +534,7 @@ class TestGetTimeline:
                         },
                     ],
                     "summary": None,
-                    "word_count": 33,
+                    "word_count": 24,
                     "read_minutes": 1,
                     "writing": False,
                     "edited_at": None,
