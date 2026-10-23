@@ -63,6 +63,7 @@ from app.services.session_record_service import (
 )
 from app.services.session_stream_service import SessionStreamService
 from app.services.supervisor import LoopHandle, Supervisor
+from app.services.work_status import work_moved
 from app.utils.after_commit import after_commit
 
 if TYPE_CHECKING:
@@ -372,6 +373,7 @@ class RelayService:
             session.state_code = SessionState.RUNNING
             session.current_line = at_send(None, turn.started_at)
             _refresh_turns(db, session, turn)
+            self._moved(session)
 
     def _recreate(
         self, db: Session, session: AgentSession, problem: ControllerProblem
@@ -418,6 +420,7 @@ class RelayService:
             ).first()
             if latest is not None:
                 _refresh_turns(db, session, latest)
+            self._moved(session, state=True)
         db.flush()
         logger.info(
             "Session %s lost controller session %s; resumed as %s in environment %s",
@@ -475,9 +478,11 @@ class RelayService:
         turn.started_at = datetime.now(UTC)
         if turn.author_user_id is not None:
             records.append(session.id, RecordKind.SEND, turn_id=turn.id)
+        moved_state = session.state_code != SessionState.RUNNING
         session.state_code = SessionState.RUNNING
         session.current_line = at_send(session.current_line, turn.started_at)
         _refresh_turns(db, session, turn)
+        self._moved(session, state=moved_state)
         self._environments.clear_shutdown_timer(db, session.environment_id)
         after_commit(_RelayStart(self, session.id))
 
@@ -557,7 +562,10 @@ class RelayService:
             raw_offset=frame.offset,
             controller_session=opening.controller_session,
         )
-        session.current_line = after_line(session.current_line, payload, record.at)
+        line = after_line(session.current_line, payload, record.at)
+        if line != session.current_line:
+            session.current_line = line
+            self._moved(session)
         progress.current_line = session.current_line
         if session.conversation_id is None and isinstance(payload, dict):
             # Every line `claude` prints names its conversation, which a resume
@@ -581,6 +589,7 @@ class RelayService:
                 moved = after_partial(session.current_line, line, at)
                 if moved is not None:
                     session.current_line = moved
+                    self._moved(session)
             progress.current_line = session.current_line
 
     def _end_turn(self, opening: _Opening, frame: ResultFrame, offset: int) -> None:
@@ -637,6 +646,7 @@ class RelayService:
                         )
                 else:
                     session.current_line = at_send(None, following.started_at)
+                self._moved(session, state=following is None)
                 self._container.document_service().turn_ended(session)
         if not ended:
             # Another process's relay ended the turn.
@@ -644,6 +654,9 @@ class RelayService:
             return
         with scoped_session(self._container) as db:
             self._environments.arm_shutdown_timer(db, opening.env_id)
+
+    def _moved(self, session: AgentSession, *, state: bool = False) -> None:
+        work_moved(self._container.engine_bus(), session, state=state)
 
     def _records(self, db: Session) -> SessionRecordService:
         return SessionRecordService(db, self._streams)

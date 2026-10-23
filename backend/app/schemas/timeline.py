@@ -5,11 +5,12 @@ F37.4, F129.4)."""
 
 import uuid
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
-from app.models.reference import AnswerChannel, BlockKind, UserKind
+from app.models.reference import AnswerChannel, BlockKind, SessionState, UserKind
+from app.schemas.links import EnvironmentNameSchema
 
 ItemKindCode = Literal[
     "opening",
@@ -231,6 +232,87 @@ class AttachmentSchema(BaseModel):
     )
 
 
+class LineStepSchema(BaseModel):
+    """The latest tool call of a current line."""
+
+    tool: str | None = Field(description="The call's `name`", examples=["Read"])
+    input: Any = Field(
+        description="The call's `input`, as the line has it",
+        examples=[{"file_path": "/work/Camp/plan.json"}],
+    )
+
+
+class LineAgentSchema(BaseModel):
+    """The sub-agent a current line waits on, from its `Task` call."""
+
+    type: str | None = Field(
+        description="The call's `subagent_type`", examples=["Explore"]
+    )
+    description: str | None = Field(
+        description="The call's `description`", examples=["Survey the tent makers"]
+    )
+
+
+class CurrentLineSchema(BaseModel):
+    """A work item's one current line while a turn of its Session is in flight,
+    which the client words as it words the chat's cue (F26.2; design 2 §9.5)."""
+
+    state: Literal["starting", "thinking", "writing", "working", "waiting"] = Field(
+        description=(
+            "What the turn is doing: the session coming up, thinking, writing a "
+            "main-thread text block, running a tool call, or waiting on a sub-agent"
+        )
+    )
+    since: datetime = Field(description="When that state, or the latest step, began")
+    step: LineStepSchema | None = Field(
+        description="The latest tool call; null before the first"
+    )
+    agent: LineAgentSchema | None = Field(
+        description="The sub-agent; null unless `state` is `waiting`"
+    )
+    text: str | None = Field(
+        description=(
+            "The server's own words while the session comes up; null unless "
+            "`state` is `starting`"
+        ),
+        examples=["Starting Camp-1…"],
+    )
+
+
+class WorkSchema(BaseModel):
+    """A work item's Session, as its line and its head show it (F26, F12)."""
+
+    state: SessionState = Field(
+        description=(
+            "Its Session's state: `held` while the gate holds its start, `starting` "
+            "while it comes up, `running` while a turn is in flight, `idle` once its "
+            "turn ended, `stopped` and `failed` waiting on you, `ended` once its "
+            "controller session is gone"
+        )
+    )
+    current_line: CurrentLineSchema | None = Field(
+        description="Its one current line; null while no turn is in flight"
+    )
+    environment: EnvironmentNameSchema = Field(
+        description="The environment it runs in: its env chip and the chip's link"
+    )
+    started_at: datetime | None = Field(
+        description=(
+            'When the controller confirmed its session, which "running N min" '
+            "counts from; null before"
+        )
+    )
+    error: str | None = Field(
+        description=(
+            "Why it failed: a failed start's error, or the error its latest turn "
+            "ended in; null unless `state` is `failed` (F125)"
+        )
+    )
+    autopilot: bool = Field(
+        description="The auto pilot setting its start was briefed under (F4.3)"
+    )
+
+
 class TimelineItemSchema(BaseModel):
     """An entry on the timeline, with what its line and its open form show."""
 
@@ -318,6 +400,12 @@ class TimelineItemSchema(BaseModel):
     )
     attachments: list[AttachmentSchema] = Field(
         description="The files hung on the item, in their order, on every kind (F17.5)"
+    )
+    work: WorkSchema | None = Field(
+        description=(
+            "A work item's Session, which the SSE event `work_moved` carries as it "
+            "moves; null for every other kind"
+        )
     )
 
 

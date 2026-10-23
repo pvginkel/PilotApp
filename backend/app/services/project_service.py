@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.engine.bus import EngineBus, ManifestChanged
+from app.engine.bus import EngineBus, ManifestChanged, ProjectChanged
 from app.engine.documents import OPENING
 from app.engine.record import RecordService
 from app.engine.views import ViewService
@@ -252,6 +252,7 @@ class ProjectService:
             )
         )
         self.db.flush()
+        self.engine_bus.emit(ProjectChanged(project.id))
 
     def leave(self, auth: AuthContext, project_id: uuid.UUID) -> None:
         """The caller's membership of the project closed (F127).
@@ -271,6 +272,7 @@ class ProjectService:
             raise InvalidOperationException(operation, "you are no member")
         membership.left_at = datetime.now(UTC)
         self.db.flush()
+        self.engine_bus.emit(ProjectChanged(project.id))
 
     def _locked(self, project_id: uuid.UUID) -> Project:
         """The project, its row held until the transaction ends, so that two

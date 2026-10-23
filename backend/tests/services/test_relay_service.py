@@ -21,7 +21,7 @@ from werkzeug.wrappers import Request, Response
 
 from app import models
 from app.database import scoped_session
-from app.engine.bus import EngineEvent, ProjectChanged
+from app.engine.bus import EngineEvent, ProjectChanged, WorkMoved
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import DocumentVersion, Environment, Item, Project, Turn, User
 from app.models.reference import RecordKind, SessionState, UserKind, VersionCause
@@ -1184,6 +1184,11 @@ def _item_done(db: DbSession, run: models.Session) -> tuple[Any, ...]:
     return item.done_at, item.done_cause_code, item.done_by_user_id
 
 
+def _moves(events: list[EngineEvent]) -> list[EngineEvent]:
+    """What the browsers hear of: the work items' moves and the projects'."""
+    return [event for event in events if isinstance(event, WorkMoved | ProjectChanged)]
+
+
 class TestRelayWorkItem:
     """A work item's turn's end (decision 44; DB Session State, F125)."""
 
@@ -1208,7 +1213,9 @@ class TestRelayWorkItem:
         relays: RelayService,
         fake_controller: ServedFakeController,
         controller_session: str,
+        project: Project,
         work_item: models.Session,
+        engine_events: list[EngineEvent],
         outcome: FinishOutcome,
         result: str,
         state: SessionState,
@@ -1220,6 +1227,12 @@ class TestRelayWorkItem:
         )
 
         _relay(relays, work_item)
+
+        # The badge counts it: the project's screens are read again (R20).
+        assert _moves(engine_events)[-2:] == [
+            WorkMoved(project.id, work_item.id),
+            ProjectChanged(project.id),
+        ]
 
         assert work_item.state_code == state
         assert turn.ended_at is not None
@@ -1249,6 +1262,52 @@ class TestRelayWorkItem:
         assert turn.error is None
         assert _item_done(session, work_item) == (turn.ended_at, "turn_ended", None)
         assert ProjectChanged(project.id) in engine_events
+
+    def test_each_record_that_moves_its_line_moves_the_item_alone(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        project: Project,
+        work_item: models.Session,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        _send(relays, session, work_item)
+        _turn_of(fake_controller, controller_session, raw_turn("turn_tool"))
+        engine_events.clear()
+
+        _relay(relays, work_item)
+
+        moved = WorkMoved(project.id, work_item.id)
+        # The tool call's block start, its `assistant` line, its result, the
+        # text block's start and its `assistant` line move the line; the
+        # `system`, `rate_limit_event` and `result` lines and the deltas do
+        # not. The turn's end moves its state, and makes it done.
+        assert _moves(engine_events) == [
+            *[moved] * 5,
+            ProjectChanged(project.id),
+            moved,
+        ]
+
+    def test_a_send_to_a_stopped_item_moves_its_state(
+        self,
+        container: ServiceContainer,
+        relays: RelayService,
+        project: Project,
+        work_item: models.Session,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        work_item.state_code = SessionState.STOPPED
+
+        with scoped_session(container) as db:
+            relays.send(db, work_item.id, CONTINUE)
+
+        assert work_item.state_code == SessionState.RUNNING
+        assert _moves(engine_events) == [
+            WorkMoved(project.id, work_item.id),
+            ProjectChanged(project.id),
+        ]
 
     def test_a_send_committed_before_the_turns_end_keeps_the_item_open(
         self,

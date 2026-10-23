@@ -974,7 +974,7 @@ class TestJoin:
         with pytest.raises(RecordNotFoundException):
             container.project_service().join(ADA, unknown)
 
-    def test_membership_moves_no_timeline(
+    def test_membership_moves_the_projects_head_and_no_timeline(
         self, container: ServiceContainer, engine_events: list[EngineEvent]
     ) -> None:
         made = _make(container, name="Camp")
@@ -983,11 +983,13 @@ class TestJoin:
         engine_events.clear()
 
         with scoped_session(container):
-            service = container.project_service()
-            service.leave(ADA, made.id)
-            service.join(ADA, made.id)
+            container.project_service().leave(ADA, made.id)
+        with scoped_session(container):
+            container.project_service().join(ADA, made.id)
 
-        assert engine_events == []
+        # Other browsers read the head's members again; the timeline's file
+        # did not move.
+        assert engine_events == [ProjectChanged(made.id)] * 2
 
 
 @pytest.mark.usefixtures("person")

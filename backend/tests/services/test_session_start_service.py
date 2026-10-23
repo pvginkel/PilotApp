@@ -19,6 +19,7 @@ from werkzeug.wrappers import Request, Response
 
 from app import models
 from app.database import scoped_session
+from app.engine.bus import EngineEvent, ProjectChanged, WorkMoved
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import Environment, Item, PlanTask, Project, Turn, User, Work
 from app.models.reference import RecordKind, SessionState, TaskStatus, UserKind
@@ -200,6 +201,11 @@ def _read(db: DbSession, run_id: uuid.UUID) -> models.Session:
 
 def _row(db: DbSession) -> Environment:
     return db.get_one(Environment, ENV, populate_existing=True)
+
+
+def _moves(events: list[EngineEvent]) -> list[EngineEvent]:
+    """What the browsers hear of: the work items' moves and the projects'."""
+    return [event for event in events if isinstance(event, WorkMoved | ProjectChanged)]
 
 
 def _assert_failed(
@@ -487,6 +493,7 @@ class TestStartWork:
         fake: _Recording,
         session: DbSession,
         project: Project,
+        engine_events: list[EngineEvent],
     ) -> None:
         fake.capped(ENV)
         work = _start_work(starts, session, project)
@@ -495,6 +502,34 @@ class TestStartWork:
 
         _assert_failed(session, work.id)
         assert session.get_one(Item, work.id, populate_existing=True).done_at is None
+        # The badge counts it: the project's screens are read again (R20).
+        assert _moves(engine_events) == [
+            WorkMoved(project.id, work.id),
+            ProjectChanged(project.id),
+        ]
+
+    def test_each_phase_moves_the_item_and_the_brief_its_state(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        work = _start_work(starts, session, project)
+
+        starts.run(work.id, LoopHandle(f"start:{work.id}"))
+
+        moved = WorkMoved(project.id, work.id)
+        # "Creating the session…", the session's start, then the brief's send,
+        # which makes it `running`.
+        assert _read(session, work.id).state_code == SessionState.RUNNING
+        assert _moves(engine_events) == [
+            moved,
+            moved,
+            moved,
+            ProjectChanged(project.id),
+        ]
 
 
 class TestRun:

@@ -26,7 +26,9 @@ from app.models import (
     Project,
     ProjectTransition,
     SaveError,
+    Turn,
     User,
+    Work,
 )
 from app.models.reference import (
     AttachmentSource,
@@ -40,7 +42,7 @@ from app.schemas.testing_record import InventedFileSchema, InventedProjectCreate
 from app.schemas.timeline import AttachmentSchema, DoneCauseCode, ItemKindCode
 from app.services.auth_service import AuthContext
 from app.services.container import ServiceContainer
-from app.services.timeline_service import Badge
+from app.services.timeline_service import Badge, work_status
 
 ADA = AuthContext(
     subject="subject-ada", email=None, name="Ada Example", roles={"editor"}
@@ -239,9 +241,12 @@ def _work(
     project: Project,
     environment: Environment,
     state: SessionState,
+    *,
+    autopilot: bool = False,
     **values: Any,
 ) -> Item:
-    """A work item, one identity with its session (DB decision 3)."""
+    """A work item, its Item, its Session and its Work one identity (DB
+    decision 3), its Work briefed under `autopilot`."""
     run = _run(session, project, environment, state)
     work = Item(
         id=run.id,
@@ -254,7 +259,32 @@ def _work(
     )
     session.add(work)
     session.flush()
+    session.add(
+        Work(
+            id=run.id,
+            project_id=project.id,
+            session_kind_code="work",
+            autopilot=autopilot,
+        )
+    )
+    session.flush()
     return work
+
+
+def _turn(
+    session: DbSession, run: models.Session, seq: int, error: str | None = None
+) -> Turn:
+    turn = Turn(
+        session_id=run.id,
+        seq=seq,
+        message="Build the camp",
+        started_at=datetime.now(UTC),
+        ended_at=datetime.now(UTC),
+        error=error,
+    )
+    session.add(turn)
+    session.flush()
+    return turn
 
 
 def _wait(session: DbSession, project: Project, run: models.Session) -> Item:
@@ -507,6 +537,13 @@ class TestTimeline:
             False,
             False,
             True,
+            True,
+        ]
+        assert [item["work"] is None for item in items] == [
+            True,
+            True,
+            True,
+            False,
             True,
         ]
 
@@ -1314,6 +1351,218 @@ class TestTimeline:
         timeline = container.timeline_service().timeline(project.id)
 
         assert timeline.finished_at is None
+
+    def test_a_work_item_carries_its_session_as_its_line_and_head_show_it(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        work = _work(session, project, environment, SessionState.RUNNING)
+        run = session.get_one(models.Session, work.id)
+        run.started_at = datetime(2026, 10, 24, 9, 0, tzinfo=UTC)
+        run.current_line = {
+            "state": "working",
+            "since": "2026-10-24T09:01:00+00:00",
+            "step": {"tool": "Read", "input": {"file_path": "/work/Camp/plan.json"}},
+        }
+        session.flush()
+
+        _opening, item = container.timeline_service().timeline(project.id).items
+
+        assert item.work is not None
+        assert item.work.model_dump() == {
+            "state": SessionState.RUNNING,
+            "current_line": {
+                "state": "working",
+                "since": datetime(2026, 10, 24, 9, 1, tzinfo=UTC),
+                "step": {
+                    "tool": "Read",
+                    "input": {"file_path": "/work/Camp/plan.json"},
+                },
+                "agent": None,
+                "text": None,
+            },
+            "environment": {"id": environment.id, "name": "Example-1"},
+            "started_at": datetime(2026, 10, 24, 9, 0, tzinfo=UTC),
+            "error": None,
+            "autopilot": False,
+        }
+
+    def test_a_work_item_coming_up_has_the_servers_words_and_no_start_yet(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        work = _work(session, project, environment, SessionState.STARTING)
+        session.get_one(models.Session, work.id).current_line = {
+            "state": "starting",
+            "since": "2026-10-24T09:00:00+00:00",
+            "text": "Starting Example-1…",
+        }
+        session.flush()
+
+        _opening, item = container.timeline_service().timeline(project.id).items
+
+        assert item.work is not None
+        assert (item.work.state, item.work.started_at) == (SessionState.STARTING, None)
+        assert item.work.current_line is not None
+        assert item.work.current_line.model_dump() == {
+            "state": "starting",
+            "since": datetime(2026, 10, 24, 9, 0, tzinfo=UTC),
+            "step": None,
+            "agent": None,
+            "text": "Starting Example-1…",
+        }
+
+    def test_a_line_waiting_on_a_sub_agent_names_it(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        work = _work(session, project, environment, SessionState.RUNNING)
+        call = {"subagent_type": "Explore", "description": "Survey the tent makers"}
+        session.get_one(models.Session, work.id).current_line = {
+            "state": "waiting",
+            "since": "2026-10-24T09:00:00+00:00",
+            "step": {"tool": "Task", "input": call},
+            "agent": {"type": "Explore", "description": "Survey the tent makers"},
+        }
+        session.flush()
+
+        _opening, item = container.timeline_service().timeline(project.id).items
+
+        assert item.work is not None and item.work.current_line is not None
+        line = item.work.current_line
+        assert line.state == "waiting"
+        assert line.step is not None
+        assert (line.step.tool, line.step.input) == ("Task", call)
+        assert line.agent is not None
+        assert (line.agent.type, line.agent.description) == (
+            "Explore",
+            "Survey the tent makers",
+        )
+
+    def test_a_work_item_between_turns_has_no_line(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        _work(session, project, environment, SessionState.STOPPED)
+
+        _opening, item = container.timeline_service().timeline(project.id).items
+
+        assert item.work is not None
+        assert (item.work.state, item.work.current_line) == (SessionState.STOPPED, None)
+
+    def test_a_failed_start_has_the_sessions_error(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        work = _work(session, project, environment, SessionState.FAILED)
+        run = session.get_one(models.Session, work.id)
+        run.error = "The environment limit is reached"
+        _turn(session, run, 1)
+
+        _opening, item = container.timeline_service().timeline(project.id).items
+
+        assert item.work is not None
+        assert item.work.error == "The environment limit is reached"
+
+    def test_a_failed_turn_has_its_latest_turns_error(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        work = _work(session, project, environment, SessionState.FAILED)
+        run = session.get_one(models.Session, work.id)
+        _turn(session, run, 1, "An earlier turn's error")
+        _turn(session, run, 2, "The tests failed.")
+        other = _work(session, project, environment, SessionState.FAILED)
+        _turn(session, session.get_one(models.Session, other.id), 1, "Its own error")
+
+        _opening, item, other_item = (
+            container.timeline_service().timeline(project.id).items
+        )
+
+        assert item.work is not None and other_item.work is not None
+        assert (item.work.error, other_item.work.error) == (
+            "The tests failed.",
+            "Its own error",
+        )
+
+    @pytest.mark.parametrize(
+        "state", [SessionState.STOPPED, SessionState.IDLE, SessionState.RUNNING]
+    )
+    def test_an_item_that_is_not_failed_has_no_error(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        state: SessionState,
+    ) -> None:
+        project = _make(container)
+        work = _work(session, project, environment, state)
+        run = session.get_one(models.Session, work.id)
+        run.error = "A start's error"
+        _turn(session, run, 1, "A turn's error")
+
+        _opening, item = container.timeline_service().timeline(project.id).items
+
+        assert item.work is not None
+        assert item.work.error is None
+
+    def test_a_work_item_keeps_the_switch_it_was_briefed_under(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        _work(session, project, environment, SessionState.RUNNING, autopilot=True)
+        _work(session, project, environment, SessionState.RUNNING)
+
+        _opening, briefed_on, briefed_off = (
+            container.timeline_service().timeline(project.id).items
+        )
+
+        assert project.autopilot is False
+        assert briefed_on.work is not None and briefed_off.work is not None
+        assert (briefed_on.work.autopilot, briefed_off.work.autopilot) == (True, False)
+
+
+@pytest.mark.usefixtures("person")
+class TestWorkStatus:
+    def test_only_the_work_items_among_the_ids(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        work = _work(session, project, environment, SessionState.RUNNING)
+        no_work = _run(session, project, environment, SessionState.RUNNING)
+        notice = _bear(container, project, no_work, "notice", "The site", NOTICE)
+
+        found = work_status(session, [work.id, no_work.id, notice.id, uuid.uuid4()])
+
+        assert list(found) == [work.id]
+        assert found[work.id].state == SessionState.RUNNING
+
+    def test_no_ids_read_nothing(self, session: DbSession) -> None:
+        assert work_status(session, []) == {}
 
 
 CAMP_PLAN = """---

@@ -473,6 +473,7 @@ class TestGetTimeline:
                     "writing": False,
                     "edited_at": None,
                     "attachments": [],
+                    "work": None,
                 },
                 {
                     "id": str(decision.id),
@@ -539,6 +540,7 @@ class TestGetTimeline:
                     "writing": False,
                     "edited_at": None,
                     "attachments": [],
+                    "work": None,
                 },
                 {
                     "id": str(notice.id),
@@ -570,8 +572,54 @@ class TestGetTimeline:
                     "writing": False,
                     "edited_at": None,
                     "attachments": [],
+                    "work": None,
                 },
             ],
+        }
+
+    def test_a_work_items_entry_carries_its_session(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        environment: Environment,
+    ) -> None:
+        camp = session.get_one(Project, _make(container, name="Camp"))
+        run = _run(session, camp, environment)
+        container.record_service().place_work(camp, run, "Build the camp")
+        run.state_code = SessionState.RUNNING
+        run.started_at = datetime.fromisoformat("2026-10-24T09:00:00+00:00")
+        run.current_line = {
+            "state": "working",
+            "since": "2026-10-24T09:01:00+00:00",
+            "step": {"tool": "Read", "input": {"file_path": "/work/Camp/plan.json"}},
+        }
+        session.flush()
+        _sign_in(client)
+
+        body = client.get(f"{PROJECTS}/{camp.id}/timeline").get_json()
+
+        _opening, work = body["items"]
+        assert (
+            _stamped(work, ("work", "started_at")),
+            _stamped(work, ("work", "current_line", "since")),
+        ) == (run.started_at, datetime.fromisoformat("2026-10-24T09:01:00+00:00"))
+        assert work["work"] == {
+            "state": "running",
+            "current_line": {
+                "state": "working",
+                "since": "<time>",
+                "step": {
+                    "tool": "Read",
+                    "input": {"file_path": "/work/Camp/plan.json"},
+                },
+                "agent": None,
+                "text": None,
+            },
+            "environment": {"id": environment.id, "name": "Example-1"},
+            "started_at": "<time>",
+            "error": None,
+            "autopilot": False,
         }
 
     def test_a_block_s_own_section_rides_with_its_text(

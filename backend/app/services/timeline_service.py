@@ -4,11 +4,11 @@ draft or its handbook (F37.4, F129.4); and the items waiting on a person,
 which a tab's badge counts (F1.4, F94.5)."""
 
 import uuid
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import PurePosixPath
-from typing import cast
+from typing import Any, cast
 
 from sqlalchemy import ColumnElement, and_, func, or_, select
 from sqlalchemy.dialects.postgresql import distinct_on
@@ -24,6 +24,7 @@ from app.models import (
     ConfirmationReason,
     Document,
     DocumentVersion,
+    Environment,
     Item,
     ItemAttachment,
     ItemKind,
@@ -31,7 +32,9 @@ from app.models import (
     Project,
     ProjectTransition,
     SaveError,
+    Turn,
     User,
+    Work,
 )
 from app.models import Session as AgentSession
 from app.models.reference import (
@@ -44,12 +47,14 @@ from app.models.reference import (
     TransitionKind,
     VersionCause,
 )
+from app.schemas.links import EnvironmentNameSchema
 from app.schemas.timeline import (
     AttachmentSchema,
     BlockPartSchema,
     BlockSchema,
     BodyPartSchema,
     ConfirmationReasonSchema,
+    CurrentLineSchema,
     DeferralSchema,
     DoneCauseCode,
     DoneSchema,
@@ -64,6 +69,7 @@ from app.schemas.timeline import (
     TimelineItemSchema,
     TimelineSchema,
     UserSchema,
+    WorkSchema,
 )
 from app.services.people_service import initials
 
@@ -114,6 +120,53 @@ def waiting_on(person: User | None) -> ColumnElement[bool]:
             and_(form == WORK, state.in_(_STOPPED)),
         ),
     )
+
+
+def work_status(
+    db: Session, item_ids: Collection[uuid.UUID]
+) -> dict[uuid.UUID, WorkSchema]:
+    """The work status of each work item among `item_ids`, as its line and
+    head show it; an item of another kind is left out. A failed one's error is
+    its latest Turn's, else its Session's: a turn's failure is its Turn's, a
+    start's the Session's (DB Session `error?`)."""
+    rows = db.execute(
+        select(AgentSession, Environment.name, Work.autopilot)
+        .join(Work, Work.id == AgentSession.id)
+        .join(Environment, Environment.id == AgentSession.environment_id)
+        .where(AgentSession.id.in_(list(item_ids)))
+    ).all()
+    failed = [
+        session.id
+        for session, _, _ in rows
+        if session.state_code is SessionState.FAILED
+    ]
+    turn_errors: dict[uuid.UUID, str | None] = (
+        dict(
+            db.execute(
+                select(Turn.session_id, Turn.error)
+                .where(Turn.session_id.in_(failed))
+                .ext(distinct_on(Turn.session_id))
+                .order_by(Turn.session_id, Turn.seq.desc())
+            ).all()
+        )
+        if failed
+        else {}
+    )
+    return {
+        session.id: WorkSchema(
+            state=session.state_code,
+            current_line=_current_line(session.current_line),
+            environment=EnvironmentNameSchema(id=session.environment_id, name=name),
+            started_at=session.started_at,
+            error=(
+                turn_errors.get(session.id) or session.error
+                if session.state_code is SessionState.FAILED
+                else None
+            ),
+            autopilot=autopilot,
+        )
+        for session, name, autopilot in rows
+    }
 
 
 class TimelineService:
@@ -242,6 +295,9 @@ class TimelineService:
         counts = {item_id: dsl.words(text) for item_id, text in texts.items()}
         edited = self._edited(list(texts))
         attachments = self._attachments([item.id for item, _, _ in rows])
+        works = work_status(
+            self.db, [item.id for item, _, form in rows if form == WORK]
+        )
         reader = self._reader(
             project,
             self._users(
@@ -320,6 +376,7 @@ class TimelineService:
                 ),
                 edited_at=edited.get(item.id),
                 attachments=attachments.get(item.id, []),
+                work=works[item.id] if form == WORK else None,
             )
             for item, document, form in rows
         ]
@@ -550,6 +607,22 @@ def _answerers(bodies: Iterable[Iterable[dsl.Prose | dsl.Block]]) -> set[str]:
         for part in parts
         if isinstance(part, dsl.Block) and part.by is not None
     }
+
+
+def _current_line(line: dict[str, Any] | None) -> CurrentLineSchema | None:
+    """The stored current line, whose keys but `state` and `since` are absent
+    where they do not apply (design 2 §9.5)."""
+    if line is None:
+        return None
+    return CurrentLineSchema.model_validate(
+        {
+            "state": line["state"],
+            "since": line["since"],
+            "step": line.get("step"),
+            "agent": line.get("agent"),
+            "text": line.get("text"),
+        }
+    )
 
 
 def _read_minutes(words: int) -> int:

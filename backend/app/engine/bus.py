@@ -62,6 +62,16 @@ class ProjectChanged(EngineEvent):
 
 
 @dataclass(frozen=True)
+class WorkMoved(EngineEvent):
+    """What a work item's line shows of its Session moved: its state, its one
+    current line, its start or its error (F80.2's work status). It moves
+    nothing else of the project's screens."""
+
+    project_id: uuid.UUID
+    work_id: uuid.UUID
+
+
+@dataclass(frozen=True)
 class ManifestChanged(EngineEvent):
     """The set of syncing projects changed (design 1 §5.4, decision 24): the
     manifest lists other folders."""

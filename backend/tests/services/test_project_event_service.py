@@ -1,7 +1,7 @@
-"""A project's live event on the browsers' SSE connections (F80.2): once a
+"""A project's live events on the browsers' SSE connections (F80.2): once a
 change to what its timeline, head or tab shows commits, every person's
-connections hear of it, as one event naming the project, read off test
-connections' queues."""
+connections hear of it, as one event naming the project; once a work item's
+status moves, as one event carrying it. Read off test connections' queues."""
 
 import json
 import uuid
@@ -14,8 +14,9 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.database import scoped_session
-from app.engine.bus import ProjectChanged, TreeHashMoved
+from app.engine.bus import ProjectChanged, TreeHashMoved, WorkMoved
 from app.models import Document, Project, User
+from app.models.reference import SessionState
 from app.services.container import ServiceContainer
 from app.services.project_event_service import ProjectEventService
 from app.services.sse_connection_manager import SSEConnection, SSEConnectionManager
@@ -204,3 +205,89 @@ class TestProjectEventService:
             container.engine_bus().emit(ProjectChanged(other.id))
 
         assert frames(tab) == [changed(project.id), changed(other.id)]
+
+    def test_a_work_items_move_carries_its_status_as_it_reads_once_committed(
+        self,
+        container: ServiceContainer,
+        connect: Connect,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        container.record_service().place_work(project, project_session, "Camp")
+        clear_after_commit_callbacks()
+        ada_tab = connect("ada-1", person.subject)
+        ben = container.test_data_service().person("ben", "Ben Example")
+        ben_tab = connect("ben-1", ben.subject)
+
+        with scoped_session(container):
+            container.engine_bus().emit(WorkMoved(project.id, project_session.id))
+            project_session.current_line = {
+                "state": "thinking",
+                "since": "2026-10-24T09:00:00+00:00",
+            }
+
+        moved = {
+            "type": "work_moved",
+            "payload": {
+                "project_id": str(project.id),
+                "item_id": str(project_session.id),
+                "work": {
+                    "state": "running",
+                    "current_line": {
+                        "state": "thinking",
+                        "since": "2026-10-24T09:00:00Z",
+                        "step": None,
+                        "agent": None,
+                        "text": None,
+                    },
+                    "environment": {
+                        "id": project_session.environment_id,
+                        "name": "Example-1",
+                    },
+                    "started_at": None,
+                    "error": None,
+                    "autopilot": False,
+                },
+            },
+        }
+        assert (frames(ada_tab), frames(ben_tab)) == ([moved], [moved])
+
+    def test_a_move_of_a_session_with_no_work_item_sends_nothing(
+        self,
+        container: ServiceContainer,
+        connect: Connect,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        tab = connect("ada-1", person.subject)
+
+        with scoped_session(container):
+            container.engine_bus().emit(WorkMoved(project.id, project_session.id))
+
+        assert frames(tab) == []
+
+    def test_a_failed_work_items_move_carries_its_error(
+        self,
+        container: ServiceContainer,
+        connect: Connect,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        container.record_service().place_work(project, project_session, "Camp")
+        project_session.state_code = SessionState.FAILED
+        project_session.error = "The environment limit is reached"
+        clear_after_commit_callbacks()
+        tab = connect("ada-1", person.subject)
+
+        with scoped_session(container):
+            container.engine_bus().emit(WorkMoved(project.id, project_session.id))
+
+        [frame] = frames(tab)
+        assert (frame["type"], frame["payload"]["work"]["state"]) == (
+            "work_moved",
+            "failed",
+        )
+        assert frame["payload"]["work"]["error"] == "The environment limit is reached"

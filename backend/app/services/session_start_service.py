@@ -45,6 +45,7 @@ from app.services.relay_service import RelayService
 from app.services.session_record_service import SessionRecordService
 from app.services.session_stream_service import SessionStreamService
 from app.services.supervisor import LoopHandle, Supervisor
+from app.services.work_status import work_moved
 from app.utils.after_commit import after_commit
 
 if TYPE_CHECKING:
@@ -270,6 +271,7 @@ class SessionStartService:
                     ):
                         session.controller_session = created.name
                         session.started_at = datetime.now(UTC)
+                        self._moved(session)
             if handle.stopping:
                 return
         with scoped_session(self._container) as db:
@@ -311,6 +313,7 @@ class SessionStartService:
         )
         session = records.lock_session(session_id)
         session.current_line = while_starting(text, record.at)
+        self._moved(session)
 
     def _fail(
         self, db: Session, session_id: uuid.UUID, reason: str, *, recorded: bool
@@ -337,8 +340,12 @@ class SessionStartService:
         session.state_code = SessionState.FAILED
         session.error = reason
         session.current_line = None
+        self._moved(session, state=True)
         self._environments.arm_shutdown_timer(db, session.environment_id)
         logger.warning("Session %s failed to start: %s", session_id, reason)
+
+    def _moved(self, session: AgentSession, *, state: bool = False) -> None:
+        work_moved(self._container.engine_bus(), session, state=state)
 
     def _records(self, db: Session) -> SessionRecordService:
         return SessionRecordService(db, self._streams)
