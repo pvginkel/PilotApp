@@ -1,0 +1,79 @@
+/* The overlay (PilotAppSpecs design/mockup/style.css, "The document overlay" and "Narrow
+   screens"). */
+
+@layer components {
+  /* A page of its own in the project list's colour: what stands on the page's background stands
+     on its. */
+  .sheet { --background: var(--side); --card: var(--side); }
+
+  /* It and its backdrop lie over the side column and the centre, under the top bar; the drawer
+     lies over them. */
+  .sheet-backdrop {
+    position: absolute;
+    inset: 0 var(--panel-space, 0px) 0 0;
+    z-index: 18;
+    background: rgb(0 0 0 / 0.28);
+  }
+  .sheet {
+    position: absolute;
+    top: 0;
+    right: var(--panel-space, 0px);
+    bottom: 0;
+    z-index: 19;
+    display: flex;
+    flex-direction: column;
+    width: min(max(66.667vw, 640px), calc(var(--column) + 24px));
+    max-width: calc(100vw - var(--panel-space, 0px));
+    border-left: 1px solid hsl(var(--border));
+    background: hsl(var(--background));
+    box-shadow: var(--shadow-lg);
+    transition: width 160ms ease-out;
+  }
+  .sheet.max { width: calc(100vw - var(--panel-space, 0px)); }
+  .sheet-head {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px 10px 32px;
+    border-bottom: 1px solid hsl(var(--border));
+  }
+  .sheet-head .titles { flex: 1; min-width: 0; }
+  .sheet-head h2 { margin: 0; font-size: 17px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sheet-head .sub { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: 13px; color: hsl(var(--muted-foreground)); }
+  .sheet-head .sub .segbar { align-self: center; }
+  .sheet-head .edited { display: inline-flex; align-items: baseline; gap: 6px; }
+  .sheet-head .edited .avatar { align-self: center; }
+  .sheet-head .btn-icon + .btn-icon { margin-left: -10px; }
+  .sheet-body { flex: 1; overflow-y: auto; scrollbar-gutter: stable; }
+  .sheet-body .column { max-width: var(--column); margin: 0 auto; padding: 20px 32px 40px; }
+  /* No wider than the column and the scrollbar: the column stands at the left, under the title,
+     what the scrollbar leaves over at its right. */
+  .sheet:not(.max) .sheet-body .column { margin-left: 0; }
+  .sheet-foot {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 24px 10px 32px;
+    border-top: 1px solid hsl(var(--border));
+    background: hsl(var(--muted) / 0.4);
+  }
+  .sheet-foot .grow { flex: 1; }
+  .sheet-foot .state { font-size: 13px; color: hsl(var(--muted-foreground)); }
+
+  .lead { margin-bottom: 18px; padding: 10px 14px; border-radius: var(--radius); background: hsl(var(--primary-muted) / 0.6); font-size: 14.5px; }
+  .item-sub { margin: 0 0 6px; font-size: 14px; color: hsl(var(--muted-foreground)); }
+
+  /* A document's prose and its blocks in the body. */
+  .sheet-doc > .prose + .prose { margin-top: 0.7em; }
+  .sheet-doc > .block { margin: 14px 0 26px; }
+
+  /* A phone: the whole screen, with no maximize (F98.3). */
+  @media (max-width: 900px) {
+    .sheet { width: 100vw; }
+    .sheet-body .column { padding: 16px 16px 32px; }
+    .sheet-head { padding: 8px 10px 8px 16px; }
+    .sheet .maximize { display: none; }
+  }
+}

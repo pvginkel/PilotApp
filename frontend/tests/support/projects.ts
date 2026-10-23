@@ -87,6 +87,12 @@ export class Projects {
     expect(response.status(), await response.text()).toBe(204);
   }
 
+  /** The signed-in person sends a document's answers: its Done. */
+  async send(itemId: string): Promise<void> {
+    const response = await this.page.request.post(`${this.backendUrl}/api/items/${itemId}/done`);
+    expect(response.status(), await response.text()).toBe(204);
+  }
+
   /** The signed-in person undoes an item's answer or mark. */
   async undo(itemId: string): Promise<void> {
     const response = await this.page.request.post(`${this.backendUrl}/api/items/${itemId}/undo`);

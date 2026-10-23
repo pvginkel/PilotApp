@@ -72,7 +72,8 @@
     overflow-y: auto;
   }
 
-  .centre { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  /* Not positioned: the overlay in it lies over the side column too, placed on .app. */
+  .centre { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
   /* ---- The keys list -------------------------------------------------------------------- */
 

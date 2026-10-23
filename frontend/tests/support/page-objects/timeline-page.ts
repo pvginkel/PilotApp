@@ -3,11 +3,11 @@ import type { UiStateTestEvent } from '@/lib/test/test-events';
 import { waitTestEvent } from '../helpers';
 
 /**
- * A project's timeline (F8): its rows, the opening, its items open and as done lines with Undo, an
- * open item's block (F31) or a confirmation's card (F22), an inline document's blocks, segments and
- * *Send answers* with its dialog (F24.1, F33, F32.5), Pilot's dots (F35), the urgent banners and
- * the "N open above" chip (F10.2, F11), a finished timeline's end (F5.3), and where it stands
- * scrolled; opened at its project's address or at an item's or a block's under it (F97).
+ * A project's timeline (F8): its rows, the opening, its items open and as done lines with Open and
+ * Undo, an open item's block (F31) or a confirmation's card (F22), an inline document's blocks,
+ * segments and *Send answers* with its dialog (F24.1, F33, F32.5), Pilot's dots (F35), the urgent
+ * banners and the "N open above" chip (F10.2, F11), a finished timeline's end (F5.3), and where it
+ * stands scrolled; opened at its project's address or at an item's or a block's under it (F97).
  */
 export class TimelinePage {
   readonly root: Locator;
@@ -94,7 +94,8 @@ export class TimelinePage {
       said: root.getByTestId('timeline.line.said'),
       note: root.getByTestId('timeline.line.note'),
       undo: root.getByTestId('timeline.line.undo'),
-      block: this.block(root.getByTestId('timeline.block')),
+      open: root.getByTestId('timeline.line.open'),
+      block: blockParts(this.page, root.getByTestId('timeline.block')),
       confirm: this.confirm(root),
       edited: root.getByTestId('timeline.item.edited'),
       editedTime: root.getByTestId('timeline.item.edited.time'),
@@ -103,47 +104,10 @@ export class TimelinePage {
       document: root.getByTestId('timeline.item.document'),
       blocks: root.getByTestId('timeline.block'),
       /** A document's block by its id. */
-      blockAt: (blockId: string) => this.block(root.locator(`[data-testid="timeline.block"][data-block-id="${blockId}"]`)),
+      blockAt: (blockId: string) => blockParts(this.page, root.locator(`[data-testid="timeline.block"][data-block-id="${blockId}"]`)),
       segments: root.getByTestId('timeline.segment'),
       segment: (blockId: string) => root.locator(`[data-testid="timeline.segment"][data-segment="${blockId}"]`),
       send: root.getByTestId('timeline.item.send'),
-    };
-  }
-
-  /**
-   * An open item's block, its head, its answer; a decision's options, a question's field and Send,
-   * an action's paste-back, Done and its options as buttons; Other and its console; a confirmation
-   * block's check and cross, and No's console.
-   */
-  private block(root: Locator) {
-    return {
-      root,
-      head: root.getByTestId('timeline.block.head'),
-      kind: root.getByTestId('timeline.block.kind'),
-      toggle: root.getByTestId('timeline.block.toggle'),
-      answered: root.getByTestId('timeline.block.answered'),
-      who: root.getByTestId('timeline.block.who'),
-      time: root.getByTestId('timeline.block.time'),
-      deferred: root.getByTestId('timeline.block.deferred'),
-      note: root.getByTestId('timeline.block.note'),
-      said: root.getByTestId('timeline.block.said'),
-      answerField: root.getByTestId('timeline.block.field'),
-      answerSend: root.getByTestId('timeline.block.send'),
-      paste: root.getByTestId('timeline.block.paste'),
-      done: root.getByTestId('timeline.block.done'),
-      acts: root.getByTestId('timeline.block.act'),
-      act: (label: string) => root.getByTestId('timeline.block.act').filter({ hasText: label }),
-      options: root.getByTestId('timeline.block.option'),
-      option: (label: string) => root.getByTestId('timeline.block.option').filter({ has: this.page.locator('.label', { hasText: label }) }),
-      other: root.getByTestId('timeline.block.other'),
-      console: root.getByTestId('timeline.block.console'),
-      field: root.getByTestId('timeline.block.console.field'),
-      send: root.getByTestId('timeline.block.console.send'),
-      cancel: root.getByTestId('timeline.block.console.cancel'),
-      yes: root.getByTestId('timeline.confirm.yes'),
-      no: root.getByTestId('timeline.confirm.no'),
-      noField: root.getByTestId('timeline.confirm.console.field'),
-      noSend: root.getByTestId('timeline.confirm.console.send'),
     };
   }
 
@@ -203,4 +167,41 @@ export class TimelinePage {
 /** An item's address under its project's, or a block's under the item's (F97). */
 export function addressOf(projectId: string, itemId: string, blockId?: string): string {
   return `/projects/${projectId}/items/${itemId}${blockId === undefined ? '' : `/blocks/${blockId}`}`;
+}
+
+/**
+ * An open item's block, its head, its answer; a decision's options, a question's field and Send,
+ * an action's paste-back, Done and its options as buttons; Other and its console; a confirmation
+ * block's check and cross, and No's console.
+ */
+export function blockParts(page: Page, root: Locator) {
+  return {
+    root,
+    head: root.getByTestId('timeline.block.head'),
+    kind: root.getByTestId('timeline.block.kind'),
+    toggle: root.getByTestId('timeline.block.toggle'),
+    answered: root.getByTestId('timeline.block.answered'),
+    who: root.getByTestId('timeline.block.who'),
+    time: root.getByTestId('timeline.block.time'),
+    deferred: root.getByTestId('timeline.block.deferred'),
+    note: root.getByTestId('timeline.block.note'),
+    said: root.getByTestId('timeline.block.said'),
+    answerField: root.getByTestId('timeline.block.field'),
+    answerSend: root.getByTestId('timeline.block.send'),
+    paste: root.getByTestId('timeline.block.paste'),
+    done: root.getByTestId('timeline.block.done'),
+    acts: root.getByTestId('timeline.block.act'),
+    act: (label: string) => root.getByTestId('timeline.block.act').filter({ hasText: label }),
+    options: root.getByTestId('timeline.block.option'),
+    option: (label: string) => root.getByTestId('timeline.block.option').filter({ has: page.locator('.label', { hasText: label }) }),
+    other: root.getByTestId('timeline.block.other'),
+    console: root.getByTestId('timeline.block.console'),
+    field: root.getByTestId('timeline.block.console.field'),
+    send: root.getByTestId('timeline.block.console.send'),
+    cancel: root.getByTestId('timeline.block.console.cancel'),
+    yes: root.getByTestId('timeline.confirm.yes'),
+    no: root.getByTestId('timeline.confirm.no'),
+    noField: root.getByTestId('timeline.confirm.console.field'),
+    noSend: root.getByTestId('timeline.confirm.console.send'),
+  };
 }

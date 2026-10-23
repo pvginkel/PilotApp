@@ -5,11 +5,12 @@
  * Pilot's dots at its end while Pilot writes it (F35); a confirmation is a card of its own (F22),
  * and a short document stands inline (F24.1). An urgent one is tinted (F10.1), and one whose latest
  * save is held shows its last published text with a dashed border, a concept (F78). Done, it is
- * its line (F13.1, F13.2), with Undo while the record offers it (F14.1).
+ * its line (F13.1, F13.2), with Open (F13.3) and Undo while the record offers it (F14.1).
  */
 
 import type { AnimationEvent, ReactNode } from 'react';
-import { Check, StickyNote, Undo2, X } from 'lucide-react';
+import { Link, useParams } from '@tanstack/react-router';
+import { Check, FileText, StickyNote, Undo2, X } from 'lucide-react';
 import { Fold } from '@/components/shared/fold';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Markdown } from '@/components/shared/markdown';
@@ -155,8 +156,8 @@ function saidIn(item: TimelineItem): Said | null {
 }
 
 /**
- * The same line for every kind: its icon, its title, Undo while the record offers it, and when it
- * was done; under the title the person's answer to a one-ask item with its note, the other
+ * The same line for every kind: its icon, its title, Open, Undo while the record offers it, and
+ * when it was done; under the title the person's answer to a one-ask item with its note, the other
  * person's after their avatar. A confirmation's Yes leads it with a green check, its No with a red
  * cross (F22.5). It does not expand.
  */
@@ -172,6 +173,7 @@ function DoneLine({ item }: { item: TimelineItem }) {
       <span className="title" title={title} data-testid="timeline.line.title">
         <LinkedText text={title} />
       </span>
+      <Open item={item} />
       {done.undo && <Undo item={item} />}
       <Time at={done.at} format="clock" testId="timeline.line.time" />
       {said && (
@@ -209,6 +211,23 @@ function LineLead({ item }: { item: TimelineItem }) {
     <span className="kind-icon" data-testid="timeline.line.kind">
       <Icon className="icon" aria-hidden="true" />
     </span>
+  );
+}
+
+/** Open: the item's document in the overlay, as it was done (F13.3), at the document's address. */
+function Open({ item }: { item: TimelineItem }) {
+  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  return (
+    <Link
+      to="/projects/$projectId/documents/$documentId"
+      params={{ projectId, documentId: item.id }}
+      className="btn btn-ghost btn-sm btn-icon"
+      title="Open the document"
+      aria-label="Open"
+      data-testid="timeline.line.open"
+    >
+      <FileText className="icon" aria-hidden="true" />
+    </Link>
   );
 }
 

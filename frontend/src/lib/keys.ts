@@ -6,14 +6,15 @@
 
 import { useEffect, useRef } from 'react';
 
-// Bottom to top: Esc closes the highest layer open, and within a layer the one opened last.
-// Other's consoles lie under everything; a menu shares its layer with Stop's confirmation; the
-// panel is the one that lies over the overlay.
-const LAYERS = ['console', 'overlay', 'panel', 'plan', 'menu', 'dialog', 'keys'] as const;
-type EscapeLayer = (typeof LAYERS)[number];
+// Each layer's rank, bottom to top: Esc closes the highest ranked open, and within a rank the one
+// opened last. Other's consoles lie under everything; a menu shares its rank with Stop's
+// confirmation; the overlay shares its rank with the panel, so where the two lie over each other
+// the one opened last closes first.
+const RANKS = { console: 0, overlay: 1, panel: 1, plan: 2, menu: 3, dialog: 4, keys: 5 } as const;
+type EscapeLayer = keyof typeof RANKS;
 
 interface OpenThing {
-  layer: number;
+  rank: number;
   opened: number;
   close: () => void;
 }
@@ -29,7 +30,7 @@ export function useEscape(layer: EscapeLayer, isOpen: boolean, close: () => void
   });
   useEffect(() => {
     if (!isOpen) return undefined;
-    const thing = { layer: LAYERS.indexOf(layer), opened: ++openings, close: () => closeRef.current() };
+    const thing = { rank: RANKS[layer], opened: ++openings, close: () => closeRef.current() };
     openThings.add(thing);
     return () => {
       openThings.delete(thing);
@@ -40,7 +41,7 @@ export function useEscape(layer: EscapeLayer, isOpen: boolean, close: () => void
 function topMost(): OpenThing | undefined {
   let top: OpenThing | undefined;
   for (const thing of openThings) {
-    if (!top || thing.layer > top.layer || (thing.layer === top.layer && thing.opened > top.opened)) top = thing;
+    if (!top || thing.rank > top.rank || (thing.rank === top.rank && thing.opened > top.opened)) top = thing;
   }
   return top;
 }

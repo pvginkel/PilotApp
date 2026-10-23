@@ -47,7 +47,7 @@ export function InlineDocument({ item }: { item: TimelineItem }) {
   );
 }
 
-function UnsentChip() {
+export function UnsentChip() {
   return (
     <span className="chip unsent" title="Answered, and not sent to Pilot yet" data-testid="timeline.item.unsent">
       Unsent
@@ -56,7 +56,7 @@ function UnsentChip() {
 }
 
 /** A document's prose and its blocks in their order, every block answered in place. */
-function DocumentParts({ item }: { item: TimelineItem }) {
+export function DocumentParts({ item }: { item: TimelineItem }) {
   // The API gives every prose item but the opening its text.
   return item.body!.map((part, index) =>
     part.type === 'block' ? (
@@ -68,7 +68,7 @@ function DocumentParts({ item }: { item: TimelineItem }) {
 }
 
 /** A segment per block, filled once the block is answered; each goes to its block. */
-function SegmentBar({ item }: { item: TimelineItem }) {
+export function SegmentBar({ item }: { item: TimelineItem }) {
   const goTo = useContext(GoToContext);
   return (
     <div className="segbar" data-testid="timeline.segments">
@@ -97,8 +97,9 @@ function recommendedWords(block: BlockData, answer: string): string {
   return block.proposal === null ? answer : `${answer}: ${block.proposal}`;
 }
 
-function SendAnswers({ item }: { item: TimelineItem }) {
-  const { mark, pending } = useSend(item.id);
+/** `onSent` runs once the record holds the answers. */
+export function SendAnswers({ item, onSent }: { item: TimelineItem; onSent?: () => void }) {
+  const { mark, pending } = useSend(item.id, onSent);
   const [asking, setAsking] = useState(false);
   const blocks = blocksOf(item);
   const unanswered = blocks.filter((block) => !isAnswered(block));

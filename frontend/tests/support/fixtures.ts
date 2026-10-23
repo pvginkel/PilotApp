@@ -5,13 +5,14 @@
  * `people` signs the spec in as a fresh person, `projects` puts projects on the record, `links` sets
  * what links in text, `shell` is the frame every screen sits in, `handleStep` and `profile` the
  * person's own pages, `projectList` the side column's list, `projectHead` a project's head, `timeline`
- * its timeline.
+ * its timeline, `overlay` the overlay over it.
  */
 
 /* eslint-disable react-hooks/rules-of-hooks */
 import { infrastructureFixtures } from './fixtures-infrastructure';
 import { Links } from './links';
 import { HandleStepPage } from './page-objects/handle-step-page';
+import { OverlayPage } from './page-objects/overlay-page';
 import { ProfilePage } from './page-objects/profile-page';
 import { ProjectHeadPage } from './page-objects/project-head-page';
 import { ProjectListPage } from './page-objects/project-list-page';
@@ -30,6 +31,7 @@ interface DomainFixtures {
   projectList: ProjectListPage;
   projectHead: ProjectHeadPage;
   timeline: TimelinePage;
+  overlay: OverlayPage;
 }
 
 export const test = infrastructureFixtures.extend<DomainFixtures>({
@@ -61,6 +63,9 @@ export const test = infrastructureFixtures.extend<DomainFixtures>({
   },
   timeline: async ({ page }, use) => {
     await use(new TimelinePage(page));
+  },
+  overlay: async ({ page }, use) => {
+    await use(new OverlayPage(page));
   },
 });
 

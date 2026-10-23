@@ -1,11 +1,12 @@
 /**
  * What flashes on the timeline, each once until its animation ends: an item that arrived or that
  * the reader was taken to, by its id, and a block the reader was taken to, by `<item>/<block>`
- * (F8.2, F97). Outside a timeline nothing flashes. A block on the page is gone to as an address
- * goes to it, from a segment of its document's bar (F33).
+ * (F8.2, F97). The overlay flashes the blocks it is taken to on its own. Elsewhere nothing
+ * flashes. A block on the page is gone to as an address goes to it, from a segment of its
+ * document's bar (F33).
  */
 
-import { createContext, useContext, type AnimationEvent } from 'react';
+import { createContext, useContext, useState, type AnimationEvent } from 'react';
 
 interface Flashing {
   fresh: ReadonlySet<string>;
@@ -29,4 +30,16 @@ export function useBlockFlash(itemId: string, blockId: string) {
       if (event.target === event.currentTarget) flashed(key);
     },
   };
+}
+
+/** Flashes kept by a page of its own: `flash` starts a key's, again if it is flashing. */
+export function useFlashes() {
+  const [fresh, setFresh] = useState<ReadonlySet<string>>(new Set());
+  const flashed = (key: string) => setFresh((current) => new Set([...current].filter((other) => other !== key)));
+  const flash = (key: string) => {
+    flashed(key);
+    // Back on two frames later, once a frame has been drawn without it, so its animation starts again.
+    requestAnimationFrame(() => requestAnimationFrame(() => setFresh((current) => new Set([...current, key]))));
+  };
+  return { fresh, flashed, flash };
 }
