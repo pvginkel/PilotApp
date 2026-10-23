@@ -61,8 +61,10 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   (what the merge put back or took out), with its line and message.
 - `attachments`: a copy of a file kept for the reader, never edited, at
   `attachments/<batch>/<filename>` of its project's folder: its bytes, `title`, `content_type`,
-  `size`, `sha256`, and its source environment and path, which the draft's copy has none of.
-  `item_attachments` hangs one on an item, in a position among the item's.
+  `size`, `sha256`, and its source environment and path, which the draft's copy has none of. Its
+  bytes, `content`, are read and written through the engine's `AttachmentStore` alone: a loaded row
+  never holds them ([`documents.md`](documents.md)). `item_attachments` hangs one on an item, in a
+  position among the item's.
 
 **Sessions and environments**
 

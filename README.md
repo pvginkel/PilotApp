@@ -10,8 +10,11 @@ manifest and service worker ([`docs/ui.md`](docs/ui.md)): the handle a person ch
 sign-in ([`docs/sign-in.md`](docs/sign-in.md)), the project list, and a project's head with its
 plan, its members, the auto pilot switch, and Finish, Reopen, Archive and Bring back
 ([`docs/projects.md`](docs/projects.md)); under the head, its timeline, where every item that asks
-one thing is answered in place, with Undo, urgent banners, a badge per tab and a URL per item, and
-which every open browser follows live ([`docs/timeline.md`](docs/timeline.md)). Nothing creates a
+one thing is answered in place and a document inline or from its card, its answers sent at once,
+with Undo, urgent banners, a badge per tab and a URL per item, and which every open browser follows
+live ([`docs/timeline.md`](docs/timeline.md)); and the overlay that opens a document, an attachment
+or the handbook, beside the side panel with the project's documents
+([`docs/documents.md`](docs/documents.md)). Nothing creates a
 project yet, so production's list is empty. Beneath the screens are the record's schema and the
 engine behind it: the block DSL, the parse gate and the merge by ownership, the record's own writes,
 and the rendered `timeline.json`, `reference.json` and `plan.json`

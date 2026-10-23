@@ -2,10 +2,10 @@
 
 A document is Markdown the agent writes, and the asks in it are fenced blocks the record reads. This
 page is the grammar as the engine reads and writes it. Its library is `app.engine.dsl`
-(`backend/app/engine/dsl/`): `parse()`, `validate()` and `body()` in `reader.py`; the splice, the
-merge and `with_title()` in `writer.py`. The library is pure: it takes text and returns text, and
-imports nothing but the standard library, PyYAML and the app's exceptions, so what it validates
-against comes in as values (`Facts`).
+(`backend/app/engine/dsl/`): `parse()`, `validate()`, `body()` and `words()` in `reader.py`; the
+splice, the merge and `with_title()` in `writer.py`. The library is pure: it takes text and returns
+text, and imports nothing but the standard library, PyYAML and the app's exceptions, so what it
+validates against comes in as values (`Facts`).
 
 ````markdown
 ---
@@ -55,8 +55,24 @@ first into its front matter, unless that gives a `title` already (`with_title()`
 
 **The body as shown.** `body(text)` splits a text without a fault the way a screen draws it: its
 prose parts and its blocks in order, the front matter and the heading that is the title left out.
-A prose part is the Markdown between two blocks, without blank lines at its ends, and one with
-nothing in it is left out.
+A prose part is the Markdown between two blocks or a section's edges, without blank lines at its
+ends, and one with nothing in it is left out. A prose part inside a block's own section carries
+that block's local id (`Prose.section`), and one outside every section none, so a section's parts
+and its block stand together, its heading the first line of its first part.
+
+**A block's own section** (`Block.section`: the heading's text and its span) starts at the nearest
+heading before the block, the title's own heading counting as none. A heading is read as the title
+is: an ATX heading outside a fence, its text without its `#` marks and closing `#`s; an empty `##`,
+a setext heading, `#tag` and a line indented four spaces are none, and open or end no section. The
+section runs to the line before the next heading of the same or a higher level, else to the text's
+last line, and is the block's only where that span holds no other block, a block under a
+sub-heading counting; no heading further out is tried. A block without one has none. The screens
+draw a section whose block Pilot answered as one line ([`timeline.md`](timeline.md)).
+
+**The count.** `words(text)` counts the text's words past its front matter, a word being a run of
+characters between whitespace: its headings and every block's fence and body count, but not a
+block's answer lines (`answer`, `by`, `at`, `note`, `via`, `to`, `done`), so no answer, Done or Undo
+moves it.
 
 **The opening** is not read at all: its text is the person's words verbatim, and nothing in it is
 a block or a fault ([`engine.md`](engine.md)).

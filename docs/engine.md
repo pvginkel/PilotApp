@@ -15,6 +15,7 @@ nothing it emits is delivered before that transaction commits.
 | `PlanService` (`plan.py`) | `plan.json`, rendered and saved; the deferrals without a home |
 | `TreeService` (`tree.py`) | what a path names, the bytes it must hold, its tree hash; the manifest |
 | `ViewService` (`views.py`) | `reference.json` and `timeline.json` |
+| `AttachmentStore` (`attachments.py`) | an attachment's bytes, kept, read and deleted ([`documents.md`](documents.md)) |
 | `EngineBus` (`bus.py`) | the events, one bus per process |
 
 The grammar the engine reads is [`block-dsl.md`](block-dsl.md), the tree and its files

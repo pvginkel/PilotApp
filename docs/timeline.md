@@ -7,7 +7,8 @@ the live event, and the screen under the project's head. The read is `GET
 `ItemService`, which calls the engine's `RecordService` ([`engine.md`](engine.md)); the screen is
 `frontend/src/components/timeline/`. The texts are written in the block DSL
 ([`block-dsl.md`](block-dsl.md)), and the project's head and list are
-[`projects.md`](projects.md)'s.
+[`projects.md`](projects.md)'s. A document read on its own, the overlay it opens in, the
+attachments and the side panel are [`documents.md`](documents.md)'s.
 
 ## Reading it
 
@@ -26,15 +27,32 @@ is finished, else null. `items` are every item, by `seq`, each with:
   that its text is the one last published (F78);
 - the opening's `author` and its `words`, verbatim; null on every other item;
 - `body`: every other prose item's text as drawn (`dsl.body`), its parts in order, `{type: prose,
-  markdown}` and `{type: block, block}`, the front matter and the heading that is the title left
-  out; null for the opening, work and waits.
+  markdown, section}` and `{type: block, block}`, the front matter and the heading that is the
+  title left out; null for the opening, work and waits. A prose part's `section` is the local id of
+  the block whose own section holds it, null outside every section ([`block-dsl.md`](block-dsl.md));
+- `summary`: the front matter's `summary`, null where the text gives none and for the opening, work
+  and waits;
+- `word_count`, the text's own count (`dsl.words`), which no answer, Done or Undo moves, and
+  `read_minutes`, that count at 230 words a minute, rounded half up, at least 1; both null where
+  `body` is;
+- `writing`: whether a session's running turn is saving the text (`Document.writing_session_id`).
+  A save sets it and the turn's end clears it ([`engine.md`](engine.md)), which no live event
+  announces;
+- `edited_at`: the time of the latest `turn` Version that follows the first Version whose text has
+  anything in `dsl.body`, the first text the item was shown with; null where no such Version
+  follows it, and where `body` is null (D032);
+- `attachments`, on every item, work included, in the order they hang on it: `{id, title, filename,
+  content_type, size, batch, copied_at, source}`, `batch` the project's attach call it came in,
+  from 1, and `source` where it was copied from, `<environment>:<path>`, null for the draft's copy.
+  Its bytes are streamed apart ([`documents.md`](documents.md)).
 
 A block is `{id, kind, confirmation, because, proposal, default, check, options, answer, by, at,
-note, via, done, deferral}`. `id` is its local id; `because` is a confirmation's reason, `{code,
-name, description}`, the grants table's name and the line the agent reads, not the card's words;
-`options` are `{label, text, recommended}` in order; `via` is `app` for a person's answer whose text
-names no channel; `deferral` is `{to, title}` while `answer` is `deferred`, `title` the task's title
-live from the plan and null for `to: plan`, the project's end. A person or Pilot, wherever one is
+note, via, done, deferral, section}`. `id` is its local id; `because` is a confirmation's reason,
+`{code, name, description}`, the grants table's name and the line the agent reads, not the card's
+words; `options` are `{label, text, recommended}` in order; `via` is `app` for a person's answer
+whose text names no channel; `deferral` is `{to, title}` while `answer` is `deferred`, `title` the
+task's title live from the plan and null for `to: plan`, the project's end; `section` is the
+block's own section, `{heading}`, the heading's text, or null. A person or Pilot, wherever one is
 named, is `{kind, handle, name, initials, avatar_slot}`, Pilot `kind: agent` with no slot.
 
 ## Answering it
@@ -69,10 +87,11 @@ handle, so a connection whose user has none hears nothing. Only the process that
 delivers to it.
 
 `useProjectEvents` (`frontend/src/hooks/use-project-events.ts`), called by the shell, reads again,
-on the event, the project lists and the named project's head and timeline, events that arrive
-together once after them; and on every rise of the stream's `isConnected`, the first included,
-every list, head and timeline, which covers an event sent from a process that does not hold the
-browser's stream. A person's own write reads every query again as well.
+on the event, the project lists and the named project's head, timeline, handbook and project
+document, and every document read of an item of it ([`documents.md`](documents.md)), events that
+arrive together once after them; and on every rise of the stream's `isConnected`, the first
+included, every one of those reads, which covers an event sent from a process that does not hold
+the browser's stream. A person's own write reads every query again as well.
 
 ## The timeline
 
@@ -88,14 +107,23 @@ and waits draw no line. A project with none reads "Nothing yet".
   first read flashes once.
 - **The opening** (`opening.tsx`) is a bubble beside its author's avatar, "<who> started this
   project · <time>" over it, "You" for the signed-in person and the full name for the other; its
-  words verbatim, folding with Show more. It has no head and is never done.
-- **An open item** (`item.tsx`) is its head, its title (`title`, else `file_name`) and its text.
-  The head (`item-head.tsx`) is the kind's icon and label (`kinds.ts`; a confirmation's is
-  "Confirm", a document's "Document · N" with its most common block's icon), the time, the full
-  stamp as its tooltip, the Urgent chip and "for <full name>" while it is for someone. The text's
-  prose is GFM (`Markdown`, [`ui.md`](ui.md)); the prose before the first block folds past 13.5em
-  with Show more, the ask stands in that block's place, and the prose after it shows whole. A
-  concept has a dashed border.
+  words verbatim, folding with Show more, and its attachments under them. It has no head and is
+  never done.
+- **An open item** (`item.tsx`) is its head, its title (`title`, else `file_name`), its text and
+  its attachments; a document and a review draw as [below](#documents-and-reviews). The head
+  (`item-head.tsx`) is the kind's icon and label (`kinds.ts`; a confirmation's is "Confirm", a
+  document's "Document · N" with its most common block's icon), the time, the full stamp as its
+  tooltip, the Urgent chip and "for <full name>" while it is for someone. The text's prose is GFM
+  (`Markdown`, [`ui.md`](ui.md)); the prose before the first block folds past 13.5em with Show
+  more, the ask stands in that block's place, and the prose after it shows whole. A concept has a
+  dashed border.
+- **Attachments** (`attachments.tsx`) are chips, the clip and the title, a long one cut short:
+  after a one-ask item's or a notice's text, at a confirmation card's end, in the opening's bubble,
+  after an inline document's text and on a card. A chip opens the attachment in the overlay
+  ([`documents.md`](documents.md)).
+- **Pilot writing.** While a session's turn saves an item's text (`writing`), Pilot's avatar and
+  three dots, one at a time brightening, end the open item, every kind but the opening. The turn's
+  end clears the flag with no live event, so the dots go on the screen's next read.
 - **Urgent.** An open urgent item is tinted, its kind's label in the urgent colour. Each has a
   banner pinned at the top of the timeline, in their order, "Urgent · <title> · Show", whose click
   scrolls the item to the middle and flashes it; a finished project's timeline pins none.
@@ -103,13 +131,59 @@ and waits draw no line. A project with none reads "Nothing yet".
   above them, the other person's included, never a done line or the opening; its click scrolls the
   nearest of them to the top.
 
-A document or a review draws its prose and none of its blocks.
+## Documents and reviews
+
+`document.tsx`, by what `document-state.ts` reads of the item. A document of up to 150 words of its
+own (`word_count`) stands inline; a longer one, and every review, leaves a card (`isCard`). No
+answer moves the count, so a document stays as it stands while it is answered.
+
+- **Its head** is an item's head, then *Edited <time>* and *Unsent* (below).
+- **Inline**, it is its head; its title; its prose and its blocks in order, each block answered in
+  place as a one-ask item's is ([below](#answering-inline)), its own head naming its kind; its
+  attachments; Pilot's dots; and, where it has blocks, the segment bar beside *Send answers*.
+- **A card** is its head over a box: the title, the summary, the count chips, the segment bar, or
+  "N min read" (`read_minutes`) for a text with no block, as every review is, the attachments, and
+  Open, which reads Continue while the document is *Unsent*, beside Reviewed on a review; Pilot's
+  dots follow the box. The chips count the blocks by kind, a confirmation as a decision, but for
+  Pilot's answers: "N settled by Pilot", and "N deferred" for its deferrals; a count of none has no
+  chip. Open goes to the document's address, which opens it in the overlay
+  ([`documents.md`](documents.md)); none of the text shows on the card. Reviewed (`POST reviewed`)
+  makes the review a done line.
+- **The segment bar**: a segment per block, filled once the block is answered, its tooltip what the
+  block asks, its section's heading, else its kind, and whether it is answered. Inline, a segment
+  scrolls to its block, which flashes; on a card it opens the overlay at the block's address.
+
+**Unsent and Send answers** (D026, D033). A document reads *Unsent* while it has an answer and no
+Done: a person's answer or Pilot's, an action's Done among them. A deferral alone is no answer here,
+since it asks nothing of the person, and neither is a recommendation; a held save, `concept`, has
+nothing to do with it (`isUnsent`). The document's Done is *Send answers*, which fixes the answers
+and sends them back while the work goes on (`POST done`). It enables once every unanswered block has
+a recommendation; with any block unanswered it asks first, in a dialog, "Send with the
+recommendations?", a line per unanswered block, "<ask> · <answer>", a proposal's answer "Agree:
+<proposal>" and a confirmation's "Yes: <proposal>", whose Confirm sends, the record answering each
+block with its recommendation. An action's Done keeps its name, and a one-ask item, its answer being
+its done, has neither.
+
+***Edited <time>*** (D032), Pilot's mark and the clock in a document's head, says that Pilot changed
+the document in a turn after the first text it was shown with (`edited_at`). No read is recorded:
+the label means changed since first shown, not since you read it.
+
+**A settled section** (`sections.ts`, `settled.tsx`). A block's own section
+([`block-dsl.md`](block-dsl.md)) whose answer is Pilot's, a deferral included, stands collapsed to
+one line in its block's place, inline and in the overlay alike: Pilot's mark, the heading's words,
+"·", the answer as the closed block shows it ("Deferred to <task>", a proposal agreed to as the
+proposal, an action's Done), a chevron, and the note as a second muted line, each clipped;
+consecutive lines are one list. A click on it, a segment of its document's bar or the block's
+address opens it, and it stays open on that page, the timeline or the overlay, each its own, while
+the page is shown. A person's answer is not Pilot's, so it opens the section for good, and Undo,
+which never gives Pilot its answer back, leaves it open. A block with no section never collapses.
+The count, the bar and *Send answers* are the same whether it collapses or not.
 
 ## Answering inline
 
-A one-ask item's block (`block.tsx`) is answered in its place; each click or Send posts through
-`useAnswer` (`hooks/use-answer.ts`), and the item becomes its done line once the screens read it
-back.
+A one-ask item's block, and each of a document's (`block.tsx`), is answered in its place; each
+click or Send posts through `useAnswer` (`hooks/use-answer.ts`). A one-ask item becomes its done
+line once the screens read it back; a document's block stays, answered, until *Send answers*.
 
 - **A decision** (`decision.tsx`): its options as full-width rows, each its label, its line and
   Recommended on the recommendation; a proposal is one row, tinted as recommended, that answers
@@ -126,7 +200,8 @@ back.
   the reason's code with the ground as its tooltip ("Auto pilot off", "Always asks: cannot be
   undone", and so on; a code without words of its own shows `because.name`); the title and the
   proposal beside the check, Yes, and the cross, No, which opens a console for the reason that
-  sends empty too, "Send No"; and Details, which unfolds the prose, and Less.
+  sends empty too, "Send No"; and Details, which unfolds the prose, and Less. Inside a document a
+  confirmation is a block, its proposal beside the same Yes and No.
 - **A notice** has Read.
 
 A console (`console.tsx`) is the growing text field with Send and a cross, Cancel, inside its
@@ -139,16 +214,27 @@ chevron, Answered, the time and the avatar of who answered, Pilot's mark for Pil
 is not a person's reads closed, the answer alone, and opens, on a click or the chevron, to the
 block's controls, live, so that the person can replace it. A deferral reads "Deferred to <task>",
 or to *the project's end*, with its note; opened, the controls stand under that line with nothing
-chosen. A note stands under its answer with the note icon.
+chosen. A note stands under its answer with the note icon. In a document every block has that
+head, its kind named, and once answered Answered. In a done item, as Open shows it, every answered
+block reads closed, a person's answer too, and opens to its controls, all disabled.
 
 ## Done lines and Undo
 
 A done item is one line that does not expand: its kind's icon, or a confirmation's green check for
-Yes and red cross for No; its title; Undo while `done.undo`; and the time it was done. Under the
-title stands a person's answer to a one-ask item, the other person's after their avatar, its note
-after " · " with the note icon: an option, the words, or "Deferred to <task>"; a confirmation's Yes
-or No shows only its note, and nothing of Pilot's shows. Undo ("Undo, until a session has taken
-it") opens the item again, and a one-ask item's block unanswered.
+Yes and red cross for No; its title; Open; its attachments' indicator; Undo while `done.undo`; and
+the time it was done. Under the title stands a person's answer to a one-ask item, the other
+person's after their avatar, its note after " · " with the note icon: an option, the words, or
+"Deferred to <task>"; a confirmation's Yes or No shows only its note, and nothing of Pilot's shows.
+Undo ("Undo, until a session has taken it") opens the item again, and a one-ask item's block
+unanswered.
+
+- **Open**, on every done line, opens the item's document in the overlay at its address, as Done
+  fixed it ([`documents.md`](documents.md)).
+- **The attachments' indicator**, where attachments hang on the item, whatever its kind: a document
+  icon opening the one attachment, or a documents icon opening a menu of them, which drops under
+  its button at the line's end, no wider than the line.
+- **A document Pilot marked Done** (cause `settled`, which no unanswered block allows) is a done
+  line as any other, and its overlay's foot names Pilot.
 
 **Finished.** Finish closes every open item but the opening, so a finished project's timeline is its
 opening and done lines, and ends in "Finished · <stamp>", "22 Oct 2026, 14:05". No line offers
@@ -164,7 +250,10 @@ draw nothing of their own. Opened there, the timeline jumps to the middle of the
 a confirmation card's row, and flashes it. A block the timeline does not draw, as in a done item's
 line or an id the item lacks, goes to its item; an item it does not draw leaves it at its end. Each
 address is gone to once, when the timeline is read or when Back reopens it, and the jump stops the
-timeline following its end.
+timeline following its end. A block in a collapsed section opens its section first. A block's
+address whose document is a card, done or open, also opens the document in the overlay at the
+block; a document's own address, an attachment's, the handbook's and the project document's are
+[`documents.md`](documents.md)'s.
 
 **On a narrow window.** At 900px and below an option's line goes under its label, Recommended
 staying at the label's end. At 600px and below a block's head wraps, and Answered shows its icon
@@ -176,13 +265,17 @@ The engine's side is pinned in `backend/tests/engine/`, the read in
 `tests/services/test_timeline_service.py` and `TestGetTimeline` (`tests/api/test_projects.py`), the
 writes and the event in `tests/api/test_items.py`, `tests/services/test_item_service.py` and
 `tests/services/test_project_event_service.py`. The browser suites are `frontend/tests/timeline/`,
-with `tests/projects/badge.spec.ts`.
+with `tests/projects/badge.spec.ts`; `document.spec.ts`, `card.spec.ts` and `settled.spec.ts` pin
+the documents.
 
 A spec makes its project with `projects.makeWithSession`, places items with `projects.place`, a
 text written in the block DSL, and posts an agent's save with `projects.save`; `projects.answer`,
-`markDone`, `undo`, `timeline` and `block` drive the routes above ([`projects.md`](projects.md) has
-the testing endpoints they call). The `timeline` page object
+`markDone`, `send`, `undo`, `timeline` and `block` drive the routes above, and `endTurn` and
+`doneByPilot` end the session's turn and mark a document Done as Pilot ([`projects.md`](projects.md)
+has the testing endpoints they call). A text with one block makes its item that block's kind, so a
+spec's document carries two blocks or more. The `timeline` page object
 (`tests/support/page-objects/timeline-page.ts`) opens a project's timeline (`open`), or an
-address (`openAt`), and reads its items, blocks, banners and done lines; `slowNetwork`
+address (`openAt`), and reads its items, blocks, segments, cards, settled lines, attachments,
+banners and done lines; `slowNetwork`
 (`tests/support/network.ts`) holds a write on its way, to see what shows while it saves. A spec
 asserting a live update waits for the stream first (`deploymentSse.ensureConnected()`).

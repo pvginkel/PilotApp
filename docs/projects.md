@@ -4,7 +4,9 @@ A project as a signed-in person reads and changes it: the project list, a projec
 transitions and its members. The API is `backend/app/api/projects.py` on `ProjectService`
 (`backend/app/services/project_service.py`), the screens are `frontend/src/components/projects/`,
 the tables are [`record.md`](record.md)'s, and the frame the screens sit in is [`ui.md`](ui.md). The
-timeline under a project's head, and its items, are [`timeline.md`](timeline.md)'s.
+timeline under a project's head, and its items, are [`timeline.md`](timeline.md)'s; the overlay over
+it and the side panel beside it, with the project's handbook and project document, are
+[`documents.md`](documents.md)'s.
 
 Nothing in the app creates a project yet: the dev seed and the record's testing endpoints (below)
 make them. In production the list is empty, and the centre reads "No projects yet"; the dev stage's
@@ -94,9 +96,11 @@ at its right, which holds *Archived*.
 A project has its own address, `/projects/<id>`, by its id. The bare address opens the project the
 browser remembers while that project is in the list, else the list's first in the order shown; with
 no project the centre reads "No projects yet" and the address stays `/`. Under it are an item's
-address and a block's ([`timeline.md`](timeline.md)), at which the project's tab is current too. The
-project's route remounts on each project, so whatever it opened (the plan, the notes, the menu, a
-dialog) is closed on the next one; the drawer closes on any change of address ([`ui.md`](ui.md)).
+address and a block's ([`timeline.md`](timeline.md)), and a document's, an attachment's, the
+handbook's and the project document's ([`documents.md`](documents.md)), at which the project's tab
+is current too. The project's route remounts on each project, so whatever it opened (the plan, the
+notes, the menu, a dialog, the overlay) is closed on the next one, while the side panel comes back
+as that project left it; the drawer closes on any change of address ([`ui.md`](ui.md)).
 
 The list and the head are read again when the window regains focus, after each of the person's
 own writes, which invalidate every query, on the server's `project_changed` event, and whenever the
@@ -105,11 +109,12 @@ event stream comes up ([`timeline.md`](timeline.md)).
 ## The head
 
 `project-head.tsx` draws the head in two rows: the name, its chip and the ticket and the repo, then
-the auto pilot switch; below them the step button, the members, the plan's notes button and the
-project's menu. On a wide window the two rows share one line. Under the narrow window's breakpoint
-they are a row each and the repo is hidden.
+the auto pilot switch; below them the step button, the members, the Documents button, the
+handbook's, the plan's notes button and the project's menu. On a wide window the two rows share one
+line. Under the narrow window's breakpoint they are a row each and the repo is hidden.
 
-- **The chips.** A draft shows "Draft", its name and members, and no switch, step or notes button.
+- **The chips.** A draft shows "Draft", its name and members, and no switch, step, Documents,
+  handbook or notes button.
   A finished project shows the "Finished" chip in place of the switch. An archived project shows
   "Archived" after its name and the rest as it was left, the switch disabled.
 - **The step button** shows the plan as a donut of its steps, done and in progress, and the step
@@ -122,6 +127,8 @@ they are a row each and the repo is hidden.
   notes", each note its summary and then its content.
 - **The members** are small avatars, overlapping by 2px, in the order they joined, in a group named
   "Members".
+- **The Documents button**, pressed while the side panel shows its Documents tab, opens that tab or
+  closes it; **the handbook's** opens the handbook in the overlay ([`documents.md`](documents.md)).
 
 The popovers and the menu close on a press outside them and on Esc.
 
@@ -171,7 +178,8 @@ answers only in testing mode ([`sign-in.md`](sign-in.md)).
   `tasks`, `notes`, `environment_id`, `open_items` and `opening`. The transitions to that standing
   are made at one instant by the first member, and the plan is saved through the engine. A project
   past the draft is born with its opening first: the first member's words, `opening` (by default
-  "An invented project, started for a test."), verbatim, titled by its name or "New project". With
+  "An invented project, started for a test."), verbatim, titled by its name or "New project", and
+  with its handbook, empty; its project document is `# <name>`. With
   an `environment_id`, an idle work session of the project there adds `open_items` open notices. A
   finished project with auto pilot on, a member named twice, open items without an environment and
   a plan with a fault are each a `400`; a handle that is no person's, `agent` included, and an
@@ -184,11 +192,33 @@ answers only in testing mode ([`sign-in.md`](sign-in.md)).
 - `POST /api/testing/items/<id>/saves` `{text}` ingests an agent's save of the item's file by that
   session, on the tree's current hash, as the store's sync does, and answers `200` `{held, faults:
   [{line, message}]}`. A held save leaves the item a concept until a clean one.
+- `POST /api/testing/projects/<id>/draft/saves` and `…/handbook/saves` `{text}` ingest a save of the
+  project document or the handbook by the project's session, as an item's does, with the same
+  answer. An unknown or archived project, and a draft's handbook, are a `404`; a project with no
+  session a `409`.
+- `POST /api/testing/projects/<id>/turn-ends`, no body, ends the turn of the project's session
+  started last as the relay does ([`engine.md`](engine.md)), and answers `204`: Pilot's writing
+  flag cleared on every document the session was saving, and a `turn` Version cut of each whose text
+  moved. No live event follows. An unknown project is a `404`, one with no session a `409`.
+- `POST /api/testing/items/<id>/done`, no body, marks a document Done as Pilot does one it settled
+  or deferred whole, by the project's session, and answers `204`: cause `settled`, a `done` Version
+  cut. An unknown item is a `404`; a project with no session, an item that is no document or is
+  done, and a block unanswered a `409`.
+- `POST /api/testing/items/<id>/attachments` `{files: [{title, filename, content_type, content}]}`,
+  `content` base64, hangs the files on the item as the project's session attaches them in one call,
+  and answers `201` `{batch, ids}`, the ids in the files' order: one batch, the project's next,
+  after the item's own attachments, each copied from `<session's folder>/<filename>` and kept
+  through the store ([`documents.md`](documents.md)). No file, a filename that is not one path
+  segment (empty, `.`, `..`, or holding a slash or NUL) or is named twice, content that is not
+  base64, and a file over 16 MiB are a `400`; an unknown item a `404`; a project with no session a
+  `409`.
 
-A project past the draft, born with its opening, an item placed and a save posted each raise
-`project_changed` through the engine, so an open screen follows them ([`timeline.md`](timeline.md)).
+A project past the draft, born with its opening, an item placed, an item's save posted, Pilot's Done
+and attachments hung each raise `project_changed` through the engine, so an open screen follows them
+([`timeline.md`](timeline.md)); a turn's end raises none, and a save of the handbook none either.
 The frontend suite's `projects` fixture (`frontend/tests/support/projects.ts`) wraps them (`make`,
-`makeWithSession`, `place`, `save`, `list`, `head`, `transition`, and the item writes of
-[`timeline.md`](timeline.md)), and the page objects `projectList` and `projectHead` drive the
-screens. Each Playwright worker's database is a clone of the dev seed
-([`record.md`](record.md)), so every spec's list holds the seed's projects beside its own.
+`makeWithSession`, `place`, `save`, `saveProjectDocument`, `endTurn`, `doneByPilot`, `attach`,
+`list`, `head`, `transition`, and the item writes of [`timeline.md`](timeline.md)), and the page
+objects `projectList` and `projectHead` drive the screens. Each Playwright worker's database is a
+clone of the dev seed ([`record.md`](record.md)), so every spec's list holds the seed's projects
+beside its own.

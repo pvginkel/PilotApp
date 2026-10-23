@@ -4,8 +4,8 @@ The React app is the mockup converted ([`change-discipline.md`](change-disciplin
 is its frame as built: the shell every screen sits in, the tokens and the shared pieces, the keys,
 what the browser remembers, links in text and the PWA. The screens have their own pages:
 [`projects.md`](projects.md) for the project list and the head, [`timeline.md`](timeline.md) for a
-project's timeline and its items, and [`sign-in.md`](sign-in.md) for the handle step and the profile
-page.
+project's timeline and its items, [`documents.md`](documents.md) for the overlay and the side panel,
+and [`sign-in.md`](sign-in.md) for the handle step and the profile page.
 
 ## Where things go
 
@@ -82,6 +82,8 @@ In `src/components/shared/`:
 - `LinkedText`: below.
 - `Markdown({text})`: GFM (react-markdown with remark-gfm) inside `.prose`, its text linked as the
   record's words are except in code and inside a link, every link opening in a new tab.
+  `HeadingWords({text})` is a heading's inline Markdown alone, for inside a button: emphasis, code
+  and links as the heading shows them, each link nested as `LinkedText`'s are.
 - `Fold({children, testId})`: a text cut at 13.5em, fading out, with Show more; one that fits shows
   whole.
 - `TextField`: the text field every answer is typed into, a `textarea` one line at rest that grows
@@ -96,19 +98,23 @@ level with its bottom edge), `.chip`, `.popover`, `.menu-pop`, `.dialog`, `.empt
 
 ## The keys
 
-`src/lib/keys.ts`. Esc closes the top-most open thing, one per press. The layers, bottom to top, are
-`console`, `overlay`, `panel`, `plan`, `menu`, `dialog` and `keys`; within a layer, the thing opened
-last is on top. An open thing registers with `useEscape(layer, open, close)`. `?` opens the keys
-list, which names Ctrl+Enter, Esc and `?`. Neither key acts in a text field or with a modifier
-held; Esc in a console's own field closes the console, and Ctrl+Enter sends a text field that has
-one Send (`TextField`).
+`src/lib/keys.ts`. Esc closes the top-most open thing, one per press. The layers' ranks, bottom to
+top, are `console`; `overlay` and `panel`, sharing one; `plan`; `menu`; `dialog`; and `keys`. Within
+a rank, the thing opened last is on top. An open thing registers with `useEscape(layer, open,
+close)`, stamped when `open` turns true. The panel registers only while it lies on top of an open
+overlay, so of the two the one opened last closes first ([`documents.md`](documents.md)). `?` opens
+the keys list, which names Ctrl+Enter, Esc and `?`. Neither key acts in a text field or with a
+modifier held; Esc in a console's own field closes the console, and Ctrl+Enter sends a text field
+that has one Send (`TextField`).
 
 ## What the browser remembers
 
 `src/lib/browser-state.ts`, one localStorage entry, `pilot`: the theme, the current project (which
-the bare address opens), and the chevrons of *Other projects* and *Finished*. Nothing of it is on
-the server. A component reads it with `useBrowserState()` and changes it with
-`rememberInBrowser(change)`.
+the bare address opens), the chevrons of *Other projects* and *Finished*, and each project's side
+panel, `{open, tab}` by the project's id, once the person set it ([`documents.md`](documents.md)).
+Nothing of it is on the server. A component reads it with `useBrowserState()` and changes it with
+`rememberInBrowser(change)`, a panel with `rememberPanel(projectId, panel)`, which keeps what
+another tab of the browser keeps for the other projects.
 
 The unsent text of every answer's field is a second entry, `pilot.unsent`, by field:
 `<item>/<block>/answer`, `/paste`, `/other` and `/no` ([`timeline.md`](timeline.md)).
@@ -197,5 +203,6 @@ The frontend suite's fixtures (`frontend/tests/support/fixtures.ts`):
   spec, a setting left out unset, and unsets both after it, through `PUT /api/testing/links`, which
   answers only in testing mode and refuses what the boot refuses; `environment(id, name)` puts an
   environment on the record through `POST /api/testing/environments` ([`projects.md`](projects.md)).
-- The page objects `handleStep`, `profile`, `projectList`, `projectHead` and `timeline`, and
-  `projects` ([`projects.md`](projects.md), [`timeline.md`](timeline.md)).
+- The page objects `handleStep`, `profile`, `projectList`, `projectHead`, `timeline`, `overlay` and
+  `panel`, and `projects` ([`projects.md`](projects.md), [`timeline.md`](timeline.md),
+  [`documents.md`](documents.md)).
