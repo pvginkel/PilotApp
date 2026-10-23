@@ -32,7 +32,12 @@ function tokenize(text: string): string[] {
       i++;
     } else if (c === '"' || c === "'") {
       let j = i + 1;
-      while (text[j] !== c) j += text[j] === '\\' ? 2 : 1;
+      while (text[j] !== c) {
+        if (j >= text.length) {
+          throw new Error(`nginx.conf: the ${c} quote at offset ${i} is never closed`);
+        }
+        j += text[j] === '\\' ? 2 : 1;
+      }
       tokens.push(text.slice(i + 1, j));
       i = j + 1;
     } else {
@@ -51,7 +56,12 @@ function parse(tokens: string[]): Directive[] {
     const directives: Directive[] = [];
     while (i < tokens.length && tokens[i] !== '}') {
       const words: string[] = [];
-      while (tokens[i] !== ';' && tokens[i] !== '{') words.push(tokens[i++]);
+      while (tokens[i] !== ';' && tokens[i] !== '{') {
+        if (i >= tokens.length) {
+          throw new Error(`nginx.conf: '${words.join(' ')}' ends without a ';' or a '{'`);
+        }
+        words.push(tokens[i++]);
+      }
       const [name, ...args] = words;
       if (tokens[i++] === '{') {
         directives.push({ name, args, block: block() });
