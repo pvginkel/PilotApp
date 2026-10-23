@@ -65,9 +65,15 @@ In `src/components/shared/`:
 - `Avatar({who, size?})`: a person `{name, initials, slot}`, or `'pilot'`; `size` is `sm` or `xs`.
 - `Menu` and `MenuItem`, and `Popover`: each closes on a press outside it and on Esc
   (`src/hooks/use-dismiss.ts`).
-- `Dialog`, a modal dialog that a click beside it or Esc closes, and `ConfirmDialog({title, lines,
-  note?, act, pending, onConfirm, onCancel, testId})`, which asks before an act; while `pending`,
-  nothing closes it.
+- `Dialog`, a modal dialog on Radix's (`@radix-ui/react-dialog`, not the template's wrapper) that a
+  click beside it or Esc closes, Esc through `useEscape` (below) and never Radix's own. While it is
+  open, Tab and Shift+Tab stay inside it and the page behind it is hidden from a screen reader. It
+  takes the focus as it opens, to its `initialFocus` or else the first thing in it that takes the
+  focus, and gives it back as it closes, to its `returnFocus` or else to what had it, if that is
+  still there. `ConfirmDialog({title, lines, note?, act, pending, onConfirm, onCancel, returnFocus?,
+  testId})` asks before an act: Cancel takes the focus first, so that Enter pressed again cancels,
+  and while `pending`, nothing closes it. The project's menu has the focus given back to its button,
+  since the item chosen is gone.
 - `EmptyState({icon, title, testId})`.
 - `Time({at, format?})`: a time in the browser's time zone, with the full stamp as its tooltip: by
   `format`, the day and the month ("19 Oct", the default), `clock`, the hour and the minute

@@ -5,7 +5,7 @@
  * or the dialog's closing, comes once the list and the head show the new standing.
  */
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Archive, ArchiveRestore, Ellipsis, Flag, RotateCcw, UserMinus, UserPlus, type LucideIcon } from 'lucide-react';
 import { ConfirmDialog } from '@/components/shared/dialog';
@@ -88,6 +88,8 @@ export function ProjectMenu({ project }: { project: Project }) {
   const leave = useDeleteProjectsMembershipByProjectId(refetch);
   const transition = usePostProjectsTransitionsByProjectId(refetch);
   const [asking, setAsking] = useState<Ask | null>(null);
+  // The item that opened a dialog is gone once it is chosen: the focus goes back to the menu's button.
+  const menuButton = useRef<HTMLButtonElement>(null);
   const name = project.name ?? 'New project';
   const path = { project_id: project.id };
 
@@ -129,6 +131,7 @@ export function ProjectMenu({ project }: { project: Project }) {
         testId="project.menu"
         trigger={({ open, toggle }) => (
           <button
+            ref={menuButton}
             type="button"
             className="btn btn-ghost btn-sm btn-icon"
             title="More"
@@ -195,6 +198,7 @@ export function ProjectMenu({ project }: { project: Project }) {
           pending={transition.isPending}
           onConfirm={() => confirm(asking, asked.kind)}
           onCancel={() => setAsking(null)}
+          returnFocus={menuButton}
           testId={`project.${asking}-dialog`}
         />
       )}

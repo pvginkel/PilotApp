@@ -80,6 +80,14 @@ export class ProjectHeadPage {
     await done;
   }
 
+  /** Chooses `ask` in the project's menu with the keyboard: Enter on the menu's button, then on the item. */
+  async chooseWithKeys(ask: Ask): Promise<void> {
+    await this.menuButton.focus();
+    await this.page.keyboard.press('Enter');
+    await this.menuItem(ask).focus();
+    await this.page.keyboard.press('Enter');
+  }
+
   /** The dialog the menu opens to ask before `ask`. */
   dialog(ask: Ask): { root: Locator; backdrop: Locator; title: Locator; lines: Locator; note: Locator; cancel: Locator; confirm: Locator } {
     const id = `project.${ask}-dialog`;

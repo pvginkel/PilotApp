@@ -2,7 +2,8 @@
  * The project's menu at the end of its head (F2.4): what each standing offers, an archived
  * project only Bring back (D012); Join and Leave at once, each with its toast (F127, D011);
  * Finish, Reopen, Archive and Bring back, each asking first in a dialog with D010's texts,
- * no toast after (F5.1, F6, F128); the list and the head showing the new standing; everything
+ * no toast after (F5.1, F6, F128); the list and the head showing the new standing; the dialog
+ * taking the focus to Cancel, holding it, and giving it back to the menu's button; everything
  * closed on another project (F1.6).
  */
 
@@ -341,6 +342,65 @@ test.describe('Bring back', () => {
 
     await projectList.archivedBack.click();
     await expect(mine).toHaveText([first, middle, last]);
+  });
+});
+
+test.describe('The dialog’s focus', () => {
+  test('chosen with Enter, Finish, Archive, Reopen and Bring back each put the focus on Cancel', async ({ page, people, projects, projectHead }) => {
+    const me = await people.signIn();
+    const cases: [Spec, ('finish' | 'archive' | 'reopen' | 'bring-back')[]][] = [
+      [{ members: [me.handle!] }, ['finish', 'archive']],
+      [{ members: [me.handle!], state: 'finished' }, ['reopen']],
+      [{ members: [me.handle!], archived: true }, ['bring-back']],
+    ];
+    for (const [spec, asks] of cases) {
+      await projectHead.open(await projects.make({ name: makeUnique('Focus'), ...spec }));
+      for (const ask of asks) {
+        const dialog = projectHead.dialog(ask);
+        await projectHead.chooseWithKeys(ask);
+        await expect(dialog.root).toBeVisible();
+        await expect(dialog.cancel).toBeFocused();
+        await page.keyboard.press('Escape');
+        await expect(dialog.root).toHaveCount(0);
+      }
+    }
+  });
+
+  test('Tab and Shift+Tab stay inside the dialog', async ({ page, people, projects, projectHead }) => {
+    const me = await people.signIn();
+    await projectHead.open(await projects.make({ name: makeUnique('Trapped'), members: [me.handle!] }));
+    const dialog = projectHead.dialog('finish');
+
+    await projectHead.chooseWithKeys('finish');
+    await expect(dialog.cancel).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(dialog.confirm).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(dialog.cancel).toBeFocused();
+    await page.keyboard.press('Shift+Tab');
+    await expect(dialog.confirm).toBeFocused();
+    await page.keyboard.press('Shift+Tab');
+    await expect(dialog.cancel).toBeFocused();
+  });
+
+  test('Esc or Cancel puts the focus back on the menu’s button', async ({ page, people, projects, projectHead }) => {
+    const me = await people.signIn();
+    const id = await projects.make({ name: makeUnique('Returning'), members: [me.handle!] });
+    await projectHead.open(id);
+    const dialog = projectHead.dialog('archive');
+
+    await projectHead.chooseWithKeys('archive');
+    await expect(dialog.cancel).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(dialog.root).toHaveCount(0);
+    await expect(projectHead.menuButton).toBeFocused();
+
+    await projectHead.chooseWithKeys('archive');
+    await expect(dialog.cancel).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(dialog.root).toHaveCount(0);
+    await expect(projectHead.menuButton).toBeFocused();
+    expect((await projects.head(id)).archived).toBe(false);
   });
 });
 
