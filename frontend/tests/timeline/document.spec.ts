@@ -268,10 +268,11 @@ test.describe('A short document', () => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Long'), members: [me.handle!] });
     const words = Array.from({ length: 160 }, (_, index) => `word${index}`).join(' ');
-    const long = await projects.place(id, { kind: 'document', title: 'The long trip', text: `${words}\n\n${TENT}` });
+    const long = await projects.place(id, { kind: 'document', title: 'The long trip', text: `${words}\n\n${TENT}\n${PITCH}` });
     await timeline.open(id);
     const item = timeline.item(long);
 
+    await expect(item.kind).toHaveText('Document · 2');
     await expect(item.title).toHaveText('The long trip');
     await expect(item.document).toHaveCount(0);
     await expect(item.send).toHaveCount(0);
