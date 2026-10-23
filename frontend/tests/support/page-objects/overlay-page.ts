@@ -7,14 +7,18 @@ import { blockParts, settledParts } from './timeline-page';
  * The overlay (F28): an item's document over its project's timeline, opened at the document's own
  * address (F97); its head with the title, the project, the step, the segment bar, *Unsent* or
  * *Done* and *Edited <time>*; its body with the summary, the prose and the blocks, the sections
- * Pilot settled as their lines, Pilot's dots, or "The document did not load"; its foot; maximize,
- * the cross and the backdrop.
+ * Pilot settled as their lines, its attachments, Pilot's dots, or "The document did not load"; its
+ * foot; maximize, the cross and the backdrop. Showing an attachment (F28.5), its head is its title
+ * over "Attachment of “<item>”" and, opened from the document, Back; its body the attachment by
+ * its type.
  */
 export class OverlayPage {
   readonly root: Locator;
   readonly backdrop: Locator;
   readonly head: Locator;
   readonly title: Locator;
+  readonly sub: Locator;
+  readonly back: Locator;
   readonly project: Locator;
   readonly step: Locator;
   readonly segments: Locator;
@@ -37,12 +41,26 @@ export class OverlayPage {
   readonly doneTime: Locator;
   readonly send: Locator;
   readonly reviewed: Locator;
+  /** The body's attachments' chips. */
+  readonly attachments: Locator;
+  /** An attachment shown: its view, by its type in `data-view`, and its parts. */
+  readonly attachment: {
+    root: Locator;
+    prose: Locator;
+    image: Locator;
+    text: Locator;
+    fileTitle: Locator;
+    size: Locator;
+    download: Locator;
+  };
 
   constructor(private readonly page: Page) {
     this.root = page.getByTestId('overlay');
     this.backdrop = page.getByTestId('overlay.backdrop');
     this.head = this.root.getByTestId('overlay.head');
     this.title = this.root.getByTestId('overlay.title');
+    this.sub = this.root.getByTestId('overlay.sub');
+    this.back = this.root.getByTestId('overlay.back');
     this.project = this.root.getByTestId('overlay.project');
     this.step = this.root.getByTestId('overlay.step');
     this.segments = this.head.getByTestId('timeline.segment');
@@ -65,6 +83,22 @@ export class OverlayPage {
     this.doneTime = this.root.getByTestId('overlay.done.time');
     this.send = this.foot.getByTestId('timeline.item.send');
     this.reviewed = this.root.getByTestId('overlay.reviewed');
+    this.attachments = this.body.getByTestId('timeline.attachment');
+    const attachment = this.root.getByTestId('overlay.attachment');
+    this.attachment = {
+      root: attachment,
+      prose: attachment.locator('.prose'),
+      image: attachment.getByTestId('overlay.attachment.image'),
+      text: attachment.getByTestId('overlay.attachment.text'),
+      fileTitle: attachment.getByTestId('overlay.attachment.file-title'),
+      size: attachment.getByTestId('overlay.attachment.size'),
+      download: attachment.getByTestId('overlay.attachment.download'),
+    };
+  }
+
+  /** The body's attachment chip by its attachment's id. */
+  attachmentChip(attachmentId: string): Locator {
+    return this.body.locator(`[data-testid="timeline.attachment"][data-attachment-id="${attachmentId}"]`);
   }
 
   /** Opens a document at its own address, once its project's timeline and the document are read. */
@@ -98,6 +132,11 @@ export class OverlayPage {
   async scrollTop(): Promise<number> {
     return this.body.evaluate((body) => body.scrollTop);
   }
+}
+
+/** An attachment's address under its document's (F28.5). */
+export function documentAttachmentAddress(projectId: string, documentId: string, attachmentId: string): string {
+  return `${documentAddress(projectId, documentId)}/attachments/${attachmentId}`;
 }
 
 /** A document's address under its project's (F97). */

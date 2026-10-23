@@ -13,6 +13,7 @@ export type TimelineItem = Schemas['TimelineSchema.1fdd8ae.TimelineItemSchema'];
 export type TimelineUser = Schemas['TimelineSchema.1fdd8ae.UserSchema'];
 export type Block = Schemas['TimelineSchema.1fdd8ae.BlockSchema'];
 export type BodyPart = NonNullable<TimelineItem['body']>[number];
+export type Attachment = Schemas['TimelineSchema.1fdd8ae.AttachmentSchema'];
 type ProsePart = Schemas['TimelineSchema.1fdd8ae.ProsePartSchema'];
 
 export function useTimeline(id: string) {
@@ -33,6 +34,10 @@ export const isProse = (part: BodyPart): part is ProsePart => part.type === 'pro
 export function blocksOf(item: TimelineItem): Block[] {
   return (item.body ?? []).flatMap((part) => (part.type === 'block' ? [part.block] : []));
 }
+
+/** An item's attachment by its id. */
+export const attachmentIn = (item: TimelineItem, id: string): Attachment | undefined =>
+  item.attachments.find((attachment) => attachment.id === id);
 
 /** Whether the record counts the block answered: an answer, a deferral included, or an action's Done. */
 export const isAnswered = (block: Block) => block.answer !== null || block.done !== null;

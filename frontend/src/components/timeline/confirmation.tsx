@@ -5,13 +5,15 @@
  * empty and is the note (F22.3); the prose folded under Details, which Less folds again (F22.4).
  * The check and the cross, with No's console, are the block's controls inside a document too
  * (F22.7). The answer given, or being saved, stays coloured. On the card the row is the block, and
- * gone to at its address, it flashes (F97). Pilot's dots end the card while Pilot writes it (F35).
+ * gone to at its address, it flashes (F97). Its attachments follow (F17.5), and Pilot's dots end
+ * the card while Pilot writes it (F35).
  */
 
 import { useState, type ReactNode } from 'react';
 import { Check, ChevronDown, ChevronUp, X } from 'lucide-react';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Markdown } from '@/components/shared/markdown';
+import { Attachments } from '@/components/timeline/attachments';
 import { Console } from '@/components/timeline/console';
 import { useBlockFlash } from '@/components/timeline/flash';
 import { ItemHead } from '@/components/timeline/item-head';
@@ -71,6 +73,7 @@ export function Confirmation({ item }: { item: TimelineItem }) {
           ))}
         </div>
       )}
+      <Attachments item={item} />
       {item.writing && <PilotWriting />}
     </div>
   );

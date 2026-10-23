@@ -20,6 +20,8 @@ interface OverlayProps {
   showing: string;
   /** A block of what it shows, to go to once its body draws it. */
   at?: { item: string; block: string } | null;
+  /** Before its titles: an attachment's way back to its document. */
+  back?: ReactNode;
   /** Its head's titles: the title and the line under it. */
   titles: ReactNode;
   foot: ReactNode;
@@ -27,7 +29,7 @@ interface OverlayProps {
   children: ReactNode;
 }
 
-export function Overlay({ showing, at = null, titles, foot, onClose, children }: OverlayProps) {
+export function Overlay({ showing, at = null, back = null, titles, foot, onClose, children }: OverlayProps) {
   const [max, setMax] = useState(false);
   const body = useRef<HTMLDivElement>(null);
   const { fresh, flashed, flash } = useFlashes();
@@ -70,6 +72,7 @@ export function Overlay({ showing, at = null, titles, foot, onClose, children }:
           <div className="sheet-backdrop" onClick={onClose} data-testid="overlay.backdrop" />
           <section className={cn('sheet', max && 'max')} data-testid="overlay">
             <div className="sheet-head" data-testid="overlay.head">
+              {back}
               <div className="titles">{titles}</div>
               <button
                 type="button"
@@ -104,5 +107,14 @@ export function Overlay({ showing, at = null, titles, foot, onClose, children }:
         </SectionsContext.Provider>
       </GoToContext.Provider>
     </FlashContext.Provider>
+  );
+}
+
+/** What it shows where a read of it fails (F113). */
+export function DidNotLoad() {
+  return (
+    <p className="item-sub" data-testid="overlay.failed">
+      The document did not load.
+    </p>
   );
 }

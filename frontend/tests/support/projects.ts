@@ -4,8 +4,9 @@
  * lists read them. Every list also holds the seed's projects and those earlier specs of the
  * worker made. A project made with a session has items placed on its timeline as Pilot places
  * them, and saves of them as Pilot's (POST /api/testing/projects/<id>/items and
- * /api/testing/items/<id>/saves), its session's turn ended and a document it settled whole marked
- * Done by Pilot; they are answered through the items API.
+ * /api/testing/items/<id>/saves), its session's turn ended, a document it settled whole marked
+ * Done by Pilot and files it copied attached to an item (/api/testing/items/<id>/attachments); they
+ * are answered through the items API.
  */
 
 import { expect, type Page } from '@playwright/test';
@@ -18,6 +19,9 @@ type ProjectHead = components['schemas']['ProjectHeadSchema.e86ccd6'];
 type TransitionKind = components['schemas']['TransitionRequestSchema.e86ccd6']['kind'];
 type ItemSpec = components['schemas']['InventedItemCreateSchema.6d6b324'];
 type Save = components['schemas']['InventedSaveSchema.6d6b324'];
+type InventedFile = components['schemas']['InventedAttachmentsCreateSchema.6d6b324.InventedFileSchema'];
+/** A file to attach, its bytes as they are. */
+export type AttachedFile = Omit<InventedFile, 'content'> & { content: string | Buffer };
 type Timeline = components['schemas']['TimelineSchema.1fdd8ae'];
 type Block = components['schemas']['TimelineSchema.1fdd8ae.BlockSchema'];
 type BlockPart = components['schemas']['TimelineSchema.1fdd8ae.BlockPartSchema'];
@@ -63,6 +67,15 @@ export class Projects {
   async endTurn(projectId: string): Promise<void> {
     const response = await this.page.request.post(`${this.backendUrl}/api/testing/projects/${projectId}/turn-ends`);
     expect(response.status(), await response.text()).toBe(204);
+  }
+
+  /** Files the project's session attaches to an item in one call, one batch; answers their ids, in the files' order. */
+  async attach(itemId: string, files: AttachedFile[]): Promise<string[]> {
+    const response = await this.page.request.post(`${this.backendUrl}/api/testing/items/${itemId}/attachments`, {
+      data: { files: files.map((file) => ({ ...file, content: Buffer.from(file.content).toString('base64') })) },
+    });
+    expect(response.status(), await response.text()).toBe(201);
+    return ((await response.json()) as { ids: string[] }).ids;
   }
 
   /** Pilot marks Done a document whose every block it answered or deferred. */

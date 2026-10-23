@@ -4,9 +4,10 @@
  * block answered in its place (F19.1, F20, F21) and a notice's Read under its text (F23), and
  * Pilot's dots at its end while Pilot writes it (F35); a confirmation is a card of its own (F22),
  * a short document stands inline (F24.1), and a larger one and a review leave a card (F24.2,
- * F25.1). An urgent one is tinted (F10.1), and one whose latest save is held shows its last
- * published text with a dashed border, a concept (F78). Done, it is its line (F13.1, F13.2), with
- * Open (F13.3) and Undo while the record offers it (F14.1).
+ * F25.1). Its attachments follow its text (F17.5). An urgent one is tinted (F10.1), and one whose
+ * latest save is held shows its last published text with a dashed border, a concept (F78). Done,
+ * it is its line (F13.1, F13.2), with Open (F13.3), its attachments' indicator (F13.6) and Undo
+ * while the record offers it (F14.1).
  */
 
 import type { AnimationEvent, ReactNode } from 'react';
@@ -16,6 +17,7 @@ import { Fold } from '@/components/shared/fold';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Markdown } from '@/components/shared/markdown';
 import { Time } from '@/components/shared/time';
+import { Attachments, LineAttachments } from '@/components/timeline/attachments';
 import { Block } from '@/components/timeline/block';
 import { Confirmation } from '@/components/timeline/confirmation';
 import { DocumentCard, InlineDocument } from '@/components/timeline/document';
@@ -73,6 +75,7 @@ function OpenItem({ item }: { item: TimelineItem }) {
       </div>
       {/* The API gives every prose item but the opening its text. */}
       <ItemText body={item.body!} ask={askOf(item)} />
+      <Attachments item={item} />
       {item.writing && <PilotWriting />}
     </div>
   );
@@ -158,8 +161,8 @@ function saidIn(item: TimelineItem): Said | null {
 }
 
 /**
- * The same line for every kind: its icon, its title, Open, Undo while the record offers it, and
- * when it was done; under the title the person's answer to a one-ask item with its note, the other
+ * The same line for every kind: its icon, its title, Open, its attachments' indicator, Undo while
+ * the record offers it, and when it was done; under the title the person's answer to a one-ask item with its note, the other
  * person's after their avatar. A confirmation's Yes leads it with a green check, its No with a red
  * cross (F22.5). It does not expand.
  */
@@ -176,6 +179,7 @@ function DoneLine({ item }: { item: TimelineItem }) {
         <LinkedText text={title} />
       </span>
       <Open item={item} />
+      <LineAttachments item={item} />
       {done.undo && <Undo item={item} />}
       <Time at={done.at} format="clock" testId="timeline.line.time" />
       {said && (

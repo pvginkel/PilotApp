@@ -2,16 +2,16 @@
  * A document item (F24): many blocks under one title, its head carrying *Edited <time>* (F28.7) and
  * *Unsent* while it has an answer and no Done (D026). One under about 150 words of its own (F24.1)
  * stands inline: its head; its title; its prose with every block answered in place, each in a panel
- * of its own, and each section Pilot settled collapsed to its line (F31.5); Pilot's dots while it
- * writes (F35); then its segment bar beside *Send answers* (F33). A segment goes to its block.
+ * of its own, and each section Pilot settled collapsed to its line (F31.5); its attachments
+ * (F17.5); Pilot's dots while it writes (F35); then its segment bar beside *Send answers* (F33). A segment goes to its block.
  * *Send answers* is the document's Done (F24.3): it enables once every block is answered or has a
  * recommendation, and clicked with unanswered recommended blocks it lists them in a dialog whose
  * Confirm sends, the record answering them with their recommendation (F32.5).
  *
  * A larger one, and every review (F25.1), leaves a card: its head, its title, its summary (F34),
- * its count chips (F24.2), its segment bar, or for a text with no block "N min read", Open, which
- * reads Continue while the document reads *Unsent*, and on a review Reviewed (F25.2); Pilot's dots
- * end it while Pilot writes. Open opens the overlay at the document's address, and a segment opens
+ * its count chips (F24.2), its segment bar, or for a text with no block "N min read", its
+ * attachments, Open, which reads Continue while the document reads *Unsent*, and on a review
+ * Reviewed (F25.2); Pilot's dots end it while Pilot writes. Open opens the overlay at the document's address, and a segment opens
  * it at its block's (F33, F97).
  */
 
@@ -21,6 +21,7 @@ import { Check, FileText } from 'lucide-react';
 import { ConfirmDialog } from '@/components/shared/dialog';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Markdown } from '@/components/shared/markdown';
+import { Attachments } from '@/components/timeline/attachments';
 import { Block } from '@/components/timeline/block';
 import { askOf, countsOf, isUnsent, recommendationOf, type Counts } from '@/components/timeline/document-state';
 import { blockKey, GoToContext } from '@/components/timeline/flash';
@@ -51,6 +52,7 @@ export function InlineDocument({ item }: { item: TimelineItem }) {
       <div className="inline-doc" data-testid="timeline.item.document">
         <DocumentParts item={item} />
       </div>
+      <Attachments item={item} />
       {item.writing && <PilotWriting />}
       {blocksOf(item).length > 0 && (
         <div className="item-actions doc-actions">
@@ -93,6 +95,7 @@ export function DocumentCard({ item }: { item: TimelineItem }) {
             <span data-testid="timeline.item.read-time">{item.read_minutes!} min read</span>
           )}
         </div>
+        <Attachments item={item} />
         <div className="item-actions">
           <Link
             to="/projects/$projectId/documents/$documentId"

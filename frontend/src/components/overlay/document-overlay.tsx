@@ -6,16 +6,20 @@
  * lead, then its prose with every block answered in place, then Pilot's dots while it writes
  * (F28.3); its foot "Done · <stamp> · <who>", naming who did it unless it was the person, or
  * Reviewed on an open review, or *Send answers* on an open document, which closes the overlay
- * (F28.4). Opened at a block, it goes to the block once it draws it (F33). A read that fails, or
- * finds no document of the project, reads "The document did not load" (F113).
+ * (F28.4). Opened at a block, it goes to the block once it draws it (F33). Its attachments stand
+ * between the lead and the text, each opening, at its address under the document's, in place of
+ * the document, with an arrow back to it (F28.3, F28.5). A read that fails, or finds no document
+ * of the project, reads "The document did not load" (F113).
  */
 
 import type { ReactNode } from 'react';
-import { useNavigate } from '@tanstack/react-router';
-import { Check } from 'lucide-react';
-import { Overlay } from '@/components/overlay/overlay';
+import { Link, useNavigate } from '@tanstack/react-router';
+import { ArrowLeft, Check } from 'lucide-react';
+import { AttachmentBody, AttachmentTitles } from '@/components/overlay/attachment-overlay';
+import { DidNotLoad, Overlay } from '@/components/overlay/overlay';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Time } from '@/components/shared/time';
+import { Attachments } from '@/components/timeline/attachments';
 import { DocumentParts, SegmentBar, SendAnswers, UnsentChip } from '@/components/timeline/document';
 import { isUnsent } from '@/components/timeline/document-state';
 import { Edited } from '@/components/timeline/item-head';
@@ -24,7 +28,7 @@ import { useItemDocument, type ItemDocument } from '@/hooks/use-document';
 import { useReviewed } from '@/hooks/use-marks';
 import type { ProjectHead } from '@/hooks/use-projects';
 import { usePerson } from '@/hooks/use-self';
-import { blocksOf, titleOf } from '@/hooks/use-timeline';
+import { attachmentIn, blocksOf, titleOf } from '@/hooks/use-timeline';
 
 interface DocumentOverlayProps {
   projectId: string;
@@ -33,9 +37,11 @@ interface DocumentOverlayProps {
   documentId: string;
   /** The block it opens at. */
   block: string | null;
+  /** Its attachment, shown in its place. */
+  attachment: string | null;
 }
 
-export function DocumentOverlay({ projectId, project, documentId, block }: DocumentOverlayProps) {
+export function DocumentOverlay({ projectId, project, documentId, block, attachment }: DocumentOverlayProps) {
   const navigate = useNavigate();
   const { handle } = usePerson();
   const close = () => void navigate({ to: '/projects/$projectId', params: { projectId } });
@@ -43,6 +49,20 @@ export function DocumentOverlay({ projectId, project, documentId, block }: Docum
   // An address may name an item of another project, or the opening, which has no text.
   const item = data !== undefined && data.project_id === projectId && data.body !== null ? data : undefined;
   const failed = error !== null || (data !== undefined && item === undefined);
+  if (attachment !== null) {
+    const shown = item && attachmentIn(item, attachment);
+    return (
+      <Overlay
+        showing={`attachment ${attachment}`}
+        back={<Back projectId={projectId} documentId={documentId} />}
+        titles={item && shown && <AttachmentTitles item={item} attachment={shown} />}
+        foot={null}
+        onClose={close}
+      >
+        {failed || (item !== undefined && shown === undefined) ? <DidNotLoad /> : shown && <AttachmentBody attachment={shown} />}
+      </Overlay>
+    );
+  }
   return (
     <Overlay
       showing={documentId}
@@ -51,14 +71,24 @@ export function DocumentOverlay({ projectId, project, documentId, block }: Docum
       foot={item && footOf(item, handle, close)}
       onClose={close}
     >
-      {failed ? (
-        <p className="item-sub" data-testid="overlay.failed">
-          The document did not load.
-        </p>
-      ) : (
-        item && <Body item={item} />
-      )}
+      {failed ? <DidNotLoad /> : item && <Body item={item} />}
     </Overlay>
+  );
+}
+
+/** An attachment's way back to its document: an arrow, no label. */
+function Back({ projectId, documentId }: { projectId: string; documentId: string }) {
+  return (
+    <Link
+      to="/projects/$projectId/documents/$documentId"
+      params={{ projectId, documentId }}
+      className="btn btn-ghost btn-sm btn-icon back"
+      title="Back to the document"
+      aria-label="Back"
+      data-testid="overlay.back"
+    >
+      <ArrowLeft className="icon" aria-hidden="true" />
+    </Link>
   );
 }
 
@@ -105,6 +135,7 @@ function Body({ item }: { item: ItemDocument }) {
           <LinkedText text={item.summary} />
         </div>
       )}
+      <Attachments item={item} inDocument />
       <div className="sheet-doc" data-testid="overlay.document">
         <DocumentParts item={item} />
       </div>

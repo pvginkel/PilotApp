@@ -6,7 +6,8 @@ import { waitTestEvent } from '../helpers';
  * A project's timeline (F8): its rows, the opening, its items open and as done lines with Open and
  * Undo, an open item's block (F31) or a confirmation's card (F22), an inline document's blocks,
  * segments and *Send answers* with its dialog (F24.1, F33, F32.5), a larger document's or a
- * review's card (F24.2, F25), a section Pilot settled as its line (F31.5), Pilot's dots (F35), the
+ * review's card (F24.2, F25), a section Pilot settled as its line (F31.5), an item's attachments
+ * and a done line's indicator of them (F17.5, F13.6), Pilot's dots (F35), the
  * urgent banners and the "N open above" chip
  * (F10.2, F11), a finished timeline's end (F5.3), and where it stands scrolled; opened at its
  * project's address or at an item's or a block's under it (F97).
@@ -20,6 +21,8 @@ export class TimelinePage {
   readonly openingWho: Locator;
   readonly openingWords: Locator;
   readonly openingMore: Locator;
+  /** The opening's attachments' chips. */
+  readonly openingAttachments: Locator;
   readonly empty: Locator;
   readonly banners: Locator;
   readonly openAbove: Locator;
@@ -36,6 +39,7 @@ export class TimelinePage {
     this.openingWho = this.opening.getByTestId('timeline.opening.who');
     this.openingWords = this.opening.getByTestId('timeline.opening.words');
     this.openingMore = this.opening.getByTestId('timeline.opening.words.more');
+    this.openingAttachments = this.opening.getByTestId('timeline.attachment');
     this.empty = this.root.getByTestId('timeline.empty');
     this.banners = this.root.getByTestId('timeline.banner');
     this.openAbove = this.root.getByTestId('timeline.open-above');
@@ -97,6 +101,14 @@ export class TimelinePage {
       note: root.getByTestId('timeline.line.note'),
       undo: root.getByTestId('timeline.line.undo'),
       open: root.getByTestId('timeline.line.open'),
+      /** The attachments' chips, and each by its attachment's id. */
+      attachments: root.getByTestId('timeline.attachment'),
+      attachment: (attachmentId: string) => root.locator(`[data-testid="timeline.attachment"][data-attachment-id="${attachmentId}"]`),
+      /** A done line's indicator: the one attachment, or the menu of several and its items. */
+      lineAttachment: root.getByTestId('timeline.line.attachment'),
+      lineAttachments: root.getByTestId('timeline.line.attachments'),
+      lineAttachmentsMenu: root.getByTestId('timeline.line.attachments.menu'),
+      lineAttachmentItems: root.getByTestId('timeline.line.attachments.item'),
       block: blockParts(this.page, root.getByTestId('timeline.block')),
       confirm: this.confirm(root),
       edited: root.getByTestId('timeline.item.edited'),
@@ -176,6 +188,11 @@ export class TimelinePage {
   async refocus(): Promise<void> {
     await this.page.evaluate(() => document.dispatchEvent(new Event('visibilitychange', { bubbles: true })));
   }
+}
+
+/** An attachment's address under its item's (F28.5). */
+export function attachmentAddress(projectId: string, itemId: string, attachmentId: string): string {
+  return `/projects/${projectId}/items/${itemId}/attachments/${attachmentId}`;
 }
 
 /** An item's address under its project's, or a block's under the item's (F97). */

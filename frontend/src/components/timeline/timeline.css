@@ -100,6 +100,9 @@
   .item-sub { margin: 0 0 6px; font-size: 14px; color: hsl(var(--muted-foreground)); }
   .item-after { margin-top: 12px; }
   .item-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+  /* The attachments hung on an item, a chip each (attachments.tsx). */
+  .attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .attachments .btn { max-width: 100%; }
 
   /* ---- A confirmation: a compact card in a soft yellow, Yes and No as a check and a cross, grey
      until hovered --------------------------------------------------------------------------- */
@@ -380,7 +383,7 @@
   .item.collapsed { border-color: transparent; background: none; margin: 2px 0; }
   .line .kind-icon { color: hsl(var(--primary)); }
   /* Its icon buttons side by side touch. */
-  .line .btn-icon + .btn-icon { margin-left: -10px; }
+  .line .btn-icon + .btn-icon, .line .btn-icon + .menu-anchor, .line .menu-anchor + .btn-icon { margin-left: -10px; }
   .line .kind-icon.yes { color: hsl(var(--success-text)); }
   .line .kind-icon.no { color: hsl(var(--destructive-text)); }
   .line .title, .line .said-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -39,6 +39,8 @@
     border-bottom: 1px solid hsl(var(--border));
   }
   .sheet-head .titles { flex: 1; min-width: 0; }
+  /* An attachment's Back: the arrow hangs into the padding, level with the text under it. */
+  .sheet-head .back { margin-left: -6px; }
   .sheet-head h2 { margin: 0; font-size: 17px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sheet-head .sub { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: 13px; color: hsl(var(--muted-foreground)); }
   .sheet-head .sub .segbar { align-self: center; }
@@ -62,12 +64,23 @@
   .sheet-foot .grow { flex: 1; }
   .sheet-foot .state { font-size: 13px; color: hsl(var(--muted-foreground)); }
 
+  .sheet .attachments { margin: 0 0 14px; }
   .lead { margin-bottom: 18px; padding: 10px 14px; border-radius: var(--radius); background: hsl(var(--primary-muted) / 0.6); font-size: 14.5px; }
 
   /* A document's prose and its blocks in the body. */
   .sheet-doc > .prose + .prose { margin-top: 0.7em; }
   .sheet-doc > .block { margin: 14px 0 26px; }
   .sheet-doc > .settled-lines { margin: 12px -8px 20px; }
+
+  /* An attachment by its type (attachment-overlay.tsx). */
+  .attachment-image { display: block; max-width: 100%; height: auto; border: 1px solid hsl(var(--border)); border-radius: var(--radius); }
+  .attachment-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .attachment-file { display: flex; align-items: baseline; gap: 10px; }
+  .attachment-file > .icon { flex: none; position: relative; top: calc(0.5em - 0.5cap); color: hsl(var(--primary)); }
+  .attachment-file .t { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .attachment-file .title, .attachment-file .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .attachment-file .sub { font-size: 13px; color: hsl(var(--muted-foreground)); }
+  .attachment-file .btn { flex: none; align-self: center; }
 
   /* A phone: the whole screen, with no maximize (F98.3). */
   @media (max-width: 900px) {
