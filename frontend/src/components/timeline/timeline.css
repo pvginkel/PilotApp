@@ -103,6 +103,7 @@
   /* The attachments hung on an item, a chip each (attachments.tsx). */
   .attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
   .attachments .btn { max-width: 100%; }
+  .attachments .name, .line .menu-item .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
   /* ---- A confirmation: a compact card in a soft yellow, Yes and No as a check and a cross, grey
      until hovered --------------------------------------------------------------------------- */
@@ -370,6 +371,7 @@
   /* The same shape for every kind, so history reads as a log. Its text, icons and time share a
      baseline, the text's line filling the row so it centres. */
   .line {
+    position: relative;
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
@@ -384,6 +386,10 @@
   .line .kind-icon { color: hsl(var(--primary)); }
   /* Its icon buttons side by side touch. */
   .line .btn-icon + .btn-icon, .line .btn-icon + .menu-anchor, .line .menu-anchor + .btn-icon { margin-left: -10px; }
+  /* Its menu drops under its button, at its static place, and stands at the line's end, no wider
+     than the line. */
+  .line .menu-anchor { position: static; }
+  .line .menu-pop { top: auto; right: 12px; max-width: calc(100% - 24px); margin-top: 6px; }
   .line .kind-icon.yes { color: hsl(var(--success-text)); }
   .line .kind-icon.no { color: hsl(var(--destructive-text)); }
   .line .title, .line .said-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

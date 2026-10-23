@@ -33,7 +33,7 @@ export function Attachments({ item, inDocument = false }: AttachmentsProps) {
           testId="timeline.attachment"
         >
           <Paperclip className="icon" aria-hidden="true" />
-          {attachment.title}
+          <span className="name">{attachment.title}</span>
         </AttachmentLink>
       ))}
     </div>
@@ -92,7 +92,9 @@ export function LineAttachments({ item }: { item: TimelineItem }) {
           }
           testId="timeline.line.attachments.item"
         >
-          {attachment.title}
+          <span className="name" title={attachment.title}>
+            {attachment.title}
+          </span>
         </MenuItem>
       ))}
     </Menu>

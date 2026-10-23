@@ -10,6 +10,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import type { Locator, Page } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import { documentAddress, documentAttachmentAddress } from '../support/page-objects/overlay-page';
@@ -279,5 +280,81 @@ test.describe('Attachments', () => {
     await overlay.back.click();
     await expect(overlay.title).toHaveText('The trip');
     await expect(overlay.attachments).toHaveText(['Tent notes']);
+  });
+});
+
+test.describe('Attachments on a phone', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  const TITLE = 'Architecture decision record: an event-sourced timeline with append-only versions per turn';
+
+  /** A part lies on the screen, its left edge to its right. */
+  const onScreen = async (page: Page, part: Locator) => {
+    const box = (await part.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+  };
+  /** A text cut short, or a pane that scrolls sideways. */
+  const overflows = (part: Locator) => part.evaluate((element) => element.scrollWidth > element.clientWidth);
+
+  /** A chip with a long title: on the screen, its clip at its start, the title cut short inside it. */
+  const fits = async (page: Page, chip: Locator) => {
+    await expect(chip).toHaveAttribute('title', TITLE);
+    await onScreen(page, chip);
+    const [box, clip] = [(await chip.boundingBox())!, (await chip.locator('.icon').boundingBox())!];
+    expect(clip.x).toBeGreaterThanOrEqual(box.x);
+    expect(await chip.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    expect(await overflows(chip.locator('.name'))).toBe(true);
+  };
+
+  test('cut a long title short inside its chip, on the timeline and in the overlay’s body, which do not scroll sideways', async ({
+    page,
+    people,
+    projects,
+    timeline,
+    overlay,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Attached'), members: [me.handle!] });
+    const decision = await projects.place(id, { kind: 'decision', title: 'Which tent?', text: DECISION });
+    const trip = await projects.place(id, { kind: 'document', title: 'The trip', text: LONG });
+    const [onItem] = await projects.attach(decision, [file(TITLE)]);
+    const [onTrip] = await projects.attach(trip, [file(TITLE)]);
+    await timeline.open(id);
+
+    await fits(page, timeline.item(decision).attachment(onItem));
+    await fits(page, timeline.item(trip).attachment(onTrip));
+    expect(await overflows(timeline.root)).toBe(false);
+
+    await overlay.open(id, trip);
+    await fits(page, overlay.attachmentChip(onTrip));
+    expect(await overflows(overlay.body)).toBe(false);
+  });
+
+  test('keep a done line’s menu of attachments on the screen under its button, a long title cut short and every entry in sight', async ({
+    page,
+    people,
+    projects,
+    timeline,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Attached'), members: [me.handle!] });
+    const decision = await projects.place(id, { kind: 'decision', title: 'Which tent?', text: DECISION });
+    await projects.attach(decision, [file(TITLE), file('Short')]);
+    await projects.answer(decision, 'D1', 'Dome');
+    await timeline.open(id);
+
+    const item = timeline.item(decision);
+    await item.lineAttachments.click();
+    await expect(item.lineAttachmentItems).toHaveText([TITLE, 'Short']);
+    await onScreen(page, item.lineAttachmentsMenu);
+    for (const entry of await item.lineAttachmentItems.all()) await onScreen(page, entry);
+    const [long, short] = [item.lineAttachmentItems.first(), item.lineAttachmentItems.last()];
+    await expect(long.locator('.name')).toHaveAttribute('title', TITLE);
+    expect(await overflows(long.locator('.name'))).toBe(true);
+    expect(await overflows(short.locator('.name'))).toBe(false);
+    const button = (await item.lineAttachments.boundingBox())!;
+    expect((await item.lineAttachmentsMenu.boundingBox())!.y).toBeGreaterThanOrEqual(button.y + button.height);
+    expect(await overflows(timeline.root)).toBe(false);
   });
 });
