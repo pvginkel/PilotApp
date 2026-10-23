@@ -5,8 +5,9 @@ import re
 from dataclasses import dataclass
 
 from sqlalchemy import exists, or_, select
-from sqlalchemy.orm import Session, defer
+from sqlalchemy.orm import Session
 
+from app.engine.attachments import AttachmentStore
 from app.engine.paths import PLAN, REFERENCE, TIMELINE, attachment_path, tree_path
 from app.engine.plan import PlanService
 from app.engine.views import Rendering, ViewService
@@ -65,11 +66,16 @@ class TreeService:
     """
 
     def __init__(
-        self, db: Session, view_service: ViewService, plan_service: PlanService
+        self,
+        db: Session,
+        view_service: ViewService,
+        plan_service: PlanService,
+        attachment_store: AttachmentStore,
     ) -> None:
         self.db = db
         self.view_service = view_service
         self.plan_service = plan_service
+        self.attachment_store = attachment_store
 
     def resolve(self, path: str) -> TreeDocument | TreePlan | TreeFile:
         """What `path`, from the tree's root, names among the paths the store
@@ -96,7 +102,7 @@ class TreeService:
                     )
                 ).one_or_none()
                 if copy is not None:
-                    return TreeFile(copy.content, copy.sha256)
+                    return TreeFile(self.attachment_store.get(copy), copy.sha256)
             found = self.db.execute(
                 select(Document, Item)
                 .outerjoin(Item, Item.id == Document.id)
@@ -218,10 +224,7 @@ class TreeService:
                 True,
             )
             for attachment in self.db.scalars(
-                # Its hash, not its bytes: the content stays in the database.
-                select(Attachment)
-                .where(Attachment.project_id == project.id)
-                .options(defer(Attachment.content))
+                select(Attachment).where(Attachment.project_id == project.id)
             )
         )
         return sorted(entries, key=lambda entry: entry.path)

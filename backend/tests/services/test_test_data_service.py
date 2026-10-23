@@ -1,6 +1,8 @@
 """The dev stack's seed: an invented record, written through the engine's own
 operations where the engine writes it (slice 002 P9)."""
 
+import base64
+import hashlib
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -13,8 +15,10 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.app import App
+from app.database import scoped_session
 from app.engine import dsl
-from app.engine.tree import TreeDocument, TreePlan
+from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved
+from app.engine.tree import TreeDocument, TreeFile, TreePlan
 from app.exceptions import (
     InvalidOperationException,
     RecordNotFoundException,
@@ -46,7 +50,11 @@ from app.models.reference import (
     UserKind,
     VersionCause,
 )
-from app.schemas.testing_record import OPENING_WORDS, InventedProjectCreateSchema
+from app.schemas.testing_record import (
+    OPENING_WORDS,
+    InventedFileSchema,
+    InventedProjectCreateSchema,
+)
 from app.services import test_data_service
 from app.services.container import ServiceContainer
 from app.startup import load_test_data_hook
@@ -459,7 +467,7 @@ class TestTestDataService:
 
         assert hung.attachment_id == attachment.id
         assert attachment.source_code is AttachmentSource.FILE
-        assert attachment.size == len(attachment.content)
+        assert attachment.size == len(container.attachment_store().get(attachment))
         assert decision["attachments"] == [
             {"id": str(attachment.id), "path": "attachments/1/layout-sketches.md"}
         ]
@@ -1017,3 +1025,178 @@ class TestSave:
             f"Cannot save item {opening.id} because the project has no session: "
             "make it with an environment_id"
         )
+
+
+def _file(filename: str, content: bytes, content_type: str = "text/markdown") -> Any:
+    return InventedFileSchema.model_validate(
+        {
+            "title": "Sketch",
+            "filename": filename,
+            "content_type": content_type,
+            "content": base64.b64encode(content).decode(),
+        }
+    )
+
+
+def _hung(session: DbSession, item: Item) -> list[tuple[int, int, str]]:
+    """The item's attachments in order: position, batch and filename."""
+    return [
+        (position, batch, filename)
+        for position, batch, filename in session.execute(
+            select(ItemAttachment.position, Attachment.batch, Attachment.filename)
+            .join(Attachment, Attachment.id == ItemAttachment.attachment_id)
+            .where(ItemAttachment.item_id == item.id)
+            .order_by(ItemAttachment.position)
+        )
+    ]
+
+
+class TestAttach:
+    @pytest.fixture
+    def notice(self, container: ServiceContainer, camp: Project) -> Item:
+        return container.test_data_service().item(
+            camp.id, "notice", "Palette", "Blue and green.\n"
+        )
+
+    def test_the_projects_session_copies_them_through_the_store(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        camp: Project,
+        notice: Item,
+        environment: Environment,
+    ) -> None:
+        [attachment] = container.test_data_service().attach(
+            notice.id, [_file("sketch.png", b"\x89PNG", "image/png")]
+        )
+
+        project_session = _session_of(session, camp)
+        assert (
+            attachment.title,
+            attachment.filename,
+            attachment.content_type,
+            attachment.size,
+            attachment.sha256,
+            attachment.source_code,
+            attachment.source_environment_id,
+            attachment.source_path,
+            attachment.created_by_session_id,
+        ) == (
+            "Sketch",
+            "sketch.png",
+            "image/png",
+            4,
+            hashlib.sha256(b"\x89PNG").hexdigest(),
+            AttachmentSource.FILE,
+            environment.id,
+            f"{project_session.cwd}/sketch.png",
+            project_session.id,
+        )
+        assert container.attachment_store().get(attachment) == b"\x89PNG"
+
+    def test_one_call_is_one_batch_the_projects_next_after_the_items_own(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        camp: Project,
+        notice: Item,
+    ) -> None:
+        service = container.test_data_service()
+        other = service.item(camp.id, "notice", "Tents", "Dome.\n")
+
+        service.attach(notice.id, [_file("a.md", b"A"), _file("b.md", b"B")])
+        service.attach(notice.id, [_file("a.md", b"C")])
+        service.attach(other.id, [_file("c.md", b"D")])
+
+        assert _hung(session, notice) == [
+            (1, 1, "a.md"),
+            (2, 1, "b.md"),
+            (3, 2, "a.md"),
+        ]
+        assert _hung(session, other) == [(1, 3, "c.md")]
+
+    def test_the_stores_tree_holds_them_and_the_timeline_lists_them(
+        self, container: ServiceContainer, camp: Project, notice: Item
+    ) -> None:
+        [attachment] = container.test_data_service().attach(
+            notice.id, [_file("sketch.md", b"# Sketch\n")]
+        )
+
+        path = f"{camp.slug}/attachments/1/sketch.md"
+        assert container.tree_service().read(path) == TreeFile(
+            b"# Sketch\n", hashlib.sha256(b"# Sketch\n").hexdigest()
+        )
+        timeline = json.loads(container.view_service().timeline(camp).text)
+        [item] = [entry for entry in timeline["items"] if entry["title"] == "Palette"]
+        assert item["attachments"] == [
+            {"id": str(attachment.id), "path": "attachments/1/sketch.md"}
+        ]
+
+    def test_their_paths_and_the_timeline_move_after_the_commit(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        person: User,
+        environment: Environment,
+    ) -> None:
+        with scoped_session(container):
+            service = container.test_data_service()
+            project = service.project(_spec(name="Camp", environment_id=environment.id))
+            notice = service.item(project.id, "notice", "Palette", "Blue.\n")
+            attachments = service.attach(
+                notice.id, [_file("a.md", b"A"), _file("b.md", b"B")]
+            )
+            moved = [
+                TreeHashMoved(
+                    f"{project.slug}/attachments/1/{attachment.filename}",
+                    attachment.sha256,
+                )
+                for attachment in attachments
+            ] + [
+                TreeHashMoved(
+                    f"{project.slug}/timeline.json",
+                    container.view_service().timeline(project).hash,
+                ),
+                ProjectChanged(project.id),
+            ]
+            assert engine_events == []
+
+        assert [event for event in moved if event not in engine_events] == []
+
+    def test_an_unknown_item_is_not_found(self, container: ServiceContainer) -> None:
+        item_id = uuid.uuid4()
+
+        with pytest.raises(RecordNotFoundException) as raised:
+            container.test_data_service().attach(item_id, [_file("a.md", b"A")])
+
+        assert raised.value.message == f"Item {item_id} was not found"
+
+    def test_a_project_without_a_session_is_refused(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        project = container.test_data_service().project(_spec())
+        [opening] = _items(session, project)
+
+        with pytest.raises(InvalidOperationException) as raised:
+            container.test_data_service().attach(opening.id, [_file("a.md", b"A")])
+
+        assert raised.value.message == (
+            f"Cannot attach files to item {opening.id} because the project has no "
+            "session: make it with an environment_id"
+        )
+        assert session.scalars(select(Attachment)).all() == []
+
+    def test_a_file_over_16_mib_is_refused_and_none_kept(
+        self, container: ServiceContainer, session: DbSession, notice: Item
+    ) -> None:
+        over = 16 * 1024 * 1024 + 1
+
+        with pytest.raises(ValidationException) as raised:
+            container.test_data_service().attach(
+                notice.id, [_file("a.md", b"A"), _file("big.bin", bytes(over))]
+            )
+
+        assert raised.value.message == (
+            f"big.bin is {over} bytes, over the 16777216-byte cap"
+        )
+        assert session.scalars(select(Attachment)).all() == []

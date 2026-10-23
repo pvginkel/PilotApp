@@ -2,6 +2,7 @@
 UI cannot make (TEST-6), on every stage but prd, behind the API's sign-in
 (D027)."""
 
+import base64
 import uuid
 from typing import Any
 
@@ -13,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.config import STAGES, Settings, Stage, default_stage
 from app.config import Environment as SettingsEnvironment
-from app.models import Document, Environment, Item, Project, User
+from app.models import Attachment, Document, Environment, Item, Project, User
 from app.models.reference import ProjectState
 from app.schemas.testing_record import OPENING_WORDS
 from app.services.container import ServiceContainer
@@ -37,6 +38,20 @@ def _items_path(project_id: uuid.UUID | str) -> str:
 
 def _saves_path(item_id: uuid.UUID | str) -> str:
     return f"/api/testing/items/{item_id}/saves"
+
+
+def _attachments_path(item_id: uuid.UUID | str) -> str:
+    return f"/api/testing/items/{item_id}/attachments"
+
+
+def _file(filename: str, data: bytes, **fields: Any) -> dict[str, Any]:
+    return {
+        "title": "Sketch",
+        "filename": filename,
+        "content_type": "text/markdown",
+        "content": base64.b64encode(data).decode(),
+        **fields,
+    }
 
 
 def _make(client: FlaskClient, **spec: Any) -> str:
@@ -675,12 +690,133 @@ class TestCreateSave:
         assert response.status_code == 409
 
 
+@pytest.mark.usefixtures("person")
+class TestCreateAttachments:
+    def test_one_file_hangs_as_the_projects_first_batch_and_streams(
+        self, client: FlaskClient, environment: Environment
+    ) -> None:
+        project_id = _make(client, environment_id=environment.id)
+        item_id = _place(client, project_id, "notice", "Blue and green.\n")
+
+        response = client.post(
+            _attachments_path(item_id),
+            json={"files": [_file("sketch.md", b"# Sketch\n")]},
+        )
+
+        assert response.status_code == 201
+        body = response.get_json()
+        assert (body["batch"], len(body["ids"])) == (1, 1)
+        streamed = client.get(f"/api/attachments/{body['ids'][0]}")
+        assert (streamed.status_code, streamed.data) == (200, b"# Sketch\n")
+
+    def test_files_of_one_call_share_a_batch_the_next_call_the_next(
+        self, client: FlaskClient, session: Session, environment: Environment
+    ) -> None:
+        project_id = _make(client, environment_id=environment.id)
+        item_id = _place(client, project_id, "notice", "Blue and green.\n")
+
+        first = client.post(
+            _attachments_path(item_id),
+            json={"files": [_file("a.md", b"A"), _file("b.png", b"B")]},
+        ).get_json()
+        second = client.post(
+            _attachments_path(item_id), json={"files": [_file("a.md", b"C")]}
+        ).get_json()
+
+        assert (first["batch"], second["batch"]) == (1, 2)
+        assert [
+            session.get_one(Attachment, uuid.UUID(attachment_id)).filename
+            for attachment_id in first["ids"]
+        ] == ["a.md", "b.png"]
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            pytest.param({}, id="no files"),
+            pytest.param({"files": []}, id="an empty list"),
+            pytest.param({"files": [_file("docs/a.md", b"A")]}, id="a slash"),
+            pytest.param({"files": [_file(".", b"A")]}, id="dot"),
+            pytest.param({"files": [_file("..", b"A")]}, id="dot dot"),
+            pytest.param({"files": [_file("", b"A")]}, id="no name"),
+            pytest.param({"files": [_file("a\x00.md", b"A")]}, id="a NUL"),
+            pytest.param(
+                {"files": [_file("a.md", b"A"), _file("a.md", b"B")]},
+                id="a name twice",
+            ),
+            pytest.param({"files": [_file("a.md", b"A", title="")]}, id="no title"),
+            pytest.param(
+                {"files": [_file("a.md", b"A", content_type="")]}, id="no type"
+            ),
+            pytest.param(
+                {"files": [_file("a.md", b"A", content="QQ")]}, id="unpadded base64"
+            ),
+            pytest.param(
+                {"files": [_file("a.md", b"A", content="!!!!")]}, id="not base64"
+            ),
+        ],
+    )
+    def test_a_body_out_of_the_record_is_invalid(
+        self,
+        client: FlaskClient,
+        session: Session,
+        environment: Environment,
+        body: dict[str, Any],
+    ) -> None:
+        project_id = _make(client, environment_id=environment.id)
+        item_id = _place(client, project_id, "notice", "Blue and green.\n")
+
+        response = client.post(_attachments_path(item_id), json=body)
+
+        assert response.status_code == 400
+        assert _count(session, Attachment) == 0
+
+    def test_a_file_of_16_mib_is_taken_and_one_byte_more_refused(
+        self, client: FlaskClient, session: Session, environment: Environment
+    ) -> None:
+        project_id = _make(client, environment_id=environment.id)
+        item_id = _place(client, project_id, "notice", "Blue and green.\n")
+        cap = 16 * 1024 * 1024
+
+        over = client.post(
+            _attachments_path(item_id),
+            json={"files": [_file("big.bin", bytes(cap + 1))]},
+        )
+        at = client.post(
+            _attachments_path(item_id), json={"files": [_file("big.bin", bytes(cap))]}
+        )
+
+        assert (over.status_code, at.status_code) == (400, 201)
+        assert session.scalars(select(Attachment.size)).one() == cap
+
+    def test_an_unknown_item_is_not_found(self, client: FlaskClient) -> None:
+        response = client.post(
+            _attachments_path(uuid.uuid4()), json={"files": [_file("a.md", b"A")]}
+        )
+
+        assert response.status_code == 404
+
+    def test_a_project_without_a_session_conflicts(
+        self, client: FlaskClient, session: Session
+    ) -> None:
+        project_id = _make(client)
+        opening = session.scalars(
+            select(Item).where(Item.project_id == uuid.UUID(project_id))
+        ).one()
+
+        response = client.post(
+            _attachments_path(opening.id), json={"files": [_file("a.md", b"A")]}
+        )
+
+        assert response.status_code == 409
+
+
 ENDPOINTS = [
     (PEOPLE, {"handle": "ben"}),
     (ENVIRONMENTS, {"id": "example-env-2", "name": "Example-2"}),
     (PROJECTS, {"members": ["ada"]}),
     (_items_path(uuid.uuid4()), {"kind": "notice", "title": "Camp", "text": "Hi"}),
     (_saves_path(uuid.uuid4()), {"text": "Hi"}),
+    (_attachments_path(uuid.uuid4()), {"files": [_file("a.md", b"Hi")]}),
 ]
 
 

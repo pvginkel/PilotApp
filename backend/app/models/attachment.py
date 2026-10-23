@@ -48,7 +48,11 @@ class Attachment(db.Model):  # type: ignore[name-defined]
     content_type: Mapped[str] = mapped_column(Text)
     size: Mapped[int] = mapped_column(Integer)
     sha256: Mapped[str] = mapped_column(Text)
-    content: Mapped[bytes] = mapped_column(LargeBinary)
+    # Read and written through `AttachmentStore` alone: loading a row never
+    # reads the bytes, and touching the attribute on a loaded row raises.
+    content: Mapped[bytes] = mapped_column(
+        LargeBinary, deferred=True, deferred_raiseload=True
+    )
     source_code: Mapped[AttachmentSource] = mapped_column(ATTACHMENT_SOURCE)
     source_environment_id: Mapped[str | None] = mapped_column(
         ForeignKey("environments.id")

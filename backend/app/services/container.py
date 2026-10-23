@@ -8,6 +8,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.app_config import AppSettings
 from app.config import Settings
+from app.engine.attachments import AttachmentStore
 from app.engine.bus import EngineBus
 from app.engine.documents import DocumentService
 from app.engine.ingest import IngestService
@@ -16,6 +17,7 @@ from app.engine.record import RecordService
 from app.engine.tree import TreeService
 from app.engine.views import ViewService
 from app.exceptions import ConfigurationError
+from app.services.attachment_service import AttachmentService
 from app.services.auth_service import AuthService
 from app.services.controller_client import ControllerClient
 from app.services.environment_service import EnvironmentService
@@ -250,8 +252,13 @@ class ServiceContainer(containers.DeclarativeContainer):
         db=db_session,
         ticket_id_pattern=app_config.provided.ticket_id_pattern,
     )
+    attachment_store = providers.Factory(AttachmentStore, db=db_session)
     tree_service = providers.Factory(
-        TreeService, db=db_session, view_service=view_service, plan_service=plan_service
+        TreeService,
+        db=db_session,
+        view_service=view_service,
+        plan_service=plan_service,
+        attachment_store=attachment_store,
     )
     document_service = providers.Factory(
         DocumentService,
@@ -309,6 +316,10 @@ class ServiceContainer(containers.DeclarativeContainer):
     timeline_service = providers.Factory(
         TimelineService, db=db_session, record_service=record_service
     )
+    # An attachment's bytes, streamed (F28.5, F36)
+    attachment_service = providers.Factory(
+        AttachmentService, db=db_session, attachment_store=attachment_store
+    )
     # What a person does to an item: its answers and marks (F14, F32.4)
     item_service = providers.Factory(
         ItemService,
@@ -345,6 +356,9 @@ class ServiceContainer(containers.DeclarativeContainer):
         people_service=people_service,
         ingest_service=ingest_service,
         tree_service=tree_service,
+        view_service=view_service,
+        attachment_store=attachment_store,
+        engine_bus=engine_bus,
     )
 
 

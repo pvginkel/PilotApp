@@ -4,6 +4,8 @@ import hashlib
 from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy import select
+from sqlalchemy.exc import InvalidRequestError
 from sqlalchemy.orm import Session as DbSession
 
 from app.models import Attachment, Environment, Item, ItemAttachment, Project, Session
@@ -39,8 +41,25 @@ class TestAttachment:
         session.flush()
         session.expire(copy)
 
-        assert copy.content == _CONTENT
         assert copy.source_environment_id is None
+
+    def test_its_bytes_load_only_on_a_query_of_their_own(
+        self, session: DbSession, project: Project
+    ) -> None:
+        copy = _draft_copy(project)
+        session.add(copy)
+        session.flush()
+        session.expire(copy)
+
+        assert copy.source_code is AttachmentSource.DRAFT
+        with pytest.raises(InvalidRequestError, match="raiseload"):
+            _ = copy.content
+        assert (
+            session.scalars(
+                select(Attachment.content).where(Attachment.id == copy.id)
+            ).one()
+            == _CONTENT
+        )
 
     def test_a_file_copy_has_its_source_and_session(
         self,

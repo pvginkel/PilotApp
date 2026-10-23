@@ -24,6 +24,28 @@ def _ingest(document: Document, text: str) -> None:
     document.ingested_at = datetime.now(UTC)
 
 
+def _keep(
+    container: ServiceContainer,
+    project: Project,
+    batch: int,
+    filename: str,
+    content: bytes,
+) -> None:
+    """A copy of the draft in the batch, kept through the store."""
+    container.attachment_store().put(
+        Attachment(
+            project_id=project.id,
+            batch=batch,
+            title="Palette",
+            filename=filename,
+            content_type="text/markdown",
+            source_code=AttachmentSource.DRAFT,
+            copied_at=datetime.now(UTC),
+        ),
+        content,
+    )
+
+
 def _error(
     environment: Environment, path: str, kind: ErrorKind = ErrorKind.PARSE
 ) -> SaveError:
@@ -116,20 +138,7 @@ class TestTreeService:
         _ingest(session.get_one(Document, held.id), _HELD)
         session.add(_error(environment, "badge-colours/items/1-the-palette.md"))
         content = b"# Palette\n"
-        session.add(
-            Attachment(
-                project_id=project.id,
-                batch=1,
-                title="Palette",
-                filename="project.md",
-                content_type="text/markdown",
-                size=len(content),
-                sha256=hashlib.sha256(content).hexdigest(),
-                content=content,
-                source_code=AttachmentSource.DRAFT,
-                copied_at=datetime.now(UTC),
-            )
-        )
+        _keep(container, project, 1, "project.md", content)
         session.flush()
         container.plan_service().save(project, b'{"ticket": "MD-8"}')
 
@@ -189,20 +198,7 @@ class TestTreeServiceManifest:
         folder = f"draft-{project.number}"
         session.add(_error(environment, f"{folder}/items/1-the-palette.md"))
         content = b"# Palette\n"
-        session.add(
-            Attachment(
-                project_id=project.id,
-                batch=1,
-                title="Palette",
-                filename="palette.md",
-                content_type="text/markdown",
-                size=len(content),
-                sha256=hashlib.sha256(content).hexdigest(),
-                content=content,
-                source_code=AttachmentSource.DRAFT,
-                copied_at=datetime.now(UTC),
-            )
-        )
+        _keep(container, project, 1, "palette.md", content)
         opened = Project(created_by_user_id=project.created_by_user_id)
         archived = Project(created_by_user_id=project.created_by_user_id)
         session.add_all([opened, archived])
@@ -312,20 +308,7 @@ class TestTreeServicePaths:
         self, session: DbSession, container: ServiceContainer, project: Project
     ) -> None:
         content = b"# Palette\n"
-        session.add(
-            Attachment(
-                project_id=project.id,
-                batch=3,
-                title="Palette",
-                filename="palette.md",
-                content_type="text/markdown",
-                size=len(content),
-                sha256=hashlib.sha256(content).hexdigest(),
-                content=content,
-                source_code=AttachmentSource.DRAFT,
-                copied_at=datetime.now(UTC),
-            )
-        )
+        _keep(container, project, 3, "palette.md", content)
         session.flush()
 
         assert container.tree_service().resolve(

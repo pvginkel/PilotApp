@@ -1,11 +1,19 @@
 """Schemas for the testing endpoints that make the record's states the UI
-cannot make: people, environments, projects, their items and an agent's
-saves of them."""
+cannot make: people, environments, projects, their items, an agent's saves of
+them and the files hung on them."""
 
+import base64
+import binascii
 import uuid
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    Field,
+    WithJsonSchema,
+    field_validator,
+)
 
 from app.models.reference import ProjectState, TaskStatus
 
@@ -169,4 +177,81 @@ class InventedSaveSchema(BaseModel):
     )
     faults: list[InventedFaultSchema] = Field(
         description="What held the save, or what the merge reverted"
+    )
+
+
+def _base64(value: object) -> object:
+    """A string's bytes as standard base64, with padding, decodes them;
+    anything else is left to the bytes' own validation."""
+    if not isinstance(value, str):
+        return value
+    try:
+        return base64.b64decode(value, validate=True)
+    except binascii.Error as error:
+        raise ValueError(f"not base64: {error}") from error
+
+
+Base64Content = Annotated[
+    bytes,
+    BeforeValidator(_base64),
+    WithJsonSchema({"type": "string", "format": "base64"}),
+]
+
+
+class InventedFileSchema(BaseModel):
+    """A file the project's session copied from its environment."""
+
+    title: str = Field(
+        min_length=1,
+        description="Its title, as the screens show it",
+        examples=["Layout sketches"],
+    )
+    filename: str = Field(
+        description=(
+            "Its file's name, one path segment: the last of its path in the "
+            "store's tree, `attachments/<batch>/<filename>`"
+        ),
+        examples=["layout-sketches.md"],
+    )
+    content_type: str = Field(
+        min_length=1,
+        description="The media type it was copied with",
+        examples=["text/markdown"],
+    )
+    content: Base64Content = Field(description="Its bytes, base64, at most 16 MiB")
+
+    @field_validator("filename")
+    @classmethod
+    def _one_segment(cls, filename: str) -> str:
+        if filename in ("", ".", "..") or "/" in filename or "\x00" in filename:
+            raise ValueError(
+                "a filename is one path segment: not empty, . or .., with no "
+                "slash or NUL"
+            )
+        return filename
+
+
+class InventedAttachmentsCreateSchema(BaseModel):
+    """Files the project's session attaches to an item in one call, as a
+    folder is: one batch."""
+
+    files: list[InventedFileSchema] = Field(
+        min_length=1, description="The files, in the order they hang on the item"
+    )
+
+    @field_validator("files")
+    @classmethod
+    def _named_once(cls, files: list[InventedFileSchema]) -> list[InventedFileSchema]:
+        names = [file.filename for file in files]
+        if len(set(names)) != len(names):
+            raise ValueError("a batch names each file once")
+        return files
+
+
+class InventedAttachmentsSchema(BaseModel):
+    batch: int = Field(
+        description="The batch the files share, the project's next", examples=[2]
+    )
+    ids: list[uuid.UUID] = Field(
+        description="The attachments' ids, in the files' order"
     )

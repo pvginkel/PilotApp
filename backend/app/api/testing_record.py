@@ -1,7 +1,7 @@
 """Testing endpoints that make the record's states the UI cannot make
 (TEST-6): people who never signed in, environments, projects in every
 standing, with members, a plan, their opening and open items, the items a
-project's session adds, and an agent's saves of them. Nothing in the UI
+project's session adds, an agent's saves of them, and the files it attaches. Nothing in the UI
 creates a project before the definition chat (F46).
 
 They answer on every STAGE but prd, whatever FLASK_ENV says, so that the dev
@@ -20,6 +20,8 @@ from app.config import Settings
 from app.exceptions import RouteNotAvailableException
 from app.schemas.common import ApiErrorResponseSchema
 from app.schemas.testing_record import (
+    InventedAttachmentsCreateSchema,
+    InventedAttachmentsSchema,
     InventedEnvironmentSchema,
     InventedFaultSchema,
     InventedItemCreateSchema,
@@ -206,3 +208,36 @@ def create_save(
             for fault in ingested.faults
         ],
     ).model_dump(), 200
+
+
+@testing_record_bp.route("/items/<uuid:item_id>/attachments", methods=["POST"])
+@api.validate(
+    json=InventedAttachmentsCreateSchema,
+    resp=SpectreeResponse(
+        HTTP_201=InventedAttachmentsSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def create_attachments(
+    item_id: uuid.UUID,
+    test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
+) -> Any:
+    """Hang files on the item as the project's session attaches them in one
+    call (F36.1, F37.1): copied from its environment, kept through the store,
+    one batch, the project's next, after the item's attachments.
+
+    Returns:
+        201: The batch and the attachments' ids
+        400: No file, a filename that is not one path segment or is named
+            twice, or content that is not base64 or is over 16 MiB
+        404: No item has the id
+        409: The project has no session
+    """
+    data = InventedAttachmentsCreateSchema.model_validate(request.get_json())
+    attachments = test_data_service.attach(item_id, data.files)
+    return InventedAttachmentsSchema(
+        batch=attachments[0].batch, ids=[attachment.id for attachment in attachments]
+    ).model_dump(mode="json"), 201

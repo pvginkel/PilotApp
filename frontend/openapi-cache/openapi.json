@@ -280,6 +280,97 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "InventedAttachmentsCreateSchema.6d6b324": {
+        "description": "Files the project's session attaches to an item in one call, as a\nfolder is: one batch.",
+        "properties": {
+          "files": {
+            "description": "The files, in the order they hang on the item",
+            "items": {
+              "$ref": "#/components/schemas/InventedAttachmentsCreateSchema.6d6b324.InventedFileSchema"
+            },
+            "minItems": 1,
+            "title": "Files",
+            "type": "array"
+          }
+        },
+        "required": [
+          "files"
+        ],
+        "title": "InventedAttachmentsCreateSchema",
+        "type": "object"
+      },
+      "InventedAttachmentsCreateSchema.6d6b324.InventedFileSchema": {
+        "description": "A file the project's session copied from its environment.",
+        "properties": {
+          "content": {
+            "description": "Its bytes, base64, at most 16 MiB",
+            "format": "base64",
+            "title": "Content",
+            "type": "string"
+          },
+          "content_type": {
+            "description": "The media type it was copied with",
+            "examples": [
+              "text/markdown"
+            ],
+            "minLength": 1,
+            "title": "Content Type",
+            "type": "string"
+          },
+          "filename": {
+            "description": "Its file's name, one path segment: the last of its path in the store's tree, `attachments/<batch>/<filename>`",
+            "examples": [
+              "layout-sketches.md"
+            ],
+            "title": "Filename",
+            "type": "string"
+          },
+          "title": {
+            "description": "Its title, as the screens show it",
+            "examples": [
+              "Layout sketches"
+            ],
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "filename",
+          "content_type",
+          "content"
+        ],
+        "title": "InventedFileSchema",
+        "type": "object"
+      },
+      "InventedAttachmentsSchema.6d6b324": {
+        "properties": {
+          "batch": {
+            "description": "The batch the files share, the project's next",
+            "examples": [
+              2
+            ],
+            "title": "Batch",
+            "type": "integer"
+          },
+          "ids": {
+            "description": "The attachments' ids, in the files' order",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "batch",
+          "ids"
+        ],
+        "title": "InventedAttachmentsSchema",
+        "type": "object"
+      },
       "InventedEnvironmentSchema.6d6b324": {
         "description": "An environment of the record, by its KubeCoder id and its name.",
         "properties": {
@@ -3586,6 +3677,77 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/attachments/{attachment_id}": {
+      "get": {
+        "description": "A raster image is served inline as its type, text other than HTML inline as plain text; anything else, an SVG and HTML among it, as a download of `application/octet-stream`, whatever type it was stored with. The type is never sniffed.\n\nReturns:     200: The bytes     401: No one is signed in     403: The caller lacks the editor role     404: No attachment has the id",
+        "operationId": "get__api_attachments_{attachment_id}",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "attachment_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Stream an attachment's bytes, with its file's name and its length.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
     "/api/auth/callback": {
       "get": {
         "description": "Exchanges authorization code for tokens and sets access token cookie.\n\nQuery Parameters:     code: Authorization code from OIDC provider     state: CSRF token from OIDC provider\n\nReturns:     302: Redirect to original redirect URL with access token cookie set     400: Invalid or missing callback parameters     401: Token exchange failed",
@@ -5879,6 +6041,84 @@
           }
         ],
         "summary": "Put an environment Pilot has touched on the record.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/items/{item_id}/attachments": {
+      "post": {
+        "description": "Returns:     201: The batch and the attachments' ids     400: No file, a filename that is not one path segment or is named         twice, or content that is not base64 or is over 16 MiB     404: No item has the id     409: The project has no session",
+        "operationId": "post__api_testing_items_{item_id}_attachments",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventedAttachmentsCreateSchema.6d6b324"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventedAttachmentsSchema.6d6b324"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Hang files on the item as the project's session attaches them in one call (F36.1, F37.1): copied from its environment, kept through the store, one batch, the project's next, after the item's attachments.",
         "tags": [],
         "x-required-role": "editor"
       }
