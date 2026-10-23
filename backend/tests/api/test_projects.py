@@ -23,7 +23,7 @@ from app.models import (
     ProjectTransition,
     User,
 )
-from app.models.reference import SessionState, TransitionKind
+from app.models.reference import DocumentRole, SessionState, TransitionKind
 from app.schemas.testing_record import InventedFileSchema, InventedProjectCreateSchema
 from app.services.container import ServiceContainer
 from tests.support.fake_sidecar import FakeSidecar
@@ -715,6 +715,102 @@ class TestGetTimeline:
         self, oidc_client: FlaskClient
     ) -> None:
         assert oidc_client.get(f"{PROJECTS}/{uuid.uuid4()}/timeline").status_code == 401
+
+
+@pytest.mark.usefixtures("person")
+class TestGetProjectDocuments:
+    """The project's draft, `project.md`, and its handbook, read only."""
+
+    def test_the_handbook_born_at_create_reads_empty_the_draft_its_name(
+        self, client: FlaskClient, container: ServiceContainer
+    ) -> None:
+        camp = _make(container, name="Camp")
+        _sign_in(client)
+
+        handbook = client.get(f"{PROJECTS}/{camp}/handbook")
+        draft = client.get(f"{PROJECTS}/{camp}/draft")
+
+        assert (handbook.status_code, handbook.get_json()) == (
+            200,
+            {"title": None, "body": [], "writing": False},
+        )
+        assert (draft.status_code, draft.get_json()) == (
+            200,
+            {"title": "Camp", "body": [], "writing": False},
+        )
+
+    @pytest.mark.parametrize("document", ["draft", "handbook"])
+    def test_a_save_reads_as_drawn_while_pilot_writes_it(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        environment: Environment,
+        document: str,
+    ) -> None:
+        camp = _make(container, name="Camp", environment_id=environment.id)
+        container.test_data_service().save_project_document(
+            camp, DocumentRole(document), "# Camp\n\nTwo tents.\n"
+        )
+        _sign_in(client)
+
+        response = client.get(f"{PROJECTS}/{camp}/{document}")
+
+        assert response.status_code == 200
+        assert response.get_json() == {
+            "title": "Camp",
+            "body": [{"type": "prose", "markdown": "Two tents.", "section": None}],
+            "writing": True,
+        }
+
+    def test_a_drafts_handbook_is_not_found(
+        self, client: FlaskClient, container: ServiceContainer
+    ) -> None:
+        draft = _make(container, state="draft")
+        _sign_in(client)
+
+        response = client.get(f"{PROJECTS}/{draft}/handbook")
+
+        assert response.status_code == 404
+        assert response.get_json()["error"] == (
+            f"Handbook of project {draft} was not found"
+        )
+
+    @pytest.mark.parametrize("document", ["draft", "handbook"])
+    def test_an_unknown_project_is_not_found(
+        self, client: FlaskClient, document: str
+    ) -> None:
+        _sign_in(client)
+        unknown = uuid.uuid4()
+
+        response = client.get(f"{PROJECTS}/{unknown}/{document}")
+
+        assert response.status_code == 404
+        assert response.get_json()["error"] == f"Project {unknown} was not found"
+
+    @pytest.mark.parametrize("document", ["draft", "handbook"])
+    def test_an_id_that_is_no_uuid_is_not_found(
+        self, client: FlaskClient, document: str
+    ) -> None:
+        _sign_in(client)
+
+        assert client.get(f"{PROJECTS}/camp/{document}").status_code == 404
+
+    @pytest.mark.parametrize("document", ["draft", "handbook"])
+    def test_without_editor_it_is_refused(
+        self, client: FlaskClient, container: ServiceContainer, document: str
+    ) -> None:
+        camp = _make(container, name="Camp")
+        _sign_in(client, roles=())
+
+        assert client.get(f"{PROJECTS}/{camp}/{document}").status_code == 403
+
+    @pytest.mark.parametrize("document", ["draft", "handbook"])
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient, document: str
+    ) -> None:
+        response = oidc_client.get(f"{PROJECTS}/{uuid.uuid4()}/{document}")
+
+        assert response.status_code == 401
 
 
 @pytest.mark.usefixtures("person")

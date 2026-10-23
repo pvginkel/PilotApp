@@ -1,6 +1,7 @@
 """/api/testing/{people,environments,projects,items}: the record's states the
 UI cannot make (TEST-6), on every stage but prd, behind the API's sign-in
-(D027)."""
+(D027): among them the handbook an open project is born with, an agent's
+saves of the project's draft and handbook, and Pilot's Done."""
 
 import base64
 import uuid
@@ -55,6 +56,14 @@ def _attachments_path(item_id: uuid.UUID | str) -> str:
 
 def _turn_ends_path(project_id: uuid.UUID | str) -> str:
     return f"{PROJECTS}/{project_id}/turn-ends"
+
+
+def _document_saves_path(project_id: uuid.UUID | str, document: str) -> str:
+    return f"{PROJECTS}/{project_id}/{document}/saves"
+
+
+def _done_path(item_id: uuid.UUID | str) -> str:
+    return f"/api/testing/items/{item_id}/done"
 
 
 def _file(filename: str, data: bytes, **fields: Any) -> dict[str, Any]:
@@ -298,6 +307,24 @@ class TestCreateProject:
         _make(client, name="Camp", state="draft", opening="Let's camp.")
 
         assert _count(session, Item) == 0
+
+    @pytest.mark.parametrize("state", ["open", "finished"])
+    def test_past_the_draft_it_is_born_with_its_handbook_empty(
+        self, client: FlaskClient, state: str
+    ) -> None:
+        project_id = _make(client, name="Camp", state=state)
+
+        response = client.get(f"/api/projects/{project_id}/handbook")
+
+        assert (response.status_code, response.get_json()) == (
+            200,
+            {"title": None, "body": [], "writing": False},
+        )
+
+    def test_a_draft_has_no_handbook(self, client: FlaskClient) -> None:
+        project_id = _make(client, name="Camp", state="draft")
+
+        assert client.get(f"/api/projects/{project_id}/handbook").status_code == 404
 
     def test_a_name_whose_draft_has_a_fault_is_refused(
         self, client: FlaskClient
@@ -870,6 +897,228 @@ class TestCreateTurnEnd:
         assert response.status_code == 409
 
 
+@pytest.mark.usefixtures("person")
+@pytest.mark.parametrize("document", ["draft", "handbook"])
+class TestCreateProjectDocumentSave:
+    def test_a_clean_save_is_published_and_pilot_writes_it(
+        self, client: FlaskClient, environment: Environment, document: str
+    ) -> None:
+        project_id = _make(client, name="Camp", environment_id=environment.id)
+
+        response = client.post(
+            _document_saves_path(project_id, document),
+            json={"text": "# Camp\n\nTwo tents.\n"},
+        )
+
+        assert (response.status_code, response.get_json()) == (
+            200,
+            {"held": False, "faults": []},
+        )
+        assert client.get(f"/api/projects/{project_id}/{document}").get_json() == {
+            "title": "Camp",
+            "body": [{"type": "prose", "markdown": "Two tents.", "section": None}],
+            "writing": True,
+        }
+
+    def test_a_save_with_a_fault_is_held_and_reads_as_last_published(
+        self, client: FlaskClient, environment: Environment, document: str
+    ) -> None:
+        project_id = _make(client, name="Camp", environment_id=environment.id)
+        before = client.get(f"/api/projects/{project_id}/{document}").get_json()
+
+        response = client.post(
+            _document_saves_path(project_id, document),
+            json={"text": "# Camp\n\n```decision id=D1\nnope: 1\n```\n"},
+        )
+
+        body = response.get_json()
+        assert (response.status_code, body["held"], len(body["faults"])) == (
+            200,
+            True,
+            1,
+        )
+        after = client.get(f"/api/projects/{project_id}/{document}").get_json()
+        assert after == {**before, "writing": True}
+
+    def test_a_body_without_a_text_is_invalid(
+        self, client: FlaskClient, environment: Environment, document: str
+    ) -> None:
+        project_id = _make(client, environment_id=environment.id)
+
+        response = client.post(_document_saves_path(project_id, document), json={})
+
+        assert response.status_code == 400
+
+    def test_an_unknown_project_is_not_found(
+        self, client: FlaskClient, document: str
+    ) -> None:
+        unknown = uuid.uuid4()
+
+        response = client.post(
+            _document_saves_path(unknown, document), json={"text": "Red."}
+        )
+
+        assert response.status_code == 404
+        assert response.get_json()["error"] == f"Project {unknown} was not found"
+
+    def test_an_archived_project_is_not_found(
+        self, client: FlaskClient, environment: Environment, document: str
+    ) -> None:
+        project_id = _make(client, archived=True, environment_id=environment.id)
+
+        response = client.post(
+            _document_saves_path(project_id, document), json={"text": "# Camp\n"}
+        )
+
+        assert response.status_code == 404
+
+    def test_a_project_without_a_session_conflicts(
+        self, client: FlaskClient, document: str
+    ) -> None:
+        project_id = _make(client)
+
+        response = client.post(
+            _document_saves_path(project_id, document), json={"text": "# Camp\n"}
+        )
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            f"Cannot save the {document} of project {project_id} because the "
+            "project has no session: make it with an environment_id"
+        )
+
+
+@pytest.mark.usefixtures("person")
+def test_a_drafts_handbook_save_is_not_found(
+    client: FlaskClient, environment: Environment
+) -> None:
+    project_id = _make(client, state="draft", environment_id=environment.id)
+
+    response = client.post(
+        _document_saves_path(project_id, "handbook"), json={"text": "# Camp\n"}
+    )
+
+    assert response.status_code == 404
+    assert response.get_json()["error"] == (
+        f"Handbook of project {project_id} was not found"
+    )
+
+
+SETTLED_WHOLE = """```decision id=D1
+proposal: Cook on the fire.
+answer: Agree
+by: agent
+at: 2026-10-20T09:00:00Z
+```
+
+```question id=Q1
+default: Two nights
+answer: deferred
+by: agent
+at: 2026-10-20T09:01:00Z
+to: plan
+```
+"""
+"""A document Pilot settled and deferred whole."""
+
+PILOT = {
+    "kind": "agent",
+    "handle": "agent",
+    "name": "Pilot",
+    "initials": "P",
+    "avatar_slot": None,
+}
+
+
+@pytest.mark.usefixtures("person")
+class TestCreateDone:
+    def test_pilot_marks_a_document_it_settled_whole_done_from_the_start(
+        self, client: FlaskClient, session: Session, environment: Environment
+    ) -> None:
+        project_id = _make(client, environment_id=environment.id)
+        item_id = _place(client, project_id, "document", SETTLED_WHOLE)
+
+        response = client.post(_done_path(item_id))
+
+        assert (response.status_code, response.data) == (204, b"")
+        done = _timeline_item(client, project_id, item_id)["done"]
+        assert (done["cause"], done["by"]) == ("settled", PILOT)
+        assert session.scalars(
+            select(DocumentVersion.cause_code)
+            .where(DocumentVersion.document_id == uuid.UUID(item_id))
+            .order_by(DocumentVersion.number)
+        ).all() == [VersionCause.BORN, VersionCause.DONE]
+
+    def test_a_document_with_a_block_unanswered_conflicts(
+        self, client: FlaskClient, environment: Environment
+    ) -> None:
+        project_id = _make(client, environment_id=environment.id)
+        item_id = _place(
+            client,
+            project_id,
+            "document",
+            SETTLED_WHOLE.replace(
+                "answer: deferred\nby: agent\nat: 2026-10-20T09:01:00Z\nto: plan\n",
+                "",
+            ),
+        )
+
+        response = client.post(_done_path(item_id))
+
+        assert response.status_code == 409
+        assert response.get_json()["error"].endswith(
+            "Pilot marks done only a document it settled whole, and these blocks "
+            "are unanswered: Q1"
+        )
+        assert _timeline_item(client, project_id, item_id)["done"] is None
+
+    def test_a_done_document_conflicts(
+        self, client: FlaskClient, environment: Environment
+    ) -> None:
+        project_id = _make(client, environment_id=environment.id)
+        item_id = _place(client, project_id, "document", SETTLED_WHOLE)
+        client.post(_done_path(item_id))
+
+        assert client.post(_done_path(item_id)).status_code == 409
+
+    def test_an_item_that_is_no_document_conflicts(
+        self, client: FlaskClient, environment: Environment
+    ) -> None:
+        project_id = _make(client, environment_id=environment.id)
+        item_id = _place(client, project_id, "notice", "Blue and green.\n")
+
+        response = client.post(_done_path(item_id))
+
+        assert response.status_code == 409
+        assert response.get_json()["error"].endswith(
+            "a notice item is not done by Done"
+        )
+
+    def test_an_unknown_item_is_not_found(self, client: FlaskClient) -> None:
+        unknown = uuid.uuid4()
+
+        response = client.post(_done_path(unknown))
+
+        assert response.status_code == 404
+        assert response.get_json()["error"] == f"Item {unknown} was not found"
+
+    def test_a_project_without_a_session_conflicts(
+        self, client: FlaskClient, session: Session
+    ) -> None:
+        project_id = _make(client)
+        opening = session.scalars(
+            select(Item).where(Item.project_id == uuid.UUID(project_id))
+        ).one()
+
+        response = client.post(_done_path(opening.id))
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            f"Cannot mark item {opening.id} done because the project has no "
+            "session: make it with an environment_id"
+        )
+
+
 ENDPOINTS = [
     (PEOPLE, {"handle": "ben"}),
     (ENVIRONMENTS, {"id": "example-env-2", "name": "Example-2"}),
@@ -878,6 +1127,9 @@ ENDPOINTS = [
     (_saves_path(uuid.uuid4()), {"text": "Hi"}),
     (_attachments_path(uuid.uuid4()), {"files": [_file("a.md", b"Hi")]}),
     (_turn_ends_path(uuid.uuid4()), {}),
+    (_document_saves_path(uuid.uuid4(), "draft"), {"text": "Hi"}),
+    (_document_saves_path(uuid.uuid4(), "handbook"), {"text": "Hi"}),
+    (_done_path(uuid.uuid4()), {}),
 ]
 
 

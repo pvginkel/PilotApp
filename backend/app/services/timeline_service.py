@@ -1,5 +1,7 @@
-"""A project's timeline as a screen draws it (F8, F12, F13, F18, F31, F78), and
-the items waiting on a person, which a tab's badge counts (F1.4, F94.5)."""
+"""A project's timeline as a screen draws it (F8, F12, F13, F18, F31, F78); a
+document read on its own, an item's, as it was done (F13.3), the project's
+draft or its handbook (F37.4, F129.4); and the items waiting on a person,
+which a tab's badge counts (F1.4, F94.5)."""
 
 import uuid
 from collections.abc import Iterable
@@ -15,7 +17,7 @@ from sqlalchemy.orm import Session
 from app.engine import dsl
 from app.engine.documents import OPENING, PROSE
 from app.engine.paths import tree_path
-from app.engine.record import NOTICE, RecordService
+from app.engine.record import MARKED, NOTICE, SETTLED, RecordService
 from app.exceptions import RecordNotFoundException
 from app.models import (
     Attachment,
@@ -35,6 +37,7 @@ from app.models import Session as AgentSession
 from app.models.reference import (
     AnswerChannel,
     BlockKind,
+    DocumentRole,
     ErrorKind,
     ProjectState,
     SessionState,
@@ -50,9 +53,11 @@ from app.schemas.timeline import (
     DeferralSchema,
     DoneCauseCode,
     DoneSchema,
+    ItemDocumentSchema,
     ItemForm,
     ItemKindCode,
     OptionSchema,
+    ProjectDocumentSchema,
     ProsePartSchema,
     SectionSchema,
     StepSchema,
@@ -140,9 +145,7 @@ class TimelineService:
         Raises:
             RecordNotFoundException: no project has the id.
         """
-        project = self.db.get(Project, project_id)
-        if project is None:
-            raise RecordNotFoundException("Project", str(project_id))
+        project = self._project(project_id)
         rows = self.db.execute(
             select(Item, Document, ItemKind.form)
             .join(ItemKind, ItemKind.code == Item.kind_code)
@@ -150,46 +153,110 @@ class TimelineService:
             .where(Item.project_id == project.id)
             .order_by(Item.seq)
         ).all()
-        texts = {
-            item.id: _published(document)
-            for item, document, _ in rows
-            if document is not None and item.kind_code != OPENING
-        }
+        return TimelineSchema(
+            finished_at=self._finished_at(project),
+            items=self._items(
+                project,
+                [(item, document, form) for item, document, form in rows],
+                {
+                    item.id: _published(document)
+                    for item, document, _ in rows
+                    if document is not None and item.kind_code != OPENING
+                },
+            ),
+        )
+
+    def item_document(self, item_id: uuid.UUID) -> ItemDocumentSchema:
+        """The item's document read on its own, as its timeline entry shows
+        it, but that an item done by Done, Pilot's included, reads as Done
+        fixed it (F13.3): the text of its latest `done` Version. Only Done
+        cuts one; an open item, and one done any other way, reads as last
+        published.
+
+        Raises:
+            RecordNotFoundException: no item has the id, or it has no
+                document: work and waits.
+        """
+        row = self.db.execute(
+            select(Item, Document, ItemKind.form)
+            .join(ItemKind, ItemKind.code == Item.kind_code)
+            .join(Document, Document.id == Item.id)
+            .where(Item.id == item_id)
+        ).one_or_none()
+        if row is None:
+            raise RecordNotFoundException("Document of item", str(item_id))
+        item, document, form = row
+        project = self.db.get_one(Project, item.project_id)
+        fixed = self._fixed_at_done(item)
+        texts = (
+            {}
+            if item.kind_code == OPENING
+            else {item.id: _published(document) if fixed is None else fixed}
+        )
+        (entry,) = self._items(project, [(item, document, form)], texts)
+        if fixed is not None:
+            parsed = dsl.parse(fixed)
+            entry = entry.model_copy(
+                update={"title": parsed.title, "summary": parsed.front_matter.summary}
+            )
+        return ItemDocumentSchema(project_id=project.id, **dict(entry))
+
+    def project_document(
+        self, project_id: uuid.UUID, role: DocumentRole
+    ) -> ProjectDocumentSchema:
+        """The project's draft or its handbook as last published, read only.
+
+        Raises:
+            RecordNotFoundException: no project has the id, or it has no
+                document of the role: a draft has no handbook (F129.2).
+        """
+        project = self._project(project_id)
+        document = self.db.scalars(
+            select(Document).where(
+                Document.project_id == project.id, Document.role_code == role
+            )
+        ).one_or_none()
+        if document is None:
+            raise RecordNotFoundException(
+                f"{role.value.capitalize()} of project", str(project.id)
+            )
+        text = _published(document)
+        parts = dsl.body(text)
+        reader = self._reader(project, self._users(set(), _answerers([parts])))
+        return ProjectDocumentSchema(
+            title=dsl.parse(text).title,
+            body=[reader.part(part) for part in parts],
+            writing=document.writing_session_id is not None,
+        )
+
+    def _items(
+        self,
+        project: Project,
+        rows: list[tuple[Item, Document | None, str]],
+        texts: dict[uuid.UUID, str],
+    ) -> list[TimelineItemSchema]:
+        """`rows`, items of `project` with their documents and forms, as their
+        lines and open forms show them; a prose item's text as drawn is its
+        text in `texts`, where the opening, work and waits have none."""
         bodies = {item_id: dsl.body(text) for item_id, text in texts.items()}
         counts = {item_id: dsl.words(text) for item_id, text in texts.items()}
         edited = self._edited(list(texts))
         attachments = self._attachments([item.id for item, _, _ in rows])
-        users = self._users(
-            {
-                user_id
-                for item, _, _ in rows
-                for user_id in (
-                    item.for_user_id,
-                    item.done_by_user_id,
-                    item.created_by_user_id,
-                )
-                if user_id is not None
-            },
-            {
-                part.by
-                for parts in bodies.values()
-                for part in parts
-                if isinstance(part, dsl.Block) and part.by is not None
-            },
-        )
-        reader = _Reader(
-            users=users,
-            tasks=dict(
-                self.db.execute(
-                    select(PlanTask.task_id, PlanTask.title).where(
-                        PlanTask.project_id == project.id
+        reader = self._reader(
+            project,
+            self._users(
+                {
+                    user_id
+                    for item, _, _ in rows
+                    for user_id in (
+                        item.for_user_id,
+                        item.done_by_user_id,
+                        item.created_by_user_id,
                     )
-                ).all()
+                    if user_id is not None
+                },
+                _answerers(bodies.values()),
             ),
-            reasons={
-                reason.code: reason
-                for reason in self.db.scalars(select(ConfirmationReason))
-            },
         )
         held = set(
             self.db.scalars(
@@ -205,58 +272,97 @@ class TimelineService:
                 )
             )
         )
-        return TimelineSchema(
-            finished_at=self._finished_at(project),
-            items=[
-                TimelineItemSchema(
-                    id=item.id,
-                    seq=item.seq,
-                    kind=cast(ItemKindCode, item.kind_code),
-                    form=cast(ItemForm, form),
-                    title=item.title,
-                    file_name=(
-                        None
-                        if document is None or document.source_path is None
-                        else PurePosixPath(document.source_path).name
-                    ),
-                    created_at=item.created_at,
-                    step=(
-                        None
-                        if item.plan_task_id is None
-                        else StepSchema(
-                            id=item.plan_task_id,
-                            title=reader.tasks[item.plan_task_id],
-                        )
-                    ),
-                    urgent=item.urgent,
-                    for_user=reader.user(item.for_user_id),
-                    done=self._done(item, reader),
-                    concept=(
-                        document is not None
-                        and tree_path(project, document.path) in held
-                    ),
-                    author=reader.user(item.created_by_user_id),
-                    words=(_published(document) if item.kind_code == OPENING else None),
-                    body=(
-                        None
-                        if item.id not in bodies
-                        else [reader.part(part) for part in bodies[item.id]]
-                    ),
-                    summary=None if document is None else document.summary,
-                    word_count=counts.get(item.id),
-                    read_minutes=(
-                        None
-                        if item.id not in counts
-                        else _read_minutes(counts[item.id])
-                    ),
-                    writing=(
-                        document is not None and document.writing_session_id is not None
-                    ),
-                    edited_at=edited.get(item.id),
-                    attachments=attachments.get(item.id, []),
-                )
-                for item, document, form in rows
-            ],
+        return [
+            TimelineItemSchema(
+                id=item.id,
+                seq=item.seq,
+                kind=cast(ItemKindCode, item.kind_code),
+                form=cast(ItemForm, form),
+                title=item.title,
+                file_name=(
+                    None
+                    if document is None or document.source_path is None
+                    else PurePosixPath(document.source_path).name
+                ),
+                created_at=item.created_at,
+                step=(
+                    None
+                    if item.plan_task_id is None
+                    else StepSchema(
+                        id=item.plan_task_id,
+                        title=reader.tasks[item.plan_task_id],
+                    )
+                ),
+                urgent=item.urgent,
+                for_user=reader.user(item.for_user_id),
+                done=self._done(item, reader),
+                concept=(
+                    document is not None and tree_path(project, document.path) in held
+                ),
+                author=reader.user(item.created_by_user_id),
+                words=(
+                    _published(document)
+                    if document is not None and item.kind_code == OPENING
+                    else None
+                ),
+                body=(
+                    None
+                    if item.id not in bodies
+                    else [reader.part(part) for part in bodies[item.id]]
+                ),
+                summary=None if document is None else document.summary,
+                word_count=counts.get(item.id),
+                read_minutes=(
+                    None if item.id not in counts else _read_minutes(counts[item.id])
+                ),
+                writing=(
+                    document is not None and document.writing_session_id is not None
+                ),
+                edited_at=edited.get(item.id),
+                attachments=attachments.get(item.id, []),
+            )
+            for item, document, form in rows
+        ]
+
+    def _fixed_at_done(self, item: Item) -> str | None:
+        """The text Done fixed of an item it marked done (F13.3), from its
+        latest `done` Version; none for an open item and one done otherwise.
+        Undo cuts no Version, so the cause tells a Done in force from one
+        undone before the item was closed another way (`finished`)."""
+        if item.done_cause_code not in (MARKED, SETTLED):
+            return None
+        return self.db.scalars(
+            select(DocumentVersion.text)
+            .where(
+                DocumentVersion.document_id == item.id,
+                DocumentVersion.cause_code == VersionCause.DONE,
+            )
+            .order_by(DocumentVersion.number.desc())
+            .limit(1)
+        ).first()
+
+    def _project(self, project_id: uuid.UUID) -> Project:
+        project = self.db.get(Project, project_id)
+        if project is None:
+            raise RecordNotFoundException("Project", str(project_id))
+        return project
+
+    def _reader(
+        self, project: Project, users: dict[uuid.UUID | str, User]
+    ) -> "_Reader":
+        return _Reader(
+            users=users,
+            tasks=dict(
+                self.db.execute(
+                    select(PlanTask.task_id, PlanTask.title).where(
+                        PlanTask.project_id == project.id
+                    )
+                ).all()
+            ),
+            reasons={
+                reason.code: reason
+                for reason in self.db.scalars(select(ConfirmationReason))
+            },
         )
 
     def _edited(self, document_ids: list[uuid.UUID]) -> dict[uuid.UUID, datetime]:
@@ -434,6 +540,16 @@ class _Reader:
                 else SectionSchema(heading=block.section.heading)
             ),
         )
+
+
+def _answerers(bodies: Iterable[Iterable[dsl.Prose | dsl.Block]]) -> set[str]:
+    """The handles of those who answered a block of `bodies`."""
+    return {
+        part.by
+        for parts in bodies
+        for part in parts
+        if isinstance(part, dsl.Block) and part.by is not None
+    }
 
 
 def _read_minutes(words: int) -> int:

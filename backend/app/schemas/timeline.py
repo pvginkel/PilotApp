@@ -1,5 +1,7 @@
 """Schemas for a project's timeline, read whole: its items in order, with what
-their lines and open forms show (F8, F12, F13, F18, F31)."""
+their lines and open forms show (F8, F12, F13, F18, F31); and for a document
+read on its own, an item's, the project's draft or its handbook (F28, F13.3,
+F37.4, F129.4)."""
 
 import uuid
 from datetime import datetime
@@ -329,3 +331,40 @@ class TimelineSchema(BaseModel):
         )
     )
     items: list[TimelineItemSchema] = Field(description="The items, in their order")
+
+
+class ItemDocumentSchema(TimelineItemSchema):
+    """An item's document read on its own, as the overlay draws it (F28): its
+    timeline entry, but that a document done by Done reads as Done fixed it
+    (F13.3), its `title`, `summary`, `body`, `word_count` and `read_minutes`
+    from the text of its `done` Version."""
+
+    project_id: uuid.UUID = Field(description="The project whose timeline holds it")
+
+
+class ProjectDocumentSchema(BaseModel):
+    """The project's draft, `project.md`, or its handbook, `handbook.md`,
+    read only, as the overlay draws it (F37.4, F129.4)."""
+
+    title: str | None = Field(
+        description=(
+            "The text's title, from its front matter or its first heading; null "
+            "where it gives none"
+        ),
+        examples=["Recipe box"],
+    )
+    body: list[BodyPartSchema] = Field(
+        description=(
+            "Its text as drawn: its prose parts and blocks in order, without the "
+            "front matter and a first heading that is its title; empty for a text "
+            "with nothing more, as the handbook is born (F129.2), which the "
+            "screens show as *Empty*"
+        )
+    )
+    writing: bool = Field(
+        description=(
+            "Whether a session's running turn is saving the text, which Pilot's "
+            "dots show at its end (F35); cleared at the turn's end, which no live "
+            "event announces"
+        )
+    )

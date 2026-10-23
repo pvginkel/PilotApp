@@ -763,6 +763,35 @@ class TestProject:
             session.get_one(Document, opening.id).published_text,
         ) == (title, OPENING_WORDS)
 
+    @pytest.mark.parametrize(
+        ("state", "roles"),
+        [
+            ("draft", [DocumentRole.DRAFT]),
+            ("open", [DocumentRole.DRAFT, DocumentRole.HANDBOOK]),
+            ("finished", [DocumentRole.DRAFT, DocumentRole.HANDBOOK]),
+        ],
+    )
+    def test_past_the_draft_its_handbook_is_born_empty(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        state: str,
+        roles: list[DocumentRole],
+    ) -> None:
+        project = container.test_data_service().project(_spec(name="Camp", state=state))
+
+        documents = session.scalars(
+            select(Document)
+            .where(Document.project_id == project.id)
+            .order_by(Document.role_code)
+        ).all()
+        assert [document.role_code for document in documents] == roles
+        assert [
+            (document.path, document.published_text)
+            for document in documents
+            if document.role_code is DocumentRole.HANDBOOK
+        ] == ([("handbook.md", "")] if state != "draft" else [])
+
     def test_a_draft_has_no_opening(
         self, container: ServiceContainer, session: DbSession
     ) -> None:
@@ -1091,6 +1120,191 @@ class TestEndTurn:
 
         assert raised.value.message == (
             f"Cannot end a turn of project {project.id} because the project has no "
+            "session: make it with an environment_id"
+        )
+
+
+@pytest.mark.parametrize("role", list(DocumentRole))
+class TestSaveProjectDocument:
+    def _document(
+        self, session: DbSession, project: Project, role: DocumentRole
+    ) -> Document:
+        return session.scalars(
+            select(Document).where(
+                Document.project_id == project.id, Document.role_code == role
+            )
+        ).one()
+
+    def test_a_clean_save_is_published_by_the_session(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        camp: Project,
+        role: DocumentRole,
+    ) -> None:
+        ingested = container.test_data_service().save_project_document(
+            camp.id, role, "# Camp\n\nTwo tents.\n"
+        )
+
+        assert (ingested.held, ingested.faults, ingested.stale) == (False, (), False)
+        document = self._document(session, camp, role)
+        assert document.published_text == "# Camp\n\nTwo tents.\n"
+        assert document.writing_session_id == _session_of(session, camp).id
+
+    def test_a_save_with_a_fault_is_held(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        camp: Project,
+        role: DocumentRole,
+    ) -> None:
+        document = self._document(session, camp, role)
+        published = document.published_text
+
+        ingested = container.test_data_service().save_project_document(
+            camp.id, role, "# Camp\n\n```decision id=D1\nnope: 1\n```\n"
+        )
+
+        assert ingested.held
+        assert container.tree_service().held(camp, document)
+        assert document.published_text == published
+
+    def test_an_unknown_project_is_not_found(
+        self, container: ServiceContainer, role: DocumentRole
+    ) -> None:
+        project_id = uuid.uuid4()
+
+        with pytest.raises(RecordNotFoundException) as raised:
+            container.test_data_service().save_project_document(
+                project_id, role, "# Camp\n"
+            )
+
+        assert raised.value.message == f"Project {project_id} was not found"
+
+    def test_an_archived_projects_document_is_not_found(
+        self,
+        container: ServiceContainer,
+        person: User,
+        environment: Environment,
+        role: DocumentRole,
+    ) -> None:
+        project = container.test_data_service().project(
+            _spec(archived=True, environment_id=environment.id)
+        )
+
+        with pytest.raises(RecordNotFoundException):
+            container.test_data_service().save_project_document(
+                project.id, role, "# Camp\n"
+            )
+
+    def test_a_project_without_a_session_is_refused(
+        self, container: ServiceContainer, person: User, role: DocumentRole
+    ) -> None:
+        project = container.test_data_service().project(_spec())
+
+        with pytest.raises(InvalidOperationException) as raised:
+            container.test_data_service().save_project_document(
+                project.id, role, "# Camp\n"
+            )
+
+        assert raised.value.message == (
+            f"Cannot save the {role.value} of project {project.id} because the "
+            "project has no session: make it with an environment_id"
+        )
+
+
+def test_a_drafts_handbook_is_not_found(
+    container: ServiceContainer, person: User, environment: Environment
+) -> None:
+    project = container.test_data_service().project(
+        _spec(state="draft", environment_id=environment.id)
+    )
+
+    with pytest.raises(RecordNotFoundException) as raised:
+        container.test_data_service().save_project_document(
+            project.id, DocumentRole.HANDBOOK, "# Camp\n"
+        )
+
+    assert raised.value.message == f"Handbook of project {project.id} was not found"
+
+
+SETTLED_WHOLE = """```decision id=D1
+proposal: Cook on the fire.
+answer: Agree
+by: agent
+at: 2026-10-20T09:00:00Z
+```
+
+```question id=Q1
+default: Two nights
+answer: deferred
+by: agent
+at: 2026-10-20T09:01:00Z
+to: plan
+```
+"""
+
+
+class TestMarkDone:
+    def test_pilot_marks_a_document_it_settled_whole_done(
+        self, container: ServiceContainer, session: DbSession, camp: Project
+    ) -> None:
+        service = container.test_data_service()
+        item = service.item(camp.id, "document", "Camp plan", SETTLED_WHOLE)
+
+        service.mark_done(item.id)
+
+        assert (item.done_cause_code, item.done_by_user_id) == (
+            "settled",
+            _user(session, "agent").id,
+        )
+        assert session.scalars(
+            select(DocumentVersion.cause_code)
+            .where(DocumentVersion.document_id == item.id)
+            .order_by(DocumentVersion.number)
+        ).all() == [VersionCause.BORN, VersionCause.DONE]
+
+    def test_a_document_with_a_block_unanswered_is_refused(
+        self, container: ServiceContainer, camp: Project
+    ) -> None:
+        service = container.test_data_service()
+        item = service.item(
+            camp.id,
+            "document",
+            "Camp plan",
+            SETTLED_WHOLE.replace("answer: Agree\nby: agent\n", "").replace(
+                "at: 2026-10-20T09:00:00Z\n", ""
+            ),
+        )
+
+        with pytest.raises(InvalidOperationException) as raised:
+            service.mark_done(item.id)
+
+        assert raised.value.cause == (
+            "Pilot marks done only a document it settled whole, and these blocks "
+            "are unanswered: D1"
+        )
+        assert item.done_at is None
+
+    def test_an_unknown_item_is_not_found(self, container: ServiceContainer) -> None:
+        item_id = uuid.uuid4()
+
+        with pytest.raises(RecordNotFoundException) as raised:
+            container.test_data_service().mark_done(item_id)
+
+        assert raised.value.message == f"Item {item_id} was not found"
+
+    def test_a_project_without_a_session_is_refused(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        project = container.test_data_service().project(_spec())
+        [opening] = _items(session, project)
+
+        with pytest.raises(InvalidOperationException) as raised:
+            container.test_data_service().mark_done(opening.id)
+
+        assert raised.value.message == (
+            f"Cannot mark item {opening.id} done because the project has no "
             "session: make it with an environment_id"
         )
 

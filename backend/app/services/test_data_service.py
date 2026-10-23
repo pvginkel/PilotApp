@@ -1,7 +1,8 @@
 """The invented record: the dev stack's seed, which `cli load-test-data`
 loads into the dev database and into the seed every Playwright worker clones,
-and the people, environments, projects, items and agent saves a spec or the
-dev stage's deployed check makes through `/api/testing/` (TEST-6, D027).
+and the people, environments, projects, items, agent saves and Pilot's marks
+a spec or the dev stage's deployed check makes through `/api/testing/`
+(TEST-6, D027).
 
 Documents, the record's writes and the plan go through the engine's own
 operations, so the seed is a record the engine could have produced. The rows
@@ -55,6 +56,7 @@ from app.models import Session as AgentSession
 from app.models.reference import (
     AnswerChannel,
     AttachmentSource,
+    DocumentRole,
     ProjectState,
     SessionState,
     TransitionKind,
@@ -572,8 +574,9 @@ class TestDataService:
     def project(self, spec: InventedProjectCreateSchema) -> Project:
         """A project in the standing `spec` gives, made now by its first
         member: the transitions to that standing, its members in order, its
-        draft titled by its name and its plan; past the draft, its opening,
-        the first member's words verbatim, titled by its name; with an
+        draft titled by its name and its plan; past the draft, its handbook,
+        born empty as Create project bears it (F129.2), and its opening, the
+        first member's words verbatim, titled by its name; with an
         environment, a session there that adds its open items, notices.
 
         Raises:
@@ -662,6 +665,7 @@ class TestDataService:
                 + "; ".join(fault.message for fault in faults)
             )
         if not draft:
+            self.document_service.bear_handbook(project)
             self.document_service.bear_opening(
                 project,
                 "New project" if spec.name is None else spec.name,
@@ -708,13 +712,58 @@ class TestDataService:
         project = self.db.get_one(Project, item.project_id)
         document = self.db.get_one(Document, item.id)
         session = self._session_of(project, f"save item {item.id}")
-        return self.ingest_service.ingest(
-            tree_path(project, document.path),
-            text.encode(),
-            self.tree_service.hash(project, document),
-            self.db.get_one(Environment, session.environment_id),
-            session,
+        return self._ingest(project, document, session, text)
+
+    def save_project_document(
+        self, project_id: uuid.UUID, role: DocumentRole, text: str
+    ) -> Ingested:
+        """An agent's save of the project's draft or handbook by the project's
+        session, on the tree's current hash, through the ingest the store's
+        sync calls: held on a fault, else merged and published.
+
+        Raises:
+            RecordNotFoundException: no project has the id, it has no
+                document of the role, as a draft has no handbook, or it is
+                archived, so the store does not sync its file.
+            InvalidOperationException: the project has no session.
+        """
+        project = self.db.get(Project, project_id)
+        if project is None:
+            raise RecordNotFoundException("Project", str(project_id))
+        document = self.db.scalars(
+            select(Document).where(
+                Document.project_id == project.id, Document.role_code == role
+            )
+        ).one_or_none()
+        if document is None:
+            raise RecordNotFoundException(
+                f"{role.value.capitalize()} of project", str(project.id)
+            )
+        session = self._session_of(
+            project, f"save the {role.value} of project {project.id}"
         )
+        return self._ingest(project, document, session, text)
+
+    def mark_done(self, item_id: uuid.UUID) -> None:
+        """Pilot's Done on a document it settled or deferred whole, by the
+        project's session, as its `mark` takes it: a `done` Version cut and
+        the item done by Pilot, its cause `settled` (F65.2, F86.3).
+
+        Raises:
+            RecordNotFoundException: no item has the id.
+            InvalidOperationException: the project has no session, or the
+                record refuses the Done: the item is no document, it is
+                done, or a block of it is unanswered.
+        """
+        item = self.db.get(Item, item_id)
+        if item is None:
+            raise RecordNotFoundException("Item", str(item_id))
+        project = self.db.get_one(Project, item.project_id)
+        self._session_of(project, f"mark item {item.id} done")
+        pilot = self.db.scalars(
+            select(User).where(User.kind_code == UserKind.AGENT)
+        ).one()
+        self.record_service.done(item, pilot)
 
     def end_turn(self, project_id: uuid.UUID) -> None:
         """The turn of the project's session ended, as the relay ends it for
@@ -772,6 +821,17 @@ class TestDataService:
                 for file in files
             ],
             now,
+        )
+
+    def _ingest(
+        self, project: Project, document: Document, session: AgentSession, text: str
+    ) -> Ingested:
+        return self.ingest_service.ingest(
+            tree_path(project, document.path),
+            text.encode(),
+            self.tree_service.hash(project, document),
+            self.db.get_one(Environment, session.environment_id),
+            session,
         )
 
     def _session_of(self, project: Project, operation: str) -> AgentSession:

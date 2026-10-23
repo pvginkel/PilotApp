@@ -1,9 +1,9 @@
 """Testing endpoints that make the record's states the UI cannot make
 (TEST-6): people who never signed in, environments, projects in every
 standing, with members, a plan, their opening and open items, the items a
-project's session adds, an agent's saves of them, the files it attaches, and
-the end of its turn. Nothing in the UI creates a project before the
-definition chat (F46).
+project's session adds, an agent's saves of them and of the project's draft
+and handbook, the files it attaches, Pilot's Done, and the end of its turn.
+Nothing in the UI creates a project before the definition chat (F46).
 
 They answer on every STAGE but prd, whatever FLASK_ENV says, so that the dev
 stage's deployed check makes its record through them (D027). They sit on
@@ -18,7 +18,9 @@ from flask import Blueprint, request
 from spectree import Response as SpectreeResponse
 
 from app.config import Settings
+from app.engine.ingest import Ingested
 from app.exceptions import RouteNotAvailableException
+from app.models.reference import DocumentRole
 from app.schemas.common import ApiErrorResponseSchema
 from app.schemas.testing_record import (
     InventedAttachmentsCreateSchema,
@@ -229,14 +231,103 @@ def create_save(
         409: The project has no session
     """
     data = InventedSaveCreateSchema.model_validate(request.get_json())
-    ingested = test_data_service.save(item_id, data.text)
-    return InventedSaveSchema(
-        held=ingested.held,
-        faults=[
-            InventedFaultSchema(line=fault.line, message=fault.message)
-            for fault in ingested.faults
-        ],
-    ).model_dump(), 200
+    return _saved(test_data_service.save(item_id, data.text)), 200
+
+
+@testing_record_bp.route("/projects/<uuid:project_id>/draft/saves", methods=["POST"])
+@api.validate(
+    json=InventedSaveCreateSchema,
+    resp=SpectreeResponse(
+        HTTP_200=InventedSaveSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def create_draft_save(
+    project_id: uuid.UUID,
+    test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
+) -> Any:
+    """Ingest an agent's save of the project's draft, `project.md`, by the
+    project's session, as the store's sync does: held on a fault, else merged
+    and published.
+
+    Returns:
+        200: Whether the save is held, and its faults
+        400: The text is missing
+        404: No project has the id, or it is archived
+        409: The project has no session
+    """
+    data = InventedSaveCreateSchema.model_validate(request.get_json())
+    return _saved(
+        test_data_service.save_project_document(
+            project_id, DocumentRole.DRAFT, data.text
+        )
+    ), 200
+
+
+@testing_record_bp.route("/projects/<uuid:project_id>/handbook/saves", methods=["POST"])
+@api.validate(
+    json=InventedSaveCreateSchema,
+    resp=SpectreeResponse(
+        HTTP_200=InventedSaveSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def create_handbook_save(
+    project_id: uuid.UUID,
+    test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
+) -> Any:
+    """Ingest an agent's save of the project's handbook, `handbook.md`, by
+    the project's session, as the store's sync does: held on a fault, else
+    merged and published.
+
+    Returns:
+        200: Whether the save is held, and its faults
+        400: The text is missing
+        404: No project has the id, it is a draft, which has no handbook, or
+            it is archived
+        409: The project has no session
+    """
+    data = InventedSaveCreateSchema.model_validate(request.get_json())
+    return _saved(
+        test_data_service.save_project_document(
+            project_id, DocumentRole.HANDBOOK, data.text
+        )
+    ), 200
+
+
+@testing_record_bp.route("/items/<uuid:item_id>/done", methods=["POST"])
+@api.validate(
+    resp=SpectreeResponse(
+        HTTP_204=None,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def create_done(
+    item_id: uuid.UUID,
+    test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
+) -> tuple[str, int]:
+    """Mark a document Done as Pilot, by the project's session, as its `mark`
+    does a document it settled or deferred whole: the text as it stands
+    fixed in a `done` Version, the item done by Pilot.
+
+    Returns:
+        204: The document is done
+        400: The stage is prd
+        404: No item has the id
+        409: The project has no session, the item is no document or is done,
+            or a block of it is unanswered
+    """
+    test_data_service.mark_done(item_id)
+    return "", 204
 
 
 @testing_record_bp.route("/items/<uuid:item_id>/attachments", methods=["POST"])
@@ -270,3 +361,13 @@ def create_attachments(
     return InventedAttachmentsSchema(
         batch=attachments[0].batch, ids=[attachment.id for attachment in attachments]
     ).model_dump(mode="json"), 201
+
+
+def _saved(ingested: Ingested) -> dict[str, Any]:
+    return InventedSaveSchema(
+        held=ingested.held,
+        faults=[
+            InventedFaultSchema(line=fault.line, message=fault.message)
+            for fault in ingested.faults
+        ],
+    ).model_dump()

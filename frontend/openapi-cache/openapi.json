@@ -828,6 +828,903 @@
         "title": "InventedFaultSchema",
         "type": "object"
       },
+      "ItemDocumentSchema.1fdd8ae": {
+        "description": "An item's document read on its own, as the overlay draws it (F28): its\ntimeline entry, but that a document done by Done reads as Done fixed it\n(F13.3), its `title`, `summary`, `body`, `word_count` and `read_minutes`\nfrom the text of its `done` Version.",
+        "properties": {
+          "attachments": {
+            "description": "The files hung on the item, in their order, on every kind (F17.5)",
+            "items": {
+              "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.AttachmentSchema"
+            },
+            "title": "Attachments",
+            "type": "array"
+          },
+          "author": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.UserSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The opening's author (F18.1); null for every other item"
+          },
+          "body": {
+            "anyOf": [
+              {
+                "items": {
+                  "discriminator": {
+                    "mapping": {
+                      "block": "#/components/schemas/ItemDocumentSchema.1fdd8ae.BlockPartSchema",
+                      "prose": "#/components/schemas/ItemDocumentSchema.1fdd8ae.ProsePartSchema"
+                    },
+                    "propertyName": "type"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.ProsePartSchema"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.BlockPartSchema"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A prose item's text but the opening's, as drawn: its prose parts and blocks in order, split at each block's own section's edges, without the front matter and a first heading that is its title; null for the opening, work and waits",
+            "title": "Body"
+          },
+          "concept": {
+            "description": "Whether the latest save of its text is held, its text shown as last published until a parseable save arrives (F78)",
+            "title": "Concept",
+            "type": "boolean"
+          },
+          "created_at": {
+            "description": "When the item was placed",
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "done": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.DoneSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its done line; null while open"
+          },
+          "edited_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "*Edited <time>* (F28.7): the time of the latest `turn` Version that follows the first Version whose text, as drawn, holds anything; null where no such Version follows it, and where `body` is null",
+            "title": "Edited At"
+          },
+          "file_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A registered document's file name, from its source path, which its line shows while `title` is null (F35); null for any other item",
+            "examples": [
+              "refinement.md"
+            ],
+            "title": "File Name"
+          },
+          "for_user": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.UserSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The person it is for (F107); null for everyone"
+          },
+          "form": {
+            "description": "Which subtype the item is",
+            "enum": [
+              "prose",
+              "work",
+              "wait"
+            ],
+            "title": "Form",
+            "type": "string"
+          },
+          "id": {
+            "description": "The item's id",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "description": "The item's kind",
+            "enum": [
+              "opening",
+              "decision",
+              "confirmation",
+              "question",
+              "action",
+              "notice",
+              "document",
+              "review",
+              "work",
+              "card_wait",
+              "timed_wait"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "project_id": {
+            "description": "The project whose timeline holds it",
+            "format": "uuid",
+            "title": "Project Id",
+            "type": "string"
+          },
+          "read_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The text's reading time at 230 words a minute, rounded, at least 1: a review's \"N min read\" (F25.1); null where `body` is",
+            "examples": [
+              2
+            ],
+            "title": "Read Minutes"
+          },
+          "seq": {
+            "description": "Its place in the timeline, from 1",
+            "examples": [
+              3
+            ],
+            "title": "Seq",
+            "type": "integer"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.StepSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The plan task it serves, if any"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The front matter's `summary`, which a card and the overlay's lead show (F34); null where the text gives none, and for the opening, work and waits",
+            "examples": [
+              "Three tents compared; the dome wins on weight."
+            ],
+            "title": "Summary"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The line's title; null for a registered document while its text gives none",
+            "examples": [
+              "Which tent?"
+            ],
+            "title": "Title"
+          },
+          "urgent": {
+            "description": "Whether it is urgent (F10)",
+            "title": "Urgent",
+            "type": "boolean"
+          },
+          "word_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The text's own words past its front matter, every block's included but its answer lines, whatever a display collapses and whatever is answered: under about 150 a document draws inline, else it leaves a card (F24.1); null where `body` is",
+            "examples": [
+              412
+            ],
+            "title": "Word Count"
+          },
+          "words": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The opening's words, verbatim; null for every other item",
+            "title": "Words"
+          },
+          "writing": {
+            "description": "Whether a session's running turn is saving the text, which Pilot's dots show at its end (F35); cleared at the turn's end, which no live event announces",
+            "title": "Writing",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "seq",
+          "kind",
+          "form",
+          "title",
+          "file_name",
+          "created_at",
+          "step",
+          "urgent",
+          "for_user",
+          "done",
+          "concept",
+          "author",
+          "words",
+          "body",
+          "summary",
+          "word_count",
+          "read_minutes",
+          "writing",
+          "edited_at",
+          "attachments",
+          "project_id"
+        ],
+        "title": "ItemDocumentSchema",
+        "type": "object"
+      },
+      "ItemDocumentSchema.1fdd8ae.AnswerChannel": {
+        "enum": [
+          "app",
+          "chat",
+          "recommended",
+          "autopilot"
+        ],
+        "title": "AnswerChannel",
+        "type": "string"
+      },
+      "ItemDocumentSchema.1fdd8ae.AttachmentSchema": {
+        "description": "A file hung on an item, reader's material (F36), which its stream\n`/api/attachments/<id>` serves without its title or stored type.",
+        "properties": {
+          "batch": {
+            "description": "The project's attach call it came in, from 1: the files of one call, a folder among them, share it (F37.1)",
+            "examples": [
+              1
+            ],
+            "title": "Batch",
+            "type": "integer"
+          },
+          "content_type": {
+            "description": "The content type it was copied with",
+            "examples": [
+              "text/markdown"
+            ],
+            "title": "Content Type",
+            "type": "string"
+          },
+          "copied_at": {
+            "description": "When it was copied into the record",
+            "format": "date-time",
+            "title": "Copied At",
+            "type": "string"
+          },
+          "filename": {
+            "description": "The file's name, the one its download takes",
+            "examples": [
+              "sketch.md"
+            ],
+            "title": "Filename",
+            "type": "string"
+          },
+          "id": {
+            "description": "The attachment's id, its stream's address",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "size": {
+            "description": "Its size in bytes",
+            "examples": [
+              2048
+            ],
+            "title": "Size",
+            "type": "integer"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where it was copied from, `<environment>:<path>` (F36.1); null for the copy of the draft",
+            "examples": [
+              "kc-recipes:/work/Recipes/sketch.md"
+            ],
+            "title": "Source"
+          },
+          "title": {
+            "examples": [
+              "Recipe card sketch"
+            ],
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "filename",
+          "content_type",
+          "size",
+          "batch",
+          "copied_at",
+          "source"
+        ],
+        "title": "AttachmentSchema",
+        "type": "object"
+      },
+      "ItemDocumentSchema.1fdd8ae.BlockKind": {
+        "enum": [
+          "decision",
+          "question",
+          "action"
+        ],
+        "title": "BlockKind",
+        "type": "string"
+      },
+      "ItemDocumentSchema.1fdd8ae.BlockPartSchema": {
+        "description": "A block, in its place in the text.",
+        "properties": {
+          "block": {
+            "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.BlockSchema"
+          },
+          "type": {
+            "const": "block",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "block"
+        ],
+        "title": "BlockPartSchema",
+        "type": "object"
+      },
+      "ItemDocumentSchema.1fdd8ae.BlockSchema": {
+        "description": "An ask in its item's text, with its definition and its answer (F30, F31).",
+        "properties": {
+          "answer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The answer: an option's label, `Agree`, `Yes`, `No`, free words or `deferred`; null while unanswered and on an action marked Done",
+            "examples": [
+              "Dome"
+            ],
+            "title": "Answer"
+          },
+          "at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When it was answered",
+            "title": "At"
+          },
+          "because": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.ConfirmationReasonSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A confirmation's reason; null for any other block"
+          },
+          "by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.UserSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who answered, or marked the action Done"
+          },
+          "check": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What Pilot checks after the answer",
+            "title": "Check"
+          },
+          "confirmation": {
+            "description": "Whether the decision is a confirmation",
+            "title": "Confirmation",
+            "type": "boolean"
+          },
+          "default": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A question's default answer",
+            "title": "Default"
+          },
+          "deferral": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.DeferralSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where a deferred block went; null unless `answer` is `deferred`"
+          },
+          "done": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the action was marked Done",
+            "title": "Done"
+          },
+          "id": {
+            "description": "The block's local id, unique within its item",
+            "examples": [
+              "D1"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.BlockKind",
+            "description": "The block's kind"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why it was answered so, or what was pasted back (F17.4)",
+            "title": "Note"
+          },
+          "options": {
+            "description": "The choices, in their order",
+            "items": {
+              "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.OptionSchema"
+            },
+            "title": "Options",
+            "type": "array"
+          },
+          "proposal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A decision's one proposal; null where it offers options",
+            "title": "Proposal"
+          },
+          "section": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.SectionSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The block's own section: from the nearest heading before it, the title's counting as none, to the next heading of the same or a higher level, or the text's end, where that holds no other block; null where it has none. The prose parts in it carry the block's id as their `section`"
+          },
+          "via": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.AnswerChannel"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How the answer reached the record: `app` for a person's unless the text names another; null for Pilot's unless it names one, and while unanswered"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "confirmation",
+          "because",
+          "proposal",
+          "default",
+          "check",
+          "options",
+          "answer",
+          "by",
+          "at",
+          "note",
+          "via",
+          "done",
+          "deferral",
+          "section"
+        ],
+        "title": "BlockSchema",
+        "type": "object"
+      },
+      "ItemDocumentSchema.1fdd8ae.ConfirmationReasonSchema": {
+        "description": "The ground on which a confirmation asks (F22.1).",
+        "properties": {
+          "code": {
+            "examples": [
+              "rider"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "description": {
+            "description": "When the agent uses the reason, one line, not the card's tooltip",
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "description": "The reason's name in the grants table, not the card's words",
+            "examples": [
+              "Rider"
+            ],
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "description"
+        ],
+        "title": "ConfirmationReasonSchema",
+        "type": "object"
+      },
+      "ItemDocumentSchema.1fdd8ae.DeferralSchema": {
+        "description": "Where a deferred block went (decision 47).",
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The task's title, live from the plan, a removed task's last; null for `plan`",
+            "examples": [
+              "Ship it"
+            ],
+            "title": "Title"
+          },
+          "to": {
+            "description": "The task's id, or `plan` for the project's end",
+            "examples": [
+              "ship"
+            ],
+            "title": "To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "to",
+          "title"
+        ],
+        "title": "DeferralSchema",
+        "type": "object"
+      },
+      "ItemDocumentSchema.1fdd8ae.DoneSchema": {
+        "description": "How a done item came to be done: its done line (F13).",
+        "properties": {
+          "at": {
+            "description": "When the item was done",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.UserSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who did it; null when the server did, at a turn's end"
+          },
+          "cause": {
+            "description": "How it came to be done",
+            "enum": [
+              "answered",
+              "marked",
+              "settled",
+              "turn_ended",
+              "finished"
+            ],
+            "title": "Cause",
+            "type": "string"
+          },
+          "undo": {
+            "description": "Whether the record takes Undo now: a prose item, done by a cause that offers it, whose answers no session has taken (F14.1)",
+            "title": "Undo",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "at",
+          "cause",
+          "by",
+          "undo"
+        ],
+        "title": "DoneSchema",
+        "type": "object"
+      },
+      "ItemDocumentSchema.1fdd8ae.OptionSchema": {
+        "description": "A choice a block offers.",
+        "properties": {
+          "label": {
+            "examples": [
+              "Dome"
+            ],
+            "title": "Label",
+            "type": "string"
+          },
+          "recommended": {
+            "description": "Whether the block recommends it",
+            "title": "Recommended",
+            "type": "boolean"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The option's one line; null for a bare label",
+            "examples": [
+              "Up in five minutes"
+            ],
+            "title": "Text"
+          }
+        },
+        "required": [
+          "label",
+          "text",
+          "recommended"
+        ],
+        "title": "OptionSchema",
+        "type": "object"
+      },
+      "ItemDocumentSchema.1fdd8ae.ProsePartSchema": {
+        "description": "Markdown between blocks, drawn as GFM (F29.1).",
+        "properties": {
+          "markdown": {
+            "examples": [
+              "The dome stands up in five minutes."
+            ],
+            "title": "Markdown",
+            "type": "string"
+          },
+          "section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The local id of the block whose own section (F30.9) holds this Markdown; null outside every section. A section's parts and its block stand together in the body, its heading the first line of its first part",
+            "examples": [
+              "D1"
+            ],
+            "title": "Section"
+          },
+          "type": {
+            "const": "prose",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "markdown",
+          "section"
+        ],
+        "title": "ProsePartSchema",
+        "type": "object"
+      },
+      "ItemDocumentSchema.1fdd8ae.SectionSchema": {
+        "description": "A block's own section (F30.9), which a display may draw as one line\n(F31.5).",
+        "properties": {
+          "heading": {
+            "description": "The heading's text, without its `#` marks",
+            "examples": [
+              "Which tent?"
+            ],
+            "title": "Heading",
+            "type": "string"
+          }
+        },
+        "required": [
+          "heading"
+        ],
+        "title": "SectionSchema",
+        "type": "object"
+      },
+      "ItemDocumentSchema.1fdd8ae.StepSchema": {
+        "description": "The plan task an item serves, whose title its step divider carries (F9).",
+        "properties": {
+          "id": {
+            "description": "The task's id in `plan.json`",
+            "examples": [
+              "build"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "description": "The task's title, live from the plan; a removed task's last",
+            "examples": [
+              "Build the recipe card page"
+            ],
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title"
+        ],
+        "title": "StepSchema",
+        "type": "object"
+      },
+      "ItemDocumentSchema.1fdd8ae.UserKind": {
+        "enum": [
+          "person",
+          "agent"
+        ],
+        "title": "UserKind",
+        "type": "string"
+      },
+      "ItemDocumentSchema.1fdd8ae.UserSchema": {
+        "description": "A person, or Pilot, as an avatar draws them (F106, F132).",
+        "properties": {
+          "avatar_slot": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The avatar's palette slot, from 1; null for Pilot",
+            "examples": [
+              1
+            ],
+            "title": "Avatar Slot"
+          },
+          "handle": {
+            "description": "The handle; Pilot's is `agent`",
+            "examples": [
+              "ada"
+            ],
+            "title": "Handle",
+            "type": "string"
+          },
+          "initials": {
+            "description": "The avatar's initials",
+            "examples": [
+              "AE"
+            ],
+            "title": "Initials",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.UserKind",
+            "description": "A person, or Pilot itself"
+          },
+          "name": {
+            "description": "The full name, the avatar's tooltip",
+            "examples": [
+              "Ada Example"
+            ],
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "handle",
+          "name",
+          "initials",
+          "avatar_slot"
+        ],
+        "title": "UserSchema",
+        "type": "object"
+      },
       "LinkSettingsSchema.fb10421": {
         "description": "The link settings the deployment's environment sets (F91, F93); a\nsetting left out or null is unset.",
         "properties": {
@@ -955,6 +1852,519 @@
           "name"
         ],
         "title": "EnvironmentNameSchema",
+        "type": "object"
+      },
+      "ProjectDocumentSchema.1fdd8ae": {
+        "description": "The project's draft, `project.md`, or its handbook, `handbook.md`,\nread only, as the overlay draws it (F37.4, F129.4).",
+        "properties": {
+          "body": {
+            "description": "Its text as drawn: its prose parts and blocks in order, without the front matter and a first heading that is its title; empty for a text with nothing more, as the handbook is born (F129.2), which the screens show as *Empty*",
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "block": "#/components/schemas/ProjectDocumentSchema.1fdd8ae.BlockPartSchema",
+                  "prose": "#/components/schemas/ProjectDocumentSchema.1fdd8ae.ProsePartSchema"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/ProjectDocumentSchema.1fdd8ae.ProsePartSchema"
+                },
+                {
+                  "$ref": "#/components/schemas/ProjectDocumentSchema.1fdd8ae.BlockPartSchema"
+                }
+              ]
+            },
+            "title": "Body",
+            "type": "array"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The text's title, from its front matter or its first heading; null where it gives none",
+            "examples": [
+              "Recipe box"
+            ],
+            "title": "Title"
+          },
+          "writing": {
+            "description": "Whether a session's running turn is saving the text, which Pilot's dots show at its end (F35); cleared at the turn's end, which no live event announces",
+            "title": "Writing",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "title",
+          "body",
+          "writing"
+        ],
+        "title": "ProjectDocumentSchema",
+        "type": "object"
+      },
+      "ProjectDocumentSchema.1fdd8ae.AnswerChannel": {
+        "enum": [
+          "app",
+          "chat",
+          "recommended",
+          "autopilot"
+        ],
+        "title": "AnswerChannel",
+        "type": "string"
+      },
+      "ProjectDocumentSchema.1fdd8ae.BlockKind": {
+        "enum": [
+          "decision",
+          "question",
+          "action"
+        ],
+        "title": "BlockKind",
+        "type": "string"
+      },
+      "ProjectDocumentSchema.1fdd8ae.BlockPartSchema": {
+        "description": "A block, in its place in the text.",
+        "properties": {
+          "block": {
+            "$ref": "#/components/schemas/ProjectDocumentSchema.1fdd8ae.BlockSchema"
+          },
+          "type": {
+            "const": "block",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "block"
+        ],
+        "title": "BlockPartSchema",
+        "type": "object"
+      },
+      "ProjectDocumentSchema.1fdd8ae.BlockSchema": {
+        "description": "An ask in its item's text, with its definition and its answer (F30, F31).",
+        "properties": {
+          "answer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The answer: an option's label, `Agree`, `Yes`, `No`, free words or `deferred`; null while unanswered and on an action marked Done",
+            "examples": [
+              "Dome"
+            ],
+            "title": "Answer"
+          },
+          "at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When it was answered",
+            "title": "At"
+          },
+          "because": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectDocumentSchema.1fdd8ae.ConfirmationReasonSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A confirmation's reason; null for any other block"
+          },
+          "by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectDocumentSchema.1fdd8ae.UserSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who answered, or marked the action Done"
+          },
+          "check": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What Pilot checks after the answer",
+            "title": "Check"
+          },
+          "confirmation": {
+            "description": "Whether the decision is a confirmation",
+            "title": "Confirmation",
+            "type": "boolean"
+          },
+          "default": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A question's default answer",
+            "title": "Default"
+          },
+          "deferral": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectDocumentSchema.1fdd8ae.DeferralSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where a deferred block went; null unless `answer` is `deferred`"
+          },
+          "done": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the action was marked Done",
+            "title": "Done"
+          },
+          "id": {
+            "description": "The block's local id, unique within its item",
+            "examples": [
+              "D1"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ProjectDocumentSchema.1fdd8ae.BlockKind",
+            "description": "The block's kind"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why it was answered so, or what was pasted back (F17.4)",
+            "title": "Note"
+          },
+          "options": {
+            "description": "The choices, in their order",
+            "items": {
+              "$ref": "#/components/schemas/ProjectDocumentSchema.1fdd8ae.OptionSchema"
+            },
+            "title": "Options",
+            "type": "array"
+          },
+          "proposal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A decision's one proposal; null where it offers options",
+            "title": "Proposal"
+          },
+          "section": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectDocumentSchema.1fdd8ae.SectionSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The block's own section: from the nearest heading before it, the title's counting as none, to the next heading of the same or a higher level, or the text's end, where that holds no other block; null where it has none. The prose parts in it carry the block's id as their `section`"
+          },
+          "via": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectDocumentSchema.1fdd8ae.AnswerChannel"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How the answer reached the record: `app` for a person's unless the text names another; null for Pilot's unless it names one, and while unanswered"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "confirmation",
+          "because",
+          "proposal",
+          "default",
+          "check",
+          "options",
+          "answer",
+          "by",
+          "at",
+          "note",
+          "via",
+          "done",
+          "deferral",
+          "section"
+        ],
+        "title": "BlockSchema",
+        "type": "object"
+      },
+      "ProjectDocumentSchema.1fdd8ae.ConfirmationReasonSchema": {
+        "description": "The ground on which a confirmation asks (F22.1).",
+        "properties": {
+          "code": {
+            "examples": [
+              "rider"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "description": {
+            "description": "When the agent uses the reason, one line, not the card's tooltip",
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "description": "The reason's name in the grants table, not the card's words",
+            "examples": [
+              "Rider"
+            ],
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "description"
+        ],
+        "title": "ConfirmationReasonSchema",
+        "type": "object"
+      },
+      "ProjectDocumentSchema.1fdd8ae.DeferralSchema": {
+        "description": "Where a deferred block went (decision 47).",
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The task's title, live from the plan, a removed task's last; null for `plan`",
+            "examples": [
+              "Ship it"
+            ],
+            "title": "Title"
+          },
+          "to": {
+            "description": "The task's id, or `plan` for the project's end",
+            "examples": [
+              "ship"
+            ],
+            "title": "To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "to",
+          "title"
+        ],
+        "title": "DeferralSchema",
+        "type": "object"
+      },
+      "ProjectDocumentSchema.1fdd8ae.OptionSchema": {
+        "description": "A choice a block offers.",
+        "properties": {
+          "label": {
+            "examples": [
+              "Dome"
+            ],
+            "title": "Label",
+            "type": "string"
+          },
+          "recommended": {
+            "description": "Whether the block recommends it",
+            "title": "Recommended",
+            "type": "boolean"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The option's one line; null for a bare label",
+            "examples": [
+              "Up in five minutes"
+            ],
+            "title": "Text"
+          }
+        },
+        "required": [
+          "label",
+          "text",
+          "recommended"
+        ],
+        "title": "OptionSchema",
+        "type": "object"
+      },
+      "ProjectDocumentSchema.1fdd8ae.ProsePartSchema": {
+        "description": "Markdown between blocks, drawn as GFM (F29.1).",
+        "properties": {
+          "markdown": {
+            "examples": [
+              "The dome stands up in five minutes."
+            ],
+            "title": "Markdown",
+            "type": "string"
+          },
+          "section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The local id of the block whose own section (F30.9) holds this Markdown; null outside every section. A section's parts and its block stand together in the body, its heading the first line of its first part",
+            "examples": [
+              "D1"
+            ],
+            "title": "Section"
+          },
+          "type": {
+            "const": "prose",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "markdown",
+          "section"
+        ],
+        "title": "ProsePartSchema",
+        "type": "object"
+      },
+      "ProjectDocumentSchema.1fdd8ae.SectionSchema": {
+        "description": "A block's own section (F30.9), which a display may draw as one line\n(F31.5).",
+        "properties": {
+          "heading": {
+            "description": "The heading's text, without its `#` marks",
+            "examples": [
+              "Which tent?"
+            ],
+            "title": "Heading",
+            "type": "string"
+          }
+        },
+        "required": [
+          "heading"
+        ],
+        "title": "SectionSchema",
+        "type": "object"
+      },
+      "ProjectDocumentSchema.1fdd8ae.UserKind": {
+        "enum": [
+          "person",
+          "agent"
+        ],
+        "title": "UserKind",
+        "type": "string"
+      },
+      "ProjectDocumentSchema.1fdd8ae.UserSchema": {
+        "description": "A person, or Pilot, as an avatar draws them (F106, F132).",
+        "properties": {
+          "avatar_slot": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The avatar's palette slot, from 1; null for Pilot",
+            "examples": [
+              1
+            ],
+            "title": "Avatar Slot"
+          },
+          "handle": {
+            "description": "The handle; Pilot's is `agent`",
+            "examples": [
+              "ada"
+            ],
+            "title": "Handle",
+            "type": "string"
+          },
+          "initials": {
+            "description": "The avatar's initials",
+            "examples": [
+              "AE"
+            ],
+            "title": "Initials",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ProjectDocumentSchema.1fdd8ae.UserKind",
+            "description": "A person, or Pilot itself"
+          },
+          "name": {
+            "description": "The full name, the avatar's tooltip",
+            "examples": [
+              "Ada Example"
+            ],
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "handle",
+          "name",
+          "initials",
+          "avatar_slot"
+        ],
+        "title": "UserSchema",
         "type": "object"
       },
       "ProjectHeadSchema.e86ccd6": {
@@ -4169,6 +5579,84 @@
         "x-required-role": "editor"
       }
     },
+    "/api/items/{item_id}/document": {
+      "get": {
+        "description": "Returns:     200: The document     401: No one is signed in     403: The caller lacks the editor role     404: No item has the id, or it has no document: work and waits",
+        "operationId": "get__api_items_{item_id}_document",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read the item's document on its own, as the overlay draws it: as its timeline entry shows it, with its project, but that a document done by Done reads as Done fixed it (F13.3).",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
     "/api/items/{item_id}/done": {
       "post": {
         "description": "Returns:     204: The document is done     401: No one is signed in     403: The caller lacks the editor role     404: No item has the id     409: The caller has not chosen a handle, the item is done or no         document, or a block has neither an answer nor a recommendation",
@@ -4828,6 +6316,162 @@
           }
         ],
         "summary": "Read a project's head: its standing, its members and its plan.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/projects/{project_id}/draft": {
+      "get": {
+        "description": "Returns:     200: The draft as last published     401: No one is signed in     403: The caller lacks the editor role     404: No project has the id",
+        "operationId": "get__api_projects_{project_id}_draft",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectDocumentSchema.1fdd8ae"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read the project document, `project.md`, read only: the draft as Pilot keeps it after Create project (F37.4).",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/projects/{project_id}/handbook": {
+      "get": {
+        "description": "Returns:     200: The handbook as last published     401: No one is signed in     403: The caller lacks the editor role     404: No project has the id, or it is a draft, which has no handbook",
+        "operationId": "get__api_projects_{project_id}_handbook",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectDocumentSchema.1fdd8ae"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read the project's handbook, `handbook.md`, read only (F129.4); born empty at Create project (F129.2).",
         "tags": [],
         "x-required-role": "editor"
       }
@@ -6283,6 +7927,67 @@
         "x-required-role": "editor"
       }
     },
+    "/api/testing/items/{item_id}/done": {
+      "post": {
+        "description": "Returns:     204: The document is done     400: The stage is prd     404: No item has the id     409: The project has no session, the item is no document or is done,         or a block of it is unanswered",
+        "operationId": "post__api_testing_items_{item_id}_done",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Mark a document Done as Pilot, by the project's session, as its `mark` does a document it settled or deferred whole: the text as it stands fixed in a `done` Version, the item done by Pilot.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
     "/api/testing/items/{item_id}/saves": {
       "post": {
         "description": "Returns:     200: Whether the save is held, and its faults     400: The text is missing     404: No item has the id, or its project is archived     409: The project has no session",
@@ -6544,6 +8249,162 @@
           }
         ],
         "summary": "Make a project in the standing given, made now by its first member.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/projects/{project_id}/draft/saves": {
+      "post": {
+        "description": "Returns:     200: Whether the save is held, and its faults     400: The text is missing     404: No project has the id, or it is archived     409: The project has no session",
+        "operationId": "post__api_testing_projects_{project_id}_draft_saves",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventedSaveCreateSchema.6d6b324"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventedSaveSchema.6d6b324"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Ingest an agent's save of the project's draft, `project.md`, by the project's session, as the store's sync does: held on a fault, else merged and published.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/projects/{project_id}/handbook/saves": {
+      "post": {
+        "description": "Returns:     200: Whether the save is held, and its faults     400: The text is missing     404: No project has the id, it is a draft, which has no handbook, or         it is archived     409: The project has no session",
+        "operationId": "post__api_testing_projects_{project_id}_handbook_saves",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventedSaveCreateSchema.6d6b324"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventedSaveSchema.6d6b324"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Ingest an agent's save of the project's handbook, `handbook.md`, by the project's session, as the store's sync does: held on a fault, else merged and published.",
         "tags": [],
         "x-required-role": "editor"
       }

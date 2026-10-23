@@ -1,6 +1,7 @@
 """/api/items: what the signed-in person does to a timeline's items — answer
 a block, mark an action Done, mark a document Done, a notice Read, a review
-Reviewed, and undo (F14, F17, F32.4); and the live event each sends (F80.2)."""
+Reviewed, and undo (F14, F17, F32.4); and the live event each sends (F80.2).
+And an item's document read on its own (F28, F13.3)."""
 
 import json
 import uuid
@@ -14,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.engine import dsl
+from app.engine.paths import tree_path
 from app.models import Document, Environment, Item, Project, User
 from app.models.reference import SessionState
 from app.schemas.testing_record import InventedProjectCreateSchema
@@ -138,6 +140,121 @@ def _done(item: Item) -> tuple[str | None, uuid.UUID | None]:
 def _error(response: Any) -> str:
     error: str = response.get_json()["error"]
     return error
+
+
+def _entry(client: FlaskClient, camp: Project, item: Item) -> dict[str, Any]:
+    """The item's entry on its project's timeline."""
+    items = client.get(f"/api/projects/{camp.id}/timeline").get_json()["items"]
+    entry: dict[str, Any] = next(
+        entry for entry in items if entry["id"] == str(item.id)
+    )
+    return entry
+
+
+@pytest.mark.usefixtures("person")
+class TestGetItemDocument:
+    def test_a_document_reads_as_its_timeline_entry_with_its_project(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        camp: Project,
+        run: models.Session,
+    ) -> None:
+        item = _bear(container, camp, run, "document", RECOMMENDED)
+        _sign_in(client)
+
+        response = client.get(f"{ITEMS}/{item.id}/document")
+
+        assert response.status_code == 200
+        assert response.get_json() == {
+            **_entry(client, camp, item),
+            "project_id": str(camp.id),
+        }
+
+    def test_a_document_done_by_done_reads_as_done_fixed_it(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        camp: Project,
+        run: models.Session,
+        environment: Environment,
+    ) -> None:
+        item = _bear(container, camp, run, "document", RECOMMENDED)
+        _sign_in(client)
+        client.post(f"{ITEMS}/{item.id}/done")
+        at_done = client.get(f"{ITEMS}/{item.id}/document").get_json()
+        document = session.get_one(Document, item.id)
+        assert document.published_text is not None
+        container.ingest_service().ingest(
+            tree_path(camp, document.path),
+            f"{document.published_text}\nA lantern too.\n".encode(),
+            container.tree_service().hash(camp, document),
+            environment,
+            run,
+        )
+
+        read = client.get(f"{ITEMS}/{item.id}/document").get_json()
+
+        assert read["body"] == at_done["body"]
+        assert _entry(client, camp, item)["body"][-1]["markdown"] == "A lantern too."
+        assert read["done"]["cause"] == "marked"
+
+    def test_an_unknown_item_is_not_found(self, client: FlaskClient) -> None:
+        unknown = uuid.uuid4()
+        _sign_in(client)
+
+        response = client.get(f"{ITEMS}/{unknown}/document")
+
+        assert response.status_code == 404
+        assert _error(response) == f"Document of item {unknown} was not found"
+
+    def test_work_has_no_document(
+        self,
+        client: FlaskClient,
+        session: Session,
+        camp: Project,
+        run: models.Session,
+    ) -> None:
+        session.add(
+            Item(
+                id=run.id,
+                project_id=camp.id,
+                seq=2,
+                kind_code="work",
+                title="Build the camp",
+                created_by_session_id=run.id,
+            )
+        )
+        session.flush()
+        _sign_in(client)
+
+        response = client.get(f"{ITEMS}/{run.id}/document")
+
+        assert response.status_code == 404
+        assert _error(response) == f"Document of item {run.id} was not found"
+
+    def test_an_id_that_is_no_uuid_is_not_found(self, client: FlaskClient) -> None:
+        _sign_in(client)
+
+        assert client.get(f"{ITEMS}/camp/document").status_code == 404
+
+    def test_without_editor_it_is_refused(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        camp: Project,
+        run: models.Session,
+    ) -> None:
+        item = _bear(container, camp, run, "notice", NOTICE)
+        _sign_in(client, roles=())
+
+        assert client.get(f"{ITEMS}/{item.id}/document").status_code == 403
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        assert oidc_client.get(f"{ITEMS}/{uuid.uuid4()}/document").status_code == 401
 
 
 @pytest.mark.usefixtures("person")

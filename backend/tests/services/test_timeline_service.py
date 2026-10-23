@@ -30,6 +30,7 @@ from app.models import (
 )
 from app.models.reference import (
     AttachmentSource,
+    DocumentRole,
     ErrorKind,
     SessionState,
     TransitionKind,
@@ -1273,6 +1274,395 @@ class TestTimeline:
         timeline = container.timeline_service().timeline(project.id)
 
         assert timeline.finished_at is None
+
+
+CAMP_PLAN = """---
+title: Camp plan
+summary: Food and nights.
+---
+
+Before the weekend.
+
+```decision id=D1
+proposal: Cook on the fire.
+```
+
+```question id=Q1
+default: Two nights
+```
+"""
+
+PILOTS_WHOLE = """---
+title: Camp plan
+summary: Food and nights.
+---
+
+```decision id=D1
+proposal: Cook on the fire.
+answer: Agree
+by: agent
+at: 2026-10-12T09:30:00Z
+```
+
+```question id=Q1
+default: Two nights
+answer: deferred
+by: agent
+at: 2026-10-12T09:31:00Z
+to: plan
+```
+"""
+"""A document Pilot settled and deferred whole, which Pilot marks Done."""
+
+_TEXT_KEYS = ("title", "summary", "body", "word_count", "read_minutes")
+"""What an item document reads from its text."""
+
+
+def _pilot(session: DbSession) -> User:
+    return session.scalars(select(User).where(User.handle == "agent")).one()
+
+
+def _revised(session: DbSession, item: Item) -> str:
+    """The item's published text, retitled, summarised anew and grown a line."""
+    published = _document(session, item).published_text
+    assert published is not None
+    return (
+        published.replace("title: Camp plan", "title: Camp plan, revised")
+        .replace("summary: Food and nights.", "summary: Food, nights and a lantern.")
+        .replace("```question", "Bring a lantern.\n\n```question")
+    )
+
+
+def _read(container: ServiceContainer, item: Item) -> dict[str, Any]:
+    read: dict[str, Any] = (
+        container.timeline_service().item_document(item.id).model_dump(mode="json")
+    )
+    return read
+
+
+def _text_of(entry: dict[str, Any]) -> dict[str, Any]:
+    return {key: entry[key] for key in _TEXT_KEYS}
+
+
+@pytest.mark.usefixtures("person")
+class TestItemDocument:
+    def test_an_unknown_item_is_not_found(self, container: ServiceContainer) -> None:
+        item_id = uuid.uuid4()
+
+        with pytest.raises(RecordNotFoundException) as raised:
+            container.timeline_service().item_document(item_id)
+
+        assert raised.value.message == f"Document of item {item_id} was not found"
+
+    def test_work_and_a_wait_have_no_document(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        work = _work(session, project, environment, SessionState.RUNNING)
+        wait = _wait(session, project, session.get_one(models.Session, work.id))
+
+        for item in (work, wait):
+            with pytest.raises(RecordNotFoundException) as raised:
+                container.timeline_service().item_document(item.id)
+            assert raised.value.message == f"Document of item {item.id} was not found"
+
+    def test_an_open_document_reads_as_its_timeline_entry_with_its_project(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container, environment_id=environment.id)
+        data = container.test_data_service()
+        item = data.item(project.id, "document", "Camp kit", CAMP_KIT)
+        data.attach(item.id, [_file("sketch.md", b"# Sketch\n")])
+        data.save(item.id, CAMP_KIT.replace("What we bring.", "What we pack."))
+
+        read = _read(container, item)
+
+        assert read == {**_items(container, project)[1], "project_id": str(project.id)}
+        assert (read["writing"], len(read["attachments"])) == (True, 1)
+        assert [
+            part["block"]["section"] for part in read["body"] if part["type"] == "block"
+        ] == [{"heading": "Which stove?"}]
+
+    def test_the_opening_reads_its_words_verbatim(
+        self, container: ServiceContainer, session: DbSession
+    ) -> None:
+        project = _make(container, opening="Let's camp.\n")
+        opening = session.scalars(
+            select(Item).where(Item.project_id == project.id)
+        ).one()
+
+        read = _read(container, opening)
+
+        assert (read["kind"], read["words"], read["body"]) == (
+            "opening",
+            "Let's camp.\n",
+            None,
+        )
+
+    def test_a_document_done_by_a_person_reads_as_done_fixed_it(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        project = _make(container)
+        run = _run(session, project, environment)
+        item = _bear(container, project, run, "document", "Camp plan", CAMP_PLAN)
+        container.record_service().done(item, person)
+        at_done = _items(container, project)[1]
+
+        _save(
+            container, session, project, item, environment, run, _revised(session, item)
+        )
+        read = _read(container, item)
+
+        (done,) = _versions(session, item, VersionCause.DONE)
+        assert _text_of(read) == _text_of(at_done)
+        assert (read["title"], read["summary"]) == ("Camp plan", "Food and nights.")
+        assert [part["type"] for part in read["body"]] == ["prose", "block", "block"]
+        assert read["done"] == {**at_done["done"], "undo": True}
+        assert "Bring a lantern." in _document(session, item).published_text
+        assert "Bring a lantern." not in done.text
+        assert _items(container, project)[1]["title"] == "Camp plan, revised"
+
+    def test_a_document_pilot_marked_done_reads_as_done_fixed_it(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        run = _run(session, project, environment)
+        item = _bear(container, project, run, "document", "Camp plan", PILOTS_WHOLE)
+        container.record_service().done(item, _pilot(session))
+        at_done = _items(container, project)[1]
+
+        _save(
+            container, session, project, item, environment, run, _revised(session, item)
+        )
+        read = _read(container, item)
+
+        assert _text_of(read) == _text_of(at_done)
+        assert (read["done"]["cause"], read["done"]["by"]) == ("settled", PILOT)
+        assert _items(container, project)[1]["summary"] == (
+            "Food, nights and a lantern."
+        )
+
+    def test_done_again_after_undo_reads_as_the_second_done(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        project = _make(container)
+        run = _run(session, project, environment)
+        item = _bear(container, project, run, "document", "Camp plan", CAMP_PLAN)
+        record = container.record_service()
+        record.done(item, person)
+        record.undo(item)
+        record.answer(_document(session, item), "Q1", person, "Three nights")
+        record.done(item, person)
+        at_done = _items(container, project)[1]
+
+        _save(
+            container, session, project, item, environment, run, _revised(session, item)
+        )
+        read = _read(container, item)
+
+        assert len(_versions(session, item, VersionCause.DONE)) == 2
+        assert _text_of(read) == _text_of(at_done)
+        assert read["body"][2]["block"]["answer"] == "Three nights"
+
+    def test_a_document_undone_then_closed_by_finish_reads_as_last_published(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        project = _make(container)
+        run = _run(session, project, environment)
+        item = _bear(container, project, run, "document", "Camp plan", CAMP_PLAN)
+        record = container.record_service()
+        record.done(item, person)
+        record.undo(item)
+        record.answer(_document(session, item), "Q1", person, "Three nights")
+        container.project_service().transition(ADA, project.id, TransitionKind.FINISHED)
+
+        read = _read(container, item)
+
+        assert read["done"]["cause"] == "finished"
+        assert _text_of(read) == _text_of(_items(container, project)[1])
+        assert read["body"][2]["block"]["answer"] == "Three nights"
+
+    @pytest.mark.parametrize(
+        ("kind", "text", "mark"),
+        [
+            pytest.param("question", QUESTION, "answer", id="one-ask answered"),
+            pytest.param("notice", NOTICE, "read", id="notice read"),
+            pytest.param("review", NOTICE, "reviewed", id="review reviewed"),
+            pytest.param("question", QUESTION, "finish", id="closed by finish"),
+        ],
+    )
+    def test_an_item_done_otherwise_reads_as_last_published(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
+        kind: str,
+        text: str,
+        mark: str,
+    ) -> None:
+        project = _make(container)
+        run = _run(session, project, environment)
+        item = _bear(container, project, run, kind, "Opens in May", text)
+        record = container.record_service()
+        if mark == "answer":
+            record.answer(_document(session, item), "Q1", person, "By the hill")
+        elif mark == "read":
+            record.read(item, person)
+        elif mark == "reviewed":
+            record.reviewed(item, person)
+        else:
+            container.project_service().transition(
+                ADA, project.id, TransitionKind.FINISHED
+            )
+
+        read = _read(container, item)
+
+        assert read["done"] is not None
+        assert _versions(session, item, VersionCause.DONE) == []
+        assert read == {**_items(container, project)[1], "project_id": str(project.id)}
+
+
+@pytest.mark.usefixtures("person")
+class TestProjectDocument:
+    def test_an_unknown_project_is_not_found(self, container: ServiceContainer) -> None:
+        project_id = uuid.uuid4()
+
+        with pytest.raises(RecordNotFoundException) as raised:
+            container.timeline_service().project_document(
+                project_id, DocumentRole.HANDBOOK
+            )
+
+        assert raised.value.message == f"Project {project_id} was not found"
+
+    def test_a_draft_has_its_draft_and_no_handbook(
+        self, container: ServiceContainer
+    ) -> None:
+        project = _make(container, state="draft", name="Camp")
+        timelines = container.timeline_service()
+
+        draft = timelines.project_document(project.id, DocumentRole.DRAFT)
+        with pytest.raises(RecordNotFoundException) as raised:
+            timelines.project_document(project.id, DocumentRole.HANDBOOK)
+
+        assert draft.model_dump() == {"title": "Camp", "body": [], "writing": False}
+        assert raised.value.message == f"Handbook of project {project.id} was not found"
+
+    def test_the_handbook_born_at_create_reads_empty(
+        self, container: ServiceContainer
+    ) -> None:
+        project = _make(container)
+
+        handbook = container.timeline_service().project_document(
+            project.id, DocumentRole.HANDBOOK
+        )
+
+        assert handbook.model_dump() == {"title": None, "body": [], "writing": False}
+
+    @pytest.mark.parametrize("role", list(DocumentRole))
+    def test_a_save_reads_as_drawn_written_by_pilot_until_its_turn_ends(
+        self,
+        container: ServiceContainer,
+        environment: Environment,
+        role: DocumentRole,
+    ) -> None:
+        project = _make(container, environment_id=environment.id)
+        text = "# Camp\n\nKeep the stove dry.\n\n## Gear\n\nTwo tents.\n"
+        data = container.test_data_service()
+        data.save_project_document(project.id, role, text)
+        timelines = container.timeline_service()
+
+        saved = timelines.project_document(project.id, role).model_dump()
+        data.end_turn(project.id)
+        ended = timelines.project_document(project.id, role).model_dump()
+
+        assert saved == {
+            "title": "Camp",
+            "body": [
+                {
+                    "type": "prose",
+                    "markdown": "Keep the stove dry.\n\n## Gear\n\nTwo tents.",
+                    "section": None,
+                }
+            ],
+            "writing": True,
+        }
+        assert ended == {**saved, "writing": False}
+
+    def test_its_blocks_read_with_their_answers(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        project = _make(container, state="draft", name="Camp")
+        draft = session.scalars(
+            select(Document).where(
+                Document.project_id == project.id,
+                Document.role_code == DocumentRole.DRAFT,
+            )
+        ).one()
+        container.document_service().publish(
+            draft,
+            "# Camp\n\nThe dome stands up in five minutes.\n\n"
+            "```decision id=D1\noptions:\n  - Dome\n  - Tunnel\n```\n\n"
+            "Pick before the weekend.\n",
+        )
+        container.record_service().answer(draft, "D1", person, "Tunnel")
+
+        (prose, block, after) = (
+            container.timeline_service()
+            .project_document(project.id, DocumentRole.DRAFT)
+            .body
+        )
+
+        assert prose.model_dump() == {
+            "type": "prose",
+            "markdown": "The dome stands up in five minutes.",
+            "section": None,
+        }
+        answered = block.model_dump(mode="json")["block"]
+        assert (answered["answer"], answered["by"]) == ("Tunnel", ADA_USER)
+        assert after.model_dump()["markdown"] == "Pick before the weekend."
+
+    def test_a_held_save_reads_as_last_published(
+        self, container: ServiceContainer, environment: Environment
+    ) -> None:
+        project = _make(container, environment_id=environment.id)
+        data = container.test_data_service()
+        data.save_project_document(
+            project.id, DocumentRole.HANDBOOK, "# Camp\n\nTwo tents.\n"
+        )
+
+        ingested = data.save_project_document(
+            project.id, DocumentRole.HANDBOOK, "```decision id=D1\nnope: 1\n```\n"
+        )
+
+        assert ingested.held
+        handbook = container.timeline_service().project_document(
+            project.id, DocumentRole.HANDBOOK
+        )
+        assert [part.model_dump()["markdown"] for part in handbook.body] == [
+            "Two tents."
+        ]
 
 
 @pytest.mark.usefixtures("person")

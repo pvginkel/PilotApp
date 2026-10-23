@@ -1,7 +1,7 @@
 """The projects as the signed-in person reads them, the project list, the
-archived projects, a project's head and its timeline (F1, F2, F3, F8, D012);
-and what they change of a project's standing: its transitions and their
-membership (F4.1, F5, F6, F127, F128)."""
+archived projects, a project's head, its timeline, its draft and its handbook
+(F1, F2, F3, F8, F37.4, F129.4, D012); and what they change of a project's
+standing: its transitions and their membership (F4.1, F5, F6, F127, F128)."""
 
 import uuid
 from typing import Any
@@ -12,7 +12,7 @@ from spectree import Response as SpectreeResponse
 
 from app.api.caller import caller
 from app.models import PlanNote, User
-from app.models.reference import TransitionKind
+from app.models.reference import DocumentRole, TransitionKind
 from app.schemas.common import ApiErrorResponseSchema
 from app.schemas.projects import (
     BadgeSchema,
@@ -26,7 +26,7 @@ from app.schemas.projects import (
     ProjectTabSchema,
     TransitionRequestSchema,
 )
-from app.schemas.timeline import TimelineSchema
+from app.schemas.timeline import ProjectDocumentSchema, TimelineSchema
 from app.services.container import ServiceContainer
 from app.services.people_service import initials
 from app.services.project_service import PlanProgress, ProjectHead, ProjectService
@@ -177,6 +177,62 @@ def get_timeline(
         404: No project has the id
     """
     return timeline_service.timeline(project_id).model_dump(mode="json")
+
+
+@projects_bp.route("/<uuid:project_id>/draft", methods=["GET"])
+@api.validate(
+    resp=SpectreeResponse(
+        HTTP_200=ProjectDocumentSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+    )
+)
+@inject
+def get_draft(
+    project_id: uuid.UUID,
+    timeline_service: TimelineService = Provide[ServiceContainer.timeline_service],
+) -> Any:
+    """Read the project document, `project.md`, read only: the draft as Pilot
+    keeps it after Create project (F37.4).
+
+    Returns:
+        200: The draft as last published
+        401: No one is signed in
+        403: The caller lacks the editor role
+        404: No project has the id
+    """
+    return timeline_service.project_document(project_id, DocumentRole.DRAFT).model_dump(
+        mode="json"
+    )
+
+
+@projects_bp.route("/<uuid:project_id>/handbook", methods=["GET"])
+@api.validate(
+    resp=SpectreeResponse(
+        HTTP_200=ProjectDocumentSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+    )
+)
+@inject
+def get_handbook(
+    project_id: uuid.UUID,
+    timeline_service: TimelineService = Provide[ServiceContainer.timeline_service],
+) -> Any:
+    """Read the project's handbook, `handbook.md`, read only (F129.4); born
+    empty at Create project (F129.2).
+
+    Returns:
+        200: The handbook as last published
+        401: No one is signed in
+        403: The caller lacks the editor role
+        404: No project has the id, or it is a draft, which has no handbook
+    """
+    return timeline_service.project_document(
+        project_id, DocumentRole.HANDBOOK
+    ).model_dump(mode="json")
 
 
 @projects_bp.route("/<uuid:project_id>/transitions", methods=["POST"])

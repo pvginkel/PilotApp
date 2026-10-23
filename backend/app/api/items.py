@@ -2,9 +2,11 @@
 answer a block, mark an action Done, mark a document Done, a notice Read, a
 review Reviewed, and undo. Each is the record's own write; its refusals
 answer as the API's errors. A block is addressed under its item, by its
-local id (F30.7)."""
+local id (F30.7). And an item's document, read on its own as the overlay
+draws it (F28, F13.3)."""
 
 import uuid
+from typing import Any
 
 from dependency_injector.wiring import Provide, inject
 from flask import Blueprint, request
@@ -13,11 +15,40 @@ from spectree import Response as SpectreeResponse
 from app.api.caller import caller
 from app.schemas.common import ApiErrorResponseSchema
 from app.schemas.items import ActionDoneRequestSchema, AnswerRequestSchema
+from app.schemas.timeline import ItemDocumentSchema
 from app.services.container import ServiceContainer
 from app.services.item_service import ItemService
+from app.services.timeline_service import TimelineService
 from app.utils.spectree_config import api
 
 items_bp = Blueprint("items", __name__, url_prefix="/items")
+
+
+@items_bp.route("/<uuid:item_id>/document", methods=["GET"])
+@api.validate(
+    resp=SpectreeResponse(
+        HTTP_200=ItemDocumentSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+    )
+)
+@inject
+def get_item_document(
+    item_id: uuid.UUID,
+    timeline_service: TimelineService = Provide[ServiceContainer.timeline_service],
+) -> Any:
+    """Read the item's document on its own, as the overlay draws it: as its
+    timeline entry shows it, with its project, but that a document done by
+    Done reads as Done fixed it (F13.3).
+
+    Returns:
+        200: The document
+        401: No one is signed in
+        403: The caller lacks the editor role
+        404: No item has the id, or it has no document: work and waits
+    """
+    return timeline_service.item_document(item_id).model_dump(mode="json")
 
 
 @items_bp.route("/<uuid:item_id>/blocks/<block_id>/answer", methods=["POST"])
