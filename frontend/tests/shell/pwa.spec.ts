@@ -63,6 +63,13 @@ test.describe('The PWA shell', () => {
     }
   });
 
+  test('serves the favicon the page head names', async ({ page }) => {
+    const href = await page.locator('link[rel="icon"]').getAttribute('href');
+    const image = await page.request.get(new URL(href!, page.url()).href);
+    expect(image.headers()['content-type']).toBe('image/png');
+    expect(pngSize(await image.body())).toBe('384x384');
+  });
+
   // Chrome's own installability check is not witnessed: headless Chromium's
   // Page.getInstallabilityErrors answers no error for a page that names no manifest at all.
   test('names a manifest Chrome reads without an error', async ({ page }) => {

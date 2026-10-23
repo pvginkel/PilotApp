@@ -11,7 +11,10 @@ test.describe('The top bar', () => {
     await shell.open();
 
     await expect(shell.brand).toHaveText('Pilot');
-    await expect(shell.brand.locator('img.logo')).toHaveAttribute('src', '/logo.png');
+    const logo = shell.brand.locator('img.logo');
+    await expect(logo).toHaveAttribute('src', '/logo.png');
+    // Three times the bar's 32px: the 96px render, served under the logo's name (vite-icons.ts).
+    await expect.poll(() => logo.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(96);
     await expect(shell.avatar).toHaveText('AE');
     await expect(shell.avatar).toHaveAttribute('title', 'Ada Example');
     await expect(shell.userName).toHaveText('Ada Example');

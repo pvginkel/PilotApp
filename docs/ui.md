@@ -171,15 +171,18 @@ from acting.
 ## The PWA
 
 The app's mark is the operator's control tower in three-quarter perspective, modelled in
-`assets/icon/ATC-tower.blend` and rendered beside it to two PNGs (its `README.txt` says how):
-`tower-blue.png`, the white tower on a rounded tile in the theme's blue, and `tower-white.png`, the
-same tower in blues on a white tile (D020). `scripts/render-icons.mjs`, run from `frontend/` after a
-new render, writes `frontend/public/`'s images from them: the favicon and the manifest's icons
-(192px, 512px and a 512px maskable one, the tile full-bleed with the tower at 0.8 of its size) from
-the blue one, and the top bar's `logo.png` from the white one, the bar being the theme's blue itself
-(D020). Beside them stand the manifest (`manifest.json`) and the service worker,
-`sw.js`; the page head links the manifest and sets `theme-color` to `#568ed2`, a standing edit of
-the template's `index.html` (`CLAUDE.md`).
+`frontend/assets/icon/ATC-tower.blend` and rendered beside it by `render_both.py` (its `README.txt`
+says how): `tower-blue-<size>.png`, the white tower on a rounded tile in the theme's blue, and
+`tower-white-<size>.png`, the same tower in blues on a white tile (D020), each at 512, 384, 192 and
+96px, and `tower-blue-512-maskable.png`, the blue tile full-bleed with the tower at 0.8 of its size.
+The app takes the renders as they are: `vite-icons.ts`, a plugin of `loadAppPlugins()`, serves them
+from the dev server and writes them to the build's root under the names the app asks for, so a new
+render is in the next build with nothing copied: the favicon (`favicon.png`, the 384px blue one)
+and the manifest's icons (`icon-192.png`, `icon-512.png` and the maskable `icon-512-maskable.png`)
+from the blue renders, and the top bar's `logo.png` from the 96px white one, three times the bar's
+32px, the bar being the theme's blue itself (D020). Beside them stand `public/`'s manifest
+(`manifest.json`) and service worker, `sw.js`; the page head links the manifest and sets
+`theme-color` to `#568ed2`, a standing edit of the template's `index.html` (`CLAUDE.md`).
 `registerServiceWorker()` (`src/lib/service-worker.ts`) registers the worker when the shell's
 module loads, on any page, before sign-in too, wherever the browser offers service workers (a
 secure context). The worker caches nothing. It answers only a navigation the network does not,

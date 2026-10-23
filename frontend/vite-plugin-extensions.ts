@@ -1,4 +1,5 @@
 import type { PluginOption } from 'vite'
+import { appIcons } from './vite-icons'
 
 /**
  * App-owned plugin extensions — appended to the Vite config's plugins, in dev, build and preview.
@@ -6,5 +7,5 @@ import type { PluginOption } from 'vite'
  * This file is never overwritten by template updates.
  */
 export function loadAppPlugins(): PluginOption[] {
-  return []
+  return [appIcons()]
 }
