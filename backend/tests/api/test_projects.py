@@ -491,6 +491,7 @@ class TestGetTimeline:
                         {
                             "type": "prose",
                             "markdown": "The dome stands up in five minutes.",
+                            "section": None,
                         },
                         {
                             "type": "block",
@@ -521,6 +522,7 @@ class TestGetTimeline:
                                 "via": "app",
                                 "done": None,
                                 "deferral": None,
+                                "section": None,
                             },
                         },
                     ],
@@ -546,10 +548,42 @@ class TestGetTimeline:
                     "concept": False,
                     "author": None,
                     "words": None,
-                    "body": [{"type": "prose", "markdown": "A storm comes."}],
+                    "body": [
+                        {"type": "prose", "markdown": "A storm comes.", "section": None}
+                    ],
                 },
             ],
         }
+
+    def test_a_block_s_own_section_rides_with_its_text(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        environment: Environment,
+    ) -> None:
+        camp = session.get_one(Project, _make(container, name="Camp"))
+        container.document_service().bear_item(
+            camp,
+            "document",
+            "Camp kit",
+            _run(session, camp, environment),
+            "# Camp kit\n\nWhat we bring.\n\n## Which tent?\n\n"
+            "```question id=Q1\n```\n",
+        )
+        _sign_in(client)
+
+        body = client.get(f"{PROJECTS}/{camp.id}/timeline").get_json()
+
+        parts = body["items"][1]["body"]
+        assert [
+            (part["type"], part.get("markdown"), part.get("section")) for part in parts
+        ] == [
+            ("prose", "What we bring.", None),
+            ("prose", "## Which tent?", "Q1"),
+            ("block", None, None),
+        ]
+        assert parts[2]["block"]["section"] == {"heading": "Which tent?"}
 
     def test_a_finished_project_has_its_finish(
         self, client: FlaskClient, container: ServiceContainer, session: Session

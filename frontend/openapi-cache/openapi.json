@@ -2871,6 +2871,17 @@
             "description": "A decision's one proposal; null where it offers options",
             "title": "Proposal"
           },
+          "section": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.SectionSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The block's own section: from the nearest heading before it, the title's counting as none, to the next heading of the same or a higher level, or the text's end, where that holds no other block; null where it has none. The prose parts in it carry the block's id as their `section`"
+          },
           "via": {
             "anyOf": [
               {
@@ -2898,7 +2909,8 @@
           "note",
           "via",
           "done",
-          "deferral"
+          "deferral",
+          "section"
         ],
         "title": "BlockSchema",
         "type": "object"
@@ -3065,6 +3077,21 @@
             "title": "Markdown",
             "type": "string"
           },
+          "section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The local id of the block whose own section (F30.9) holds this Markdown; null outside every section. A section's parts and its block stand together in the body, its heading the first line of its first part",
+            "examples": [
+              "D1"
+            ],
+            "title": "Section"
+          },
           "type": {
             "const": "prose",
             "title": "Type",
@@ -3073,9 +3100,28 @@
         },
         "required": [
           "type",
-          "markdown"
+          "markdown",
+          "section"
         ],
         "title": "ProsePartSchema",
+        "type": "object"
+      },
+      "TimelineSchema.1fdd8ae.SectionSchema": {
+        "description": "A block's own section (F30.9), which a display may draw as one line\n(F31.5).",
+        "properties": {
+          "heading": {
+            "description": "The heading's text, without its `#` marks",
+            "examples": [
+              "Which tent?"
+            ],
+            "title": "Heading",
+            "type": "string"
+          }
+        },
+        "required": [
+          "heading"
+        ],
+        "title": "SectionSchema",
         "type": "object"
       },
       "TimelineSchema.1fdd8ae.StepSchema": {
@@ -3145,7 +3191,7 @@
                 "type": "null"
               }
             ],
-            "description": "A prose item's text but the opening's, as drawn: its prose parts and blocks in order, without the front matter and a first heading that is its title; null for the opening, work and waits",
+            "description": "A prose item's text but the opening's, as drawn: its prose parts and blocks in order, split at each block's own section's edges, without the front matter and a first heading that is its title; null for the opening, work and waits",
             "title": "Body"
           },
           "concept": {

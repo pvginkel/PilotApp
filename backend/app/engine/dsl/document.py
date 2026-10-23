@@ -53,11 +53,21 @@ class Option:
 
 
 @dataclass(frozen=True)
+class Section:
+    """A block's own section (F30.9): its heading's text, and the lines from
+    the heading to the section's end."""
+
+    heading: str
+    span: Span
+
+
+@dataclass(frozen=True)
 class Block:
     """A fence whose info string names a block kind and its `id`.
 
     `lines` holds the span of every key of the body, by key. A value the
     grammar refuses is read as none, and its fault is the document's.
+    `section` is the block's own section, none where it has none.
     """
 
     local_id: str
@@ -77,11 +87,21 @@ class Block:
     via: str | None = None
     to: str | None = None
     done: datetime | None = None
+    section: Section | None = None
 
     @property
     def answered(self) -> bool:
         """An `answer`, `deferred` included, or `done` (DB Block)."""
         return self.answer is not None or self.done is not None
+
+
+@dataclass(frozen=True)
+class Prose:
+    """Markdown as a display draws it, between blocks and section edges;
+    `section` is the local id of the block whose own section holds it."""
+
+    markdown: str
+    section: str | None = None
 
 
 @dataclass(frozen=True)

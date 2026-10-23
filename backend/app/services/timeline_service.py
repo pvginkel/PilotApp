@@ -48,6 +48,7 @@ from app.schemas.timeline import (
     ItemKindCode,
     OptionSchema,
     ProsePartSchema,
+    SectionSchema,
     StepSchema,
     TimelineItemSchema,
     TimelineSchema,
@@ -286,9 +287,11 @@ class _Reader:
             avatar_slot=user.avatar_slot,
         )
 
-    def part(self, part: str | dsl.Block) -> BodyPartSchema:
-        if isinstance(part, str):
-            return ProsePartSchema(type="prose", markdown=part)
+    def part(self, part: dsl.Prose | dsl.Block) -> BodyPartSchema:
+        if isinstance(part, dsl.Prose):
+            return ProsePartSchema(
+                type="prose", markdown=part.markdown, section=part.section
+            )
         return BlockPartSchema(type="block", block=self._block(part))
 
     def _block(self, block: dsl.Block) -> BlockSchema:
@@ -330,6 +333,11 @@ class _Reader:
                 )
                 if block.answer == dsl.DEFERRED and block.to is not None
                 else None
+            ),
+            section=(
+                None
+                if block.section is None
+                else SectionSchema(heading=block.section.heading)
             ),
         )
 

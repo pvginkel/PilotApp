@@ -16,6 +16,8 @@ from app.engine.dsl import (
     Facts,
     Fault,
     ParsedDocument,
+    Prose,
+    Section,
     Span,
     parse,
     validate,
@@ -192,6 +194,14 @@ def corpus_parse(document: ParsedDocument) -> dict[str, Any]:
                         "via": block.via,
                         "to": block.to,
                         "done": _time(block.done),
+                        "section": (
+                            None
+                            if block.section is None
+                            else {
+                                "heading": block.section.heading,
+                                "span": _span(block.section.span),
+                            }
+                        ),
                     }
                 )
                 for block in document.blocks
@@ -772,7 +782,10 @@ class TestBody:
 
         parts = dsl.body(text)
 
-        assert [part if isinstance(part, str) else part.local_id for part in parts] == [
+        assert [
+            part.markdown if isinstance(part, Prose) else part.local_id
+            for part in parts
+        ] == [
             "Before.",
             "D1",
             "Between,\nover two lines.",
@@ -783,34 +796,87 @@ class TestBody:
 
     def test_the_front_matter_is_left_out(self) -> None:
         assert dsl.body("---\ntitle: Tent\nurgent: true\n---\nThe dome.\n") == (
-            "The dome.",
+            Prose("The dome."),
         )
 
     def test_a_heading_matching_the_front_matter_title_is_left_out(self) -> None:
         text = "---\ntitle: Which tent?\n---\n\n# Which tent?\n\nThe dome.\n"
 
-        assert dsl.body(text) == ("The dome.",)
+        assert dsl.body(text) == (Prose("The dome."),)
 
     def test_a_heading_that_is_the_title_is_left_out(self) -> None:
-        assert dsl.body("# Which tent?\n\nThe dome.\n") == ("The dome.",)
+        assert dsl.body("# Which tent?\n\nThe dome.\n") == (Prose("The dome."),)
 
     def test_a_heading_other_than_the_front_matter_title_stays(self) -> None:
         text = "---\ntitle: Which tent?\n---\n# Camping\n\nThe dome.\n"
 
-        assert dsl.body(text) == ("# Camping\n\nThe dome.",)
+        assert dsl.body(text) == (Prose("# Camping\n\nThe dome."),)
 
     def test_only_the_first_heading_is_left_out(self) -> None:
         text = "# Which tent?\n\n## Which tent?\n"
 
-        assert dsl.body(text) == ("## Which tent?",)
+        assert dsl.body(text) == (Prose("## Which tent?"),)
 
     def test_a_code_fence_stays_in_the_prose(self) -> None:
         text = "Run:\n\n```sh\nmake tent\n```\n"
 
-        assert dsl.body(text) == ("Run:\n\n```sh\nmake tent\n```",)
+        assert dsl.body(text) == (Prose("Run:\n\n```sh\nmake tent\n```"),)
 
     def test_carriage_returns_are_left_out(self) -> None:
-        assert dsl.body("One.\r\n\r\nTwo.\r\n") == ("One.\n\nTwo.",)
+        assert dsl.body("One.\r\n\r\nTwo.\r\n") == (Prose("One.\n\nTwo."),)
+
+    def test_the_prose_splits_at_a_section_s_edges_and_names_its_block(
+        self,
+    ) -> None:
+        text = (
+            "# Camp\n\n"
+            "Shared context.\n\n"
+            "## Which tent?\n\nThe dome is quick.\n\n"
+            "```decision id=D1\noptions:\n  - Dome\n```\n\n"
+            "Pitched by noon.\n\n"
+            "## Which stove?\n\nGas or wood.\n"
+        )
+
+        parts = dsl.body(text)
+
+        assert parts == (
+            Prose("Shared context."),
+            Prose("## Which tent?\n\nThe dome is quick.", "D1"),
+            parse(text).blocks[0],
+            Prose("Pitched by noon.", "D1"),
+            Prose("## Which stove?\n\nGas or wood."),
+        )
+
+    def test_a_section_s_heading_alone_is_its_first_part(self) -> None:
+        text = "# Camp\n## Which tent?\n```question id=Q1\n```\n"
+
+        heading, block = dsl.body(text)
+
+        assert heading == Prose("## Which tent?", "Q1")
+        assert isinstance(block, dsl.Block)
+        assert block.section == Section("Which tent?", Span(2, 4))
+
+    def test_a_section_s_sub_heading_stays_in_its_parts(self) -> None:
+        text = (
+            "# Camp\n## Which tent?\n```question id=Q1\n```\n### Why\nRain.\n## Next\n"
+        )
+
+        parts = dsl.body(text)
+
+        assert parts[2:] == (Prose("### Why\nRain.", "Q1"), Prose("## Next"))
+
+    def test_the_prose_around_blocks_without_a_section_is_unmarked(self) -> None:
+        text = (
+            "# Camp\n## Two asks\n\n```question id=Q1\n```\n\nBetween.\n\n"
+            "```question id=Q2\n```\n"
+        )
+
+        parts = dsl.body(text)
+
+        assert [part for part in parts if isinstance(part, Prose)] == [
+            Prose("## Two asks"),
+            Prose("Between."),
+        ]
 
     def test_blank_prose_is_left_out(self) -> None:
         text = "---\ntitle: T\n---\n\n```question id=Q1\n```\n\n"
@@ -822,6 +888,133 @@ class TestBody:
 
     def test_an_empty_text_has_no_parts(self) -> None:
         assert dsl.body("") == ()
+
+
+class TestSection:
+    """A block's own section (F30.9), read from the headings as the title is."""
+
+    @staticmethod
+    def _sections(text: str) -> dict[str, Section | None]:
+        return {block.local_id: block.section for block in parse(text).blocks}
+
+    def test_the_nearest_heading_before_a_block_opens_its_section(self) -> None:
+        text = (
+            "# Camp\nIntro.\n\n## Which tent?\n\nThe dome.\n\n"
+            "```question id=Q1\n```\n\nAfter.\n\n## Next\n"
+        )
+
+        assert self._sections(text) == {"Q1": Section("Which tent?", Span(4, 12))}
+
+    def test_a_section_runs_to_the_text_s_end_without_a_later_heading(
+        self,
+    ) -> None:
+        text = "# Camp\n## Which tent?\n```question id=Q1\n```\nAfter.\n\n"
+
+        assert self._sections(text) == {"Q1": Section("Which tent?", Span(2, 6))}
+
+    def test_a_heading_of_a_higher_level_ends_a_section(self) -> None:
+        text = "# Camp\n### Which tent?\n```question id=Q1\n```\n# Next\n"
+
+        assert self._sections(text) == {"Q1": Section("Which tent?", Span(2, 4))}
+
+    def test_a_heading_of_a_lower_level_does_not_end_a_section(self) -> None:
+        text = (
+            "# Camp\n## Which tent?\n```question id=Q1\n```\n### Why\nRain.\n## Next\n"
+        )
+
+        assert self._sections(text) == {"Q1": Section("Which tent?", Span(2, 6))}
+
+    @pytest.mark.parametrize(
+        ("line", "heading"),
+        [
+            ("## Closed ##", "Closed"),
+            ("   ## Indented", "Indented"),
+            ("##\tTabbed", "Tabbed"),
+            ("## A *styled* ask", "A *styled* ask"),
+        ],
+    )
+    def test_the_heading_s_text_is_read_as_the_title_s(
+        self, line: str, heading: str
+    ) -> None:
+        text = f"# Title\n{line}\n```question id=Q1\n```\n"
+
+        assert self._sections(text) == {"Q1": Section(heading, Span(2, 4))}
+
+    @pytest.mark.parametrize(
+        "line",
+        ["#Hashtag", "####### Seven", "    ## Indented four", "##", "Setext\n---"],
+    )
+    def test_a_line_that_is_no_heading_neither_opens_nor_ends_a_section(
+        self, line: str
+    ) -> None:
+        text = f"# Title\n## Which tent?\n{line}\n```question id=Q1\n```\n{line}\n"
+        last = len(text.split("\n")) - 1
+
+        assert self._sections(text) == {"Q1": Section("Which tent?", Span(2, last))}
+        assert parse(text).faults == ()
+
+    def test_a_heading_inside_a_fence_is_no_heading(self) -> None:
+        text = (
+            "# Camp\n## Which tent?\n```sh\n# a comment\n```\n"
+            "```question id=Q1\n```\n~~~\n## quoted\n~~~\n"
+        )
+
+        assert self._sections(text) == {"Q1": Section("Which tent?", Span(2, 10))}
+
+    def test_the_title_s_own_heading_gives_no_section(self) -> None:
+        assert self._sections("# Which tent?\n\n```question id=Q1\n```\n") == {
+            "Q1": None
+        }
+
+    def test_a_first_heading_that_is_not_the_title_opens_a_section(self) -> None:
+        text = "---\ntitle: Camp\n---\n# Which tent?\n```question id=Q1\n```\n"
+
+        assert self._sections(text) == {"Q1": Section("Which tent?", Span(4, 6))}
+
+    def test_a_block_without_a_heading_before_it_has_no_section(self) -> None:
+        text = "# Camp\nIntro.\n```question id=Q1\n```\n## Later\n"
+
+        assert self._sections(text) == {"Q1": None}
+
+    def test_a_section_holding_two_blocks_is_neither_s(self) -> None:
+        text = "# Camp\n## Two asks\n```question id=Q1\n```\n```question id=Q2\n```\n"
+
+        assert self._sections(text) == {"Q1": None, "Q2": None}
+
+    def test_a_block_under_a_sub_heading_counts_in_the_enclosing_section(
+        self,
+    ) -> None:
+        text = (
+            "# Camp\n## Group\n```question id=Q1\n```\n"
+            "### Detail\n```question id=Q2\n```\n"
+        )
+
+        assert self._sections(text) == {
+            "Q1": None,
+            "Q2": Section("Detail", Span(5, 7)),
+        }
+
+    def test_the_nearest_heading_is_taken_and_none_further_out(self) -> None:
+        text = "# Camp\n## Which tent?\nContext.\n### Detail\nMore.\n```question id=Q1\n```\n"
+
+        assert self._sections(text) == {"Q1": Section("Detail", Span(4, 7))}
+
+    def test_every_block_has_its_own_section(self) -> None:
+        text = (
+            "# Camp\nShared.\n"
+            "## Which tent?\n```question id=Q1\n```\n"
+            "## Which stove?\n```question id=Q2\n```\n"
+        )
+
+        assert self._sections(text) == {
+            "Q1": Section("Which tent?", Span(3, 5)),
+            "Q2": Section("Which stove?", Span(6, 8)),
+        }
+
+    def test_a_section_is_never_a_fault(self) -> None:
+        text = "# Camp\n## Two asks\n```question id=Q1\n```\n```question id=Q2\n```\n"
+
+        assert validate(parse(text), FACTS) == []
 
 
 class TestValidate:

@@ -10,7 +10,7 @@ the string written: `answer: Yes` matches the option `- Yes`, and `at` and
 import re
 from collections.abc import Mapping, Sequence
 from collections.abc import Set as AbstractSet
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 
@@ -24,6 +24,8 @@ from app.engine.dsl.document import (
     FrontMatter,
     Option,
     ParsedDocument,
+    Prose,
+    Section,
     Span,
 )
 
@@ -68,7 +70,9 @@ _UNSTORABLE = re.compile(r"[\x00\ud800-\udfff]")
 """What a double-quoted YAML escape can write and no PostgreSQL `text` holds."""
 
 _FENCE = re.compile(r"(?P<indent> {0,3})(?P<marker>`{3,}|~{3,})(?P<info>.*)")
-_HEADING = re.compile(r" {0,3}#{1,6}(?:[ \t]+(?P<text>.*?))?(?:[ \t]+#+)?[ \t]*")
+_HEADING = re.compile(
+    r" {0,3}(?P<marks>#{1,6})(?:[ \t]+(?P<text>.*?))?(?:[ \t]+#+)?[ \t]*"
+)
 _LOCAL_ID = re.compile(r"id\s*=\s*(?P<id>\S+)")
 _CARRIES_ID = re.compile(r"(?:^|\s)id\s*=")
 _TIME = re.compile(
@@ -114,6 +118,16 @@ class Facts:
     published_to: Mapping[str, str]
 
 
+@dataclass(frozen=True)
+class _Heading:
+    """An ATX heading outside a fence: its line, its number of `#` and its
+    text."""
+
+    line: int
+    level: int
+    text: str
+
+
 def parse(text: str) -> ParsedDocument:
     """Read a document's text, with the faults it holds on its own."""
     lines = [line.removesuffix("\r") for line in text.split("\n")]
@@ -123,14 +137,15 @@ def parse(text: str) -> ParsedDocument:
     front_matter, index = _front_matter(lines, faults)
     blocks: list[Block] = []
     seen: set[str] = set()
-    heading: tuple[int, str] | None = None
+    headings: list[_Heading] = []
     while index < len(lines):
         opening = _FENCE.fullmatch(lines[index])
         if opening is None or (
             opening["marker"].startswith("`") and "`" in opening["info"]
         ):
-            if heading is None:
-                heading = _heading(lines[index], index + 1)
+            heading = _heading(lines[index], index + 1)
+            if heading is not None:
+                headings.append(heading)
             index += 1
             continue
         close = _closing_fence(lines, index, opening["marker"])
@@ -156,49 +171,104 @@ def parse(text: str) -> ParsedDocument:
         index = close + 1
 
     title, title_heading_line = front_matter.title, None
-    if heading is not None and title in (None, heading[1]):
-        title_heading_line, title = heading
+    if headings and title in (None, headings[0].text):
+        title_heading_line, title = headings[0].line, headings[0].text
+    sections = [
+        _section(block, blocks, headings, title_heading_line, len(lines))
+        for block in blocks
+    ]
     return ParsedDocument(
         front_matter=front_matter,
         title=title,
         title_heading_line=title_heading_line,
-        blocks=tuple(blocks),
+        blocks=tuple(
+            replace(block, section=section)
+            for block, section in zip(blocks, sections, strict=True)
+        ),
         faults=tuple(sorted(faults, key=_by_line)),
     )
 
 
-def body(text: str) -> tuple[str | Block, ...]:
+def _section(
+    block: Block,
+    blocks: list[Block],
+    headings: list[_Heading],
+    title_line: int | None,
+    end: int,
+) -> Section | None:
+    """The block's own section (F30.9): from the nearest heading before it,
+    the title's counting as none, to the line before the next heading of the
+    same or a higher level, or the text's last line, where that span holds no
+    other block. No heading further out is tried."""
+    heading = next((h for h in reversed(headings) if h.line < block.fence.first), None)
+    if heading is None or heading.line == title_line:
+        return None
+    last = next(
+        (
+            h.line - 1
+            for h in headings
+            if h.line > heading.line and h.level <= heading.level
+        ),
+        end,
+    )
+    held = [other for other in blocks if heading.line < other.fence.first <= last]
+    return Section(heading.text, Span(heading.line, last)) if len(held) == 1 else None
+
+
+def body(text: str) -> tuple[Prose | Block, ...]:
     """A text without a fault as a display draws it (decision 32): its prose
     parts and its blocks in order, the front matter and the heading that is
-    the title left out. A prose part is the Markdown between two blocks,
-    without blank lines at its ends; one with nothing in it is left out."""
+    the title left out. A prose part is the Markdown between two blocks or
+    a block's own section's edges, without blank lines at its ends, marked
+    with the block whose section holds it; one with nothing in it is left
+    out. A section's parts and its block stand together, its heading the
+    first line of its first part."""
     document = parse(text)
     lines = [line.removesuffix("\r") for line in text.split("\n")]
+    if lines[-1] == "":
+        lines.pop()
     left_out: set[int] = set()
     if document.front_matter.span is not None:
         span = document.front_matter.span
         left_out.update(range(span.first, span.last + 1))
     if document.title_heading_line is not None:
         left_out.add(document.title_heading_line)
-    parts: list[str | Block] = []
+    owners: dict[int, str] = {}
+    for block in document.blocks:
+        if block.section is not None:
+            span = block.section.span
+            owners.update(
+                dict.fromkeys(range(span.first, span.last + 1), block.local_id)
+            )
+    fences = {block.fence.first: block for block in document.blocks}
+    parts: list[Prose | Block] = []
+    prose: list[str] = []
+    section: str | None = None
     number = 1
-    for block in (*document.blocks, None):
-        end = len(lines) if block is None else block.fence.first - 1
-        prose = [
-            lines[index - 1]
-            for index in range(number, end + 1)
-            if index not in left_out
-        ]
-        while prose and not prose[0].strip():
-            prose.pop(0)
-        while prose and not prose[-1].strip():
-            prose.pop()
-        if prose:
-            parts.append("\n".join(prose))
-        if block is not None:
-            parts.append(block)
-            number = block.fence.last + 1
+    while number <= len(lines):
+        fenced = fences.get(number)
+        if fenced is not None or owners.get(number) != section:
+            parts.extend(_prose(prose, section))
+            prose, section = [], owners.get(number)
+        if fenced is not None:
+            parts.append(fenced)
+            number = fenced.fence.last + 1
+            continue
+        if number not in left_out:
+            prose.append(lines[number - 1])
+        number += 1
+    parts.extend(_prose(prose, section))
     return tuple(parts)
+
+
+def _prose(lines: list[str], section: str | None) -> tuple[Prose, ...]:
+    """The lines as one prose part without blank lines at its ends; none
+    when nothing is left."""
+    first = next((i for i, line in enumerate(lines) if line.strip()), None)
+    if first is None:
+        return ()
+    last = max(i for i, line in enumerate(lines) if line.strip())
+    return (Prose("\n".join(lines[first : last + 1]), section),)
 
 
 def validate(document: ParsedDocument, facts: Facts) -> list[Fault]:
@@ -297,11 +367,12 @@ def _slug_problem(slug: str, taken: AbstractSet[str]) -> str | None:
     return None
 
 
-def _heading(line: str, number: int) -> tuple[int, str] | None:
+def _heading(line: str, number: int) -> _Heading | None:
+    """An ATX heading with text; an empty one is no heading."""
     match = _HEADING.fullmatch(line)
     if match is None or not match["text"] or not match["text"].strip():
         return None
-    return number, match["text"].strip()
+    return _Heading(number, len(match["marks"]), match["text"].strip())
 
 
 def _closing_fence(lines: list[str], opening: int, marker: str) -> int | None:

@@ -10,6 +10,8 @@ from app.engine.dsl.document import (
     FrontMatter,
     Option,
     ParsedDocument,
+    Prose,
+    Section,
     Span,
 )
 from app.engine.dsl.reader import (
@@ -49,6 +51,8 @@ __all__ = [
     "Merge",
     "Option",
     "ParsedDocument",
+    "Prose",
+    "Section",
     "Span",
     "body",
     "clear_answer",

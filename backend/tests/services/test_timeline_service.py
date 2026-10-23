@@ -427,7 +427,11 @@ class TestTimeline:
         assert item["author"] is None
         assert item["words"] is None
         assert item["body"] == [
-            {"type": "prose", "markdown": "The dome stands up in five minutes."},
+            {
+                "type": "prose",
+                "markdown": "The dome stands up in five minutes.",
+                "section": None,
+            },
             {
                 "type": "block",
                 "block": {
@@ -453,10 +457,57 @@ class TestTimeline:
                     "via": None,
                     "done": None,
                     "deferral": None,
+                    "section": None,
                 },
             },
-            {"type": "prose", "markdown": "Pick before the weekend."},
+            {"type": "prose", "markdown": "Pick before the weekend.", "section": None},
         ]
+
+    def test_a_block_s_own_section_is_carried_with_the_text(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        _bear(
+            container,
+            project,
+            _run(session, project, environment),
+            "document",
+            "Camp kit",
+            "# Camp kit\n\nWhat we bring.\n\n"
+            "## Which tent?\n\nThe dome is quick.\n\n"
+            "```decision id=D1\noptions:\n  - Dome\n  - Tunnel\n"
+            "answer: Dome\nby: agent\nat: 2026-10-12T09:30:00Z\nnote: It is quick.\n"
+            "```\n\n"
+            "Pitched by noon.\n\n"
+            "## Food\n\n```question id=Q1\n```\n\n```question id=Q2\n```\n",
+        )
+
+        _opening, item = _items(container, project)
+
+        assert [
+            {key: part[key] for key in ("type", "markdown", "section") if key in part}
+            for part in item["body"]
+        ] == [
+            {"type": "prose", "markdown": "What we bring.", "section": None},
+            {
+                "type": "prose",
+                "markdown": "## Which tent?\n\nThe dome is quick.",
+                "section": "D1",
+            },
+            {"type": "block"},
+            {"type": "prose", "markdown": "Pitched by noon.", "section": "D1"},
+            {"type": "prose", "markdown": "## Food", "section": None},
+            {"type": "block"},
+            {"type": "block"},
+        ]
+        assert [
+            (part["block"]["id"], part["block"]["section"])
+            for part in item["body"]
+            if part["type"] == "block"
+        ] == [("D1", {"heading": "Which tent?"}), ("Q1", None), ("Q2", None)]
 
     def test_a_confirmation_names_its_reason_and_a_question_its_default(
         self,
@@ -800,7 +851,9 @@ class TestTimeline:
         _opening, line = _items(container, project)
 
         assert (line["title"], line["file_name"]) == (None, "refinement.md")
-        assert line["body"] == [{"type": "prose", "markdown": "The camp's refinement."}]
+        assert line["body"] == [
+            {"type": "prose", "markdown": "The camp's refinement.", "section": None}
+        ]
 
     def test_a_finished_project_has_the_time_of_its_latest_finish(
         self, container: ServiceContainer

@@ -603,7 +603,7 @@ class TestCreateSave:
         item = _timeline_item(client, project_id, item_id)
         assert (item["concept"], item["body"]) == (
             True,
-            [{"type": "prose", "markdown": "Blue and green."}],
+            [{"type": "prose", "markdown": "Blue and green.", "section": None}],
         )
 
     def test_a_clean_save_is_published(
@@ -622,7 +622,7 @@ class TestCreateSave:
         assert (item["concept"], item["title"], item["body"]) == (
             False,
             "Palette",
-            [{"type": "prose", "markdown": "Red."}],
+            [{"type": "prose", "markdown": "Red.", "section": None}],
         )
 
     def test_a_save_of_the_opening_is_reverted(

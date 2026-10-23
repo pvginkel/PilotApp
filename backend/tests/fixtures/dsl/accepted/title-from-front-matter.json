@@ -29,7 +29,11 @@
             "label": "Mill South",
             "line": 10
           }
-        ]
+        ],
+        "section": {
+          "heading": "The heading is not the title when `title` is there",
+          "span": [5, 11]
+        }
       }
     ]
   },

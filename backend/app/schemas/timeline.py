@@ -110,6 +110,16 @@ class DeferralSchema(BaseModel):
     )
 
 
+class SectionSchema(BaseModel):
+    """A block's own section (F30.9), which a display may draw as one line
+    (F31.5)."""
+
+    heading: str = Field(
+        description="The heading's text, without its `#` marks",
+        examples=["Which tent?"],
+    )
+
+
 class BlockSchema(BaseModel):
     """An ask in its item's text, with its definition and its answer (F30, F31)."""
 
@@ -150,6 +160,15 @@ class BlockSchema(BaseModel):
     deferral: DeferralSchema | None = Field(
         description="Where a deferred block went; null unless `answer` is `deferred`"
     )
+    section: SectionSchema | None = Field(
+        description=(
+            "The block's own section: from the nearest heading before it, the "
+            "title's counting as none, to the next heading of the same or a higher "
+            "level, or the text's end, where that holds no other block; null where "
+            "it has none. The prose parts in it carry the block's id as their "
+            "`section`"
+        )
+    )
 
 
 class ProsePartSchema(BaseModel):
@@ -157,6 +176,14 @@ class ProsePartSchema(BaseModel):
 
     type: Literal["prose"]
     markdown: str = Field(examples=["The dome stands up in five minutes."])
+    section: str | None = Field(
+        description=(
+            "The local id of the block whose own section (F30.9) holds this "
+            "Markdown; null outside every section. A section's parts and its block "
+            "stand together in the body, its heading the first line of its first part"
+        ),
+        examples=["D1"],
+    )
 
 
 class BlockPartSchema(BaseModel):
@@ -213,8 +240,9 @@ class TimelineItemSchema(BaseModel):
     body: list[BodyPartSchema] | None = Field(
         description=(
             "A prose item's text but the opening's, as drawn: its prose parts and "
-            "blocks in order, without the front matter and a first heading that is "
-            "its title; null for the opening, work and waits"
+            "blocks in order, split at each block's own section's edges, without "
+            "the front matter and a first heading that is its title; null for the "
+            "opening, work and waits"
         )
     )
 

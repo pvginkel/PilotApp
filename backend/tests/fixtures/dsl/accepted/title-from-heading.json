@@ -30,7 +30,11 @@
             "label": "Mill South",
             "line": 18
           }
-        ]
+        ],
+        "section": {
+          "heading": "A later heading is no title",
+          "span": [13, 19]
+        }
       }
     ]
   },
