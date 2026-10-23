@@ -12,4 +12,4 @@ Mesh edits update both variants. Adding/removing objects or changing modifiers r
 
 Backgrounds are exact solid sRGB #568ed2 and #ffffff, independent of lighting and camera orientation. Standard color management and disabled dithering preserve these colors.
 
-Rounded corners: both outputs use transparent PNG corners matching SVG radius 274/1254 of the shorter side (111.87 pixels at 512 square). The script refreshes the mask for each scene's output dimensions. Saved masks also work with F12 at the current size; rerun the script after changing resolution.
+Rounded corners: both outputs use transparent PNG corners with a radius of 0.15 of the shorter side (76.8 pixels at 512 square). The script refreshes the mask for each scene's output dimensions. Saved masks also work with F12 at the current size; rerun the script after changing resolution.
