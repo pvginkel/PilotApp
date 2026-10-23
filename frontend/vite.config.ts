@@ -5,6 +5,7 @@ import path from 'path'
 import { execSync } from 'child_process'
 import fs from 'fs'
 import { loadAppProxies } from './vite-proxy-extensions'
+import { loadAppPlugins } from './vite-plugin-extensions'
 
 function versionPlugin(): Plugin {
   const getGitCommitId = () => {
@@ -115,7 +116,7 @@ const configureSseProxy: ProxyOptions['configure'] = (proxy) => {
 const backendProxyTarget = process.env.BACKEND_URL || 'http://localhost:3501'
 
 export default defineConfig({
-  plugins: [tailwindcss(), react(), versionPlugin(), backendProxyStatusPlugin(backendProxyTarget)],
+  plugins: [tailwindcss(), react(), versionPlugin(), backendProxyStatusPlugin(backendProxyTarget), ...loadAppPlugins()],
   // A Playwright dev server's own (tests/support/process/servers.ts):
   // node_modules/.vite when unset.
   cacheDir: process.env.VITE_CACHE_DIR,

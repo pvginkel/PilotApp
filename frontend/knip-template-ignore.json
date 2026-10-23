@@ -52,6 +52,7 @@
   "scripts/eslint-rules/**",
   "vite.config.ts",
   "vite-proxy-extensions.ts",
+  "vite-plugin-extensions.ts",
   "playwright.config.ts",
 
   "tests/infrastructure/**",

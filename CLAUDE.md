@@ -64,11 +64,12 @@ template-owned file to add app behaviour; use the extension points instead:
 | CLI commands, post-migration logic | `backend/app/startup.py` |
 | Test fixtures | `backend/tests/conftest.py`, `frontend/tests/support/fixtures.ts` |
 | Sidecars CI must wait for | `backend/scripts/wait-for-services.py` (the suite runner calls it) |
+| Vite plugins | `loadAppPlugins()` in `frontend/vite-plugin-extensions.ts` |
 
 Template-owned code is improved in this repo, not in the template repos (D018): what the template
 gets wrong, or does less well than the work needs, is changed here, with no need to stay backwards
 compatible, in a commit of its own, and listed here as a standing edit, so that a `copier update`
-that conflicts on it resolves to this repo's side; an agent merges it into ModernAppTemplate. Five
+that conflicts on it resolves to this repo's side; an agent merges it into ModernAppTemplate. Six
 stand today: the `Jenkinsfile`, the app's own as a whole, which tags its images `dev-<n>` and
 `dev-latest` and pins `dev-<n>` into PilotDeploy's `config/dev` and `prd-<n>` into its `config/prd`
 in one commit, where the template's tags `<n>` and `latest` and pins production alone, and which
@@ -81,16 +82,18 @@ the worker — revalidated on every load, so that a changed icon shows under its
 location of `frontend/nginx.conf`, a `^~` prefix, so that nginx tries no regex location on an
 `/api/` path, where the template's plain prefix let the cache rule's regex answer an `/api/` path
 ending in `.js` or `.png`, and this repo's `.json`, from the static root
-(`tests/infrastructure/nginx.spec.ts` pins it); and the Playwright dev servers' dependency caches,
+(`tests/infrastructure/nginx.spec.ts` pins it); the Playwright dev servers' dependency caches,
 one per server: `frontend/tests/support/process/servers.ts` gives each its own `VITE_CACHE_DIR`,
 `node_modules/.tmp/vite-playwright/<port>`, removed when it stops, and `frontend/vite.config.ts`
 reads it as `cacheDir`, where the template's `scripts/testing-server.sh` set a variable nothing
 read, so that its servers shared `node_modules/.vite` and swapped its `deps/` under each other's
-first pages on a cold start (`tests/infrastructure/dev-server.spec.ts` pins it). uv, the migration
-that keeps the app's loggers, the masked database URL in `backend/app/cli.py` and the
-declarative `Jenkinsfile` on the library's `modernApp.test` are the template's own since root v0.2.0
-and backend v0.14.0, and `backend/scripts/init-dev-database.py` (production's locale) since backend
-v0.15.0.
+first pages on a cold start (`tests/infrastructure/dev-server.spec.ts` pins it); and the app's Vite
+plugins, which `frontend/vite.config.ts` appends from `loadAppPlugins()` in the app-owned
+`frontend/vite-plugin-extensions.ts`, as it merges the proxies of `vite-proxy-extensions.ts`, where
+the template gives an app no place for a plugin. uv, the migration that keeps the app's loggers, the
+masked database URL in `backend/app/cli.py` and the declarative `Jenkinsfile` on the library's
+`modernApp.test` are the template's own since root v0.2.0 and backend v0.14.0, and
+`backend/scripts/init-dev-database.py` (production's locale) since backend v0.15.0.
 
 ## Architecture model
 
