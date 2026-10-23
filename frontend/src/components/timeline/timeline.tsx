@@ -11,11 +11,13 @@
  * "Finished · <stamp>", every item but the opening done by Finish (F5.3).
  *
  * Opened at an item's address, the timeline goes to the item and flashes it; at a block's, to the
- * block, or to its item where its line stands for it; an address it draws nothing for leaves it at
- * its end (F97).
+ * block, its collapsed section opened (F31.5), or to its item where its line or its card stands for
+ * it; an address it draws nothing for leaves it at its end (F97). A segment opens its block's
+ * collapsed section too (F33).
  */
 
 import { useLayoutEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { ArrowDown, ArrowUp, Flag, TriangleAlert } from 'lucide-react';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Time } from '@/components/shared/time';
@@ -23,6 +25,7 @@ import { blockKey, FlashContext, GoToContext } from '@/components/timeline/flash
 import { Item } from '@/components/timeline/item';
 import { Opening } from '@/components/timeline/opening';
 import { rowsOf, type Row } from '@/components/timeline/rows';
+import { SectionsContext, useSections } from '@/components/timeline/sections';
 import { titleOf, useTimeline, type TimelineItem } from '@/hooks/use-timeline';
 
 /** How far from the end, in pixels, still reads as at the end. */
@@ -42,6 +45,7 @@ export function Timeline({ projectId, address }: { projectId: string; address: A
   const finishedAt = data?.finished_at ?? null;
   const urgent = finishedAt === null ? (items ?? []).filter((item) => item.urgent && item.done === null) : [];
   const { fresh, flashed, flash } = useFresh(items);
+  const sections = useSections(address === null || address.block === null ? null : blockKey(address.item, address.block));
   const feed = useRef<HTMLDivElement>(null);
   const pins = useRef<HTMLDivElement>(null);
   // The open items scrolled out above the banners, by id, in their order.
@@ -103,7 +107,11 @@ export function Timeline({ projectId, address }: { projectId: string; address: A
     scrollTo(found ?? article, 'center', behavior);
     flash(found === null ? item : blockKey(item, block!));
   };
-  const goToBlock = (item: string, block: string) => goTo({ item, block }, 'smooth');
+  const goToBlock = (item: string, block: string) => {
+    // Its collapsed section opens first, so that the block is drawn to go to.
+    flushSync(() => sections.open(blockKey(item, block)));
+    goTo({ item, block }, 'smooth');
+  };
   // The address last gone to: each is gone to once, when the timeline is read, or when it is opened
   // with the timeline on screen.
   const reached = useRef<string | null>(null);
@@ -166,7 +174,9 @@ export function Timeline({ projectId, address }: { projectId: string; address: A
         )}
         <FlashContext.Provider value={{ fresh, flashed }}>
           <GoToContext.Provider value={goToBlock}>
-            {items && rowsOf(items).map((row) => <TimelineRow key={row.key} row={row} fresh={fresh} flashed={flashed} />)}
+            <SectionsContext.Provider value={sections}>
+              {items && rowsOf(items).map((row) => <TimelineRow key={row.key} row={row} fresh={fresh} flashed={flashed} />)}
+            </SectionsContext.Provider>
           </GoToContext.Provider>
         </FlashContext.Provider>
         {finishedAt !== null && (

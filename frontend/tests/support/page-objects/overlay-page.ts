@@ -1,13 +1,14 @@
 import type { Locator, Page } from '@playwright/test';
 import type { UiStateTestEvent } from '@/lib/test/test-events';
 import { waitTestEvent } from '../helpers';
-import { blockParts } from './timeline-page';
+import { blockParts, settledParts } from './timeline-page';
 
 /**
  * The overlay (F28): an item's document over its project's timeline, opened at the document's own
  * address (F97); its head with the title, the project, the step, the segment bar, *Unsent* or
- * *Done* and *Edited <time>*; its body with the summary, the prose and the blocks, Pilot's dots,
- * or "The document did not load"; its foot; maximize, the cross and the backdrop.
+ * *Done* and *Edited <time>*; its body with the summary, the prose and the blocks, the sections
+ * Pilot settled as their lines, Pilot's dots, or "The document did not load"; its foot; maximize,
+ * the cross and the backdrop.
  */
 export class OverlayPage {
   readonly root: Locator;
@@ -27,6 +28,8 @@ export class OverlayPage {
   readonly summary: Locator;
   readonly document: Locator;
   readonly blocks: Locator;
+  readonly settled: Locator;
+  readonly settledLines: Locator;
   readonly writing: Locator;
   readonly failed: Locator;
   readonly foot: Locator;
@@ -53,6 +56,8 @@ export class OverlayPage {
     this.summary = this.root.getByTestId('overlay.summary');
     this.document = this.root.getByTestId('overlay.document');
     this.blocks = this.root.getByTestId('timeline.block');
+    this.settled = this.root.getByTestId('timeline.settled');
+    this.settledLines = this.root.getByTestId('timeline.settled.line');
     this.writing = this.root.getByTestId('timeline.writing');
     this.failed = this.root.getByTestId('overlay.failed');
     this.foot = this.root.getByTestId('overlay.foot');
@@ -78,6 +83,11 @@ export class OverlayPage {
   /** A block in the body, by its id. */
   blockAt(blockId: string) {
     return blockParts(this.page, this.root.locator(`[data-testid="timeline.block"][data-block-id="${blockId}"]`));
+  }
+
+  /** A settled section's line in the body, by its block's id. */
+  settledLine(blockId: string) {
+    return settledParts(this.root, blockId);
   }
 
   /** The head's segment for a block. */

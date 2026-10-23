@@ -6,7 +6,8 @@ import { waitTestEvent } from '../helpers';
  * A project's timeline (F8): its rows, the opening, its items open and as done lines with Open and
  * Undo, an open item's block (F31) or a confirmation's card (F22), an inline document's blocks,
  * segments and *Send answers* with its dialog (F24.1, F33, F32.5), a larger document's or a
- * review's card (F24.2, F25), Pilot's dots (F35), the urgent banners and the "N open above" chip
+ * review's card (F24.2, F25), a section Pilot settled as its line (F31.5), Pilot's dots (F35), the
+ * urgent banners and the "N open above" chip
  * (F10.2, F11), a finished timeline's end (F5.3), and where it stands scrolled; opened at its
  * project's address or at an item's or a block's under it (F97).
  */
@@ -108,6 +109,10 @@ export class TimelinePage {
       blockAt: (blockId: string) => blockParts(this.page, root.locator(`[data-testid="timeline.block"][data-block-id="${blockId}"]`)),
       segments: root.getByTestId('timeline.segment'),
       segment: (blockId: string) => root.locator(`[data-testid="timeline.segment"][data-segment="${blockId}"]`),
+      /** The lists of settled sections' lines, and each line by its block's id. */
+      settled: root.getByTestId('timeline.settled'),
+      settledLines: root.getByTestId('timeline.settled.line'),
+      settledLine: (blockId: string) => settledParts(root, blockId),
       send: root.getByTestId('timeline.item.send'),
       card: {
         root: root.getByTestId('timeline.item.card'),
@@ -176,6 +181,18 @@ export class TimelinePage {
 /** An item's address under its project's, or a block's under the item's (F97). */
 export function addressOf(projectId: string, itemId: string, blockId?: string): string {
   return `/projects/${projectId}/items/${itemId}${blockId === undefined ? '' : `/blocks/${blockId}`}`;
+}
+
+/** A settled section's line (F31.5), by its block's id: Pilot's mark, the heading's words, the answer, the note. */
+export function settledParts(within: Locator, blockId: string) {
+  const root = within.locator(`[data-testid="timeline.settled.line"][data-section="${blockId}"]`);
+  return {
+    root,
+    avatar: root.locator('.avatar'),
+    heading: root.getByTestId('timeline.settled.heading'),
+    answer: root.getByTestId('timeline.settled.answer'),
+    note: root.getByTestId('timeline.settled.note'),
+  };
 }
 
 /**

@@ -2,17 +2,17 @@
  * A document item (F24): many blocks under one title, its head carrying *Edited <time>* (F28.7) and
  * *Unsent* while it has an answer and no Done (D026). One under about 150 words of its own (F24.1)
  * stands inline: its head; its title; its prose with every block answered in place, each in a panel
- * of its own; Pilot's dots while it writes (F35); then its segment bar beside *Send answers* (F33).
- * A segment goes to its block. *Send answers* is the document's Done (F24.3): it enables once every
- * block is answered or has a recommendation, and clicked with unanswered recommended blocks it
- * lists them in a dialog whose Confirm sends, the record answering them with their recommendation
- * (F32.5).
+ * of its own, and each section Pilot settled collapsed to its line (F31.5); Pilot's dots while it
+ * writes (F35); then its segment bar beside *Send answers* (F33). A segment goes to its block.
+ * *Send answers* is the document's Done (F24.3): it enables once every block is answered or has a
+ * recommendation, and clicked with unanswered recommended blocks it lists them in a dialog whose
+ * Confirm sends, the record answering them with their recommendation (F32.5).
  *
  * A larger one, and every review (F25.1), leaves a card: its head, its title, its summary (F34),
  * its count chips (F24.2), its segment bar, or for a text with no block "N min read", Open, which
  * reads Continue while the document reads *Unsent*, and on a review Reviewed (F25.2); Pilot's dots
  * end it while Pilot writes. Open opens the overlay at the document's address, and a segment opens
- * it at its block (F33).
+ * it at its block's (F33, F97).
  */
 
 import { useContext, useState } from 'react';
@@ -23,8 +23,10 @@ import { LinkedText } from '@/components/shared/linked-text';
 import { Markdown } from '@/components/shared/markdown';
 import { Block } from '@/components/timeline/block';
 import { askOf, countsOf, isUnsent, recommendationOf, type Counts } from '@/components/timeline/document-state';
-import { GoToContext } from '@/components/timeline/flash';
+import { blockKey, GoToContext } from '@/components/timeline/flash';
 import { Edited, ItemHead } from '@/components/timeline/item-head';
+import { isSettled, piecesOf, SectionsContext } from '@/components/timeline/sections';
+import { SettledLines } from '@/components/timeline/settled';
 import { PilotWriting } from '@/components/timeline/writing';
 import { useReviewed, useSend } from '@/hooks/use-marks';
 import { blocksOf, isAnswered, titleOf, type Block as BlockData, type TimelineItem } from '@/hooks/use-timeline';
@@ -66,8 +68,8 @@ export function DocumentCard({ item }: { item: TimelineItem }) {
   const navigate = useNavigate();
   const blocks = blocksOf(item);
   const params = { projectId, documentId: item.id };
-  const openAt = (_itemId: string, blockId: string) =>
-    void navigate({ to: '/projects/$projectId/documents/$documentId', params, search: { block: blockId } });
+  const openAt = (itemId: string, blockId: string) =>
+    void navigate({ to: '/projects/$projectId/items/$itemId/blocks/$blockId', params: { projectId, itemId, blockId } });
   return (
     <div className="item-body">
       <DocumentHead item={item} />
@@ -151,16 +153,32 @@ export function UnsentChip() {
   );
 }
 
-/** A document's prose and its blocks in their order, every block answered in place. */
+/**
+ * A document's prose and its blocks in their order, every block answered in place, and each
+ * section Pilot settled, while not opened, its line in its block's place, consecutive lines one
+ * list.
+ */
 export function DocumentParts({ item }: { item: TimelineItem }) {
+  const { opened, open } = useContext(SectionsContext);
+  const collapsed = (block: BlockData) => isSettled(block) && !opened.has(blockKey(item.id, block.id));
   // The API gives every prose item but the opening its text.
-  return item.body!.map((part, index) =>
-    part.type === 'block' ? (
+  return piecesOf(item.body!, collapsed).map((piece) => {
+    if (piece.type === 'settled') {
+      return (
+        <SettledLines
+          key={`settled ${piece.blocks[0].id}`}
+          blocks={piece.blocks}
+          onOpen={(block) => open(blockKey(item.id, block.id))}
+        />
+      );
+    }
+    const { part, index } = piece;
+    return part.type === 'block' ? (
       <Block key={`block ${part.block.id}`} item={item} block={part.block} />
     ) : (
       <Markdown key={`prose ${index}`} text={part.markdown} />
-    ),
-  );
+    );
+  });
 }
 
 /** A segment per block, filled once the block is answered; each goes to its block. */

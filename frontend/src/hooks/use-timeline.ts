@@ -21,6 +21,12 @@ export function useTimeline(id: string) {
   return query;
 }
 
+/** An item of a project's timeline, from the timeline's read, once read; none for no id. */
+export function useTimelineItem(projectId: string, itemId: string | undefined): TimelineItem | undefined {
+  const { data } = useGetProjectsTimelineByProjectId({ path: { project_id: projectId } });
+  return itemId === undefined ? undefined : data?.items.find((item) => item.id === itemId);
+}
+
 export const isProse = (part: BodyPart): part is ProsePart => part.type === 'prose';
 
 /** A prose item's blocks, in their order. */

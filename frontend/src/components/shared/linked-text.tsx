@@ -30,7 +30,9 @@ export function LinkedText({ text, nested = false }: LinkedTextProps) {
     if (piece.link === undefined) return piece.text;
     const { href, title } = piece.link;
     return nested ? (
-      <NestedLink key={index} href={href} title={title} text={piece.text} />
+      <NestedLink key={index} href={href} title={title}>
+        {piece.text}
+      </NestedLink>
     ) : (
       <a key={index} className="mention" href={href} title={title} target="_blank" rel="noreferrer">
         {piece.text}
@@ -39,7 +41,8 @@ export function LinkedText({ text, nested = false }: LinkedTextProps) {
   });
 }
 
-function NestedLink({ href, title, text }: { href: string; title: string; text: string }) {
+/** A link inside a link or a button, where an `<a>` cannot nest: a span that opens it. */
+export function NestedLink({ href, title, children }: { href: string; title?: string; children: ReactNode }) {
   const open = (event: SyntheticEvent) => {
     // The link or the button around it must not act too: the click bubbles to it, and so does
     // Enter, which a link turns into a click of its own.
@@ -57,7 +60,7 @@ function NestedLink({ href, title, text }: { href: string; title: string; text: 
       onClick={open}
       onKeyDown={(event) => event.key === 'Enter' && open(event)}
     >
-      {text}
+      {children}
     </span>
   );
 }

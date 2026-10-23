@@ -293,6 +293,42 @@
   .item-head .edited { display: inline-flex; align-items: baseline; gap: 6px; }
   .item-head .edited .avatar { align-self: center; }
 
+  /* A section Pilot settled, one line until opened (F31.5): its mark, its heading, the answer, the
+     note a muted line under them; each clipped to its line, consecutive ones one tight list. */
+  .settled-lines { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
+  /* Its mark stands at the prose's edge, the padding its hover fills outside it. */
+  .inline-doc > .settled-lines { margin: 10px -8px; }
+  .settled {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 14px;
+    line-height: 22px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .settled:hover { background: hsl(var(--muted) / 0.6); }
+  .settled-main { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .settled-main .avatar { flex: none; }
+  .settled-main .heading { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+  .settled-main .sep { flex: none; opacity: 0.5; }
+  .settled-main .answer { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .settled-main .chevron { flex: none; color: hsl(var(--muted-foreground)); }
+  .settled-note {
+    display: block;
+    min-width: 0;
+    padding-left: 24px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    line-height: 18px;
+    color: hsl(var(--muted-foreground));
+  }
+  .settled-note .icon { margin-right: 6px; }
+
   /* The card a larger document or a review leaves: what is in it, how far the answers are. */
   .doc-card .counts { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
   .progress { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 13px; color: hsl(var(--muted-foreground)); }

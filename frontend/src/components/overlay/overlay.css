@@ -67,6 +67,7 @@
   /* A document's prose and its blocks in the body. */
   .sheet-doc > .prose + .prose { margin-top: 0.7em; }
   .sheet-doc > .block { margin: 14px 0 26px; }
+  .sheet-doc > .settled-lines { margin: 12px -8px 20px; }
 
   /* A phone: the whole screen, with no maximize (F98.3). */
   @media (max-width: 900px) {

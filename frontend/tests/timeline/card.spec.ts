@@ -5,13 +5,15 @@
  * is still the person's by kind, what Pilot settled and what it deferred; its segment bar (F33), or
  * "N min read" for a text with no block; Open, which reads Continue while it reads *Unsent*; and on
  * a review Reviewed (F25.2). Open opens it in the overlay at its address, and a segment opens the
- * overlay at its block, which flashes. Pilot's dots end it while Pilot writes it (F35), and
- * *Edited <time>* stands in its head once a later turn changed it (F28.7).
+ * overlay at its block's address, at the block, which flashes; a section Pilot settled is its line
+ * there (F31.5). Pilot's dots end it while Pilot writes it (F35), and *Edited <time>* stands in its
+ * head once a later turn changed it (F28.7).
  */
 
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import { documentAddress } from '../support/page-objects/overlay-page';
+import { addressOf } from '../support/page-objects/timeline-page';
 import type { Projects } from '../support/projects';
 import type { components } from '@/lib/api/generated/types';
 
@@ -138,7 +140,9 @@ test.describe('A larger document', () => {
     await expect(page).toHaveURL(documentAddress(id, trip));
     await expect(overlay.title).toHaveText('The long trip');
     await expect(overlay.summary).toHaveText(SUMMARY);
-    await expect(overlay.blocks).toHaveCount(5);
+    // Pilot's deferral is its section's line (F31.5).
+    await expect(overlay.blocks).toHaveCount(4);
+    await expect(overlay.settledLine('D3').answer).toHaveText("Deferred to the project's end");
 
     await overlay.close.click();
     await expect(overlay.root).toHaveCount(0);
@@ -146,7 +150,7 @@ test.describe('A larger document', () => {
     await expect(timeline.item(trip).card.root).toBeVisible();
   });
 
-  test('a segment opens the overlay at its block, which flashes in view', async ({ page, people, projects, timeline, overlay }) => {
+  test('a segment opens the overlay at its block’s address, the block flashing in view', async ({ page, people, projects, timeline, overlay }) => {
     await page.setViewportSize({ width: 1280, height: 520 });
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Segment'), members: [me.handle!] });
@@ -155,7 +159,7 @@ test.describe('A larger document', () => {
     await timeline.open(id);
 
     await timeline.item(trip).segment('A1').click();
-    await expect(page).toHaveURL(`${documentAddress(id, trip)}?block=A1`);
+    await expect(page).toHaveURL(addressOf(id, trip, 'A1'));
     const van = overlay.blockAt('A1').root;
     await expect(van).toHaveClass(/\bflash\b/);
     await expect(van).toBeInViewport();
