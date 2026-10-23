@@ -13,7 +13,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/pilot-s
 
 FROM scratch
 
-# The sidecar speaks TLS to Pilot, whose certificate a public CA signs.
+# The sidecar speaks TLS to its stage's Pilot: pilot.ginbov.nl's certificate a public CA signs,
+# pilot-dev.home's the homelab step-ca. The builder's bundle carries both roots: its base,
+# kube-coder-dev-base, merges the homelab root into the system bundle copied here.
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /out/pilot-sync /pilot-sync
 
