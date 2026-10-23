@@ -2024,6 +2024,38 @@ class TestRecordServiceRowLock:
             assert session.get_one(Item, item_id).done_at is None
             assert session.get_one(Document, decision_id).published_text == DECISION
 
+    def test_undo_waits_for_the_projects_row(self, committed_app: Flask) -> None:
+        person_id, decision_id, _ = _committed_items(committed_app)
+        container = committed_app.container
+        with scoped_session(container) as session:
+            container.record_service().answer(
+                session.get_one(Document, decision_id),
+                "D1",
+                session.get_one(User, person_id),
+                "Tunnel",
+            )
+            project_id = session.get_one(Item, decision_id).project_id
+        with committed_app.app_context():
+            engine = db.engine
+
+        # What Finish and Reopen hold while they change the project's state.
+        with engine.connect() as holder:
+            holder.execute(
+                sql("SELECT id FROM projects WHERE id = :id FOR NO KEY UPDATE"),
+                {"id": project_id},
+            )
+            with (
+                pytest.raises(OperationalError) as raised,
+                scoped_session(container) as session,
+            ):
+                session.execute(sql("SET LOCAL lock_timeout = '200ms'"))
+                container.record_service().undo(session.get_one(Item, decision_id))
+            holder.rollback()
+
+        assert isinstance(raised.value.orig, LockNotAvailable)
+        with scoped_session(container) as session:
+            assert session.get_one(Item, decision_id).done_cause_code == "answered"
+
     def test_the_close_waits_for_an_open_items_document_row(
         self, committed_app: Flask
     ) -> None:

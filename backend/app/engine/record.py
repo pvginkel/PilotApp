@@ -20,7 +20,7 @@ from app.engine.paths import tree_path
 from app.engine.views import ViewService
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import Document, DoneCause, Item, ItemKind, PlanTask, Project, User
-from app.models.reference import AnswerChannel, UserKind, VersionCause
+from app.models.reference import AnswerChannel, ProjectState, UserKind, VersionCause
 
 NOTICE = "notice"
 REVIEW = "review"
@@ -139,15 +139,25 @@ class RecordService:
         self._done_by_its_answer(project, item, blocks, user, at)
 
     def undo(self, item: Item) -> None:
-        """Undo of a done prose item while no session has consumed it and its
-        Done Cause offers it (DB 164, F14.1): its done cleared, and on a
-        one-ask item its block's answer with it, an answer of Pilot's it
-        replaced not restored (decision 6)."""
+        """Undo of a done prose item while no session has consumed it, its
+        Done Cause offers it (DB 164, F14.1) and its project is not finished
+        (D028): its done cleared, and on a one-ask item its block's answer
+        with it, an answer of Pilot's it replaced not restored (decision 6).
+
+        The project's row is held shared before the document's, so that
+        Finish and Reopen, which change the project's state under its row
+        lock, never interleave with an Undo.
+        """
         operation = f"undo item {item.id}"
         if self.db.get_one(ItemKind, item.kind_code).form != PROSE:
             raise InvalidOperationException(
                 operation, f"a {item.kind_code} item offers no undo"
             )
+        self.db.scalars(
+            select(Project.id)
+            .where(Project.id == item.project_id)
+            .with_for_update(read=True)
+        ).one()
         document = self.db.get_one(Document, item.id)
         project, _ = self._locked(document)
         refusal = self._undo_refusal(item)
@@ -284,6 +294,9 @@ class RecordService:
             return "a session has taken the item's answers"
         if not self.db.get_one(DoneCause, item.done_cause_code).undo_offered:
             return f"an item done as {item.done_cause_code} offers no undo"
+        project = self.db.get_one(Project, item.project_id)
+        if project.state_code is ProjectState.FINISHED:
+            return "the project is finished"
         return None
 
     def _locked(self, document: Document) -> tuple[Project, Item | None]:

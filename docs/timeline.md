@@ -151,9 +151,9 @@ or No shows only its note, and nothing of Pilot's shows. Undo ("Undo, until a se
 it") opens the item again, and a one-ask item's block unanswered.
 
 **Finished.** Finish closes every open item but the opening, so a finished project's timeline is its
-opening and done lines, and ends in "Finished · <stamp>", "22 Oct 2026, 14:05". A line answered
-before Finish keeps its Undo, which opens its item there again, above the end divider and with no
-banner.
+opening and done lines, and ends in "Finished · <stamp>", "22 Oct 2026, 14:05". No line offers
+Undo while the project is finished, a line answered before Finish included (D028); Reopen brings it
+back.
 
 ## Addresses
 

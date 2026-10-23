@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.engine.paths import tree_path
-from app.exceptions import RecordNotFoundException
+from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import (
     Document,
     DoneCause,
@@ -646,6 +646,33 @@ class TestTimeline:
         _opening, line = _items(container, project)
 
         assert line["done"]["undo"] is False
+
+    def test_undo_is_refused_while_the_project_is_finished(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        project = _make(container)
+        run = _run(session, project, environment)
+        item = _bear(container, project, run, "question", "Where?", QUESTION)
+        container.record_service().answer(
+            _document(session, item), "Q1", person, "The hill"
+        )
+        transition = container.project_service().transition
+        transition(ADA, project.id, TransitionKind.FINISHED)
+
+        _opening, finished = _items(container, project)
+        with pytest.raises(InvalidOperationException) as refused:
+            container.record_service().undo(item)
+        transition(ADA, project.id, TransitionKind.REOPENED)
+        _opening, reopened = _items(container, project)
+
+        assert finished["done"]["undo"] is False
+        assert refused.value.cause == "the project is finished"
+        assert item.done_cause_code == "answered"
+        assert reopened["done"]["undo"] is True
 
     def test_finish_makes_a_done_line_of_every_item_but_the_opening(
         self,

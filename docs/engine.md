@@ -125,10 +125,12 @@ the next clean save's merge carries the write to the file.
   ([`block-dsl.md`](block-dsl.md)), and so does an action's Done.
 - `done_action(document, local_id, user, *, note=None)`: Done on an action without options; on a
   one-ask item it is the item's done as well.
-- `undo(item)`: clears a done prose item's mark while no session has taken its answers and its done
-  cause offers undo. On cause `answered` it also takes out the answer lines of the block the person
-  answered, which unfreezes the block. `offers_undo(item)` says whether `undo` would take the item
-  now, by the same rule.
+- `undo(item)`: clears a done prose item's mark while no session has taken its answers, its done
+  cause offers undo and its project is not finished (D028). On cause `answered` it also takes out
+  the answer lines of the block the person answered, which unfreezes the block. It holds the
+  project's row shared before the document's, so Finish and Reopen, which change the project's state
+  under its row lock, never interleave with it. `offers_undo(item)` says whether `undo` would take
+  the item now, by the same rule.
 - `done(item, user)`: Done on a document. A person's first answers every unanswered block that
   has a recommendation with it, `via: recommended`, and is refused while a block has neither an
   answer nor a recommendation; its cause is `marked`. Pilot's is refused while any block is
@@ -147,9 +149,9 @@ write on a done item; a blank answer; `deferred` without `to`, `to` without `def
 naming neither `plan` nor a task in the plan; an answer to an action without options other than a
 deferral; Done on an action with options or on a block that is no action; Done on an item that is
 not a `document`, Read on one that is not a notice, Reviewed on one that is not a review; undo of
-an item that is no prose item, is not done, has been consumed, or was done by a cause that offers
-none. A block the text does not have is a `RecordNotFoundException`, and the opening has none: an
-answer or a Done on it is refused so.
+an item that is no prose item, is not done, has been consumed, was done by a cause that offers
+none, or is of a finished project. A block the text does not have is a `RecordNotFoundException`,
+and the opening has none: an answer or a Done on it is refused so.
 
 The writes but the close, which takes its caller's time, record their times to the second; they
 trim every value and read a blank note as none.

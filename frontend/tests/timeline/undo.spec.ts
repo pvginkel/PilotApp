@@ -98,7 +98,7 @@ test.describe('Undo', () => {
     await expect(item.block.root.locator('[data-chosen="true"]')).toHaveCount(0);
   });
 
-  test('is not in a line the record offers none for: an ask Finish closed unanswered', async ({ people, projects, timeline }) => {
+  test('is in no line of a finished project: an ask Finish closed unanswered, or one answered before', async ({ people, projects, timeline }) => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Closed'), members: [me.handle!] });
     const answered = await projects.place(id, { kind: 'question', title: 'Which lake?', text: QUESTION });
@@ -110,9 +110,10 @@ test.describe('Undo', () => {
     const items = (await projects.timeline(id)).items;
     const offers = (item: string) => items.find((each) => each.id === item)!.done!.undo;
     expect(offers(closed)).toBe(false);
+    expect(offers(answered)).toBe(false);
     await expect(timeline.item(closed).line).toBeVisible();
     await expect(timeline.item(closed).undo).toHaveCount(0);
-    // The line follows the record, whatever it rules for an answer given before Finish.
-    await expect(timeline.item(answered).undo).toHaveCount(offers(answered) ? 1 : 0);
+    await expect(timeline.item(answered).line).toBeVisible();
+    await expect(timeline.item(answered).undo).toHaveCount(0);
   });
 });
