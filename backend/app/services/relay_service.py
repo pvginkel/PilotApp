@@ -43,7 +43,7 @@ from app.core_exceptions import ExternalServiceException
 from app.database import scoped_session
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import Session as AgentSession
-from app.models import Turn
+from app.models import Turn, Work
 from app.models.reference import RecordKind, SessionState
 from app.services.controller_client import (
     ControllerClient,
@@ -587,8 +587,11 @@ class RelayService:
         """The Turn's end, in one transaction (§9.2): the `result` record at the
         offset of the stream's last raw frame, the Turn ended, the Session
         `idle` (`stopped` when interrupted) with no current line, and the
-        engine's turn end. After the commit, the environment's shutdown timer
-        is armed if nothing runs there.
+        engine's turn end. A work item's Session whose turn ended in error is
+        `failed` instead, the error the Turn's (F125), and one that ended
+        neither interrupted nor in error makes the work item done (decision
+        44). After the commit, the environment's shutdown timer is armed if
+        nothing runs there.
 
         A later Turn in flight is a send the controller accepted once this
         turn's result was out, committed first: the Session stays `running`
@@ -610,7 +613,8 @@ class RelayService:
                     controller_session=opening.controller_session,
                 )
                 turn = db.get_one(Turn, opening.turn_id)
-                turn.ended_at = datetime.now(UTC)
+                ended_at = datetime.now(UTC)
+                turn.ended_at = ended_at
                 if frame.is_error:
                     turn.error = frame.result or _TURN_FAILED
                 for earlier in db.scalars(
@@ -620,14 +624,17 @@ class RelayService:
                         Turn.seq < turn.seq,
                     )
                 ):
-                    earlier.ended_at = turn.ended_at
+                    earlier.ended_at = ended_at
                 following = _turn_in_flight(db, opening.session_id)
                 if following is None:
                     _refresh_turns(db, session, turn)
-                    session.state_code = (
-                        SessionState.STOPPED if frame.interrupted else SessionState.IDLE
-                    )
+                    work = db.get(Work, opening.session_id) is not None
+                    session.state_code = _ended(frame, work=work)
                     session.current_line = None
+                    if work and session.state_code == SessionState.IDLE:
+                        self._container.record_service().work_done(
+                            opening.session_id, ended_at
+                        )
                 else:
                     session.current_line = at_send(None, following.started_at)
                 self._container.document_service().turn_ended(session)
@@ -718,6 +725,17 @@ def _in_flight(db: Session, turn_id: int) -> bool:
     which every end of a Turn takes."""
     turn = db.get_one(Turn, turn_id, populate_existing=True)
     return turn.ended_at is None
+
+
+def _ended(frame: ResultFrame, *, work: bool) -> SessionState:
+    """The Session's state at its turn's end with no later Turn in flight:
+    `stopped` when interrupted, `failed` for a work item's turn ended in
+    error, else `idle` (§9.2; DB Session State)."""
+    if frame.interrupted:
+        return SessionState.STOPPED
+    if work and frame.is_error:
+        return SessionState.FAILED
+    return SessionState.IDLE
 
 
 def _refresh_turns(db: Session, session: AgentSession, turn: Turn) -> None:

@@ -199,6 +199,20 @@ class DocumentService:
         self.db.flush()
         return sorted(held)
 
+    def next_seq(self, project: Project) -> int:
+        """The `seq` of the project's next Item, under the project's row lock
+        until the transaction ends: births in one project take their `seq`
+        one at a time."""
+        self.db.execute(
+            select(Project.id).where(Project.id == project.id).with_for_update()
+        )
+        return (
+            self.db.scalar(
+                select(func.max(Item.seq)).where(Item.project_id == project.id)
+            )
+            or 0
+        ) + 1
+
     def owner(self, document: Document) -> tuple[Project, Item | None]:
         """The document's Project, and its Item for a Prose Item."""
         if document.project_id is not None:
@@ -229,16 +243,7 @@ class DocumentService:
     ) -> Item:
         """`item` born with `text`, its file named by `title`, the title it
         was added with."""
-        # Births in one project take their `seq` one at a time.
-        self.db.execute(
-            select(Project.id).where(Project.id == project.id).with_for_update()
-        )
-        seq = (
-            self.db.scalar(
-                select(func.max(Item.seq)).where(Item.project_id == project.id)
-            )
-            or 0
-        ) + 1
+        seq = self.next_seq(project)
         item.id = uuid.uuid4()
         item.project_id = project.id
         item.seq = seq

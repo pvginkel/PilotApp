@@ -21,8 +21,9 @@ from werkzeug.wrappers import Request, Response
 
 from app import models
 from app.database import scoped_session
+from app.engine.bus import EngineEvent, ProjectChanged
 from app.exceptions import InvalidOperationException, RecordNotFoundException
-from app.models import DocumentVersion, Environment, Project, Turn, User
+from app.models import DocumentVersion, Environment, Item, Project, Turn, User
 from app.models.reference import RecordKind, SessionState, UserKind, VersionCause
 from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerClient, HeadlessCreateRequest
@@ -1163,6 +1164,132 @@ class _Replaying(ServedFakeController):
     def _response(self, request: Request, env_id: str, name: str) -> Response:
         environ = dict(request.environ, QUERY_STRING="format=raw&offset=0")
         return super()._response(Request(environ), env_id, name)
+
+
+@pytest.fixture
+def work_item(
+    session: DbSession,
+    container: ServiceContainer,
+    project: Project,
+    idle: models.Session,
+) -> models.Session:
+    """`idle`, placed as a work item on `project`'s timeline."""
+    container.record_service().place_work(project, idle, "Renaming the badge")
+    clear_after_commit_callbacks()
+    return idle
+
+
+def _item_done(db: DbSession, run: models.Session) -> tuple[Any, ...]:
+    item = db.get_one(Item, run.id, populate_existing=True)
+    return item.done_at, item.done_cause_code, item.done_by_user_id
+
+
+class TestRelayWorkItem:
+    """A work item's turn's end (decision 44; DB Session State, F125)."""
+
+    @pytest.mark.parametrize(
+        ("outcome", "result", "state", "error"),
+        [
+            ("error", "The tests failed.", SessionState.FAILED, "The tests failed."),
+            ("error", "", SessionState.FAILED, "The turn ended in an error"),
+            (
+                "spawn-failure",
+                "claude would not start",
+                SessionState.FAILED,
+                "claude would not start",
+            ),
+            ("ended", "", SessionState.FAILED, "The turn ended in an error"),
+            ("interrupted", "", SessionState.STOPPED, None),
+        ],
+    )
+    def test_a_turn_that_did_not_end_well_leaves_the_item_open_waiting_on_you(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        work_item: models.Session,
+        outcome: FinishOutcome,
+        result: str,
+        state: SessionState,
+        error: str | None,
+    ) -> None:
+        turn = _send(relays, session, work_item)
+        _turn_of(
+            fake_controller, controller_session, raw_turn("turn_text"), outcome, result
+        )
+
+        _relay(relays, work_item)
+
+        assert work_item.state_code == state
+        assert turn.ended_at is not None
+        assert turn.error == error
+        # A turn's failure is its Turn's; the Session's error is a create's.
+        assert work_item.error is None
+        assert work_item.current_line is None
+        assert _item_done(session, work_item) == (None, None, None)
+
+    def test_a_turn_that_ended_well_makes_the_item_done(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        project: Project,
+        work_item: models.Session,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        turn = _send(relays, session, work_item)
+        _turn_of(fake_controller, controller_session, raw_turn("turn_text"))
+        engine_events.clear()
+
+        _relay(relays, work_item)
+
+        assert work_item.state_code == SessionState.IDLE
+        assert turn.error is None
+        assert _item_done(session, work_item) == (turn.ended_at, "turn_ended", None)
+        assert ProjectChanged(project.id) in engine_events
+
+    def test_a_send_committed_before_the_turns_end_keeps_the_item_open(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        work_item: models.Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        lines = raw_turn("turn_text")
+        _send(relays, session, work_item, "One")
+        _turn_of(fake_controller, controller_session, lines)
+        sent: list[Turn] = []
+        end_turn = relays._end_turn
+
+        def send_first(*args: Any) -> None:
+            sent.append(_send(relays, session, work_item, CONTINUE))
+            end_turn(*args)
+
+        monkeypatch.setattr(relays, "_end_turn", send_first)
+        _relay(relays, work_item)
+        monkeypatch.undo()
+
+        assert work_item.state_code == SessionState.RUNNING
+        assert _item_done(session, work_item) == (None, None, None)
+
+        # The server's own turn stays inside the one item (F26.7).
+        _turn_of(fake_controller, controller_session, lines)
+        _relay(relays, work_item)
+
+        [second] = sent
+        assert work_item.state_code == SessionState.IDLE
+        assert _item_done(session, work_item) == (
+            second.ended_at,
+            "turn_ended",
+            None,
+        )
+        assert session.scalars(select(Item)).all() == [
+            session.get_one(Item, work_item.id)
+        ]
 
 
 class TestRelaySkip:

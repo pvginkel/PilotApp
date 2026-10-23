@@ -2,7 +2,8 @@
 brief's send (design 2 §13.2, §7.1; F88.1, F125; decision 38).
 
 `start_session` writes, in the caller's transaction, the Session `starting` and
-its first Turn, the brief, before the environment is up. Once that commits, the
+its first Turn, the brief, before the environment is up; `start_work` writes a
+work item's so, its Item and its Work with it. Once that commits, the
 Session's start loop, `start:<id>`, brings the environment up, creates the
 headless session and sends the brief, whose `202` starts the relay. Each phase
 the start enters is a `server` record in no Turn (DB assertion 220), and each
@@ -34,7 +35,7 @@ from sqlalchemy.orm import Session
 from app.core_exceptions import ExternalServiceException
 from app.database import scoped_session
 from app.exceptions import InvalidOperationException, RecordNotFoundException
-from app.models import Environment, Project, Turn
+from app.models import Environment, Project, Turn, Work
 from app.models import Session as AgentSession
 from app.models.reference import RecordKind, SessionState
 from app.services.controller_client import ControllerClient, HeadlessCreateRequest
@@ -60,6 +61,8 @@ START_FAILED = "start-failed"
 """The `type` of the `server` record a start that failed writes."""
 
 CREATING = "Creating the session…"
+
+WORK_KIND = "work"
 
 
 @dataclass(frozen=True)
@@ -189,6 +192,41 @@ class SessionStartService:
         self._environments.clear_shutdown_timer(db, env_id)
         after_commit(_LoopStart(self, session.id))
         return session
+
+    def start_work(
+        self,
+        db: Session,
+        project_id: uuid.UUID,
+        env_id: str,
+        *,
+        title: str,
+        brief: str,
+        cwd: str,
+        plan_task_id: str | None = None,
+    ) -> Work:
+        """Place a work item titled `title` on the project's timeline, on the
+        plan's task `plan_task_id` when given, and write its `work` Session's
+        start in the environment as `start_session` writes one, in the
+        caller's transaction: its Item, its Work and its Session one id (DB
+        Work, decision 3).
+
+        Returns:
+            The Work
+
+        Raises:
+            InvalidOperationException: No controller is configured
+            RecordNotFoundException: No Project has the id, or its plan has
+                no task `plan_task_id`
+            ControllerProblem: `not-found` when the controller has no such
+                environment
+            ExternalServiceException: The controller failed otherwise
+        """
+        session = self.start_session(
+            db, project_id, env_id, kind_code=WORK_KIND, cwd=cwd, brief=brief
+        )
+        return self._container.record_service().place_work(
+            db.get_one(Project, project_id), session, title, plan_task_id
+        )
 
     def run(self, session_id: uuid.UUID, handle: LoopHandle) -> None:
         """The start loop's run, from where the Session's rows left its start:

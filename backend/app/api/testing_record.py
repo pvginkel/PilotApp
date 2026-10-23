@@ -2,8 +2,10 @@
 (TEST-6): people who never signed in, environments, projects in every
 standing, with members, a plan, their opening and open items, the items a
 project's session adds, an agent's saves of them and of the project's draft
-and handbook, the files it attaches, Pilot's Done, and the end of its turn.
-Nothing in the UI creates a project before the definition chat (F46).
+and handbook, the files it attaches, Pilot's Done, and the end of its turn;
+and a work item started in an environment of the stage's own controller.
+Nothing in the UI creates a project before the definition chat (F46), nor
+places a work item, which the brain adds (F66).
 
 They answer on every STAGE but prd, whatever FLASK_ENV says, so that the dev
 stage's deployed check makes its record through them (D027). They sit on
@@ -16,6 +18,7 @@ from typing import Any
 from dependency_injector.wiring import Provide, inject
 from flask import Blueprint, request
 from spectree import Response as SpectreeResponse
+from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.engine.ingest import Ingested
@@ -35,8 +38,10 @@ from app.schemas.testing_record import (
     InventedProjectSchema,
     InventedSaveCreateSchema,
     InventedSaveSchema,
+    InventedWorkCreateSchema,
 )
 from app.services.container import ServiceContainer
+from app.services.session_start_service import SessionStartService
 from app.services.test_data_service import TestDataService
 from app.utils.flask_error_handlers import build_error_response
 from app.utils.spectree_config import api
@@ -175,6 +180,49 @@ def create_item(
     data = InventedItemCreateSchema.model_validate(request.get_json())
     item = test_data_service.item(project_id, data.kind, data.title, data.text)
     return InventedItemSchema(id=item.id).model_dump(mode="json"), 201
+
+
+@testing_record_bp.route("/projects/<uuid:project_id>/work", methods=["POST"])
+@api.validate(
+    json=InventedWorkCreateSchema,
+    resp=SpectreeResponse(
+        HTTP_201=InventedItemSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+        HTTP_502=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def create_work(
+    project_id: uuid.UUID,
+    session_starts: SessionStartService = Provide[
+        ServiceContainer.session_start_service
+    ],
+    db: Session = Provide[ServiceContainer.db_session],
+) -> Any:
+    """Place a work item on the project's timeline, in an environment of the
+    stage's own controller, and start its session as every work item's
+    starts; the start runs once the request commits.
+
+    Returns:
+        201: The work item's id, its Work's and its Session's
+        400: The body is invalid, or the stage is prd
+        404: No project has the id, or its plan has no task of the step
+        409: No controller is configured
+        502: The controller has no such environment, or failed
+    """
+    data = InventedWorkCreateSchema.model_validate(request.get_json())
+    work = session_starts.start_work(
+        db,
+        project_id,
+        data.environment_id,
+        title=data.title,
+        brief=data.brief,
+        cwd=data.cwd,
+        plan_task_id=data.step,
+    )
+    return InventedItemSchema(id=work.id).model_dump(mode="json"), 201
 
 
 @testing_record_bp.route("/projects/<uuid:project_id>/turn-ends", methods=["POST"])

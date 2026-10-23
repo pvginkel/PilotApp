@@ -268,6 +268,28 @@ class TestDocumentServiceBirth:
         assert item.seq == 10
         assert session.get_one(Document, item.id).path == "items/10-the-palette.md"
 
+    def test_the_next_seq_is_one_past_the_projects_last_item(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        documents = container.document_service()
+        assert documents.next_seq(project) == 1
+        session.add(
+            Item(
+                project_id=project.id,
+                seq=9,
+                kind_code="work",
+                title="Renaming",
+                created_by_session_id=project_session.id,
+            )
+        )
+        session.flush()
+
+        assert documents.next_seq(project) == 10
+
     @pytest.mark.parametrize(
         ("title", "path"),
         [

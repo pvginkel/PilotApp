@@ -1,5 +1,6 @@
 """A session started in testing mode, for the live check against a real
-controller (design 2 §13.2). No other route starts a session.
+controller (design 2 §13.2), with no work item; the record's testing routes
+start a work item (`testing_record.py`).
 
 Guarded by reject_if_not_testing(): FLASK_ENV=testing on a stage other than
 prd.

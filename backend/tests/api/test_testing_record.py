@@ -1,19 +1,23 @@
 """/api/testing/{people,environments,projects,items}: the record's states the
 UI cannot make (TEST-6), on every stage but prd, behind the API's sign-in
 (D027): among them the handbook an open project is born with, an agent's
-saves of the project's draft and handbook, and Pilot's Done."""
+saves of the project's draft and handbook, Pilot's Done, and a work item
+started in an environment of the stage's own controller."""
 
 import base64
 import uuid
+from collections.abc import Iterator
 from datetime import datetime
 from typing import Any
 
 import pytest
+from dependency_injector import providers
 from flask import Flask
 from flask.testing import FlaskClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app import models
 from app.config import STAGES, Settings, Stage, default_stage
 from app.config import Environment as SettingsEnvironment
 from app.models import (
@@ -24,10 +28,18 @@ from app.models import (
     Item,
     Project,
     User,
+    Work,
 )
-from app.models.reference import ProjectState, VersionCause
+from app.models.reference import ProjectState, SessionState, VersionCause
 from app.schemas.testing_record import OPENING_WORDS
 from app.services.container import ServiceContainer
+from app.services.controller_client import ControllerClient
+from app.services.environment_service import EnvironmentService
+from app.services.relay_service import RelayService
+from app.services.session_start_service import SessionStartService
+from app.utils.after_commit import clear_after_commit_callbacks
+from tests.support.fake_controller import ServedFakeController
+from tests.support.supervisor import Supervise
 
 PEOPLE = "/api/testing/people"
 ENVIRONMENTS = "/api/testing/environments"
@@ -64,6 +76,20 @@ def _document_saves_path(project_id: uuid.UUID | str, document: str) -> str:
 
 def _done_path(item_id: uuid.UUID | str) -> str:
     return f"/api/testing/items/{item_id}/done"
+
+
+def _work_path(project_id: uuid.UUID | str) -> str:
+    return f"{PROJECTS}/{project_id}/work"
+
+
+WORK_ENV = "env-a"
+
+WORK = {
+    "environment_id": WORK_ENV,
+    "title": "Building the camp",
+    "brief": "Build the camp.",
+    "cwd": "/work/Camp",
+}
 
 
 def _file(filename: str, data: bytes, **fields: Any) -> dict[str, Any]:
@@ -1119,6 +1145,174 @@ class TestCreateDone:
         )
 
 
+def _starts(
+    container: ServiceContainer, supervise: Supervise, *, controller_configured: bool
+) -> SessionStartService:
+    """The session starts, on a supervisor of their own whose loops never run."""
+    supervisor, _ = supervise(container)
+    environments = EnvironmentService(
+        container=container, supervisor=supervisor, stop_after_seconds=1800
+    )
+    return SessionStartService(
+        container=container,
+        supervisor=supervisor,
+        session_streams=container.session_stream_service(),
+        environment_service=environments,
+        relay_service=RelayService(
+            container=container,
+            supervisor=supervisor,
+            session_streams=container.session_stream_service(),
+            environment_service=environments,
+        ),
+        controller_configured=controller_configured,
+    )
+
+
+@pytest.mark.usefixtures("person")
+class TestCreateWork:
+    @pytest.fixture(autouse=True)
+    def _no_callbacks(self) -> Iterator[None]:
+        clear_after_commit_callbacks()
+        yield
+        clear_after_commit_callbacks()
+
+    @pytest.fixture
+    def served(
+        self,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        supervise: Supervise,
+    ) -> Iterator[None]:
+        """The route on the fake, which has the environment `WORK_ENV`,
+        stopped."""
+        fake_controller.add_environment(WORK_ENV, name="Env-A")
+        container.session_start_service.override(
+            providers.Object(_starts(container, supervise, controller_configured=True))
+        )
+        try:
+            yield
+        finally:
+            container.session_start_service.reset_last_overriding()
+
+    @staticmethod
+    def _work_items(session: Session) -> list[Item]:
+        return list(session.scalars(select(Item).where(Item.kind_code == "work")))
+
+    def test_it_places_a_work_item_and_starts_it(
+        self, client: FlaskClient, served: None, session: Session
+    ) -> None:
+        project_id = _make(client, name="Camp", tasks=TASKS)
+
+        response = client.post(_work_path(project_id), json={**WORK, "step": "build"})
+
+        assert response.status_code == 201, response.get_json()
+        work_id = response.get_json()["id"]
+        item = _timeline_item(client, project_id, work_id)
+        assert _within(
+            item,
+            {
+                "kind": "work",
+                "form": "work",
+                "title": "Building the camp",
+                "step": {"id": "build", "title": "Build the camp"},
+                "done": None,
+            },
+        ), item
+        run = session.get_one(models.Session, uuid.UUID(work_id))
+        assert (run.state_code, run.environment_id, run.kind_code, run.cwd) == (
+            SessionState.STARTING,
+            WORK_ENV,
+            "work",
+            "/work/Camp",
+        )
+        work = session.get_one(Work, run.id)
+        assert work.autopilot is False
+
+    def test_without_a_step_it_works_on_none(
+        self, client: FlaskClient, served: None, session: Session
+    ) -> None:
+        project_id = _make(client)
+
+        response = client.post(_work_path(project_id), json=WORK)
+
+        assert response.status_code == 201, response.get_json()
+        (item,) = self._work_items(session)
+        assert item.plan_task_id is None
+
+    @pytest.mark.parametrize(
+        "changes",
+        [{"title": ""}, {"brief": ""}, {"cwd": ""}, {"environment_id": ""}],
+        ids=["no-title", "no-brief", "no-cwd", "no-environment"],
+    )
+    def test_a_body_out_of_the_record_is_invalid(
+        self,
+        client: FlaskClient,
+        served: None,
+        session: Session,
+        changes: dict[str, str],
+    ) -> None:
+        project_id = _make(client)
+
+        response = client.post(_work_path(project_id), json={**WORK, **changes})
+
+        assert response.status_code == 400
+        assert self._work_items(session) == []
+
+    def test_an_unknown_project_is_not_found(
+        self, client: FlaskClient, served: None, session: Session
+    ) -> None:
+        response = client.post(_work_path(uuid.uuid4()), json=WORK)
+
+        assert response.status_code == 404
+        assert session.scalars(select(models.Session)).all() == []
+
+    def test_a_step_not_in_the_plan_is_not_found(
+        self, client: FlaskClient, served: None, session: Session
+    ) -> None:
+        project_id = _make(client, tasks=TASKS)
+
+        response = client.post(_work_path(project_id), json={**WORK, "step": "cook"})
+
+        assert response.status_code == 404
+        assert response.get_json()["error"] == (
+            f"Plan task {project_id}/cook was not found"
+        )
+        assert self._work_items(session) == []
+        assert session.scalars(select(models.Session)).all() == []
+
+    def test_an_environment_the_controller_lacks_is_502(
+        self, client: FlaskClient, served: None, session: Session
+    ) -> None:
+        project_id = _make(client)
+
+        response = client.post(
+            _work_path(project_id), json={**WORK, "environment_id": "env-missing"}
+        )
+
+        assert response.status_code == 502
+        assert self._work_items(session) == []
+
+    def test_no_controller_configured_is_409(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        supervise: Supervise,
+        session: Session,
+    ) -> None:
+        project_id = _make(client)
+        container.session_start_service.override(
+            providers.Object(_starts(container, supervise, controller_configured=False))
+        )
+        try:
+            response = client.post(_work_path(project_id), json=WORK)
+        finally:
+            container.session_start_service.reset_last_overriding()
+
+        assert response.status_code == 409
+        assert self._work_items(session) == []
+
+
 ENDPOINTS = [
     (PEOPLE, {"handle": "ben"}),
     (ENVIRONMENTS, {"id": "example-env-2", "name": "Example-2"}),
@@ -1130,6 +1324,7 @@ ENDPOINTS = [
     (_document_saves_path(uuid.uuid4(), "draft"), {"text": "Hi"}),
     (_document_saves_path(uuid.uuid4(), "handbook"), {"text": "Hi"}),
     (_done_path(uuid.uuid4()), {}),
+    (_work_path(uuid.uuid4()), WORK),
 ]
 
 

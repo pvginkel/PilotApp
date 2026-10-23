@@ -828,6 +828,71 @@
         "title": "InventedFaultSchema",
         "type": "object"
       },
+      "InventedWorkCreateSchema.6d6b324": {
+        "description": "A work item placed in an environment of the stage's own controller and\nstarted, as Pilot starts one.",
+        "properties": {
+          "brief": {
+            "description": "Its first turn's message",
+            "examples": [
+              "Rename the badge."
+            ],
+            "minLength": 1,
+            "title": "Brief",
+            "type": "string"
+          },
+          "cwd": {
+            "description": "Its session's working directory",
+            "examples": [
+              "/work/Example"
+            ],
+            "minLength": 1,
+            "title": "Cwd",
+            "type": "string"
+          },
+          "environment_id": {
+            "description": "The controller's id of the environment it runs in",
+            "examples": [
+              "example-env-1"
+            ],
+            "minLength": 1,
+            "title": "Environment Id",
+            "type": "string"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The id of the plan's task it works on; none for none",
+            "examples": [
+              "build"
+            ],
+            "title": "Step"
+          },
+          "title": {
+            "description": "The title its line shows",
+            "examples": [
+              "Renaming the badge"
+            ],
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "environment_id",
+          "title",
+          "brief",
+          "cwd"
+        ],
+        "title": "InventedWorkCreateSchema",
+        "type": "object"
+      },
       "ItemDocumentSchema.1fdd8ae": {
         "description": "An item's document read on its own, as the overlay draws it (F28): its\ntimeline entry, but that a document done by Done reads as Done fixed it\n(F13.3), its `title`, `summary`, `body`, `word_count` and `read_minutes`\nfrom the text of its `done` Version.",
         "properties": {
@@ -8544,6 +8609,94 @@
           }
         ],
         "summary": "End the turn of the project's session as the relay does for its documents: Pilot's writing flag cleared on each it was saving, and a `turn` Version cut of each whose text moved. No live event follows.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/projects/{project_id}/work": {
+      "post": {
+        "description": "Returns:     201: The work item's id, its Work's and its Session's     400: The body is invalid, or the stage is prd     404: No project has the id, or its plan has no task of the step     409: No controller is configured     502: The controller has no such environment, or failed",
+        "operationId": "post__api_testing_projects_{project_id}_work",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventedWorkCreateSchema.6d6b324"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventedItemSchema.6d6b324"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Place a work item on the project's timeline, in an environment of the stage's own controller, and start its session as every work item's starts; the start runs once the request commits.",
         "tags": [],
         "x-required-role": "editor"
       }

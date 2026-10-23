@@ -1,14 +1,17 @@
 """The record's own writes (design 1 §6.4, F32.4): a person's answer, Done on
-an action, undo, Done on a document, Read and Reviewed; and Finish's close of
-the open items (F5.1).
+an action, undo, Done on a document, Read and Reviewed; Finish's close of the
+open items (F5.1); and a work item's place and its done at its turn's end
+(DB Work, decision 44).
 
 Each is a write of the caller's transaction, under the document's row lock
-(TD §8.5). A write that touches the text splices it into the published text
+(TD §8.5); a work item's, which has no document, under its project's row or
+its item's. A write that touches the text splices it into the published text
 and publishes it, whether or not the path's latest save is held: the tree
 keeps the agent's ingest then, and the next clean save's merge carries the
 write to the file (design 1 §5.2, §7). No write raises *modified*.
 """
 
+import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import ColumnElement, and_, exists, select
@@ -19,15 +22,27 @@ from app.engine.documents import DOCUMENT, OPENING, PROSE, DocumentService
 from app.engine.paths import tree_path
 from app.engine.views import ViewService
 from app.exceptions import InvalidOperationException, RecordNotFoundException
-from app.models import Document, DoneCause, Item, ItemKind, PlanTask, Project, User
+from app.models import (
+    Document,
+    DoneCause,
+    Item,
+    ItemKind,
+    PlanTask,
+    Project,
+    User,
+    Work,
+)
+from app.models import Session as AgentSession
 from app.models.reference import AnswerChannel, ProjectState, UserKind, VersionCause
 
 NOTICE = "notice"
 REVIEW = "review"
+WORK = "work"
 
 ANSWERED = "answered"
 MARKED = "marked"
 SETTLED = "settled"
+TURN_ENDED = "turn_ended"
 FINISHED = "finished"
 
 
@@ -268,6 +283,61 @@ class RecordService:
             item.done_by_user_id = user.id
         if items:
             self.view_service.timeline_moved(project)
+
+    def place_work(
+        self,
+        project: Project,
+        session: AgentSession,
+        title: str,
+        plan_task_id: str | None = None,
+    ) -> Work:
+        """A work item of `session`, one identity with it (DB Work, decision
+        3): its Item of kind `work` at the project's next place on the
+        timeline, on the plan's task `plan_task_id` when given, created by its
+        own Session, and its Work under the switch's setting as it stands
+        (F54.7).
+
+        Raises:
+            RecordNotFoundException: the project's plan has no task
+                `plan_task_id`.
+        """
+        if plan_task_id is not None and not self._in_the_plan(project, plan_task_id):
+            raise RecordNotFoundException("Plan task", f"{project.id}/{plan_task_id}")
+        self.db.add(
+            Item(
+                id=session.id,
+                project_id=project.id,
+                seq=self.document_service.next_seq(project),
+                kind_code=WORK,
+                title=title,
+                plan_task_id=plan_task_id,
+                created_by_session_id=session.id,
+            )
+        )
+        self.db.flush()
+        work = Work(
+            id=session.id,
+            project_id=project.id,
+            session_kind_code=session.kind_code,
+            autopilot=project.autopilot,
+        )
+        self.db.add(work)
+        self.db.flush()
+        self.view_service.timeline_moved(project)
+        return work
+
+    def work_done(self, work_id: uuid.UUID, at: datetime) -> None:
+        """The work item done at `at`, its turn's end, by no one, its Done
+        Cause `turn_ended`, which is final (decision 44). An item Finish
+        closed first stays as Finish closed it."""
+        item = self.db.get_one(
+            Item, work_id, with_for_update=True, populate_existing=True
+        )
+        if item.done_at is not None:
+            return
+        item.done_at = at
+        item.done_cause_code = TURN_ENDED
+        self.view_service.timeline_moved(self.db.get_one(Project, item.project_id))
 
     def _mark_by_kind(self, item: Item, user: User, kind: str, mark: str) -> None:
         if self.db.get_one(ItemKind, item.kind_code).form != PROSE:

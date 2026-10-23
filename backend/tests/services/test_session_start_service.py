@@ -1,5 +1,5 @@
 """The session start (design 2 §13.2, §7.1; F88.1, F125; decision 38; V05, V15,
-V19).
+V19), and a work item's (DB Work, decision 3).
 
 The start's write and its loop's run are on the test's session: the run is
 called as its loop calls it. `TestStartLoop` runs the loop from the write's
@@ -20,8 +20,8 @@ from werkzeug.wrappers import Request, Response
 from app import models
 from app.database import scoped_session
 from app.exceptions import InvalidOperationException, RecordNotFoundException
-from app.models import Environment, Project, Turn, User
-from app.models.reference import RecordKind, SessionState, UserKind
+from app.models import Environment, Item, PlanTask, Project, Turn, User, Work
+from app.models.reference import RecordKind, SessionState, TaskStatus, UserKind
 from app.services.container import ServiceContainer
 from app.services.controller_client import (
     ControllerProblem,
@@ -365,6 +365,136 @@ class TestStartSession:
 
         assert session.scalars(select(models.Session)).all() == []
         assert fake.calls == []
+
+
+def _start_work(
+    starts: SessionStartService,
+    db: DbSession,
+    project: Project,
+    plan_task_id: str | None = None,
+) -> Work:
+    work = starts.start_work(
+        db,
+        project.id,
+        ENV,
+        title="Renaming the badge",
+        brief=BRIEF,
+        cwd=CWD,
+        plan_task_id=plan_task_id,
+    )
+    clear_after_commit_callbacks()
+    return work
+
+
+class TestStartWork:
+    def test_it_places_the_work_item_and_writes_its_sessions_start(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        work = _start_work(starts, session, project)
+
+        item = session.get_one(Item, work.id)
+        run = _read(session, work.id)
+        assert (item.kind_code, item.title, item.seq) == (
+            "work",
+            "Renaming the badge",
+            1,
+        )
+        assert item.created_by_session_id == run.id
+        assert item.done_at is None
+        assert (work.session_kind_code, work.autopilot) == ("work", project.autopilot)
+        assert run.state_code == SessionState.STARTING
+        assert (run.project_id, run.environment_id, run.kind_code, run.cwd) == (
+            project.id,
+            ENV,
+            "work",
+            CWD,
+        )
+        (brief,) = _turns(session, run.id)
+        assert (brief.seq, brief.message, brief.author_user_id) == (1, BRIEF, None)
+        assert _server(session, run.id) == [(None, STARTING_ENV)]
+
+    def test_it_works_on_the_plans_task(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        session.add(
+            PlanTask(
+                project_id=project.id,
+                task_id="badge",
+                position=1,
+                title="The badge",
+                status_code=TaskStatus.PENDING,
+            )
+        )
+        session.flush()
+
+        work = _start_work(starts, session, project, "badge")
+
+        assert session.get_one(Item, work.id).plan_task_id == "badge"
+
+    def test_a_task_not_in_the_plan_is_not_found(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        with pytest.raises(RecordNotFoundException, match="Plan task"):
+            _start_work(starts, session, project, "badge")
+
+        assert session.scalars(select(Item)).all() == []
+
+    def test_an_unknown_project_is_not_found(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+    ) -> None:
+        with pytest.raises(RecordNotFoundException, match="Project"):
+            starts.start_work(
+                session, uuid.uuid4(), ENV, title="Renaming", brief=BRIEF, cwd=CWD
+            )
+
+        assert session.scalars(select(models.Session)).all() == []
+        assert fake.calls == []
+
+    def test_no_controller_refuses_it(
+        self,
+        container: ServiceContainer,
+        fake: _Recording,
+        supervise: Supervise,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        starts = _services(container, supervise, controller_configured=False)[0]
+
+        with pytest.raises(InvalidOperationException, match="no controller"):
+            _start_work(starts, session, project)
+
+        assert session.scalars(select(Item)).all() == []
+        assert fake.calls == []
+
+    def test_a_failed_start_leaves_the_item_open_waiting_on_you(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        fake.capped(ENV)
+        work = _start_work(starts, session, project)
+
+        starts.run(work.id, LoopHandle(f"start:{work.id}"))
+
+        _assert_failed(session, work.id)
+        assert session.get_one(Item, work.id, populate_existing=True).done_at is None
 
 
 class TestRun:
@@ -747,6 +877,41 @@ class TestStartLoop:
         assert kinds[:2] == [RecordKind.SERVER, RecordKind.SERVER]
         assert kinds[-1] == RecordKind.RESULT
         assert set(kinds[2:-1]) == {RecordKind.CLAUDE}
+
+    def test_a_work_items_start_runs_to_its_turns_end_and_its_done(
+        self,
+        committed_app: Flask,
+        committed_fake: _Recording,
+        supervise: Supervise,
+        loop_log: LogWaiter,
+    ) -> None:
+        container = committed_app.container
+        starts, _, coordinator = _services(container, supervise)
+        project_id = _committed_project(container)
+        coordinator.fire_startup()
+
+        with scoped_session(container) as db:
+            work_id = starts.start_work(
+                db, project_id, ENV, title="Renaming", brief=BRIEF, cwd=CWD
+            ).id
+
+        loop_log.wait_for(rf"Loop relay:{work_id} started")
+        run = _committed(container, work_id)
+        assert run.controller_session is not None
+        committed_fake.play(ENV, run.controller_session, raw_turn("turn_text"))
+        committed_fake.finish(ENV, run.controller_session, "success", "Done.")
+        wait_until(
+            lambda: _committed(container, work_id).state_code == SessionState.IDLE,
+            "the brief's turn ended",
+        )
+        with scoped_session(container) as db:
+            item = db.get_one(Item, work_id)
+            (brief,) = _turns(db, work_id)
+            assert (item.done_at, item.done_cause_code, item.done_by_user_id) == (
+                brief.ended_at,
+                "turn_ended",
+                None,
+            )
 
     def test_startup_resumes_a_start_that_was_cut(
         self,

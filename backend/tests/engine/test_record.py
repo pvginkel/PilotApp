@@ -1,5 +1,6 @@
 """The record's own writes: a person's answer, Done on an action, undo, Done
-on a document, Read and Reviewed (design 1 §6.4, F32.4)."""
+on a document, Read and Reviewed (design 1 §6.4, F32.4); a work item's place
+and its done at its turn's end (DB Work, decision 44)."""
 
 import json
 import uuid
@@ -28,6 +29,7 @@ from app.models import (
     PlanTask,
     Project,
     User,
+    Work,
 )
 from app.models.reference import (
     AnswerChannel,
@@ -2087,3 +2089,229 @@ class TestRecordServiceRowLock:
                 session.get_one(Item, item_id).done_at
                 for item_id in (decision_id, notice_id)
             ] == [None, None]
+
+
+def _work_session(
+    session: DbSession, project: Project, environment: Environment
+) -> models.Session:
+    """A work Session of `project` whose start is written, with no Item yet."""
+    run = models.Session(
+        project_id=project.id,
+        environment_id=environment.id,
+        kind_code="work",
+        cwd="/work/Example",
+        token_hash=uuid.uuid4().hex,
+        state_code=SessionState.STARTING,
+    )
+    session.add(run)
+    session.flush()
+    return run
+
+
+class TestRecordServicePlaceWork:
+    def test_the_item_its_work_and_its_session_are_one_id(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        environment: Environment,
+    ) -> None:
+        _bear(session, container, project, project_session, "notice", "Palette", NOTICE)
+        run = _work_session(session, project, environment)
+
+        work = container.record_service().place_work(project, run, "Renaming the badge")
+
+        item = session.get_one(Item, run.id)
+        assert work.id == item.id == run.id
+        assert (item.project_id, item.seq, item.kind_code, item.title) == (
+            project.id,
+            2,
+            "work",
+            "Renaming the badge",
+        )
+        assert item.plan_task_id is None
+        # Created by its own Session (DB Work), not the project's.
+        assert (item.created_by_session_id, item.created_by_user_id) == (run.id, None)
+        assert _done(item) == (None, None, None)
+        assert (work.project_id, work.session_kind_code) == (project.id, "work")
+        assert (work.trigger_code, work.trigger_item_id) == (None, None)
+        assert session.get(Document, item.id) is None
+
+    @pytest.mark.parametrize("autopilot", [True, False])
+    def test_the_work_keeps_the_switchs_setting_it_was_placed_under(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        autopilot: bool,
+    ) -> None:
+        project.autopilot = autopilot
+        session.flush()
+        run = _work_session(session, project, environment)
+
+        work = container.record_service().place_work(project, run, "Renaming")
+        project.autopilot = not autopilot
+        session.flush()
+
+        assert session.get_one(Work, work.id, populate_existing=True).autopilot is (
+            autopilot
+        )
+
+    def test_it_works_on_a_task_of_the_plan(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _task(session, project, "build")
+        run = _work_session(session, project, environment)
+
+        container.record_service().place_work(project, run, "Building", "build")
+
+        assert session.get_one(Item, run.id).plan_task_id == "build"
+
+    @pytest.mark.parametrize("removed", [False, True], ids=["unknown", "removed"])
+    def test_a_task_not_in_the_plan_is_not_found(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        removed: bool,
+    ) -> None:
+        if removed:
+            _task(session, project, "build", removed=True)
+        run = _work_session(session, project, environment)
+
+        with pytest.raises(RecordNotFoundException) as raised:
+            container.record_service().place_work(project, run, "Building", "build")
+
+        assert raised.value.message == (f"Plan task {project.id}/build was not found")
+        assert session.get(Item, run.id) is None
+        assert session.get(Work, run.id) is None
+
+    def test_its_place_moves_the_timeline(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _work_session(session, project, environment)
+
+        with scoped_session(container):
+            container.record_service().place_work(project, run, "Renaming")
+            assert engine_events == []
+
+        assert engine_events == [
+            TreeHashMoved(
+                f"draft-{project.number}/timeline.json",
+                container.view_service().timeline(project).hash,
+            ),
+            ProjectChanged(project.id),
+        ]
+        timeline = json.loads(container.view_service().timeline(project).text)
+        assert [(item["kind"], item["title"]) for item in timeline["items"]] == [
+            ("work", "Renaming")
+        ]
+
+
+class TestRecordServiceWorkDone:
+    AT = datetime(2026, 10, 23, 9, 30, 0, tzinfo=UTC)
+
+    def test_the_item_is_done_at_its_turns_end_by_no_one(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _work_session(session, project, environment)
+        records = container.record_service()
+        records.place_work(project, run, "Renaming")
+
+        records.work_done(run.id, self.AT)
+
+        item = session.get_one(Item, run.id)
+        assert _done(item) == (self.AT, "turn_ended", None)
+        assert not records.offers_undo(item)
+
+    def test_an_item_finish_closed_first_stays_closed(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        run = _work_session(session, project, environment)
+        records = container.record_service()
+        records.place_work(project, run, "Renaming")
+        records.close_unanswered(project, person, FINISH)
+
+        records.work_done(run.id, self.AT)
+
+        assert _done(session.get_one(Item, run.id)) == (
+            FINISH,
+            "finished",
+            person.id,
+        )
+
+    def test_its_done_moves_the_timeline(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _work_session(session, project, environment)
+        with scoped_session(container):
+            container.record_service().place_work(project, run, "Renaming")
+        engine_events.clear()
+
+        with scoped_session(container):
+            container.record_service().work_done(run.id, self.AT)
+
+        assert engine_events == [
+            TreeHashMoved(
+                f"draft-{project.number}/timeline.json",
+                container.view_service().timeline(project).hash,
+            ),
+            ProjectChanged(project.id),
+        ]
+        (entry,) = json.loads(container.view_service().timeline(project).text)["items"]
+        assert entry["done"] == {"at": _z(self.AT), "cause": "turn_ended", "by": None}
+
+    def test_it_waits_for_the_items_row(self, committed_app: Flask) -> None:
+        """What Finish's close holds while it closes the open items."""
+        person_id, _, _ = _committed_items(committed_app)
+        container = committed_app.container
+        with scoped_session(container) as session:
+            project = session.scalars(select(Project)).one()
+            environment = session.get_one(Environment, ENVIRONMENT_ID)
+            run = _work_session(session, project, environment)
+            container.record_service().place_work(project, run, "Renaming")
+            run_id = run.id
+        with committed_app.app_context():
+            engine = db.engine
+
+        with engine.connect() as holder:
+            holder.execute(
+                sql("SELECT id FROM items WHERE id = :id FOR UPDATE"), {"id": run_id}
+            )
+            with (
+                pytest.raises(OperationalError) as raised,
+                scoped_session(container) as session,
+            ):
+                session.execute(sql("SET LOCAL lock_timeout = '200ms'"))
+                container.record_service().work_done(run_id, self.AT)
+            holder.rollback()
+
+        assert isinstance(raised.value.orig, LockNotAvailable)
+        with scoped_session(container) as session:
+            assert session.get_one(Item, run_id).done_at is None

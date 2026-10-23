@@ -1,6 +1,6 @@
 """Schemas for the testing endpoints that make the record's states the UI
-cannot make: people, environments, projects, their items, an agent's saves of
-them and the files hung on them."""
+cannot make: people, environments, projects, their items, their work items,
+an agent's saves of them and the files hung on them."""
 
 import base64
 import binascii
@@ -153,6 +153,37 @@ class InventedItemCreateSchema(BaseModel):
 
 class InventedItemSchema(BaseModel):
     id: uuid.UUID = Field(description="The item's id")
+
+
+class InventedWorkCreateSchema(BaseModel):
+    """A work item placed in an environment of the stage's own controller and
+    started, as Pilot starts one."""
+
+    environment_id: str = Field(
+        min_length=1,
+        description="The controller's id of the environment it runs in",
+        examples=["example-env-1"],
+    )
+    title: str = Field(
+        min_length=1,
+        description="The title its line shows",
+        examples=["Renaming the badge"],
+    )
+    brief: str = Field(
+        min_length=1,
+        description="Its first turn's message",
+        examples=["Rename the badge."],
+    )
+    cwd: str = Field(
+        min_length=1,
+        description="Its session's working directory",
+        examples=["/work/Example"],
+    )
+    step: str | None = Field(
+        default=None,
+        description="The id of the plan's task it works on; none for none",
+        examples=["build"],
+    )
 
 
 class InventedSaveCreateSchema(BaseModel):
