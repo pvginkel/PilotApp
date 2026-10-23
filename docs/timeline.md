@@ -140,7 +140,8 @@ answer moves the count, so a document stays as it stands while it is answered.
 - **Its head** is an item's head, then *Edited <time>* and *Unsent* (below).
 - **Inline**, it is its head; its title; its prose and its blocks in order, each block answered in
   place as a one-ask item's is ([below](#answering-inline)), its own head naming its kind; its
-  attachments; Pilot's dots; and, where it has blocks, the segment bar beside *Send answers*.
+  attachments; Pilot's dots; and the segment bar beside *Send answers*, the bar empty where it has no
+  block.
 - **A card** is its head over a box: the title, the summary, the count chips, the segment bar, or
   "N min read" (`read_minutes`) for a text with no block, as every review is, the attachments, and
   Open, which reads Continue while the document is *Unsent*, beside Reviewed on a review; Pilot's

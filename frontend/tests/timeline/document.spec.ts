@@ -174,6 +174,27 @@ test.describe('A short document', () => {
     expect(await blockOf(projects, id, trip, 'D1')).toMatchObject({ answer: 'Tunnel', via: 'app' });
   });
 
+  test('with no block, stands with an empty segment bar beside Send answers, which sends it at once', async ({
+    people,
+    projects,
+    timeline,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('No block'), members: [me.handle!] });
+    const packing = await projects.place(id, { kind: 'document', title: 'Packing', text: 'We pack light this time.\n' });
+    await timeline.open(id);
+    const item = timeline.item(packing);
+
+    await expect(item.document).toHaveText('We pack light this time.');
+    await expect(item.segments).toHaveCount(0);
+    await expect(item.send).toBeEnabled();
+    await item.send.click();
+    await expect(item.root).toHaveAttribute('data-state', 'done');
+    await expect(timeline.sendDialog.root).toHaveCount(0);
+    const done = await itemOf(projects, id, packing);
+    expect(done.done).toMatchObject({ cause: 'marked', by: { kind: 'person', handle: me.handle } });
+  });
+
   test('lists the unanswered recommended blocks in a dialog: Cancel leaves them, Confirm records each recommendation as the answer', async ({
     people,
     projects,

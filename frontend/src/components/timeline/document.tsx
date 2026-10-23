@@ -3,7 +3,8 @@
  * *Unsent* while it has an answer and no Done (D026). One under about 150 words of its own (F24.1)
  * stands inline: its head; its title; its prose with every block answered in place, each in a panel
  * of its own, and each section Pilot settled collapsed to its line (F31.5); its attachments
- * (F17.5); Pilot's dots while it writes (F35); then its segment bar beside *Send answers* (F33). A segment goes to its block.
+ * (F17.5); Pilot's dots while it writes (F35); then its segment bar beside *Send answers* (F33), the bar
+ * empty and *Send answers* enabled where it has no block. A segment goes to its block.
  * *Send answers* is the document's Done (F24.3): it enables once every block is answered or has a
  * recommendation, and clicked with unanswered recommended blocks it lists them in a dialog whose
  * Confirm sends, the record answering them with their recommendation (F32.5).
@@ -54,13 +55,11 @@ export function InlineDocument({ item }: { item: TimelineItem }) {
       </div>
       <Attachments item={item} />
       {item.writing && <PilotWriting />}
-      {blocksOf(item).length > 0 && (
-        <div className="item-actions doc-actions">
-          <SegmentBar item={item} />
-          <span className="grow" />
-          <SendAnswers item={item} />
-        </div>
-      )}
+      <div className="item-actions doc-actions">
+        <SegmentBar item={item} />
+        <span className="grow" />
+        <SendAnswers item={item} />
+      </div>
     </div>
   );
 }
