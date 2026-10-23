@@ -369,15 +369,41 @@ class TestStart:
     ) -> None:
         fake_controller.add_environment(ENV, status="stopped")
         fake_controller.settle_starts(ENV, settles)
-        before = datetime.now(UTC)
 
         with pytest.raises(EnvironmentStartFailed, match=f"it settled {settles}"):
             environments.start(ENV)
 
-        # Pilot started it: the timer is armed so that it is stopped.
+    def test_a_start_settled_error_keeps_its_claim_on_its_pod(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        fake_controller.add_environment(ENV, status="stopped")
+        fake_controller.settle_starts(ENV, "error")
+        before = datetime.now(UTC)
+
+        with pytest.raises(EnvironmentStartFailed):
+            environments.start(ENV)
+
+        # Pilot's bring-up is there: the timer is armed so that it is stopped.
         row = _row(session)
-        assert row is not None and row.server_started_at is not None
+        assert _claim(row)[1] == _pod(fake_controller)
         assert _armed_around(row, before)
+
+    def test_a_start_settled_stopped_ends_its_claim(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        fake_controller.add_environment(ENV, status="stopped")
+        fake_controller.settle_starts(ENV, "stopped")
+
+        with pytest.raises(EnvironmentStartFailed):
+            environments.start(ENV)
+
+        assert _claim(_row(session)) == _NO_CLAIM
 
     def test_another_conflict_is_the_controllers_problem(
         self,
@@ -619,16 +645,19 @@ class TestShutdownTimer:
         assert fake_controller.environment(ENV).status == "stopped"
         assert _claim(_row(session)) == _NO_CLAIM
 
+    @pytest.mark.parametrize("settle", ["cut", "run-out"])
     def test_a_start_cut_before_its_settle_keeps_its_claim(
         self,
         container: ServiceContainer,
         controller_client: ControllerClient,
         supervise: Supervise,
         session: Session,
+        settle: str,
     ) -> None:
-        # Review O1: Pilot's 202, the settle cut, the resumed start's 200, and
-        # the environment stopped once idle past the timer.
-        fake = _SettleCut()
+        # Review O1: Pilot's 202, the settle cut or run out before a pod, the
+        # resumed start's 200, and the environment stopped once idle past the
+        # timer.
+        fake = _SettleCut() if settle == "cut" else _SettleRunOut()
         try:
             client_of(container, fake)
             service = _service(container, supervise, stop_after=timedelta(0))
@@ -646,6 +675,31 @@ class TestShutdownTimer:
             fake.close()
 
         assert fake.environment(ENV).status == "stopped"
+        assert _claim(_row(session)) == _NO_CLAIM
+
+    def test_a_bring_up_that_settled_stopped_claims_no_later_pod(
+        self,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        supervise: Supervise,
+        session: Session,
+    ) -> None:
+        # Review r1, F1: Pilot's 202 settled stopped, someone's start, Pilot's
+        # 200, the tick.
+        service = _service(container, supervise, stop_after=timedelta(0))
+        fake_controller.add_environment(ENV, status="stopped")
+        fake_controller.settle_starts(ENV, "stopped")
+        with pytest.raises(EnvironmentStartFailed):
+            service.start(ENV)
+        fake_controller.settle_starts(ENV, None)
+        fake_controller.set_status(ENV, "running")
+
+        service.start(ENV)
+        service.run_shutdown_timer(session)
+
+        assert _stops(fake_controller) == []
+        assert fake_controller.environment(ENV).status == "running"
         assert _claim(_row(session)) == _NO_CLAIM
 
     @pytest.mark.parametrize(
@@ -999,6 +1053,25 @@ class _SettleCut(ServedFakeController):
             self._cut = False
             return Response("upstream unavailable", status=503)
         return super()._get_environment(request, env_id)
+
+
+class _SettleRunOut(ServedFakeController):
+    """The fake, answering the first settle's `GET` as a wait run out before
+    the bring-up had a pod: `starting`, no pod."""
+
+    def __init__(self) -> None:
+        super().__init__(keepalive_seconds=0.2)
+        self._run_out = True
+
+    def _get_environment(self, request: Request, env_id: str) -> Response:
+        response = super()._get_environment(request, env_id)
+        if not (self._run_out and request.args.get("wait") == "settled"):
+            return response
+        self._run_out = False
+        body = response.get_json()
+        body["status"] = "starting"
+        body["pod"] = None
+        return Response(json.dumps(body), status=200, content_type="application/json")
 
 
 class _UnknownPodStart(ServedFakeController):

@@ -7,9 +7,9 @@ scheduled the bring-up, and `started_pod_at`, the `pod.startedAt` that bring-up
 settled on (D12; DB 233). The shutdown timer stops an environment only while its
 pod is still the claim's, it is not exempt, and no Session is `running` or
 `starting` there. A pod gone, another's or unknown ends the claim with no stop,
-at the tick or at a start answered `200`; the claim's three columns, its
-deadline `stop_due_at` among them, end together. The fleet consumer writes none
-of them (§13.1).
+at the tick or at a settled start; the claim's three columns, its deadline
+`stop_due_at` among them, end together. The fleet consumer writes none of them
+(§13.1).
 """
 
 import logging
@@ -43,6 +43,8 @@ SHUTDOWN_TIMER = "environment-shutdown"
 _BUSY_STATES = (SessionState.RUNNING, SessionState.STARTING)
 _START_STATES = (SessionState.HELD, SessionState.STARTING)
 _FAILED_SETTLES = ("error", "stopped", "deleting")
+_AT_REST = ("running", *_FAILED_SETTLES)
+"""The statuses a settled wait answers at; a wait run out reads another."""
 
 
 def reported_columns(
@@ -154,7 +156,7 @@ class EnvironmentService:
 
         settled = client.get_environment(env_id, wait="settled")
         with scoped_session(self._container) as db:
-            _settle_claim(_lock(db, env_id), _pod_started_at(settled))
+            _settle_claim(_lock(db, env_id), settled)
             self.arm_shutdown_timer(db, env_id)
         if settled.status in _FAILED_SETTLES:
             raise EnvironmentStartFailed(env_id, f"it settled {settled.status}")
@@ -311,14 +313,25 @@ def _locking(env_id: str, *, skip_locked: bool = False) -> Select[Environment]:
     )
 
 
-def _settle_claim(row: Environment, pod_started_at: datetime | None) -> None:
-    """The claim, as a settled start finds the environment's pod: a claim with
-    no pod yet — its `202` just made, or recorded by a start cut before its
-    settle — takes this one; a claim on another pod ends (D12)."""
+def _settle_claim(row: Environment, settled: ControllerEnvironment) -> None:
+    """The claim, as a settled start finds the environment: a claim with no pod
+    yet — its `202` just made, or recorded by a start cut before its settle —
+    takes the settled pod, and ends when the environment came to rest with no
+    pod of known start; a claim on another pod ends (D12)."""
     if row.server_started_at is None:
         return
+    pod_started_at = _pod_started_at(settled)
     if row.started_pod_at is None:
-        row.started_pod_at = pod_started_at
+        if pod_started_at is None and settled.status in _AT_REST:
+            logger.info(
+                "Environment %s settled %s with no pod of Pilot's start: its "
+                "claim ends",
+                row.id,
+                settled.status,
+            )
+            _end_claim(row)
+        else:
+            row.started_pod_at = pod_started_at
     elif row.started_pod_at != pod_started_at:
         logger.info(
             "Environment %s no longer runs the pod Pilot's start brought up: "
