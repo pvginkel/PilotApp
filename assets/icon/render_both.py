@@ -6,6 +6,7 @@ VARIANTS = [
     ("Tower - Blue Background", "tower-blue.png"),
     ("Tower - White Background", "tower-white.png"),
 ]
+RENDER_SIZES = (512, 384, 192, 96)
 SVG_RADIUS_RATIO = 0.15
 
 def setup_corners(scene):
@@ -55,16 +56,28 @@ def setup_corners(scene):
 def render_both():
     folder = Path(bpy.data.filepath).parent
     original_scene = bpy.context.window.scene if bpy.context.window else None
-    try:
-        for scene_name, filename in VARIANTS:
-            scene = bpy.data.scenes[scene_name]
+    for scene_name, filename in VARIANTS:
+        scene = bpy.data.scenes[scene_name]
+        render = scene.render
+        original = (render.resolution_x, render.resolution_y,
+                    render.resolution_percentage, render.filepath)
+        try:
+            for size in RENDER_SIZES:
+                render.resolution_x = render.resolution_y = size
+                render.resolution_percentage = 100
+                setup_corners(scene)
+                render.filepath = str(folder / f"{Path(filename).stem}-{size}.png")
+                bpy.ops.render.render(scene=scene.name, write_still=True)
+                print("Saved:", render.filepath)
+                # Keep existing consumers of the unsuffixed 512px names working.
+                if size == 512:
+                    (folder / filename).write_bytes(Path(render.filepath).read_bytes())
+        finally:
+            (render.resolution_x, render.resolution_y,
+             render.resolution_percentage, render.filepath) = original
             setup_corners(scene)
-            scene.render.filepath = str(folder / filename)
-            bpy.ops.render.render(scene=scene.name, write_still=True)
-            print("Saved:", scene.render.filepath)
-    finally:
-        if original_scene and bpy.context.window:
-            bpy.context.window.scene = original_scene
+            if original_scene and bpy.context.window:
+                bpy.context.window.scene = original_scene
 
 if __name__ == "__main__":
     render_both()
