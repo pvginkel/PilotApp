@@ -48,7 +48,8 @@ function Project() {
   const toItem = itemId === undefined || attached !== null ? null : `${itemId}/${blockId ?? ''}`;
   const { panel, front, show, close, toggle, overlayOnTop } = usePanel(projectId, overlay, toItem);
   const [head, setHead] = useState<HTMLElement | null>(null);
-  const panelShown = panel.open && data?.state !== 'draft';
+  // Not before the head is read, which says whether it is a draft, nor where it never is.
+  const panelShown = panel.open && data !== undefined && data.state !== 'draft';
   return (
     <div className="project" data-panel={panelShown ? 'open' : 'closed'} data-front={front}>
       <div className="project-main">

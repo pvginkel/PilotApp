@@ -11,8 +11,9 @@
  * (F98.2); on a phone it is the whole screen (F98.3).
  */
 
+import { randomUUID } from 'node:crypto';
 import { test, expect } from '../support/fixtures';
-import { makeUnique } from '../support/helpers';
+import { makeUnique, waitForUiState } from '../support/helpers';
 import { documentAddress, projectDocumentAddress } from '../support/page-objects/overlay-page';
 import { isOnTop } from '../support/page-objects/panel-page';
 import { addressOf, attachmentAddress } from '../support/page-objects/timeline-page';
@@ -240,6 +241,13 @@ test.describe('The side panel on a wide window', () => {
     const kept = await page.evaluate(() => (JSON.parse(localStorage.getItem('pilot')!) as { panels: Record<string, unknown> }).panels);
     expect(kept[one]).toEqual({ open: false, tab: 'documents' });
     expect(kept[other]).toBeUndefined();
+  });
+
+  test('stands only once the project’s head is read: not at an address naming no project', async ({ page, people, panel }) => {
+    await people.signIn();
+    await page.goto(`/projects/${randomUUID()}`);
+    await waitForUiState(page, 'project.head', 'ready');
+    await expect(panel.root).toHaveCount(0);
   });
 });
 
