@@ -23,8 +23,8 @@ from app.exceptions import (
     RecordNotFoundException,
     SyncProtocolUnsupportedException,
 )
-from app.models import Environment, Project, SaveError
-from app.models.reference import ErrorKind
+from app.models import Environment, Project, SaveError, User
+from app.models.reference import ErrorKind, ProjectState
 from app.services.container import ServiceContainer
 from app.services.sync_service import (
     FAULTS_TOTAL,
@@ -55,6 +55,24 @@ at: 2026-10-12T09:40:00Z
 """
 
 BROKEN = ANSWERED + "\n```question id=Q1\n"
+
+DEFERRED = """---
+title: Camp chores
+---
+
+```question id=Q1
+answer: deferred
+by: agent
+at: 2026-10-12T09:30:00Z
+to: plan
+```
+
+```question id=Q2
+answer: Before the trip
+by: agent
+at: 2026-10-12T09:30:00Z
+```
+"""
 
 PLAN = json.dumps({"ticket": "MD-8", "tasks": [], "notes": []})
 
@@ -126,6 +144,36 @@ def _bear_item(
             project, "decision", "Which tent?", session, ANSWERED
         )
     return f"draft-{project.number}/items/1-which-tent.md"
+
+
+def _project(session: DbSession, person: User) -> Project:
+    """Another draft, created by `person`."""
+    draft = Project(created_by_user_id=person.id)
+    session.add(draft)
+    session.flush()
+    return draft
+
+
+def _open(session: DbSession, project: Project, slug: str) -> None:
+    project.slug = slug
+    project.state_code = ProjectState.OPEN
+    session.flush()
+
+
+def _deferral(
+    container: ServiceContainer,
+    project: Project,
+    session: models.Session,
+    person: User,
+) -> str:
+    """A done item of `project` whose Q1 is deferred to the plan; returns the
+    block as a note names it."""
+    with scoped_session(container):
+        item = container.document_service().bear_item(
+            project, "decision", "Camp chores", session, DEFERRED
+        )
+        container.record_service().done(item, person)
+        return f"{item.id}/Q1"
 
 
 class TestSyncService:
@@ -499,12 +547,16 @@ class TestSyncService:
             "\0".join(["reference.json", reference, "1"]) + "\n"
         )
 
-    def test_check_reports_the_stores_errors_and_deletes_the_reverted_alone(
+    def test_check_reports_the_folders_errors_and_deletes_its_reverted_alone(
         self,
         session: DbSession,
         container: ServiceContainer,
         environment: Environment,
+        project: Project,
+        person: User,
     ) -> None:
+        _open(session, _project(session, person), "camp")
+        draft = f"draft-{project.number}"
         other = Environment(id="example-env-2", name="Example-2", exempt=False)
         session.add(other)
         session.add_all(
@@ -512,13 +564,17 @@ class TestSyncService:
                 _error(STORE_ENVIRONMENT_ID, "camp/b.md", ErrorKind.REVERTED, 4),
                 _error(STORE_ENVIRONMENT_ID, "camp/b.md", ErrorKind.PARSE, 9),
                 _error(STORE_ENVIRONMENT_ID, "camp/a.md", ErrorKind.PARSE, None),
+                _error(STORE_ENVIRONMENT_ID, f"{draft}/a.md", ErrorKind.REVERTED, 3),
+                _error(STORE_ENVIRONMENT_ID, "campsite/a.md", ErrorKind.REVERTED, 5),
                 _error(other.id, "camp/a.md", ErrorKind.REVERTED, 2),
             ]
         )
         session.flush()
+        sync = _sync(container)
 
-        first = _sync(container).check("camp/a.md", HASH, 0.0)
-        second = _sync(container).check("camp/a.md", HASH, 0.0)
+        first = sync.check("camp/a.md", HASH, 0.0)
+        second = sync.check("camp/a.md", HASH, 0.0)
+        drafts = sync.check(f"{draft}/b.md", HASH, 0.0)
 
         assert first.errors == [
             CheckedError("camp/a.md", ErrorKind.PARSE, None, "parse on line None"),
@@ -526,13 +582,100 @@ class TestSyncService:
             CheckedError("camp/b.md", ErrorKind.PARSE, 9, "parse on line 9"),
         ]
         assert second.errors == [first.errors[0], first.errors[2]]
+        assert drafts.errors == [
+            CheckedError(f"{draft}/a.md", ErrorKind.REVERTED, 3, "reverted on line 3")
+        ]
         assert sorted(
-            (error.environment_id, error.kind_code)
+            (error.environment_id, error.path, error.kind_code)
             for error in session.scalars(select(SaveError))
         ) == [
-            ("example-env-1", ErrorKind.PARSE),
-            ("example-env-1", ErrorKind.PARSE),
-            ("example-env-2", ErrorKind.REVERTED),
+            ("example-env-1", "camp/a.md", ErrorKind.PARSE),
+            ("example-env-1", "camp/b.md", ErrorKind.PARSE),
+            ("example-env-1", "campsite/a.md", ErrorKind.REVERTED),
+            ("example-env-2", "camp/a.md", ErrorKind.REVERTED),
+        ]
+
+    @pytest.mark.parametrize(
+        ("path", "sibling"),
+        [
+            ("reference.json", "notes.md"),
+            ("campsite/a.md", "campsite/b.md"),
+            ("{archived}/a.md", "{archived}/b.md"),
+        ],
+    )
+    def test_check_under_no_syncing_folder_reports_the_paths_own_errors_alone(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+        path: str,
+        sibling: str,
+    ) -> None:
+        archived = _project(session, person)
+        archived.archived = True
+        session.flush()
+        path, sibling = (
+            name.format(archived=f"draft-{archived.number}") for name in (path, sibling)
+        )
+        _deferral(container, project, project_session, person)
+        draft = f"draft-{project.number}/a.md"
+        session.add_all(
+            [
+                _error(STORE_ENVIRONMENT_ID, path, ErrorKind.REVERTED, 1),
+                _error(STORE_ENVIRONMENT_ID, path, ErrorKind.PARSE, 2),
+                _error(STORE_ENVIRONMENT_ID, sibling, ErrorKind.REVERTED, 3),
+                _error(STORE_ENVIRONMENT_ID, draft, ErrorKind.REVERTED, 4),
+            ]
+        )
+        session.flush()
+
+        first = _sync(container).check(path, HASH, 0.0)
+        second = _sync(container).check(path, HASH, 0.0)
+
+        assert first.errors == [
+            CheckedError(path, ErrorKind.REVERTED, 1, "reverted on line 1"),
+            CheckedError(path, ErrorKind.PARSE, 2, "parse on line 2"),
+        ]
+        assert first.homeless_deferrals == []
+        assert second.errors == [first.errors[1]]
+        assert sorted(
+            (error.path, error.kind_code)
+            for error in session.scalars(select(SaveError))
+        ) == sorted(
+            [
+                (path, ErrorKind.PARSE),
+                (sibling, ErrorKind.REVERTED),
+                (draft, ErrorKind.REVERTED),
+            ]
+        )
+
+    def test_check_reports_the_projects_deferrals_alone(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        other = _project(session, person)
+        mine = _deferral(container, project, project_session, person)
+        theirs = _deferral(container, other, project_session, person)
+        _open(session, other, "camp")
+        sync = _sync(container)
+
+        answers = [
+            sync.check(path, HASH, 0.0).homeless_deferrals
+            for path in (f"draft-{project.number}/plan.json", "camp/plan.json")
+        ]
+
+        assert [
+            [(deferral.block, deferral.document) for deferral in answer]
+            for answer in answers
+        ] == [
+            [(mine, f"draft-{project.number}/items/1-camp-chores.md")],
+            [(theirs, "camp/items/1-camp-chores.md")],
         ]
 
     def test_check_agrees_with_a_documents_tree_hash_and_its_latest_save(

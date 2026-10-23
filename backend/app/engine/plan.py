@@ -305,15 +305,14 @@ class PlanService:
             )
         self.db.flush()
 
-    def homeless_deferrals(self) -> list[HomelessDeferral]:
-        """Every deferral without a home, computed and never stored (DB
-        decision 214): a Block answered `deferred` in a Document whose Item is
-        done, deferred to a Plan Task that is not `done` or to the plan of a
-        Project not finished, that no Plan Note names, a struck note's
-        reference counting. In project, item and block order."""
+    def homeless_deferrals(self, project: Project) -> list[HomelessDeferral]:
+        """The project's deferrals without a home, computed and never stored
+        (DB decision 214): a Block answered `deferred` in a Document whose Item
+        is the project's and done, deferred to a Plan Task that is not `done`
+        or to the plan while the project is not finished, that no Plan Note
+        names, a struck note's reference counting. In item and block order."""
         rows = self.db.execute(
             select(
-                Project,
                 Document.path,
                 Item.title,
                 Block.document_id,
@@ -332,6 +331,7 @@ class PlanService:
                 ),
             )
             .where(
+                Item.project_id == project.id,
                 Block.answer == dsl.DEFERRED,
                 Item.done_at.is_not(None),
                 or_(
@@ -343,7 +343,7 @@ class PlanService:
                 ),
                 ~exists().where(PlanNoteReference.block_id == Block.id),
             )
-            .order_by(Project.number, Item.seq, Block.position)
+            .order_by(Item.seq, Block.position)
         ).all()
         return [
             HomelessDeferral(
@@ -352,7 +352,7 @@ class PlanService:
                 title=title,
                 to=dsl.PLAN if task_id is None else task_id,
             )
-            for project, path, title, document_id, local_id, task_id in rows
+            for path, title, document_id, local_id, task_id in rows
         ]
 
 

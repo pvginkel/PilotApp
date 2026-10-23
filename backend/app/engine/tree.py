@@ -112,6 +112,14 @@ class TreeService:
                 return TreeDocument(project, found[0], found[1])
         raise RecordNotFoundException("Path", path)
 
+    def project_of(self, path: str) -> Project | None:
+        """The syncing project whose folder holds `path`, from the tree's
+        root: the `<slug>/` or `draft-<number>/` it starts with. None for a
+        path at the tree's root and for one under a folder no syncing project
+        has, an archived project's included (design 1 §5.6 step 3)."""
+        folder, slash, _ = path.partition("/")
+        return self._project(folder) if slash else None
+
     def read(self, path: str) -> TreeFile:
         """The bytes `path` must hold in the tree, and their tree hash."""
         resolved = self.resolve(path)

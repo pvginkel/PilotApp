@@ -194,10 +194,11 @@ def check(
 ) -> Any:
     """The hook's check of a file of the store's tree after an edit (design 1
     §5.6 step 3): the file's hash on disk, once its sidecar has it acked, in;
-    whether the server agrees with it, every Save Error of the store's tree
-    and every deferral without a home out. A `reverted` Save Error is
-    answered once and deleted; a `parse` one stands until a clean save of
-    its path."""
+    whether the server agrees with it, the Save Errors of the file's project
+    folder and that project's deferrals without a home out, a file under no
+    syncing project's folder answered its own Save Errors alone. A
+    `reverted` Save Error is answered once and deleted; a `parse` one stands
+    until a clean save of its path."""
     body = SyncCheckRequestSchema.model_validate(request.get_json())
     answer = sync_service.check(body.path, body.hash, body.wait_seconds)
     response = SyncCheckResponseSchema.model_validate(answer, from_attributes=True)

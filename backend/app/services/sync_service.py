@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.app_config import AppSettings
 from app.engine.ingest import Ingested, IngestService, PathKind
+from app.engine.paths import folder
 from app.engine.plan import HomelessDeferral, PlanService
 from app.engine.tree import ManifestEntry, TreeFile, TreePlan, TreeService
 from app.exceptions import (
@@ -234,14 +235,23 @@ class SyncService:
         `wait_seconds` of waiting for that (design 1 §5.6 step 3).
 
         `checked` says whether the server agrees with that hash, a
-        disagreement logged. The errors are every Save Error of the store's
-        Environment in path order: its `reverted` rows are deleted as they are
-        read, so each is reported once, and its `parse` rows stand until a
-        clean save of their path. With them, every deferral without a home.
+        disagreement logged. The errors are the Save Errors of the store's
+        Environment under the folder of the syncing project that holds `path`,
+        in path order: its `reverted` rows are deleted as they are read, so
+        each is reported once, to that project's check alone, and its `parse`
+        rows stand until a clean save of their path. With them, that project's
+        deferrals without a home. A path under no syncing project's folder is
+        answered its own Save Errors alone.
         """
         HOOK_WAIT_SECONDS.observe(wait_seconds)
         checked = self._agrees(path, disk_hash)
-        store = SaveError.environment_id == self.app_settings.store_environment_id
+        project = self.tree_service.project_of(path)
+        scope = (
+            SaveError.environment_id == self.app_settings.store_environment_id,
+            SaveError.path == path
+            if project is None
+            else SaveError.path.startswith(f"{folder(project)}/"),
+        )
         columns = (
             SaveError.id,
             SaveError.path,
@@ -253,17 +263,20 @@ class SyncService:
         # after it is the next check's to report.
         reverted = self.db.execute(
             delete(SaveError)
-            .where(store, SaveError.kind_code == ErrorKind.REVERTED)
+            .where(*scope, SaveError.kind_code == ErrorKind.REVERTED)
             .returning(*columns)
         ).all()
         parse = self.db.execute(
-            select(*columns).where(store, SaveError.kind_code == ErrorKind.PARSE)
+            select(*columns).where(*scope, SaveError.kind_code == ErrorKind.PARSE)
         ).all()
         errors = [
             CheckedError(row.path, row.kind_code, row.line, row.message)
             for row in sorted([*parse, *reverted], key=lambda row: (row.path, row.id))
         ]
-        return Checked(checked, errors, self.plan_service.homeless_deferrals())
+        deferrals = (
+            [] if project is None else self.plan_service.homeless_deferrals(project)
+        )
+        return Checked(checked, errors, deferrals)
 
     def _agrees(self, path: str, disk_hash: str) -> bool:
         """Whether the server agrees `path` holds `disk_hash`: the path's tree

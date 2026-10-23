@@ -1217,6 +1217,119 @@ class TestCheck:
             ],
         }
 
+    def test_the_answer_is_the_files_project_folders_alone(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        other = Project(created_by_user_id=person.id)
+        session.add(other)
+        session.flush()
+        mine = _bear_item(container, project, project_session, ANSWERED)
+        _bear_item(container, other, project_session, ANSWERED)
+        my_block, my_done = _done_deferrals(container, project, project_session, person)
+        their_block, their_draft = _done_deferrals(
+            container, other, project_session, person
+        )
+        with scoped_session(container):
+            other.slug = "camp"
+            other.state_code = ProjectState.OPEN
+        theirs = "camp/items/1-which-tent.md"
+        their_done = their_draft.replace(f"draft-{other.number}/", "camp/")
+        reverting = ANSWERED.replace("by: ada", "by: agent")
+        fake_sidecar.save(mine, reverting)
+        fake_sidecar.save(theirs, reverting)
+
+        answers = [
+            fake_sidecar.post_check(path, sha256_hex(ANSWERED), 0.0).json
+            for path in (mine, mine, theirs, theirs)
+        ]
+
+        assert [
+            [(error["path"], error["kind"]) for error in answer["errors"]]
+            for answer in answers
+        ] == [[(mine, "reverted")], [], [(theirs, "reverted")], []]
+        assert [
+            [
+                (deferral["block"], deferral["document"])
+                for deferral in answer["homeless_deferrals"]
+            ]
+            for answer in answers
+        ] == [
+            [(f"{my_block}/D1", my_done), (f"{my_block}/Q1", my_done)],
+            [(f"{my_block}/D1", my_done), (f"{my_block}/Q1", my_done)],
+            [(f"{their_block}/D1", their_done), (f"{their_block}/Q1", their_done)],
+            [(f"{their_block}/D1", their_done), (f"{their_block}/Q1", their_done)],
+        ]
+
+    @pytest.mark.parametrize(
+        ("path", "sibling"),
+        [
+            ("reference.json", "notes.md"),
+            ("example/notes.md", "example/plan.json"),
+            ("{archived}/items/1-which-tent.md", "{archived}/plan.json"),
+        ],
+    )
+    def test_a_path_under_no_syncing_folder_is_answered_its_own_errors_alone(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+        path: str,
+        sibling: str,
+    ) -> None:
+        archived = Project(created_by_user_id=person.id)
+        session.add(archived)
+        session.flush()
+        mine = _bear_item(container, project, project_session, ANSWERED)
+        _done_deferrals(container, project, project_session, person)
+        fake_sidecar.save(mine, ANSWERED.replace("by: ada", "by: agent"))
+        with scoped_session(container):
+            archived.archived = True
+        path, sibling = (
+            name.format(archived=f"draft-{archived.number}") for name in (path, sibling)
+        )
+        session.add_all(
+            SaveError(
+                environment_id=STORE_ENVIRONMENT_ID,
+                path=at,
+                kind_code=kind,
+                line=1,
+                message="a fault",
+            )
+            for at, kind in (
+                (path, ErrorKind.REVERTED),
+                (path, ErrorKind.PARSE),
+                (sibling, ErrorKind.REVERTED),
+            )
+        )
+        session.flush()
+
+        answers = [fake_sidecar.post_check(path, HASH, 0.0).json for _ in range(2)]
+
+        assert [
+            [(error["path"], error["kind"]) for error in answer["errors"]]
+            for answer in answers
+        ] == [[(path, "reverted"), (path, "parse")], [(path, "parse")]]
+        assert [answer["homeless_deferrals"] for answer in answers] == [[], []]
+        assert sorted(
+            (at, kind)
+            for at, kind in session.execute(select(SaveError.path, SaveError.kind_code))
+        ) == sorted(
+            [
+                (mine, ErrorKind.REVERTED),
+                (path, ErrorKind.PARSE),
+                (sibling, ErrorKind.REVERTED),
+            ]
+        )
+
     def test_a_deferral_in_a_registered_document_with_no_title_has_none(
         self,
         container: ServiceContainer,

@@ -11,7 +11,7 @@ from app import models
 from app.engine.paths import sha256_hex
 from app.engine.tree import ManifestEntry, TreeDocument, TreeFile, TreePlan
 from app.exceptions import RecordNotFoundException
-from app.models import Attachment, Document, Environment, Project, SaveError
+from app.models import Attachment, Document, Environment, Project, SaveError, User
 from app.models.reference import AttachmentSource, ErrorKind, ProjectState
 from app.services.container import ServiceContainer
 
@@ -372,6 +372,64 @@ class TestTreeServicePaths:
         session.flush()
         with pytest.raises(RecordNotFoundException):
             tree.resolve("badge-colours/project.md")
+
+    def test_a_paths_project_is_the_syncing_one_whose_folder_holds_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+    ) -> None:
+        opened = Project(created_by_user_id=person.id)
+        session.add(opened)
+        session.flush()
+        opened.slug = "badge-colours"
+        opened.state_code = ProjectState.OPEN
+        session.flush()
+        draft = f"draft-{project.number}"
+
+        assert [
+            container.tree_service().project_of(path)
+            for path in (
+                f"{draft}/project.md",
+                f"{draft}/notes.md",
+                f"{draft}/attachments/3/palette.md",
+                "badge-colours/items/1-the-palette.md",
+                "badge-colours/plan.json",
+            )
+        ] == [project, project, project, opened, opened]
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "reference.json",
+            "{folder}",
+            "notes.md",
+            "camp/project.md",
+            "draft-999999/project.md",
+            "draft-0{number}/project.md",
+        ],
+    )
+    def test_a_path_under_no_projects_folder_has_no_project(
+        self, container: ServiceContainer, project: Project, path: str
+    ) -> None:
+        path = path.format(folder=f"draft-{project.number}", number=project.number)
+
+        assert container.tree_service().project_of(path) is None
+
+    def test_an_archived_or_opened_projects_draft_folder_has_no_project(
+        self, session: DbSession, container: ServiceContainer, project: Project
+    ) -> None:
+        tree = container.tree_service()
+        project.slug = "badge-colours"
+        project.state_code = ProjectState.OPEN
+        session.flush()
+
+        assert tree.project_of(f"draft-{project.number}/project.md") is None
+        assert tree.project_of("badge-colours/project.md") == project
+        project.archived = True
+        session.flush()
+        assert tree.project_of("badge-colours/project.md") is None
 
     def test_read_gives_the_published_text_or_the_held_ingest(
         self,

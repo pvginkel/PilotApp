@@ -1873,7 +1873,7 @@
             "type": "boolean"
           },
           "errors": {
-            "description": "Every Save Error of the store's tree, in path order; the `reverted` ones are reported once",
+            "description": "The Save Errors of the file's project folder, in path order, or the file's own under no syncing project's folder; the `reverted` ones are reported once",
             "items": {
               "$ref": "#/components/schemas/SyncCheckResponseSchema.19c06e7.SyncSaveErrorSchema"
             },
@@ -1881,7 +1881,7 @@
             "type": "array"
           },
           "homeless_deferrals": {
-            "description": "Every deferral without a home",
+            "description": "The deferrals without a home of the file's project; none under no syncing project's folder",
             "items": {
               "$ref": "#/components/schemas/SyncCheckResponseSchema.19c06e7.SyncHomelessDeferralSchema"
             },
@@ -5126,7 +5126,7 @@
             "description": "Upgrade Required"
           }
         },
-        "summary": "The hook's check of a file of the store's tree after an edit (design 1 §5.6 step 3): the file's hash on disk, once its sidecar has it acked, in; whether the server agrees with it, every Save Error of the store's tree and every deferral without a home out. A `reverted` Save Error is answered once and deleted; a `parse` one stands until a clean save of its path.",
+        "summary": "The hook's check of a file of the store's tree after an edit (design 1 §5.6 step 3): the file's hash on disk, once its sidecar has it acked, in; whether the server agrees with it, the Save Errors of the file's project folder and that project's deferrals without a home out, a file under no syncing project's folder answered its own Save Errors alone. A `reverted` Save Error is answered once and deleted; a `parse` one stands until a clean save of its path.",
         "tags": []
       }
     },

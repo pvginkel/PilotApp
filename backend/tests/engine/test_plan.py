@@ -833,7 +833,7 @@ class TestPlanServiceHomelessDeferrals:
         item = _deferrals(container, project, project_session, person)
 
         document = f"draft-{project.number}/items/1-camp-chores.md"
-        assert container.plan_service().homeless_deferrals() == [
+        assert container.plan_service().homeless_deferrals(project) == [
             HomelessDeferral(f"{item.id}/D1", document, "Camp chores", "fix"),
             HomelessDeferral(f"{item.id}/Q1", document, "Camp chores", "plan"),
         ]
@@ -859,7 +859,7 @@ class TestPlanServiceHomelessDeferrals:
         container.record_service().done(item, person)
 
         path = f"draft-{project.number}/items/1-camp-chores.md"
-        assert container.plan_service().homeless_deferrals() == [
+        assert container.plan_service().homeless_deferrals(project) == [
             HomelessDeferral(f"{item.id}/D1", path, None, "fix"),
             HomelessDeferral(f"{item.id}/Q1", path, None, "plan"),
         ]
@@ -874,7 +874,7 @@ class TestPlanServiceHomelessDeferrals:
         _save(container, project, _plan())
         _deferrals(container, project, project_session, person, done=False)
 
-        assert container.plan_service().homeless_deferrals() == []
+        assert container.plan_service().homeless_deferrals(project) == []
 
     def test_a_deferral_in_the_draft_is_no_items_and_not_homeless(
         self, container: ServiceContainer, project: Project
@@ -883,7 +883,7 @@ class TestPlanServiceHomelessDeferrals:
             project, DEFERRED.replace("to: fix", "to: plan")
         )
 
-        assert container.plan_service().homeless_deferrals() == []
+        assert container.plan_service().homeless_deferrals(project) == []
 
     def test_a_note_naming_the_block_is_its_home_open_or_struck(
         self,
@@ -900,13 +900,13 @@ class TestPlanServiceHomelessDeferrals:
         assert _save(container, project, plan) == []
         homed = _homeless(session, project, item, "Q1:plan")
 
-        assert container.plan_service().homeless_deferrals() == homed
+        assert container.plan_service().homeless_deferrals(project) == homed
 
         # The note is struck: it was dealt with, and the block keeps its home.
         plan["tasks"][0]["notes"] = []
         assert _save(container, project, plan) == []
         assert session.scalars(select(PlanNote.deleted_at)).one() is not None
-        assert container.plan_service().homeless_deferrals() == homed
+        assert container.plan_service().homeless_deferrals(project) == homed
 
         plan["notes"] = [
             {
@@ -917,7 +917,7 @@ class TestPlanServiceHomelessDeferrals:
             }
         ]
         assert _save(container, project, plan) == []
-        assert container.plan_service().homeless_deferrals() == []
+        assert container.plan_service().homeless_deferrals(project) == []
 
     def test_a_deferral_to_a_done_task_or_a_finished_project_is_not_homeless(
         self,
@@ -933,16 +933,16 @@ class TestPlanServiceHomelessDeferrals:
         plan["tasks"][0]["status"] = "done"
         assert _save(container, project, plan) == []
 
-        assert container.plan_service().homeless_deferrals() == _homeless(
+        assert container.plan_service().homeless_deferrals(project) == _homeless(
             session, project, item, "Q1:plan"
         )
 
         project.slug = "camp"
         project.state_code = ProjectState.FINISHED
         session.flush()
-        assert container.plan_service().homeless_deferrals() == []
+        assert container.plan_service().homeless_deferrals(project) == []
 
-    def test_the_deferrals_are_in_project_item_and_block_order(
+    def test_the_deferrals_are_the_projects_alone_in_item_and_block_order(
         self,
         session: DbSession,
         container: ServiceContainer,
@@ -950,17 +950,20 @@ class TestPlanServiceHomelessDeferrals:
         project_session: models.Session,
         person: User,
     ) -> None:
-        later = Project(created_by_user_id=person.id)
-        session.add(later)
+        other = Project(created_by_user_id=person.id)
+        session.add(other)
         session.flush()
-        for owner in (later, project):
+        for owner in (other, project):
             _save(container, owner, _plan())
-        last = _deferrals(container, later, project_session, person)
+        others = _deferrals(container, other, project_session, person)
         first = _deferrals(container, project, project_session, person)
         second = _deferrals(container, project, project_session, person)
+        plans = container.plan_service()
 
-        assert container.plan_service().homeless_deferrals() == [
+        assert plans.homeless_deferrals(project) == [
             *_homeless(session, project, first, "D1:fix", "Q1:plan"),
             *_homeless(session, project, second, "D1:fix", "Q1:plan"),
-            *_homeless(session, later, last, "D1:fix", "Q1:plan"),
         ]
+        assert plans.homeless_deferrals(other) == _homeless(
+            session, other, others, "D1:fix", "Q1:plan"
+        )

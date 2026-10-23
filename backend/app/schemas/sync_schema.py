@@ -120,9 +120,12 @@ class SyncCheckResponseSchema(BaseModel):
     )
     errors: list[SyncSaveErrorSchema] = Field(
         ...,
-        description="Every Save Error of the store's tree, in path order; the"
+        description="The Save Errors of the file's project folder, in path"
+        " order, or the file's own under no syncing project's folder; the"
         " `reverted` ones are reported once",
     )
     homeless_deferrals: list[SyncHomelessDeferralSchema] = Field(
-        ..., description="Every deferral without a home"
+        ...,
+        description="The deferrals without a home of the file's project; none"
+        " under no syncing project's folder",
     )
