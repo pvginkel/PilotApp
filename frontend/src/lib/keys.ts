@@ -8,8 +8,8 @@ import { useEffect, useRef } from 'react';
 
 // Each layer's rank, bottom to top: Esc closes the highest ranked open, and within a rank the one
 // opened last. Other's consoles lie under everything; a menu shares its rank with Stop's
-// confirmation; the overlay shares its rank with the panel, so where the two lie over each other
-// the one opened last closes first.
+// confirmation; the overlay shares its rank with the panel, which is open to Esc only while it lies
+// on top of the overlay (use-panel.ts), so that the one opened last closes first.
 const RANKS = { console: 0, overlay: 1, panel: 1, plan: 2, menu: 3, dialog: 4, keys: 5 } as const;
 type EscapeLayer = keyof typeof RANKS;
 

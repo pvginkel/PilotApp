@@ -12,12 +12,24 @@ export type Theme = (typeof THEMES)[number];
 export const GROUPS = ['others', 'finished'] as const;
 export type Group = (typeof GROUPS)[number];
 
+/** The side panel's tabs (F38.1). */
+export const PANEL_TABS = ['documents'] as const;
+export type PanelTab = (typeof PANEL_TABS)[number];
+
+/** A project's side panel as the person last left it: open or not, and its tab. */
+export interface Panel {
+  open: boolean;
+  tab: PanelTab;
+}
+
 interface BrowserState {
   theme: Theme;
   /** The project last on screen, which the bare address opens (F1.6). */
   project: string | null;
   /** Each group's chevron as the person last set it: open or not. */
   chevrons: Record<Group, boolean>;
+  /** Each project's side panel, by the project's id, once the person set it (F1.6, F38.1). */
+  panels: Record<string, Panel>;
 }
 
 const STORAGE_KEY = 'pilot';
@@ -31,7 +43,19 @@ function load(): BrowserState {
     theme: THEMES.find((theme) => theme === saved.theme) ?? 'system',
     project: typeof saved.project === 'string' ? saved.project : null,
     chevrons: { others: chevrons.others === true, finished: chevrons.finished === true },
+    panels: loadPanels(saved.panels),
   };
+}
+
+function loadPanels(saved: unknown): Record<string, Panel> {
+  if (typeof saved !== 'object' || saved === null) return {};
+  const panels: Record<string, Panel> = {};
+  for (const [projectId, panel] of Object.entries(saved as Record<string, unknown>)) {
+    if (typeof panel !== 'object' || panel === null) continue;
+    const { open, tab } = panel as Partial<Record<keyof Panel, unknown>>;
+    panels[projectId] = { open: open === true, tab: PANEL_TABS.find((each) => each === tab) ?? 'documents' };
+  }
+  return panels;
 }
 
 let state = load();
@@ -46,6 +70,11 @@ export function rememberInBrowser(change: Partial<BrowserState>): void {
   state = { ...state, ...change };
   localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...load(), ...change }));
   listeners.forEach((listener) => listener());
+}
+
+/** Keeps a project's side panel as the person set it, over what another tab keeps for the others. */
+export function rememberPanel(projectId: string, panel: Panel): void {
+  rememberInBrowser({ panels: { ...load().panels, [projectId]: panel } });
 }
 
 function subscribe(listener: () => void): () => void {

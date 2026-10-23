@@ -1,0 +1,94 @@
+/* A project's page and its side panel (PilotAppSpecs design/mockup/style.css, "The side panel",
+   "The documents tab" and "Narrow screens"). */
+
+@layer components {
+  /* The project's head over its timeline, and the panel beside them. Neither is positioned: the
+     overlay, and the panel on a narrower window, lie over the side column and the centre, placed
+     on .app. */
+  .project { flex: 1; min-height: 0; display: flex; }
+  .project-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+  /* A page of its own in the project list's colour, as the overlay is. */
+  .panel {
+    --background: var(--side);
+    --card: var(--side);
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    width: var(--panel);
+    min-height: 0;
+    border-left: 1px solid hsl(var(--border));
+    background: hsl(var(--background));
+  }
+  /* On a wide window the panel stands beside the timeline, and the overlay opens to its left. */
+  @media (min-width: 1200px) {
+    .project[data-panel="open"] { --panel-space: var(--panel); }
+  }
+  /* Its height and --tab-top are lined up with the project's head on a wide window (panel.tsx). */
+  .panel-head {
+    flex: none;
+    display: flex;
+    align-items: stretch;
+    gap: 4px;
+    height: 52px;
+    padding: 0 10px 0 8px;
+    border-bottom: 1px solid hsl(var(--border));
+  }
+  .panel-head .grow { flex: 1; }
+  .panel-head .btn { align-self: center; }
+  .ptab {
+    position: relative;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: var(--tab-top, 14px) 10px 0;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    background: none;
+    color: hsl(var(--muted-foreground));
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .ptab:hover { color: hsl(var(--foreground)); }
+  .ptab.on { border-bottom-color: hsl(var(--primary)); color: hsl(var(--foreground)); }
+  .panel-body { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
+
+  /* The Documents tab. */
+  .docs { padding: 4px 8px 16px; }
+  .docs h3 { margin: 14px 8px 6px; font-size: 13px; font-weight: 600; color: hsl(var(--muted-foreground)); }
+  .docs ul { margin: 0; padding: 0; list-style: none; }
+  .docs .none { margin: 0 8px; font-size: 13.5px; color: hsl(var(--muted-foreground)); }
+  .doc-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    width: 100%;
+    padding: 7px 8px;
+    border-radius: 6px;
+    color: inherit;
+    font-size: 14px;
+    text-decoration: none;
+  }
+  a.doc-row:hover { background: hsl(var(--accent)); text-decoration: none; }
+  .doc-row > .icon { color: hsl(var(--primary)); position: relative; top: calc(0.5em - 0.5cap); }
+  .doc-row .t { display: flex; flex-direction: column; min-width: 0; }
+  .doc-row .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .doc-row .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: hsl(var(--muted-foreground)); }
+  /* Files attached in one call: under their folder, by the width of its icon and the gap after it. */
+  .doc-batch > ul { padding-left: 24px; }
+
+  /* Narrower: the panel lies over the timeline; it and the overlay lie over each other, the one
+     opened last on top, the overlay's backdrop with it. */
+  @media (max-width: 1199px) {
+    .panel { position: absolute; top: 0; right: 0; bottom: 0; z-index: 21; box-shadow: var(--shadow-lg); }
+    .project[data-front="overlay"] .sheet-backdrop { z-index: 22; }
+    .project[data-front="overlay"] .sheet { z-index: 23; }
+  }
+  /* A phone: the whole screen (F98.3). */
+  @media (max-width: 900px) {
+    .panel { left: 0; width: auto; border-left: 0; }
+  }
+}

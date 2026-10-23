@@ -62,6 +62,7 @@ test.describe('A document’s address', () => {
     shell,
     timeline,
     overlay,
+    panel,
   }) => {
     const me = await people.signIn();
     const name = makeUnique('Overlay');
@@ -106,17 +107,20 @@ test.describe('A document’s address', () => {
     await expect(overlay.send).toHaveText('Send answers');
     await expect(overlay.send).toBeDisabled();
 
-    // Part of the page, at the mockup's width: the column and the scrollbar, at the window's right.
+    // Part of the page, at the mockup's width: the column and the scrollbar, left of the side panel,
+    // which stands open at the window's right (F98.1).
     const viewport = page.viewportSize()!;
     const box = (await overlay.root.boundingBox())!;
+    const side = (await panel.root.boundingBox())!;
     const app = (await shell.app.boundingBox())!;
     expect(box.width).toBe(844);
-    expect(box.x + box.width).toBe(viewport.width);
+    expect(box.x + box.width).toBe(side.x);
+    expect(side.x + side.width).toBe(viewport.width);
     expect(box.y).toBe(app.y);
     expect(box.y + box.height).toBe(app.y + app.height);
   });
 
-  test('maximized it takes the page, and restored it is the mockup’s width again', async ({ page, people, projects, overlay }) => {
+  test('maximized it takes the page beside the side panel, and restored it is the mockup’s width again', async ({ people, projects, overlay, panel }) => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Maximize'), members: [me.handle!] });
     const trip = await projects.place(id, { kind: 'document', title: 'The trip', text: TRIP });
@@ -127,7 +131,7 @@ test.describe('A document’s address', () => {
     await overlay.maximize.click();
     await expect(overlay.root).toHaveClass(/\bmax\b/);
     await expect(overlay.maximize).toHaveAttribute('title', 'Restore');
-    await expect.poll(width).toBe(page.viewportSize()!.width);
+    await expect.poll(width).toBe((await panel.root.boundingBox())!.x);
 
     await overlay.maximize.click();
     await expect(overlay.root).not.toHaveClass(/\bmax\b/);

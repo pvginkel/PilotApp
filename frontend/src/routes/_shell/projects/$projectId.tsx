@@ -6,17 +6,20 @@
  * card, at the block (F33). An attachment's address under an item's opens it in the overlay over
  * the timeline where the timeline stands, and under a document's in the document's overlay
  * (F28.5). The handbook's address, and the project document's, open it in the overlay over the
- * timeline (F129.4, F37.4). Another project's address closes it.
+ * timeline (F129.4, F37.4). Another project's address closes it. Beside the head and the timeline
+ * stands the side panel, the project's own (F38.1), which a draft does not have.
  */
 
-import { useEffect } from 'react';
-import { createFileRoute, useMatch, useParams } from '@tanstack/react-router';
+import { useEffect, useState } from 'react';
+import { createFileRoute, useMatch, useParams, useRouterState } from '@tanstack/react-router';
 import { ItemAttachmentOverlay } from '@/components/overlay/attachment-overlay';
 import { DocumentOverlay } from '@/components/overlay/document-overlay';
 import { HandbookOverlay, ProjectDocumentOverlay } from '@/components/overlay/project-document-overlay';
+import { Panel } from '@/components/panel/panel';
 import { ProjectHead } from '@/components/projects/project-head';
 import { isCard } from '@/components/timeline/document-state';
 import { Timeline } from '@/components/timeline/timeline';
+import { usePanel } from '@/hooks/use-panel';
 import { useProjectHead } from '@/hooks/use-projects';
 import { useTimelineItem, type TimelineItem } from '@/hooks/use-timeline';
 import { rememberInBrowser } from '@/lib/browser-state';
@@ -40,15 +43,30 @@ function Project() {
   const goneTo = itemId === undefined || attached !== null ? null : { item: itemId, block: blockId ?? null };
   const handbook = useMatch({ from: '/_shell/projects/$projectId/handbook', shouldThrow: false }) !== undefined;
   const projectDocument = useMatch({ from: '/_shell/projects/$projectId/project-document', shouldThrow: false }) !== undefined;
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const overlay = overlaid !== null || attached !== null || handbook || projectDocument ? pathname : null;
+  const toItem = itemId === undefined || attached !== null ? null : `${itemId}/${blockId ?? ''}`;
+  const { panel, front, show, close, toggle, overlayOnTop } = usePanel(projectId, overlay, toItem);
+  const [head, setHead] = useState<HTMLElement | null>(null);
+  const panelShown = panel.open && data?.state !== 'draft';
   return (
-    <>
-      {data && <ProjectHead project={data} />}
-      <Timeline projectId={projectId} address={goneTo} />
+    <div className="project" data-panel={panelShown ? 'open' : 'closed'} data-front={front}>
+      <div className="project-main">
+        {data && (
+          <ProjectHead
+            ref={setHead}
+            project={data}
+            documents={{ shown: panelShown && panel.tab === 'documents', toggle: () => toggle('documents') }}
+          />
+        )}
+        <Timeline projectId={projectId} address={goneTo} />
+      </div>
+      {panelShown && <Panel projectId={projectId} tab={panel.tab} head={head} onTab={show} onClose={close} onOpen={overlayOnTop} />}
       {overlaid !== null && <DocumentOverlay projectId={projectId} project={data} {...overlaid} />}
       {attached !== null && <ItemAttachmentOverlay projectId={projectId} {...attached} />}
       {handbook && <HandbookOverlay projectId={projectId} project={data} />}
       {projectDocument && <ProjectDocumentOverlay projectId={projectId} project={data} />}
-    </>
+    </div>
   );
 }
 

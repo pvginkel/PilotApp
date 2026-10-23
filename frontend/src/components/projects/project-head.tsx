@@ -1,8 +1,9 @@
 /**
  * A project's head (F2): its name, ticket and repo, linked (F2.1); auto pilot's switch, or the
  * Finished chip once finished (F2.6, F4.1); the step button and its plan (F2.2, F3); the members
- * (F2.5); the handbook, opening in the overlay (F2.3, F129.4); the plan's notes (F2.7); the
- * project's menu (F2.4). A draft, which has no handbook (F129.2), has in its head its name, the
+ * (F2.5); the Documents button, toggling the side panel's Documents tab, and the handbook, opening
+ * in the overlay (F2.3, F129.4); the plan's notes (F2.7); the project's menu (F2.4). A draft, which
+ * has neither a handbook (F129.2) nor the panel's Documents tab, has in its head its name, the
  * Draft chip, its members and its menu. An archived project's reads as it was left, marked
  * archived, its switch not to be flipped (D012).
  *
@@ -10,9 +11,10 @@
  * members and the icons, the repo hidden.
  */
 
+import type { Ref } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import { Archive, Flag, NotebookText } from 'lucide-react';
+import { Archive, Files, Flag, NotebookText } from 'lucide-react';
 import { NotesButton } from '@/components/projects/plan-notes';
 import { StepButton } from '@/components/projects/plan-popover';
 import { ProjectMenu } from '@/components/projects/project-menu';
@@ -21,11 +23,19 @@ import { LinkedText } from '@/components/shared/linked-text';
 import type { ProjectHead as Project } from '@/hooks/use-projects';
 import { usePostProjectsTransitionsByProjectId } from '@/lib/api/generated/hooks';
 import { trackFormError, trackFormSubmit, trackFormSuccess } from '@/lib/test/form-instrumentation';
+import { cn } from '@/lib/utils';
 
-export function ProjectHead({ project }: { project: Project }) {
+interface ProjectHeadProps {
+  project: Project;
+  /** The side panel's Documents tab: whether it is showing, and its toggle. */
+  documents: { shown: boolean; toggle: () => void };
+  ref?: Ref<HTMLElement>;
+}
+
+export function ProjectHead({ project, documents, ref }: ProjectHeadProps) {
   const draft = project.state === 'draft';
   return (
-    <header className="feed-head" data-testid="project.head">
+    <header ref={ref} className="feed-head" data-testid="project.head">
       <div className="head-row">
         <h1 data-testid="project.name">
           <LinkedText text={project.name ?? 'New project'} />
@@ -59,11 +69,29 @@ export function ProjectHead({ project }: { project: Project }) {
       <div className="head-row">
         {!draft && <StepButton progress={project.progress} tasks={project.tasks} />}
         <Members members={project.members} />
+        {!draft && <DocumentsButton {...documents} />}
         {!draft && <HandbookButton projectId={project.id} />}
         {!draft && <NotesButton notes={project.notes} />}
         <ProjectMenu project={project} />
       </div>
     </header>
+  );
+}
+
+/** The side panel's Documents tab, closing the panel where it is the tab showing. */
+function DocumentsButton({ shown, toggle }: { shown: boolean; toggle: () => void }) {
+  return (
+    <button
+      type="button"
+      className={cn('btn btn-ghost btn-sm btn-icon head-icon', shown && 'on')}
+      onClick={toggle}
+      aria-pressed={shown}
+      title="The project’s documents"
+      aria-label="The project’s documents"
+      data-testid="project.documents"
+    >
+      <Files className="icon" aria-hidden="true" />
+    </button>
   );
 }
 
