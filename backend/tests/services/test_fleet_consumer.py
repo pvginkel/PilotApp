@@ -83,6 +83,7 @@ def _columns(container: ServiceContainer, env_id: str) -> dict[str, Any] | None:
             "last_seen_at": row.last_seen_at,
             "exempt": row.exempt,
             "server_started_at": row.server_started_at,
+            "started_pod_at": row.started_pod_at,
             "stop_due_at": row.stop_due_at,
         }
 
@@ -168,6 +169,37 @@ class TestFleetConsumer:
             "stopped",
         )
         assert _column(container, "env-a", "last_seen_at") > listed_at
+
+    @pytest.mark.parametrize("report", ["stopped", "gone"])
+    def test_a_report_leaves_the_claim_as_it_is(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        consume: Consume,
+        report: str,
+    ) -> None:
+        # D12: the claim ends at the tick's or a start's check of the pod, and
+        # the consumer writes none of the starter's columns.
+        container = committed_app.container
+        fake_controller.add_environment("env-a", status="running")
+        claim = {
+            "server_started_at": datetime.now(UTC) - timedelta(hours=1),
+            "started_pod_at": fake_controller.environment("env-a").pod_started_at,
+            "stop_due_at": datetime.now(UTC) + timedelta(minutes=5),
+        }
+        _add(container, Environment(id="env-a", name="Alpha", exempt=False, **claim))
+        consume()
+
+        if report == "stopped":
+            fake_controller.set_status("env-a", "stopped")
+        else:
+            fake_controller.remove_environment("env-a")
+
+        wait_until(lambda: _column(container, "env-a", "last_state") == report, report)
+        columns = _columns(container, "env-a")
+        assert columns is not None
+        assert {column: columns[column] for column in claim} == claim
 
     def test_an_exempt_environment_has_no_deadline(
         self,

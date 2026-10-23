@@ -108,14 +108,18 @@ def controller_session(
     return _headless(fake_controller, controller_client)
 
 
-def _environment_row(db: DbSession, *, due: datetime | None = None) -> Environment:
-    """The environment's row, as Pilot's own start left it."""
+def _environment_row(
+    db: DbSession, *, pod: datetime | None = None, due: datetime | None = None
+) -> Environment:
+    """The environment's row, as Pilot's own start left it, its claim on the pod
+    that started at `pod`."""
     row = Environment(
         id=ENV,
         name="Env-A",
         exempt=False,
         last_state="running",
         server_started_at=datetime.now(UTC) - timedelta(hours=1),
+        started_pod_at=pod,
         stop_due_at=due,
     )
     db.add(row)
@@ -1873,7 +1877,11 @@ class TestTwoProcesses:
         container = committed_app.container
         fake_controller.add_environment(ENV, status="running")
         with scoped_session(container) as db:
-            _environment_row(db, due=datetime.now(UTC) - timedelta(seconds=1))
+            _environment_row(
+                db,
+                pod=fake_controller.environment(ENV).pod_started_at,
+                due=datetime.now(UTC) - timedelta(seconds=1),
+            )
         _, one = _relay_service(container, supervise)
         _, other = _relay_service(container, supervise)
         ticks = metric_value(TIMER_RUNS_TOTAL, timer=SHUTDOWN_TIMER, outcome="ok")

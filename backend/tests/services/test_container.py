@@ -230,6 +230,9 @@ class TestEnvironmentWiring:
                         name="Pilot's",
                         exempt=False,
                         server_started_at=datetime.now(UTC),
+                        started_pod_at=fake_controller.environment(
+                            "env-pilots"
+                        ).pod_started_at,
                     ),
                     Environment(id="env-other", name="Other", exempt=False),
                 ]

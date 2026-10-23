@@ -59,6 +59,7 @@ class TestFakeController:
             "set-exempt",
             "settle-starts",
             "restart",
+            "recreate-pod",
             "unreachable",
             "capped",
             "unprojectable",
@@ -248,6 +249,44 @@ class TestFakeController:
         http.post("/environments/env-1/start", headers=BEARER)
 
         assert fake.environment("env-1").status == "error"
+
+    def test_each_new_pod_reports_a_later_start(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        def started_at() -> str | None:
+            pod = http.get("/environments/env-1", headers=BEARER).get_json()["pod"]
+            return None if pod is None else pod["startedAt"]
+
+        fake.add_environment("env-1")
+        assert started_at() is None
+
+        http.post("/environments/env-1/start", headers=BEARER)
+        brought_up = started_at()
+        fake.restart("env-1")
+        fake.set_status("env-1", "running")
+        assert started_at() == brought_up
+
+        fake.set_status("env-1", "stopped")
+        assert started_at() is None
+        fake.set_status("env-1", "running")
+        started_again = started_at()
+        fake.recreate_pod("env-1")
+        fake.set_status("env-1", "running")
+        recreated = started_at()
+
+        assert brought_up is not None and started_again is not None
+        assert recreated is not None
+        assert brought_up < started_again < recreated
+        assert recreated.endswith("Z")
+
+    def test_a_recreated_pod_holds_no_session(self, fake: FakeController) -> None:
+        fake.add_environment("env-1", status="running")
+        Client(fake).post("/environments/env-1/sessions/headless", headers=BEARER)
+
+        fake.recreate_pod("env-1")
+
+        assert fake.sessions("env-1") == []
+        assert fake.environment("env-1").status == "starting"
 
     def test_reset_forgets_everything(self, fake: FakeController, http: Client) -> None:
         fake.add_environment("env-1")

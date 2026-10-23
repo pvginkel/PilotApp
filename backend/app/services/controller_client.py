@@ -12,6 +12,7 @@ import json
 import threading
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 from types import TracebackType
@@ -90,6 +91,9 @@ class _ControllerModel(BaseModel):
 
 
 class ControllerPod(_ControllerModel):
+    started_at: datetime | None = None
+    """When the pod started, the kubelet's stamp: one pod's identity, which a
+    container's restart in it leaves as it is."""
     restart_count: int
     restart_reason: str | None = None
 

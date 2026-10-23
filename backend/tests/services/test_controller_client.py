@@ -132,6 +132,8 @@ class TestControllerClient:
         assert (a.env_id, a.name, a.status, a.exempt) == ("env-a", "A", "running", True)
         assert a.pod is not None and a.pod.restart_count == 1
         assert a.pod.restart_reason == "Error"
+        assert a.pod.started_at == fake_controller.environment("env-a").pod_started_at
+        assert a.pod.started_at is not None and a.pod.started_at.tzinfo is not None
         assert (b.env_id, b.name, b.repo, b.status) == (
             "env-b",
             None,

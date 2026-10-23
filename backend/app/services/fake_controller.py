@@ -24,6 +24,7 @@ import time
 import uuid
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from functools import partial
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -103,14 +104,17 @@ class FakeEnvironment:
     capped: bool = False
     unprojectable: bool = False
     sessions_created: int = 0
+    pod_started_at: datetime | None = None
+    """Its pod's `startedAt`; None while it has no pod, `stopped`."""
 
     def to_json(self) -> dict[str, Any]:
         running = self.status == "running"
         pod = None
-        if self.status != "stopped":
+        if self.pod_started_at is not None:
             pod = {
                 "phase": "Running" if running else "Pending",
                 "ready": running,
+                "startedAt": self.pod_started_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "restartCount": self.restart_count,
                 "restartReason": self.restart_reason,
                 "restartExitCode": None,
@@ -249,6 +253,7 @@ class FakeController:
         self._subscribers: list[_Subscriber] = []
         self._drops = 0
         self._closed = False
+        self._last_pod_started_at = datetime.min.replace(tzinfo=UTC)
         self.calls: list[str] = []
         self._endpoints: dict[str, Callable[..., Response]] = {
             "readyz": self._readyz,
@@ -274,6 +279,7 @@ class FakeController:
             "set-exempt": self.set_exempt,
             "settle-starts": self.settle_starts,
             "restart": self.restart,
+            "recreate-pod": self.recreate_pod,
             "unreachable": self.unreachable,
             "capped": self.capped,
             "unprojectable": self.unprojectable,
@@ -321,6 +327,8 @@ class FakeController:
         """An environment of the fleet; a `state` frame announces it."""
         with self._changed:
             environment = FakeEnvironment(env_id, name, repo, status, exempt)
+            if status != "stopped":
+                environment.pod_started_at = self._new_pod_started_at()
             self._environments[env_id] = environment
             self._publish(self._state_frame(environment))
 
@@ -356,12 +364,23 @@ class FakeController:
 
     @validate_call
     def restart(self, env_id: str) -> None:
-        """The pod restarted: its sessions and their files are gone, and the
-        environment reads `starting` until `set_status` brings it back."""
+        """The pod's containers restarted: its sessions and their files are
+        gone, and the environment reads `starting` until `set_status` brings it
+        back. The pod is the same one, its `startedAt` unmoved."""
         with self._changed:
             environment = self._environment(env_id)
             environment.restart_count += 1
             environment.restart_reason = "Error"
+            self._set_status(environment, "starting")
+
+    @validate_call
+    def recreate_pod(self, env_id: str) -> None:
+        """KubeCoder replaced the pod, as its `restart` route does: a new pod
+        with a later `startedAt`, its sessions and their files gone, the
+        environment `starting` until `set_status` brings it back."""
+        with self._changed:
+            environment = self._environment(env_id)
+            environment.pod_started_at = self._new_pod_started_at()
             self._set_status(environment, "starting")
 
     @validate_call
@@ -772,6 +791,11 @@ class FakeController:
     def _set_status(
         self, environment: FakeEnvironment, status: EnvironmentStatus
     ) -> None:
+        """A stopped environment has no pod, and one leaving `stopped` a new one."""
+        if status == "stopped":
+            environment.pod_started_at = None
+        elif environment.pod_started_at is None:
+            environment.pod_started_at = self._new_pod_started_at()
         environment.status = status
         if status != "running":
             self._sweep(environment)
@@ -788,6 +812,16 @@ class FakeController:
             del self._sessions[key]
         if names:
             self._publish(self._sessions_frame(environment.env_id))
+
+    def _new_pod_started_at(self) -> datetime:
+        """A new pod's `startedAt`, in the controller's whole seconds and later
+        than every pod's before it, so that a stop and a start within one second
+        is another pod."""
+        now = datetime.now(UTC).replace(microsecond=0)
+        self._last_pod_started_at = max(
+            now, self._last_pod_started_at + timedelta(seconds=1)
+        )
+        return self._last_pod_started_at
 
     def _resolve(self, session: FakeSession, outcome: FinishOutcome, text: str) -> None:
         is_error, interrupted, status = _OUTCOMES[outcome]

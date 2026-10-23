@@ -2,9 +2,14 @@
 F73.1).
 
 Pilot starts an environment knowing whether it started it, and stops only what
-it started: `server_started_at` is set when Pilot's own `start` scheduled the
-bring-up, and the shutdown timer stops an environment only while that is set,
-the environment is not exempt, and no Session is `running` or `starting` there.
+it started. The claim is `server_started_at`, set when Pilot's own `start`
+scheduled the bring-up, and `started_pod_at`, the `pod.startedAt` that bring-up
+settled on (D12; DB 233). The shutdown timer stops an environment only while its
+pod is still the claim's, it is not exempt, and no Session is `running` or
+`starting` there. A pod gone, another's or unknown ends the claim with no stop,
+at the tick or at a start answered `200`; the claim's three columns, its
+deadline `stop_due_at` among them, end together. The fleet consumer writes none
+of them (§13.1).
 """
 
 import logging
@@ -36,6 +41,7 @@ logger = logging.getLogger(__name__)
 SHUTDOWN_TIMER = "environment-shutdown"
 
 _BUSY_STATES = (SessionState.RUNNING, SessionState.STARTING)
+_START_STATES = (SessionState.HELD, SessionState.STARTING)
 _FAILED_SETTLES = ("error", "stopped", "deleting")
 
 
@@ -110,9 +116,10 @@ class EnvironmentService:
 
         The start goes without `wait`, since only then does its answer say
         whether this call scheduled the bring-up: on `202` Pilot started it, and
-        `server_started_at` is set in a transaction of its own before the wait;
-        on `200` it was running already, and nothing is set. Then the single
-        `GET` with `wait=settled`, after which the shutdown timer is armed if
+        `server_started_at` is set in a transaction of its own before the wait,
+        the claim's pod unknown until it settles; on `200` it was running
+        already, and nothing is set. Then the single `GET` with `wait=settled`,
+        whose pod the claim is checked against, and the shutdown timer armed if
         nothing runs or starts there.
 
         Returns:
@@ -138,13 +145,16 @@ class EnvironmentService:
             ) from problem
         if outcome.started:
             with scoped_session(self._container) as db:
-                _lock(db, env_id).server_started_at = datetime.now(UTC)
+                row = _lock(db, env_id)
+                row.server_started_at = datetime.now(UTC)
+                row.started_pod_at = None
             logger.info("Started environment %s", env_id)
         else:
             logger.info("Environment %s was running already", env_id)
 
         settled = client.get_environment(env_id, wait="settled")
         with scoped_session(self._container) as db:
+            _settle_claim(_lock(db, env_id), _pod_started_at(settled))
             self.arm_shutdown_timer(db, env_id)
         if settled.status in _FAILED_SETTLES:
             raise EnvironmentStartFailed(env_id, f"it settled {settled.status}")
@@ -175,12 +185,15 @@ class EnvironmentService:
     def run_shutdown_timer(self, db: Session) -> None:
         """The shutdown timer's tick, and its reconcile.
 
-        Stops every overdue environment Pilot started, not exempt, with no
-        Session `running` or `starting` there, and clears both its columns. Then
-        arms every such environment that has no `stop_due_at`, which a restart
-        between a Session's end and its arm leaves. Each environment's action is
-        a transaction of its own, under the row's lock: a row another process's
-        tick holds is skipped.
+        Ends the claim on every overdue environment Pilot started, not exempt,
+        with no Session `running` or `starting` there: read afresh, it is
+        stopped while its pod is the claim's, and left running when its pod is
+        gone, another's or unknown. A claim with no pod yet ends with no stop,
+        unless a start of Pilot's waits there to resume, `held`, which keeps it.
+        Then arms every such environment that has no `stop_due_at`, which a
+        restart between a Session's end and its arm leaves. Each environment's
+        action is a transaction of its own, under the row's lock: a row another
+        process's tick holds is skipped.
         """
         now = datetime.now(UTC)
         overdue = db.scalars(
@@ -218,6 +231,38 @@ class EnvironmentService:
         ):
             return
         due = row.stop_due_at
+        if row.started_pod_at is None:
+            if db.scalar(select(_starting(env_id))):
+                return
+            logger.info(
+                "Environment %s has no pod of Pilot's start: its claim, due %s, "
+                "ends with no stop",
+                env_id,
+                due.isoformat(),
+            )
+        elif self._runs_pod(env_id, row.started_pod_at):
+            self._stop(env_id, due)
+        else:
+            logger.info(
+                "Environment %s no longer runs the pod Pilot's start brought up: "
+                "its claim, due %s, ends with no stop",
+                env_id,
+                due.isoformat(),
+            )
+        _end_claim(row)
+
+    def _runs_pod(self, env_id: str, started_at: datetime) -> bool:
+        """Whether the environment, read afresh with no wait, runs the pod that
+        started at `started_at`; one the controller no longer has runs none."""
+        try:
+            environment = self._client().get_environment(env_id)
+        except ControllerProblem as problem:
+            if problem.problem_type is not ControllerProblemType.NOT_FOUND:
+                raise
+            return False
+        return _pod_started_at(environment) == started_at
+
+    def _stop(self, env_id: str, due: datetime) -> None:
         try:
             self._client().stop_environment(env_id)
         except ControllerProblem as problem:
@@ -230,8 +275,6 @@ class EnvironmentService:
             )
         else:
             logger.info("Stopped environment %s, due %s", env_id, due.isoformat())
-        row.stop_due_at = None
-        row.server_started_at = None
 
     def _arm(self, db: Session, row: Environment) -> None:
         if not _stoppable(db, row):
@@ -268,11 +311,47 @@ def _locking(env_id: str, *, skip_locked: bool = False) -> Select[Environment]:
     )
 
 
+def _settle_claim(row: Environment, pod_started_at: datetime | None) -> None:
+    """The claim, as a settled start finds the environment's pod: a claim with
+    no pod yet — its `202` just made, or recorded by a start cut before its
+    settle — takes this one; a claim on another pod ends (D12)."""
+    if row.server_started_at is None:
+        return
+    if row.started_pod_at is None:
+        row.started_pod_at = pod_started_at
+    elif row.started_pod_at != pod_started_at:
+        logger.info(
+            "Environment %s no longer runs the pod Pilot's start brought up: "
+            "its claim ends",
+            row.id,
+        )
+        _end_claim(row)
+
+
+def _end_claim(row: Environment) -> None:
+    row.server_started_at = None
+    row.stop_due_at = None
+    row.started_pod_at = None
+
+
+def _pod_started_at(environment: ControllerEnvironment) -> datetime | None:
+    return None if environment.pod is None else environment.pod.started_at
+
+
 def _busy(env_id: InstrumentedAttribute[str] | str) -> Exists:
     """Whether a Session is `running` or `starting` in the environment."""
     return exists().where(
         AgentSession.environment_id == env_id,
         AgentSession.state_code.in_(_BUSY_STATES),
+    )
+
+
+def _starting(env_id: str) -> Exists:
+    """Whether a start of Pilot's is to run in the environment: a Session
+    `held` or `starting` there."""
+    return exists().where(
+        AgentSession.environment_id == env_id,
+        AgentSession.state_code.in_(_START_STATES),
     )
 
 

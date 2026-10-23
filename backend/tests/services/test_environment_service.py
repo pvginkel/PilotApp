@@ -1,10 +1,12 @@
 """Environments on demand and the shutdown timer (design 2 §13.2, §13.3; F88.1,
 F73.1; V05).
 
-The three rules that protect the most: an environment Pilot did not start is
-never stopped, nor an exempt one, nor one where a Session runs or starts
-(`TestShutdownTimer`, `test_..._is_never_stopped`)."""
+The rules that protect the most: an environment Pilot did not start is never
+stopped, nor one running a pod other than the one Pilot's start brought up, nor
+an exempt one, nor one where a Session runs or starts (`TestShutdownTimer`,
+`test_..._is_never_stopped`)."""
 
+import json
 import threading
 import uuid
 from collections.abc import Callable
@@ -68,16 +70,19 @@ def _environment(
     env_id: str = ENV,
     *,
     started: bool = True,
+    pod: datetime | None = None,
     due: datetime | None = None,
     exempt: bool = False,
 ) -> Environment:
-    """An environment's row; `started` as Pilot's own start leaves it."""
+    """An environment's row; `started` as Pilot's own start leaves it, its
+    claim on the pod that started at `pod`."""
     row = Environment(
         id=env_id,
         name=env_id.title(),
         exempt=exempt,
         last_state="running",
         server_started_at=datetime.now(UTC) - timedelta(hours=1) if started else None,
+        started_pod_at=pod,
         stop_due_at=due,
     )
     db.add(row)
@@ -112,6 +117,21 @@ def _armed_around(row: Environment | None, before: datetime) -> bool:
 
 def _stops(fake: FakeController, env_id: str = ENV) -> list[str]:
     return [call for call in fake.calls if call == f"POST /environments/{env_id}/stop"]
+
+
+def _pod(fake: FakeController, env_id: str = ENV) -> datetime:
+    """The `startedAt` of the environment's pod at the fake."""
+    started_at = fake.environment(env_id).pod_started_at
+    assert started_at is not None
+    return started_at
+
+
+def _claim(row: Environment | None) -> tuple[Any, Any, Any]:
+    assert row is not None
+    return (row.server_started_at, row.started_pod_at, row.stop_due_at)
+
+
+_NO_CLAIM = (None, None, None)
 
 
 class TestEnsureEnvironment:
@@ -202,6 +222,9 @@ class TestStart:
         row = _row(session)
         assert row is not None and row.server_started_at is not None
         assert row.server_started_at >= before
+        assert row.started_pod_at == _pod(fake_controller)
+        assert settled.pod is not None
+        assert settled.pod.started_at == row.started_pod_at
         assert fake_controller.calls == [
             f"GET /environments/{ENV}",
             f"POST /environments/{ENV}/start",
@@ -219,10 +242,74 @@ class TestStart:
         settled = environments.start(ENV)
 
         assert settled.status == "running"
+        assert _claim(_row(session)) == _NO_CLAIM
+
+    def test_a_200_over_a_claim_on_its_pod_keeps_it(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        fake_controller.add_environment(ENV, status="stopped")
+        environments.start(ENV)
+        claim = _claim(_row(session))[:2]
+
+        environments.start(ENV)  # answered 200: Pilot's bring-up runs
+
+        assert _claim(_row(session))[:2] == claim
+        assert _claim(_row(session))[1] is not None
+
+    def test_a_200_over_a_claim_on_another_pod_ends_it(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        # 007's close-out D2: Pilot's 202, someone's stop and start, Pilot's 200.
+        fake_controller.add_environment(ENV, status="stopped")
+        environments.start(ENV)
+        fake_controller.set_status(ENV, "stopped")
+        fake_controller.set_status(ENV, "running")
+
+        environments.start(ENV)
+
+        assert _claim(_row(session)) == _NO_CLAIM
+
+    def test_a_200_over_a_claim_with_no_pod_yet_takes_the_pod(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        # Review O1: the rows a start cut between its 202 and its settle leaves;
+        # its bring-up went on meanwhile.
+        fake_controller.add_environment(ENV, status="running")
+        started = _environment(session).server_started_at
+        before = datetime.now(UTC)
+
+        environments.start(ENV)
+
         row = _row(session)
-        assert row is not None
-        assert row.server_started_at is None
-        assert row.stop_due_at is None
+        assert _claim(row)[:2] == (started, _pod(fake_controller))
+        assert _armed_around(row, before)
+
+    def test_a_202_over_an_ended_bring_up_claims_the_new_pod(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        fake_controller.add_environment(ENV, status="stopped")
+        environments.start(ENV)
+        old = _claim(_row(session))
+        fake_controller.set_status(ENV, "stopped")
+
+        environments.start(ENV)
+
+        row = _row(session)
+        assert row is not None and row.server_started_at is not None
+        assert row.server_started_at > old[0]
+        assert row.started_pod_at == _pod(fake_controller) != old[1]
 
     def test_a_start_that_settles_with_nothing_there_arms_the_timer(
         self,
@@ -475,15 +562,182 @@ class TestShutdownTimer:
         session: Session,
     ) -> None:
         fake_controller.add_environment(ENV, status="running")
-        _environment(session, due=_overdue())
+        _environment(session, pod=_pod(fake_controller), due=_overdue())
 
         environments.run_shutdown_timer(session)
 
         assert fake_controller.environment(ENV).status == "stopped"
-        assert _stops(fake_controller) == [f"POST /environments/{ENV}/stop"]
-        row = _row(session)
-        assert row is not None
-        assert (row.stop_due_at, row.server_started_at) == (None, None)
+        assert fake_controller.calls == [
+            f"GET /environments/{ENV}",
+            f"POST /environments/{ENV}/stop",
+        ]
+        assert _claim(_row(session)) == _NO_CLAIM
+
+    @pytest.mark.parametrize("pilots_200", [False, True])
+    def test_a_bring_up_someone_stopped_and_started_again_is_never_stopped(
+        self,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        supervise: Supervise,
+        session: Session,
+        pilots_200: bool,
+    ) -> None:
+        # 007's close-out D2, as the reviewer witnessed it: Pilot's 202,
+        # someone's stop and start, then Pilot's 200 or none, the tick. No time
+        # to stand idle, so the tick is due at once.
+        service = _service(container, supervise, stop_after=timedelta(0))
+        fake_controller.add_environment(ENV, status="stopped")
+        service.start(ENV)
+        fake_controller.set_status(ENV, "stopped")
+        fake_controller.set_status(ENV, "running")
+        if pilots_200:
+            service.start(ENV)
+
+        service.run_shutdown_timer(session)
+        service.run_shutdown_timer(session)
+
+        assert _stops(fake_controller) == []
+        assert fake_controller.environment(ENV).status == "running"
+        assert _claim(_row(session)) == _NO_CLAIM
+
+    def test_pilots_own_bring_up_left_idle_is_stopped(
+        self,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        supervise: Supervise,
+        session: Session,
+    ) -> None:
+        service = _service(container, supervise, stop_after=timedelta(0))
+        fake_controller.add_environment(ENV, status="stopped")
+        service.start(ENV)
+        service.start(ENV)  # answered 200: Pilot's own pod runs
+
+        service.run_shutdown_timer(session)
+
+        assert fake_controller.environment(ENV).status == "stopped"
+        assert _claim(_row(session)) == _NO_CLAIM
+
+    def test_a_start_cut_before_its_settle_keeps_its_claim(
+        self,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        supervise: Supervise,
+        session: Session,
+    ) -> None:
+        # Review O1: Pilot's 202, the settle cut, the resumed start's 200, and
+        # the environment stopped once idle past the timer.
+        fake = _SettleCut()
+        try:
+            client_of(container, fake)
+            service = _service(container, supervise, stop_after=timedelta(0))
+            fake.add_environment(ENV, status="stopped")
+            with pytest.raises(ExternalServiceException):
+                service.start(ENV)
+            row = _row(session)
+            assert row is not None and row.server_started_at is not None
+            assert row.started_pod_at is None
+
+            service.start(ENV)  # answered 200: the cut start's bring-up runs
+            assert _claim(_row(session))[1] == _pod(fake)
+            service.run_shutdown_timer(session)
+        finally:
+            fake.close()
+
+        assert fake.environment(ENV).status == "stopped"
+        assert _claim(_row(session)) == _NO_CLAIM
+
+    @pytest.mark.parametrize(
+        "elsewhere", ["stopped", "stopped-and-started", "recreated"]
+    )
+    def test_a_pod_not_the_claims_is_not_stopped(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+        elsewhere: str,
+    ) -> None:
+        fake_controller.add_environment(ENV, status="running")
+        _environment(session, pod=_pod(fake_controller), due=_overdue())
+        if elsewhere == "stopped":
+            fake_controller.set_status(ENV, "stopped")
+        elif elsewhere == "stopped-and-started":
+            fake_controller.set_status(ENV, "stopped")
+            fake_controller.set_status(ENV, "running")
+        else:
+            fake_controller.recreate_pod(ENV)
+            fake_controller.set_status(ENV, "running")
+
+        environments.run_shutdown_timer(session)
+
+        assert fake_controller.calls == [f"GET /environments/{ENV}"]
+        assert _claim(_row(session)) == _NO_CLAIM
+
+    def test_a_container_restart_leaves_the_pod_the_claims(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        fake_controller.add_environment(ENV, status="running")
+        _environment(session, pod=_pod(fake_controller), due=_overdue())
+        fake_controller.restart(ENV)
+        fake_controller.set_status(ENV, "running")
+
+        environments.run_shutdown_timer(session)
+
+        assert fake_controller.environment(ENV).status == "stopped"
+        assert _claim(_row(session)) == _NO_CLAIM
+
+    def test_a_pod_whose_start_is_unknown_is_not_stopped(
+        self, container: ServiceContainer, supervise: Supervise, session: Session
+    ) -> None:
+        fake = _UnknownPodStart()
+        try:
+            client_of(container, fake)
+            fake.add_environment(ENV, status="running")
+            _environment(session, pod=_pod(fake), due=_overdue())
+
+            _service(container, supervise).run_shutdown_timer(session)
+        finally:
+            fake.close()
+
+        assert _stops(fake) == []
+        assert _claim(_row(session)) == _NO_CLAIM
+
+    def test_a_claim_with_no_pod_ends_with_no_stop(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+        project: Project,
+    ) -> None:
+        # As rows written before the claim had its pod hold it.
+        fake_controller.add_environment(ENV, status="running")
+        _environment(session, due=_overdue())
+        _agent_session(session, project, SessionState.FAILED)
+
+        environments.run_shutdown_timer(session)
+
+        assert fake_controller.calls == []
+        assert _claim(_row(session)) == _NO_CLAIM
+
+    def test_a_claim_with_no_pod_lasts_while_a_start_waits_there(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+        project: Project,
+    ) -> None:
+        fake_controller.add_environment(ENV, status="running")
+        claim = _claim(_environment(session, due=_overdue()))
+        _agent_session(session, project, SessionState.HELD)
+
+        environments.run_shutdown_timer(session)
+
+        assert fake_controller.calls == []
+        assert _claim(_row(session)) == claim
 
     def test_it_leaves_one_not_yet_due(
         self,
@@ -622,14 +876,31 @@ class TestShutdownTimer:
         fake_controller: ServedFakeController,
         session: Session,
     ) -> None:
-        _environment(session, due=_overdue())
+        _environment(session, pod=datetime.now(UTC), due=_overdue())
 
         environments.run_shutdown_timer(session)
 
-        assert _stops(fake_controller) == [f"POST /environments/{ENV}/stop"]
-        row = _row(session)
-        assert row is not None
-        assert (row.stop_due_at, row.server_started_at) == (None, None)
+        assert fake_controller.calls == [f"GET /environments/{ENV}"]
+        assert _claim(_row(session)) == _NO_CLAIM
+
+    def test_an_environment_gone_before_its_stop_is_cleared(
+        self, container: ServiceContainer, supervise: Supervise, session: Session
+    ) -> None:
+        fake = _StopHook()
+        try:
+            client_of(container, fake)
+            fake.add_environment(ENV, status="running")
+            _environment(session, pod=_pod(fake), due=_overdue())
+            fake.during_stop = lambda: fake.remove_environment(ENV)
+
+            with listening("app.services.environment_service") as log:
+                _service(container, supervise).run_shutdown_timer(session)
+        finally:
+            fake.close()
+
+        assert _stops(fake) == [f"POST /environments/{ENV}/stop"]
+        assert log.matching(rf"Environment {ENV} is gone: .*")
+        assert _claim(_row(session)) == _NO_CLAIM
 
     def test_a_stop_the_controller_refuses_keeps_the_deadline(
         self,
@@ -639,7 +910,7 @@ class TestShutdownTimer:
     ) -> None:
         fake_controller.add_environment(ENV, status="deleting")
         due = _overdue()
-        _environment(session, due=due)
+        _environment(session, pod=_pod(fake_controller), due=due)
 
         with pytest.raises(ControllerProblem) as raised:
             environments.run_shutdown_timer(session)
@@ -658,7 +929,7 @@ class TestShutdownTimer:
             service = _service(container, supervise)
             fake.add_environment(ENV, status="running")
             with scoped_session(container) as db:
-                _environment(db, due=_overdue())
+                _environment(db, pod=_pod(fake), due=_overdue())
             other: list[_Outcome] = []
 
             def other_tick() -> None:
@@ -673,6 +944,7 @@ class TestShutdownTimer:
 
         assert _stops(fake) == [f"POST /environments/{ENV}/stop"]
         assert _committed(container, "server_started_at") is None
+        assert _committed(container, "started_pod_at") is None
 
 
 class _Outcome:
@@ -714,11 +986,47 @@ class _StopHook(ServedFakeController):
         return super()._stop(request, env_id)
 
 
-def _service(container: ServiceContainer, supervise: Supervise) -> EnvironmentService:
+class _SettleCut(ServedFakeController):
+    """The fake, answering the first settle's `GET` with an ingress's 503, as a
+    start cut between its `202` and its settle leaves it."""
+
+    def __init__(self) -> None:
+        super().__init__(keepalive_seconds=0.2)
+        self._cut = True
+
+    def _get_environment(self, request: Request, env_id: str) -> Response:
+        if self._cut and request.args.get("wait") == "settled":
+            self._cut = False
+            return Response("upstream unavailable", status=503)
+        return super()._get_environment(request, env_id)
+
+
+class _UnknownPodStart(ServedFakeController):
+    """The fake, reporting a pod with no `startedAt`."""
+
+    def __init__(self) -> None:
+        super().__init__(keepalive_seconds=0.2)
+
+    def _get_environment(self, request: Request, env_id: str) -> Response:
+        response = super()._get_environment(request, env_id)
+        body = response.get_json()
+        body["pod"]["startedAt"] = None
+        return Response(
+            json.dumps(body),
+            status=response.status_code,
+            content_type="application/json",
+        )
+
+
+def _service(
+    container: ServiceContainer,
+    supervise: Supervise,
+    stop_after: timedelta = STOP_AFTER,
+) -> EnvironmentService:
     return EnvironmentService(
         container=container,
         supervisor=supervise(container)[0],
-        stop_after_seconds=STOP_AFTER.total_seconds(),
+        stop_after_seconds=stop_after.total_seconds(),
     )
 
 
