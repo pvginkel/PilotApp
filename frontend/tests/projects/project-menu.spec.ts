@@ -362,6 +362,7 @@ test.describe('The dialog’s focus', () => {
         await expect(dialog.cancel).toBeFocused();
         await page.keyboard.press('Escape');
         await expect(dialog.root).toHaveCount(0);
+        await expect(projectHead.menuButton).toBeFocused();
       }
     }
   });
