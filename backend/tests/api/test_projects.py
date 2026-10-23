@@ -25,6 +25,7 @@ from app.models import (
 from app.models.reference import SessionState, TransitionKind
 from app.schemas.testing_record import InventedProjectCreateSchema
 from app.services.container import ServiceContainer
+from tests.support.fake_sidecar import FakeSidecar
 
 PROJECTS = "/api/projects"
 
@@ -678,6 +679,38 @@ class TestAddTransition:
         assert response.status_code == 201
         body = response.get_json()
         assert (body["state"], body["archived"], body["autopilot"]) == standing
+
+    def test_archive_and_bring_back_move_the_folder_out_of_the_stores_tree_and_back(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+    ) -> None:
+        recipes = _make(container, name="Recipe box")
+        fake_sidecar.connect()
+        fake_sidecar.drain()
+        synced = set(fake_sidecar.tree)
+        _sign_in(client)
+
+        archived = client.post(
+            f"{PROJECTS}/{recipes}/transitions", json={"kind": "archived"}
+        )
+        fake_sidecar.drain()
+
+        assert archived.status_code == 201
+        assert set(fake_sidecar.tree) == {"reference.json"} != synced
+
+        brought_back = client.post(
+            f"{PROJECTS}/{recipes}/transitions", json={"kind": "brought_back"}
+        )
+        fake_sidecar.drain()
+
+        assert brought_back.status_code == 201
+        tree = container.tree_service()
+        assert fake_sidecar.tree == {
+            entry.path: tree.read(entry.path).content for entry in tree.manifest()
+        }
+        assert set(fake_sidecar.tree) == synced
 
     @pytest.mark.parametrize(
         "body",

@@ -28,6 +28,7 @@ from app.exceptions import (
 )
 from app.models import Environment, SaveError
 from app.models.reference import ErrorKind
+from app.services.environment_service import EnvironmentService
 
 SYNC_PROTOCOL_MIN = 1
 """The oldest protocol version the server serves."""
@@ -105,12 +106,14 @@ class SyncService:
         ingest_service: IngestService,
         tree_service: TreeService,
         plan_service: PlanService,
+        environment_service: EnvironmentService,
     ) -> None:
         self.db = db
         self.app_settings = app_settings
         self.ingest_service = ingest_service
         self.tree_service = tree_service
         self.plan_service = plan_service
+        self.environment_service = environment_service
 
     def admit(
         self,
@@ -119,12 +122,17 @@ class SyncService:
         protocol: str | None,
     ) -> None:
         """Let a sync call through, its three headers' values given, and make
-        the store's Environment row if it has none.
+        the store's Environment row if it has none: from the controller's
+        report while a controller is configured (`ensure_environment`), so
+        the store's exemption holds from the row's first moment; without one,
+        named by its id and not exempt.
 
         Refused, in this order: without the store's bearer, and always while
         `SYNC_TOKEN` is empty; from an environment other than
         `STORE_ENVIRONMENT_ID`, and always while that is empty; in a protocol
         version outside the accepted range. A refused call touches nothing.
+        While the store has no row, a call let through fails, and makes none,
+        when the controller does not report the store.
         """
         token = self.app_settings.sync_token
         if not token or not hmac.compare_digest(
@@ -147,8 +155,9 @@ class SyncService:
             raise SyncProtocolUnsupportedException(
                 protocol, SYNC_PROTOCOL_MIN, SYNC_PROTOCOL_MAX
             )
-        # `name` and `exempt` have no source before the controller client
-        # (design 2 §13.1): the id stands in for the name.
+        if self.app_settings.controller_url is not None:
+            self.environment_service.ensure_environment(self.db, store)
+            return
         self.db.execute(
             insert(Environment)
             .values(id=store, name=store, exempt=False)

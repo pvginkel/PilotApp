@@ -284,6 +284,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         ingest_service=ingest_service,
         tree_service=tree_service,
         plan_service=plan_service,
+        environment_service=environment_service,
     )
     sync_stream_service = providers.Singleton(
         SyncStreamService,
@@ -326,6 +327,7 @@ class ServiceContainer(containers.DeclarativeContainer):
     project_service = providers.Factory(
         ProjectService,
         db=db_session,
+        engine_bus=engine_bus,
         people_service=people_service,
         record_service=record_service,
         view_service=view_service,

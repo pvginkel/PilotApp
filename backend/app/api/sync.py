@@ -53,7 +53,8 @@ def admit_the_store(
     sync_service: SyncService = Provide[ServiceContainer.sync_service],
 ) -> None:
     """The gate every sync call passes: 401, 403 or 426 before anything is
-    read or written."""
+    read or written; 502 when the store's Environment row is to be made and
+    the controller does not report the store."""
     sync_service.admit(
         request.headers.get("Authorization"),
         request.headers.get("X-Pilot-Environment"),
@@ -83,6 +84,7 @@ def answer_the_protocol_range(
         HTTP_404=ApiErrorResponseSchema,
         HTTP_413=ApiErrorResponseSchema,
         HTTP_426=SyncProtocolRangeSchema,
+        HTTP_502=ApiErrorResponseSchema,
     )
 )
 @inject
@@ -128,6 +130,7 @@ def put_file(
         HTTP_403=ApiErrorResponseSchema,
         HTTP_404=ApiErrorResponseSchema,
         HTTP_426=SyncProtocolRangeSchema,
+        HTTP_502=ApiErrorResponseSchema,
     )
 )
 @inject
@@ -156,6 +159,7 @@ def get_file(
         HTTP_401=ApiErrorResponseSchema,
         HTTP_403=ApiErrorResponseSchema,
         HTTP_426=SyncProtocolRangeSchema,
+        HTTP_502=ApiErrorResponseSchema,
     ),
 )
 @inject
@@ -186,6 +190,7 @@ def reconcile(
         HTTP_401=ApiErrorResponseSchema,
         HTTP_403=ApiErrorResponseSchema,
         HTTP_426=SyncProtocolRangeSchema,
+        HTTP_502=ApiErrorResponseSchema,
     ),
 )
 @inject
@@ -224,8 +229,8 @@ def events(
     committed, and a `manifest`, `{}`, whenever the set of syncing projects
     changed; a heartbeat comment after `SYNC_HEARTBEAT_SECONDS` idle. No
     `id:` field: the sidecar's hashes are its cursor. Ends on shutdown, and
-    when the stream falls too far behind. Refused with 401, 403 or 426 as
-    every sync call is.
+    when the stream falls too far behind. Refused with 401, 403 or 426, and
+    answered 502, as every sync call is.
     """
     hello = SyncHelloSchema(
         protocol=SyncProtocolRangeSchema(min=SYNC_PROTOCOL_MIN, max=SYNC_PROTOCOL_MAX),

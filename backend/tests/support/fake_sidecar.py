@@ -240,7 +240,8 @@ class FakeSidecar:
         """Apply what the change stream carried since the last drain, up to
         its heartbeat: fetch and write each `change`'s path whose hash
         differs from the shadow, the sidecar's own write echoed back
-        ignored, and reconcile on `manifest`. Returns the paths fetched for
+        ignored, and a path of no syncing project left for the reconcile;
+        and reconcile on `manifest`. Returns the paths fetched for
         `change`s, in order."""
         fetched: list[str] = []
         while (event := self._next_event()) is not None:
@@ -248,7 +249,10 @@ class FakeSidecar:
             if name == "manifest":
                 self.reconcile()
             elif self.shadow.get(data["path"]) != data["hash"]:
-                self._fetch(data["path"])
+                response = self.get(data["path"])
+                if response.status_code == 404:
+                    continue
+                self._write(data["path"], response)
                 fetched.append(data["path"])
         return fetched
 
@@ -271,7 +275,9 @@ class FakeSidecar:
     def _fetch(self, path: str) -> None:
         """Write the bytes `path` must hold, as the server answers them, and
         record their hash."""
-        response = self.get(path)
+        self._write(path, self.get(path))
+
+    def _write(self, path: str, response: TestResponse) -> None:
         assert response.status_code == 200, response.get_data(as_text=True)
         self.tree[path] = response.get_data()
         self.shadow[path] = response.headers["X-Pilot-Hash"]

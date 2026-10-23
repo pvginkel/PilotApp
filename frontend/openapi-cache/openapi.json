@@ -5124,6 +5124,16 @@
               }
             },
             "description": "Upgrade Required"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Gateway"
           }
         },
         "summary": "The hook's check of a file of the store's tree after an edit (design 1 §5.6 step 3): the file's hash on disk, once its sidecar has it acked, in; whether the server agrees with it, the Save Errors of the file's project folder and that project's deferrals without a home out, a file under no syncing project's folder answered its own Save Errors alone. A `reverted` Save Error is answered once and deleted; a `parse` one stands until a clean save of its path.",
@@ -5132,7 +5142,7 @@
     },
     "/api/sync/events": {
       "get": {
-        "description": "`hello` first, `{protocol: {min, max}, manifest_hash}`; then a `change`, `{path, hash}`, for every tree hash that moved once its transaction has committed, and a `manifest`, `{}`, whenever the set of syncing projects changed; a heartbeat comment after `SYNC_HEARTBEAT_SECONDS` idle. No `id:` field: the sidecar's hashes are its cursor. Ends on shutdown, and when the stream falls too far behind. Refused with 401, 403 or 426 as every sync call is.",
+        "description": "`hello` first, `{protocol: {min, max}, manifest_hash}`; then a `change`, `{path, hash}`, for every tree hash that moved once its transaction has committed, and a `manifest`, `{}`, whenever the set of syncing projects changed; a heartbeat comment after `SYNC_HEARTBEAT_SECONDS` idle. No `id:` field: the sidecar's hashes are its cursor. Ends on shutdown, and when the stream falls too far behind. Refused with 401, 403 or 426, and answered 502, as every sync call is.",
         "operationId": "get__api_sync_events",
         "parameters": [],
         "responses": {},
@@ -5209,6 +5219,16 @@
               }
             },
             "description": "Upgrade Required"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Gateway"
           }
         },
         "summary": "The bytes a file of the store's tree must hold, with their hash as `X-Pilot-Hash`. 404 for a path of no syncing project.",
@@ -5295,6 +5315,16 @@
               }
             },
             "description": "Upgrade Required"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Gateway"
           }
         },
         "summary": "The store's save of a file of its tree (design 1 §5.3).",
@@ -5366,6 +5396,16 @@
               }
             },
             "description": "Upgrade Required"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Gateway"
           }
         },
         "summary": "The manifest reconcile (design 1 §5.5 step 2): the store's tree as its sidecar sees it in, the manifest and the three lists that make the tree match it out.",

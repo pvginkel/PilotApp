@@ -29,6 +29,7 @@ from app.engine.paths import sha256_hex
 from app.models import Document, Environment, Project, SaveError, User
 from app.models.reference import ErrorKind, ProjectState
 from app.services.container import ServiceContainer
+from app.services.controller_client import ControllerClient
 from app.services.sync_service import (
     HOOK_WAIT_SECONDS,
     SYNC_PROTOCOL_MAX,
@@ -40,6 +41,7 @@ from app.services.sync_stream_service import (
     SyncStreamService,
 )
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
+from tests.support.fake_controller import ServedFakeController
 from tests.support.fake_sidecar import (
     HOMELESS,
     STORE_ENVIRONMENT_ID,
@@ -417,6 +419,44 @@ class TestSyncGate:
 
         store = session.get_one(Environment, STORE_ENVIRONMENT_ID)
         assert (store.name, store.exempt) == (STORE_ENVIRONMENT_ID, False)
+
+    @pytest.mark.parametrize(("method", "url"), ROUTES)
+    def test_with_a_controller_the_first_call_takes_the_store_from_its_report(
+        self,
+        session: DbSession,
+        client: FlaskClient,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        method: str,
+        url: str,
+    ) -> None:
+        _configure(container, controller_url=fake_controller.url)
+        fake_controller.add_environment(STORE_ENVIRONMENT_ID, name="Store", exempt=True)
+
+        with _call(client, method, url, sync_headers()) as response:
+            assert response.status_code == 200
+
+        store = session.get_one(Environment, STORE_ENVIRONMENT_ID)
+        assert (store.name, store.exempt) == ("Store", True)
+
+    @pytest.mark.parametrize(("method", "url"), ROUTES)
+    def test_a_first_call_the_controller_does_not_report_is_502(
+        self,
+        session: DbSession,
+        client: FlaskClient,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        method: str,
+        url: str,
+    ) -> None:
+        _configure(container, controller_url=fake_controller.url)
+
+        response = _call(client, method, url, sync_headers())
+
+        assert response.status_code == 502
+        assert session.get(Environment, STORE_ENVIRONMENT_ID) is None
 
     def test_a_call_leaves_the_stores_environment_as_it_is(
         self, session: DbSession, client: FlaskClient, environment: Environment

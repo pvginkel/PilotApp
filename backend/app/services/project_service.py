@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.engine.bus import EngineBus, ManifestChanged
 from app.engine.documents import OPENING
 from app.engine.record import RecordService
 from app.engine.views import ViewService
@@ -93,12 +94,14 @@ class ProjectService:
     def __init__(
         self,
         db: Session,
+        engine_bus: EngineBus,
         people_service: PeopleService,
         record_service: RecordService,
         view_service: ViewService,
         timeline_service: TimelineService,
     ) -> None:
         self.db = db
+        self.engine_bus = engine_bus
         self.people_service = people_service
         self.record_service = record_service
         self.view_service = view_service
@@ -202,7 +205,9 @@ class ProjectService:
         refreshed with it (DB §7.4). Finish is followed at its instant by
         `autopilot_off` while auto pilot is on (DB 171) and closes the open
         items unanswered (F5.1). A finished project's auto pilot is off, so
-        Reopen leaves it off (F6).
+        Reopen leaves it off (F6). Archive and Bring back raise the `manifest`
+        event once committed: the project's folder leaves the store's tree or
+        comes back to it (F128.4).
 
         Raises:
             RecordNotFoundException: no project has the id.
@@ -222,6 +227,8 @@ class ProjectService:
                 self._write(project, person, at, TransitionKind.AUTOPILOT_OFF)
             self.record_service.close_unanswered(project, person, at)
         self.view_service.timeline_moved(project)
+        if kind in (TransitionKind.ARCHIVED, TransitionKind.BROUGHT_BACK):
+            self.engine_bus.emit(ManifestChanged())
 
     def join(self, auth: AuthContext, project_id: uuid.UUID) -> None:
         """The caller's new membership of the project, a rejoin a new row

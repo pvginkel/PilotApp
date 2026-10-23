@@ -26,6 +26,11 @@ from app.exceptions import (
 from app.models import Environment, Project, SaveError, User
 from app.models.reference import ErrorKind, ProjectState
 from app.services.container import ServiceContainer
+from app.services.controller_client import (
+    ControllerClient,
+    ControllerProblem,
+    ControllerProblemType,
+)
 from app.services.sync_service import (
     FAULTS_TOTAL,
     HOOK_WAIT_SECONDS,
@@ -36,6 +41,7 @@ from app.services.sync_service import (
     Reconciled,
     SyncService,
 )
+from tests.support.fake_controller import ServedFakeController
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID, SYNC_TOKEN
 
 BEARER = f"Bearer {SYNC_TOKEN}"
@@ -180,6 +186,7 @@ class TestSyncService:
     def test_admit_lets_the_store_through_and_makes_its_environment(
         self, session: DbSession, container: ServiceContainer
     ) -> None:
+        # No controller is configured: the id names the store.
         _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "1")
 
         store = session.get_one(Environment, STORE_ENVIRONMENT_ID)
@@ -187,6 +194,92 @@ class TestSyncService:
             STORE_ENVIRONMENT_ID,
             STORE_ENVIRONMENT_ID,
             False,
+        )
+
+    def test_admit_with_a_controller_makes_the_stores_environment_from_its_report(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+    ) -> None:
+        _configure(container, controller_url=fake_controller.url)
+        fake_controller.add_environment(
+            STORE_ENVIRONMENT_ID, name="Store", status="running", exempt=True
+        )
+
+        _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "1")
+        _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "1")
+
+        store = session.get_one(Environment, STORE_ENVIRONMENT_ID)
+        assert (store.name, store.exempt, store.last_state) == (
+            "Store",
+            True,
+            "running",
+        )
+        assert fake_controller.calls == [f"GET /environments/{STORE_ENVIRONMENT_ID}"]
+
+    def test_admit_with_a_controller_leaves_an_environment_that_exists(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        environment: Environment,
+    ) -> None:
+        _configure(container, controller_url=fake_controller.url)
+
+        _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "1")
+
+        session.refresh(environment)
+        assert (environment.name, environment.exempt) == ("Example-1", False)
+        assert fake_controller.calls == []
+
+    def test_admit_with_a_controller_that_does_not_report_the_store_makes_no_row(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+    ) -> None:
+        _configure(container, controller_url=fake_controller.url)
+
+        with pytest.raises(ControllerProblem) as raised:
+            _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "1")
+
+        assert raised.value.problem_type is ControllerProblemType.NOT_FOUND
+        assert session.get(Environment, STORE_ENVIRONMENT_ID) is None
+
+    def test_the_store_the_sync_admits_is_started_and_never_armed(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+    ) -> None:
+        _configure(container, controller_url=fake_controller.url)
+        fake_controller.add_environment(
+            STORE_ENVIRONMENT_ID, status="stopped", exempt=True
+        )
+        _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "1")
+        environments = container.environment_service()
+
+        settled = environments.start(STORE_ENVIRONMENT_ID)
+        environments.run_shutdown_timer(session)
+
+        assert settled.status == "running"
+        store = session.scalars(
+            select(Environment)
+            .where(Environment.id == STORE_ENVIRONMENT_ID)
+            .execution_options(populate_existing=True)
+        ).one()
+        assert store.server_started_at is not None
+        assert store.stop_due_at is None
+        assert f"POST /environments/{STORE_ENVIRONMENT_ID}/start" in (
+            fake_controller.calls
+        )
+        assert f"POST /environments/{STORE_ENVIRONMENT_ID}/stop" not in (
+            fake_controller.calls
         )
 
     def test_admit_leaves_an_environment_that_exists(

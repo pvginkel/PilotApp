@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.database import scoped_session
-from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved
+from app.engine.bus import EngineEvent, ManifestChanged, ProjectChanged, TreeHashMoved
 from app.engine.paths import TIMELINE, tree_path
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.extensions import db
@@ -785,6 +785,106 @@ class TestTransition:
             ),
             ProjectChanged(made.id),
         ]
+
+    @pytest.mark.parametrize(
+        ("spec", "kind"),
+        [
+            ({"state": "open"}, TransitionKind.ARCHIVED),
+            ({"state": "draft", "archived": True}, TransitionKind.BROUGHT_BACK),
+        ],
+    )
+    def test_archive_and_bring_back_announce_the_manifest_once_committed(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        spec: dict[str, Any],
+        kind: TransitionKind,
+    ) -> None:
+        made = _make(container, name="Camp", **spec)
+        with scoped_session(container):
+            pass
+        engine_events.clear()
+
+        with scoped_session(container):
+            container.project_service().transition(ADA, made.id, kind)
+            assert engine_events == []
+
+        assert engine_events == [
+            TreeHashMoved(
+                tree_path(made, TIMELINE),
+                container.view_service().timeline(made).hash,
+            ),
+            ProjectChanged(made.id),
+            ManifestChanged(),
+        ]
+
+    @pytest.mark.parametrize(
+        ("spec", "kind"),
+        [
+            ({"state": "open"}, TransitionKind.FINISHED),
+            ({"state": "finished"}, TransitionKind.REOPENED),
+            ({"state": "open"}, TransitionKind.AUTOPILOT_ON),
+            ({"state": "open", "autopilot": True}, TransitionKind.AUTOPILOT_OFF),
+        ],
+    )
+    def test_no_other_transition_announces_the_manifest(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        spec: dict[str, Any],
+        kind: TransitionKind,
+    ) -> None:
+        made = _make(container, name="Camp", **spec)
+        with scoped_session(container):
+            pass
+        engine_events.clear()
+
+        with scoped_session(container):
+            container.project_service().transition(ADA, made.id, kind)
+
+        assert ProjectChanged(made.id) in engine_events
+        assert ManifestChanged() not in engine_events
+
+    @pytest.mark.parametrize(
+        ("spec", "kind"),
+        [
+            ({"archived": True}, TransitionKind.ARCHIVED),
+            ({"state": "open"}, TransitionKind.BROUGHT_BACK),
+        ],
+    )
+    def test_a_refused_archive_or_bring_back_announces_nothing(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        spec: dict[str, Any],
+        kind: TransitionKind,
+    ) -> None:
+        made = _make(container, name="Camp", **spec)
+        with scoped_session(container):
+            pass
+        engine_events.clear()
+
+        with pytest.raises(InvalidOperationException), scoped_session(container):
+            container.project_service().transition(ADA, made.id, kind)
+
+        assert engine_events == []
+
+    def test_a_rolled_back_archive_announces_nothing(
+        self, container: ServiceContainer, engine_events: list[EngineEvent]
+    ) -> None:
+        made = _make(container, name="Camp")
+        with scoped_session(container):
+            pass
+        engine_events.clear()
+
+        with pytest.raises(RuntimeError), scoped_session(container):
+            container.project_service().transition(
+                ADA, made.id, TransitionKind.ARCHIVED
+            )
+            raise RuntimeError("the transaction fails after the archive")
+
+        assert engine_events == []
+        assert container.project_service().head(ADA, made.id).project.archived is False
 
 
 @pytest.mark.usefixtures("person")
