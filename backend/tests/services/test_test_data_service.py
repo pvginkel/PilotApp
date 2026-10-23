@@ -1027,6 +1027,74 @@ class TestSave:
         )
 
 
+class TestEndTurn:
+    @pytest.fixture
+    def notice(self, container: ServiceContainer, camp: Project) -> Item:
+        return container.test_data_service().item(
+            camp.id, "notice", "Palette", "Blue and green.\n"
+        )
+
+    def test_the_sessions_documents_are_written_no_longer_and_versioned(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        camp: Project,
+        notice: Item,
+    ) -> None:
+        service = container.test_data_service()
+        service.save(notice.id, "---\ntitle: Palette\n---\nRed.\n")
+        document = session.get_one(Document, notice.id)
+        assert document.writing_session_id == _session_of(session, camp).id
+
+        service.end_turn(camp.id)
+
+        assert (document.writing_session_id, document.writing_since) == (None, None)
+        assert session.execute(
+            select(DocumentVersion.cause_code, DocumentVersion.session_id)
+            .where(DocumentVersion.document_id == document.id)
+            .order_by(DocumentVersion.number)
+        ).all() == [
+            (VersionCause.BORN, _session_of(session, camp).id),
+            (VersionCause.TURN, _session_of(session, camp).id),
+        ]
+
+    def test_a_turn_that_saved_nothing_cuts_no_version(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        camp: Project,
+        notice: Item,
+    ) -> None:
+        container.test_data_service().end_turn(camp.id)
+
+        assert session.scalars(
+            select(DocumentVersion.cause_code).where(
+                DocumentVersion.document_id == notice.id
+            )
+        ).all() == [VersionCause.BORN]
+
+    def test_an_unknown_project_is_not_found(self, container: ServiceContainer) -> None:
+        project_id = uuid.uuid4()
+
+        with pytest.raises(RecordNotFoundException) as raised:
+            container.test_data_service().end_turn(project_id)
+
+        assert raised.value.message == f"Project {project_id} was not found"
+
+    def test_a_project_without_a_session_is_refused(
+        self, container: ServiceContainer, person: User
+    ) -> None:
+        project = container.test_data_service().project(_spec())
+
+        with pytest.raises(InvalidOperationException) as raised:
+            container.test_data_service().end_turn(project.id)
+
+        assert raised.value.message == (
+            f"Cannot end a turn of project {project.id} because the project has no "
+            "session: make it with an environment_id"
+        )
+
+
 def _file(filename: str, content: bytes, content_type: str = "text/markdown") -> Any:
     return InventedFileSchema.model_validate(
         {

@@ -4,6 +4,7 @@ UI cannot make (TEST-6), on every stage but prd, behind the API's sign-in
 
 import base64
 import uuid
+from datetime import datetime
 from typing import Any
 
 import pytest
@@ -14,8 +15,16 @@ from sqlalchemy.orm import Session
 
 from app.config import STAGES, Settings, Stage, default_stage
 from app.config import Environment as SettingsEnvironment
-from app.models import Attachment, Document, Environment, Item, Project, User
-from app.models.reference import ProjectState
+from app.models import (
+    Attachment,
+    Document,
+    DocumentVersion,
+    Environment,
+    Item,
+    Project,
+    User,
+)
+from app.models.reference import ProjectState, VersionCause
 from app.schemas.testing_record import OPENING_WORDS
 from app.services.container import ServiceContainer
 
@@ -42,6 +51,10 @@ def _saves_path(item_id: uuid.UUID | str) -> str:
 
 def _attachments_path(item_id: uuid.UUID | str) -> str:
     return f"/api/testing/items/{item_id}/attachments"
+
+
+def _turn_ends_path(project_id: uuid.UUID | str) -> str:
+    return f"{PROJECTS}/{project_id}/turn-ends"
 
 
 def _file(filename: str, data: bytes, **fields: Any) -> dict[str, Any]:
@@ -810,6 +823,53 @@ class TestCreateAttachments:
         assert response.status_code == 409
 
 
+@pytest.mark.usefixtures("person")
+class TestCreateTurnEnd:
+    def test_pilot_writes_no_longer_and_its_change_is_an_edit(
+        self, client: FlaskClient, session: Session, environment: Environment
+    ) -> None:
+        project_id = _make(client, environment_id=environment.id)
+        item_id = _place(client, project_id, "notice", "Blue and green.\n")
+        client.post(_saves_path(item_id), json={"text": "# Which tent?\n\nRed.\n"})
+        saved = _timeline_item(client, project_id, item_id)
+
+        response = client.post(_turn_ends_path(project_id))
+
+        assert (response.status_code, response.data) == (204, b"")
+        ended = _timeline_item(client, project_id, item_id)
+        turn = session.scalars(
+            select(DocumentVersion).where(
+                DocumentVersion.document_id == uuid.UUID(item_id),
+                DocumentVersion.cause_code == VersionCause.TURN,
+            )
+        ).one()
+        assert (saved["writing"], saved["edited_at"]) == (True, None)
+        assert ended["writing"] is False
+        assert datetime.fromisoformat(ended["edited_at"]) == turn.created_at
+
+    def test_a_turn_that_saved_nothing_changes_nothing(
+        self, client: FlaskClient, environment: Environment
+    ) -> None:
+        project_id = _make(client, environment_id=environment.id)
+        item_id = _place(client, project_id, "notice", "Blue and green.\n")
+        before = _timeline_item(client, project_id, item_id)
+
+        response = client.post(_turn_ends_path(project_id))
+
+        assert response.status_code == 204
+        assert _timeline_item(client, project_id, item_id) == before
+
+    def test_an_unknown_project_is_not_found(self, client: FlaskClient) -> None:
+        response = client.post(_turn_ends_path(uuid.uuid4()))
+
+        assert response.status_code == 404
+
+    def test_a_project_without_a_session_conflicts(self, client: FlaskClient) -> None:
+        response = client.post(_turn_ends_path(_make(client)))
+
+        assert response.status_code == 409
+
+
 ENDPOINTS = [
     (PEOPLE, {"handle": "ben"}),
     (ENVIRONMENTS, {"id": "example-env-2", "name": "Example-2"}),
@@ -817,6 +877,7 @@ ENDPOINTS = [
     (_items_path(uuid.uuid4()), {"kind": "notice", "title": "Camp", "text": "Hi"}),
     (_saves_path(uuid.uuid4()), {"text": "Hi"}),
     (_attachments_path(uuid.uuid4()), {"files": [_file("a.md", b"Hi")]}),
+    (_turn_ends_path(uuid.uuid4()), {}),
 ]
 
 

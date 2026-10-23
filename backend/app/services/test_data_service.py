@@ -716,6 +716,23 @@ class TestDataService:
             session,
         )
 
+    def end_turn(self, project_id: uuid.UUID) -> None:
+        """The turn of the project's session ended, as the relay ends it for
+        the documents: the writing columns of those it was saving cleared, a
+        `turn` Version cut of each whose published text moved since its last
+        Version (design 1 §7). Nothing announces it live, as nothing does at
+        a relayed turn's end.
+
+        Raises:
+            RecordNotFoundException: no project has the id.
+            InvalidOperationException: the project has no session.
+        """
+        project = self.db.get(Project, project_id)
+        if project is None:
+            raise RecordNotFoundException("Project", str(project_id))
+        session = self._session_of(project, f"end a turn of project {project.id}")
+        self.document_service.turn_ended(session)
+
     def attach(
         self, item_id: uuid.UUID, files: Sequence[InventedFileSchema]
     ) -> list[Attachment]:

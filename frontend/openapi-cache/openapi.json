@@ -2784,6 +2784,89 @@
         "title": "AnswerChannel",
         "type": "string"
       },
+      "TimelineSchema.1fdd8ae.AttachmentSchema": {
+        "description": "A file hung on an item, reader's material (F36), which its stream\n`/api/attachments/<id>` serves without its title or stored type.",
+        "properties": {
+          "batch": {
+            "description": "The project's attach call it came in, from 1: the files of one call, a folder among them, share it (F37.1)",
+            "examples": [
+              1
+            ],
+            "title": "Batch",
+            "type": "integer"
+          },
+          "content_type": {
+            "description": "The content type it was copied with",
+            "examples": [
+              "text/markdown"
+            ],
+            "title": "Content Type",
+            "type": "string"
+          },
+          "copied_at": {
+            "description": "When it was copied into the record",
+            "format": "date-time",
+            "title": "Copied At",
+            "type": "string"
+          },
+          "filename": {
+            "description": "The file's name, the one its download takes",
+            "examples": [
+              "sketch.md"
+            ],
+            "title": "Filename",
+            "type": "string"
+          },
+          "id": {
+            "description": "The attachment's id, its stream's address",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "size": {
+            "description": "Its size in bytes",
+            "examples": [
+              2048
+            ],
+            "title": "Size",
+            "type": "integer"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where it was copied from, `<environment>:<path>` (F36.1); null for the copy of the draft",
+            "examples": [
+              "kc-recipes:/work/Recipes/sketch.md"
+            ],
+            "title": "Source"
+          },
+          "title": {
+            "examples": [
+              "Recipe card sketch"
+            ],
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "filename",
+          "content_type",
+          "size",
+          "batch",
+          "copied_at",
+          "source"
+        ],
+        "title": "AttachmentSchema",
+        "type": "object"
+      },
       "TimelineSchema.1fdd8ae.BlockKind": {
         "enum": [
           "decision",
@@ -3245,6 +3328,14 @@
       "TimelineSchema.1fdd8ae.TimelineItemSchema": {
         "description": "An entry on the timeline, with what its line and its open form show.",
         "properties": {
+          "attachments": {
+            "description": "The files hung on the item, in their order, on every kind (F17.5)",
+            "items": {
+              "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.AttachmentSchema"
+            },
+            "title": "Attachments",
+            "type": "array"
+          },
           "author": {
             "anyOf": [
               {
@@ -3307,6 +3398,19 @@
             ],
             "description": "Its done line; null while open"
           },
+          "edited_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "*Edited <time>* (F28.7): the time of the latest `turn` Version that follows the first Version whose text, as drawn, holds anything; null where no such Version follows it, and where `body` is null",
+            "title": "Edited At"
+          },
           "file_name": {
             "anyOf": [
               {
@@ -3367,6 +3471,21 @@
             "title": "Kind",
             "type": "string"
           },
+          "read_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The text's reading time at 230 words a minute, rounded, at least 1: a review's \"N min read\" (F25.1); null where `body` is",
+            "examples": [
+              2
+            ],
+            "title": "Read Minutes"
+          },
           "seq": {
             "description": "Its place in the timeline, from 1",
             "examples": [
@@ -3385,6 +3504,21 @@
               }
             ],
             "description": "The plan task it serves, if any"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The front matter's `summary`, which a card and the overlay's lead show (F34); null where the text gives none, and for the opening, work and waits",
+            "examples": [
+              "Three tents compared; the dome wins on weight."
+            ],
+            "title": "Summary"
           },
           "title": {
             "anyOf": [
@@ -3406,6 +3540,21 @@
             "title": "Urgent",
             "type": "boolean"
           },
+          "word_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The text's own words past its front matter, every block's included, whatever a display collapses: under about 150 a document draws inline, else it leaves a card (F24.1); null where `body` is",
+            "examples": [
+              412
+            ],
+            "title": "Word Count"
+          },
           "words": {
             "anyOf": [
               {
@@ -3417,6 +3566,11 @@
             ],
             "description": "The opening's words, verbatim; null for every other item",
             "title": "Words"
+          },
+          "writing": {
+            "description": "Whether a session's running turn is saving the text, which Pilot's dots show at its end (F35); cleared at the turn's end, which no live event announces",
+            "title": "Writing",
+            "type": "boolean"
           }
         },
         "required": [
@@ -3434,7 +3588,13 @@
           "concept",
           "author",
           "words",
-          "body"
+          "body",
+          "summary",
+          "word_count",
+          "read_minutes",
+          "writing",
+          "edited_at",
+          "attachments"
         ],
         "title": "TimelineItemSchema",
         "type": "object"
@@ -6462,6 +6622,67 @@
           }
         ],
         "summary": "Add a prose item to the project's timeline, by the project's session, as Pilot adds one: its kind, urgency, person, step and blocks, Pilot's answers and deferrals among them, are what its text says.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/projects/{project_id}/turn-ends": {
+      "post": {
+        "description": "Returns:     204: The turn has ended     400: The stage is prd     404: No project has the id     409: The project has no session",
+        "operationId": "post__api_testing_projects_{project_id}_turn-ends",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "End the turn of the project's session as the relay does for its documents: Pilot's writing flag cleared on each it was saving, and a `turn` Version cut of each whose text moved. No live event follows.",
         "tags": [],
         "x-required-role": "editor"
       }

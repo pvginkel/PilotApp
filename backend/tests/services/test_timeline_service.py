@@ -1,6 +1,7 @@
 """A project's timeline as a screen draws it, and the items waiting on a
 person (F8, F12, F13, F18, F31, F78, F1.4)."""
 
+import base64
 import uuid
 from datetime import UTC, datetime
 from typing import Any, get_args
@@ -13,10 +14,13 @@ from app import models
 from app.engine.paths import tree_path
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import (
+    Attachment,
     Document,
+    DocumentVersion,
     DoneCause,
     Environment,
     Item,
+    ItemAttachment,
     ItemKind,
     PlanTask,
     Project,
@@ -24,9 +28,15 @@ from app.models import (
     SaveError,
     User,
 )
-from app.models.reference import ErrorKind, SessionState, TransitionKind
-from app.schemas.testing_record import InventedProjectCreateSchema
-from app.schemas.timeline import DoneCauseCode, ItemKindCode
+from app.models.reference import (
+    AttachmentSource,
+    ErrorKind,
+    SessionState,
+    TransitionKind,
+    VersionCause,
+)
+from app.schemas.testing_record import InventedFileSchema, InventedProjectCreateSchema
+from app.schemas.timeline import AttachmentSchema, DoneCauseCode, ItemKindCode
 from app.services.auth_service import AuthContext
 from app.services.container import ServiceContainer
 from app.services.timeline_service import Badge
@@ -168,6 +178,32 @@ note: Gas was on the list.
 """
 
 
+NOTICE_LATER = "---\ntitle: The site opens in May\n---\n\nThe site opens on 1 May.\n"
+
+CAMP_KIT = """---
+title: Camp kit
+summary: What we bring, and the stove.
+---
+
+# Camp kit
+
+What we bring.
+
+## Which stove?
+
+```decision id=D1
+options:
+  - Gas
+  - Wood
+answer: Gas
+by: agent
+at: 2026-10-12T09:30:00Z
+```
+"""
+"""Its own count past the front matter, whatever collapses: `# Camp kit` 3,
+the prose 3, the heading 3, the fence's lines 2, 1, 2, 2, 2, 2, 2 and 1."""
+
+
 def _make(container: ServiceContainer, **spec: Any) -> Project:
     spec.setdefault("members", ["ada"])
     spec.setdefault("name", "Camp")
@@ -255,6 +291,88 @@ def _bear(
 
 def _document(session: DbSession, item: Item) -> Document:
     return session.get_one(Document, item.id)
+
+
+def _save(
+    container: ServiceContainer,
+    session: DbSession,
+    project: Project,
+    item: Item,
+    environment: Environment,
+    run: models.Session,
+    text: str,
+) -> None:
+    """A clean save of the item's file by `run`, which it is then writing."""
+    document = _document(session, item)
+    ingested = container.ingest_service().ingest(
+        tree_path(project, document.path),
+        text.encode(),
+        container.tree_service().hash(project, document),
+        environment,
+        run,
+    )
+    assert not ingested.held, ingested.faults
+
+
+def _versions(
+    session: DbSession, item: Item, cause: VersionCause
+) -> list[DocumentVersion]:
+    return list(
+        session.scalars(
+            select(DocumentVersion)
+            .where(
+                DocumentVersion.document_id == item.id,
+                DocumentVersion.cause_code == cause,
+            )
+            .order_by(DocumentVersion.number)
+        )
+    )
+
+
+def _causes(session: DbSession, item: Item) -> list[VersionCause]:
+    return list(
+        session.scalars(
+            select(DocumentVersion.cause_code)
+            .where(DocumentVersion.document_id == item.id)
+            .order_by(DocumentVersion.number)
+        )
+    )
+
+
+def _session_of(session: DbSession, project: Project) -> models.Session:
+    return session.scalars(
+        select(models.Session).where(models.Session.project_id == project.id)
+    ).one()
+
+
+def _file(
+    filename: str, content: bytes, content_type: str = "text/markdown"
+) -> InventedFileSchema:
+    return InventedFileSchema.model_validate(
+        {
+            "title": filename.split(".")[0].capitalize(),
+            "filename": filename,
+            "content_type": content_type,
+            "content": base64.b64encode(content).decode(),
+        }
+    )
+
+
+def _attachment(
+    attachment: Attachment, content_type: str, size: int, batch: int, source: str
+) -> AttachmentSchema:
+    """What the timeline says of `attachment`, a file `_file` made, copied from
+    the folder `source` names."""
+    return AttachmentSchema(
+        id=attachment.id,
+        title=attachment.filename.split(".")[0].capitalize(),
+        filename=attachment.filename,
+        content_type=content_type,
+        size=size,
+        batch=batch,
+        copied_at=attachment.copied_at,
+        source=f"{source}/{attachment.filename}",
+    )
 
 
 def _items(container: ServiceContainer, project: Project) -> list[dict[str, Any]]:
@@ -854,6 +972,235 @@ class TestTimeline:
         assert line["body"] == [
             {"type": "prose", "markdown": "The camp's refinement.", "section": None}
         ]
+
+    def test_the_opening_work_and_waits_say_nothing_of_a_text(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        run = _run(session, project, environment)
+        _work(session, project, environment, SessionState.RUNNING)
+        _wait(session, project, run)
+
+        items = _items(container, project)
+
+        facts = ("summary", "word_count", "read_minutes", "writing", "edited_at")
+        assert [
+            ([item[key] for key in facts], item["attachments"]) for item in items
+        ] == [([None, None, None, False, None], [])] * 3
+
+    def test_a_documents_summary_and_its_own_count(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        _bear(
+            container,
+            project,
+            _run(session, project, environment),
+            "document",
+            "Camp kit",
+            CAMP_KIT,
+        )
+
+        _opening, item = _items(container, project)
+
+        assert (item["summary"], item["word_count"], item["read_minutes"]) == (
+            "What we bring, and the stove.",
+            23,
+            1,
+        )
+        assert item["body"][2]["block"]["section"] == {"heading": "Which stove?"}
+
+    @pytest.mark.parametrize(
+        ("words", "minutes"),
+        [(0, 1), (1, 1), (344, 1), (345, 2), (574, 2), (575, 3)],
+    )
+    def test_a_reviews_reading_time_is_its_words_at_230_a_minute_half_up(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        words: int,
+        minutes: int,
+    ) -> None:
+        project = _make(container)
+        _bear(
+            container,
+            project,
+            _run(session, project, environment),
+            "review",
+            "Long read",
+            "---\ntitle: Long read\n---\n\n" + " ".join(["word"] * words) + "\n",
+        )
+
+        _opening, item = _items(container, project)
+
+        assert (item["word_count"], item["read_minutes"]) == (words, minutes)
+
+    def test_pilot_writes_a_document_from_its_save_to_its_turns_end(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        run = _run(session, project, environment)
+        item = _bear(container, project, run, "notice", "Opens in May", NOTICE)
+        born = _items(container, project)[1]["writing"]
+
+        _save(container, session, project, item, environment, run, NOTICE_LATER)
+        saved = _items(container, project)[1]["writing"]
+        container.document_service().turn_ended(run)
+        ended = _items(container, project)[1]["writing"]
+
+        assert (born, saved, ended) == (False, True, False)
+
+    def test_a_document_only_born_or_changed_by_no_turn_is_not_edited(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        project = _make(container)
+        run = _run(session, project, environment)
+        item = _bear(container, project, run, "question", "Where?", QUESTION)
+        container.record_service().answer(
+            _document(session, item), "Q1", person, "By the hill"
+        )
+
+        _opening, line = _items(container, project)
+
+        assert line["edited_at"] is None
+
+    def test_edited_is_the_latest_turn_to_change_the_text_after_its_first(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        project = _make(container)
+        run = _run(session, project, environment)
+        item = _bear(container, project, run, "document", "Camp plan", TWO_ASKS)
+        documents = container.document_service()
+        for note in ("Pack light.", "Pack lighter."):
+            _save(
+                container,
+                session,
+                project,
+                item,
+                environment,
+                run,
+                TWO_ASKS.replace("```question", f"{note}\n\n```question"),
+            )
+            documents.turn_ended(run)
+        container.record_service().done(item, person)
+        first, second = _versions(session, item, VersionCause.TURN)
+        first.created_at = datetime(2026, 10, 12, 9, 0, tzinfo=UTC)
+        second.created_at = datetime(2026, 10, 12, 10, 0, tzinfo=UTC)
+        (done,) = _versions(session, item, VersionCause.DONE)
+        done.created_at = datetime(2026, 10, 12, 11, 0, tzinfo=UTC)
+        session.flush()
+
+        _opening, line = _items(container, project)
+
+        assert datetime.fromisoformat(line["edited_at"]) == second.created_at
+
+    def test_a_document_born_without_text_is_edited_from_its_second_turn(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        run = _run(session, project, environment)
+        item = _bear(container, project, run, "notice", "Opens in May", "")
+        documents = container.document_service()
+        _save(container, session, project, item, environment, run, NOTICE)
+        documents.turn_ended(run)
+        first = _items(container, project)[1]["edited_at"]
+
+        _save(container, session, project, item, environment, run, NOTICE_LATER)
+        documents.turn_ended(run)
+        second = _items(container, project)[1]["edited_at"]
+
+        (_, turn) = _versions(session, item, VersionCause.TURN)
+        assert _causes(session, item) == [
+            VersionCause.BORN,
+            VersionCause.TURN,
+            VersionCause.TURN,
+        ]
+        assert first is None
+        assert datetime.fromisoformat(second) == turn.created_at
+
+    def test_an_item_carries_its_attachments_in_their_order_work_included(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container, environment_id=environment.id)
+        source = f"{environment.id}:{_session_of(session, project).cwd}"
+        data = container.test_data_service()
+        notice = data.item(project.id, "notice", "Opens in May", NOTICE)
+        work = _work(session, project, environment, SessionState.RUNNING)
+        sketch, photo = data.attach(
+            notice.id,
+            [_file("sketch.md", b"# Sketch\n"), _file("map.png", b"PNG", "image/png")],
+        )
+        (notes,) = data.attach(
+            notice.id, [_file("notes.txt", b"Bring boots.", "text/plain")]
+        )
+        (log,) = data.attach(work.id, [_file("build.log", b"ok", "text/plain")])
+
+        timeline = container.timeline_service().timeline(project.id)
+
+        assert [item.attachments for item in timeline.items] == [
+            [],
+            [
+                _attachment(sketch, "text/markdown", 9, 1, source),
+                _attachment(photo, "image/png", 3, 1, source),
+                _attachment(notes, "text/plain", 12, 2, source),
+            ],
+            [_attachment(log, "text/plain", 2, 3, source)],
+        ]
+
+    def test_the_copy_of_the_draft_has_no_source(
+        self, container: ServiceContainer, session: DbSession
+    ) -> None:
+        project = _make(container)
+        opening = session.scalars(
+            select(Item).where(Item.project_id == project.id)
+        ).one()
+        copy = Attachment(
+            project_id=project.id,
+            batch=1,
+            title="Camp",
+            filename="project.md",
+            content_type="text/markdown",
+            source_code=AttachmentSource.DRAFT,
+            copied_at=datetime(2026, 10, 12, 9, 0, tzinfo=UTC),
+        )
+        container.attachment_store().put(copy, b"# Camp\n")
+        session.add(
+            ItemAttachment(
+                item_id=opening.id,
+                attachment_id=copy.id,
+                position=1,
+                attached_at=copy.copied_at,
+            )
+        )
+        session.flush()
+
+        (line,) = container.timeline_service().timeline(project.id).items
+
+        assert [(a.id, a.source) for a in line.attachments] == [(copy.id, None)]
 
     def test_a_finished_project_has_the_time_of_its_latest_finish(
         self, container: ServiceContainer

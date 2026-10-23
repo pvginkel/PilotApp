@@ -3,6 +3,7 @@ head, as the signed-in person reads them (F1, F2, F3, D012); and what they
 change of a project's standing, its transitions and their membership (F4.1,
 F5, F6, F127, F128)."""
 
+import base64
 import uuid
 from datetime import datetime
 from typing import Any
@@ -23,7 +24,7 @@ from app.models import (
     User,
 )
 from app.models.reference import SessionState, TransitionKind
-from app.schemas.testing_record import InventedProjectCreateSchema
+from app.schemas.testing_record import InventedFileSchema, InventedProjectCreateSchema
 from app.services.container import ServiceContainer
 from tests.support.fake_sidecar import FakeSidecar
 
@@ -466,6 +467,12 @@ class TestGetTimeline:
                     "author": ada,
                     "words": "Let's camp.\n",
                     "body": None,
+                    "summary": None,
+                    "word_count": None,
+                    "read_minutes": None,
+                    "writing": False,
+                    "edited_at": None,
+                    "attachments": [],
                 },
                 {
                     "id": str(decision.id),
@@ -526,6 +533,12 @@ class TestGetTimeline:
                             },
                         },
                     ],
+                    "summary": None,
+                    "word_count": 33,
+                    "read_minutes": 1,
+                    "writing": False,
+                    "edited_at": None,
+                    "attachments": [],
                 },
                 {
                     "id": str(notice.id),
@@ -551,6 +564,12 @@ class TestGetTimeline:
                     "body": [
                         {"type": "prose", "markdown": "A storm comes.", "section": None}
                     ],
+                    "summary": None,
+                    "word_count": 3,
+                    "read_minutes": 1,
+                    "writing": False,
+                    "edited_at": None,
+                    "attachments": [],
                 },
             ],
         }
@@ -584,6 +603,74 @@ class TestGetTimeline:
             ("block", None, None),
         ]
         assert parts[2]["block"]["section"] == {"heading": "Which tent?"}
+
+    def test_a_documents_summary_writing_and_attachments_ride_with_it(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        environment: Environment,
+    ) -> None:
+        camp = _make(container, name="Camp", environment_id=environment.id)
+        data = container.test_data_service()
+        item = data.item(
+            camp,
+            "review",
+            "Camp kit",
+            "---\ntitle: Camp kit\nsummary: What we bring.\n---\n\nBoots.\n",
+        )
+        data.save(
+            item.id,
+            "---\ntitle: Camp kit\nsummary: What we bring.\n---\n\nBoots, a tent.\n",
+        )
+        (sketch,) = data.attach(
+            item.id,
+            [
+                InventedFileSchema.model_validate(
+                    {
+                        "title": "Sketch",
+                        "filename": "sketch.md",
+                        "content_type": "text/markdown",
+                        "content": base64.b64encode(b"# Sketch\n").decode(),
+                    }
+                )
+            ],
+        )
+        _sign_in(client)
+
+        body = client.get(f"{PROJECTS}/{camp}/timeline").get_json()
+
+        line = body["items"][1]
+        assert _stamped(line, ("attachments", 0, "copied_at")) == sketch.copied_at
+        assert {
+            key: line[key]
+            for key in (
+                "summary",
+                "word_count",
+                "read_minutes",
+                "writing",
+                "edited_at",
+                "attachments",
+            )
+        } == {
+            "summary": "What we bring.",
+            "word_count": 3,
+            "read_minutes": 1,
+            "writing": True,
+            "edited_at": None,
+            "attachments": [
+                {
+                    "id": str(sketch.id),
+                    "title": "Sketch",
+                    "filename": "sketch.md",
+                    "content_type": "text/markdown",
+                    "size": 9,
+                    "batch": 1,
+                    "copied_at": "<time>",
+                    "source": f"{environment.id}:/work/Invented/sketch.md",
+                }
+            ],
+        }
 
     def test_a_finished_project_has_its_finish(
         self, client: FlaskClient, container: ServiceContainer, session: Session

@@ -261,6 +261,16 @@ def body(text: str) -> tuple[Prose | Block, ...]:
     return tuple(parts)
 
 
+def words(text: str) -> int:
+    """The text's words past its front matter, its headings and every block's
+    fence and body included: a document's own count (F24.1), whatever a
+    display collapses. A word is a run of characters between whitespace."""
+    lines = text.split("\n")
+    close = _front_matter_close(lines)
+    first = 0 if close is None else close + 1
+    return sum(len(line.split()) for line in lines[first:])
+
+
 def _prose(lines: list[str], section: str | None) -> tuple[Prose, ...]:
     """The lines as one prose part without blank lines at its ends; none
     when nothing is left."""
@@ -497,14 +507,8 @@ def _block(
 
 
 def _front_matter(lines: list[str], faults: list[Fault]) -> tuple[FrontMatter, int]:
-    """The front matter, and the index of the first line after it. A `---`
-    first line with no closing one opens no front matter."""
-    if not lines or lines[0].rstrip() != "---":
-        return FrontMatter(), 0
-    close = next(
-        (index for index in range(1, len(lines)) if lines[index].rstrip() == "---"),
-        None,
-    )
+    """The front matter, and the index of the first line after it."""
+    close = _front_matter_close(lines)
     if close is None:
         return FrontMatter(), 0
     span = Span(1, close + 1)
@@ -527,6 +531,17 @@ def _front_matter(lines: list[str], faults: list[Fault]) -> tuple[FrontMatter, i
             slug=values.text("slug"),
         ),
         close + 1,
+    )
+
+
+def _front_matter_close(lines: list[str]) -> int | None:
+    """The index of the front matter's closing `---`; none without front
+    matter. A `---` first line with no closing one opens no front matter."""
+    if not lines or lines[0].rstrip() != "---":
+        return None
+    return next(
+        (index for index in range(1, len(lines)) if lines[index].rstrip() == "---"),
+        None,
     )
 
 

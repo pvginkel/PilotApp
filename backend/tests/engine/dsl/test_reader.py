@@ -890,6 +890,35 @@ class TestBody:
         assert dsl.body("") == ()
 
 
+class TestWords:
+    """A document's own count (F24.1)."""
+
+    def test_the_words_past_the_front_matter(self) -> None:
+        text = (
+            "---\ntitle: Tent\nsummary: Which tent we take.\n---\n# Tent\n\nThe dome.\n"
+        )
+
+        assert dsl.words(text) == 4
+
+    def test_every_blocks_fence_and_body_count_whatever_collapses(self) -> None:
+        text = (
+            "## Which stove?\n\n"
+            "```decision id=D1\noptions:\n  - Gas\n  - Wood\n"
+            "answer: Gas\nby: agent\n```\n"
+        )
+
+        assert dsl.words(text) == 3 + 2 + 1 + 2 + 2 + 2 + 2 + 1
+
+    def test_any_whitespace_parts_two_words(self) -> None:
+        assert dsl.words("One\ttwo\r\nthree  four\u00a0five\n") == 5
+
+    def test_an_unclosed_front_matter_is_text(self) -> None:
+        assert dsl.words("---\ntitle: Tent\n") == 3
+
+    def test_an_empty_text_and_a_front_matter_alone_have_none(self) -> None:
+        assert (dsl.words(""), dsl.words("---\ntitle: Tent\n---\n")) == (0, 0)
+
+
 class TestSection:
     """A block's own section (F30.9), read from the headings as the title is."""
 

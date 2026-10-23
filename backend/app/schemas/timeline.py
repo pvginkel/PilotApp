@@ -198,6 +198,37 @@ BodyPartSchema = Annotated[
 ]
 
 
+class AttachmentSchema(BaseModel):
+    """A file hung on an item, reader's material (F36), which its stream
+    `/api/attachments/<id>` serves without its title or stored type."""
+
+    id: uuid.UUID = Field(description="The attachment's id, its stream's address")
+    title: str = Field(examples=["Recipe card sketch"])
+    filename: str = Field(
+        description="The file's name, the one its download takes",
+        examples=["sketch.md"],
+    )
+    content_type: str = Field(
+        description="The content type it was copied with", examples=["text/markdown"]
+    )
+    size: int = Field(description="Its size in bytes", examples=[2048])
+    batch: int = Field(
+        description=(
+            "The project's attach call it came in, from 1: the files of one call, "
+            "a folder among them, share it (F37.1)"
+        ),
+        examples=[1],
+    )
+    copied_at: datetime = Field(description="When it was copied into the record")
+    source: str | None = Field(
+        description=(
+            "Where it was copied from, `<environment>:<path>` (F36.1); null for the "
+            "copy of the draft"
+        ),
+        examples=["kc-recipes:/work/Recipes/sketch.md"],
+    )
+
+
 class TimelineItemSchema(BaseModel):
     """An entry on the timeline, with what its line and its open form show."""
 
@@ -244,6 +275,46 @@ class TimelineItemSchema(BaseModel):
             "the front matter and a first heading that is its title; null for the "
             "opening, work and waits"
         )
+    )
+    summary: str | None = Field(
+        description=(
+            "The front matter's `summary`, which a card and the overlay's lead show "
+            "(F34); null where the text gives none, and for the opening, work and "
+            "waits"
+        ),
+        examples=["Three tents compared; the dome wins on weight."],
+    )
+    word_count: int | None = Field(
+        description=(
+            "The text's own words past its front matter, every block's included, "
+            "whatever a display collapses: under about 150 a document draws inline, "
+            "else it leaves a card (F24.1); null where `body` is"
+        ),
+        examples=[412],
+    )
+    read_minutes: int | None = Field(
+        description=(
+            "The text's reading time at 230 words a minute, rounded, at least 1: a "
+            'review\'s "N min read" (F25.1); null where `body` is'
+        ),
+        examples=[2],
+    )
+    writing: bool = Field(
+        description=(
+            "Whether a session's running turn is saving the text, which Pilot's "
+            "dots show at its end (F35); cleared at the turn's end, which no live "
+            "event announces"
+        )
+    )
+    edited_at: datetime | None = Field(
+        description=(
+            "*Edited <time>* (F28.7): the time of the latest `turn` Version that "
+            "follows the first Version whose text, as drawn, holds anything; null "
+            "where no such Version follows it, and where `body` is null"
+        )
+    )
+    attachments: list[AttachmentSchema] = Field(
+        description="The files hung on the item, in their order, on every kind (F17.5)"
     )
 
 

@@ -9,6 +9,7 @@ from pathlib import PurePosixPath
 from typing import cast
 
 from sqlalchemy import ColumnElement, and_, func, or_, select
+from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import Session
 
 from app.engine import dsl
@@ -17,9 +18,12 @@ from app.engine.paths import tree_path
 from app.engine.record import NOTICE, RecordService
 from app.exceptions import RecordNotFoundException
 from app.models import (
+    Attachment,
     ConfirmationReason,
     Document,
+    DocumentVersion,
     Item,
+    ItemAttachment,
     ItemKind,
     PlanTask,
     Project,
@@ -35,8 +39,10 @@ from app.models.reference import (
     ProjectState,
     SessionState,
     TransitionKind,
+    VersionCause,
 )
 from app.schemas.timeline import (
+    AttachmentSchema,
     BlockPartSchema,
     BlockSchema,
     BodyPartSchema,
@@ -61,6 +67,9 @@ WORK = "work"
 _STOPPED = (SessionState.STOPPED, SessionState.FAILED)
 """The states in which a work item waits on a person: stopped, or failed to
 start (F1.4, F125)."""
+
+_WORDS_A_MINUTE = 230
+"""The reading speed of a review's "N min read" (F25.1)."""
 
 
 @dataclass(frozen=True)
@@ -141,11 +150,15 @@ class TimelineService:
             .where(Item.project_id == project.id)
             .order_by(Item.seq)
         ).all()
-        bodies = {
-            item.id: dsl.body(_published(document))
+        texts = {
+            item.id: _published(document)
             for item, document, _ in rows
             if document is not None and item.kind_code != OPENING
         }
+        bodies = {item_id: dsl.body(text) for item_id, text in texts.items()}
+        counts = {item_id: dsl.words(text) for item_id, text in texts.items()}
+        edited = self._edited(list(texts))
+        attachments = self._attachments([item.id for item, _, _ in rows])
         users = self._users(
             {
                 user_id
@@ -229,10 +242,91 @@ class TimelineService:
                         if item.id not in bodies
                         else [reader.part(part) for part in bodies[item.id]]
                     ),
+                    summary=None if document is None else document.summary,
+                    word_count=counts.get(item.id),
+                    read_minutes=(
+                        None
+                        if item.id not in counts
+                        else _read_minutes(counts[item.id])
+                    ),
+                    writing=(
+                        document is not None and document.writing_session_id is not None
+                    ),
+                    edited_at=edited.get(item.id),
+                    attachments=attachments.get(item.id, []),
                 )
                 for item, document, form in rows
             ],
         )
+
+    def _edited(self, document_ids: list[uuid.UUID]) -> dict[uuid.UUID, datetime]:
+        """Each document's *Edited <time>* (F28.7, the planning's ruling): the
+        time of its latest `turn` Version where a Version before it holds
+        text as drawn, the first text it was shown with. A document with
+        none is left out."""
+        latest = {
+            row.document_id: row
+            for row in self.db.execute(
+                select(
+                    DocumentVersion.document_id,
+                    DocumentVersion.number,
+                    DocumentVersion.created_at,
+                )
+                .where(
+                    DocumentVersion.document_id.in_(document_ids),
+                    DocumentVersion.cause_code == VersionCause.TURN,
+                )
+                .ext(distinct_on(DocumentVersion.document_id))
+                .order_by(DocumentVersion.document_id, DocumentVersion.number.desc())
+            )
+        }
+        edited: dict[uuid.UUID, datetime] = {}
+        number = 1
+        pending = {key for key, turn in latest.items() if number < turn.number}
+        while pending:
+            for document_id, text in self.db.execute(
+                select(DocumentVersion.document_id, DocumentVersion.text).where(
+                    DocumentVersion.document_id.in_(pending),
+                    DocumentVersion.number == number,
+                )
+            ):
+                if dsl.body(text):
+                    edited[document_id] = latest[document_id].created_at
+                    pending.discard(document_id)
+            number += 1
+            pending = {key for key in pending if number < latest[key].number}
+        return edited
+
+    def _attachments(
+        self, item_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, list[AttachmentSchema]]:
+        """The attachments hung on each item, in their order; an item with
+        none is left out."""
+        hung: dict[uuid.UUID, list[AttachmentSchema]] = {}
+        for item_id, attachment in self.db.execute(
+            select(ItemAttachment.item_id, Attachment)
+            .join(Attachment, Attachment.id == ItemAttachment.attachment_id)
+            .where(ItemAttachment.item_id.in_(item_ids))
+            .order_by(ItemAttachment.item_id, ItemAttachment.position)
+        ):
+            hung.setdefault(item_id, []).append(
+                AttachmentSchema(
+                    id=attachment.id,
+                    title=attachment.title,
+                    filename=attachment.filename,
+                    content_type=attachment.content_type,
+                    size=attachment.size,
+                    batch=attachment.batch,
+                    copied_at=attachment.copied_at,
+                    source=(
+                        None
+                        if attachment.source_path is None
+                        else f"{attachment.source_environment_id}:"
+                        f"{attachment.source_path}"
+                    ),
+                )
+            )
+        return hung
 
     def _done(self, item: Item, reader: "_Reader") -> DoneSchema | None:
         if item.done_at is None:
@@ -340,6 +434,11 @@ class _Reader:
                 else SectionSchema(heading=block.section.heading)
             ),
         )
+
+
+def _read_minutes(words: int) -> int:
+    """`words` at the reading speed, rounded half up, at least 1."""
+    return max(1, (words + _WORDS_A_MINUTE // 2) // _WORDS_A_MINUTE)
 
 
 def _published(document: Document) -> str:

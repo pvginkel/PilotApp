@@ -24,6 +24,7 @@ from app.engine.dsl.reader import (
     body,
     parse,
     validate,
+    words,
 )
 from app.engine.dsl.writer import (
     Merge,
@@ -61,6 +62,7 @@ __all__ = [
     "recommendation",
     "validate",
     "with_title",
+    "words",
     "write_answer",
     "write_done",
     "write_recommended",

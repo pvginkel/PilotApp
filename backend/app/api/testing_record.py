@@ -1,8 +1,9 @@
 """Testing endpoints that make the record's states the UI cannot make
 (TEST-6): people who never signed in, environments, projects in every
 standing, with members, a plan, their opening and open items, the items a
-project's session adds, an agent's saves of them, and the files it attaches. Nothing in the UI
-creates a project before the definition chat (F46).
+project's session adds, an agent's saves of them, the files it attaches, and
+the end of its turn. Nothing in the UI creates a project before the
+definition chat (F46).
 
 They answer on every STAGE but prd, whatever FLASK_ENV says, so that the dev
 stage's deployed check makes its record through them (D027). They sit on
@@ -172,6 +173,34 @@ def create_item(
     data = InventedItemCreateSchema.model_validate(request.get_json())
     item = test_data_service.item(project_id, data.kind, data.title, data.text)
     return InventedItemSchema(id=item.id).model_dump(mode="json"), 201
+
+
+@testing_record_bp.route("/projects/<uuid:project_id>/turn-ends", methods=["POST"])
+@api.validate(
+    resp=SpectreeResponse(
+        HTTP_204=None,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def create_turn_end(
+    project_id: uuid.UUID,
+    test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
+) -> tuple[str, int]:
+    """End the turn of the project's session as the relay does for its
+    documents: Pilot's writing flag cleared on each it was saving, and a
+    `turn` Version cut of each whose text moved. No live event follows.
+
+    Returns:
+        204: The turn has ended
+        400: The stage is prd
+        404: No project has the id
+        409: The project has no session
+    """
+    test_data_service.end_turn(project_id)
+    return "", 204
 
 
 @testing_record_bp.route("/items/<uuid:item_id>/saves", methods=["POST"])
