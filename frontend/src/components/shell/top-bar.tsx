@@ -37,7 +37,7 @@ export function TopBar({ self, drawer }: TopBarProps) {
         </button>
       )}
       <div className="brand">
-        <img className="logo" src="/logo.svg" alt="" />
+        <img className="logo" src="/logo.png" alt="" />
         Pilot
       </div>
       <div className="spacer" />

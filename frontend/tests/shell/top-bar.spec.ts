@@ -11,7 +11,7 @@ test.describe('The top bar', () => {
     await shell.open();
 
     await expect(shell.brand).toHaveText('Pilot');
-    await expect(shell.brand.locator('img.logo')).toHaveAttribute('src', '/logo.svg');
+    await expect(shell.brand.locator('img.logo')).toHaveAttribute('src', '/logo.png');
     await expect(shell.avatar).toHaveText('AE');
     await expect(shell.avatar).toHaveAttribute('title', 'Ada Example');
     await expect(shell.userName).toHaveText('Ada Example');

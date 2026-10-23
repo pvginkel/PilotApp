@@ -164,12 +164,14 @@ from acting.
 
 ## The PWA
 
-`frontend/public/` holds the app's mark, `favicon.svg`: the operator's control tower, drawn in
-three-quarter perspective, on a rounded tile in the theme's blue (D020). The favicon and the
-manifest's icons (192px, 512px and a 512px maskable one, the tile full-bleed with the tower at 0.8 of
-its size) are rendered from it by `scripts/render-icons.mjs`, run from `frontend/` after a change to
-the SVG; the top bar's `logo.svg` is the same tower in blues on a white tile, the bar being the
-theme's blue itself (D020). Beside them stand the manifest (`manifest.json`) and the service worker,
+The app's mark is the operator's control tower in three-quarter perspective, modelled in
+`assets/icon/ATC-tower.blend` and rendered beside it to two PNGs (its `README.txt` says how):
+`tower-blue.png`, the white tower on a rounded tile in the theme's blue, and `tower-white.png`, the
+same tower in blues on a white tile (D020). `scripts/render-icons.mjs`, run from `frontend/` after a
+new render, writes `frontend/public/`'s images from them: the favicon and the manifest's icons
+(192px, 512px and a 512px maskable one, the tile full-bleed with the tower at 0.8 of its size) from
+the blue one, and the top bar's `logo.png` from the white one, the bar being the theme's blue itself
+(D020). Beside them stand the manifest (`manifest.json`) and the service worker,
 `sw.js`; the page head links the manifest and sets `theme-color` to `#568ed2`, a standing edit of
 the template's `index.html` (`CLAUDE.md`).
 `registerServiceWorker()` (`src/lib/service-worker.ts`) registers the worker when the shell's
