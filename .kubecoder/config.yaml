@@ -34,7 +34,13 @@ secrets:
   PILOT_DEV_TEST_PASSWORD: pilot-dev-test-password
 
 tools:
+  # Over the catalog's 5Gi: each Playwright worker runs its own backend, Vite
+  # server and Chromium here, about 0.9 GiB apiece, and 6 workers were
+  # OOMKilled at 5Gi (P-41).
   - use: modern-app
+    resources:
+      limits:
+        memory: 12Gi
   # PilotDeploy's Helm and Terraform gates.
   - use: iac
   # Its architecture gates: gen-architecture and arch-validate.
