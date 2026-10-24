@@ -1351,18 +1351,22 @@ class TestCreateWork:
         assert self._work_items(session) == []
 
 
+# A fixed id that names no row: it lands in the test ids, which every xdist
+# worker must collect alike.
+NO_ROW = uuid.UUID("00000000-0000-4000-8000-000000000000")
+
 ENDPOINTS = [
     (PEOPLE, {"handle": "ben"}),
     (ENVIRONMENTS, {"id": "example-env-2", "name": "Example-2"}),
     (PROJECTS, {"members": ["ada"]}),
-    (_items_path(uuid.uuid4()), {"kind": "notice", "title": "Camp", "text": "Hi"}),
-    (_saves_path(uuid.uuid4()), {"text": "Hi"}),
-    (_attachments_path(uuid.uuid4()), {"files": [_file("a.md", b"Hi")]}),
-    (_turn_ends_path(uuid.uuid4()), {}),
-    (_document_saves_path(uuid.uuid4(), "draft"), {"text": "Hi"}),
-    (_document_saves_path(uuid.uuid4(), "handbook"), {"text": "Hi"}),
-    (_done_path(uuid.uuid4()), {}),
-    (_work_path(uuid.uuid4()), WORK),
+    (_items_path(NO_ROW), {"kind": "notice", "title": "Camp", "text": "Hi"}),
+    (_saves_path(NO_ROW), {"text": "Hi"}),
+    (_attachments_path(NO_ROW), {"files": [_file("a.md", b"Hi")]}),
+    (_turn_ends_path(NO_ROW), {}),
+    (_document_saves_path(NO_ROW, "draft"), {"text": "Hi"}),
+    (_document_saves_path(NO_ROW, "handbook"), {"text": "Hi"}),
+    (_done_path(NO_ROW), {}),
+    (_work_path(NO_ROW), WORK),
 ]
 
 
