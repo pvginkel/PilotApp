@@ -1,8 +1,8 @@
 """The session start of a work item placed by repository, in an environment of
-Pilot's own its start creates (design 2 §13.2, §13.5, §7.1; F88.1, F125,
-F143.1; decision 38; V05, V15, V19), and the work item it is (DB Work,
-decision 3); the gate every start passes, the held start and its release
-(§13.4, §8.2; F141.5; DB 229, 230; V16, V24).
+Pilot's own its start takes free or creates (design 2 §13.2, §13.5, §7.1;
+F88.1, F125, F143.1; decision 38; DB 240; V05, V15, V19), and the work item it
+is (DB Work, decision 3); the gate every start passes, the held start and its
+release (§13.4, §8.2; F141.5; DB 229, 230; V16, V24).
 
 The start's write and its loop's run are on the test's session: the run is
 called as its loop calls it. `TestStartLoop` and `TestHeldLoop` run the loops
@@ -71,6 +71,7 @@ SLUG = "camp"
 CWD = "/work/Example"
 BRIEF = "Rename the badge."
 STOP_AFTER = timedelta(minutes=30)
+DELETE_AFTER = timedelta(days=7)
 PREPARING = {"type": STARTING, "text": "Preparing camp…"}
 STARTING_ENV = {"type": STARTING, "text": "Starting camp…"}
 CREATING = {"type": STARTING, "text": "Creating the session…"}
@@ -83,10 +84,11 @@ class _Recording(ServedFakeController):
     """The fake, keeping each environment create's body and the env id it
     made, and each headless create's body, and refusing every send with `502
     worker-unreachable` while `refuse_sends` is set. `during_provision`,
-    `during_start`, `during_settle`, `during_create` and `during_snapshot`,
-    when set, run once, as an environment's create, its start, its `wait`, a
-    headless create or a session's snapshot is answered: another process's
-    action then, or the controller going down after that call."""
+    `during_rename`, `during_start`, `during_settle`, `during_create` and
+    `during_snapshot`, when set, run once, as an environment's create, its
+    rename, its start, its `wait`, a headless create or a session's snapshot
+    is answered: another process's action then, or the controller going down
+    after that call."""
 
     def __init__(self, keepalive_seconds: float) -> None:
         super().__init__(keepalive_seconds)
@@ -95,6 +97,7 @@ class _Recording(ServedFakeController):
         self.create_bodies: list[dict[str, Any]] = []
         self.refuse_sends = False
         self.during_provision: Callable[[], None] | None = None
+        self.during_rename: Callable[[], None] | None = None
         self.during_start: Callable[[], None] | None = None
         self.during_create: Callable[[], None] | None = None
         self.during_settle: Callable[[], None] | None = None
@@ -108,6 +111,12 @@ class _Recording(ServedFakeController):
         response = super()._create_environment(request)
         self.created.append(json.loads(response.get_data())["envId"])
         return response
+
+    def _rename(self, request: Request, env_id: str) -> Response:
+        hook, self.during_rename = self.during_rename, None
+        if hook is not None:
+            hook()
+        return super()._rename(request, env_id)
 
     def _start(self, request: Request, env_id: str) -> Response:
         hook, self.during_start = self.during_start, None
@@ -192,6 +201,7 @@ def _services(
     supervise: Supervise,
     *,
     stop_after: timedelta = STOP_AFTER,
+    delete_after: timedelta = DELETE_AFTER,
     controller_configured: bool = True,
     outage: ControllerOutage | None = None,
 ) -> tuple[SessionStartService, EnvironmentService, LifecycleCoordinator]:
@@ -202,6 +212,7 @@ def _services(
         container=container,
         supervisor=supervisor,
         stop_after_seconds=stop_after.total_seconds(),
+        delete_after_seconds=delete_after.total_seconds(),
     )
     relays = RelayService(
         container=container,
@@ -856,6 +867,356 @@ class TestRun:
         )
         assert fake.sessions(env_id) == []
         assert _server(session, run.id) == []
+
+
+FREE = "example-example-free"
+
+
+def _free(
+    db: DbSession,
+    fake: ServedFakeController,
+    env_id: str = FREE,
+    *,
+    name: str | None = None,
+    freed_at: datetime | None = None,
+) -> Environment:
+    """An environment of Pilot's own made from the repository, free and
+    stopped, its row as the fleet reports it, its delete deadline set from
+    `freed_at`."""
+    fake.add_environment(env_id, name=name, repo=REPO)
+    now = datetime.now(UTC)
+    row = Environment(
+        id=env_id,
+        name=name or env_id,
+        exempt=False,
+        last_state="stopped",
+        server_created_at=now - timedelta(days=2),
+        repo=REPO,
+        delete_due_at=(freed_at or now - timedelta(hours=1)) + DELETE_AFTER,
+    )
+    db.add(row)
+    db.flush()
+    return row
+
+
+def _project_named(db: DbSession, person: User, slug: str) -> Project:
+    opened = Project(
+        created_by_user_id=person.id, state_code=ProjectState.OPEN, slug=slug
+    )
+    db.add(opened)
+    db.flush()
+    return opened
+
+
+def _calls_on(fake: ServedFakeController, env_id: str) -> list[str]:
+    return [call for call in fake.calls if f"/environments/{env_id}" in call]
+
+
+class TestRunTakes:
+    """A free environment of Pilot's own taken before one is created, and
+    renamed after the taking Project (§13.5; DB 240; refinement D1; V01, V10,
+    V17, V18)."""
+
+    def test_a_free_environment_of_its_repository_is_taken_renamed_and_started(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        _free(session, fake)
+        run = _start(starts, session, project)
+
+        _run(starts, run)
+
+        assert fake.created == []
+        assert CREATE_ENVIRONMENT not in fake.calls
+        assert _env(session, run.id) == FREE
+        assert fake.environment(FREE).name == SLUG
+        row = _row(session, FREE)
+        assert (row.name, row.delete_due_at) == (SLUG, None)
+        # Renamed before it is brought up; its start's `202` took the claim.
+        assert _calls_on(fake, FREE)[:2] == [
+            f"POST /environments/{FREE}/rename",
+            f"POST /environments/{FREE}/start",
+        ]
+        assert row.server_started_at is not None
+        assert row.started_pod_at == fake.environment(FREE).pod_started_at is not None
+        run = _read(session, run.id)
+        assert run.state_code == SessionState.RUNNING
+        assert _server(session, run.id) == [(None, PREPARING), (None, CREATING)]
+        (headless,) = fake.sessions(FREE)
+        assert _sends(fake, FREE, headless.name) == 1
+
+    def test_the_most_recently_freed_is_taken(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        now = datetime.now(UTC)
+        _free(session, fake, "example-example-older", freed_at=now - timedelta(days=3))
+        _free(session, fake, FREE, freed_at=now - timedelta(minutes=5))
+        run = _start(starts, session, project)
+
+        _run(starts, run)
+
+        assert _env(session, run.id) == FREE
+        assert _calls_on(fake, "example-example-older") == []
+
+    def test_a_name_the_fleet_holds_is_suffixed(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        # An operator's environment holds the slug.
+        fake.add_environment("operators-env", name=SLUG)
+        _free(session, fake)
+        run = _start(starts, session, project)
+
+        _run(starts, run)
+
+        assert fake.environment(FREE).name == "camp-2"
+        assert _row(session, FREE).name == "camp-2"
+        assert _server(session, run.id)[0] == (
+            None,
+            {"type": STARTING, "text": "Preparing camp-2…"},
+        )
+
+    def test_a_drafts_take_clears_the_name(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        person: User,
+    ) -> None:
+        # Freed since the delete timer's last tick: it still has a name.
+        _free(session, fake, name="dune")
+        draft = Project(created_by_user_id=person.id)
+        session.add(draft)
+        session.flush()
+        run = _start(starts, session, draft)
+
+        _run(starts, run)
+
+        assert _env(session, run.id) == FREE
+        assert fake.environment(FREE).name is None
+        assert _row(session, FREE).name == FREE
+
+    def test_a_stopped_work_items_environment_is_never_taken(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        # It may resume there (refinement D1): the next start creates another.
+        first = _start(starts, session, project)
+        _run(starts, first)
+        bound = _env(session, first.id)
+        starts.stop(session, first.id, person)
+        clear_after_commit_callbacks()
+        fake.set_status(bound, "stopped")
+        _row(session, bound).last_state = "stopped"
+        session.flush()
+        calls = len(_calls_on(fake, bound))
+
+        second = _start(starts, session, project)
+        _run(starts, second)
+
+        assert len(fake.created) == 2
+        assert _env(session, second.id) == fake.created[1] != bound
+        assert len(_calls_on(fake, bound)) == calls
+        assert _read(session, first.id).environment_id == bound
+
+    def test_an_environment_pilot_did_not_create_is_never_taken_renamed_or_started(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        # An operator's of the repository, the store, and one a work item placed
+        # by id before slice 020 ran in, its turn ended.
+        others = ("env-operators", "env-store", "env-placed-by-id")
+        for env_id in others:
+            fake.add_environment(env_id, name=env_id.upper(), repo=REPO)
+            session.add(
+                Environment(
+                    id=env_id,
+                    name=env_id.upper(),
+                    exempt=env_id == "env-store",
+                    last_state="stopped",
+                )
+            )
+        session.flush()
+        session.add(
+            models.Session(
+                project_id=project.id,
+                environment_id="env-placed-by-id",
+                kind_code="work",
+                cwd=CWD,
+                token_hash=uuid.uuid4().hex,
+                state_code=SessionState.IDLE,
+            )
+        )
+        session.flush()
+        run = _start(starts, session, project)
+
+        _run(starts, run)
+
+        (created,) = fake.created
+        assert _env(session, run.id) == created
+        for env_id in others:
+            assert _calls_on(fake, env_id) == []
+            assert fake.environment(env_id).name == env_id.upper()
+
+    def test_a_stop_while_it_is_renamed_leaves_it_bound_to_the_item_under_the_timer(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _free(session, fake)
+        work = _start_work(starts, session, project)
+        client = container.controller_client()
+        rename = client.rename_environment
+
+        def stopped_meanwhile(*args: Any) -> Any:
+            renamed = rename(*args)
+            starts.stop(session, work.id, person)
+            session.flush()
+            return renamed
+
+        monkeypatch.setattr(client, "rename_environment", stopped_meanwhile)
+
+        _run(starts, _read(session, work.id))
+        clear_after_commit_callbacks()
+
+        run = _read(session, work.id)
+        assert (run.state_code, run.environment_id) == (SessionState.STOPPED, FREE)
+        assert _server(session, run.id) == []
+        assert fake.sessions(FREE) == []
+        # Its bring-up's claim stands, and nothing runs there: the timer stops it.
+        row = _row(session, FREE)
+        assert row.server_started_at is not None and row.stop_due_at is not None
+        assert row.delete_due_at is None
+
+    def test_a_rename_the_controller_does_not_answer_holds_the_start_until_it_does(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        controller_outage: ControllerOutage,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _free(session, fake)
+        run = _start(starts, session, project)
+        client = container.controller_client()
+        rename = client.rename_environment
+
+        def unanswered(*args: Any) -> Any:
+            fake.outage()
+            return rename(*args)
+
+        monkeypatch.setattr(client, "rename_environment", unanswered)
+
+        _run(starts, run)
+
+        run = _read(session, run.id)
+        assert (run.state_code, run.environment_id) == (SessionState.HELD, FREE)
+        assert _server(session, run.id) == []
+        row = _row(session, FREE)
+        # Taken: its claim and its deadline cleared, its name not yet the slug.
+        assert (row.server_started_at, row.delete_due_at, row.name) == (
+            None,
+            None,
+            FREE,
+        )
+        assert controller_outage.holds
+
+        monkeypatch.undo()
+        fake.outage(on=False)
+        controller_outage.probe_answered()
+        _release(starts)
+        _run(starts, run)
+
+        run = _read(session, run.id)
+        assert run.state_code == SessionState.RUNNING
+        assert fake.environment(FREE).name == SLUG
+        assert fake.created == []
+        # Its phase is the rename's, in the name the take gave it.
+        assert _server(session, run.id) == [(None, PREPARING), (None, CREATING)]
+
+    def test_a_rename_the_controller_refuses_fails_the_start(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        # Its row a report behind: it is deleting.
+        _free(session, fake)
+        fake.set_status(FREE, "deleting")
+        run = _start(starts, session, project)
+
+        _run(starts, run)
+
+        run = _assert_failed(session, run.id)
+        assert run.error is not None and "409 conflict" in run.error
+        assert run.environment_id == FREE
+
+    def test_a_free_environment_is_taken_by_the_next_start_named_after_its_project(
+        self,
+        container: ServiceContainer,
+        fake: _Recording,
+        supervise: Supervise,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        starts, environments, _ = _services(container, supervise)
+        first = _start(starts, session, project)
+        _run(starts, first)
+        env_id = _env(session, first.id)
+        # Its turn ended: done, the environment free.
+        _read(session, first.id).state_code = SessionState.IDLE
+        session.flush()
+
+        environments.run_delete_timer(session)
+
+        assert fake.environment(env_id).name is None
+        row = _row(session, env_id)
+        assert row.name == env_id and row.delete_due_at is not None
+        chip = work_status(session, [first.id], unreachable=False)[first.id]
+        assert chip.environment is not None and chip.environment.name == env_id
+
+        # The shutdown timer stopped it, as the fleet reports.
+        fake.set_status(env_id, "stopped")
+        row.last_state = "stopped"
+        session.flush()
+        second = _start(starts, session, _project_named(session, person, "dune"))
+        _run(starts, second)
+
+        assert fake.created == [env_id]
+        assert [each["envId"] for each in fake.managed()] == [env_id]
+        assert _env(session, second.id) == env_id
+        assert fake.environment(env_id).name == "dune"
+        row = _row(session, env_id)
+        assert (row.name, row.delete_due_at) == ("dune", None)
+        # The env chip shows the row as it stands.
+        chip = work_status(session, [first.id], unreachable=False)[first.id]
+        assert chip.environment is not None and chip.environment.name == "dune"
 
 
 class TestRunFails:
@@ -1806,6 +2167,82 @@ class TestStartLoop:
                 None,
             )
             assert [payload for _, payload in _server(db, run_id)] == []
+
+    def test_the_take_commits_before_any_controller_call(
+        self,
+        committed_app: Flask,
+        committed_fake: _Recording,
+        supervise: Supervise,
+    ) -> None:
+        container = committed_app.container
+        starts, _, _ = _services(container, supervise)
+        project_id = _committed_project(container)
+        with scoped_session(container) as db:
+            _free(db, committed_fake)
+        run_id = _committed_work(starts, container, project_id)
+        seen: list[tuple[Any, ...]] = []
+
+        def read_the_committed_rows() -> None:
+            # Another connection, as the take's rename is answered.
+            with scoped_session(container) as db:
+                row = _row(db, FREE)
+                seen.append(
+                    (
+                        db.get_one(models.Session, run_id).environment_id,
+                        row.server_started_at,
+                        row.delete_due_at,
+                    )
+                )
+
+        committed_fake.during_rename = read_the_committed_rows
+
+        starts.run(run_id, LoopHandle(f"start:{run_id}"))
+
+        assert seen == [(FREE, None, None)]
+        assert _committed(container, run_id).state_code == SessionState.RUNNING
+
+    def test_an_environment_left_free_is_unnamed_then_deleted_by_the_delete_timer(
+        self,
+        committed_app: Flask,
+        committed_fake: _Recording,
+        supervise: Supervise,
+        loop_log: LogWaiter,
+    ) -> None:
+        container = committed_app.container
+        starts, _, coordinator = _services(
+            container, supervise, delete_after=timedelta(seconds=0.5)
+        )
+        project_id = _committed_project(container)
+        coordinator.fire_startup()
+        work_id = _committed_work(starts, container, project_id)
+        loop_log.wait_for(rf"Loop relay:{work_id} started")
+        run = _committed(container, work_id)
+        env_id = _committed_env(container, work_id)
+        assert run.controller_session is not None
+
+        committed_fake.finish(env_id, run.controller_session, "success", "Done.")
+
+        wait_until(
+            lambda: _committed_row(container, env_id).delete_due_at is not None,
+            "the delete timer armed the free environment",
+        )
+        assert committed_fake.environment(env_id).name is None
+        wait_until(
+            lambda: _committed_row(container, env_id).last_state == "gone",
+            "the delete timer deleted it",
+        )
+        assert f"DELETE /environments/{env_id}" in committed_fake.calls
+        assert committed_fake.managed() == []
+        row = _committed_row(container, env_id)
+        assert (row.name, row.delete_due_at) == (env_id, None)
+        assert _committed(container, work_id).environment_id == env_id
+
+
+def _committed_row(container: ServiceContainer, env_id: str) -> Environment:
+    with scoped_session(container) as db:
+        row = _row(db, env_id)
+        db.expunge(row)
+        return row
 
 
 class TestHeldLoop:

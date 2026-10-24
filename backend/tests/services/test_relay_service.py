@@ -85,6 +85,7 @@ def _relay_service(
         container=container,
         supervisor=supervisor,
         stop_after_seconds=STOP_AFTER.total_seconds(),
+        delete_after_seconds=timedelta(days=7).total_seconds(),
     )
     relays = RelayService(
         container=container,

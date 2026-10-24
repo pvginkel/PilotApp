@@ -93,6 +93,14 @@ class AppEnvironment(BaseSettings):
             "or starting there before its shutdown timer stops it"
         ),
     )
+    ENVIRONMENT_DELETE_AFTER_SECONDS: float = Field(
+        default=604800.0,
+        gt=0,
+        description=(
+            "Seconds an environment Pilot created stands free before its delete "
+            "timer deletes it"
+        ),
+    )
 
 
 class AppSettings(BaseModel):
@@ -164,6 +172,10 @@ class AppSettings(BaseModel):
     """How long an environment Pilot started stands with no Session running or
     starting there before the shutdown timer stops it (design 2 §13.3)."""
 
+    environment_delete_after_seconds: float = 604800.0
+    """How long an environment of Pilot's own stands free before the delete
+    timer deletes it (design 2 §13.5)."""
+
     def dump_for_logging(self) -> dict[str, str]:
         """Every setting, for the boot log, with the Sensitive ones as ``***``."""
         return dump_config_for_logging(self)
@@ -190,4 +202,5 @@ class AppSettings(BaseModel):
             ),
             scheduler_tick_seconds=env.SCHEDULER_TICK_SECONDS,
             environment_stop_after_seconds=env.ENVIRONMENT_STOP_AFTER_SECONDS,
+            environment_delete_after_seconds=env.ENVIRONMENT_DELETE_AFTER_SECONDS,
         )

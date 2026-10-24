@@ -1,5 +1,6 @@
-"""Environments on demand, Pilot's own created, and the shutdown timer (design 2
-§13.2, §13.3, §13.5; F88.1, F73.1, F143.1).
+"""Environments on demand, Pilot's own created, taken and deleted, and the
+shutdown and delete timers (design 2 §13.2, §13.3, §13.5; F88.1, F73.1, F143.1,
+F143.3).
 
 Pilot starts an environment knowing whether it started it, and stops only what
 it started. The claim is `server_started_at`, set when Pilot's own `start` or
@@ -12,13 +13,23 @@ or `starting` there. A pod gone, another's or unknown ends the claim with no
 stop, at the tick or at a settled start; the claim's three columns, its
 deadline `stop_due_at` among them, end together. The fleet consumer writes none
 of them (§13.1).
+
+An environment of Pilot's own is free while it is neither gone nor deleting and
+no Session there is `running`, `starting` or `held`, nor `stopped` or `failed`,
+a work item that may resume (DB 240, as slice 020's refinement D1 rules it):
+derived wherever it is read, no column. A start takes a free one of its Work's
+repository, renamed after the taking Project; the delete timer's tick clears
+the name of one that has become free and sets its `delete_due_at`, both or
+neither, and deletes it once that has passed with it still free, its row kept
+`gone`. Nothing that is not Pilot's own is taken, renamed or deleted.
 """
 
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import Exists, Select, exists, select
+from sqlalchemy import ColumnElement, Exists, Select, and_, exists, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import InstrumentedAttribute, Session
 
@@ -42,8 +53,24 @@ logger = logging.getLogger(__name__)
 
 SHUTDOWN_TIMER = "environment-shutdown"
 
+DELETE_TIMER = "environment-delete"
+
+GONE = "gone"
+"""The `last_state` of an environment the controller no longer has."""
+
 _BUSY_STATES = (SessionState.RUNNING, SessionState.STARTING)
 _START_STATES = (SessionState.HELD, SessionState.STARTING)
+_BINDING_STATES = (
+    SessionState.RUNNING,
+    SessionState.STARTING,
+    SessionState.HELD,
+    SessionState.STOPPED,
+    SessionState.FAILED,
+)
+"""The states of a Session that holds its environment: under way, or a work
+item that may resume (refinement D1)."""
+_LEAVING = ("deleting", GONE)
+"""The statuses of an environment on its way out, or out: never free."""
 _FAILED_SETTLES = ("error", "stopped", "deleting")
 _AT_REST = ("running", *_FAILED_SETTLES)
 """The statuses a settled wait answers at; a wait run out can read running too."""
@@ -75,27 +102,35 @@ class EnvironmentStartFailed(ExternalServiceException):
 
 
 class EnvironmentService:
-    """Creates environments of Pilot's own, starts environments, and arms,
-    clears and runs their shutdown timer."""
+    """Creates, takes, names and deletes environments of Pilot's own, starts
+    environments, and runs the shutdown and delete timers."""
 
     def __init__(
         self,
         container: "ServiceContainer",
         supervisor: Supervisor,
         stop_after_seconds: float,
+        delete_after_seconds: float,
     ) -> None:
-        """Register the shutdown timer, whose reconcile is its tick.
+        """Register the shutdown timer and the delete timer, the reconcile of
+        each its tick.
 
         Args:
             container: Gives the start its database sessions and the client
-            supervisor: Runs the shutdown timer on its tick
+            supervisor: Runs the timers on its tick
             stop_after_seconds: How long an environment Pilot started stands
-                idle before the timer stops it
+                idle before the shutdown timer stops it
+            delete_after_seconds: How long an environment of Pilot's own stands
+                free before the delete timer deletes it
         """
         self._container = container
         self._stop_after = timedelta(seconds=stop_after_seconds)
+        self._delete_after = timedelta(seconds=delete_after_seconds)
         supervisor.register_timer(
             SHUTDOWN_TIMER, self.run_shutdown_timer, needs_controller=True
+        )
+        supervisor.register_timer(
+            DELETE_TIMER, self.run_delete_timer, needs_controller=True
         )
 
     def ensure_environment(self, db: Session, env_id: str) -> None:
@@ -134,16 +169,63 @@ class EnvironmentService:
         client = self._client()
         if slug is None:
             return client.create_environment(repo)
-        suffix = 1
-        while True:
-            name = slug if suffix == 1 else f"{slug}-{suffix}"
-            try:
-                return client.create_environment(repo, name)
-            except ControllerProblem as problem:
-                if problem.problem_type is not ControllerProblemType.NAME_CONFLICT:
-                    raise
-                logger.info("The fleet holds the name %s already", name)
-            suffix += 1
+        return _labelled(slug, lambda name: client.create_environment(repo, name))
+
+    def take(self, db: Session, repo: str) -> Environment | None:
+        """A free environment of Pilot's own created from `repo`, taken in the
+        caller's transaction, which commits it before any controller call: the
+        most recently freed, its row locked, its claim cleared, so that its
+        rows say its bring-up is still to make, and its delete deadline with
+        it. One in `error`, `provisioning` or `starting`, or running outside
+        Pilot's claim, is passed over, and a row another transaction holds
+        skipped. None when no environment is left to take.
+
+        Each candidate's freedom is read again once its row is locked, in a
+        statement of its own, so of two starts the later sees the earlier's
+        Session there.
+        """
+        candidates = db.scalars(
+            select(Environment.id)
+            .where(*_takeable(repo))
+            .order_by(Environment.delete_due_at.desc().nulls_first(), Environment.id)
+        ).all()
+        for env_id in candidates:
+            row = _try_lock(db, env_id)
+            if row is None or not db.scalar(
+                select(exists().where(Environment.id == env_id, *_takeable(repo)))
+            ):
+                continue
+            _end_claim(row)
+            row.delete_due_at = None
+            db.flush()
+            return row
+        return None
+
+    def name(self, env_id: str, slug: str | None) -> str:
+        """Rename the environment `slug`, or on a `409 name-conflict` the
+        first of `slug-2`, `slug-3`, … the fleet does not hold, as the create
+        names one (§13.5): at every take, after its commit; with no slug, its
+        name is cleared. Its row's name is set from the answer.
+
+        Returns:
+            The name it now has
+
+        Raises:
+            ControllerProblem: The controller refused it: `409 conflict` while
+                it is deleting, `404` when it is gone
+            ControllerUnreachable: The controller did not answer
+            ExternalServiceException: The controller failed otherwise
+        """
+        client = self._client()
+        renamed = (
+            client.rename_environment(env_id, "")
+            if slug is None
+            else _labelled(slug, lambda name: client.rename_environment(env_id, name))
+        )
+        with scoped_session(self._container) as db:
+            row = _lock(db, env_id)
+            row.name = renamed.name or env_id
+            return row.name
 
     def record_created(
         self, db: Session, created: ControllerEnvironment, repo: str
@@ -166,15 +248,21 @@ class EnvironmentService:
 
     def stop_untaken(self, env_id: str) -> None:
         """Stop an environment Pilot created for a start that moved on before
-        taking it, its claim ended: free, it holds no node slot.
+        taking it, its claim ended: free, it holds no node slot. Free from its
+        row's commit, another start may have taken it first: under its row's
+        lock, one no longer free is left to that start.
 
         Raises:
             ControllerUnreachable: The controller did not answer
             ExternalServiceException: The controller failed otherwise
         """
-        self._client().stop_environment(env_id)
         with scoped_session(self._container) as db:
-            _end_claim(_lock(db, env_id))
+            row = _lock(db, env_id)
+            if not _free(db, row):
+                logger.info("Environment %s was taken before its stop", env_id)
+                return
+            self._client().stop_environment(env_id)
+            _end_claim(row)
         logger.info("Stopped environment %s, which no Session took", env_id)
 
     def start(self, env_id: str) -> ControllerEnvironment:
@@ -304,6 +392,76 @@ class EnvironmentService:
             if row is not None and row.stop_due_at is None:
                 self._arm(db, row)
             db.commit()
+
+    def run_delete_timer(self, db: Session) -> None:
+        """The delete timer's tick, and its reconcile (§13.5; DB 242).
+
+        Deletes every environment of Pilot's own whose `delete_due_at` has
+        passed while it is still free, whatever its state, and keeps its row,
+        `last_state` gone, its claim ended; one no longer free loses its
+        deadline. Then every free environment of Pilot's own with no deadline —
+        one that has become free since the last tick — has its name cleared
+        and its deadline set to now plus ENVIRONMENT_DELETE_AFTER_SECONDS.
+        Each environment's action is a transaction of its own, under the row's
+        lock: a row another transaction holds is skipped.
+        """
+        now = datetime.now(UTC)
+        overdue = db.scalars(
+            select(Environment.id)
+            .where(Environment.delete_due_at <= now)
+            .order_by(Environment.delete_due_at, Environment.id)
+        ).all()
+        for env_id in overdue:
+            self._delete_if_overdue(db, env_id, now)
+            db.commit()
+
+        freed = db.scalars(
+            select(Environment.id)
+            .where(Environment.delete_due_at.is_(None), *_freedom())
+            .order_by(Environment.id)
+        ).all()
+        for env_id in freed:
+            row = _try_lock(db, env_id)
+            if row is not None and row.delete_due_at is None and _free(db, row):
+                self._release(row)
+            db.commit()
+
+    def _delete_if_overdue(self, db: Session, env_id: str, now: datetime) -> None:
+        row = _try_lock(db, env_id)
+        if row is None or row.delete_due_at is None or row.delete_due_at > now:
+            return
+        due = row.delete_due_at
+        if _free(db, row):
+            self._client().delete_environment(env_id)
+            row.last_state = GONE
+            _end_claim(row)
+            logger.info("Deleted environment %s, due %s", env_id, due.isoformat())
+        else:
+            logger.info(
+                "Environment %s is no longer free: its delete, due %s, is cleared",
+                env_id,
+                due.isoformat(),
+            )
+        row.delete_due_at = None
+
+    def _release(self, row: Environment) -> None:
+        """A free environment of Pilot's own unnamed at the controller, and its
+        delete deadline set; one the controller no longer has is gone."""
+        try:
+            renamed = self._client().rename_environment(row.id, "")
+        except ControllerProblem as problem:
+            if problem.problem_type is not ControllerProblemType.NOT_FOUND:
+                raise
+            row.last_state = GONE
+            logger.info("Environment %s is gone: it has no delete to arm", row.id)
+            return
+        row.name = renamed.name or row.id
+        row.delete_due_at = datetime.now(UTC) + self._delete_after
+        logger.info(
+            "Environment %s is free: its name cleared, its delete due %s",
+            row.id,
+            row.delete_due_at.isoformat(),
+        )
 
     def _stop_if_overdue(self, db: Session, env_id: str, now: datetime) -> None:
         row = _try_lock(db, env_id)
@@ -450,6 +608,66 @@ def _starting(env_id: str) -> Exists:
     return exists().where(
         AgentSession.environment_id == env_id,
         AgentSession.state_code.in_(_START_STATES),
+    )
+
+
+def _labelled(
+    slug: str, call: Callable[[str], ControllerEnvironment]
+) -> ControllerEnvironment:
+    """`call` with the name `slug`, then `slug-2`, `slug-3`, … while the
+    controller answers `409 name-conflict`, KubeCoder's names being unique
+    across the fleet."""
+    suffix = 1
+    while True:
+        name = slug if suffix == 1 else f"{slug}-{suffix}"
+        try:
+            return call(name)
+        except ControllerProblem as problem:
+            if problem.problem_type is not ControllerProblemType.NAME_CONFLICT:
+                raise
+            logger.info("The fleet holds the name %s already", name)
+        suffix += 1
+
+
+def _bound(env_id: InstrumentedAttribute[str] | str) -> Exists:
+    """Whether a Session holds the environment (refinement D1)."""
+    return exists().where(
+        AgentSession.environment_id == env_id,
+        AgentSession.state_code.in_(_BINDING_STATES),
+    )
+
+
+def _freedom() -> tuple[ColumnElement[bool], ...]:
+    """The conditions of an Environment row that is free: Pilot's own,
+    neither gone nor deleting, and no Session holding it (DB 240,
+    refinement D1)."""
+    return (
+        Environment.server_created_at.is_not(None),
+        Environment.last_state.not_in(_LEAVING),
+        ~_bound(Environment.id),
+    )
+
+
+def _takeable(repo: str) -> tuple[ColumnElement[bool], ...]:
+    """The conditions of a free environment of `repo` a start takes: stopped,
+    stopping, or running under Pilot's claim."""
+    return (
+        Environment.repo == repo,
+        *_freedom(),
+        or_(
+            Environment.last_state.in_(("stopped", "stopping")),
+            and_(
+                Environment.last_state == "running",
+                Environment.server_started_at.is_not(None),
+            ),
+        ),
+    )
+
+
+def _free(db: Session, row: Environment) -> bool:
+    """Whether the environment, its row locked, is free, read afresh."""
+    return bool(
+        db.scalar(select(exists().where(Environment.id == row.id, *_freedom())))
     )
 
 

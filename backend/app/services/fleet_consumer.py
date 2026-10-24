@@ -31,7 +31,7 @@ from app.services.controller_client import (
     StateFrame,
 )
 from app.services.controller_outage import ControllerOutage
-from app.services.environment_service import reported_columns
+from app.services.environment_service import GONE, reported_columns
 from app.services.supervisor import LoopHandle, Supervisor
 
 if TYPE_CHECKING:
@@ -40,9 +40,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 FLEET_JOB = "fleet"
-
-GONE = "gone"
-"""The `last_state` of an environment the controller no longer has."""
 
 FLEET_STREAM_CONNECTED = Gauge(
     "pilot_fleet_stream_connected",

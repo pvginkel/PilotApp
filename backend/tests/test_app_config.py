@@ -135,6 +135,24 @@ class TestAppSettings:
         with pytest.raises(ValidationError, match="ENVIRONMENT_STOP_AFTER_SECONDS"):
             AppEnvironment(_env_file=None, ENVIRONMENT_STOP_AFTER_SECONDS=0)
 
+    def test_an_environment_stands_free_seven_days_by_default(self) -> None:
+        settings = AppSettings.load(AppEnvironment(_env_file=None))
+
+        assert settings.environment_delete_after_seconds == 604800
+
+    def test_load_reads_the_environments_delete_after_from_the_environment(
+        self,
+    ) -> None:
+        settings = AppSettings.load(
+            AppEnvironment(_env_file=None, ENVIRONMENT_DELETE_AFTER_SECONDS=120)
+        )
+
+        assert settings.environment_delete_after_seconds == 120
+
+    def test_load_refuses_a_delete_after_that_is_not_positive(self) -> None:
+        with pytest.raises(ValidationError, match="ENVIRONMENT_DELETE_AFTER_SECONDS"):
+            AppEnvironment(_env_file=None, ENVIRONMENT_DELETE_AFTER_SECONDS=0)
+
     def test_the_controller_token_is_hidden_in_the_log(self) -> None:
         settings = AppSettings(
             controller_url="https://controller.example", controller_token="a-token"
@@ -163,6 +181,7 @@ class TestAppSettings:
             "controller_ca_file": "None",
             "scheduler_tick_seconds": repr(10.0),
             "environment_stop_after_seconds": repr(1800.0),
+            "environment_delete_after_seconds": repr(604800.0),
         }
 
     def test_the_link_settings_are_unset_by_default(self) -> None:
@@ -226,4 +245,5 @@ class TestAppSettings:
             "controller_ca_file": repr(None),
             "scheduler_tick_seconds": repr(10.0),
             "environment_stop_after_seconds": repr(1800.0),
+            "environment_delete_after_seconds": repr(604800.0),
         }

@@ -110,6 +110,7 @@ def _watch(
         container=container,
         supervisor=supervisor,
         stop_after_seconds=timedelta(minutes=30).total_seconds(),
+        delete_after_seconds=timedelta(days=7).total_seconds(),
     )
     relays = RelayService(
         container=container,

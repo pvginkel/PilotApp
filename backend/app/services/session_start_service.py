@@ -7,12 +7,13 @@ transaction: its Item, its Work, which keeps the repository, its Session, with
 no Environment until its start provides one (DB 107), and its first Turn, the
 brief. The gate (§13.4) decides the Session's state: `held` while it is
 closed, with nothing run for it, else `starting`. A `starting` Session's start
-loop, `start:<id>`, runs once that commits: it creates an environment of
-Pilot's own from the repository, whose row commits before its bring-up is
-waited on, creates the headless session and sends the brief, whose `202`
-starts the relay. Each phase the start enters is a `server` record in no Turn
-(DB assertion 220), and each such record rebuilds the current line in its
-transaction.
+loop, `start:<id>`, runs once that commits: it takes a free environment of
+Pilot's own made from the repository, the take committed before any controller
+call and the environment then renamed after the Project, or creates one, whose
+row commits before its bring-up is waited on; then it creates the headless
+session and sends the brief, whose `202` starts the relay. Each phase the
+start enters is a `server` record in no Turn (DB assertion 220), and each such
+record rebuilds the current line in its transaction.
 
 A start that meets a call the controller does not answer goes back to `held`
 with its rows as they stand, the outage on (DB 230). Every other failure of the
@@ -159,6 +160,9 @@ class _Pending:
     bringing_up: bool
     """A bring-up of Pilot's there awaits its settle: its claim has no pod
     yet."""
+    taken: bool
+    """The environment is Pilot's own with no claim, for a start on a new
+    conversation: a take's, still to be named and brought up."""
     controller_session: str | None
     create: HeadlessCreateRequest
     turn_id: int
@@ -305,11 +309,12 @@ class SessionStartService:
         returns the Session to `held`; any other failure fails it (F125), a
         refused create among them.
 
-        The bring-up: a Session with no Environment has one of Pilot's own
-        created (`_create`), and its bring-up awaited; one whose environment
-        has a bring-up of Pilot's still to settle, a create's or a start's,
-        has it awaited, never a second scheduled; any other has its
-        environment started.
+        The bring-up: a Session with no Environment takes a free one of
+        Pilot's own (`_take`), or has one created (`_create`) and its bring-up
+        awaited; one whose environment has a bring-up of Pilot's still to
+        settle, a create's or a start's, has it awaited, never a second
+        scheduled; any other has its environment started, a taken one renamed
+        after its Project first (`_named`).
         """
         with scoped_session(self._container) as db:
             pending = _pending(db, session_id)
@@ -572,13 +577,14 @@ class SessionStartService:
         """The start of a `starting` Session begun, and its loop run once the
         transaction commits. In its Environment, the phase that brings it
         up, unless the Session has its controller session already, and its
-        shutdown timer cleared; one with no Environment yet enters its phase
-        at the create."""
+        shutdown timer cleared. One with no Environment yet, or with one taken
+        and still to be named, enters its phase at the take's rename or at the
+        create."""
         if session.environment_id is None:
             after_commit(_LoopStart(self, session.id))
             return
-        if session.controller_session is None:
-            environment = db.get_one(Environment, session.environment_id)
+        environment = db.get_one(Environment, session.environment_id)
+        if session.controller_session is None and not _taken(session, environment):
             self._phase(db, session.id, _bringing_up(db, session, environment))
         self._environments.clear_shutdown_timer(db, session.environment_id)
         after_commit(_LoopStart(self, session.id))
@@ -690,17 +696,22 @@ class SessionStartService:
 
     def _bring_up(self, session_id: uuid.UUID, pending: _Pending) -> bool:
         """The Session's environment brought up as its rows have it, and its
-        settle awaited (`run`). Returns False when the Session took no
-        environment of this run's create, having moved on meanwhile: that one
-        is stopped at once, and left free.
+        settle awaited (`run`). Returns False when the Session moved on
+        before it took an environment: one this run's create made for it is
+        stopped at once, and left free.
 
         Raises:
-            ControllerProblem: The controller refused the create
+            ControllerProblem: The controller refused the create or the rename
             EnvironmentStartFailed: It refused the start, or the environment
                 settled other than `running`
             ControllerUnreachable: The controller did not answer a call
             ExternalServiceException: The controller failed otherwise
         """
+        if pending.env_id is None:
+            taking = self._take(session_id)
+            if taking is None:
+                return False
+            pending = taking
         if pending.env_id is None:
             env_id, taken = self._create(session_id)
             if not taken:
@@ -708,11 +719,60 @@ class SessionStartService:
                 return False
             self._environments.settle(env_id)
             return True
+        if pending.taken:
+            self._named(session_id, pending.env_id)
         if pending.bringing_up:
             self._environments.settle(pending.env_id)
         else:
             self._environments.start(pending.env_id)
         return True
+
+    def _take(self, session_id: uuid.UUID) -> _Pending | None:
+        """Under the Session's lock, while it is `starting` with no
+        Environment: a free environment of Pilot's own made from its Work's
+        repository taken for it, and committed before any controller call
+        (`EnvironmentService.take`). Returns the Session's start as its rows
+        then have it, with no Environment when none was free to take; None
+        when it has moved on, stopped or given its Environment by another
+        process."""
+        with scoped_session(self._container) as db:
+            session = self._records(db).lock_session(session_id)
+            if (
+                session.state_code != SessionState.STARTING
+                or session.environment_id is not None
+            ):
+                return None
+            repo = db.get_one(Work, session_id).repo
+            # `start_work` places every Session with no Environment by repository.
+            assert repo is not None
+            environment = self._environments.take(db, repo)
+            if environment is not None:
+                session.environment_id = environment.id
+                logger.info(
+                    "Session %s took environment %s", session_id, environment.id
+                )
+            return _pending(db, session_id)
+
+    def _named(self, session_id: uuid.UUID, env_id: str) -> None:
+        """The environment its start took renamed after the Session's
+        Project (§13.5), unnamed for a draft's, and the phase that prepares
+        it, while the Session is still `starting` there.
+
+        Raises:
+            ControllerProblem: The controller refused the rename
+            ControllerUnreachable: The controller did not answer
+            ExternalServiceException: The controller failed otherwise
+        """
+        with scoped_session(self._container) as db:
+            slug = db.get_one(Project, db.get_one(Work, session_id).project_id).slug
+        name = self._environments.name(env_id, slug)
+        with scoped_session(self._container) as db:
+            session = self._records(db).lock_session(session_id)
+            if (
+                session.state_code == SessionState.STARTING
+                and session.environment_id == env_id
+            ):
+                self._phase(db, session_id, f"Preparing {name}…")
 
     def _create(self, session_id: uuid.UUID) -> tuple[str, bool]:
         """An environment of Pilot's own created from the Work's repository,
@@ -843,6 +903,7 @@ def _pending(db: Session, session_id: uuid.UUID) -> _Pending | None:
         bringing_up=environment is not None
         and environment.server_started_at is not None
         and environment.started_pod_at is None,
+        taken=environment is not None and _taken(session, environment),
         controller_session=session.controller_session,
         create=HeadlessCreateRequest(
             cwd=session.cwd,
@@ -853,6 +914,17 @@ def _pending(db: Session, session_id: uuid.UUID) -> _Pending | None:
         ),
         turn_id=turn.id,
         resuming=turn.seq > 1,
+    )
+
+
+def _taken(session: AgentSession, environment: Environment) -> bool:
+    """Whether the Session's environment is a take's, still to be named and
+    brought up: Pilot's own with no claim, for a start on a new
+    conversation."""
+    return (
+        environment.server_created_at is not None
+        and environment.server_started_at is None
+        and session.conversation_id is None
     )
 
 

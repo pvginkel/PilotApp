@@ -1,10 +1,13 @@
-"""Environments on demand and the shutdown timer (design 2 §13.2, §13.3; F88.1,
-F73.1; V05).
+"""Environments on demand, Pilot's own created, taken, named and deleted, and
+the shutdown and delete timers (design 2 §13.2, §13.3, §13.5; F88.1, F73.1,
+F143.1, F143.3; DB 239, 240, 242; slice 020's refinement D1).
 
 The rules that protect the most: an environment Pilot did not start is never
 stopped, nor one running a pod other than the one Pilot's start brought up, nor
 an exempt one, nor one where a Session runs or starts (`TestShutdownTimer`,
-`test_..._is_never_stopped`)."""
+`test_..._is_never_stopped`); an environment Pilot did not create is never
+taken, renamed or deleted, nor one a Session holds, a stopped or failed work
+item's among them (`TestTake`, `TestDeleteTimer`)."""
 
 import json
 import threading
@@ -32,6 +35,8 @@ from app.services.controller_client import (
     ControllerUnreachable,
 )
 from app.services.environment_service import (
+    DELETE_TIMER,
+    GONE,
     SHUTDOWN_TIMER,
     EnvironmentService,
     EnvironmentStartFailed,
@@ -41,6 +46,7 @@ from tests.support.fake_controller import ServedFakeController, client_of
 from tests.support.supervisor import WAIT_SECONDS, Supervise, listening, wait_until
 
 STOP_AFTER = timedelta(minutes=30)
+DELETE_AFTER = timedelta(days=7)
 ENV = "env-a"
 
 
@@ -55,6 +61,7 @@ def environments(
         container=container,
         supervisor=supervisor,
         stop_after_seconds=STOP_AFTER.total_seconds(),
+        delete_after_seconds=DELETE_AFTER.total_seconds(),
     )
 
 
@@ -393,6 +400,7 @@ class TestStopUntaken:
         service = _service(container, supervise, stop_after=timedelta(0))
         created = service.create(REPO, "camp")
         service.record_created(session, created, REPO)
+        session.commit()
         fake_controller.outage()
         with pytest.raises(ControllerUnreachable):
             service.stop_untaken(created.env_id)
@@ -403,6 +411,352 @@ class TestStopUntaken:
 
         assert fake_controller.environment(created.env_id).status == "stopped"
         assert _claim(_row(session, created.env_id)) == _NO_CLAIM
+
+    def test_one_another_start_took_first_is_left_to_it(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+        project: Project,
+    ) -> None:
+        created = environments.create(REPO, "camp")
+        environments.record_created(session, created, REPO)
+        _agent_session(session, project, SessionState.STARTING, created.env_id)
+
+        environments.stop_untaken(created.env_id)
+
+        assert fake_controller.environment(created.env_id).status == "running"
+        assert fake_controller.calls == ["POST /environments"]
+        row = _row(session, created.env_id)
+        assert row is not None and row.server_started_at is not None
+
+
+def _own(
+    db: Session,
+    env_id: str = ENV,
+    *,
+    state: str = "stopped",
+    repo: str = REPO,
+    claimed: bool = False,
+    delete_due: datetime | None = None,
+) -> Environment:
+    """The row of an environment of Pilot's own made from `repo`, as the fleet
+    reports it `state`; `claimed` as Pilot's own bring-up left it."""
+    now = datetime.now(UTC)
+    row = Environment(
+        id=env_id,
+        name=env_id,
+        exempt=False,
+        last_state=state,
+        server_created_at=now - timedelta(days=1),
+        repo=repo,
+        server_started_at=now - timedelta(hours=1) if claimed else None,
+        delete_due_at=delete_due,
+    )
+    db.add(row)
+    db.flush()
+    return row
+
+
+def _taken(service: EnvironmentService, db: Session) -> str | None:
+    taken = service.take(db, REPO)
+    return None if taken is None else taken.id
+
+
+class TestTake:
+    """A free environment of Pilot's own taken for a start (§13.5; DB 240;
+    refinement D1; V18)."""
+
+    def test_a_free_one_of_the_repository_is_taken_its_claim_and_deadline_cleared(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        now = datetime.now(UTC)
+        row = _own(session, state="running", claimed=True, delete_due=now)
+        row.started_pod_at = now - timedelta(hours=1)
+        row.stop_due_at = now + STOP_AFTER
+        session.flush()
+
+        assert _taken(environments, session) == ENV
+
+        row = _row(session)
+        assert _claim(row) == _NO_CLAIM
+        assert row is not None and row.delete_due_at is None
+        assert fake_controller.calls == []
+
+    def test_the_take_is_the_callers_to_commit(
+        self, environments: EnvironmentService, session: Session
+    ) -> None:
+        due = datetime.now(UTC) + DELETE_AFTER
+        _own(session, delete_due=due)
+        session.commit()
+
+        environments.take(session, REPO)
+        session.rollback()
+
+        row = _row(session)
+        assert row is not None and row.delete_due_at == due
+
+    def test_the_most_recently_freed_is_taken(
+        self, environments: EnvironmentService, session: Session
+    ) -> None:
+        now = datetime.now(UTC)
+        _own(session, "env-older", delete_due=now + timedelta(days=1))
+        _own(session, "env-recent", delete_due=now + timedelta(days=6))
+        _own(session, "env-oldest", delete_due=now)
+
+        assert _taken(environments, session) == "env-recent"
+
+    def test_one_freed_since_the_last_tick_is_the_most_recently_freed(
+        self, environments: EnvironmentService, session: Session
+    ) -> None:
+        _own(session, "env-armed", delete_due=datetime.now(UTC) + DELETE_AFTER)
+        _own(session, "env-just-freed")
+
+        assert _taken(environments, session) == "env-just-freed"
+
+    @pytest.mark.parametrize(
+        ("state", "claimed"),
+        [("stopped", False), ("stopping", False), ("running", True)],
+    )
+    def test_one_stopped_stopping_or_running_under_pilots_claim_is_taken(
+        self,
+        environments: EnvironmentService,
+        session: Session,
+        state: str,
+        claimed: bool,
+    ) -> None:
+        _own(session, state=state, claimed=claimed)
+
+        assert _taken(environments, session) == ENV
+
+    @pytest.mark.parametrize(
+        ("state", "claimed"),
+        [
+            ("error", False),
+            ("provisioning", True),
+            ("starting", True),
+            ("running", False),
+            ("deleting", False),
+            (GONE, False),
+        ],
+        ids=[
+            "error",
+            "provisioning",
+            "starting",
+            "running-outside-the-claim",
+            "deleting",
+            "gone",
+        ],
+    )
+    def test_one_in_error_coming_up_running_outside_the_claim_or_leaving_is_passed_over(
+        self,
+        environments: EnvironmentService,
+        session: Session,
+        state: str,
+        claimed: bool,
+    ) -> None:
+        _own(session, state=state, claimed=claimed)
+
+        assert _taken(environments, session) is None
+
+    @pytest.mark.parametrize(
+        "state",
+        [
+            SessionState.RUNNING,
+            SessionState.STARTING,
+            SessionState.HELD,
+            SessionState.STOPPED,
+            SessionState.FAILED,
+        ],
+    )
+    def test_one_a_session_holds_is_never_taken(
+        self,
+        environments: EnvironmentService,
+        session: Session,
+        project: Project,
+        state: SessionState,
+    ) -> None:
+        # A stopped or failed work item may resume there (refinement D1).
+        _own(session)
+        _agent_session(session, project, state)
+
+        assert _taken(environments, session) is None
+
+    @pytest.mark.parametrize("state", [SessionState.IDLE, SessionState.ENDED])
+    def test_one_whose_sessions_are_done_is_free(
+        self,
+        environments: EnvironmentService,
+        session: Session,
+        project: Project,
+        state: SessionState,
+    ) -> None:
+        _own(session)
+        _agent_session(session, project, state)
+
+        assert _taken(environments, session) == ENV
+
+    def test_another_repositorys_is_never_taken(
+        self, environments: EnvironmentService, session: Session
+    ) -> None:
+        _own(session, repo="example/Other")
+
+        assert _taken(environments, session) is None
+
+    def test_an_environment_pilot_did_not_create_is_never_taken(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+        project: Project,
+    ) -> None:
+        # An operator's of the repository, the store, and one a work item placed
+        # by id before slice 020 ran in, its turn ended.
+        for env_id, exempt in (
+            ("env-operators", False),
+            ("env-store", True),
+            ("env-placed-by-id", False),
+        ):
+            row = _environment(session, env_id, started=False, exempt=exempt)
+            row.last_state = "stopped"
+        _agent_session(session, project, SessionState.IDLE, "env-placed-by-id")
+        session.flush()
+
+        assert _taken(environments, session) is None
+        assert fake_controller.calls == []
+
+    def test_a_row_another_transaction_holds_is_skipped(
+        self, committed_app: Flask, supervise: Supervise
+    ) -> None:
+        container = committed_app.container
+        service = _service(container, supervise)
+        with scoped_session(container) as db:
+            _own(db, "env-held", delete_due=datetime.now(UTC) + DELETE_AFTER)
+            _own(db, "env-next", delete_due=datetime.now(UTC))
+        holder = container.session_maker()()
+        try:
+            holder.execute(
+                text("SELECT 1 FROM environments WHERE id = 'env-held' FOR UPDATE")
+            )
+            with scoped_session(container) as db:
+                assert _taken(service, db) == "env-next"
+        finally:
+            holder.close()
+
+    def test_two_starts_never_take_one(
+        self, committed_app: Flask, supervise: Supervise
+    ) -> None:
+        container = committed_app.container
+        service = _service(container, supervise)
+        with scoped_session(container) as db:
+            _own(db)
+            project_id = _project(db).id
+        first = container.session_maker()()
+        try:
+            # The first start's take, its Session there, not yet committed.
+            assert _taken(service, first) == ENV
+            run = _agent_session(
+                first, first.get_one(Project, project_id), SessionState.STARTING
+            )
+            with scoped_session(container) as db:
+                assert _taken(service, db) is None
+            first.commit()
+            with scoped_session(container) as db:
+                assert _taken(service, db) is None
+                assert db.get_one(AgentSession, run.id).environment_id == ENV
+        finally:
+            first.close()
+
+
+class TestName:
+    """The name, the taking Project's slug at every take (§13.5; V17)."""
+
+    def test_it_is_renamed_the_slug_and_its_row_named_so(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        fake_controller.add_environment(ENV)
+        _own(session)
+        session.commit()
+
+        assert environments.name(ENV, "camp") == "camp"
+
+        assert fake_controller.environment(ENV).name == "camp"
+        row = _row(session)
+        assert row is not None and row.name == "camp"
+        assert fake_controller.calls == [f"POST /environments/{ENV}/rename"]
+
+    def test_a_name_the_fleet_holds_takes_the_first_free_suffix(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        fake_controller.add_environment(ENV, name="dune")
+        fake_controller.add_environment("operators-env", name="camp")
+        _own(session)
+        session.commit()
+
+        assert environments.name(ENV, "camp") == "camp-2"
+
+        assert fake_controller.environment(ENV).name == "camp-2"
+
+    def test_the_name_it_has_is_its_own(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        fake_controller.add_environment(ENV, name="camp")
+        _own(session)
+        session.commit()
+
+        assert environments.name(ENV, "camp") == "camp"
+
+    def test_with_no_slug_its_name_is_cleared(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        # A draft's take: it has no slug.
+        fake_controller.add_environment(ENV, name="camp")
+        _own(session)
+        session.commit()
+
+        assert environments.name(ENV, None) == ENV
+
+        assert fake_controller.environment(ENV).name is None
+
+    @pytest.mark.parametrize(
+        ("gone", "problem_type"),
+        [
+            (False, ControllerProblemType.CONFLICT),
+            (True, ControllerProblemType.NOT_FOUND),
+        ],
+        ids=["deleting", "gone"],
+    )
+    def test_a_refusal_is_the_controllers_problem(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+        gone: bool,
+        problem_type: ControllerProblemType,
+    ) -> None:
+        if not gone:
+            fake_controller.add_environment(ENV, status="deleting")
+        _own(session)
+        session.commit()
+
+        with pytest.raises(ControllerProblem) as raised:
+            environments.name(ENV, "camp")
+
+        assert raised.value.problem_type is problem_type
 
 
 class TestStart:
@@ -769,7 +1123,10 @@ class TestShutdownTimer:
     ) -> None:
         supervisor, coordinator = supervise(app.container, controller_configured=False)
         EnvironmentService(
-            container=app.container, supervisor=supervisor, stop_after_seconds=60
+            container=app.container,
+            supervisor=supervisor,
+            stop_after_seconds=60,
+            delete_after_seconds=60,
         )
 
         with listening("app.services.supervisor") as log:
@@ -777,7 +1134,7 @@ class TestShutdownTimer:
 
         assert log.matching(r"No controller configured.*") == [
             "No controller configured (CONTROLLER_URL unset): the jobs and timers "
-            f"that need one do not start ({SHUTDOWN_TIMER})"
+            f"that need one do not start ({SHUTDOWN_TIMER}, {DELETE_TIMER})"
         ]
 
     def test_it_stops_an_overdue_environment_pilot_started(
@@ -1103,6 +1460,7 @@ class TestShutdownTimer:
             container=container,
             supervisor=supervise(container)[0],
             stop_after_seconds=0,
+            delete_after_seconds=DELETE_AFTER.total_seconds(),
         )
         fake_controller.add_environment(ENV, status="stopped")
         service.ensure_environment(session, ENV)
@@ -1200,6 +1558,275 @@ class TestShutdownTimer:
         assert _committed(container, "started_pod_at") is None
 
 
+def _released_around(row: Environment | None, before: datetime) -> bool:
+    assert row is not None and row.delete_due_at is not None
+    return (
+        before + DELETE_AFTER <= row.delete_due_at <= datetime.now(UTC) + DELETE_AFTER
+    )
+
+
+def _deletes(fake: FakeController, env_id: str = ENV) -> list[str]:
+    return [call for call in fake.calls if call == f"DELETE /environments/{env_id}"]
+
+
+class TestDeleteTimer:
+    """The delete timer (§13.5; DB 242; F143.3; V03, V10)."""
+
+    def test_a_free_environment_loses_its_name_and_gets_its_deadline(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+        project: Project,
+    ) -> None:
+        # Its work item's turn ended: done.
+        fake_controller.add_environment(ENV, name="camp", status="running")
+        row = _own(session, state="running", claimed=True)
+        row.name = "camp"
+        _agent_session(session, project, SessionState.IDLE)
+        before = datetime.now(UTC)
+
+        environments.run_delete_timer(session)
+
+        assert fake_controller.environment(ENV).name is None
+        assert fake_controller.calls == [f"POST /environments/{ENV}/rename"]
+        row = _row(session)
+        assert _released_around(row, before)
+        assert row is not None and row.name == ENV
+        # The shutdown timer's claim stands: the delete timer is beside it.
+        assert row.server_started_at is not None
+
+    def test_one_with_its_deadline_is_left_as_it_is(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        due = datetime.now(UTC) + timedelta(days=1)
+        _own(session, delete_due=due)
+
+        environments.run_delete_timer(session)
+
+        row = _row(session)
+        assert row is not None and row.delete_due_at == due
+        assert fake_controller.calls == []
+
+    @pytest.mark.parametrize(
+        "state",
+        [
+            SessionState.RUNNING,
+            SessionState.STARTING,
+            SessionState.HELD,
+            SessionState.STOPPED,
+            SessionState.FAILED,
+        ],
+    )
+    def test_one_a_session_holds_keeps_its_name_and_gets_no_deadline(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+        project: Project,
+        state: SessionState,
+    ) -> None:
+        # A stopped or failed work item may resume there, with no expiry
+        # (refinement D1).
+        _own(session)
+        _agent_session(session, project, SessionState.IDLE)
+        _agent_session(session, project, state)
+
+        environments.run_delete_timer(session)
+
+        row = _row(session)
+        assert row is not None and row.delete_due_at is None
+        assert fake_controller.calls == []
+
+    def test_one_the_controller_no_longer_has_is_gone(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        _own(session)
+
+        environments.run_delete_timer(session)
+
+        row = _row(session)
+        assert row is not None
+        assert (row.last_state, row.delete_due_at) == (GONE, None)
+
+    @pytest.mark.parametrize("state", ["stopped", "running", "error"])
+    def test_an_overdue_free_environment_is_deleted_whatever_its_state_its_row_kept_gone(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+        project: Project,
+        state: str,
+    ) -> None:
+        fake_controller.add_environment(ENV, status="running")
+        if state != "running":
+            fake_controller.set_status(ENV, state)
+        row = _own(session, state=state, claimed=True, delete_due=_overdue())
+        row.stop_due_at = datetime.now(UTC) + STOP_AFTER
+        run = _agent_session(session, project, SessionState.IDLE)
+
+        environments.run_delete_timer(session)
+
+        assert _deletes(fake_controller) == [f"DELETE /environments/{ENV}"]
+        assert fake_controller.calls == [f"DELETE /environments/{ENV}"]
+        row = _row(session)
+        assert row is not None
+        assert (row.last_state, row.delete_due_at) == (GONE, None)
+        assert _claim(row) == _NO_CLAIM
+        # Its work item's env chip and links keep reading it (DB 242).
+        assert session.get_one(AgentSession, run.id).environment_id == ENV
+
+    def test_one_already_gone_at_the_controller_is_deleted(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        _own(session, delete_due=_overdue())
+
+        environments.run_delete_timer(session)
+
+        assert _deletes(fake_controller) == [f"DELETE /environments/{ENV}"]
+        row = _row(session)
+        assert row is not None and row.last_state == GONE
+
+    def test_it_leaves_one_not_yet_due(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        fake_controller.add_environment(ENV)
+        due = datetime.now(UTC) + timedelta(minutes=1)
+        _own(session, delete_due=due)
+
+        environments.run_delete_timer(session)
+
+        assert fake_controller.calls == []
+        row = _row(session)
+        assert row is not None and row.delete_due_at == due
+
+    @pytest.mark.parametrize("state", ["deleting", GONE])
+    def test_one_no_longer_free_loses_its_deadline_undeleted(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+        state: str,
+    ) -> None:
+        # Someone deleted it before its deadline.
+        _own(session, state=state, delete_due=_overdue())
+
+        environments.run_delete_timer(session)
+
+        assert fake_controller.calls == []
+        row = _row(session)
+        assert row is not None
+        assert (row.last_state, row.delete_due_at) == (state, None)
+
+    def test_an_environment_pilot_did_not_create_is_never_renamed_or_deleted(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+        project: Project,
+    ) -> None:
+        # An operator's of the repository, the store, and one a work item placed
+        # by id before slice 020 ran in, each with nothing holding it.
+        for env_id, exempt in (
+            ("env-operators", False),
+            ("env-store", True),
+            ("env-placed-by-id", False),
+        ):
+            fake_controller.add_environment(env_id, name=env_id.upper())
+            _environment(session, env_id, started=False, exempt=exempt)
+        _agent_session(session, project, SessionState.IDLE, "env-placed-by-id")
+
+        environments.run_delete_timer(session)
+
+        assert fake_controller.calls == []
+        for env_id in ("env-operators", "env-store", "env-placed-by-id"):
+            assert fake_controller.environment(env_id).name == env_id.upper()
+            row = _row(session, env_id)
+            assert row is not None and row.delete_due_at is None
+
+    def test_a_delete_the_controller_does_not_answer_keeps_the_deadline(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        fake_controller.add_environment(ENV)
+        due = _overdue()
+        _own(session, delete_due=due)
+        fake_controller.outage()
+
+        with pytest.raises(ControllerUnreachable):
+            environments.run_delete_timer(session)
+
+        row = _row(session)
+        assert row is not None and row.delete_due_at == due
+        assert fake_controller.environment(ENV).status == "stopped"
+
+    def test_two_ticks_at_once_delete_an_environment_once(
+        self, committed_app: Flask, supervise: Supervise
+    ) -> None:
+        container = committed_app.container
+        fake = _Hooked()
+        try:
+            client_of(container, fake)
+            service = _service(container, supervise)
+            fake.add_environment(ENV)
+            with scoped_session(container) as db:
+                _own(db, delete_due=_overdue())
+
+            def other_tick() -> None:
+                # Another process's tick, while this one holds the row.
+                _in_thread(lambda: _delete_tick(container, service)).result()
+
+            fake.during["DELETE"] = other_tick
+            _delete_tick(container, service)
+        finally:
+            fake.close()
+
+        assert _deletes(fake) == [f"DELETE /environments/{ENV}"]
+        assert _committed(container, "last_state") == GONE
+
+    def test_a_take_while_the_tick_unnames_it_passes_it_over(
+        self, committed_app: Flask, supervise: Supervise
+    ) -> None:
+        container = committed_app.container
+        fake = _Hooked()
+        try:
+            client_of(container, fake)
+            service = _service(container, supervise)
+            fake.add_environment(ENV, name="camp")
+            with scoped_session(container) as db:
+                _own(db)
+            taken: list[str | None] = []
+
+            def take() -> None:
+                def run() -> None:
+                    with scoped_session(container) as db:
+                        taken.append(_taken(service, db))
+
+                _in_thread(run).result()
+
+            fake.during["rename"] = take
+            _delete_tick(container, service)
+        finally:
+            fake.close()
+
+        assert taken == [None]
+        assert _committed(container, "delete_due_at") is not None
+
+
 class _Outcome:
     def __init__(self, run: Callable[[], Any]) -> None:
         self._value: Any = None
@@ -1237,6 +1864,28 @@ class _StopHook(ServedFakeController):
         if hook is not None:
             hook()
         return super()._stop(request, env_id)
+
+
+class _Hooked(ServedFakeController):
+    """The fake, running `during[verb]` once while it answers a delete
+    (`DELETE`) or a rename (`rename`)."""
+
+    def __init__(self) -> None:
+        super().__init__(keepalive_seconds=0.2)
+        self.during: dict[str, Callable[[], None]] = {}
+
+    def _delete_environment(self, request: Request, env_id: str) -> Response:
+        self._run("DELETE")
+        return super()._delete_environment(request, env_id)
+
+    def _rename(self, request: Request, env_id: str) -> Response:
+        self._run("rename")
+        return super()._rename(request, env_id)
+
+    def _run(self, verb: str) -> None:
+        hook = self.during.pop(verb, None)
+        if hook is not None:
+            hook()
 
 
 class _SettleCut(ServedFakeController):
@@ -1294,17 +1943,24 @@ def _service(
     container: ServiceContainer,
     supervise: Supervise,
     stop_after: timedelta = STOP_AFTER,
+    delete_after: timedelta = DELETE_AFTER,
 ) -> EnvironmentService:
     return EnvironmentService(
         container=container,
         supervisor=supervise(container)[0],
         stop_after_seconds=stop_after.total_seconds(),
+        delete_after_seconds=delete_after.total_seconds(),
     )
 
 
 def _tick(container: ServiceContainer, service: EnvironmentService) -> None:
     with scoped_session(container) as db:
         service.run_shutdown_timer(db)
+
+
+def _delete_tick(container: ServiceContainer, service: EnvironmentService) -> None:
+    with scoped_session(container) as db:
+        service.run_delete_timer(db)
 
 
 def _project(db: Session) -> Project:

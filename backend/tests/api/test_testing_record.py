@@ -1155,7 +1155,10 @@ def _starts(
     """The session starts, on a supervisor of their own whose loops never run."""
     supervisor, _ = supervise(container)
     environments = EnvironmentService(
-        container=container, supervisor=supervisor, stop_after_seconds=1800
+        container=container,
+        supervisor=supervisor,
+        stop_after_seconds=1800,
+        delete_after_seconds=604800,
     )
     return SessionStartService(
         container=container,

@@ -145,7 +145,8 @@ class ServiceContainer(containers.DeclarativeContainer):
     register_for_background_startup(lambda c: c.supervisor())
 
     # The fleet consumer keeps the Environment rows current; the environment
-    # service starts environments and runs the shutdown timer (design 2 §13).
+    # service starts environments and runs the shutdown and delete timers
+    # (design 2 §13).
     # Each registers its job on the supervisor when built, before STARTUP.
     fleet_consumer = providers.Singleton(
         FleetConsumer,
@@ -159,6 +160,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         container=__self__,
         supervisor=supervisor,
         stop_after_seconds=app_config.provided.environment_stop_after_seconds,
+        delete_after_seconds=app_config.provided.environment_delete_after_seconds,
     )
     register_for_background_startup(lambda c: c.environment_service())
 
