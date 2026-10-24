@@ -2,7 +2,8 @@
  * The gold bar (F125; UC *The gold bar*): with the controller unreachable, its line stands over
  * the project list in every open browser, at once and with no reload, in gold tokens of its own at
  * 4.5:1 or better, light and dark; below 900px it spans the window under the top bar, the drawer
- * opening under it. It goes when the controller answers again, and nothing dismisses it. A
+ * opening under it. It goes when the controller answers again, and nothing dismisses it. A stream
+ * that comes back up reads it again, covering a turn missed while it was down (design 2 §6.2). A
  * controller that answers about one environment turns nothing on (review O2).
  */
 
@@ -99,6 +100,45 @@ test.describe('The gold bar', () => {
 
     await controller.outage(false);
     for (const each of [shell, other, late]) await expect(each.goldLine('outage')).toHaveCount(0);
+  });
+
+  test('is read again when the stream comes back up, showing an outage that began while it was down', async ({
+    page,
+    backendUrl,
+    auth,
+    people,
+    shell,
+    controller,
+    deploymentSse,
+    toastHelper,
+  }) => {
+    // The backend reads the controller answering at its fleet stream's reconnect, whose backoff
+    // grows while the outage holds.
+    test.setTimeout(90_000);
+    await people.signIn();
+    await shell.open('/profile');
+    await deploymentSse.ensureConnected();
+    await waitForUiState(page, 'shell.conditions', 'ready');
+    await expect(shell.goldLine('outage')).toHaveCount(0);
+
+    // The stream goes down and stays down: its next connect is refused, and the session check
+    // that would open it again fails.
+    const refusal = await page.request.post(`${backendUrl}/api/testing/sse/force-callback-error?status=403`);
+    expect(refusal.status()).toBe(204);
+    await auth.forceError(500);
+    await page.evaluate(() => window.__sseForceReconnect!());
+    await toastHelper.expectErrorToast(/refresh the page/i);
+    expect((await deploymentSse.getStatus()).isConnected).toBe(false);
+
+    // The outage turns on while it is down: the browser does not hear it.
+    await controller.outage(true);
+    await expect(shell.goldLine('outage')).toHaveCount(0);
+
+    await deploymentSse.connect();
+    await expect(shell.goldLine('outage')).toHaveText(LINE);
+
+    await controller.outage(false);
+    await expect(shell.goldLine('outage')).toHaveCount(0);
   });
 
   test('stays away while the controller answers about one environment alone', async ({
