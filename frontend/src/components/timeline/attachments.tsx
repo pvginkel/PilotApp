@@ -1,14 +1,14 @@
 /**
  * The attachments hung on an item, reader's material (F17.5, F36): on an open item, a chip per
- * attachment, its clip and its title; on a done line, an indicator (F13.6), a document icon opening
- * the one, a documents icon opening a menu of several. Each opens in the overlay's attachment view
- * (F28.5) at its address under its item's, or, in the document's overlay, under the document's,
- * which gives it its way back.
+ * attachment, its clip and its title; on a done line, an indicator (F13.6), the clip opening the
+ * one, unlike Open's document icon beside it (D039), a documents icon opening a menu of several.
+ * Each opens in the overlay's attachment view (F28.5) at its address under its item's, or, in the
+ * document's overlay, under the document's, which gives it its way back.
  */
 
 import type { ReactNode } from 'react';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
-import { File, Files, Paperclip } from 'lucide-react';
+import { Files, Paperclip } from 'lucide-react';
 import { Menu, MenuItem } from '@/components/shared/menu';
 import type { Attachment, TimelineItem } from '@/hooks/use-timeline';
 
@@ -57,7 +57,7 @@ export function LineAttachments({ item }: { item: TimelineItem }) {
         label="Attachment"
         testId="timeline.line.attachment"
       >
-        <File className="icon" aria-hidden="true" />
+        <Paperclip className="icon" aria-hidden="true" />
       </AttachmentLink>
     );
   }

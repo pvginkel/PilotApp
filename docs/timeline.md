@@ -237,9 +237,10 @@ unanswered.
 
 - **Open**, on every done line, opens the item's document in the overlay at its address, as Done
   fixed it ([`documents.md`](documents.md)).
-- **The attachments' indicator**, where attachments hang on the item, whatever its kind: a document
-  icon opening the one attachment, or a documents icon opening a menu of them, which drops under
-  its button at the line's end, no wider than the line.
+- **The attachments' indicator**, where attachments hang on the item, whatever its kind: the clip
+  opening the one attachment, as the chips carry it, set apart from Open's document icon beside it
+  (D039), or a documents icon opening a menu of them, which drops under its button at the line's
+  end, no wider than the line.
 - **A document Pilot marked Done** (cause `settled`, which no unanswered block allows) is a done
   line as any other, and its overlay's foot names Pilot.
 - **A work item's line** is quieter than the others: set in behind a rule that runs down a run of
