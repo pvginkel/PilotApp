@@ -75,6 +75,8 @@
   .switch:disabled { opacity: 0.55; cursor: default; }
   .switch:focus-visible { outline: none; }
   .switch:focus-visible .track { box-shadow: 0 0 0 2px hsl(var(--ring)); }
+  /* Beside the switch while work briefed under its other setting runs (F4.3). */
+  .switch-warning { flex: none; margin-left: -6px; font-size: 14px; color: hsl(var(--warning-text)); }
 
   /* The step button: a long step name gives way before the ticket does. */
   .step-anchor { min-width: 0; }

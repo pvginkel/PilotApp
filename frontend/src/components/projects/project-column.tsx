@@ -126,7 +126,7 @@ function ArchivedList({ onBack }: { onBack: () => void }) {
         Archived
       </div>
       {data?.projects.length === 0 && <p className="tabs-none">None yet</p>}
-      {data?.projects.map((project) => <ProjectTab key={project.id} project={project} />)}
+      {data?.projects.map((project) => <ProjectTab key={project.id} project={project} archived />)}
     </div>
   );
 }

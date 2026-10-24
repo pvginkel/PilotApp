@@ -29,6 +29,31 @@
   .tab-name { display: flex; align-items: center; gap: 8px; font-weight: 600; line-height: 1.35; }
   .tab-name .card-id { margin-left: auto; font-weight: 400; font-size: 12px; color: hsl(var(--muted-foreground)); }
   .tab-status { display: flex; align-items: center; gap: 6px; margin-top: 2px; font-size: 13px; color: hsl(var(--muted-foreground)); }
+  /* The project's status in the live dot's place (F1.3), the pause or the play glyph in its place
+     under the pointer and the focus (F141.2); the running glyph is the dot, pulsing. */
+  .status-icon {
+    display: inline-grid;
+    flex: none;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    margin: -2px 0 -2px -3px;
+    border-radius: 4px;
+    font-size: 14px;
+  }
+  .status-icon[role="button"] { cursor: pointer; }
+  .status-icon[role="button"]:hover { background: hsl(var(--muted-foreground) / 0.15); color: hsl(var(--foreground)); }
+  .status-icon:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: -1px; }
+  .status-icon > span { display: grid; place-items: center; }
+  .status-icon .glyph-hover { display: none; }
+  .status-icon[role="button"]:is(:hover, :focus-visible) .glyph-rest { display: none; }
+  .status-icon[role="button"]:is(:hover, :focus-visible) .glyph-hover { display: grid; }
+  .status-icon .glyph-rest[data-glyph="running"] { color: hsl(var(--success)); animation: pulse 1.4s ease-in-out infinite; }
+  .status-icon .glyph-rest[data-glyph="running"] .icon { width: 9px; height: 9px; fill: currentColor; }
+  .status-icon .glyph-rest[data-glyph="waiting_on_you"] { color: hsl(var(--primary-strong)); }
+  .status-icon .glyph-rest[data-glyph="done"] { color: hsl(var(--success-text)); }
+  .status-icon .glyph-rest[data-glyph="pausing"] { animation: pulse 1.4s ease-in-out infinite; }
+
   .count-badge {
     display: inline-grid;
     flex: none;

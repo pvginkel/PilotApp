@@ -6,9 +6,9 @@ type Act = 'join' | 'leave' | 'finish' | 'reopen' | 'archive' | 'bring-back';
 type Ask = Exclude<Act, 'join' | 'leave'>;
 
 /**
- * A project's head (F2), the plan popover its step button opens (F3), the Documents button (F2.3),
- * the handbook's button (F129.4), the plan's notes (F2.7), and
- * the project's menu and the dialogs it opens (F2.4).
+ * A project's head (F2), auto pilot's switch and its warning triangle (F4), the plan popover its
+ * step button opens (F3), the Documents button (F2.3), the handbook's button (F129.4), the plan's
+ * notes (F2.7), and the project's menu and the dialogs it opens (F2.4).
  */
 export class ProjectHeadPage {
   readonly root: Locator;
@@ -19,6 +19,7 @@ export class ProjectHeadPage {
   readonly archived: Locator;
   readonly finished: Locator;
   readonly autopilot: Locator;
+  readonly autopilotWarning: Locator;
   readonly step: Locator;
   readonly ring: Locator;
   readonly plan: Locator;
@@ -42,6 +43,7 @@ export class ProjectHeadPage {
     this.archived = page.getByTestId('project.archived');
     this.finished = page.getByTestId('project.finished');
     this.autopilot = page.getByTestId('project.autopilot');
+    this.autopilotWarning = page.getByTestId('project.autopilot.warning');
     this.step = page.getByTestId('project.step');
     this.ring = page.getByTestId('project.step.ring');
     this.plan = page.getByTestId('project.plan');

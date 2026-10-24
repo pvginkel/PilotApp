@@ -1,6 +1,7 @@
 /**
- * A project's head (F2): its name, ticket and repo, linked (F2.1); auto pilot's switch, or the
- * Finished chip once finished (F2.6, F4.1); the step button and its plan (F2.2, F3); the members
+ * A project's head (F2): its name, ticket and repo, linked (F2.1); auto pilot's switch, its
+ * warning triangle while work briefed under the other setting runs (F4.3), or the Finished chip
+ * once finished (F2.6, F4.1); the step button and its plan (F2.2, F3); the members
  * (F2.5); the Documents button, toggling the side panel's Documents tab, and the handbook, opening
  * in the overlay (F2.3, F129.4); the plan's notes (F2.7); the project's menu (F2.4). A draft, which
  * has neither a handbook (F129.2) nor the panel's Documents tab, has in its head its name, the
@@ -14,14 +15,15 @@
 import type { Ref } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import { Archive, Files, Flag, NotebookText } from 'lucide-react';
+import { Archive, Files, Flag, NotebookText, TriangleAlert } from 'lucide-react';
 import { NotesButton } from '@/components/projects/plan-notes';
 import { StepButton } from '@/components/projects/plan-popover';
 import { ProjectMenu } from '@/components/projects/project-menu';
 import { Avatar } from '@/components/shared/avatar';
 import { LinkedText } from '@/components/shared/linked-text';
 import type { ProjectHead as Project } from '@/hooks/use-projects';
-import { usePostProjectsTransitionsByProjectId } from '@/lib/api/generated/hooks';
+import { STOPPABLE } from '@/hooks/use-work-acts';
+import { useGetProjectsTimelineByProjectId, usePostProjectsTransitionsByProjectId } from '@/lib/api/generated/hooks';
 import { trackFormError, trackFormSubmit, trackFormSuccess } from '@/lib/test/form-instrumentation';
 import { cn } from '@/lib/utils';
 
@@ -140,21 +142,43 @@ function Autopilot({ project }: { project: Project }) {
     );
   };
   return (
-    <button
-      type="button"
-      className="switch"
-      role="switch"
-      aria-checked={project.autopilot}
-      disabled={project.archived}
-      title="Auto pilot hands the project to Pilot; it still asks on the held column"
-      onClick={toggle}
-      data-testid="project.autopilot"
-    >
-      <span className="track">
-        <span className="knob" />
-      </span>
-      Auto pilot
-    </button>
+    <>
+      <button
+        type="button"
+        className="switch"
+        role="switch"
+        aria-checked={project.autopilot}
+        disabled={project.archived}
+        title="Auto pilot hands the project to Pilot; it still asks on the held column"
+        onClick={toggle}
+        data-testid="project.autopilot"
+      >
+        <span className="track">
+          <span className="knob" />
+        </span>
+        Auto pilot
+      </button>
+      <BriefedOtherwise project={project} />
+    </>
+  );
+}
+
+const BRIEFED_OTHERWISE = 'The change applies to work started from now on: a running session keeps the grants it was briefed with';
+
+/**
+ * The warning triangle beside the switch while a work item runs, starts or waits at the gate that
+ * its start briefed under the switch's other setting (F4.3), as the timeline reads it.
+ */
+function BriefedOtherwise({ project }: { project: Project }) {
+  const { data } = useGetProjectsTimelineByProjectId({ path: { project_id: project.id } });
+  const otherwise = (data?.items ?? []).some(
+    ({ work }) => work !== null && STOPPABLE.includes(work.state) && work.autopilot !== project.autopilot,
+  );
+  if (!otherwise) return null;
+  return (
+    <span className="switch-warning" role="img" aria-label={BRIEFED_OTHERWISE} title={BRIEFED_OTHERWISE} data-testid="project.autopilot.warning">
+      <TriangleAlert className="icon" aria-hidden="true" />
+    </span>
   );
 }
 

@@ -9,6 +9,8 @@
   /* The same in a flex row, where vertical-align does nothing: its bottom sits on the baseline, and
      the shift drops it to the capitals' middle. */
   .icon-cap { display: inline-block; flex: none; width: 1em; height: 1em; position: relative; top: calc(0.5em - 0.5cap); }
+  /* The live dot's pulse: a running work item's dot and a running project's status icon. */
+  @keyframes pulse { 50% { opacity: 0.35; } }
 
   /* ---- Buttons -------------------------------------------------------------------------- */
 

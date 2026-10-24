@@ -456,7 +456,6 @@
     background: hsl(var(--success));
     animation: pulse 1.4s ease-in-out infinite;
   }
-  @keyframes pulse { 50% { opacity: 0.35; } }
   /* Its one line: the working cue and the latest step, cut short where long; a stop or a failure
      in the stopped chip's colour, an error wrapping whole. */
   .work-line { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 2px 0 0; font-size: 13px; }

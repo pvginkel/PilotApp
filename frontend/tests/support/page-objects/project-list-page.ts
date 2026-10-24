@@ -1,9 +1,13 @@
 import type { Locator, Page } from '@playwright/test';
-import { waitForUiState } from '../helpers';
+import type { FormTestEvent } from '@/lib/test/test-events';
+import { waitForUiState, waitTestEvent } from '../helpers';
 
 type Group = 'others' | 'finished';
 
-/** The project list in the side column (F1), and the archived projects it opens (D012). */
+/**
+ * The project list in the side column (F1), a tab's status icon, the pause (F1.3, F141), and the
+ * archived projects it opens (D012).
+ */
 export class ProjectListPage {
   readonly head: Locator;
   readonly menuButton: Locator;
@@ -43,6 +47,25 @@ export class ProjectListPage {
   /** The badge on the tab named `name` (F1.4). */
   badge(name: string): Locator {
     return this.tab(name).getByTestId('projects.tab.badge');
+  }
+
+  /** The status icon on the tab named `name` (F1.3): its glyph at rest, and the one under the pointer and the focus. */
+  statusIcon(name: string, within?: Locator): { root: Locator; rest: Locator; hover: Locator } {
+    const root = this.tab(name, within).getByTestId('projects.tab.status-icon');
+    return {
+      root,
+      rest: root.getByTestId('projects.tab.status-icon.rest'),
+      hover: root.getByTestId('projects.tab.status-icon.hover'),
+    };
+  }
+
+  /** Resolves once the pause or the resume a tab's icon asked for project `id` is written and the list read again (F141.2). */
+  written(id: string, kind: 'paused' | 'resumed'): Promise<FormTestEvent> {
+    return waitTestEvent<FormTestEvent>(
+      this.page,
+      'form',
+      (event) => event.formId === 'projects.tab.pause' && event.phase === 'success' && event.fields?.project === id && event.fields.kind === kind,
+    );
   }
 
   group(group: Group): { root: Locator; toggle: Locator; count: Locator } {
