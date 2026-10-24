@@ -119,6 +119,35 @@ test.describe('Stop', () => {
     await expect(projectList.badge(name)).toHaveCount(0);
   });
 
+  test('ends a start under way, the item “Stopped · <time>”; Resume starts it again', async ({
+    people,
+    projects,
+    controller,
+    timeline,
+    deploymentSse,
+  }) => {
+    const { project, environment } = await setUp({ people, projects, controller });
+    await controller.settleStarts(environment, null);
+    const work = await startIn(projects, project, environment, 'starting');
+    await timeline.open(project);
+    await deploymentSse.ensureConnected();
+    const item = timeline.item(work).work;
+    await expect(item.cue).toHaveText(`Starting ${environment}`);
+
+    await item.stop.click();
+    await item.stopConfirm.yes.click();
+    await expect(item.line).toHaveAttribute('data-state', 'stopped');
+    const { stopped_at } = await projects.work(project, work);
+    await expect(item.line).toHaveText(`Stopped · ${clock(stopped_at!)}`);
+    await expect(item.stop).toHaveCount(0);
+
+    await controller.setStatus(environment, 'running');
+    await item.resume.click();
+    await expect.poll(async () => (await projects.work(project, work)).state).toBe('running');
+    await expect(item.running).toBeVisible();
+    await expect(timeline.items).toHaveCount(1);
+  });
+
   test('ends a held start, which starts no more once the project resumes; its Resume is held while paused, its line why', async ({
     people,
     projects,
