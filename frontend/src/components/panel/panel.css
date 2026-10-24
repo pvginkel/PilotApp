@@ -4,7 +4,8 @@
 @layer components {
   /* The project's head over its timeline, and the panel beside them. Neither is positioned: the
      overlay, and the panel on a narrower window, lie over the side column and the centre, placed
-     on .app. */
+     on .app; below 900px, where .centre is positioned (shell.css), they are placed on the centre
+     and lie under the gold bar. */
   .project { flex: 1; min-height: 0; display: flex; }
   .project-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
