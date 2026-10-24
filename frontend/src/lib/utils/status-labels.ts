@@ -1,19 +1,20 @@
 /**
  * How a project's standing reads (STATUS-4): the head's step reading (F2.2), a tab's status line
- * (F1.2), derived from the record, never written by the brain (database.md decision 15), and a
- * step's standing in the plan popover (F3.1). How a work item's session reads: its one line on the
+ * (F1.2), derived from the record, never written by the brain (database.md decision 15), a tab's
+ * status icon (F1.3, F141.1), and a step's standing in the plan popover (F3.1). How a work item's session reads: its one line on the
  * timeline (F26.1, F26.2, F125), why the gate holds its start (F26.1), why it stopped when no one
  * stopped it (F71), and its session log's tail (F69.2). How a condition that holds all work reads
  * on the gold bar (F125).
  */
 
-import { ServerOff, type LucideIcon } from 'lucide-react';
+import { Circle, CircleCheck, CircleDashed, Hourglass, Pause, ServerOff, UserRound, type LucideIcon } from 'lucide-react';
 import type { components } from '@/lib/api/generated/types';
 import { phaseOf, type Activity } from '@/lib/chat/activity';
 import { summarizeTool } from '@/lib/chat/tools';
 
 type ProjectTab = components['schemas']['ProjectListResponseSchema.e86ccd6.ProjectTabSchema'];
 type PlanProgress = components['schemas']['ProjectListResponseSchema.e86ccd6.PlanProgressSchema'];
+type ProjectStatus = NonNullable<ProjectTab['status']>;
 type TaskStatus = components['schemas']['ProjectHeadSchema.e86ccd6.TaskStatus'];
 type Work = components['schemas']['TimelineSchema.1fdd8ae.WorkSchema'];
 type HeldReason = components['schemas']['TimelineSchema.1fdd8ae.HeldReason'];
@@ -53,6 +54,35 @@ export function projectStatusLine(tab: Pick<ProjectTab, 'state' | 'finished_at' 
     default: {
       const unknown: never = tab.state;
       return { text: String(unknown), more: false, at: null };
+    }
+  }
+}
+
+interface StatusIconReading {
+  label: string;
+  icon: LucideIcon;
+}
+
+/** A project's status as its tab's icon shows it (F1.3, F141.1): the words it reads and its glyph. */
+export function projectStatusIcon(status: ProjectStatus): StatusIconReading {
+  switch (status) {
+    case 'running':
+      return { label: 'Running', icon: Circle };
+    case 'waiting_on_you':
+      return { label: 'Waiting on you', icon: UserRound };
+    case 'waiting_on_event':
+      return { label: 'Waiting on an event', icon: Hourglass };
+    case 'done':
+      return { label: 'Every step done', icon: CircleCheck };
+    case 'idle':
+      return { label: 'Idle', icon: CircleDashed };
+    case 'pausing':
+      return { label: 'Pausing', icon: Pause };
+    case 'paused':
+      return { label: 'Paused', icon: Pause };
+    default: {
+      const unknown: never = status;
+      return { label: String(unknown), icon: CircleDashed };
     }
   }
 }

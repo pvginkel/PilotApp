@@ -9,22 +9,11 @@
 
 import type { KeyboardEvent, SyntheticEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Circle, CircleCheck, CircleDashed, Hourglass, Pause, Play, UserRound, type LucideIcon } from 'lucide-react';
+import { Pause, Play, type LucideIcon } from 'lucide-react';
 import type { ProjectTab as Project } from '@/hooks/use-projects';
 import { usePostProjectsTransitionsByProjectId } from '@/lib/api/generated/hooks';
 import { trackFormError, trackFormSubmit, trackFormSuccess } from '@/lib/test/form-instrumentation';
-
-type Status = NonNullable<Project['status']>;
-
-const STATUSES: Record<Status, { label: string; icon: LucideIcon }> = {
-  running: { label: 'Running', icon: Circle },
-  waiting_on_you: { label: 'Waiting on you', icon: UserRound },
-  waiting_on_event: { label: 'Waiting on an event', icon: Hourglass },
-  done: { label: 'Every step done', icon: CircleCheck },
-  idle: { label: 'Idle', icon: CircleDashed },
-  pausing: { label: 'Pausing', icon: Pause },
-  paused: { label: 'Paused', icon: Pause },
-};
+import { projectStatusIcon } from '@/lib/utils/status-labels';
 
 const PAUSE_FORM = 'projects.tab.pause';
 
@@ -39,7 +28,7 @@ export function StatusIcon({ project, archived }: StatusIconProps) {
   const transition = usePostProjectsTransitionsByProjectId({ onSuccess: () => queryClient.invalidateQueries() });
   const status = project.status;
   if (status === null) return null;
-  const { label, icon } = STATUSES[status];
+  const { label, icon } = projectStatusIcon(status);
 
   if (archived) {
     return (
