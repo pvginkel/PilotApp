@@ -1,14 +1,15 @@
 /**
  * An open work item on the timeline (F26): a session Pilot started, updated in place as the
  * server's `work_moved` carries it (F80.2). Its head has the env chip, opening the environment in
- * KubeCoder, and "running N min" with a pulse while its turn runs (F26.1, F12). Under its title is
- * its one line (F26.2): the server's own words while its session comes up, or comes back while its
- * environment restarts; the working state and the latest step while it runs; why the gate holds
- * its start; "Stopped · <time>" with the cause of a stop made elsewhere; the error a failed start
- * or a turn ended in error left, shown as a stopped one is (F125). Its Session log opens the
- * session's records in the overlay (F26.3, F69). Stop, while it runs, starts or is held, asks
- * first in its actions' place, Esc dismissing the question; Resume, once it stopped or failed,
- * carries it on (F67), disabled while the project is archived, as its head's switch is (D012).
+ * KubeCoder, once its start has one, and "running N min" with a pulse while its turn runs (F26.1,
+ * F12). Under its title is its one line (F26.2): the server's own words while its session comes
+ * up, or comes back while its environment restarts; the working state and the latest step while
+ * it runs; why the gate holds its start; "Stopped · <time>" with the cause of a stop made
+ * elsewhere; the error a failed start or a turn ended in error left, shown as a stopped one is
+ * (F125). Its Session log opens the session's records in the overlay (F26.3, F69). Stop, while it
+ * runs, starts or is held, asks first in its actions' place, Esc dismissing the question; Resume,
+ * once it stopped or failed, carries it on (F67), disabled while the project is archived, as its
+ * head's switch is (D012).
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -37,9 +38,11 @@ export function WorkItem({ item }: { item: TimelineItem }) {
   return (
     <div className="item-body">
       <ItemHead item={item}>
-        <span className="chip mono env">
-          <EnvironmentLink environment={work.environment} testId="timeline.work.environment" />
-        </span>
+        {work.environment !== null && (
+          <span className="chip mono env">
+            <EnvironmentLink environment={work.environment} testId="timeline.work.environment" />
+          </span>
+        )}
         {work.state === 'running' && work.started_at !== null && <Running since={work.started_at} />}
       </ItemHead>
       <div className="item-title" data-testid="timeline.item.title">

@@ -60,7 +60,7 @@ export const test = infrastructureFixtures.extend<DomainFixtures, DomainWorkerFi
   controller: async ({ page, backendUrl, conditions }, use) => {
     const controller = new Controller(page, backendUrl, conditions);
     await use(controller);
-    await controller.answerAgain();
+    await controller.restore();
   },
   conditions: [
     async ({ playwright, _serviceManager }, use) => {

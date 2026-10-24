@@ -9,7 +9,6 @@
  */
 
 import { test, expect } from '../support/fixtures';
-import type { Controller } from '../support/controller';
 import { makeUnique } from '../support/helpers';
 import type { People } from '../support/people';
 import type { Projects } from '../support/projects';
@@ -20,22 +19,20 @@ const QUESTION = '```question id=Q1\n```\n';
 interface Fixtures {
   people: People;
   projects: Projects;
-  controller: Controller;
 }
 
-/** A project, signed in as its member, with a work item running in an environment of the fake's. */
-async function running({ people, projects, controller }: Fixtures) {
+/** A project, signed in as its member, with a work item running in the environment its start created. */
+async function running({ people, projects }: Fixtures) {
   const me = await people.signIn();
   const name = makeUnique('Running');
   const project = await projects.make({ name, members: [me.handle!], tasks: [step('a', 'in_progress')] });
-  const environment = await controller.environment();
   const work = await projects.startWork(project, {
-    environment_id: environment,
     title: 'Surveying the stylesheets',
     brief: 'Survey the stylesheets.',
     cwd: '/work/Example',
   });
   await expect.poll(async () => (await projects.work(project, work)).state).toBe('running');
+  const { id: environment } = await projects.environment(project, work);
   return { name, project, environment, work };
 }
 
@@ -163,7 +160,7 @@ test.describe('A tab’s status icon', () => {
     controller,
     projectList,
   }) => {
-    const { name, project, environment } = await running({ people, projects, controller });
+    const { name, project, environment } = await running({ people, projects });
     await projectList.open(project);
     const icon = projectList.statusIcon(name);
     await expect(icon.root).toHaveAttribute('data-status', 'running');
@@ -195,14 +192,12 @@ test.describe('A tab’s status icon', () => {
   test('a work item started while paused is held, its line saying so, and runs once the icon resumes the project', async ({
     people,
     projects,
-    controller,
     projectList,
     timeline,
   }) => {
     const me = await people.signIn();
     const name = makeUnique('Held');
     const project = await projects.make({ name, members: [me.handle!] });
-    const environment = await controller.environment();
     await timeline.open(project);
     const icon = projectList.statusIcon(name);
     const paused = projectList.written(project, 'paused');
@@ -210,7 +205,6 @@ test.describe('A tab’s status icon', () => {
     await paused;
 
     const work = await projects.startWork(project, {
-      environment_id: environment,
       title: 'Surveying the stylesheets',
       brief: 'Survey the stylesheets.',
       cwd: '/work/Example',

@@ -8,7 +8,6 @@
  */
 
 import { test, expect } from '../support/fixtures';
-import type { Controller } from '../support/controller';
 import { makeUnique } from '../support/helpers';
 import type { People } from '../support/people';
 import type { Projects } from '../support/projects';
@@ -23,21 +22,19 @@ const QUESTION = 'Stop the session? Its turn ends where it is; Resume sends it o
 interface Fixtures {
   people: People;
   projects: Projects;
-  controller: Controller;
 }
 
-/** A project, signed in as its member, and an environment of the fake's. */
-async function setUp({ people, projects, controller }: Fixtures, { paused = false } = {}) {
+/** A project, signed in as its member. */
+async function setUp({ people, projects }: Fixtures, { paused = false } = {}) {
   const me = await people.signIn();
   const name = makeUnique('Stop');
   const project = await projects.make({ name, members: [me.handle!], paused });
-  const environment = await controller.environment();
-  return { name, project, environment };
+  return { name, project };
 }
 
-/** A work item started in `environment`, once its session reads `state`. */
-async function startIn(projects: Projects, project: string, environment: string, state = 'running', title = TITLE): Promise<string> {
-  const work = await projects.startWork(project, { environment_id: environment, title, brief: 'Survey the stylesheets.', cwd: '/work/Example' });
+/** A work item started in the project, once its session reads `state`. */
+async function startIn(projects: Projects, project: string, state = 'running', title = TITLE): Promise<string> {
+  const work = await projects.startWork(project, { title, brief: 'Survey the stylesheets.', cwd: '/work/Example' });
   await expect.poll(async () => (await projects.work(project, work)).state).toBe(state);
   return work;
 }
@@ -51,12 +48,11 @@ test.describe('Stop', () => {
   test('asks first in the actions’ place, Cancel taking the focus; Esc and Cancel dismiss the question, and nothing stops', async ({
     people,
     projects,
-    controller,
     timeline,
     page,
   }) => {
-    const { project, environment } = await setUp({ people, projects, controller });
-    const work = await startIn(projects, project, environment);
+    const { project } = await setUp({ people, projects });
+    const work = await startIn(projects, project);
     await timeline.open(project);
     const item = timeline.item(work).work;
     await expect(item.stop).toHaveText('Stop');
@@ -85,13 +81,12 @@ test.describe('Stop', () => {
   test('confirmed, stops the item where it is, “Stopped · <time>” waiting on you; Resume carries it on in the same item', async ({
     people,
     projects,
-    controller,
     timeline,
     projectList,
     deploymentSse,
   }) => {
-    const { name, project, environment } = await setUp({ people, projects, controller });
-    const work = await startIn(projects, project, environment);
+    const { name, project } = await setUp({ people, projects });
+    const work = await startIn(projects, project);
     await timeline.open(project);
     await deploymentSse.ensureConnected();
     const item = timeline.item(work).work;
@@ -126,13 +121,15 @@ test.describe('Stop', () => {
     timeline,
     deploymentSse,
   }) => {
-    const { project, environment } = await setUp({ people, projects, controller });
-    await controller.settleStarts(environment, null);
-    const work = await startIn(projects, project, environment, 'starting');
+    const { project } = await setUp({ people, projects });
+    // The environment the start creates is held `provisioning`.
+    await controller.settleCreates(null);
+    const work = await startIn(projects, project, 'starting');
+    const environment = await projects.environment(project, work);
     await timeline.open(project);
     await deploymentSse.ensureConnected();
     const item = timeline.item(work).work;
-    await expect(item.cue).toHaveText(`Starting ${environment}`);
+    await expect(item.cue).toHaveText(`Preparing ${environment.name}`);
 
     await item.stop.click();
     await item.stopConfirm.yes.click();
@@ -141,7 +138,10 @@ test.describe('Stop', () => {
     await expect(item.line).toHaveText(`Stopped · ${clock(stopped_at!)}`);
     await expect(item.stop).toHaveCount(0);
 
-    await controller.setStatus(environment, 'running');
+    // With no conversation to continue, the Resume is a fresh start: its environment is reset,
+    // which settles as the environment's starts do.
+    await controller.setStatus(environment.id, 'running');
+    await controller.settleStarts(environment.id, 'running');
     await item.resume.click();
     await expect.poll(async () => (await projects.work(project, work)).state).toBe('running');
     await expect(item.running).toBeVisible();
@@ -151,12 +151,11 @@ test.describe('Stop', () => {
   test('ends a held start, which starts no more once the project resumes; its Resume is held while paused, its line why', async ({
     people,
     projects,
-    controller,
     timeline,
     deploymentSse,
   }) => {
-    const { project, environment } = await setUp({ people, projects, controller }, { paused: true });
-    const work = await startIn(projects, project, environment, 'held');
+    const { project } = await setUp({ people, projects }, { paused: true });
+    const work = await startIn(projects, project, 'held');
     await timeline.open(project);
     await deploymentSse.ensureConnected();
     const item = timeline.item(work).work;
@@ -170,7 +169,7 @@ test.describe('Stop', () => {
 
     // The gate releases its held starts in the order they were asked: one asked later has run.
     await projects.transition(project, 'resumed');
-    await startIn(projects, project, await controller.environment(), 'running', 'Renaming the badge');
+    await startIn(projects, project, 'running', 'Renaming the badge');
     expect((await projects.work(project, work)).state).toBe('stopped');
 
     await projects.transition(project, 'paused');
@@ -193,24 +192,26 @@ test.describe('Resume', () => {
     timeline,
     deploymentSse,
   }) => {
-    const { project, environment } = await setUp({ people, projects, controller });
-    await controller.capped(environment);
-    const refused = await startIn(projects, project, environment, 'failed');
-    const other = await controller.environment();
-    const erred = await startIn(projects, project, other, 'running', 'Renaming the badge');
+    const { project } = await setUp({ people, projects });
+    // The node at its cap refuses the create: the start fails with no environment.
+    await controller.capped();
+    const refused = await startIn(projects, project, 'failed');
+    await controller.capped(false);
+    const erred = await startIn(projects, project, 'running', 'Renaming the badge');
+    const other = await projects.environment(project, erred);
     await timeline.open(project);
     await deploymentSse.ensureConnected();
 
     const failed = timeline.item(refused).work;
     await expect(failed.line).toHaveText(/^Failed · /);
+    await expect(failed.environment).toHaveCount(0);
     await expect(failed.stop).toHaveCount(0);
-    await controller.capped(environment, false);
     await failed.resume.click();
     await expect(failed.resume).toHaveCount(0);
     await expect.poll(async () => (await projects.work(project, refused)).state).toBe('running');
     await expect(failed.running).toBeVisible();
 
-    await controller.finish(other, 'claude-1', 'error', 'The model is overloaded.');
+    await controller.finish(other.id, 'claude-1', 'error', 'The model is overloaded.');
     const ended = timeline.item(erred).work;
     await expect(ended.line).toHaveText('Failed · The model is overloaded.');
     await ended.resume.click();
@@ -227,8 +228,9 @@ test.describe('Resume', () => {
     page,
     deploymentSse,
   }) => {
-    const { project, environment } = await setUp({ people, projects, controller });
-    const work = await startIn(projects, project, environment);
+    const { project } = await setUp({ people, projects });
+    const work = await startIn(projects, project);
+    const { id: environment } = await projects.environment(project, work);
     await timeline.open(project);
     await deploymentSse.ensureConnected();
     const item = timeline.item(work).work;
@@ -256,12 +258,11 @@ test.describe('Resume', () => {
   test('stands disabled on the item Archive stopped, as the head’s switch does, until Bring back', async ({
     people,
     projects,
-    controller,
     timeline,
     deploymentSse,
   }) => {
-    const { project, environment } = await setUp({ people, projects, controller });
-    const work = await startIn(projects, project, environment);
+    const { project } = await setUp({ people, projects });
+    const work = await startIn(projects, project);
     await timeline.open(project);
     await deploymentSse.ensureConnected();
     const item = timeline.item(work).work;

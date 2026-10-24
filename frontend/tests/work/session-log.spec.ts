@@ -1,6 +1,7 @@
 /**
  * A work item's session log (F69): the overlay at its own address over its project's timeline,
- * its head "Session log" over the item's title, its environment's link and its session's id; its
+ * its head "Session log" over the item's title, its environment's link once its start has one, and
+ * its session's id; its
  * body the session's records as the chat renders a reply — a run of calls, a sub-agent's card,
  * the phantom fading in and gone at its record — streamed while it is open; its tail the working
  * cue while the session is held, starts or runs, else "Stopped by you · <time>", the environment
@@ -11,7 +12,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { test, expect } from '../support/fixtures';
-import { rawTurn, type Controller } from '../support/controller';
+import { rawTurn } from '../support/controller';
 import { makeUnique } from '../support/helpers';
 import type { People } from '../support/people';
 import type { Projects } from '../support/projects';
@@ -24,8 +25,10 @@ const clock = (at: string) => new Intl.DateTimeFormat('en-GB', { hour: '2-digit'
 const TITLE = 'Surveying the stylesheets';
 const KUBECODER = 'https://kubecoder.example';
 
-// Invented lines in `claude`'s shapes (backend/tests/fixtures/raw/).
-const line = (value: object) => JSON.stringify(value);
+// Invented lines in `claude`'s shapes (backend/tests/fixtures/raw/). Each names its conversation,
+// as every line `claude` prints does, so that a Resume continues it.
+const CONVERSATION = '3f6c2a8e-5b1d-4c7e-9a2f-8d4b6e1c0a57';
+const line = (value: object) => JSON.stringify({ ...value, session_id: CONVERSATION });
 const text = (id: string, words: string) =>
   line({ type: 'assistant', message: { id: `msg_${id}`, content: [{ type: 'text', text: words }] }, parent_tool_use_id: null });
 const toolUse = (id: string, name: string, input: object) =>
@@ -40,22 +43,22 @@ const delta = (words: string) =>
 interface Fixtures {
   people: People;
   projects: Projects;
-  controller: Controller;
 }
 
-/** A work item started in an environment of the fake's, once its session runs, or as far as its start goes. */
-async function started({ people, projects, controller }: Fixtures, { paused = false, state = 'running' } = {}) {
+/** A project, signed in as its member, and its work item's start. */
+async function started({ people, projects }: Fixtures, { paused = false, state = 'running' } = {}) {
   const me = await people.signIn();
   const project = await projects.make({ name: makeUnique('Log'), members: [me.handle!], paused });
-  const environment = await controller.environment();
-  return { project, environment, start: () => startIn(projects, project, environment, state) };
+  return { project, start: () => startIn(projects, project, state) };
 }
 
-async function startIn(projects: Projects, project: string, environment: string, state: string): Promise<string> {
-  const work = await projects.startWork(project, { environment_id: environment, title: TITLE, brief: 'Survey the stylesheets.', cwd: '/work/Example' });
+/** A work item started in the project, once its session runs, or as far as its start goes. */
+async function startIn(projects: Projects, project: string, state: string): Promise<string> {
+  const work = await projects.startWork(project, { title: TITLE, brief: 'Survey the stylesheets.', cwd: '/work/Example' });
   await expect.poll(async () => (await projects.work(project, work)).state).toBe(state);
   return work;
 }
+
 
 test.describe('A work item’s session log', () => {
   test('opened from a running item shows its head, then streams its records as the chat renders a reply — the cue, a run of calls, a sub-agent’s card, the phantom — to the turn’s end', async ({
@@ -66,13 +69,14 @@ test.describe('A work item’s session log', () => {
     sessionLog,
   }) => {
     await links.set({ environment_link_base_url: KUBECODER });
-    const { project, environment, start } = await started({ people, projects, controller });
+    const { project, start } = await started({ people, projects });
     const work = await start();
+    const { id: environment, name } = await projects.environment(project, work);
     await sessionLog.open(project, work);
 
     await expect(sessionLog.title).toHaveText('Session log');
     await expect(sessionLog.item).toHaveText(TITLE);
-    await expect(sessionLog.environment).toHaveText(environment);
+    await expect(sessionLog.environment).toHaveText(name);
     await expect(sessionLog.environment).toHaveAttribute('href', `${KUBECODER}/environments/${environment}/ssh/open`);
     await expect(sessionLog.session).toHaveText(work);
     // The server's lines while the session comes up show in the cue alone.
@@ -121,8 +125,9 @@ test.describe('A work item’s session log', () => {
     controller,
     sessionLog,
   }) => {
-    const { project, environment, start } = await started({ people, projects, controller });
+    const { project, start } = await started({ people, projects });
     const work = await start();
+    const { id: environment } = await projects.environment(project, work);
     await controller.play(environment, 'claude-1', rawTurn('turn_tool'));
     await controller.finish(environment, 'claude-1');
     await expect.poll(async () => (await projects.item(project, work)).done?.cause).toBe('turn_ended');
@@ -146,8 +151,9 @@ test.describe('A work item’s session log', () => {
     controller,
     sessionLog,
   }) => {
-    const { project, environment, start } = await started({ people, projects, controller });
+    const { project, start } = await started({ people, projects });
     const work = await start();
+    const { id: environment } = await projects.environment(project, work);
     await sessionLog.open(project, work);
     await controller.play(environment, 'claude-1', [text('looking', 'Looking at the stylesheets.')]);
     await expect(sessionLog.texts).toHaveText(['Looking at the stylesheets.']);
@@ -173,14 +179,15 @@ test.describe('A work item’s session log', () => {
   });
 
   test('an environment stopped under the turn names the cause in its tail', async ({ people, projects, controller, sessionLog }) => {
-    const { project, environment, start } = await started({ people, projects, controller });
+    const { project, start } = await started({ people, projects });
     const work = await start();
+    const { id: environment, name } = await projects.environment(project, work);
     await sessionLog.open(project, work);
 
     await controller.setStatus(environment, 'stopped');
     await expect.poll(async () => (await projects.work(project, work)).stopped_cause).toBe('environment_stopped');
     const stopped = await projects.work(project, work);
-    await expect(sessionLog.tail).toHaveText(`${environment} was stopped · ${clock(stopped.stopped_at!)}`);
+    await expect(sessionLog.tail).toHaveText(`${name} was stopped · ${clock(stopped.stopped_at!)}`);
     await expect(sessionLog.cue).toHaveCount(0);
   });
 
@@ -190,14 +197,15 @@ test.describe('A work item’s session log', () => {
     controller,
     sessionLog,
   }) => {
-    const { project, environment, start } = await started({ people, projects, controller });
+    const { project, start } = await started({ people, projects });
     const work = await start();
+    const { id: environment, name } = await projects.environment(project, work);
     await sessionLog.open(project, work);
     await controller.play(environment, 'claude-1', [text('looking', 'Looking at the stylesheets.')]);
     await expect(sessionLog.texts).toHaveText(['Looking at the stylesheets.']);
 
     await controller.restart(environment);
-    await expect(sessionLog.cue).toHaveText(`${environment} is restarting`);
+    await expect(sessionLog.cue).toHaveText(`${name} is restarting`);
     await controller.setStatus(environment, 'running');
     await expect.poll(async () => (await projects.work(project, work)).current_line?.state).toBe('thinking');
     await controller.play(environment, 'claude-2', [text('two', 'There are two stylesheets.')]);
@@ -210,8 +218,9 @@ test.describe('A work item’s session log', () => {
   });
 
   test('a turn ended in error shows its reason in red over "Failed · <time>"', async ({ people, projects, controller, sessionLog }) => {
-    const { project, environment, start } = await started({ people, projects, controller });
+    const { project, start } = await started({ people, projects });
     const work = await start();
+    const { id: environment } = await projects.environment(project, work);
     await sessionLog.open(project, work);
 
     await controller.finish(environment, 'claude-1', 'error', 'The model is overloaded.');
@@ -223,23 +232,28 @@ test.describe('A work item’s session log', () => {
   });
 
   test('a failed start shows the start’s error over "Failed"', async ({ people, projects, controller, sessionLog }) => {
-    const { project, environment } = await started({ people, projects, controller });
-    await controller.capped(environment);
-    const work = await startIn(projects, project, environment, 'failed');
+    const { project, start } = await started({ people, projects }, { state: 'failed' });
+    // The node at its cap refuses the create: the start fails with no environment.
+    await controller.capped();
+    const work = await start();
     const { error } = await projects.work(project, work);
 
     await sessionLog.open(project, work);
     await expect(sessionLog.failures).toHaveText([error!]);
     await expect(sessionLog.tail).toHaveText(/^Failed · \d\d:\d\d$/);
+    await expect(sessionLog.session).toHaveText(work);
+    await expect(sessionLog.environment).toHaveCount(0);
   });
 
-  test('a start the pause holds reads "Paused" in the cue', async ({ people, projects, controller, sessionLog }) => {
-    const { project, start } = await started({ people, projects, controller }, { paused: true, state: 'held' });
+  test('a start the pause holds reads "Paused" in the cue, and names no environment before its take', async ({ people, projects, sessionLog }) => {
+    const { project, start } = await started({ people, projects }, { paused: true, state: 'held' });
     const work = await start();
 
     await sessionLog.open(project, work);
     await expect(sessionLog.cue).toHaveText('Paused');
     await expect(sessionLog.tail).toHaveCount(0);
+    await expect(sessionLog.session).toHaveText(work);
+    await expect(sessionLog.environment).toHaveCount(0);
   });
 
   test('sticks to its end while it grows, lets go when the reader scrolls up, and sticks again once they scroll back down', async ({
@@ -249,8 +263,9 @@ test.describe('A work item’s session log', () => {
     controller,
     sessionLog,
   }) => {
-    const { project, environment, start } = await started({ people, projects, controller });
+    const { project, start } = await started({ people, projects });
     const work = await start();
+    const { id: environment } = await projects.environment(project, work);
     await sessionLog.open(project, work);
     const long = (n: number) => Array.from({ length: 60 }, (_, i) => `Paragraph ${i + 1} of survey ${n}.`).join('\n\n');
 

@@ -1,25 +1,33 @@
 /**
  * The work items' harness (design 2 §12): the worker's backend drives a fake controller of its
- * own, in whose environments a spec starts work items through the record's testing route and plays
- * their turns, and which it makes unreachable and answering again.
+ * own, from which a spec's work items, placed by repository through the record's testing route,
+ * get environments of Pilot's own, created or taken, and in which it plays their turns, and which
+ * it makes unreachable and answering again.
  */
 
 import { test, expect } from '../support/fixtures';
 import { rawTurn } from '../support/controller';
 import { makeUnique } from '../support/helpers';
+import { slugOf } from '../support/projects';
 
 const BRIEF = 'Rename the badge.';
+const WORK = { title: 'Renaming the badge', brief: BRIEF, cwd: '/work/Example' };
 
 test.describe('The fake controller', () => {
-  test('a work item started in its environment runs its turn to its end', async ({ people, projects, controller, conditions }) => {
+  test('a work item runs its turn to its end in the environment its start created, named after its project', async ({
+    people,
+    projects,
+    controller,
+    conditions,
+  }) => {
     expect(await conditions.read()).toEqual([]);
     const me = await people.signIn();
     const id = await projects.make({ name: makeUnique('Harness'), members: [me.handle!] });
-    const environment = await controller.environment();
 
-    const work = await projects.startWork(id, { environment_id: environment, title: 'Renaming the badge', brief: BRIEF, cwd: '/work/Example' });
+    const work = await projects.startWork(id, WORK);
     await expect.poll(async () => (await projects.work(id, work)).state).toBe('running');
-    expect((await projects.work(id, work)).environment).toEqual({ id: environment, name: environment });
+    const { id: environment, name } = await projects.environment(id, work);
+    expect(name).toBe(slugOf(id));
 
     const lines = rawTurn('turn_text');
     await controller.play(environment, 'claude-1', lines);
@@ -34,6 +42,34 @@ test.describe('The fake controller', () => {
     expect(records.at(-1)?.kind).toBe('result');
   });
 
+  test('a work item of the repository takes the environment another one’s end freed, named after its own project', async ({
+    people,
+    projects,
+    controller,
+  }) => {
+    const me = await people.signIn();
+    const first = await projects.make({ name: makeUnique('Freed'), members: [me.handle!] });
+    // Held until its row is in, so that the fleet stream reports it `running`: the fake's create
+    // settles within its answer otherwise, before Pilot has a row the report could update.
+    await controller.settleCreates(null);
+    const done = await projects.startWork(first, WORK);
+    const { id: environment } = await projects.environment(first, done);
+    await controller.settleCreates('running');
+    await controller.settleStarts(environment, 'running');
+    await controller.setStatus(environment, 'running');
+    await expect.poll(async () => (await projects.work(first, done)).state).toBe('running');
+    await controller.finish(environment, 'claude-1');
+    await expect.poll(async () => (await projects.item(first, done)).done?.cause).toBe('turn_ended');
+
+    const second = await projects.make({ name: makeUnique('Taking'), members: [me.handle!] });
+    const work = await projects.startWork(second, WORK);
+    await expect.poll(async () => (await projects.work(second, work)).state).toBe('running');
+    const taken = { id: environment, name: slugOf(second) };
+    expect((await projects.work(second, work)).environment).toEqual(taken);
+    // The done item names its environment as its row stands.
+    expect((await projects.work(first, done)).environment).toEqual(taken);
+  });
+
   test('the controller unreachable holds a start, and it runs once the controller answers again', async ({
     people,
     projects,
@@ -42,14 +78,15 @@ test.describe('The fake controller', () => {
   }) => {
     const me = await people.signIn();
     const id = await projects.make({ name: makeUnique('Outage'), members: [me.handle!] });
-    const environment = await controller.environment();
 
     await controller.outage(true, 'ingress');
     expect((await conditions.read()).map((condition) => condition.code)).toEqual(['outage']);
-    const work = await projects.startWork(id, { environment_id: environment, title: 'Renaming the badge', brief: BRIEF, cwd: '/work/Example' });
+    const work = await projects.startWork(id, WORK);
     const held = await projects.work(id, work);
     expect(held.state).toBe('held');
     expect(held.held_reason).toBe('controller_unreachable');
+    // Held before its take, it has no environment yet.
+    expect(held.environment).toBeNull();
 
     await controller.outage(false);
     await expect.poll(async () => (await projects.work(id, work)).state).toBe('running');

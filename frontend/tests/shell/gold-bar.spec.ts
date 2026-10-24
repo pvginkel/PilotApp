@@ -152,19 +152,21 @@ test.describe('The gold bar', () => {
   }) => {
     const me = await people.signIn();
     const project = await projects.make({ name: makeUnique('Worker'), members: [me.handle!] });
-    const environment = await controller.environment();
     await shell.open('/profile');
     await deploymentSse.ensureConnected();
     await waitForUiState(page, 'shell.conditions', 'ready');
 
-    // Its worker's 502 worker-unreachable fails the start, and holds no work.
-    await controller.unreachable(environment);
+    // The environment the start creates is held `provisioning` until its worker is unreachable.
+    await controller.settleCreates(null);
     const work = await projects.startWork(project, {
-      environment_id: environment,
       title: 'Renaming the badge',
       brief: 'Rename the badge.',
       cwd: '/work/Example',
     });
+    const { id: environment } = await projects.environment(project, work);
+    // Its worker's 502 worker-unreachable fails the start, and holds no work.
+    await controller.unreachable(environment);
+    await controller.setStatus(environment, 'running');
     await expect.poll(async () => (await projects.work(project, work)).state).toBe('failed');
     expect(await conditions.read()).toEqual([]);
     await expect(shell.goldLine('outage')).toHaveCount(0);

@@ -304,13 +304,12 @@ test.describe('The running sessions', () => {
     page,
     people,
     projects,
-    controller,
     projectHead,
   }) => {
     const me = await people.signIn();
     const id = await projects.make({ name: makeUnique('Stopping'), members: [me.handle!] });
     const brief = { brief: 'Survey.', cwd: '/work/Example' };
-    const running = await projects.startWork(id, { environment_id: await controller.environment(), title: 'Surveying the stylesheets', ...brief });
+    const running = await projects.startWork(id, { title: 'Surveying the stylesheets', ...brief });
     await expect.poll(async () => (await projects.work(id, running)).state).toBe('running');
     await projectHead.open(id);
 
@@ -319,7 +318,7 @@ test.describe('The running sessions', () => {
     await page.keyboard.press('Escape');
 
     await projects.transition(id, 'paused');
-    const held = await projects.startWork(id, { environment_id: await controller.environment(), title: 'Renaming the badge', ...brief });
+    const held = await projects.startWork(id, { title: 'Renaming the badge', ...brief });
     await expect.poll(async () => (await projects.work(id, held)).state).toBe('held');
     await projectHead.open(id);
     const both = '2 running sessions stop: Surveying the stylesheets and Renaming the badge.';

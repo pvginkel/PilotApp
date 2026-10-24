@@ -20,9 +20,9 @@ test.describe('The switch’s warning triangle', () => {
   }) => {
     const me = await people.signIn();
     const project = await projects.make({ name: makeUnique('Briefed'), members: [me.handle!] });
-    const environment = await controller.environment();
-    const work = await projects.startWork(project, { environment_id: environment, ...WORK });
+    const work = await projects.startWork(project, WORK);
     await expect.poll(async () => (await projects.work(project, work)).state).toBe('running');
+    const environment = await projects.environment(project, work);
     expect((await projects.work(project, work)).autopilot).toBe(false);
     await projectHead.open(project);
     await expect(projectHead.autopilotWarning).toHaveCount(0);
@@ -40,15 +40,14 @@ test.describe('The switch’s warning triangle', () => {
     await projectHead.autopilot.click();
     await expect(projectHead.autopilotWarning).toBeVisible();
     // The turn ends: the item is done, and nothing briefed otherwise runs.
-    await controller.finish(environment, 'claude-1');
+    await controller.finish(environment.id, 'claude-1');
     await expect(projectHead.autopilotWarning).toHaveCount(0);
   });
 
-  test('a start held at the gate counts, and the triangle goes once it is stopped', async ({ people, projects, controller, projectHead }) => {
+  test('a start held at the gate counts, and the triangle goes once it is stopped', async ({ people, projects, projectHead }) => {
     const me = await people.signIn();
     const project = await projects.make({ name: makeUnique('Held'), members: [me.handle!], autopilot: true, paused: true });
-    const environment = await controller.environment();
-    const work = await projects.startWork(project, { environment_id: environment, ...WORK });
+    const work = await projects.startWork(project, WORK);
     await expect.poll(async () => (await projects.work(project, work)).state).toBe('held');
     await projectHead.open(project);
     await expect(projectHead.autopilotWarning).toHaveCount(0);

@@ -7,9 +7,10 @@
  * /api/testing/items/<id>/saves), its handbook and its project document saved
  * (/api/testing/projects/<id>/{handbook,draft}/saves), its session's turn ended, a document it settled whole marked
  * Done by Pilot and files it copied attached to an item (/api/testing/items/<id>/attachments); they
- * are answered through the items API. A work item is placed and its session started in an
- * environment of the worker's fake controller (/api/testing/projects/<id>/work; `controller.ts`
- * drives the fake), and read as the timeline and the session log read it.
+ * are answered through the items API. A work item is placed by repository and its session started
+ * in an environment of Pilot's own its start takes or creates in the worker's fake controller
+ * (/api/testing/projects/<id>/work; `controller.ts` drives the fake), and read as the timeline and
+ * the session log read it.
  */
 
 import { expect, type Page } from '@playwright/test';
@@ -29,11 +30,23 @@ type WorkSpec = components['schemas']['InventedWorkCreateSchema.6d6b324'];
 type Timeline = components['schemas']['TimelineSchema.1fdd8ae'];
 type TimelineItem = Timeline['items'][number];
 type Work = NonNullable<TimelineItem['work']>;
+type Environment = NonNullable<Work['environment']>;
 type RecordPage = components['schemas']['SessionRecordPageSchema.01118bb'];
 type Block = components['schemas']['TimelineSchema.1fdd8ae.BlockSchema'];
 type BlockPart = components['schemas']['TimelineSchema.1fdd8ae.BlockPartSchema'];
 
+/** The slug the testing route gives an open project it makes: `project-` and its id's first 12 hex digits. */
+export function slugOf(projectId: string): string {
+  return `project-${projectId.replaceAll('-', '').slice(0, 12)}`;
+}
+
 export class Projects {
+  /**
+   * The repository the spec's work items are placed by: its own, so that a start takes no
+   * environment of Pilot's that an earlier spec of the worker left free.
+   */
+  readonly repo = `example/${makeUnique('Example')}`;
+
   constructor(
     private readonly page: Page,
     private readonly backendUrl: string,
@@ -136,14 +149,22 @@ export class Projects {
   }
 
   /**
-   * A work item placed on the project's timeline, its session started in the fake controller's
-   * environment `environment_id` as Pilot starts one, through the gate, once the request
-   * commits; answers its id, its session's.
+   * A work item placed on the project's timeline by the spec's repository, its session started as
+   * Pilot starts one, through the gate, once the request commits, in an environment its start takes
+   * or creates; answers its id, its session's.
    */
-  async startWork(projectId: string, spec: WorkSpec): Promise<string> {
-    const response = await this.page.request.post(`${this.backendUrl}/api/testing/projects/${projectId}/work`, { data: spec });
+  async startWork(projectId: string, spec: Omit<WorkSpec, 'repo'>): Promise<string> {
+    const response = await this.page.request.post(`${this.backendUrl}/api/testing/projects/${projectId}/work`, {
+      data: { ...spec, repo: this.repo },
+    });
     expect(response.status(), await response.text()).toBe(201);
     return ((await response.json()) as { id: string }).id;
+  }
+
+  /** The environment a work item's start took or created, once it has one, as its row stands. */
+  async environment(projectId: string, itemId: string): Promise<Environment> {
+    await expect.poll(async () => (await this.work(projectId, itemId)).environment).not.toBeNull();
+    return (await this.work(projectId, itemId)).environment!;
   }
 
   /** An item, as the signed-in person reads the project's timeline. */

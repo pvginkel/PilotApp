@@ -1,15 +1,17 @@
 /**
  * The worker's KubeCoder controller, for a spec: the fake its backend serves itself under
- * /api/testing/controller (design 2 §12; backend-env-extensions.ts points the backend at it). A
- * spec gives it environments and drives them and their headless sessions through the fake's
+ * /api/testing/controller (design 2 §12; backend-env-extensions.ts points the backend at it). The
+ * environments are those Pilot's starts create in it, read from the work item
+ * (`Projects.environment()`); a spec drives them and their headless sessions through the fake's
  * verbs, POST /api/testing/controller/fake/<verb>, which take no sign-in. Pilot's headless sessions
  * in an environment are `claude-1`, `claude-2`, … in the order Pilot creates them there. The lines a
  * turn plays are the backend suite's invented ones (`rawTurn()`).
  *
  * The controller unreachable is a state the backend holds, which the gold bar reads (GET
- * /api/conditions): `outage()` returns once the backend reads it as asked, and the fixture answers
- * again after a spec that left it unreachable, so that every spec starts with the controller
- * answering.
+ * /api/conditions): `outage()` returns once the backend reads it as asked. The fake's verbs that
+ * act on every environment hold across the worker's specs, so the fixture restores the controller
+ * after a spec that changed it (`restore()`): every spec starts with the controller answering, the
+ * node under its cap and a create settling `running`.
  */
 
 import { readFileSync } from 'node:fs';
@@ -91,19 +93,14 @@ export class Conditions {
 
 export class Controller {
   private unanswered = false;
+  private nodeCapped = false;
+  private createsHeld = false;
 
   constructor(
     private readonly page: Page,
     private readonly backendUrl: string,
     private readonly conditions: Conditions,
   ) {}
-
-  /** An environment of the fleet, `stopped` unless `status` says otherwise, named by its id unless `name` is given; answers its id. */
-  async environment({ name, status = 'stopped' }: { name?: string; status?: EnvironmentStatus } = {}): Promise<string> {
-    const id = makeUnique('env');
-    await this.verb('add-environment', { env_id: id, name: name ?? id, status });
-    return id;
-  }
 
   /** `claude` prints `lines` in the session's turn: an open stream sends them. Answers each line's offset. */
   async play(envId: string, session: string, lines: string[]): Promise<number[]> {
@@ -137,9 +134,18 @@ export class Controller {
     await this.verb('set-status', { env_id: envId, status });
   }
 
-  /** What a start brings the environment to at once; null holds it `starting` until `setStatus()`. */
+  /** What a start or a reset brings the environment to at once; null holds it `starting` until `setStatus()`. */
   async settleStarts(envId: string, status: EnvironmentStatus | null): Promise<void> {
     await this.verb('settle-starts', { env_id: envId, status });
+  }
+
+  /**
+   * What a create brings its environment to at once, and that environment's starts and resets
+   * after it (`settleStarts()`); null holds it `provisioning` until `setStatus()`.
+   */
+  async settleCreates(status: EnvironmentStatus | null): Promise<void> {
+    await this.verb('settle-creates', { status });
+    this.createsHeld = status !== 'running';
   }
 
   /** The environment is gone from the fleet, its sessions with it. */
@@ -147,9 +153,10 @@ export class Controller {
     await this.verb('remove-environment', { env_id: envId });
   }
 
-  /** The node at its cap, or (`on` false) under it: a start is `409 admission-blocked`. */
-  async capped(envId: string, on = true): Promise<void> {
-    await this.verb('capped', { env_id: envId, on });
+  /** The node at its cap, or (`on` false) under it: a create, a start and a reset are `409 admission-blocked`. */
+  async capped(on = true): Promise<void> {
+    await this.verb('capped', { on });
+    this.nodeCapped = on;
   }
 
   /** The environment's worker unreachable, or (`on` false) reached again: its calls are `502 worker-unreachable`. */
@@ -168,9 +175,11 @@ export class Controller {
     this.unanswered = on;
   }
 
-  /** The controller answering again after a spec that left it unreachable. */
-  async answerAgain(): Promise<void> {
+  /** The controller as every spec starts with it, after a spec that changed it. */
+  async restore(): Promise<void> {
     if (this.unanswered) await this.outage(false);
+    if (this.nodeCapped) await this.capped(false);
+    if (this.createsHeld) await this.settleCreates('running');
   }
 
   /** A verb of the fake's, which answers `204`, or `200` with what it returns. */

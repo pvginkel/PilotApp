@@ -18,7 +18,6 @@ type ProjectStatus = NonNullable<ProjectTab['status']>;
 type TaskStatus = components['schemas']['ProjectHeadSchema.e86ccd6.TaskStatus'];
 type Work = components['schemas']['TimelineSchema.1fdd8ae.WorkSchema'];
 type HeldReason = components['schemas']['TimelineSchema.1fdd8ae.HeldReason'];
-type StopCause = components['schemas']['TimelineSchema.1fdd8ae.StopCause'];
 type CurrentLine = components['schemas']['TimelineSchema.1fdd8ae.CurrentLineSchema'];
 type ConditionCode = components['schemas']['ConditionsSchema.6c014b4.ConditionCode'];
 
@@ -142,8 +141,15 @@ export function conditionLine(code: ConditionCode): ConditionLine {
   }
 }
 
-/** Why a work item stopped when its environment was stopped under it, a stop made elsewhere (F26.1, F71). */
-function stopCauseLabel(cause: StopCause, environment: string): string {
+/**
+ * Why a work item stopped when its environment was stopped under it, a stop made elsewhere (F26.1,
+ * F71); null for any other stop.
+ */
+function stopCause(work: Work): string | null {
+  const cause = work.stopped_cause;
+  if (cause === null) return null;
+  // A stop made elsewhere is its environment's: a Session stopped under its turn has one.
+  const environment = work.environment!.name;
   switch (cause) {
     case 'environment_stopped':
       return `${environment} was stopped`;
@@ -203,11 +209,7 @@ export function workLine(work: Work): WorkLine | null {
     case 'running':
       return line === null ? cue(WAITING) : lineCue(line);
     case 'stopped':
-      return {
-        kind: 'stopped',
-        at: work.stopped_at,
-        cause: work.stopped_cause === null ? null : stopCauseLabel(work.stopped_cause, work.environment.name),
-      };
+      return { kind: 'stopped', at: work.stopped_at, cause: stopCause(work) };
     case 'failed':
       return { kind: 'failed', error: work.error };
     case 'idle':
@@ -272,14 +274,7 @@ export function sessionLogTail(work: Work, selfHandle: string, endedAt: string |
       return { mark: 'ended', text: 'The turn ended', at: endedAt };
     case 'stopped': {
       const by = work.stopped_by;
-      const text =
-        by !== null
-          ? by.handle === selfHandle
-            ? 'Stopped by you'
-            : `Stopped by ${by.name}`
-          : work.stopped_cause !== null
-            ? stopCauseLabel(work.stopped_cause, work.environment.name)
-            : 'Stopped';
+      const text = by !== null ? (by.handle === selfHandle ? 'Stopped by you' : `Stopped by ${by.name}`) : (stopCause(work) ?? 'Stopped');
       return { mark: 'stopped', text, at: work.stopped_at };
     }
     case 'failed':
