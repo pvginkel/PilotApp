@@ -7,9 +7,13 @@ import socket
 
 import pytest
 from pydantic import ValidationError
-from werkzeug.test import Client
+from werkzeug.test import Client, TestResponse
 
-from app.services.fake_controller import FakeController, FakeControllerProblem
+from app.services.fake_controller import (
+    CLIENT_NAME,
+    FakeController,
+    FakeControllerProblem,
+)
 
 TOKEN = "fake-token"
 BEARER = {"Authorization": f"Bearer {TOKEN}"}
@@ -59,11 +63,13 @@ class TestFakeController:
             "set-status",
             "set-exempt",
             "settle-starts",
+            "settle-creates",
             "restart",
             "recreate-pod",
             "unreachable",
             "outage",
             "capped",
+            "not-whitelisted",
             "unprojectable",
             "busy",
             "play",
@@ -354,12 +360,18 @@ class TestFakeController:
         fake.add_environment("env-1")
         http.get("/environments", headers=BEARER)
         fake.outage(answer="ingress")
+        fake.capped()
+        fake.not_whitelisted("example")
+        fake.settle_creates(None)
 
         fake.reset()
 
         assert fake.calls == []
         listing = http.get("/environments", headers=BEARER).get_json()
         assert listing == {"items": [], "unprojectable": []}
+        created = _create(http, {"repo": "example/Example"})
+        assert created.status_code == 202
+        assert fake.environment(created.get_json()["envId"]).status == "running"
 
     def test_the_fleet_stream_carries_the_frames_published_on_demand(
         self, fake: FakeController, http: Client
@@ -383,3 +395,261 @@ class TestFakeController:
         environment = json.loads(exempt.removeprefix("event: state\ndata: "))
         assert environment["capabilities"] == {"capacityExempt": {"enabled": True}}
         assert sessions == seed.decode()
+
+    # -- Pilot's own environments: the create, reset, rename and delete --------
+
+    def test_every_environment_carries_its_manager(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.add_environment("env-1")
+        managed = _create(http, {"repo": "example/Example", "managed": True})
+        unmanaged = _create(http, {"repo": "example/Example"})
+
+        listing = http.get("/environments", headers=BEARER).get_json()
+
+        managers = {item["envId"]: item["managedBy"] for item in listing["items"]}
+        assert managers == {
+            "env-1": None,
+            managed.get_json()["envId"]: CLIENT_NAME,
+            unmanaged.get_json()["envId"]: None,
+        }
+
+    def test_the_list_filters_by_manager_repo_and_status(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.add_environment("env-1")
+        fake.add_environment("env-2", repo="example/Other", status="running")
+        fake.add_environment("env-3", repo="example/Other")
+        fake.unprojectable("env-3")
+        managed = _create(http, {"repo": "example/Other", "managed": True})
+        env_id = managed.get_json()["envId"]
+
+        def listed(query: str) -> tuple[list[str], list[str]]:
+            listing = http.get(f"/environments?{query}", headers=BEARER).get_json()
+            return [item["envId"] for item in listing["items"]], listing[
+                "unprojectable"
+            ]
+
+        assert listed("managedBy=pilot") == ([env_id], ["env-3"])
+        assert listed("managedBy=%20Pilot%20") == ([env_id], ["env-3"])
+        assert listed("managedBy=other") == ([], ["env-3"])
+        assert listed("repo=example/Other") == (["env-2", env_id], ["env-3"])
+        assert listed("repo=example/other") == ([], ["env-3"])
+        assert listed("status=stopped") == (["env-1"], ["env-3"])
+        assert listed("repo=example/Other&status=running&managedBy=pilot") == (
+            [env_id],
+            ["env-3"],
+        )
+
+    def test_the_list_refuses_an_unknown_status(self, http: Client) -> None:
+        response = http.get("/environments?status=sleeping", headers=BEARER)
+
+        assert response.status_code == 422
+
+    def test_create_answers_provisioning_with_its_location(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        response = _create(http, {"repo": "example/Example", "name": " Example "})
+
+        body = response.get_json()
+        assert response.status_code == 202
+        assert response.headers["Location"] == f"/environments/{body['envId']}"
+        assert (body["status"], body["name"], body["pod"]) == (
+            "provisioning",
+            "Example",
+            None,
+        )
+        environment = fake.environment(body["envId"])
+        assert (environment.status, environment.resets) == ("running", 0)
+        assert environment.pod_started_at is not None
+
+    def test_settle_creates_holds_a_create_and_its_starts(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.settle_creates(None)
+        held = _create(http, {"repo": "example/Example"}).get_json()["envId"]
+        fake.settle_creates("error")
+        failed = _create(http, {"repo": "example/Example"}).get_json()["envId"]
+        fake.set_status(held, "stopped")
+        http.post(f"/environments/{held}/start", headers=BEARER)
+
+        assert fake.environment(held).status == "starting"
+        assert fake.environment(failed).status == "error"
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            ["example/Example"],
+            {},
+            {"repo": 1},
+            {"repo": "example/Example", "managed": "yes"},
+            {"repo": "example/Example", "name": 5},
+            {"repo": "example/Example", "profile": "claude-dev"},
+        ],
+    )
+    def test_create_refuses_a_body_of_another_shape(
+        self, fake: FakeController, http: Client, body: object
+    ) -> None:
+        response = _create(http, body)
+
+        assert response.status_code == 422
+        assert response.get_json()["type"] == "validation-error"
+        assert http.get("/environments", headers=BEARER).get_json()["items"] == []
+
+    def test_create_refuses_in_the_controllers_order(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.add_environment("env-1", name="Taken")
+        fake.not_whitelisted("elsewhere")
+        fake.capped()
+
+        def refused(body: dict[str, object]) -> tuple[int, str]:
+            answer = _create(http, body).get_json()
+            return answer["status"], answer["type"]
+
+        assert refused({"repo": "Elsewhere", "name": "taken"}) == (
+            422,
+            "validation-error",
+        )
+        assert refused({"repo": "elsewhere/Example", "name": "x" * 65}) == (
+            422,
+            "validation-error",
+        )
+        assert refused({"repo": "Elsewhere/Example", "name": "taken"}) == (
+            403,
+            "namespace-not-whitelisted",
+        )
+        assert refused({"repo": "example/Example", "name": "TAKEN"}) == (
+            409,
+            "name-conflict",
+        )
+        assert refused({"repo": "example/Example"}) == (409, "admission-blocked")
+        assert [item["envId"] for item in _listing(http)] == ["env-1"]
+
+    def test_lifting_a_refusal_lets_the_create_through(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.not_whitelisted("example")
+        fake.capped()
+
+        fake.not_whitelisted("example", on=False)
+        fake.capped(on=False)
+
+        assert _create(http, {"repo": "example/Example"}).status_code == 202
+
+    def test_a_node_at_its_cap_refuses_every_non_exempt_start(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.add_environment("env-1")
+        fake.add_environment("env-2", exempt=True)
+        fake.capped()
+
+        blocked = http.post("/environments/env-1/start", headers=BEARER)
+        started = http.post("/environments/env-2/start", headers=BEARER)
+
+        assert (blocked.status_code, blocked.get_json()["type"]) == (
+            409,
+            "admission-blocked",
+        )
+        assert started.status_code == 202
+
+    def test_a_reset_ends_in_a_running_pod_through_starting(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.add_environment("env-1")
+        stream = http.get("/stream", headers=BEARER, buffered=False)
+        frames = iter(stream.response)
+        assert next(frames) == b""
+        next(frames)
+
+        response = http.post("/environments/env-1/reset", headers=BEARER)
+        published = [next(frames), next(frames)]
+        fake.close()
+        stream.close()
+
+        assert response.status_code == 202
+        assert response.get_json()["status"] == "starting"
+        assert [_state(frame)["status"] for frame in published] == [
+            "starting",
+            "running",
+        ]
+        assert fake.environment("env-1").resets == 1
+
+    def test_a_held_reset_stays_starting(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.add_environment("env-1")
+        fake.settle_starts("env-1", None)
+
+        http.post("/environments/env-1/reset", headers=BEARER)
+
+        assert fake.environment("env-1").status == "starting"
+        assert fake.environment("env-1").resets == 1
+
+    @pytest.mark.parametrize("body", [{}, {"name": None}, {"name": 5}, ["x"]])
+    def test_rename_refuses_a_body_of_another_shape(
+        self, fake: FakeController, http: Client, body: object
+    ) -> None:
+        fake.add_environment("env-1", name="Example")
+
+        response = http.post("/environments/env-1/rename", json=body, headers=BEARER)
+
+        assert response.status_code == 422
+        assert fake.environment("env-1").name == "Example"
+
+    def test_a_rename_is_announced(self, fake: FakeController, http: Client) -> None:
+        fake.add_environment("env-1", name="Example")
+        stream = http.get("/stream", headers=BEARER, buffered=False)
+        frames = iter(stream.response)
+        assert next(frames) == b""
+        next(frames)
+
+        http.post("/environments/env-1/rename", json={"name": ""}, headers=BEARER)
+        published = next(frames)
+        fake.close()
+        stream.close()
+
+        assert _state(published)["name"] is None
+
+    def test_a_delete_answers_deleting_then_the_environment_is_gone(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.add_environment("env-1", status="running")
+        http.post("/environments/env-1/sessions/headless", headers=BEARER)
+        stream = http.get("/stream", headers=BEARER, buffered=False)
+        frames = iter(stream.response)
+        assert next(frames) == b""
+        next(frames)
+
+        response = http.delete("/environments/env-1", headers=BEARER)
+        sessions, deleting, gone = next(frames), next(frames), next(frames)
+        again = http.delete("/environments/env-1", headers=BEARER)
+        listing = _listing(http)
+        fake.close()
+        stream.close()
+
+        assert response.status_code == 202
+        assert response.get_json()["status"] == "deleting"
+        assert sessions == b'event: sessions\ndata: {"envId":"env-1","sessions":[]}\n\n'
+        assert _state(deleting)["status"] == "deleting"
+        assert gone == b'event: gone\ndata: {"envId":"env-1"}\n\n'
+        assert (again.status_code, again.get_json()["type"]) == (404, "not-found")
+        assert listing == []
+
+
+def _create(http: Client, body: object) -> TestResponse:
+    return http.post("/environments", json=body, headers=BEARER)
+
+
+def _listing(http: Client) -> list[dict[str, object]]:
+    items: list[dict[str, object]] = http.get(
+        "/environments", headers=BEARER
+    ).get_json()["items"]
+    return items
+
+
+def _state(frame: bytes) -> dict[str, object]:
+    text = frame.decode()
+    assert text.startswith("event: state\ndata: ")
+    state: dict[str, object] = json.loads(text.removeprefix("event: state\ndata: "))
+    return state

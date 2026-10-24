@@ -20,6 +20,7 @@ from app.services.controller_client import (
     ControllerProblem,
     ControllerProblemType,
     ControllerUnreachable,
+    EnvironmentStatus,
     GoneFrame,
     HeadlessCreateRequest,
     IncompleteFrame,
@@ -29,7 +30,7 @@ from app.services.controller_client import (
     StateFrame,
 )
 from app.services.controller_outage import ControllerOutage
-from app.services.fake_controller import FinishOutcome
+from app.services.fake_controller import CLIENT_NAME, FinishOutcome
 from app.services.health_service import CheckStatus, HealthService
 from tests.support.fake_controller import (
     FAKE_CONTROLLER_TOKEN,
@@ -306,6 +307,263 @@ class TestControllerClient:
             controller_client.stop_environment("no-such-env")
 
         assert caught.value.problem_type is ControllerProblemType.NOT_FOUND
+
+    def test_create_environment_is_managed_by_pilots_client(
+        self, fake_controller: ServedFakeController, controller_client: ControllerClient
+    ) -> None:
+        created = controller_client.create_environment("example/Example")
+
+        assert created.status == "provisioning"
+        assert created.env_id.startswith("example-example-")
+        assert (created.name, created.repo) == (None, "example/Example")
+        assert created.managed_by == CLIENT_NAME
+        assert fake_controller.calls == ["POST /environments"]
+        environment = controller_client.get_environment(created.env_id)
+        assert (environment.status, environment.managed_by) == ("running", CLIENT_NAME)
+
+    def test_create_environment_gives_it_its_name(
+        self, controller_client: ControllerClient
+    ) -> None:
+        created = controller_client.create_environment("example/Example", "example")
+
+        assert created.name == "example"
+
+    def test_an_environment_pilot_did_not_create_is_managed_by_none(
+        self, running: ServedFakeController, controller_client: ControllerClient
+    ) -> None:
+        assert controller_client.get_environment(ENV).managed_by is None
+
+    @pytest.mark.parametrize(
+        ("repo", "name"),
+        [
+            ("Example", None),
+            ("/Example", None),
+            ("example/", None),
+            ("example/Example/more", None),
+            ("example/Example", "x" * 65),
+            ("example/Example", "two\nlines"),
+        ],
+    )
+    def test_create_environment_refuses_what_does_not_validate(
+        self,
+        fake_controller: ServedFakeController,
+        controller_client: ControllerClient,
+        repo: str,
+        name: str | None,
+    ) -> None:
+        with pytest.raises(ControllerProblem) as caught:
+            controller_client.create_environment(repo, name)
+
+        assert caught.value.problem_type is ControllerProblemType.VALIDATION_ERROR
+        assert caught.value.operation == f"create an environment of {repo}"
+        assert controller_client.list_environments().items == []
+
+    def test_create_environment_of_an_owner_not_whitelisted_is_refused(
+        self, fake_controller: ServedFakeController, controller_client: ControllerClient
+    ) -> None:
+        fake_controller.not_whitelisted("Elsewhere")
+
+        with pytest.raises(ControllerProblem) as caught:
+            controller_client.create_environment("elsewhere/Example")
+
+        assert (
+            caught.value.problem_type is ControllerProblemType.NAMESPACE_NOT_WHITELISTED
+        )
+        assert caught.value.cause.startswith(
+            "the controller answered 403 namespace-not-whitelisted"
+        )
+        assert controller_client.list_environments().items == []
+
+    @pytest.mark.parametrize("name", ["  EXAMPLE ", "example-env-2"])
+    def test_create_environment_under_another_ones_label_is_a_name_conflict(
+        self,
+        running: ServedFakeController,
+        controller_client: ControllerClient,
+        name: str,
+    ) -> None:
+        running.add_environment("example-env-2")
+
+        with pytest.raises(ControllerProblem) as caught:
+            controller_client.create_environment("example/Example", name)
+
+        assert caught.value.problem_type is ControllerProblemType.NAME_CONFLICT
+        assert len(controller_client.list_environments().items) == 2
+
+    def test_create_environment_on_a_capped_node_is_admission_blocked(
+        self, fake_controller: ServedFakeController, controller_client: ControllerClient
+    ) -> None:
+        fake_controller.capped()
+
+        with pytest.raises(ControllerProblem) as caught:
+            controller_client.create_environment("example/Example")
+
+        assert caught.value.problem_type is ControllerProblemType.ADMISSION_BLOCKED
+        assert controller_client.list_environments().items == []
+
+    def test_reset_environment_of_a_stopped_one_brings_it_up_cleared(
+        self, fake_controller: ServedFakeController, controller_client: ControllerClient
+    ) -> None:
+        fake_controller.add_environment(ENV)
+
+        reset = controller_client.reset_environment(ENV)
+
+        assert reset.status == "starting"
+        assert fake_controller.calls == [f"POST /environments/{ENV}/reset"]
+        assert fake_controller.environment(ENV).resets == 1
+        environment = controller_client.get_environment(ENV)
+        assert environment.status == "running"
+        assert environment.pod is not None and environment.pod.started_at is not None
+
+    @pytest.mark.parametrize(
+        "status",
+        ["provisioning", "starting", "running", "stopping", "deleting", "error"],
+    )
+    def test_reset_environment_of_one_not_stopped_is_a_conflict(
+        self,
+        fake_controller: ServedFakeController,
+        controller_client: ControllerClient,
+        status: EnvironmentStatus,
+    ) -> None:
+        fake_controller.add_environment(ENV, status=status)
+
+        with pytest.raises(ControllerProblem) as caught:
+            controller_client.reset_environment(ENV)
+
+        assert caught.value.problem_type is ControllerProblemType.CONFLICT
+        assert fake_controller.environment(ENV).resets == 0
+        assert fake_controller.environment(ENV).status == status
+
+    @pytest.mark.parametrize("node", [True, False])
+    def test_reset_environment_on_a_capped_node_is_admission_blocked(
+        self,
+        fake_controller: ServedFakeController,
+        controller_client: ControllerClient,
+        node: bool,
+    ) -> None:
+        fake_controller.add_environment(ENV)
+        fake_controller.capped(None if node else ENV)
+
+        with pytest.raises(ControllerProblem) as caught:
+            controller_client.reset_environment(ENV)
+
+        assert caught.value.problem_type is ControllerProblemType.ADMISSION_BLOCKED
+        assert fake_controller.environment(ENV).resets == 0
+        assert fake_controller.environment(ENV).status == "stopped"
+
+    def test_reset_environment_of_an_exempt_one_is_never_capped(
+        self, fake_controller: ServedFakeController, controller_client: ControllerClient
+    ) -> None:
+        fake_controller.add_environment(ENV, exempt=True)
+        fake_controller.capped()
+
+        assert controller_client.reset_environment(ENV).status == "starting"
+
+    def test_reset_environment_of_an_unknown_one_is_not_found(
+        self, controller_client: ControllerClient
+    ) -> None:
+        with pytest.raises(ControllerProblem) as caught:
+            controller_client.reset_environment("no-such-env")
+
+        assert caught.value.problem_type is ControllerProblemType.NOT_FOUND
+        assert caught.value.operation == "reset environment no-such-env"
+
+    @pytest.mark.parametrize(
+        ("name", "stored"),
+        [(" Example ", "Example"), ("", None), ("   ", None)],
+    )
+    def test_rename_environment_sets_its_name_or_clears_it_when_blank(
+        self,
+        running: ServedFakeController,
+        controller_client: ControllerClient,
+        name: str,
+        stored: str | None,
+    ) -> None:
+        renamed = controller_client.rename_environment(ENV, name)
+
+        assert renamed.name == stored
+        assert controller_client.get_environment(ENV).name == stored
+        assert running.calls[0] == f"POST /environments/{ENV}/rename"
+
+    @pytest.mark.parametrize("name", ["OTHER", "example-env-3"])
+    def test_rename_environment_to_another_ones_label_is_a_name_conflict(
+        self,
+        running: ServedFakeController,
+        controller_client: ControllerClient,
+        name: str,
+    ) -> None:
+        running.add_environment("example-env-2", name="other")
+        running.add_environment("example-env-3")
+
+        with pytest.raises(ControllerProblem) as caught:
+            controller_client.rename_environment(ENV, name)
+
+        assert caught.value.problem_type is ControllerProblemType.NAME_CONFLICT
+        assert running.environment(ENV).name == "Example"
+
+    def test_rename_environment_to_its_own_label_is_no_conflict(
+        self, fake_controller: ServedFakeController, controller_client: ControllerClient
+    ) -> None:
+        fake_controller.add_environment(ENV)
+
+        assert controller_client.rename_environment(ENV, ENV.upper()).name == (
+            ENV.upper()
+        )
+
+    @pytest.mark.parametrize("name", ["x" * 65, "a\tb"])
+    def test_rename_environment_to_a_name_that_does_not_validate_is_refused(
+        self,
+        running: ServedFakeController,
+        controller_client: ControllerClient,
+        name: str,
+    ) -> None:
+        with pytest.raises(ControllerProblem) as caught:
+            controller_client.rename_environment(ENV, name)
+
+        assert caught.value.problem_type is ControllerProblemType.VALIDATION_ERROR
+
+    def test_rename_environment_of_a_deleting_one_is_a_conflict(
+        self, fake_controller: ServedFakeController, controller_client: ControllerClient
+    ) -> None:
+        fake_controller.add_environment(ENV, status="deleting")
+
+        with pytest.raises(ControllerProblem) as caught:
+            controller_client.rename_environment(ENV, "")
+
+        assert caught.value.problem_type is ControllerProblemType.CONFLICT
+
+    def test_rename_environment_of_an_unknown_one_is_not_found(
+        self, controller_client: ControllerClient
+    ) -> None:
+        with pytest.raises(ControllerProblem) as caught:
+            controller_client.rename_environment("no-such-env", "Example")
+
+        assert caught.value.problem_type is ControllerProblemType.NOT_FOUND
+
+    def test_delete_environment(
+        self, running: ServedFakeController, controller_client: ControllerClient
+    ) -> None:
+        controller_client.delete_environment(ENV)
+
+        assert running.calls == [f"DELETE /environments/{ENV}"]
+        assert controller_client.list_environments().items == []
+
+    def test_delete_environment_of_one_already_gone_is_done(
+        self, fake_controller: ServedFakeController, controller_client: ControllerClient
+    ) -> None:
+        controller_client.delete_environment("no-such-env")
+
+        assert fake_controller.calls == ["DELETE /environments/no-such-env"]
+
+    def test_delete_environment_refused_otherwise_raises(
+        self, health_service: HealthService
+    ) -> None:
+        with _scripted(*_problem(409, "conflict")) as url:
+            client = ControllerClient(url, "t", health_service, ControllerOutage())
+            with pytest.raises(ControllerProblem) as caught:
+                client.delete_environment(ENV)
+
+        assert caught.value.problem_type is ControllerProblemType.CONFLICT
+        assert caught.value.operation == f"delete environment {ENV}"
 
     # -- Headless sessions --------------------------------------------------
 
@@ -904,6 +1162,35 @@ class TestControllerClient:
         assert [s.name for s in sessions.sessions] == ["claude-1"]
         assert swept == SessionsFrame(ENV, ())
         assert gone == GoneFrame(ENV)
+
+    def test_the_fleet_stream_carries_a_create_rename_reset_and_delete(
+        self, fake_controller: ServedFakeController, controller_client: ControllerClient
+    ) -> None:
+        with controller_client.open_fleet_stream() as stream:
+            frames = iter(stream)
+            env_id = controller_client.create_environment("example/Example").env_id
+            created = [next(frames), next(frames)]
+            controller_client.rename_environment(env_id, "example")
+            renamed = next(frames)
+            controller_client.stop_environment(env_id)
+            stopped = [next(frames), next(frames)]
+            controller_client.reset_environment(env_id)
+            reset = [next(frames), next(frames)]
+            controller_client.delete_environment(env_id)
+            deleting, gone = next(frames), next(frames)
+
+        states = [*created, *stopped, *reset, deleting]
+        assert [f.environment.status for f in states] == [  # type: ignore[union-attr]
+            "provisioning",
+            "running",
+            "stopping",
+            "stopped",
+            "starting",
+            "running",
+            "deleting",
+        ]
+        assert isinstance(renamed, StateFrame) and renamed.environment.name == "example"
+        assert gone == GoneFrame(env_id)
 
     def test_the_fleet_stream_skips_the_channels_pilot_does_not_read(
         self, health_service: HealthService

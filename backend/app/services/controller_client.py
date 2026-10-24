@@ -51,16 +51,22 @@ class ControllerProblemType(StrEnum):
 
     NOT_FOUND = "not-found"
     CONFLICT = "conflict"
+    NAME_CONFLICT = "name-conflict"
     SESSION_BUSY = "session-busy"
     ADMISSION_BLOCKED = "admission-blocked"
+    NAMESPACE_NOT_WHITELISTED = "namespace-not-whitelisted"
+    VALIDATION_ERROR = "validation-error"
     WORKER_UNREACHABLE = "worker-unreachable"
 
 
 _PROBLEM_STATUS = {
     ControllerProblemType.NOT_FOUND: 404,
     ControllerProblemType.CONFLICT: 409,
+    ControllerProblemType.NAME_CONFLICT: 409,
     ControllerProblemType.SESSION_BUSY: 409,
     ControllerProblemType.ADMISSION_BLOCKED: 409,
+    ControllerProblemType.NAMESPACE_NOT_WHITELISTED: 403,
+    ControllerProblemType.VALIDATION_ERROR: 422,
     ControllerProblemType.WORKER_UNREACHABLE: 502,
 }
 
@@ -118,6 +124,8 @@ class ControllerEnvironment(_ControllerModel):
 
     env_id: str
     name: str | None = None
+    managed_by: str | None = None
+    """The client that manages it, recorded by a create with `managed: true`."""
     repo: str
     status: EnvironmentStatus
     pod: ControllerPod | None = None
@@ -494,6 +502,59 @@ class ControllerClient:
             expect=(200, 202),
         )
         return _parse(ControllerEnvironment, response.text, operation)
+
+    def create_environment(
+        self, repo: str, name: str | None = None
+    ) -> ControllerEnvironment:
+        """Create an environment of `repo`, `owner/Name`, managed by Pilot's
+        client, without `wait`: the answer, `provisioning`, carries its env id
+        before its bring-up ends in a running pod."""
+        operation = f"create an environment of {repo}"
+        body: dict[str, Any] = {"repo": repo, "managed": True}
+        if name is not None:
+            body["name"] = name
+        response = self._call(
+            "POST", "/environments", operation, expect=(202,), json_body=body
+        )
+        return _parse(ControllerEnvironment, response.text, operation)
+
+    def reset_environment(self, env_id: str) -> ControllerEnvironment:
+        """Reset a stopped environment, without `wait`: its folder cleared and
+        its bring-up run again, it answers `starting` and ends in a running
+        pod, as a start does."""
+        operation = f"reset environment {env_id}"
+        response = self._call(
+            "POST",
+            f"/environments/{_segment(env_id)}/reset",
+            operation,
+            expect=(202,),
+        )
+        return _parse(ControllerEnvironment, response.text, operation)
+
+    def rename_environment(self, env_id: str, name: str) -> ControllerEnvironment:
+        """Set the environment's display name; a blank `name` clears it."""
+        operation = f"rename environment {env_id}"
+        response = self._call(
+            "POST",
+            f"/environments/{_segment(env_id)}/rename",
+            operation,
+            expect=(200,),
+            json_body={"name": name},
+        )
+        return _parse(ControllerEnvironment, response.text, operation)
+
+    def delete_environment(self, env_id: str) -> None:
+        """Delete the environment; one already gone, answered `404`, is deleted."""
+        try:
+            self._call(
+                "DELETE",
+                f"/environments/{_segment(env_id)}",
+                f"delete environment {env_id}",
+                expect=(202,),
+            )
+        except ControllerProblem as problem:
+            if problem.problem_type is not ControllerProblemType.NOT_FOUND:
+                raise
 
     def create_headless_session(
         self, env_id: str, request: HeadlessCreateRequest

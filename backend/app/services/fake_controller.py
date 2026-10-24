@@ -13,12 +13,17 @@ keyword arguments the JSON body.
 
 Simplifications of the real controller: a headless session's conversation id
 is minted by its first send; an environment that is not `running` holds no
-headless session; `wait=settled` is `wait=ready`, since no setup runs here.
+headless session; `wait=settled` is `wait=ready`, since no setup runs here; the
+create and the reset answer at once, taking no `wait`; a delete's teardown ends
+as it is answered; the node's cap is a flag, of the node or of one environment,
+not a count.
 """
 
 from __future__ import annotations
 
 import json
+import re
+import secrets
 import socket
 import threading
 import time
@@ -27,7 +32,7 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from functools import partial
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, get_args
 
 from pydantic import ValidationError, validate_call
 from werkzeug.exceptions import HTTPException
@@ -73,6 +78,14 @@ _CREATE_FIELDS = {
     "enableCrossSessionMessaging",
 }
 
+_ENVIRONMENT_FIELDS = {"repo", "managed", "name"}
+
+_NAME_MAX = 64
+
+CLIENT_NAME = "pilot"
+"""The named client the fake's one credential authenticates as: what a managed
+create records as the environment's `managedBy`."""
+
 _KEEPALIVE = b": keepalive\n\n"
 
 _INGRESS_PAGE = (
@@ -109,7 +122,10 @@ class FakeEnvironment:
     restart_count: int = 0
     restart_reason: str | None = None
     settles_to: EnvironmentStatus | None = "running"
-    """What a start brings it to at once; None leaves it `starting`."""
+    """What a start or a reset brings it to at once; None leaves it `starting`."""
+    managed_by: str | None = None
+    resets: int = 0
+    """How many resets cleared its folder."""
     unreachable: bool = False
     capped: bool = False
     unprojectable: bool = False
@@ -132,6 +148,7 @@ class FakeEnvironment:
         return {
             "envId": self.env_id,
             "name": self.name,
+            "managedBy": self.managed_by,
             "repo": self.repo,
             "ref": "main",
             "status": self.status,
@@ -200,9 +217,19 @@ _ROUTES = Map(
         Rule("/readyz", endpoint="readyz", methods=["GET"]),
         Rule("/stream", endpoint="fleet_stream", methods=["GET"]),
         Rule("/environments", endpoint="list_environments", methods=["GET"]),
+        Rule("/environments", endpoint="create_environment", methods=["POST"]),
         Rule("/environments/<env_id>", endpoint="get_environment", methods=["GET"]),
+        Rule(
+            "/environments/<env_id>", endpoint="delete_environment", methods=["DELETE"]
+        ),
         Rule("/environments/<env_id>/start", endpoint="start", methods=["POST"]),
         Rule("/environments/<env_id>/stop", endpoint="stop", methods=["POST"]),
+        Rule(
+            "/environments/<env_id>/reset",
+            endpoint="reset_environment",
+            methods=["POST"],
+        ),
+        Rule("/environments/<env_id>/rename", endpoint="rename", methods=["POST"]),
         Rule(
             "/environments/<env_id>/sessions",
             endpoint="list_sessions",
@@ -264,15 +291,22 @@ class FakeController:
         self._drops = 0
         self._closed = False
         self._unanswered: Unanswered | None = None
+        self._node_capped = False
+        self._unlisted_owners: set[str] = set()
+        self._creates_settle_to: EnvironmentStatus | None = "running"
         self._last_pod_started_at = datetime.min.replace(tzinfo=UTC)
         self.calls: list[str] = []
         self._endpoints: dict[str, Callable[..., Response]] = {
             "readyz": self._readyz,
             "fleet_stream": self._fleet_stream,
             "list_environments": self._list_environments,
+            "create_environment": self._create_environment,
             "get_environment": self._get_environment,
+            "delete_environment": self._delete_environment,
             "start": self._start,
             "stop": self._stop,
+            "reset_environment": self._reset_environment,
+            "rename": self._rename,
             "list_sessions": self._list_sessions,
             "create_session": self._create_session,
             "get_session": self._get_session,
@@ -289,11 +323,13 @@ class FakeController:
             "set-status": self.set_status,
             "set-exempt": self.set_exempt,
             "settle-starts": self.settle_starts,
+            "settle-creates": self.settle_creates,
             "restart": self.restart,
             "recreate-pod": self.recreate_pod,
             "unreachable": self.unreachable,
             "outage": self.outage,
             "capped": self.capped,
+            "not-whitelisted": self.not_whitelisted,
             "unprojectable": self.unprojectable,
             "busy": self.busy,
             "play": self.play,
@@ -348,11 +384,7 @@ class FakeController:
     def remove_environment(self, env_id: str) -> None:
         """The environment is gone: a `gone` frame, its sessions with it."""
         with self._changed:
-            environment = self._environment(env_id)
-            self._sweep(environment)
-            del self._environments[env_id]
-            gone = _compact({"envId": env_id})
-            self._publish(f"event: gone\ndata: {gone}\n\n".encode())
+            self._remove(self._environment(env_id))
 
     @validate_call
     def set_status(self, env_id: str, status: EnvironmentStatus) -> None:
@@ -369,10 +401,18 @@ class FakeController:
 
     @validate_call
     def settle_starts(self, env_id: str, status: EnvironmentStatus | None) -> None:
-        """What a start brings the environment to at once; None leaves it
-        `starting` until `set_status`."""
+        """What a start or a reset brings the environment to at once; None
+        leaves it `starting` until `set_status`."""
         with self._changed:
             self._environment(env_id).settles_to = status
+
+    @validate_call
+    def settle_creates(self, status: EnvironmentStatus | None) -> None:
+        """What a create brings its environment to at once, and that
+        environment's starts and resets after it; None leaves it
+        `provisioning` until `set_status`."""
+        with self._changed:
+            self._creates_settle_to = status
 
     @validate_call
     def restart(self, env_id: str) -> None:
@@ -415,11 +455,25 @@ class FakeController:
                 self._changed.notify_all()
 
     @validate_call
-    def capped(self, env_id: str, on: bool = True) -> None:
-        """The node is at its cap: a start is `409 admission-blocked`, unless
-        the environment is exempt."""
+    def capped(self, env_id: str | None = None, on: bool = True) -> None:
+        """The node is at its cap for the environment, or with no `env_id` for
+        every one: a start or a reset is `409 admission-blocked` unless the
+        environment is exempt, and with no `env_id` every create is too."""
         with self._changed:
-            self._environment(env_id).capped = on
+            if env_id is None:
+                self._node_capped = on
+            else:
+                self._environment(env_id).capped = on
+
+    @validate_call
+    def not_whitelisted(self, owner: str, on: bool = True) -> None:
+        """The owner is not a whitelisted namespace: a create of a repository
+        of its is `403 namespace-not-whitelisted`."""
+        with self._changed:
+            if on:
+                self._unlisted_owners.add(owner.casefold())
+            else:
+                self._unlisted_owners.discard(owner.casefold())
 
     @validate_call
     def unprojectable(self, env_id: str, on: bool = True) -> None:
@@ -497,10 +551,13 @@ class FakeController:
             self._changed.notify_all()
 
     def reset(self) -> None:
-        """Forget every environment, session and call, and any outage; drop
-        every stream."""
+        """Forget every environment, session and call, any outage, the node's
+        cap, every owner refused and how creates settle; drop every stream."""
         with self._changed:
             self._unanswered = None
+            self._node_capped = False
+            self._unlisted_owners.clear()
+            self._creates_settle_to = "running"
             self._environments.clear()
             self._sessions.clear()
             self.calls.clear()
@@ -570,11 +627,135 @@ class FakeController:
         return _json(answer)
 
     def _list_environments(self, request: Request) -> Response:
+        """The filters combine; `unprojectable` ignores them."""
+        status = request.args.get("status")
+        if status is not None and status not in get_args(EnvironmentStatus):
+            raise FakeControllerProblem(422, "validation-error", f"status={status}")
+        repo = request.args.get("repo")
+        manager = request.args.get("managedBy")
+        if manager is not None:
+            manager = manager.strip().lower()
         with self._changed:
             environments = self._environments.values()
-            items = [e.to_json() for e in environments if not e.unprojectable]
+            items = [
+                e.to_json()
+                for e in environments
+                if not e.unprojectable
+                and status in (None, e.status)
+                and repo in (None, e.repo)
+                and manager in (None, e.managed_by)
+            ]
             unprojectable = [e.env_id for e in environments if e.unprojectable]
         return _json({"items": items, "unprojectable": unprojectable})
+
+    def _create_environment(self, request: Request) -> Response:
+        """The controller's synchronous checks, in its order, each refusing
+        with no environment created."""
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            raise FakeControllerProblem(
+                422, "validation-error", "the body is an object"
+            )
+        unknown = set(body) - _ENVIRONMENT_FIELDS
+        if unknown:
+            raise FakeControllerProblem(
+                422, "validation-error", f"unknown fields {sorted(unknown)}"
+            )
+        repo = body.get("repo")
+        managed = body.get("managed", False)
+        name = body.get("name")
+        if (
+            not isinstance(repo, str)
+            or not isinstance(managed, bool)
+            or not isinstance(name, str | None)
+        ):
+            raise FakeControllerProblem(
+                422,
+                "validation-error",
+                "repo is a string, managed a boolean, name a string or null",
+            )
+        owner, _, project = repo.partition("/")
+        if not owner or not project or "/" in project:
+            raise FakeControllerProblem(
+                422, "validation-error", f"repo {repo!r} is not owner/Name"
+            )
+        label = None if name is None else _display_name(name)
+        with self._changed:
+            if owner.casefold() in self._unlisted_owners:
+                raise FakeControllerProblem(
+                    403,
+                    "namespace-not-whitelisted",
+                    f"namespace {owner!r} is not whitelisted",
+                )
+            env_id = self._new_env_id(repo)
+            if label is not None:
+                self._require_unique_label(env_id, label)
+            if self._node_capped:
+                raise _admission_blocked()
+            environment = FakeEnvironment(
+                env_id,
+                label,
+                repo,
+                "provisioning",
+                exempt=False,
+                settles_to=self._creates_settle_to,
+                managed_by=CLIENT_NAME if managed else None,
+            )
+            self._environments[env_id] = environment
+            self._publish(self._state_frame(environment))
+            created = environment.to_json()
+            if environment.settles_to is not None:
+                self._set_status(environment, environment.settles_to)
+        response = _json(created, 202)
+        response.headers["Location"] = f"/environments/{env_id}"
+        return response
+
+    def _delete_environment(self, request: Request, env_id: str) -> Response:
+        with self._changed:
+            environment = self._environment(env_id)
+            self._set_status(environment, "deleting")
+            body = environment.to_json()
+            self._remove(environment)
+        return _json(body, 202)
+
+    def _reset_environment(self, request: Request, env_id: str) -> Response:
+        """A stopped environment's folder cleared and its bring-up run again,
+        ending in a running pod as a start does."""
+        with self._changed:
+            environment = self._environment(env_id)
+            if environment.status != "stopped":
+                raise FakeControllerProblem(
+                    409,
+                    "conflict",
+                    f"{env_id} is {environment.status}: it must be stopped to reset",
+                )
+            if self._blocked(environment):
+                raise _admission_blocked()
+            environment.resets += 1
+            body = self._bring_up(environment)
+        return _json(body, 202)
+
+    def _rename(self, request: Request, env_id: str) -> Response:
+        body = request.get_json(silent=True)
+        if (
+            not isinstance(body, dict)
+            or set(body) != {"name"}
+            or not isinstance(body["name"], str)
+        ):
+            raise FakeControllerProblem(
+                422, "validation-error", "the body is {name: string}"
+            )
+        label = _display_name(body["name"])
+        with self._changed:
+            environment = self._environment(env_id)
+            if environment.status == "deleting":
+                raise FakeControllerProblem(409, "conflict", f"{env_id} is deleting")
+            if label is not None:
+                self._require_unique_label(env_id, label)
+            environment.name = label
+            self._publish(self._state_frame(environment))
+            renamed = environment.to_json()
+        return _json(renamed)
 
     def _get_environment(self, request: Request, env_id: str) -> Response:
         wait = request.args.get("wait", "none")
@@ -604,16 +785,9 @@ class FakeController:
                 raise FakeControllerProblem(409, "conflict", f"{env_id} is deleting")
             if environment.status == "running":
                 return _json(environment.to_json())
-            if environment.capped and not environment.exempt:
-                raise FakeControllerProblem(
-                    409,
-                    "admission-blocked",
-                    "node example-node is at its environment limit",
-                )
-            self._set_status(environment, "starting")
-            body = environment.to_json()
-            if environment.settles_to is not None:
-                self._set_status(environment, environment.settles_to)
+            if self._blocked(environment):
+                raise _admission_blocked()
+            body = self._bring_up(environment)
         return _json(body, 202)
 
     def _stop(self, request: Request, env_id: str) -> Response:
@@ -807,6 +981,50 @@ class FakeController:
             )
         return session
 
+    def _new_env_id(self, repo: str) -> str:
+        """`<slug>-<6 hex>`, the slug the repository lowercased, as the
+        controller mints an env id."""
+        slug = re.sub(r"[^a-z0-9]+", "-", repo.lower()).strip("-")
+        while True:
+            env_id = f"{slug}-{secrets.token_hex(3)}"
+            if env_id not in self._environments:
+                return env_id
+
+    def _require_unique_label(self, env_id: str, name: str) -> None:
+        """`409 name-conflict` when `name` casefold-matches another
+        environment's label: its name, else its env id."""
+        target = name.casefold()
+        for other in self._environments.values():
+            if (
+                other.env_id != env_id
+                and target == (other.name or other.env_id).casefold()
+            ):
+                raise FakeControllerProblem(
+                    409,
+                    "name-conflict",
+                    "display name is already in use by another environment",
+                )
+
+    def _blocked(self, environment: FakeEnvironment) -> bool:
+        """Whether a start or a reset of the environment meets the node's cap."""
+        return not environment.exempt and (environment.capped or self._node_capped)
+
+    def _bring_up(self, environment: FakeEnvironment) -> dict[str, Any]:
+        """A start's bring-up, a reset's with it: the `starting` snapshot it
+        answers, the environment then brought to where its starts settle."""
+        self._set_status(environment, "starting")
+        body = environment.to_json()
+        if environment.settles_to is not None:
+            self._set_status(environment, environment.settles_to)
+        return body
+
+    def _remove(self, environment: FakeEnvironment) -> None:
+        """The environment is gone: a `gone` frame, its sessions with it."""
+        self._sweep(environment)
+        del self._environments[environment.env_id]
+        gone = _compact({"envId": environment.env_id})
+        self._publish(f"event: gone\ndata: {gone}\n\n".encode())
+
     def _gate(self, env_id: str) -> FakeEnvironment:
         """The worker-proxied routes' gate, in the controller's order."""
         environment = self._environment(env_id)
@@ -897,6 +1115,27 @@ def _unanswered(request: Request, answer: Unanswered) -> Response:
     # drops the connection with nothing sent.
     request.environ["werkzeug.socket"].shutdown(socket.SHUT_RDWR)
     return Response(status=204)
+
+
+def _admission_blocked() -> FakeControllerProblem:
+    return FakeControllerProblem(
+        409, "admission-blocked", "node example-node is at its environment limit"
+    )
+
+
+def _display_name(raw: str) -> str | None:
+    """A display name as the controller stores it: trimmed, None when blank;
+    `422` past 64 characters or with a control character."""
+    name = raw.strip()
+    if not name:
+        return None
+    if len(name) > _NAME_MAX or not name.isprintable():
+        raise FakeControllerProblem(
+            422,
+            "validation-error",
+            f"a display name is at most {_NAME_MAX} printable characters",
+        )
+    return name
 
 
 def _compact(body: Any) -> str:
