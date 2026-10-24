@@ -4,10 +4,13 @@
  * backdrop close it. Its body keeps its scroll while what it shows is read again, and starts at
  * its top for each thing it shows. A segment in it goes to its block in its body, which flashes
  * (F33), and opened at a block it goes there once its body draws it; either opens the block's
- * collapsed section (F31.5). On a phone it is the whole screen, with no maximize (F98.3).
+ * collapsed section (F31.5). On a phone it is the whole screen, with no maximize (F98.3). It takes
+ * the focus as it opens, and again when what it shows replaces what had it, and gives it back as it
+ * closes to what had it before, as a dialog does; the timeline under its backdrop takes none
+ * meanwhile (the project's route).
  */
 
-import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
 import { Maximize2, Minimize2, X } from 'lucide-react';
 import { blockKey, FlashContext, GoToContext, useFlashes } from '@/components/timeline/flash';
@@ -33,6 +36,18 @@ interface OverlayProps {
 
 export function Overlay({ showing, at = null, back = null, titles, foot, onClose, bodyRef, children }: OverlayProps) {
   const [max, setMax] = useState(false);
+  const sheet = useRef<HTMLElement>(null);
+  const titlesId = useId();
+  const [opener] = useState(() => document.activeElement);
+  useEffect(() => {
+    if (!sheet.current!.contains(document.activeElement)) sheet.current!.focus({ preventScroll: true });
+  }, [showing]);
+  useEffect(
+    () => () => {
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+    },
+    [opener],
+  );
   const ownBody = useRef<HTMLDivElement>(null);
   const body = bodyRef ?? ownBody;
   const { fresh, flashed, flash } = useFlashes();
@@ -73,10 +88,19 @@ export function Overlay({ showing, at = null, back = null, titles, foot, onClose
       <GoToContext.Provider value={goToSegment}>
         <SectionsContext.Provider value={sections}>
           <div className="sheet-backdrop" onClick={onClose} data-testid="overlay.backdrop" />
-          <section className={cn('sheet', max && 'max')} data-testid="overlay">
+          <section
+            ref={sheet}
+            className={cn('sheet', max && 'max')}
+            role="dialog"
+            aria-labelledby={titlesId}
+            tabIndex={-1}
+            data-testid="overlay"
+          >
             <div className="sheet-head" data-testid="overlay.head">
               {back}
-              <div className="titles">{titles}</div>
+              <div id={titlesId} className="titles">
+                {titles}
+              </div>
               <button
                 type="button"
                 className="btn btn-ghost btn-sm btn-icon maximize"

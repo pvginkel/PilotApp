@@ -13,7 +13,7 @@
  * Opened at an item's address, the timeline goes to the item and flashes it; at a block's, to the
  * block, its collapsed section opened (F31.5), or to its item where its line or its card stands for
  * it; an address it draws nothing for leaves it at its end (F97). A segment opens its block's
- * collapsed section too (F33).
+ * collapsed section too (F33). Under an overlay's backdrop it takes no focus.
  */
 
 import { useLayoutEffect, useRef, useState } from 'react';
@@ -39,7 +39,14 @@ interface Address {
   block: string | null;
 }
 
-export function Timeline({ projectId, address }: { projectId: string; address: Address | null }) {
+interface TimelineProps {
+  projectId: string;
+  address: Address | null;
+  /** It lies under an overlay's backdrop. */
+  inert: boolean;
+}
+
+export function Timeline({ projectId, address, inert }: TimelineProps) {
   const { data } = useTimeline(projectId);
   const items = data?.items.filter((item) => item.form !== 'wait');
   const finishedAt = data?.finished_at ?? null;
@@ -145,7 +152,7 @@ export function Timeline({ projectId, address }: { projectId: string; address: A
   }, []);
 
   return (
-    <div ref={feed} className="feed" onScroll={onScroll} data-testid="timeline">
+    <div ref={feed} className="feed" onScroll={onScroll} inert={inert} data-testid="timeline">
       <div ref={pins} className="pins">
         {urgent.length > 0 && (
           <div className="pinned" data-testid="timeline.banners">

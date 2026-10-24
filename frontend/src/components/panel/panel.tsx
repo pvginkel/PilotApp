@@ -22,13 +22,15 @@ interface PanelProps {
   onClose: () => void;
   /** A row was opened in the overlay. */
   onOpen: () => void;
+  /** It lies under the overlay and its backdrop: it takes no focus. */
+  covered: boolean;
 }
 
-export function Panel({ projectId, tab, head, onTab, onClose, onOpen }: PanelProps) {
+export function Panel({ projectId, tab, head, onTab, onClose, onOpen, covered }: PanelProps) {
   const documents = usePanelDocuments(projectId);
   const panelHead = useAlignedHead(head, useWideWindow());
   return (
-    <aside className="panel" aria-label="The project’s documents" data-testid="panel">
+    <aside className="panel" aria-label="The project’s documents" inert={covered} data-testid="panel">
       <div ref={panelHead} className="panel-head" role="tablist" data-testid="panel.head">
         <button
           type="button"

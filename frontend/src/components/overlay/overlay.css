@@ -30,6 +30,8 @@
     transition: width 160ms ease-out;
   }
   .sheet.max { width: calc(100vw - var(--panel-space, 0px)); }
+  /* It takes the focus as it opens, as a dialog does, with no ring round the whole of it. */
+  .sheet:focus-visible { outline: none; }
   .sheet-head {
     flex: none;
     display: flex;

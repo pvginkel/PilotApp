@@ -7,8 +7,10 @@
  * (F28.3); its foot "Done · <stamp> · <who>", Reviewed, or *Send answers*, which closes it (F28.4).
  * It stays live and keeps its scroll; a read that fails reads "The document did not load" (F113).
  * A done line's Open shows the document as it was done (F13.3), its answers closed (F31.2), a
- * finished project's included. Switching projects closes it (F1.6), and on a phone it is the whole
- * screen, with no maximize (F98.3). Esc closes what lies over it first.
+ * finished project's included, with neither *Edited* nor Pilot's dots where Done fixed the text.
+ * Switching projects closes it (F1.6), and on a phone it is the whole screen, with no maximize
+ * (F98.3). Esc closes what lies over it first. It takes the focus as it opens, keeps Tab off the
+ * timeline under its backdrop, and gives the focus back as it closes.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -345,6 +347,32 @@ test.describe('A done line’s Open', () => {
     await expect(overlay.send).toHaveCount(0);
   });
 
+  test('of a document Pilot changed after Done has neither Pilot’s dots nor Edited <time>, which tell of the text as it stands', async ({
+    people,
+    projects,
+    timeline,
+    overlay,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Changed'), members: [me.handle!] });
+    const notes = await projects.place(id, { kind: 'document', title: 'Packing notes', text: 'We leave on Friday.\n' });
+    await projects.send(notes);
+    await projects.save(notes, '---\ntitle: Packing notes\n---\n\nWe leave on Friday.\n\nA lantern too.\n');
+    expect(await itemOf(projects, id, notes)).toMatchObject({ writing: true, done: { cause: 'marked' } });
+    await timeline.open(id);
+    await timeline.item(notes).open.click();
+
+    await expect(overlay.document).toHaveText('We leave on Friday.');
+    await expect(overlay.writing).toHaveCount(0);
+
+    await projects.endTurn(id);
+    expect((await itemOf(projects, id, notes)).edited_at).not.toBeNull();
+    await overlay.open(id, notes);
+    await expect(overlay.document).toHaveText('We leave on Friday.');
+    await expect(overlay.doneChip).toHaveText('Done');
+    await expect(overlay.edited).toHaveCount(0);
+  });
+
   test('of a done one-ask item shows its chosen option alone, opening to every option, all disabled', async ({
     people,
     projects,
@@ -413,6 +441,40 @@ test.describe('A done line’s Open', () => {
     const { done } = await itemOf(projects, id, settled);
     await expect(overlay.done).toHaveText(`Done · ${stamp(done!.at)} · Pilot`);
     await expect(overlay.blockAt('D1').deferred).toBeVisible();
+  });
+});
+
+test.describe('The focus and the overlay', () => {
+  test('it takes the focus as it opens, Tab never reaches the timeline under its backdrop, and it gives the focus back to Open as it closes', async ({
+    page,
+    people,
+    projects,
+    timeline,
+    overlay,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Focus'), members: [me.handle!] });
+    const notes = await projects.place(id, { kind: 'document', title: 'Packing notes', text: 'We leave on Friday.\n' });
+    await projects.send(notes);
+    await timeline.open(id);
+    const { open } = timeline.item(notes);
+
+    await open.focus();
+    await page.keyboard.press('Enter');
+    await expect(overlay.root).toBeFocused();
+    await expect(overlay.root).toHaveAccessibleName(/Packing notes/);
+    let inOverlay = 0;
+    for (let step = 0; step < 16; step++) {
+      await page.keyboard.press('Tab');
+      expect(await timeline.root.evaluate((root) => root.contains(document.activeElement))).toBe(false);
+      if (await overlay.root.evaluate((root) => root.contains(document.activeElement))) inOverlay++;
+    }
+    expect(inOverlay).toBeGreaterThan(0);
+
+    await overlay.close.focus();
+    await page.keyboard.press('Enter');
+    await expect(overlay.root).toHaveCount(0);
+    await expect(open).toBeFocused();
   });
 });
 

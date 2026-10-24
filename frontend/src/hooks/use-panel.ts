@@ -33,6 +33,8 @@ type Front = 'overlay' | 'panel';
 interface PanelState {
   panel: Panel;
   front: Front;
+  /** Whether the panel lies under the overlay and its backdrop, and so takes no focus. */
+  covered: boolean;
   /** Opens the panel on the tab, on top. */
   show: (tab: PanelTab) => void;
   close: () => void;
@@ -71,6 +73,7 @@ export function usePanel(projectId: string, overlay: string | null, goneTo: stri
   return {
     panel,
     front,
+    covered: panel.open && !wide && overlay !== null && front === 'overlay',
     show,
     close,
     toggle: (tab) => (panel.open && panel.tab === tab ? close() : show(tab)),

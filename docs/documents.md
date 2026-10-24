@@ -63,6 +63,12 @@ phone, at 900px and below, it takes the window's width in the centre's row, unde
 ([`ui.md`](ui.md)), with no maximize. Where a read fails, its body reads "The document did not
 load." A work item's session log opens in it too ([`work.md`](work.md)).
 
+**The focus.** The sheet is a dialog named by its titles. It takes the focus as it opens, and
+again when what it shows replaces what had it, and gives it back as it closes to what had it before,
+where that is still on the page. While it is open the timeline under its backdrop takes no focus
+(`inert`), nor the panel below 1200px where the overlay lies over it. The project's head does: its
+Documents button is how the panel opens over the overlay below 1200px.
+
 ### A document
 
 At a document's address (`DocumentOverlay`, read by `useItemDocument`):
@@ -78,8 +84,10 @@ At a document's address (`DocumentOverlay`, read by `useItemDocument`):
   notice, nothing.
 
 Opened at a card's block address, it goes to the block once its body draws it, and flashes it. Open
-on a done line shows the document as Done fixed it (above). An address naming the opening, an item
-of another project or no item reads "The document did not load."
+on a done line shows the document as Done fixed it (above), with no *Edited <time>* and no dots: those
+tell of the text as it stands. A document done another way, by an answer, a turn's end or Finish,
+shows its text as it stands, with both. An address naming the opening, an item of another project or
+no item reads "The document did not load."
 
 ### An attachment
 

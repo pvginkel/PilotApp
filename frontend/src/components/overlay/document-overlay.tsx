@@ -4,7 +4,8 @@
  * the timeline is. Its head holds its title, the project, the step, the segment bar, *Unsent* or
  * *Done* (D026), and *Edited <time>* with Pilot's mark (F28.2, F28.7); its body the summary as its
  * lead, then its prose with every block answered in place, then Pilot's dots while it writes
- * (F28.3); its foot "Done · <stamp> · <who>", naming who did it unless it was the person, or
+ * (F28.3). *Edited* and the dots tell of the text as it stands, so a document read as Done fixed it
+ * has neither; its foot "Done · <stamp> · <who>", naming who did it unless it was the person, or
  * Reviewed on an open review, or *Send answers* on an open document, which closes the overlay
  * (F28.4). Opened at a block, it goes to the block once it draws it (F33). Its attachments stand
  * between the lead and the text, each opening, at its address under the document's, in place of
@@ -121,7 +122,7 @@ function Titles({ item, project }: { item: ItemDocument; project: ProjectHead | 
         ) : (
           isUnsent(item) && <UnsentChip />
         )}
-        {item.edited_at !== null && <Edited at={item.edited_at} />}
+        {item.edited_at !== null && !asDone(item) && <Edited at={item.edited_at} />}
       </div>
     </>
   );
@@ -139,9 +140,14 @@ function Body({ item }: { item: ItemDocument }) {
       <div className="sheet-doc" data-testid="overlay.document">
         <DocumentParts item={item} />
       </div>
-      {item.writing && <PilotWriting />}
+      {item.writing && !asDone(item) && <PilotWriting />}
     </>
   );
+}
+
+/** Whether the read gives the text as Done fixed it, a person's or Pilot's (F13.3), not as it stands. */
+function asDone(item: ItemDocument): boolean {
+  return item.done?.cause === 'marked' || item.done?.cause === 'settled';
 }
 
 /** What stands in the foot: how it was done, or what marks it done; for a one-ask item or a notice, nothing. */
