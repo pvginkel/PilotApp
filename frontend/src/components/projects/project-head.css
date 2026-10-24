@@ -23,9 +23,9 @@
 
   /* In a tight head the repo and the step's name give way, then the name; the chips, auto pilot,
      the members and the icons keep their size, so the head's last control, the menu, stays inside
-     it, clear of the panel beside it. Flex items shrink in proportion to factor × size, so at this
-     factor the name gives up under a millionth of its width until the two have given way to
-     nothing. */
+     it, clear of the panel beside it, as long as those alone fit. Flex items shrink in proportion
+     to factor × size, so at this factor the name gives up under a millionth of its width until the
+     two have given way to nothing. */
   .feed-head .meta, .feed-head .step-anchor { flex-shrink: 1000000; }
   .feed-head .switch, .feed-head .members, .feed-head .head-icon { flex: none; }
   .feed-head .head-icon { align-self: center; }
