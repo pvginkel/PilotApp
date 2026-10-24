@@ -75,7 +75,7 @@ class TestWorkMoved:
             ProjectChanged(project.id),
         ]
 
-    def test_a_chats_session_raises_nothing(
+    def test_a_chats_line_raises_nothing(
         self,
         container: ServiceContainer,
         session: DbSession,
@@ -86,9 +86,25 @@ class TestWorkMoved:
         run = _session(session, project, environment, "chat")
 
         with scoped_session(container):
-            work_moved(container.engine_bus(), run, state=True)
+            work_moved(container.engine_bus(), run)
 
         assert engine_events == []
+
+    def test_a_chats_state_moves_the_project_alone(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        """The project's status reads a Chat's `running` (DB 228)."""
+        run = _session(session, project, environment, "chat")
+
+        with scoped_session(container):
+            work_moved(container.engine_bus(), run, state=True)
+
+        assert engine_events == [ProjectChanged(project.id)]
 
     def test_the_moves_of_one_transaction_go_out_once(
         self,

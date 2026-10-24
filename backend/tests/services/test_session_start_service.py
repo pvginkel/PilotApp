@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from dependency_injector import providers
 from flask import Flask
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
@@ -22,8 +23,16 @@ from app.database import scoped_session
 from app.engine.bus import EngineEvent, ProjectChanged, WorkMoved
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import Environment, Item, PlanTask, Project, Turn, User, Work
-from app.models.reference import RecordKind, SessionState, TaskStatus, UserKind
+from app.models.reference import (
+    ProjectState,
+    RecordKind,
+    SessionState,
+    TaskStatus,
+    TransitionKind,
+    UserKind,
+)
 from app.schemas.timeline import HeldReason
+from app.services.auth_service import AuthContext
 from app.services.container import ServiceContainer
 from app.services.controller_client import (
     ControllerProblem,
@@ -1772,6 +1781,45 @@ class TestHeldLoop:
 
         loop_log.wait_for(rf"Session {run_id} goes on from held")
         loop_log.wait_for(rf"Loop relay:{run_id} started")
+
+    def test_a_resume_lets_the_projects_held_starts_go_on_once_it_commits(
+        self,
+        committed_app: Flask,
+        committed_fake: _Recording,
+        supervise: Supervise,
+        loop_log: LogWaiter,
+    ) -> None:
+        """The pause lifted from the project's icon (F141.2, F141.5)."""
+        container = committed_app.container
+        starts, _, coordinator = _services(container, supervise)
+        project_id = _committed_project(container)
+        with scoped_session(container) as db:
+            project = db.get_one(Project, project_id)
+            project.state_code = ProjectState.OPEN
+            project.slug = "camp"
+            project.paused = True
+        coordinator.fire_startup()
+        with scoped_session(container) as db:
+            run_id = starts.start_session(
+                db, project_id, ENV, kind_code="work", cwd=CWD, brief=BRIEF
+            ).id
+        assert _committed(container, run_id).state_code == SessionState.HELD
+        ada = AuthContext(
+            subject="subject-ada", email=None, name="Ada Example", roles={"editor"}
+        )
+
+        container.session_start_service.override(providers.Object(starts))
+        try:
+            with scoped_session(container):
+                container.project_service().transition(
+                    ada, project_id, TransitionKind.RESUMED
+                )
+        finally:
+            container.session_start_service.reset_last_overriding()
+
+        loop_log.wait_for(rf"Session {run_id} goes on from held")
+        loop_log.wait_for(rf"Loop relay:{run_id} started")
+        assert _committed(container, run_id).state_code == SessionState.RUNNING
 
 
 def _add_environment(container: ServiceContainer) -> None:

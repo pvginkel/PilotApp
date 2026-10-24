@@ -80,6 +80,9 @@ class InventedProjectCreateSchema(BaseModel):
     autopilot: bool = Field(
         default=False, description="Auto pilot on; a finished project has it off"
     )
+    paused: bool = Field(
+        default=False, description="Paused; only an open project is (F141.2)"
+    )
     members: list[str] = Field(
         min_length=1,
         description=(

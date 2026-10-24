@@ -581,8 +581,8 @@ class TestDataService:
 
         Raises:
             ValidationException: a finished project with auto pilot on, a
-                member named twice, open items without an environment, or a
-                plan with a fault.
+                paused project that is not open, a member named twice, open
+                items without an environment, or a plan with a fault.
             RecordNotFoundException: a member is no person, or no environment
                 has the id.
         """
@@ -590,6 +590,10 @@ class TestDataService:
         if spec.state is ProjectState.FINISHED and spec.autopilot:
             raise ValidationException(
                 f"Cannot {operation} because a finished project has auto pilot off"
+            )
+        if spec.paused and spec.state is not ProjectState.OPEN:
+            raise ValidationException(
+                f"Cannot {operation} because only an open project is paused"
             )
         if len(set(spec.members)) < len(spec.members):
             raise ValidationException(
@@ -617,6 +621,7 @@ class TestDataService:
             state_code=spec.state,
             archived=spec.archived,
             autopilot=spec.autopilot,
+            paused=spec.paused,
             created_by_user_id=people[0].id,
             created_at=now,
         )
@@ -634,6 +639,7 @@ class TestDataService:
                 (TransitionKind.OPENED, not draft),
                 (TransitionKind.FINISHED, spec.state is ProjectState.FINISHED),
                 (TransitionKind.AUTOPILOT_ON, spec.autopilot),
+                (TransitionKind.PAUSED, spec.paused),
                 (TransitionKind.ARCHIVED, spec.archived),
             )
             if written

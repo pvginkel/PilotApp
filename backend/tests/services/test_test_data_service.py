@@ -610,6 +610,14 @@ class TestProject:
                 {"state": "open", "autopilot": True},
                 [TransitionKind.OPENED, TransitionKind.AUTOPILOT_ON],
             ),
+            (
+                {"state": "open", "paused": True},
+                [TransitionKind.OPENED, TransitionKind.PAUSED],
+            ),
+            (
+                {"state": "open", "paused": True, "archived": True},
+                [TransitionKind.OPENED, TransitionKind.PAUSED, TransitionKind.ARCHIVED],
+            ),
             ({"state": "draft", "archived": True}, [TransitionKind.ARCHIVED]),
             (
                 {"state": "finished", "archived": True},
@@ -637,10 +645,12 @@ class TestProject:
             project.state_code.value,
             project.archived,
             project.autopilot,
+            project.paused,
         ) == (
             standing["state"],
             standing.get("archived", False),
             standing.get("autopilot", False),
+            standing.get("paused", False),
         )
         assert (project.slug is None) == (standing["state"] == "draft")
 
@@ -807,6 +817,14 @@ class TestProject:
             (
                 {"state": "finished", "autopilot": True},
                 "Cannot make the project because a finished project has auto pilot off",
+            ),
+            (
+                {"state": "draft", "paused": True},
+                "Cannot make the project because only an open project is paused",
+            ),
+            (
+                {"state": "finished", "paused": True},
+                "Cannot make the project because only an open project is paused",
             ),
             (
                 {"members": ["ada", "ada"]},

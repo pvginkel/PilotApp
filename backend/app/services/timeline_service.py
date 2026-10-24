@@ -30,6 +30,7 @@ from app.models import (
     ItemKind,
     PlanTask,
     Project,
+    ProjectMember,
     ProjectTransition,
     SaveError,
     Turn,
@@ -76,6 +77,7 @@ from app.services.people_service import initials
 from app.services.start_gate import held_reason
 
 WORK = "work"
+WAIT = "wait"
 
 _STOPPED = (SessionState.STOPPED, SessionState.FAILED)
 """The states in which a work item waits on a person: stopped, or failed to
@@ -94,25 +96,49 @@ class Badge:
 
 
 def waiting_on(person: User | None) -> ColumnElement[bool]:
-    """The items waiting on `person` (F94.5, DB 225): open, `for` nobody or
-    for them; a prose item but the opening, a notice only when it is urgent
-    (F23.2, F10.3); a work item stopped or failed to start; never a wait
-    (F27.5). Before a person has chosen their handle, every `for` item is
-    another's."""
+    """The items waiting on `person` (F94.5, DB 225): F94.5's set, `for`
+    nobody or for them. Before a person has chosen their handle, every `for`
+    item is another's."""
+    addressed: ColumnElement[bool] = Item.for_user_id.is_(None)
+    if person is not None:
+        addressed = or_(addressed, Item.for_user_id == person.id)
+    return and_(_waiting(), addressed)
+
+
+def waiting_on_a_member() -> ColumnElement[bool]:
+    """The items waiting on a member of their project (DB 225, 228): F94.5's
+    set, `for` nobody while the project has a member, or for one of its
+    members."""
+    member = (
+        select(ProjectMember.id)
+        .where(
+            ProjectMember.project_id == Item.project_id,
+            ProjectMember.left_at.is_(None),
+            or_(Item.for_user_id.is_(None), ProjectMember.user_id == Item.for_user_id),
+        )
+        .correlate(Item)
+    )
+    return and_(_waiting(), member.exists())
+
+
+def _waiting() -> ColumnElement[bool]:
+    """F94.5's set, whoever an item is for: open; a prose item but the
+    opening, a notice only when it is urgent (F23.2, F10.3); a work item
+    stopped or failed to start; never a wait (F27.5)."""
     form = (
-        select(ItemKind.form).where(ItemKind.code == Item.kind_code).scalar_subquery()
+        select(ItemKind.form)
+        .where(ItemKind.code == Item.kind_code)
+        .correlate(Item)
+        .scalar_subquery()
     )
     state = (
         select(AgentSession.state_code)
         .where(AgentSession.id == Item.id)
+        .correlate(Item)
         .scalar_subquery()
     )
-    addressed: ColumnElement[bool] = Item.for_user_id.is_(None)
-    if person is not None:
-        addressed = or_(addressed, Item.for_user_id == person.id)
     return and_(
         Item.done_at.is_(None),
-        addressed,
         or_(
             and_(
                 form == PROSE,

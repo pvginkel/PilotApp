@@ -1,6 +1,7 @@
 """The projects as the signed-in person reads them, the project list's tabs
-and a project's head (F1, F2, F3); and what they change of a project's
-standing, its transitions and their membership (F4.1, F5, F6, F127, F128)."""
+and a project's head, its status among them (F1, F2, F3, F141.1; DB 227,
+228); and what they change of a project's standing, its transitions and their
+membership (F4.1, F5, F6, F127, F128, F141.2; DB 170, 171)."""
 
 import json
 import uuid
@@ -17,7 +18,13 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.database import scoped_session
-from app.engine.bus import EngineEvent, ManifestChanged, ProjectChanged, TreeHashMoved
+from app.engine.bus import (
+    EngineEvent,
+    ManifestChanged,
+    ProjectChanged,
+    TreeHashMoved,
+    WorkMoved,
+)
 from app.engine.paths import TIMELINE, tree_path
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.extensions import db
@@ -38,13 +45,16 @@ from app.models.reference import (
     TransitionKind,
     UserKind,
 )
+from app.schemas.projects import ProjectStatus
 from app.schemas.testing_record import InventedProjectCreateSchema
 from app.services.auth_service import AuthContext
 from app.services.container import ServiceContainer
 from app.services.project_service import (
     ARCHIVED_REFUSAL,
+    Activity,
     PlanProgress,
     plan_progress,
+    project_status,
 )
 from app.services.timeline_service import Badge
 
@@ -111,6 +121,140 @@ def _tasks(*statuses: str) -> list[dict[str, Any]]:
         {"id": f"t{number}", "title": f"Step {number}", "status": status}
         for number, status in enumerate(statuses, start=1)
     ]
+
+
+def _run(
+    container: ServiceContainer,
+    session: DbSession,
+    project: Project,
+    environment: Environment,
+    state: SessionState,
+    kind: str = "work",
+) -> models.Session:
+    """A Session of the project in `state`; one of kind `work` with its work
+    item."""
+    run = models.Session(
+        project_id=project.id,
+        environment_id=environment.id,
+        kind_code=kind,
+        cwd="/work/Camp",
+        token_hash=uuid.uuid4().hex * 2,
+        state_code=state,
+    )
+    session.add(run)
+    session.flush()
+    if kind == "work":
+        container.record_service().place_work(project, run, "Build the camp")
+    return run
+
+
+def _wait(
+    container: ServiceContainer,
+    session: DbSession,
+    project: Project,
+    run: models.Session,
+) -> Item:
+    wait = Item(
+        project_id=project.id,
+        seq=container.document_service().next_seq(project),
+        kind_code="timed_wait",
+        title="The site opens",
+        created_by_session_id=run.id,
+    )
+    session.add(wait)
+    session.flush()
+    return wait
+
+
+QUIET = Activity(running=False, work_running=False, waiting=False, wait_open=False)
+
+
+class TestProjectStatus:
+    """The order assertion 228 reads the status in (F141.1)."""
+
+    @pytest.mark.parametrize(
+        ("standing", "activity", "progress", "status"),
+        [
+            ({"state_code": ProjectState.DRAFT}, QUIET, (0, 0), None),
+            (
+                {"state_code": ProjectState.FINISHED},
+                Activity(running=True, work_running=True, waiting=True, wait_open=True),
+                (2, 2),
+                None,
+            ),
+            ({"paused": True}, QUIET, (2, 2), ProjectStatus.PAUSED),
+            (
+                {"paused": True},
+                Activity(
+                    running=True, work_running=False, waiting=True, wait_open=True
+                ),
+                (0, 1),
+                ProjectStatus.PAUSING,
+            ),
+            (
+                {},
+                Activity(running=True, work_running=True, waiting=True, wait_open=True),
+                (2, 2),
+                ProjectStatus.RUNNING,
+            ),
+            (
+                {},
+                Activity(
+                    running=False, work_running=False, waiting=True, wait_open=True
+                ),
+                (2, 2),
+                ProjectStatus.WAITING_ON_YOU,
+            ),
+            (
+                {},
+                Activity(
+                    running=False, work_running=False, waiting=False, wait_open=True
+                ),
+                (2, 2),
+                ProjectStatus.WAITING_ON_EVENT,
+            ),
+            ({}, QUIET, (2, 2), ProjectStatus.DONE),
+            ({}, QUIET, (1, 2), ProjectStatus.IDLE),
+            ({}, QUIET, (0, 0), ProjectStatus.IDLE),
+            (
+                {},
+                Activity(
+                    running=True, work_running=False, waiting=False, wait_open=False
+                ),
+                (1, 2),
+                ProjectStatus.IDLE,
+            ),
+        ],
+        ids=[
+            "draft",
+            "finished",
+            "paused",
+            "pausing",
+            "running",
+            "waiting-on-you",
+            "waiting-on-an-event",
+            "done",
+            "idle",
+            "no-plan-is-not-done",
+            "a-chat-running-is-not-work-running",
+        ],
+    )
+    def test_the_first_that_holds(
+        self,
+        standing: dict[str, Any],
+        activity: Activity,
+        progress: tuple[int, int],
+        status: ProjectStatus | None,
+    ) -> None:
+        project = Project(
+            state_code=standing.get("state_code", ProjectState.OPEN),
+            paused=standing.get("paused", False),
+        )
+        done, total = progress
+
+        assert (
+            project_status(project, activity, PlanProgress(done, total, ())) is status
+        )
 
 
 class TestPlanProgress:
@@ -292,6 +436,84 @@ class TestTabs:
             quiet.id: Badge(0, False),
         }
 
+    def test_a_tab_has_the_projects_status_read_from_the_record(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        running = _make(container, name="Running", tasks=_tasks("done"))
+        _run(container, session, running, environment, SessionState.RUNNING)
+        stopped = _make(container, name="Stopped")
+        _run(container, session, stopped, environment, SessionState.STOPPED)
+        waiting = _make(container, name="Waiting")
+        idle = _run(container, session, waiting, environment, SessionState.IDLE)
+        _wait(container, session, waiting, idle)
+        done = _make(container, name="Done", tasks=_tasks("done", "done"))
+        quiet = _make(container, name="Quiet", tasks=_tasks("done", "pending"))
+        pausing = _make(container, name="Pausing", paused=True)
+        _run(container, session, pausing, environment, SessionState.RUNNING, "chat")
+        paused = _make(container, name="Paused", paused=True)
+        _run(container, session, paused, environment, SessionState.STOPPED)
+        draft = _make(container, name="Draft", state="draft")
+        finished = _make(container, name="Finished", state="finished")
+
+        tabs = container.project_service().tabs(ADA, archived=False)
+
+        assert {tab.project.id: tab.status for tab in tabs} == {
+            running.id: ProjectStatus.RUNNING,
+            stopped.id: ProjectStatus.WAITING_ON_YOU,
+            waiting.id: ProjectStatus.WAITING_ON_EVENT,
+            done.id: ProjectStatus.DONE,
+            quiet.id: ProjectStatus.IDLE,
+            pausing.id: ProjectStatus.PAUSING,
+            paused.id: ProjectStatus.PAUSED,
+            draft.id: None,
+            finished.id: None,
+        }
+
+    def test_the_status_waits_on_a_member_whoever_reads_it(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        """F94.5's set, any member's (DB 225, 228): an item for nobody or for
+        a member, where the badge counts the caller's own (F1.4)."""
+        _ben(container)
+        for_ben = _make(container, name="For Ben", members=["ada", "ben"])
+        not_for_a_member = _make(container, name="For no member")
+        nobodys = _make(container, name="Nobody's")
+        for project in (for_ben, not_for_a_member):
+            run = _run(container, session, project, environment, SessionState.IDLE)
+            container.document_service().bear_item(
+                project, "question", "Where?", run, "---\nfor: ben\n---\n"
+            )
+        run = _run(container, session, nobodys, environment, SessionState.IDLE)
+        container.document_service().bear_item(nobodys, "question", "Where?", run)
+        container.project_service().leave(ADA, nobodys.id)
+
+        tabs = container.project_service().tabs(ADA, archived=False)
+
+        assert {tab.project.id: (tab.status, tab.badge.count) for tab in tabs} == {
+            for_ben.id: (ProjectStatus.WAITING_ON_YOU, 0),
+            not_for_a_member.id: (ProjectStatus.IDLE, 0),
+            nobodys.id: (ProjectStatus.IDLE, 1),
+        }
+
+    def test_an_archived_projects_tab_has_its_status(
+        self, container: ServiceContainer
+    ) -> None:
+        paused = _make(container, name="Paused", paused=True, archived=True)
+        draft = _make(container, name="Draft", state="draft", archived=True)
+
+        tabs = container.project_service().tabs(ADA, archived=True)
+
+        assert {tab.project.id: tab.status for tab in tabs} == {
+            paused.id: ProjectStatus.PAUSED,
+            draft.id: None,
+        }
+
     def test_no_project_is_an_empty_list(self, container: ServiceContainer) -> None:
         assert container.project_service().tabs(ADA, archived=False) == []
 
@@ -325,6 +547,38 @@ class TestHead:
             False,
             True,
         )
+
+    @pytest.mark.parametrize(
+        ("spec", "status"),
+        [
+            ({"paused": True}, ProjectStatus.PAUSED),
+            ({"tasks": _tasks("done")}, ProjectStatus.DONE),
+            ({"state": "draft"}, None),
+            ({"state": "finished"}, None),
+        ],
+    )
+    def test_the_projects_status(
+        self,
+        container: ServiceContainer,
+        spec: dict[str, Any],
+        status: ProjectStatus | None,
+    ) -> None:
+        made = _make(container, name="Camp", **spec)
+
+        assert container.project_service().head(ADA, made.id).status is status
+
+    def test_a_running_work_item_is_the_heads_status(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        made = _make(container, name="Camp")
+        _run(container, session, made, environment, SessionState.RUNNING)
+
+        head = container.project_service().head(ADA, made.id)
+
+        assert head.status is ProjectStatus.RUNNING
 
     def test_the_members_in_the_order_they_joined(
         self, container: ServiceContainer, session: DbSession
@@ -588,6 +842,89 @@ class TestTransition:
         assert finished[2] == person.id
         assert _standing(made) == (ProjectState.FINISHED, False, False)
 
+    @pytest.mark.parametrize(
+        ("spec", "kind", "paused"),
+        [
+            ({"state": "open"}, TransitionKind.PAUSED, True),
+            ({"state": "open", "autopilot": True}, TransitionKind.PAUSED, True),
+            ({"state": "open", "paused": True}, TransitionKind.RESUMED, False),
+            (
+                {"state": "open", "autopilot": True, "paused": True},
+                TransitionKind.RESUMED,
+                False,
+            ),
+        ],
+    )
+    def test_a_pause_and_a_resume_are_the_callers_transitions(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        spec: dict[str, Any],
+        kind: TransitionKind,
+        paused: bool,
+    ) -> None:
+        made = _make(container, name="Camp", **spec)
+        before = (_transitions(session, made), _standing(made))
+        started = datetime.now(UTC)
+
+        container.project_service().transition(ADA, made.id, kind)
+
+        ((written, at, by),) = _transitions(session, made)[len(before[0]) :]
+        assert (written, by) == (kind, person.id)
+        assert started <= at <= datetime.now(UTC)
+        assert made.paused is paused
+        # The grants are untouched: the switch stays where it is (F141.3).
+        assert _standing(made) == before[1]
+
+    def test_finish_resumes_a_paused_project_at_its_instant_by_its_person(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        made = _make(container, name="Camp", autopilot=True, paused=True)
+        before = _transitions(session, made)
+
+        container.project_service().transition(ADA, made.id, TransitionKind.FINISHED)
+
+        finished, autopilot_off, resumed = _transitions(session, made)[len(before) :]
+        assert finished[0] is TransitionKind.FINISHED
+        assert autopilot_off == (TransitionKind.AUTOPILOT_OFF, *finished[1:])
+        assert resumed == (TransitionKind.RESUMED, *finished[1:])
+        assert finished[2] == person.id
+        assert made.paused is False
+
+    def test_a_reopened_project_is_not_paused(
+        self, container: ServiceContainer, session: DbSession
+    ) -> None:
+        made = _make(container, name="Camp", paused=True)
+        service = container.project_service()
+        service.transition(ADA, made.id, TransitionKind.FINISHED)
+        before = _transitions(session, made)
+
+        service.transition(ADA, made.id, TransitionKind.REOPENED)
+
+        assert [kind for kind, _, _ in _transitions(session, made)[len(before) :]] == [
+            TransitionKind.REOPENED
+        ]
+        assert made.paused is False
+
+    def test_archive_keeps_the_pause_and_bring_back_returns_it(
+        self, container: ServiceContainer, session: DbSession
+    ) -> None:
+        made = _make(container, name="Camp", paused=True)
+        service = container.project_service()
+        before = _transitions(session, made)
+
+        service.transition(ADA, made.id, TransitionKind.ARCHIVED)
+        archived = made.paused
+        service.transition(ADA, made.id, TransitionKind.BROUGHT_BACK)
+
+        assert [kind for kind, _, _ in _transitions(session, made)[len(before) :]] == [
+            TransitionKind.ARCHIVED,
+            TransitionKind.BROUGHT_BACK,
+        ]
+        assert (archived, made.paused) == (True, True)
+        assert service.head(ADA, made.id).status is ProjectStatus.PAUSED
+
     def test_finish_closes_the_open_items_at_its_instant(
         self,
         container: ServiceContainer,
@@ -677,6 +1014,22 @@ class TestTransition:
                 TransitionKind.AUTOPILOT_OFF,
                 ARCHIVED_REFUSAL,
             ),
+            ({"state": "draft"}, TransitionKind.PAUSED, "it is a draft"),
+            ({"state": "finished"}, TransitionKind.PAUSED, "it is finished"),
+            (
+                {"state": "open", "paused": True},
+                TransitionKind.PAUSED,
+                "it is paused already",
+            ),
+            ({"state": "open"}, TransitionKind.RESUMED, "it is not paused"),
+            ({"state": "finished"}, TransitionKind.RESUMED, "it is not paused"),
+            ({"state": "draft"}, TransitionKind.RESUMED, "it is not paused"),
+            ({"archived": True}, TransitionKind.PAUSED, ARCHIVED_REFUSAL),
+            (
+                {"paused": True, "archived": True},
+                TransitionKind.RESUMED,
+                ARCHIVED_REFUSAL,
+            ),
         ],
     )
     def test_a_transition_its_standing_does_not_allow_is_refused(
@@ -695,6 +1048,7 @@ class TestTransition:
 
         assert refused.value.cause == cause
         assert (_transitions(session, made), _standing(made)) == before
+        assert made.paused is spec.get("paused", False)
 
     @pytest.mark.parametrize(
         ("name", "kind", "message"),
@@ -785,6 +1139,93 @@ class TestTransition:
             ),
             ProjectChanged(made.id),
         ]
+
+    @pytest.mark.parametrize(
+        ("spec", "kind"),
+        [
+            ({"state": "open"}, TransitionKind.PAUSED),
+            ({"state": "open", "paused": True}, TransitionKind.RESUMED),
+        ],
+    )
+    def test_a_pause_and_a_resume_move_the_project_and_no_timeline(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        spec: dict[str, Any],
+        kind: TransitionKind,
+    ) -> None:
+        """The pause is not in the store's tree (`timeline.json`)."""
+        made = _make(container, name="Camp", **spec)
+        with scoped_session(container):
+            pass
+        engine_events.clear()
+
+        with scoped_session(container):
+            container.project_service().transition(ADA, made.id, kind)
+
+        assert engine_events == [ProjectChanged(made.id)]
+
+    @pytest.mark.parametrize(
+        ("spec", "kind"),
+        [
+            ({"state": "open"}, TransitionKind.PAUSED),
+            ({"state": "open", "paused": True}, TransitionKind.RESUMED),
+            ({"state": "open", "paused": True}, TransitionKind.FINISHED),
+        ],
+    )
+    def test_a_pause_and_a_resume_move_the_held_work_items_reasons(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        engine_events: list[EngineEvent],
+        spec: dict[str, Any],
+        kind: TransitionKind,
+    ) -> None:
+        """Their lines read `held_reason`, the pause first (F26.1); a Chat's
+        Session has no work item."""
+        made = _make(container, name="Camp", **spec)
+        held = _run(container, session, made, environment, SessionState.HELD)
+        _run(container, session, made, environment, SessionState.HELD, "chat")
+        _run(container, session, made, environment, SessionState.IDLE)
+        with scoped_session(container):
+            pass
+        engine_events.clear()
+
+        with scoped_session(container):
+            container.project_service().transition(ADA, made.id, kind)
+
+        assert [event for event in engine_events if isinstance(event, WorkMoved)] == [
+            WorkMoved(made.id, held.id)
+        ]
+
+    @pytest.mark.parametrize(
+        ("spec", "kind"),
+        [
+            ({"state": "open", "autopilot": True}, TransitionKind.AUTOPILOT_OFF),
+            ({"state": "open"}, TransitionKind.ARCHIVED),
+            ({"state": "open", "paused": True}, TransitionKind.ARCHIVED),
+        ],
+    )
+    def test_a_change_that_keeps_the_pause_moves_no_held_work_item(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        engine_events: list[EngineEvent],
+        spec: dict[str, Any],
+        kind: TransitionKind,
+    ) -> None:
+        made = _make(container, name="Camp", **spec)
+        _run(container, session, made, environment, SessionState.HELD)
+        with scoped_session(container):
+            pass
+        engine_events.clear()
+
+        with scoped_session(container):
+            container.project_service().transition(ADA, made.id, kind)
+
+        assert not [event for event in engine_events if isinstance(event, WorkMoved)]
 
     @pytest.mark.parametrize(
         ("spec", "kind"),

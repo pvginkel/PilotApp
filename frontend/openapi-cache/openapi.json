@@ -655,6 +655,12 @@
             "title": "Opening",
             "type": "string"
           },
+          "paused": {
+            "default": false,
+            "description": "Paused; only an open project is (F141.2)",
+            "title": "Paused",
+            "type": "boolean"
+          },
           "repo": {
             "anyOf": [
               {
@@ -2846,6 +2852,17 @@
             "$ref": "#/components/schemas/ProjectHeadSchema.e86ccd6.ProjectState",
             "description": "The project's state"
           },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectHeadSchema.e86ccd6.ProjectStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The project's status, one for every viewer (F141.1; DB 228): paused, or pausing while one of its sessions runs a turn; else running while a work item or a job runs, waiting_on_you while an open item waits on a member, waiting_on_event while a wait is open, done while every step of a plan is done, idle otherwise; null for a draft and a finished project"
+          },
           "tasks": {
             "description": "The plan's steps, in order",
             "items": {
@@ -2878,6 +2895,7 @@
           "state",
           "archived",
           "autopilot",
+          "status",
           "member",
           "members",
           "progress",
@@ -3057,6 +3075,20 @@
         "title": "ProjectState",
         "type": "string"
       },
+      "ProjectHeadSchema.e86ccd6.ProjectStatus": {
+        "description": "A project's status, its tab's one icon (F141.1; DB Project Status):\nderived on request, never stored, the list of its values the API's\n(decision 53).",
+        "enum": [
+          "running",
+          "waiting_on_you",
+          "waiting_on_event",
+          "done",
+          "idle",
+          "pausing",
+          "paused"
+        ],
+        "title": "ProjectStatus",
+        "type": "string"
+      },
       "ProjectHeadSchema.e86ccd6.TaskStatus": {
         "enum": [
           "pending",
@@ -3170,6 +3202,20 @@
         "title": "ProjectState",
         "type": "string"
       },
+      "ProjectListResponseSchema.e86ccd6.ProjectStatus": {
+        "description": "A project's status, its tab's one icon (F141.1; DB Project Status):\nderived on request, never stored, the list of its values the API's\n(decision 53).",
+        "enum": [
+          "running",
+          "waiting_on_you",
+          "waiting_on_event",
+          "done",
+          "idle",
+          "pausing",
+          "paused"
+        ],
+        "title": "ProjectStatus",
+        "type": "string"
+      },
       "ProjectListResponseSchema.e86ccd6.ProjectTabSchema": {
         "description": "What a project's tab in the list shows.",
         "properties": {
@@ -3222,6 +3268,17 @@
             "$ref": "#/components/schemas/ProjectListResponseSchema.e86ccd6.ProjectState",
             "description": "The project's state"
           },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectListResponseSchema.e86ccd6.ProjectStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The project's status, one for every viewer (F141.1; DB 228): paused, or pausing while one of its sessions runs a turn; else running while a work item or a job runs, waiting_on_you while an open item waits on a member, waiting_on_event while a wait is open, done while every step of a plan is done, idle otherwise; null for a draft and a finished project"
+          },
           "ticket": {
             "anyOf": [
               {
@@ -3244,6 +3301,7 @@
           "ticket",
           "state",
           "finished_at",
+          "status",
           "member",
           "progress",
           "badge"
@@ -5754,14 +5812,16 @@
         "description": "A change of a project's standing the signed-in person makes.",
         "properties": {
           "kind": {
-            "description": "Which change: Finish, Reopen, Archive, Bring back, or auto pilot switched on or off. It must follow from the project's standing: Finish from open, Reopen from finished, Archive from unarchived, Bring back from archived, auto pilot on from off on an open project, off from on; an archived project takes Bring back alone",
+            "description": "Which change: Finish, Reopen, Archive, Bring back, auto pilot switched on or off, or the project paused or resumed. It must follow from the project's standing: Finish from open, Reopen from finished, Archive from unarchived, Bring back from archived, auto pilot on from off on an open project, off from on, the pause from not paused on an open project, the resume from paused; an archived project takes Bring back alone",
             "enum": [
               "finished",
               "reopened",
               "archived",
               "brought_back",
               "autopilot_on",
-              "autopilot_off"
+              "autopilot_off",
+              "paused",
+              "resumed"
             ],
             "examples": [
               "finished"
@@ -6970,7 +7030,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Read the project list's tabs, or with `archived` the archived projects', each with its badge for the caller.",
+        "summary": "Read the project list's tabs, or with `archived` the archived projects', each with its status and its badge for the caller.",
         "tags": [],
         "x-required-role": "editor"
       }
@@ -7048,7 +7108,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Read a project's head: its standing, its members and its plan.",
+        "summary": "Read a project's head: its standing and status, its members and its plan.",
         "tags": [],
         "x-required-role": "editor"
       }
@@ -7463,7 +7523,7 @@
     },
     "/api/projects/{project_id}/transitions": {
       "post": {
-        "description": "Finish also turns auto pilot off, and closes the project's open items unanswered; Reopen leaves auto pilot off.\n\nReturns:     201: The project's head, with its new standing     400: The kind is not one a person makes     401: No one is signed in     403: The caller lacks the editor role     404: No project has the id     409: The caller has not chosen a handle, or the project's standing         does not allow the change",
+        "description": "Finish also turns auto pilot off, resumes a paused project, and closes the project's open items unanswered; Reopen leaves auto pilot off. A resume lets the project's held starts go on.\n\nReturns:     201: The project's head, with its new standing     400: The kind is not one a person makes     401: No one is signed in     403: The caller lacks the editor role     404: No project has the id     409: The caller has not chosen a handle, or the project's standing         does not allow the change",
         "operationId": "post__api_projects_{project_id}_transitions",
         "parameters": [
           {

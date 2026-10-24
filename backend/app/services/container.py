@@ -366,6 +366,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         record_service=record_service,
         view_service=view_service,
         timeline_service=timeline_service,
+        session_start_service=session_start_service,
     )
 
     # The invented record: the dev stack's seed, loaded by `cli

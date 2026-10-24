@@ -1,7 +1,8 @@
 """The projects as the signed-in person reads them, the project list, the
 archived projects, a project's head, its timeline, its draft and its handbook
 (F1, F2, F3, F8, F37.4, F129.4, D012); and what they change of a project's
-standing: its transitions and their membership (F4.1, F5, F6, F127, F128)."""
+standing: its transitions, its pause among them, and their membership (F4.1,
+F5, F6, F127, F128, F141.2)."""
 
 import uuid
 from typing import Any
@@ -70,6 +71,7 @@ def _head(head: ProjectHead) -> dict[str, Any]:
         state=project.state_code,
         archived=project.archived,
         autopilot=project.autopilot,
+        status=head.status,
         member=head.member,
         members=[_member(person) for person in head.members],
         progress=_progress(head.progress),
@@ -102,7 +104,7 @@ def list_projects(
     project_service: ProjectService = Provide[ServiceContainer.project_service],
 ) -> Any:
     """Read the project list's tabs, or with `archived` the archived projects',
-    each with its badge for the caller.
+    each with its status and its badge for the caller.
 
     Returns:
         200: The projects, in the order they were created
@@ -119,6 +121,7 @@ def list_projects(
                 ticket=tab.project.ticket,
                 state=tab.project.state_code,
                 finished_at=tab.finished_at,
+                status=tab.status,
                 member=tab.member,
                 progress=_progress(tab.progress),
                 badge=BadgeSchema(count=tab.badge.count, urgent=tab.badge.urgent),
@@ -142,7 +145,8 @@ def get_project(
     project_id: uuid.UUID,
     project_service: ProjectService = Provide[ServiceContainer.project_service],
 ) -> Any:
-    """Read a project's head: its standing, its members and its plan.
+    """Read a project's head: its standing and status, its members and its
+    plan.
 
     Returns:
         200: The project's head
@@ -254,8 +258,9 @@ def add_transition(
 ) -> Any:
     """Change the project's standing, as the signed-in person, now.
 
-    Finish also turns auto pilot off, and closes the project's open items
-    unanswered; Reopen leaves auto pilot off.
+    Finish also turns auto pilot off, resumes a paused project, and closes
+    the project's open items unanswered; Reopen leaves auto pilot off. A
+    resume lets the project's held starts go on.
 
     Returns:
         201: The project's head, with its new standing

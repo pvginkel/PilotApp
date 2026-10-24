@@ -6,7 +6,9 @@ carries `WorkMoved`, which the browsers hear as the item's work status alone,
 read again with nothing else of the project's screens: sized for the relay,
 which moves the line on most records it writes. A move of the state, which
 moves the project's tab and head too, a badge's count among them, carries
-`ProjectChanged` with it.
+`ProjectChanged` with it. A Chat's Session has no work item, but its state's
+move is the project's too: the project's status reads every `running`
+Session (DB 228).
 """
 
 from app.engine.bus import EngineBus, ProjectChanged, WorkMoved
@@ -19,10 +21,10 @@ no work item."""
 
 def work_moved(bus: EngineBus, session: AgentSession, *, state: bool = False) -> None:
     """Tell the browsers, once the transaction commits, that what the
-    Session's work item shows on its line moved; with `state`, that its state
-    moved. Equal events of one transaction go out once."""
-    if session.kind_code not in _WORK_KINDS:
-        return
-    bus.emit(WorkMoved(session.project_id, session.id))
+    Session's work item shows on its line moved, a Chat's Session having
+    none; with `state`, that its state moved. Equal events of one transaction
+    go out once."""
+    if session.kind_code in _WORK_KINDS:
+        bus.emit(WorkMoved(session.project_id, session.id))
     if state:
         bus.emit(ProjectChanged(session.project_id))

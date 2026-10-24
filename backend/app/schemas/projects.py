@@ -3,11 +3,35 @@ the changes of its standing."""
 
 import uuid
 from datetime import datetime
+from enum import StrEnum
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
 from app.models.reference import ProjectState, TaskStatus
+
+
+class ProjectStatus(StrEnum):
+    """A project's status, its tab's one icon (F141.1; DB Project Status):
+    derived on request, never stored, the list of its values the API's
+    (decision 53)."""
+
+    RUNNING = "running"
+    WAITING_ON_YOU = "waiting_on_you"
+    WAITING_ON_EVENT = "waiting_on_event"
+    DONE = "done"
+    IDLE = "idle"
+    PAUSING = "pausing"
+    PAUSED = "paused"
+
+
+STATUS_DESCRIPTION = (
+    "The project's status, one for every viewer (F141.1; DB 228): paused, or "
+    "pausing while one of its sessions runs a turn; else running while a work "
+    "item or a job runs, waiting_on_you while an open item waits on a member, "
+    "waiting_on_event while a wait is open, done while every step of a plan is "
+    "done, idle otherwise; null for a draft and a finished project"
+)
 
 
 class ProjectListQuerySchema(BaseModel):
@@ -62,6 +86,7 @@ class ProjectTabSchema(BaseModel):
     finished_at: datetime | None = Field(
         description="When the project finished; null unless its state is finished"
     )
+    status: ProjectStatus | None = Field(description=STATUS_DESCRIPTION)
     member: bool = Field(
         description="Whether the signed-in person is a member of the project"
     )
@@ -128,6 +153,7 @@ class ProjectHeadSchema(BaseModel):
     state: ProjectState = Field(description="The project's state")
     archived: bool = Field(description="Whether the project is archived")
     autopilot: bool = Field(description="Whether auto pilot is on")
+    status: ProjectStatus | None = Field(description=STATUS_DESCRIPTION)
     member: bool = Field(
         description="Whether the signed-in person is a member of the project"
     )
@@ -156,13 +182,17 @@ class TransitionRequestSchema(BaseModel):
         "brought_back",
         "autopilot_on",
         "autopilot_off",
+        "paused",
+        "resumed",
     ] = Field(
         description=(
-            "Which change: Finish, Reopen, Archive, Bring back, or auto pilot "
-            "switched on or off. It must follow from the project's standing: "
-            "Finish from open, Reopen from finished, Archive from unarchived, "
-            "Bring back from archived, auto pilot on from off on an open "
-            "project, off from on; an archived project takes Bring back alone"
+            "Which change: Finish, Reopen, Archive, Bring back, auto pilot "
+            "switched on or off, or the project paused or resumed. It must "
+            "follow from the project's standing: Finish from open, Reopen from "
+            "finished, Archive from unarchived, Bring back from archived, auto "
+            "pilot on from off on an open project, off from on, the pause from "
+            "not paused on an open project, the resume from paused; an "
+            "archived project takes Bring back alone"
         ),
         examples=["finished"],
     )

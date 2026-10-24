@@ -115,6 +115,7 @@ class TestListProjects:
                     "ticket": None,
                     "state": "draft",
                     "finished_at": None,
+                    "status": None,
                     "member": True,
                     "progress": {"done": 0, "total": 0, "in_progress": []},
                     "badge": {"count": 0, "urgent": False},
@@ -125,6 +126,7 @@ class TestListProjects:
                     "ticket": "RB-12",
                     "state": "open",
                     "finished_at": None,
+                    "status": "idle",
                     "member": False,
                     "progress": {
                         "done": 1,
@@ -139,6 +141,7 @@ class TestListProjects:
                     "ticket": None,
                     "state": "finished",
                     "finished_at": "<the finish>",
+                    "status": None,
                     "member": True,
                     "progress": {"done": 0, "total": 0, "in_progress": []},
                     "badge": {"count": 0, "urgent": False},
@@ -277,6 +280,7 @@ class TestGetProject:
             "state": "open",
             "archived": False,
             "autopilot": True,
+            "status": "idle",
             "member": True,
             "members": [
                 {"handle": "ben", "name": "ben", "initials": "B", "avatar_slot": 2},
@@ -946,6 +950,43 @@ class TestAddTransition:
         body = response.get_json()
         assert (body["state"], body["archived"], body["autopilot"]) == standing
 
+    def test_a_pause_and_a_resume_answer_the_head_with_its_status(
+        self, client: FlaskClient, container: ServiceContainer, session: Session
+    ) -> None:
+        recipes = _make(container, name="Recipe box", autopilot=True)
+        _sign_in(client)
+
+        paused = client.post(
+            f"{PROJECTS}/{recipes}/transitions", json={"kind": "paused"}
+        )
+        again = client.post(
+            f"{PROJECTS}/{recipes}/transitions", json={"kind": "paused"}
+        )
+        resumed = client.post(
+            f"{PROJECTS}/{recipes}/transitions", json={"kind": "resumed"}
+        )
+
+        assert (paused.status_code, again.status_code, resumed.status_code) == (
+            201,
+            409,
+            201,
+        )
+        assert [
+            (body["status"], body["autopilot"])
+            for body in (paused.get_json(), resumed.get_json())
+        ] == [("paused", True), ("idle", True)]
+        assert again.get_json()["error"] == (
+            "Cannot pause Recipe box because it is paused already"
+        )
+        assert [
+            transition.kind_code
+            for transition in session.scalars(
+                select(ProjectTransition)
+                .where(ProjectTransition.project_id == recipes)
+                .order_by(ProjectTransition.at, ProjectTransition.id)
+            )
+        ][-2:] == [TransitionKind.PAUSED, TransitionKind.RESUMED]
+
     def test_archive_and_bring_back_move_the_folder_out_of_the_stores_tree_and_back(
         self,
         client: FlaskClient,
@@ -980,7 +1021,7 @@ class TestAddTransition:
 
     @pytest.mark.parametrize(
         "body",
-        [{"kind": "opened"}, {"kind": "paused"}, {"kind": None}, {}],
+        [{"kind": "opened"}, {"kind": "pausing"}, {"kind": None}, {}],
     )
     def test_a_kind_no_person_makes_is_refused(
         self, client: FlaskClient, container: ServiceContainer, body: dict[str, Any]
