@@ -241,7 +241,7 @@ test.describe('Resume', () => {
 
     await item.resume.click();
     await expect(
-      page.getByTestId('app-shell.toast.item').filter({ hasText: `Cannot resume work item ${work} because its stopped turn is still ending` }),
+      page.getByTestId('app-shell.toast.item').filter({ hasText: `Cannot resume ${TITLE} because its stopped turn is still ending` }),
     ).toBeVisible();
     await expect(item.resume).toBeEnabled();
     await expect(item.line).toHaveAttribute('data-state', 'stopped');

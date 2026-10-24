@@ -54,7 +54,7 @@ from sqlalchemy.orm import Session
 from app.core_exceptions import ExternalServiceException
 from app.database import scoped_session
 from app.exceptions import InvalidOperationException, RecordNotFoundException
-from app.models import Environment, Project, Turn, User, Work
+from app.models import Environment, Item, Project, Turn, User, Work
 from app.models import Session as AgentSession
 from app.models.reference import ProjectState, RecordKind, SessionState
 from app.services.controller_client import (
@@ -447,7 +447,7 @@ class SessionStartService:
                 neither running, starting nor held at the gate
         """
         session = self._records(db).lock_session(session_id)
-        operation = f"stop work item {session_id}"
+        operation = f"stop {_work_named(db, session_id)}"
         if db.get(Work, session_id) is None:
             raise InvalidOperationException(operation, "it is no work item")
         if session.state_code not in STOPPABLE:
@@ -499,7 +499,7 @@ class SessionStartService:
                 has its stopped turn still in flight; or the project is
                 finished or archived
         """
-        operation = f"resume work item {session_id}"
+        operation = f"resume {_work_named(db, session_id)}"
         if not self._controller_configured:
             raise InvalidOperationException(operation, "no controller is configured")
         records = self._records(db)
@@ -822,6 +822,15 @@ def _shared(db: Session, project_id: uuid.UUID) -> Project:
     if project is None:
         raise RecordNotFoundException("Project", str(project_id))
     return project
+
+
+def _work_named(db: Session, session_id: uuid.UUID) -> str:
+    """A work item as a refusal names it: its Item's title, as Finish's
+    names the project, else its id."""
+    item = db.get(Item, session_id)
+    if item is not None and item.title:
+        return item.title
+    return f"work item {session_id}"
 
 
 def _closed(project: Project) -> str | None:

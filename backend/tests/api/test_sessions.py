@@ -608,7 +608,7 @@ class TestStopSession:
 
         assert response.status_code == 409
         assert response.get_json()["error"] == (
-            f"Cannot stop work item {run.id} because {refusal}"
+            f"Cannot stop Build the camp because {refusal}"
         )
 
     def test_a_session_with_no_work_item_is_409(
@@ -742,7 +742,7 @@ class TestResumeSession:
 
         assert response.status_code == 409
         assert response.get_json()["error"] == (
-            f"Cannot resume work item {run.id} because it is running"
+            "Cannot resume Build the camp because it is running"
         )
 
     def test_an_unknown_session_is_404(self, client: FlaskClient, person: User) -> None:
