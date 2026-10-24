@@ -2578,6 +2578,143 @@ def _committed_row(container: ServiceContainer, env_id: str) -> Environment:
         return row
 
 
+def _stop_then_resume(
+    starts: SessionStartService,
+    container: ServiceContainer,
+    run_id: uuid.UUID,
+    then: Callable[[], None] | None = None,
+) -> Callable[[], None]:
+    """The work item's Stop and then its Resume, each committed in a
+    transaction of its own as the person's two requests make them, then
+    `then`."""
+
+    def stop_then_resume() -> None:
+        with scoped_session(container) as db:
+            person = db.scalars(select(User).where(User.handle == "ada")).one()
+            starts.stop(db, run_id, person)
+        with scoped_session(container) as db:
+            starts.resume(db, run_id)
+        if then is not None:
+            then()
+
+    return stop_then_resume
+
+
+def _overtaken_then_resumed(starts: SessionStartService, run_id: uuid.UUID) -> None:
+    """The start loop's run that the Stop and the Resume overtake, then the
+    run the Resume's `again` asks for once it returns."""
+    for _ in range(2):
+        starts.run(run_id, LoopHandle(f"start:{run_id}"))
+
+
+class TestRunOvertaken:
+    """A start's run that a Stop and then a Resume with no conversation
+    overtake changes nothing of the Resume's start, a fresh one: the run the
+    Resume asks for goes on from the rows, in the environment reset under
+    Pilot's claim and in a headless session of its own (review B1, B3; V19,
+    V23)."""
+
+    @pytest.mark.parametrize("taken", [False, True], ids=["created", "taken"])
+    def test_one_overtaken_while_its_environment_comes_up_leaves_it_to_the_resumes_reset_under_the_timer(
+        self,
+        committed_app: Flask,
+        committed_fake: _Recording,
+        supervise: Supervise,
+        taken: bool,
+    ) -> None:
+        container = committed_app.container
+        starts, environments, _ = _services(
+            container, supervise, stop_after=timedelta(0)
+        )
+        project_id = _committed_project(container)
+        if taken:
+            with scoped_session(container) as db:
+                _free(db, committed_fake)
+        run_id = _committed_work(starts, container, project_id)
+        committed_fake.during_settle = _stop_then_resume(starts, container, run_id)
+
+        _overtaken_then_resumed(starts, run_id)
+
+        env_id = _committed_env(container, run_id)
+        run = _committed(container, run_id)
+        assert run.state_code == SessionState.RUNNING
+        assert run.controller_session is not None
+        # The Resume's reset follows the overtaken run's create or reset.
+        assert committed_fake.environment(env_id).resets == (2 if taken else 1)
+        row = _committed_row(container, env_id)
+        assert row.server_started_at is not None
+        assert row.started_pod_at == committed_fake.environment(env_id).pod_started_at
+        assert [each.name for each in committed_fake.sessions(env_id)] == [
+            run.controller_session
+        ]
+        assert _sends(committed_fake, env_id, run.controller_session) == 1
+
+        _turn_ends(starts, committed_fake, run, "success")
+        with scoped_session(container) as db:
+            environments.run_shutdown_timer(db)
+
+        assert committed_fake.environment(env_id).status == "stopped"
+
+    def test_one_overtaken_while_it_creates_its_headless_session_leaves_that_one_unrecorded(
+        self,
+        committed_app: Flask,
+        committed_fake: _Recording,
+        supervise: Supervise,
+    ) -> None:
+        container = committed_app.container
+        starts, _, _ = _services(container, supervise)
+        project_id = _committed_project(container)
+        with scoped_session(container) as db:
+            _free(db, committed_fake)
+        run_id = _committed_work(starts, container, project_id)
+        committed_fake.during_create = _stop_then_resume(starts, container, run_id)
+
+        starts.run(run_id, LoopHandle(f"start:{run_id}"))
+
+        (earlier,) = [each.name for each in committed_fake.sessions(FREE)]
+        assert _committed(container, run_id).controller_session is None
+
+        starts.run(run_id, LoopHandle(f"start:{run_id}"))
+
+        run = _committed(container, run_id)
+        assert run.state_code == SessionState.RUNNING
+        assert run.controller_session not in (None, earlier)
+        assert committed_fake.environment(FREE).resets == 2
+        row = _committed_row(container, FREE)
+        assert row.server_started_at is not None
+        assert row.started_pod_at == committed_fake.environment(FREE).pod_started_at
+        assert _sends(committed_fake, FREE, earlier) == 0
+
+    def test_a_failure_of_the_overtaken_run_does_not_fail_the_resumes_start(
+        self,
+        committed_app: Flask,
+        committed_fake: _Recording,
+        supervise: Supervise,
+    ) -> None:
+        container = committed_app.container
+        starts, _, _ = _services(container, supervise)
+        project_id = _committed_project(container)
+        run_id = _committed_work(starts, container, project_id)
+
+        def in_error() -> None:
+            committed_fake.set_status(_committed_env(container, run_id), "error")
+
+        committed_fake.during_settle = _stop_then_resume(
+            starts, container, run_id, then=in_error
+        )
+
+        _overtaken_then_resumed(starts, run_id)
+
+        env_id = _committed_env(container, run_id)
+        run = _committed(container, run_id)
+        assert (run.state_code, run.error) == (SessionState.RUNNING, None)
+        assert _verbs(committed_fake, env_id) == ["rename", "stop", "reset"]
+        with scoped_session(container) as db:
+            assert all(
+                payload["type"] != START_FAILED for _, payload in _server(db, run_id)
+            )
+
+
 class TestHeldLoop:
     @pytest.fixture
     def loop_log(self) -> Iterator[LogWaiter]:

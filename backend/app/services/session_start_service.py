@@ -313,10 +313,14 @@ class SessionStartService:
         session that is gone, or whose environment is not running, is given up
         first, a `server` record saying so, and the start goes on from the
         environment. Returns at once for a Session no longer `starting`, and
-        between the phases when the loop is told to stop. A controller session
-        another process recorded first stands, and the one this run created is
-        left to the controller's reaper, as it is for a Session stopped while
-        it was created. A call the controller does not answer
+        between the phases when the loop is told to stop. A run a Stop and then
+        a Resume overtook, its Session `starting` the Resume's Turn, goes no
+        further than its bring-up: it creates and records no controller
+        session, sends nothing and fails nothing, and the run the Resume asks
+        for starts from the rows (review B1). A controller session another
+        process recorded first stands, and the one this run created is left
+        to the controller's reaper, as it is for a Session stopped while it
+        was created. A call the controller does not answer
         returns the Session to `held`; any other failure fails it (F125), a
         refused create among them.
 
@@ -333,9 +337,10 @@ class SessionStartService:
             pending = _pending(db, session_id)
         if pending is None:
             return
+        turn_id = pending.turn_id
         if pending.foreign:
             with scoped_session(self._container) as db:
-                self._fail(db, session_id, NOT_PILOTS, recorded=False)
+                self._fail(db, session_id, turn_id, NOT_PILOTS, recorded=False)
             return
         if pending.resuming and pending.controller_session is not None:
             try:
@@ -348,7 +353,7 @@ class SessionStartService:
                 return
             except ExternalServiceException as error:
                 with scoped_session(self._container) as db:
-                    self._fail(db, session_id, str(error), recorded=False)
+                    self._fail(db, session_id, turn_id, str(error), recorded=False)
                 return
             if lost is not None:
                 with scoped_session(self._container) as db:
@@ -362,7 +367,7 @@ class SessionStartService:
                 if not self._bring_up(session_id, pending) or handle.stopping:
                     return
                 with scoped_session(self._container) as db:
-                    pending = self._creating(db, session_id)
+                    pending = self._creating(db, session_id, turn_id)
                 if pending is None:
                     return
                 created = (
@@ -378,12 +383,12 @@ class SessionStartService:
                 return
             except ExternalServiceException as error:
                 with scoped_session(self._container) as db:
-                    self._fail(db, session_id, str(error), recorded=False)
+                    self._fail(db, session_id, turn_id, str(error), recorded=False)
                 return
             if created is not None:
                 with scoped_session(self._container) as db:
                     session = self._records(db).lock_session(session_id)
-                    if session.state_code != SessionState.STARTING:
+                    if not _sends(db, session, turn_id):
                         return
                     if session.controller_session is None:
                         session.controller_session = created.name
@@ -398,7 +403,7 @@ class SessionStartService:
                 self._hold(db, session_id, error)
                 return
             if turn.error is not None:
-                self._fail(db, session_id, turn.error, recorded=True)
+                self._fail(db, session_id, turn_id, turn.error, recorded=True)
             elif pending.resuming:
                 self._resumed(db, session_id, turn)
 
@@ -882,13 +887,18 @@ class SessionStartService:
         self._phase(db, session_id, f"Preparing {environment.name}…")
         return True
 
-    def _creating(self, db: Session, session_id: uuid.UUID) -> _Pending | None:
+    def _creating(
+        self, db: Session, session_id: uuid.UUID, turn_id: int
+    ) -> _Pending | None:
         """The Session's start as its rows have it under its lock, with the
         phase that creates the headless session written while it has no
-        controller session; None when it is no longer `starting`."""
+        controller session; None when it is no longer `starting` to send the
+        Turn `turn_id`."""
         self._records(db).lock_session(session_id)
         pending = _pending(db, session_id)
-        if pending is not None and pending.controller_session is None:
+        if pending is None or pending.turn_id != turn_id:
+            return None
+        if pending.controller_session is None:
             self._phase(db, session_id, CREATING)
         return pending
 
@@ -904,15 +914,21 @@ class SessionStartService:
         self._moved(session)
 
     def _fail(
-        self, db: Session, session_id: uuid.UUID, reason: str, *, recorded: bool
+        self,
+        db: Session,
+        session_id: uuid.UUID,
+        turn_id: int,
+        reason: str,
+        *,
+        recorded: bool,
     ) -> None:
-        """The Session `failed` with `reason`, the Turn its start sends ended,
-        and a `server` record saying so unless that Turn's failed send
-        `recorded` one. Then its environment is handed to the shutdown timer
-        (`_hand_to_timer`). A Session no longer `starting` is left as it
-        is."""
+        """The Session `failed` with `reason`, the Turn `turn_id` its start
+        sends ended, and a `server` record saying so unless that Turn's failed
+        send `recorded` one. Then its environment is handed to the shutdown
+        timer (`_hand_to_timer`). A Session no longer `starting` to send that
+        Turn is left as it is."""
         records = self._records(db)
-        if records.lock_session(session_id).state_code != SessionState.STARTING:
+        if not _sends(db, records.lock_session(session_id), turn_id):
             return
         if not recorded:
             records.append(
@@ -968,6 +984,15 @@ def _pending(db: Session, session_id: uuid.UUID) -> _Pending | None:
         ),
         turn_id=turn.id,
         resuming=turn.seq > 1,
+    )
+
+
+def _sends(db: Session, session: AgentSession, turn_id: int) -> bool:
+    """Whether the Session, its row locked, is `starting` to send the Turn:
+    after a Stop and a Resume it starts the Resume's Turn instead."""
+    return (
+        session.state_code == SessionState.STARTING
+        and _latest_turn(db, session.id).id == turn_id
     )
 
 
