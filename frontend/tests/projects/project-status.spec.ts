@@ -268,4 +268,20 @@ test.describe('A tab’s status icon on the phone', () => {
     await resumed;
     await expect(icon.root).toHaveAttribute('data-status', 'idle');
   });
+
+  test('shows the status, not the next action’s glyph, under the hover a phone keeps after a tap', async ({ page, people, projects, projectList, shell }) => {
+    const me = await people.signIn();
+    const name = makeUnique('Sticky');
+    const id = await projects.make({ name, members: [me.handle!] });
+    await projectList.open(id);
+    await shell.drawerToggle.tap();
+    await expect(shell.side).toBeVisible();
+    const icon = projectList.statusIcon(name);
+
+    // A phone cannot hover, and keeps :hover on what it tapped until the next tap elsewhere.
+    expect(await page.evaluate(() => window.matchMedia('(hover: hover)').matches)).toBe(false);
+    await icon.root.hover();
+    await expect(icon.rest).toBeVisible();
+    await expect(icon.hover).toBeHidden();
+  });
 });

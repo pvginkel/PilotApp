@@ -46,8 +46,14 @@
   .status-icon:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: -1px; }
   .status-icon > span { display: grid; place-items: center; }
   .status-icon .glyph-hover { display: none; }
-  .status-icon[role="button"]:is(:hover, :focus-visible) .glyph-rest { display: none; }
-  .status-icon[role="button"]:is(:hover, :focus-visible) .glyph-hover { display: grid; }
+  .status-icon[role="button"]:focus-visible .glyph-rest { display: none; }
+  .status-icon[role="button"]:focus-visible .glyph-hover { display: grid; }
+  /* Under the pointer only where it hovers: a phone keeps :hover on what it tapped, and would show
+     the next action's glyph in the status's place. */
+  @media (hover: hover) {
+    .status-icon[role="button"]:hover .glyph-rest { display: none; }
+    .status-icon[role="button"]:hover .glyph-hover { display: grid; }
+  }
   .status-icon .glyph-rest[data-glyph="running"] { color: hsl(var(--success)); animation: pulse 1.4s ease-in-out infinite; }
   .status-icon .glyph-rest[data-glyph="running"] .icon { width: 9px; height: 9px; fill: currentColor; }
   .status-icon .glyph-rest[data-glyph="waiting_on_you"] { color: hsl(var(--primary-strong)); }
