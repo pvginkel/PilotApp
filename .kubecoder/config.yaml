@@ -35,12 +35,12 @@ secrets:
 
 tools:
   # Over the catalog's 5Gi: each Playwright worker runs its own backend, Vite
-  # server and Chromium here, about 0.9 GiB apiece, and 6 workers were
-  # OOMKilled at 5Gi (P-41).
+  # server and Chromium here, and the frontend verb's four peak at about
+  # 5.1 GiB.
   - use: modern-app
     resources:
       limits:
-        memory: 12Gi
+        memory: 8Gi
   # PilotDeploy's Helm and Terraform gates.
   - use: iac
   # Its architecture gates: gen-architecture and arch-validate.
