@@ -34,6 +34,7 @@ from app.services.controller_client import (
     ControllerProblem,
     ControllerProblemType,
     ControllerUnreachable,
+    EnvironmentStatus,
 )
 from app.services.environment_service import (
     DELETE_TIMER,
@@ -49,6 +50,7 @@ from tests.support.supervisor import WAIT_SECONDS, Supervise, listening, wait_un
 STOP_AFTER = timedelta(minutes=30)
 DELETE_AFTER = timedelta(days=7)
 ENV = "env-a"
+WAIT = "?wait=settled&waitMs=3600000"
 
 
 @pytest.fixture
@@ -1047,6 +1049,292 @@ class TestStart:
         assert "still starting when the wait ran out" in str(raised.value)
 
 
+class TestReset:
+    """An environment brought up in a tree made anew, for a start on a new
+    conversation in one Pilot took (§13.5; review B1, B3; V02, V05, V19)."""
+
+    def test_a_stopped_one_is_reset_its_202_taking_the_claim(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        _own(session)
+        fake_controller.add_environment(ENV, status="stopped")
+        before = datetime.now(UTC)
+
+        settled = environments.reset(ENV)
+
+        assert settled.status == "running"
+        assert fake_controller.environment(ENV).resets == 1
+        # Its stop answers that it is stopped, so no wait follows; and a reset
+        # ends in a running pod, so no start does.
+        assert fake_controller.calls == [
+            f"POST /environments/{ENV}/stop",
+            f"POST /environments/{ENV}/reset",
+            f"GET /environments/{ENV}{WAIT}",
+        ]
+        row = _row(session)
+        assert row is not None and row.server_started_at is not None
+        assert row.server_started_at >= before
+        assert row.started_pod_at == _pod(fake_controller)
+        # Nothing runs or starts there: the timer covers it.
+        assert _armed_around(row, before)
+
+    @pytest.mark.parametrize("state", ["running", "error", "provisioning"])
+    def test_one_not_stopped_is_stopped_and_its_settled_stop_awaited_first(
+        self,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        supervise: Supervise,
+        session: Session,
+        state: EnvironmentStatus,
+    ) -> None:
+        # The fake's stop leaves it `stopping` until the wait, and its reset
+        # refuses one not `stopped`, as KubeCoder's does.
+        fake = _SlowStop()
+        try:
+            client_of(container, fake)
+            service = _service(container, supervise)
+            _own(session, state=state)
+            fake.add_environment(ENV, status=state)
+
+            settled = service.reset(ENV)
+        finally:
+            fake.close()
+
+        assert settled.status == "running"
+        assert fake.environment(ENV).resets == 1
+        assert fake.calls == [
+            f"POST /environments/{ENV}/stop",
+            f"GET /environments/{ENV}{WAIT}",
+            f"POST /environments/{ENV}/reset",
+            f"GET /environments/{ENV}{WAIT}",
+        ]
+
+    @pytest.mark.parametrize("settles", ["running", "error"])
+    def test_a_stop_that_settles_other_than_stopped_is_the_starts_failure(
+        self,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        supervise: Supervise,
+        session: Session,
+        settles: EnvironmentStatus,
+    ) -> None:
+        fake = _SlowStop(stop_settles_to=settles)
+        try:
+            client_of(container, fake)
+            service = _service(container, supervise)
+            _own(session, state="running")
+            fake.add_environment(ENV, status="running")
+
+            with pytest.raises(
+                EnvironmentStartFailed, match=f"it settled {settles} after its stop"
+            ):
+                service.reset(ENV)
+        finally:
+            fake.close()
+
+        assert fake.environment(ENV).resets == 0
+        assert f"POST /environments/{ENV}/reset" not in fake.calls
+        assert _claim(_row(session)) == _NO_CLAIM
+
+    def test_a_wait_for_its_stop_that_runs_out_is_a_failure_of_the_controller(
+        self,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        supervise: Supervise,
+        session: Session,
+    ) -> None:
+        fake = _SlowStop(stop_settles_to="stopping")
+        try:
+            client_of(container, fake)
+            service = _service(container, supervise)
+            _own(session, state="running")
+            fake.add_environment(ENV, status="running")
+
+            with pytest.raises(ExternalServiceException) as raised:
+                service.reset(ENV)
+        finally:
+            fake.close()
+
+        assert not isinstance(raised.value, EnvironmentStartFailed)
+        assert "still stopping when the wait for its stop ran out" in str(raised.value)
+        assert f"POST /environments/{ENV}/reset" not in fake.calls
+
+    def test_admission_blocked_is_the_starts_failure(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        _own(session)
+        fake_controller.add_environment(ENV, status="stopped")
+        fake_controller.capped(ENV)
+
+        with pytest.raises(EnvironmentStartFailed, match="refused its reset") as raised:
+            environments.reset(ENV)
+
+        assert raised.value.env_id == ENV
+        assert isinstance(raised.value.__cause__, ControllerProblem)
+        assert fake_controller.environment(ENV).resets == 0
+        assert _claim(_row(session)) == _NO_CLAIM
+        assert fake_controller.calls[-1] == f"POST /environments/{ENV}/reset"
+
+    def test_a_stop_refused_otherwise_is_the_controllers_problem(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        _own(session, state="deleting")
+        fake_controller.add_environment(ENV, status="deleting")
+
+        with pytest.raises(ControllerProblem) as raised:
+            environments.reset(ENV)
+
+        assert not isinstance(raised.value, EnvironmentStartFailed)
+        assert raised.value.problem_type is ControllerProblemType.CONFLICT
+        assert fake_controller.calls == [f"POST /environments/{ENV}/stop"]
+
+    @pytest.mark.parametrize("settles", ["error", "stopped"])
+    def test_a_reset_that_settles_other_than_running_is_the_starts_failure(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+        settles: EnvironmentStatus,
+    ) -> None:
+        _own(session)
+        fake_controller.add_environment(ENV, status="stopped")
+        fake_controller.settle_starts(ENV, settles)
+
+        with pytest.raises(EnvironmentStartFailed, match=f"it settled {settles}"):
+            environments.reset(ENV)
+
+        assert fake_controller.environment(ENV).resets == 1
+
+    def test_its_claim_commits_before_the_wait(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        supervise: Supervise,
+    ) -> None:
+        # Review B3: a start cut in the wait reads the reset as made.
+        container = committed_app.container
+        service = _service(container, supervise)
+        with scoped_session(container) as db:
+            _own(db)
+        fake_controller.add_environment(ENV, status="stopped")
+        fake_controller.settle_starts(ENV, None)
+
+        outcome = _in_thread(lambda: service.reset(ENV))
+        wait_until(
+            lambda: _committed(container, "server_started_at") is not None,
+            "claimed",
+        )
+        assert outcome.thread.is_alive()
+        assert _committed(container, "started_pod_at") is None
+        fake_controller.set_status(ENV, "running")
+
+        assert outcome.result().status == "running"
+        assert _committed(container, "started_pod_at") == _pod(fake_controller)
+
+
+class TestRetake:
+    """The environment a work item's fresh-start Resume runs in again (review
+    B1, B3; V23)."""
+
+    def test_its_claim_is_cleared_its_reset_still_to_make(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        now = datetime.now(UTC)
+        row = _own(session, state="running", claimed=True)
+        row.started_pod_at = now - timedelta(hours=1)
+        row.stop_due_at = now + STOP_AFTER
+        session.flush()
+
+        assert environments.retake(session, ENV) is True
+
+        assert _claim(_row(session)) == _NO_CLAIM
+        assert fake_controller.calls == []
+
+    @pytest.mark.parametrize("leaving", ["deleting", GONE])
+    def test_one_leaving_is_let_go_as_it_is(
+        self, environments: EnvironmentService, session: Session, leaving: str
+    ) -> None:
+        _own(session, state=leaving, claimed=True)
+
+        assert environments.retake(session, ENV) is False
+
+        row = _row(session)
+        assert row is not None and row.server_started_at is not None
+
+
+class TestReclaim:
+    """An environment of Pilot's own whose start ended before its reset,
+    handed to the shutdown timer (V19; refinement D1)."""
+
+    def test_one_with_no_claim_is_claimed_with_no_pod(
+        self, environments: EnvironmentService, session: Session
+    ) -> None:
+        before = datetime.now(UTC)
+        _own(session, state="running")
+
+        environments.reclaim(session, ENV)
+
+        row = _row(session)
+        assert row is not None and row.server_started_at is not None
+        assert row.server_started_at >= before
+        assert (row.started_pod_at, row.stop_due_at) == (None, None)
+
+    def test_a_claim_it_has_stands(
+        self, environments: EnvironmentService, session: Session
+    ) -> None:
+        row = _own(session, state="running", claimed=True)
+        row.started_pod_at = datetime.now(UTC) - timedelta(hours=1)
+        session.flush()
+        claim = _claim(row)
+
+        environments.reclaim(session, ENV)
+
+        assert _claim(_row(session)) == claim
+
+    def test_one_pilot_did_not_create_is_left_unclaimed(
+        self, environments: EnvironmentService, session: Session
+    ) -> None:
+        _environment(session, started=False)
+
+        environments.reclaim(session, ENV)
+
+        assert _claim(_row(session)) == _NO_CLAIM
+
+    def test_the_timer_then_stops_it_once_nothing_waits_to_start_there(
+        self,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        supervise: Supervise,
+        session: Session,
+        project: Project,
+    ) -> None:
+        service = _service(container, supervise, stop_after=timedelta(0))
+        _own(session, state="running")
+        fake_controller.add_environment(ENV, status="running")
+        _agent_session(session, project, SessionState.STOPPED)
+
+        service.reclaim(session, ENV)
+        service.arm_shutdown_timer(session, ENV)
+        service.run_shutdown_timer(session)
+
+        assert fake_controller.environment(ENV).status == "stopped"
+        assert _claim(_row(session)) == _NO_CLAIM
+
+
 class TestArmShutdownTimer:
     def test_it_arms_an_environment_pilot_started_with_nothing_running_there(
         self, environments: EnvironmentService, session: Session, project: Project
@@ -1951,6 +2239,34 @@ class _StopHook(ServedFakeController):
         if hook is not None:
             hook()
         return super()._stop(request, env_id)
+
+
+class _SlowStop(ServedFakeController):
+    """The fake, whose stop leaves the environment `stopping` until a settled
+    `GET` finds it `stop_settles_to`; `stopping` there answers as a wait run
+    out does."""
+
+    def __init__(self, stop_settles_to: EnvironmentStatus = "stopped") -> None:
+        super().__init__(keepalive_seconds=0.2)
+        self.stop_settles_to = stop_settles_to
+
+    def _stop(self, request: Request, env_id: str) -> Response:
+        response = super()._stop(request, env_id)
+        if response.status_code == 202:
+            self.set_status(env_id, "stopping")
+        return response
+
+    def _get_environment(self, request: Request, env_id: str) -> Response:
+        stopping = self.environment(env_id).status == "stopping"
+        if stopping and request.args.get("wait") == "settled":
+            if self.stop_settles_to == "stopping":
+                return Response(
+                    json.dumps(self.environment(env_id).to_json()),
+                    status=200,
+                    content_type="application/json",
+                )
+            self.set_status(env_id, self.stop_settles_to)
+        return super()._get_environment(request, env_id)
 
 
 class _Hooked(ServedFakeController):

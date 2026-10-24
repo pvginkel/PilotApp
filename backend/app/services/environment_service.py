@@ -18,10 +18,12 @@ An environment of Pilot's own is free while it is neither gone nor deleting and
 no Session there is `running`, `starting` or `held`, nor `stopped` or `failed`,
 a work item that may resume (DB 240, as slice 020's refinement D1 rules it):
 derived wherever it is read, no column. A start takes a free one of its Work's
-repository, renamed after the taking Project; the delete timer's tick clears
+repository, renamed after the taking Project. A start on a new conversation
+runs in a tree made anew: a created one as it is, any other reset, its reset's
+`202` taking the claim as a start's does. The delete timer's tick clears
 the name of one that has become free and sets its `delete_due_at`, both or
 neither, and deletes it once that has passed with it still free, its row kept
-`gone`. Nothing that is not Pilot's own is taken, renamed or deleted.
+`gone`. Nothing that is not Pilot's own is taken, renamed, reset or deleted.
 """
 
 import logging
@@ -102,8 +104,8 @@ class EnvironmentStartFailed(ExternalServiceException):
 
 
 class EnvironmentService:
-    """Creates, takes, names and deletes environments of Pilot's own, starts
-    environments, and runs the shutdown and delete timers."""
+    """Creates, takes, names, resets and deletes environments of Pilot's own,
+    starts environments, and runs the shutdown and delete timers."""
 
     def __init__(
         self,
@@ -201,6 +203,31 @@ class EnvironmentService:
             return row
         return None
 
+    def retake(self, db: Session, env_id: str) -> bool:
+        """The environment of Pilot's own a work item's fresh start runs in
+        again (review B1), taken back in the caller's transaction as `take`
+        takes a free one: its row locked, its claim cleared, so that its rows
+        say its stop and its reset are still to make (review B3). False, with
+        nothing changed, when it is gone or deleting: the start lets it go."""
+        row = _lock(db, env_id)
+        if row.last_state in _LEAVING:
+            return False
+        _end_claim(row)
+        db.flush()
+        return True
+
+    def reclaim(self, db: Session, env_id: str) -> None:
+        """Under the row's lock, claim an environment of Pilot's own that has
+        no claim, its pod unknown, for a start that ends there before its
+        reset: the take or a fresh Resume cleared its claim, and the shutdown
+        timer then stops it once nothing waits to start there, whatever its
+        bring-up came to, every pod of Pilot's own being Pilot's (§13.5). Any
+        other is left as it is."""
+        row = _lock(db, env_id)
+        if row.server_created_at is not None and row.server_started_at is None:
+            row.server_started_at = datetime.now(UTC)
+            db.flush()
+
     def name(self, env_id: str, slug: str | None) -> str:
         """Rename the environment `slug`, or on a `409 name-conflict` the
         first of `slug-2`, `slug-3`, … the fleet does not hold, as the create
@@ -297,13 +324,56 @@ class EnvironmentService:
                 env_id, f"the controller refused it: {problem.title}"
             ) from problem
         if outcome.started:
-            with scoped_session(self._container) as db:
-                row = _lock(db, env_id)
-                row.server_started_at = datetime.now(UTC)
-                row.started_pod_at = None
+            self._take_claim(env_id)
             logger.info("Started environment %s", env_id)
         else:
             logger.info("Environment %s was running already", env_id)
+        return self.settle(env_id)
+
+    def reset(self, env_id: str) -> ControllerEnvironment:
+        """Bring the environment up in a tree made anew, for a start on a new
+        conversation (§13.5), and wait until it settles. KubeCoder resets a
+        `stopped` environment only, and its stop takes no `wait`: one not
+        `stopped` is stopped first, `error` among them, and its settled
+        `stopped` waited on. The reset ends in a running pod as a start does,
+        so no start follows it: its `202` takes the claim, set in a
+        transaction of its own before the wait, its pod unknown until it
+        settles. Then the wait, as `settle` makes it.
+
+        Returns:
+            The environment as the wait left it, `running`
+
+        Raises:
+            EnvironmentStartFailed: The controller refused the reset (`409
+                admission-blocked`), or the environment settled other than
+                `stopped` after its stop, or `error`, `stopped` or `deleting`
+                after its reset
+            ControllerUnreachable: The controller did not answer a call
+            ExternalServiceException: A wait ran out before it settled, or
+                the controller failed otherwise
+        """
+        client = self._client()
+        if client.stop_environment(env_id).status != "stopped":
+            stopped = client.get_environment(env_id, wait="settled")
+            if stopped.status not in _AT_REST:
+                raise ExternalServiceException(
+                    f"reset environment {env_id}",
+                    f"it was still {stopped.status} when the wait for its stop ran out",
+                )
+            if stopped.status != "stopped":
+                raise EnvironmentStartFailed(
+                    env_id, f"it settled {stopped.status} after its stop"
+                )
+        try:
+            client.reset_environment(env_id)
+        except ControllerProblem as problem:
+            if problem.problem_type is not ControllerProblemType.ADMISSION_BLOCKED:
+                raise
+            raise EnvironmentStartFailed(
+                env_id, f"the controller refused its reset: {problem.title}"
+            ) from problem
+        self._take_claim(env_id)
+        logger.info("Reset environment %s", env_id)
         return self.settle(env_id)
 
     def settle(self, env_id: str) -> ControllerEnvironment:
@@ -530,6 +600,14 @@ class EnvironmentService:
             row.id,
             row.stop_due_at.isoformat(),
         )
+
+    def _take_claim(self, env_id: str) -> None:
+        """The claim of a bring-up Pilot's call scheduled, in a transaction of
+        its own before its wait: its pod unknown until it settles."""
+        with scoped_session(self._container) as db:
+            row = _lock(db, env_id)
+            row.server_started_at = datetime.now(UTC)
+            row.started_pod_at = None
 
     def _client(self) -> ControllerClient:
         client: ControllerClient = self._container.controller_client()

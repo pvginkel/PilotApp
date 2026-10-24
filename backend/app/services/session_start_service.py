@@ -9,9 +9,9 @@ brief. The gate (§13.4) decides the Session's state: `held` while it is
 closed, with nothing run for it, else `starting`. A `starting` Session's start
 loop, `start:<id>`, runs once that commits: it takes a free environment of
 Pilot's own made from the repository, the take committed before any controller
-call and the environment then renamed after the Project, or creates one, whose
-row commits before its bring-up is waited on; then it creates the headless
-session and sends the brief, whose `202` starts the relay. Each phase the
+call and the environment then renamed after the Project and reset, or creates
+one, whose row commits before its bring-up is waited on; then it creates the
+headless session and sends the brief, whose `202` starts the relay. Each phase the
 start enters is a `server` record in no Turn (DB assertion 220), and each such
 record rebuilds the current line in its transaction.
 
@@ -40,8 +40,12 @@ F128.1). Its Resume writes a server-own Turn, "continue", or the ended Turn's
 message while the Session has no conversation (R15's rule), and passes the gate
 as a start does (F67.2): `held`, or `starting`, its loop sending the Turn to
 its controller session, or to one created anew, its environment started again,
-when that one is gone or its environment is not running (§9.6); a Session with
-no Environment has one created.
+when that one is gone or its environment is not running (§9.6), never reset. A
+Resume with no conversation to continue is a fresh start (review B1): in a
+headless session of its own, in its environment reset, or in one taken or
+created when it has none or that one is gone or deleting. A work item placed
+before slice 020, in an environment Pilot did not create, is never started
+there (F143.1; review A2).
 """
 
 import hashlib
@@ -100,6 +104,8 @@ START_FAILED = "start-failed"
 """The `type` of the `server` record a start that failed writes."""
 
 CREATING = "Creating the session…"
+
+NOT_PILOTS = "its environment is not Pilot's"
 
 WORK_KIND = "work"
 
@@ -160,9 +166,13 @@ class _Pending:
     bringing_up: bool
     """A bring-up of Pilot's there awaits its settle: its claim has no pod
     yet."""
-    taken: bool
+    unreset: bool
     """The environment is Pilot's own with no claim, for a start on a new
-    conversation: a take's, still to be named and brought up."""
+    conversation: a take's or a fresh Resume's, its rename, its stop and its
+    reset still to make (review B3)."""
+    foreign: bool
+    """The Session is a work item's in an environment Pilot did not create:
+    placed before slice 020, it is never started there."""
     controller_session: str | None
     create: HeadlessCreateRequest
     turn_id: int
@@ -203,8 +213,9 @@ class SessionStartService:
                 the client
             supervisor: Runs the start loops and the probe
             session_streams: Woken by the records the start writes
-            environment_service: Creates the environment and makes its row,
-                starts it, and clears and arms its shutdown timer
+            environment_service: Takes or creates the environment and makes
+                its row, renames, resets or starts it, and clears and arms its
+                shutdown timer
             relay_service: Sends the brief, and relays its turn
             controller_outage: The gate's outage, which the probe turns off;
                 its turning off opens the gate
@@ -311,14 +322,20 @@ class SessionStartService:
 
         The bring-up: a Session with no Environment takes a free one of
         Pilot's own (`_take`), or has one created (`_create`) and its bring-up
-        awaited; one whose environment has a bring-up of Pilot's still to
-        settle, a create's or a start's, has it awaited, never a second
-        scheduled; any other has its environment started, a taken one renamed
-        after its Project first (`_named`).
+        awaited; one whose environment's reset is still to make has it
+        renamed after its Project (`_named`) and reset; one whose environment
+        has a bring-up of Pilot's still to settle, a create's, a reset's or a
+        start's, has it awaited, never a second scheduled; any other has its
+        environment started. A Session in an environment Pilot did not create
+        fails with nothing called.
         """
         with scoped_session(self._container) as db:
             pending = _pending(db, session_id)
         if pending is None:
+            return
+        if pending.foreign:
+            with scoped_session(self._container) as db:
+                self._fail(db, session_id, NOT_PILOTS, recorded=False)
             return
         if pending.resuming and pending.controller_session is not None:
             try:
@@ -460,7 +477,8 @@ class SessionStartService:
         a failed start's carries its brief), and the Session through the gate
         (§13.4): `held` while it is closed, else `starting`, its loop sending
         the Turn once this commits. The item stays one item (F26.7); its
-        Session's `error` is cleared.
+        Session's `error` is cleared. With no conversation it is a fresh start
+        (`_fresh`).
 
         The project's row is read under a share lock, so a Resume and a
         Finish or an Archive never interleave.
@@ -471,9 +489,9 @@ class SessionStartService:
         Raises:
             RecordNotFoundException: No Session has the id
             InvalidOperationException: No controller is configured; the
-                Session is no work item's, is neither stopped nor failed, or
-                has its stopped turn still in flight; or the project is
-                finished or archived
+                Session is no work item's, is neither stopped nor failed, runs
+                in an environment Pilot did not create, or has its stopped
+                turn still in flight; or the project is finished or archived
         """
         operation = f"resume {_work_named(db, session_id)}"
         if not self._controller_configured:
@@ -487,6 +505,8 @@ class SessionStartService:
             raise InvalidOperationException(
                 operation, _RESUME_REFUSALS[session.state_code]
             )
+        if _foreign(session, _environment(db, session)):
+            raise InvalidOperationException(operation, NOT_PILOTS)
         refusal = _closed(project)
         if refusal is not None:
             raise InvalidOperationException(operation, refusal)
@@ -509,6 +529,8 @@ class SessionStartService:
         session.turn_ended_at = None
         session.error = None
         session.current_line = None
+        if session.conversation_id is None:
+            self._fresh(db, session)
         held = held_reason(
             paused=project.paused,
             kind_code=session.kind_code,
@@ -577,16 +599,17 @@ class SessionStartService:
         """The start of a `starting` Session begun, and its loop run once the
         transaction commits. In its Environment, the phase that brings it
         up, unless the Session has its controller session already, and its
-        shutdown timer cleared. One with no Environment yet, or with one taken
-        and still to be named, enters its phase at the take's rename or at the
-        create."""
-        if session.environment_id is None:
-            after_commit(_LoopStart(self, session.id))
-            return
-        environment = db.get_one(Environment, session.environment_id)
-        if session.controller_session is None and not _taken(session, environment):
-            self._phase(db, session.id, _bringing_up(db, session, environment))
-        self._environments.clear_shutdown_timer(db, session.environment_id)
+        shutdown timer cleared. One with no Environment yet, or with one whose
+        reset is still to make, enters its phase at the create or at the
+        rename; one in an environment Pilot did not create none, its loop
+        failing it."""
+        environment = _environment(db, session)
+        if environment is not None and not _foreign(session, environment):
+            if session.controller_session is None and not _unreset(
+                session, environment
+            ):
+                self._phase(db, session.id, _bringing_up(session, environment))
+            self._environments.clear_shutdown_timer(db, environment.id)
         after_commit(_LoopStart(self, session.id))
 
     def _stop(
@@ -596,9 +619,8 @@ class SessionStartService:
         current line (F67.1, F69.2). A turn in flight stays so, for its relay to
         record to the end the controller's interrupt gives it once this
         commits; a start held or under way has its Turn ended unsent, and its
-        loop sends nothing more. Its environment's shutdown timer is armed if
-        nothing else runs or starts there; a start held before it had one arms
-        none."""
+        loop sends nothing more. Its environment is handed to the shutdown
+        timer (`_hand_to_timer`); a start held before it had one arms none."""
         before = session.state_code
         session.state_code = SessionState.STOPPED
         session.stopped_at = at
@@ -610,10 +632,39 @@ class SessionStartService:
             turn = _latest_turn(db, session.id)
             turn.ended_at = at
             session.turn_ended_at = at
-        if session.environment_id is not None:
-            self._environments.arm_shutdown_timer(db, session.environment_id)
+        self._hand_to_timer(db, session)
         self._moved(session, state=True)
         logger.info("Session %s stopped by %s, %s", session.id, person.handle, before)
+
+    def _fresh(self, db: Session, session: AgentSession) -> None:
+        """A Resume with no conversation to continue, a fresh start (review
+        B1): in a headless session of its own, never one an earlier start
+        left there, in its environment taken back, its reset still to make
+        (`EnvironmentService.retake`); one gone or deleting it lets go, and
+        its start takes a free one or creates one."""
+        session.controller_session = None
+        if session.environment_id is not None and not self._environments.retake(
+            db, session.environment_id
+        ):
+            logger.info(
+                "Session %s lets environment %s go: it is leaving",
+                session.id,
+                session.environment_id,
+            )
+            session.environment_id = None
+
+    def _hand_to_timer(self, db: Session, session: AgentSession) -> None:
+        """The shutdown timer of the environment the Session stops or fails
+        in armed, if it has one, when nothing else runs or starts there. One
+        whose reset was still to make, its claim cleared for it, is claimed
+        first (`EnvironmentService.reclaim`), so that a start cut before its
+        reset leaves no environment of Pilot's running outside the timer
+        (refinement D1)."""
+        if session.environment_id is None:
+            return
+        if session.conversation_id is None:
+            self._environments.reclaim(db, session.environment_id)
+        self._environments.arm_shutdown_timer(db, session.environment_id)
 
     def _lost_reason(self, env_id: str, name: str) -> str | None:
         """Why the controller session takes no turn: gone, ended, or its
@@ -697,13 +748,15 @@ class SessionStartService:
     def _bring_up(self, session_id: uuid.UUID, pending: _Pending) -> bool:
         """The Session's environment brought up as its rows have it, and its
         settle awaited (`run`). Returns False when the Session moved on
-        before it took an environment: one this run's create made for it is
-        stopped at once, and left free.
+        before it took an environment, one this run's create made for it
+        stopped at once and left free, or before its reset.
 
         Raises:
-            ControllerProblem: The controller refused the create or the rename
-            EnvironmentStartFailed: It refused the start, or the environment
-                settled other than `running`
+            ControllerProblem: The controller refused the create, the rename
+                or the stop
+            EnvironmentStartFailed: It refused the start or the reset, or the
+                environment settled other than `stopped` after its stop or
+                other than `running` after its bring-up
             ControllerUnreachable: The controller did not answer a call
             ExternalServiceException: The controller failed otherwise
         """
@@ -719,9 +772,11 @@ class SessionStartService:
                 return False
             self._environments.settle(env_id)
             return True
-        if pending.taken:
-            self._named(session_id, pending.env_id)
-        if pending.bringing_up:
+        if pending.unreset:
+            if not self._named(session_id, pending.env_id):
+                return False
+            self._environments.reset(pending.env_id)
+        elif pending.bringing_up:
             self._environments.settle(pending.env_id)
         else:
             self._environments.start(pending.env_id)
@@ -753,10 +808,11 @@ class SessionStartService:
                 )
             return _pending(db, session_id)
 
-    def _named(self, session_id: uuid.UUID, env_id: str) -> None:
+    def _named(self, session_id: uuid.UUID, env_id: str) -> bool:
         """The environment its start took renamed after the Session's
         Project (§13.5), unnamed for a draft's, and the phase that prepares
-        it, while the Session is still `starting` there.
+        it, while the Session is still `starting` there. Returns whether it
+        is.
 
         Raises:
             ControllerProblem: The controller refused the rename
@@ -769,10 +825,12 @@ class SessionStartService:
         with scoped_session(self._container) as db:
             session = self._records(db).lock_session(session_id)
             if (
-                session.state_code == SessionState.STARTING
-                and session.environment_id == env_id
+                session.state_code != SessionState.STARTING
+                or session.environment_id != env_id
             ):
-                self._phase(db, session_id, f"Preparing {name}…")
+                return False
+            self._phase(db, session_id, f"Preparing {name}…")
+            return True
 
     def _create(self, session_id: uuid.UUID) -> tuple[str, bool]:
         """An environment of Pilot's own created from the Work's repository,
@@ -850,9 +908,9 @@ class SessionStartService:
     ) -> None:
         """The Session `failed` with `reason`, the Turn its start sends ended,
         and a `server` record saying so unless that Turn's failed send
-        `recorded` one. Then its environment's shutdown timer is armed, if it
-        has one, Pilot's to stop, and nothing else runs or starts there. A
-        Session no longer `starting` is left as it is."""
+        `recorded` one. Then its environment is handed to the shutdown timer
+        (`_hand_to_timer`). A Session no longer `starting` is left as it
+        is."""
         records = self._records(db)
         if records.lock_session(session_id).state_code != SessionState.STARTING:
             return
@@ -871,8 +929,7 @@ class SessionStartService:
         session.error = reason
         session.current_line = None
         self._moved(session, state=True)
-        if session.environment_id is not None:
-            self._environments.arm_shutdown_timer(db, session.environment_id)
+        self._hand_to_timer(db, session)
         logger.warning("Session %s failed to start: %s", session_id, reason)
 
     def _moved(self, session: AgentSession, *, state: bool = False) -> None:
@@ -893,17 +950,14 @@ def _pending(db: Session, session_id: uuid.UUID) -> _Pending | None:
     if session.state_code != SessionState.STARTING:
         return None
     turn = _latest_turn(db, session_id)
-    environment = (
-        None
-        if session.environment_id is None
-        else db.get_one(Environment, session.environment_id, populate_existing=True)
-    )
+    environment = _environment(db, session)
     return _Pending(
         env_id=session.environment_id,
         bringing_up=environment is not None
         and environment.server_started_at is not None
         and environment.started_pod_at is None,
-        taken=environment is not None and _taken(session, environment),
+        unreset=environment is not None and _unreset(session, environment),
+        foreign=_foreign(session, environment),
         controller_session=session.controller_session,
         create=HeadlessCreateRequest(
             cwd=session.cwd,
@@ -917,10 +971,17 @@ def _pending(db: Session, session_id: uuid.UUID) -> _Pending | None:
     )
 
 
-def _taken(session: AgentSession, environment: Environment) -> bool:
-    """Whether the Session's environment is a take's, still to be named and
-    brought up: Pilot's own with no claim, for a start on a new
-    conversation."""
+def _environment(db: Session, session: AgentSession) -> Environment | None:
+    """The Session's Environment, read afresh; None while it has none."""
+    if session.environment_id is None:
+        return None
+    return db.get_one(Environment, session.environment_id, populate_existing=True)
+
+
+def _unreset(session: AgentSession, environment: Environment) -> bool:
+    """Whether the Session's environment is still to be named, stopped and
+    reset: Pilot's own with no claim, the take's or the fresh Resume's
+    cleared, for a start on a new conversation (review B3)."""
     return (
         environment.server_created_at is not None
         and environment.server_started_at is None
@@ -928,14 +989,22 @@ def _taken(session: AgentSession, environment: Environment) -> bool:
     )
 
 
-def _bringing_up(db: Session, session: AgentSession, environment: Environment) -> str:
+def _foreign(session: AgentSession, environment: Environment | None) -> bool:
+    """Whether the Session is a work item's in an environment Pilot did not
+    create: placed by id before slice 020, it is never started there
+    (F143.1; review A2)."""
+    return (
+        environment is not None
+        and environment.server_created_at is None
+        and session.kind_code == WORK_KIND
+    )
+
+
+def _bringing_up(session: AgentSession, environment: Environment) -> str:
     """The phase that brings the Session's environment up (decision 38):
-    "Preparing" one of Pilot's own for the brief's start, which made it, else
-    "Starting" it."""
-    if (
-        environment.server_created_at is not None
-        and _latest_turn(db, session.id).seq == 1
-    ):
+    "Preparing" one of Pilot's own for a start on a new conversation, which
+    created or reset it, else "Starting" it."""
+    if environment.server_created_at is not None and session.conversation_id is None:
         return f"Preparing {environment.name}…"
     return f"Starting {environment.name}…"
 

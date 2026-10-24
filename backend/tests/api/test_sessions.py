@@ -17,13 +17,13 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.database import scoped_session
-from app.models import Project, Turn, User
+from app.models import Environment, Project, Turn, User
 from app.models.reference import RecordKind, SessionState
 from app.services.container import ServiceContainer
 from app.services.environment_service import EnvironmentService
-from app.services.relay_service import RelayService
+from app.services.relay_service import CONTINUE, RelayService
 from app.services.session_record_service import SessionRecordService
-from app.services.session_start_service import SessionStartService
+from app.services.session_start_service import NOT_PILOTS, SessionStartService
 from app.services.session_stream_service import STREAM_VIEWS
 from app.services.sse_connection_manager import SSEConnection, SSEConnectionManager
 from app.utils.after_commit import clear_after_commit_callbacks
@@ -523,6 +523,23 @@ def _work_item(
     return run
 
 
+def _in_pilots_own(session: DbSession, run: models.Session) -> models.Session:
+    """`run` moved to an environment of Pilot's own, named after its project."""
+    own = Environment(
+        id="example-example-own",
+        name="camp",
+        exempt=False,
+        last_state="stopped",
+        server_created_at=datetime.now(UTC),
+        repo="example/Example",
+    )
+    session.add(own)
+    session.flush()
+    run.environment_id = own.id
+    session.flush()
+    return run
+
+
 def _starts(
     container: ServiceContainer, supervise: Supervise, *, controller_configured: bool
 ) -> SessionStartService:
@@ -714,6 +731,8 @@ class TestResumeSession:
         run = _work_item(
             container, session, project, project_session, SessionState.STOPPED
         )
+        _in_pilots_own(session, run).conversation_id = "conv-1"
+        session.flush()
         sign_in(client, SUBJECT)
 
         response = client.post(f"/api/sessions/{run.id}/resume")
@@ -721,13 +740,13 @@ class TestResumeSession:
         assert response.status_code == 200, response.get_json()
         body = response.get_json()
         assert (body["state"], body["held_reason"]) == ("starting", None)
-        assert body["current_line"]["text"] == "Starting Example-1…"
+        assert body["current_line"]["text"] == "Starting camp…"
         assert [
             turn.message
             for turn in session.scalars(
                 select(Turn).where(Turn.session_id == run.id).order_by(Turn.seq)
             )
-        ] == ["The brief", "The brief"]
+        ] == ["The brief", CONTINUE]
 
     def test_in_a_paused_project_it_answers_the_work_item_held(
         self,
@@ -738,8 +757,11 @@ class TestResumeSession:
         project: Project,
         project_session: models.Session,
     ) -> None:
-        run = _work_item(
-            container, session, project, project_session, SessionState.FAILED
+        run = _in_pilots_own(
+            session,
+            _work_item(
+                container, session, project, project_session, SessionState.FAILED
+            ),
         )
         project.paused = True
         session.flush()
@@ -753,6 +775,28 @@ class TestResumeSession:
             "held",
             "paused",
             None,
+        )
+
+    def test_a_work_item_in_an_environment_pilot_did_not_create_is_409(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        # Placed by id before slice 020, in the store's environment.
+        run = _work_item(
+            container, session, project, project_session, SessionState.STOPPED
+        )
+        sign_in(client, SUBJECT)
+
+        response = client.post(f"/api/sessions/{run.id}/resume")
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            f"Cannot resume Build the camp because {NOT_PILOTS}"
         )
 
     def test_a_work_item_it_cannot_resume_is_409(

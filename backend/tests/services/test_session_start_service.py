@@ -38,7 +38,7 @@ from app.models.reference import (
 from app.schemas.timeline import HeldReason
 from app.services.auth_service import AuthContext
 from app.services.container import ServiceContainer
-from app.services.controller_client import HeadlessCreateRequest
+from app.services.controller_client import EnvironmentStatus, HeadlessCreateRequest
 from app.services.controller_outage import ControllerOutage
 from app.services.environment_service import EnvironmentService
 from app.services.fake_controller import (
@@ -49,6 +49,7 @@ from app.services.fake_controller import (
 from app.services.relay_service import CONTINUE, SEND_FAILED, SESSION_GONE, RelayService
 from app.services.session_record_service import StoredRecord, read_records
 from app.services.session_start_service import (
+    NOT_PILOTS,
     START_FAILED,
     STARTING,
     SessionStartService,
@@ -82,8 +83,10 @@ START_LOGGER = "app.services.session_start_service"
 
 class _Recording(ServedFakeController):
     """The fake, keeping each environment create's body and the env id it
-    made, and each headless create's body, and refusing every send with `502
-    worker-unreachable` while `refuse_sends` is set. `during_provision`,
+    made, and each headless create's body, refusing every send with `502
+    worker-unreachable` while `refuse_sends` is set, and answering the next
+    reset, made, with an ingress's `502` while `lose_reset` is set, as a
+    reset whose `202` was lost leaves it. `during_provision`,
     `during_rename`, `during_start`, `during_settle`, `during_create` and
     `during_snapshot`, when set, run once, as an environment's create, its
     rename, its start, its `wait`, a headless create or a session's snapshot
@@ -96,6 +99,7 @@ class _Recording(ServedFakeController):
         self.created: list[str] = []
         self.create_bodies: list[dict[str, Any]] = []
         self.refuse_sends = False
+        self.lose_reset = False
         self.during_provision: Callable[[], None] | None = None
         self.during_rename: Callable[[], None] | None = None
         self.during_start: Callable[[], None] | None = None
@@ -123,6 +127,13 @@ class _Recording(ServedFakeController):
         if hook is not None:
             hook()
         return super()._start(request, env_id)
+
+    def _reset_environment(self, request: Request, env_id: str) -> Response:
+        response = super()._reset_environment(request, env_id)
+        if self.lose_reset:
+            self.lose_reset = False
+            return Response("upstream unavailable", status=502)
+        return response
 
     def _get_session(self, request: Request, env_id: str, name: str) -> Response:
         hook, self.during_snapshot = self.during_snapshot, None
@@ -597,8 +608,11 @@ class TestRun:
         assert row.server_started_at == row.server_created_at
         assert row.started_pod_at == created.pod_started_at is not None
         assert row.stop_due_at is None
-        # A create ends in a running pod: no start follows it.
+        # A create ends in a running pod: no start follows it, and its tree is
+        # new: no reset either.
         assert f"POST /environments/{env_id}/start" not in fake.calls
+        assert f"POST /environments/{env_id}/reset" not in fake.calls
+        assert created.resets == 0
         (headless,) = fake.sessions(env_id)
         assert headless.status == "busy"
         run = _read(session, run.id)
@@ -879,21 +893,25 @@ def _free(
     *,
     name: str | None = None,
     freed_at: datetime | None = None,
+    state: EnvironmentStatus = "stopped",
 ) -> Environment:
     """An environment of Pilot's own made from the repository, free and
-    stopped, its row as the fleet reports it, its delete deadline set from
-    `freed_at`."""
-    fake.add_environment(env_id, name=name, repo=REPO)
+    `state`, running under Pilot's claim on its pod, its row as the fleet
+    reports it, its delete deadline set from `freed_at`."""
+    fake.add_environment(env_id, name=name, repo=REPO, status=state)
     now = datetime.now(UTC)
     row = Environment(
         id=env_id,
         name=name or env_id,
         exempt=False,
-        last_state="stopped",
+        last_state=state,
         server_created_at=now - timedelta(days=2),
         repo=REPO,
         delete_due_at=(freed_at or now - timedelta(hours=1)) + DELETE_AFTER,
     )
+    if state == "running":
+        row.server_started_at = now - timedelta(hours=1)
+        row.started_pod_at = fake.environment(env_id).pod_started_at
     db.add(row)
     db.flush()
     return row
@@ -917,7 +935,7 @@ class TestRunTakes:
     renamed after the taking Project (§13.5; DB 240; refinement D1; V01, V10,
     V17, V18)."""
 
-    def test_a_free_environment_of_its_repository_is_taken_renamed_and_started(
+    def test_a_free_environment_of_its_repository_is_taken_renamed_and_reset(
         self,
         starts: SessionStartService,
         fake: _Recording,
@@ -935,11 +953,16 @@ class TestRunTakes:
         assert fake.environment(FREE).name == SLUG
         row = _row(session, FREE)
         assert (row.name, row.delete_due_at) == (SLUG, None)
-        # Renamed before it is brought up; its start's `202` took the claim.
-        assert _calls_on(fake, FREE)[:2] == [
+        # Renamed, then reset, stopped as it is: a reset ends in a running pod,
+        # and no start follows it; its `202` took the claim.
+        assert _calls_on(fake, FREE)[:4] == [
             f"POST /environments/{FREE}/rename",
-            f"POST /environments/{FREE}/start",
+            f"POST /environments/{FREE}/stop",
+            f"POST /environments/{FREE}/reset",
+            f"GET /environments/{FREE}?wait=settled&waitMs=3600000",
         ]
+        assert f"POST /environments/{FREE}/start" not in fake.calls
+        assert fake.environment(FREE).resets == 1
         assert row.server_started_at is not None
         assert row.started_pod_at == fake.environment(FREE).pod_started_at is not None
         run = _read(session, run.id)
@@ -1033,7 +1056,7 @@ class TestRunTakes:
         assert len(_calls_on(fake, bound)) == calls
         assert _read(session, first.id).environment_id == bound
 
-    def test_an_environment_pilot_did_not_create_is_never_taken_renamed_or_started(
+    def test_an_environment_pilot_did_not_create_is_never_taken_renamed_or_reset(
         self,
         starts: SessionStartService,
         fake: _Recording,
@@ -1105,9 +1128,12 @@ class TestRunTakes:
         assert (run.state_code, run.environment_id) == (SessionState.STOPPED, FREE)
         assert _server(session, run.id) == []
         assert fake.sessions(FREE) == []
-        # Its bring-up's claim stands, and nothing runs there: the timer stops it.
+        # Nothing of it is reset, and the Stop claimed it, its reset still to
+        # make: nothing runs there, so the timer stops it.
+        assert fake.environment(FREE).resets == 0
         row = _row(session, FREE)
         assert row.server_started_at is not None and row.stop_due_at is not None
+        assert row.started_pod_at is None
         assert row.delete_due_at is None
 
     def test_a_rename_the_controller_does_not_answer_holds_the_start_until_it_does(
@@ -1211,12 +1237,319 @@ class TestRunTakes:
         assert fake.created == [env_id]
         assert [each["envId"] for each in fake.managed()] == [env_id]
         assert _env(session, second.id) == env_id
+        # The second fresh start runs in it reset; the first, which created it,
+        # did not reset it.
+        assert fake.environment(env_id).resets == 1
         assert fake.environment(env_id).name == "dune"
         row = _row(session, env_id)
         assert (row.name, row.delete_due_at) == ("dune", None)
         # The env chip shows the row as it stands.
         chip = work_status(session, [first.id], unreachable=False)[first.id]
         assert chip.environment is not None and chip.environment.name == "dune"
+
+
+WAIT = "?wait=settled&waitMs=3600000"
+BY_ID = "env-placed-by-id"
+
+
+def _verbs(fake: ServedFakeController, env_id: str) -> list[str]:
+    """The environment's renames, stops, resets and starts, in order."""
+    return [
+        call.rsplit("/", 1)[1]
+        for call in _calls_on(fake, env_id)
+        if call.endswith(("/rename", "/stop", "/reset", "/start"))
+    ]
+
+
+class TestRunResets:
+    """A start on a new conversation in an environment it took runs in it
+    reset: stopped first unless it is, its settled `stopped` awaited, then
+    reset, whose `202` takes the claim and which no start follows (§13.5;
+    review B3; V02, V05, V19, V20)."""
+
+    @pytest.mark.parametrize("state", ["running", "stopping"])
+    def test_one_not_stopped_is_stopped_and_its_stop_awaited_before_its_reset(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        state: EnvironmentStatus,
+    ) -> None:
+        old_pod = _free(session, fake, state=state).started_pod_at
+        run = _start(starts, session, project)
+
+        _run(starts, run)
+
+        assert _calls_on(fake, FREE)[:5] == [
+            f"POST /environments/{FREE}/rename",
+            f"POST /environments/{FREE}/stop",
+            f"GET /environments/{FREE}{WAIT}",
+            f"POST /environments/{FREE}/reset",
+            f"GET /environments/{FREE}{WAIT}",
+        ]
+        assert fake.environment(FREE).resets == 1
+        assert _read(session, run.id).state_code == SessionState.RUNNING
+        # The claim is the reset's, on the pod it brought up.
+        row = _row(session, FREE)
+        assert row.server_started_at is not None
+        assert row.started_pod_at == fake.environment(FREE).pod_started_at
+        assert row.started_pod_at not in (None, old_pod)
+
+    def test_a_reset_the_controller_refuses_fails_the_start_unretried(
+        self,
+        container: ServiceContainer,
+        fake: _Recording,
+        supervise: Supervise,
+        session: DbSession,
+        project: Project,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        # No time to stand idle: the next tick is due.
+        starts, environments, _ = _services(
+            container, supervise, stop_after=timedelta(0)
+        )
+        _free(session, fake)
+        fake.capped(FREE)
+        run = _start(starts, session, project)
+
+        _run(starts, run)
+
+        run = _assert_failed(session, run.id)
+        assert run.error is not None
+        assert "refused its reset" in run.error and "environment limit" in run.error
+        assert _server(session, run.id) == [
+            (None, PREPARING),
+            (None, {"type": START_FAILED, "reason": run.error}),
+        ]
+        assert _verbs(fake, FREE) == ["rename", "stop", "reset"]
+        assert fake.environment(FREE).resets == 0
+        assert not controller_outage.holds
+        # Bound to its item, which shows Resume (D1), and under the timer.
+        assert run.environment_id == FREE
+        environments.run_shutdown_timer(session)
+        assert _verbs(fake, FREE)[-1] == "stop"
+        assert fake.environment(FREE).status == "stopped"
+
+    def test_an_environment_that_settles_error_after_its_reset_fails_the_start(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        _free(session, fake)
+        fake.settle_starts(FREE, "error")
+        run = _start(starts, session, project)
+
+        _run(starts, run)
+
+        run = _assert_failed(session, run.id)
+        assert run.error is not None and "it settled error" in run.error
+        assert fake.environment(FREE).resets == 1
+        assert fake.create_bodies == []
+        # Its Resume is a fresh start: it is stopped, out of `error`, and reset
+        # again (review B1).
+        fake.settle_starts(FREE, "running")
+        starts.resume(session, run.id)
+        clear_after_commit_callbacks()
+        _run(starts, run)
+
+        assert _read(session, run.id).state_code == SessionState.RUNNING
+        assert _verbs(fake, FREE)[-3:] == ["rename", "stop", "reset"]
+        assert fake.environment(FREE).resets == 2
+
+    def test_a_reset_whose_202_was_lost_is_made_again(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        _free(session, fake)
+        fake.lose_reset = True
+        run = _start(starts, session, project)
+
+        _run(starts, run)
+
+        run = _read(session, run.id)
+        assert (run.state_code, run.environment_id) == (SessionState.HELD, FREE)
+        assert controller_outage.holds
+        # Made at the controller, but its rows say no claim: still to make.
+        assert fake.environment(FREE).resets == 1
+        row = _row(session, FREE)
+        assert (row.server_started_at, row.started_pod_at) == (None, None)
+
+        controller_outage.probe_answered()
+        _release(starts)
+        _run(starts, run)
+
+        assert _read(session, run.id).state_code == SessionState.RUNNING
+        # The pod the lost reset brought up is stopped, and the tree made anew
+        # a second time: no work runs in an unreset tree.
+        assert _verbs(fake, FREE) == [
+            "rename",
+            "stop",
+            "reset",
+            "rename",
+            "stop",
+            "reset",
+        ]
+        assert fake.environment(FREE).resets == 2
+        assert _server(session, run.id) == [
+            (None, PREPARING),
+            (None, PREPARING),
+            (None, CREATING),
+        ]
+        row = _row(session, FREE)
+        assert row.started_pod_at == fake.environment(FREE).pod_started_at
+
+    def test_a_start_cut_after_its_reset_awaits_its_settle_alone(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        controller_outage: ControllerOutage,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _free(session, fake)
+        run = _start(starts, session, project)
+        client = container.controller_client()
+        reset = client.reset_environment
+
+        def then_down(env_id: str) -> Any:
+            reset_answer = reset(env_id)
+            fake.outage()
+            return reset_answer
+
+        monkeypatch.setattr(client, "reset_environment", then_down)
+
+        _run(starts, run)
+
+        assert _read(session, run.id).state_code == SessionState.HELD
+        # Its claim says the reset was made, its settle still to await.
+        row = _row(session, FREE)
+        claimed = row.server_started_at
+        assert claimed is not None and row.started_pod_at is None
+
+        monkeypatch.undo()
+        fake.outage(on=False)
+        controller_outage.probe_answered()
+        _release(starts)
+        _run(starts, run)
+
+        assert _read(session, run.id).state_code == SessionState.RUNNING
+        assert _verbs(fake, FREE) == ["rename", "stop", "reset"]
+        assert fake.environment(FREE).resets == 1
+        row = _row(session, FREE)
+        assert row.server_started_at == claimed
+        assert row.started_pod_at == fake.environment(FREE).pod_started_at
+        assert _server(session, run.id) == [
+            (None, PREPARING),
+            (None, PREPARING),
+            (None, CREATING),
+        ]
+
+    def test_a_start_held_before_its_reset_and_stopped_leaves_it_under_the_timer(
+        self,
+        container: ServiceContainer,
+        fake: _Recording,
+        supervise: Supervise,
+        session: DbSession,
+        project: Project,
+        person: User,
+        controller_outage: ControllerOutage,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Taken running under Pilot's claim, its claim cleared at the take, and
+        # its stop unanswered (V19; D1).
+        starts, environments, _ = _services(
+            container, supervise, stop_after=timedelta(0)
+        )
+        _free(session, fake, state="running")
+        run = _start(starts, session, project)
+        client = container.controller_client()
+        stop = client.stop_environment
+
+        def unanswered(env_id: str) -> Any:
+            fake.outage()
+            return stop(env_id)
+
+        monkeypatch.setattr(client, "stop_environment", unanswered)
+        _run(starts, run)
+        assert _read(session, run.id).state_code == SessionState.HELD
+        row = _row(session, FREE)
+        assert (row.server_started_at, row.stop_due_at) == (None, None)
+        assert fake.environment(FREE).status == "running"
+        monkeypatch.undo()
+        fake.outage(on=False)
+        controller_outage.probe_answered()
+
+        starts.stop(session, run.id, person)
+        clear_after_commit_callbacks()
+
+        row = _row(session, FREE)
+        assert row.server_started_at is not None and row.stop_due_at is not None
+        environments.run_shutdown_timer(session)
+        assert fake.environment(FREE).status == "stopped"
+        assert fake.environment(FREE).resets == 0
+        row = _row(session, FREE)
+        assert (row.server_started_at, row.stop_due_at) == (None, None)
+        assert _read(session, run.id).environment_id == FREE
+
+
+def _placed_by_id(
+    starts: SessionStartService,
+    db: DbSession,
+    fake: ServedFakeController,
+    project: Project,
+    state: SessionState,
+) -> models.Session:
+    """A work item placed by id before slice 020, in an environment Pilot did
+    not create, its Session `state`."""
+    fake.add_environment(BY_ID, name="Placed", repo=REPO)
+    db.add(Environment(id=BY_ID, name="Placed", exempt=False, last_state="stopped"))
+    db.flush()
+    run = _read(db, _start_work(starts, db, project).id)
+    run.environment_id = BY_ID
+    run.state_code = state
+    if state in (SessionState.STOPPED, SessionState.FAILED):
+        (brief,) = _turns(db, run.id)
+        brief.ended_at = run.turn_ended_at = datetime.now(UTC)
+    db.flush()
+    return run
+
+
+class TestRunPlacedById:
+    """A work item placed by id before slice 020 is never started in an
+    environment Pilot did not create (F143.1; review A2; V10)."""
+
+    @pytest.mark.parametrize("state", [SessionState.STARTING, SessionState.HELD])
+    def test_its_start_fails_with_nothing_called(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        state: SessionState,
+    ) -> None:
+        run = _placed_by_id(starts, session, fake, project, state)
+        if state is SessionState.HELD:
+            _release(starts)
+            clear_after_commit_callbacks()
+
+        _run(starts, run)
+
+        run = _assert_failed(session, run.id, NOT_PILOTS)
+        assert _server(session, run.id) == [
+            (None, {"type": START_FAILED, "reason": NOT_PILOTS}),
+        ]
+        assert _calls_on(fake, BY_ID) == []
+        assert fake.created == []
+        assert run.environment_id == BY_ID
 
 
 class TestRunFails:
@@ -2736,6 +3069,29 @@ def _stopped_item(
     return run
 
 
+def _failed_before_its_first_line(
+    starts: SessionStartService,
+    fake: _Recording,
+    db: DbSession,
+    project: Project,
+) -> models.Session:
+    """A work item whose start failed before its first line, its brief's send
+    refused, in the environment its start created, running, with no
+    conversation to continue."""
+    fake.refuse_sends = True
+    run = _start(starts, db, project)
+    _run(starts, run)
+    fake.refuse_sends = False
+    run = _read(db, run.id)
+    assert run.state_code == SessionState.FAILED
+    assert run.conversation_id is None and run.controller_session is not None
+    return run
+
+
+def _claim(row: Environment) -> tuple[Any, Any, Any]:
+    return (row.server_started_at, row.started_pod_at, row.stop_due_at)
+
+
 class TestResume:
     """A work item's Resume (F67.2, F26.7; R15's rule; review A1; V04, V05)."""
 
@@ -2789,6 +3145,9 @@ class TestResume:
         assert run.started_at == _turns(session, run.id)[1].started_at
         assert session.scalars(select(Item)).all() == [session.get_one(Item, run.id)]
         assert fake.calls.count(CREATE_ENVIRONMENT) == 1
+        # It continues in the tree as the session left it (F131.2).
+        assert _verbs(fake, env_id) == []
+        assert fake.environment(env_id).resets == 0
 
     def test_a_failed_start_with_no_environment_resumes_with_the_ended_turns_message_in_one_it_creates(
         self,
@@ -2819,6 +3178,128 @@ class TestResume:
         (created,) = fake.sessions(env_id)
         assert fake.create_bodies == [{"cwd": CWD}]
         assert _sends(fake, env_id, created.name) == 1
+
+    @pytest.mark.parametrize("state", ["running", "error", "stopped"])
+    def test_one_with_no_conversation_is_a_fresh_start_in_its_environment_reset(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        state: EnvironmentStatus,
+    ) -> None:
+        # Review B1: its environment as the failure left it, in error, or
+        # stopped by the timer.
+        failed = _failed_before_its_first_line(starts, fake, session, project)
+        env_id = _env(session, failed.id)
+        earlier = failed.controller_session
+        if state != "running":
+            fake.set_status(env_id, state)
+        records = len(_records(session, failed.id))
+
+        run = starts.resume(session, failed.id)
+        clear_after_commit_callbacks()
+
+        # Taken back as a take takes one: its claim cleared, its reset still
+        # to make, its phase the rename's, and the earlier start's controller
+        # session not its own.
+        assert run.controller_session is None
+        assert _claim(_row(session, env_id)) == (None, None, None)
+        assert len(_records(session, run.id)) == records
+
+        _run(starts, run)
+
+        run = _read(session, run.id)
+        assert (run.state_code, run.environment_id) == (SessionState.RUNNING, env_id)
+        assert _verbs(fake, env_id) == ["rename", "stop", "reset"]
+        assert fake.environment(env_id).resets == 1
+        assert run.controller_session not in (None, earlier)
+        assert [each.name for each in fake.sessions(env_id)] == [run.controller_session]
+        assert fake.create_bodies[-1] == {"cwd": CWD}
+        assert [turn.message for turn in _turns(session, run.id)] == [BRIEF, BRIEF]
+        assert _server(session, run.id)[-2:] == [(None, PREPARING), (None, CREATING)]
+        row = _row(session, env_id)
+        assert row.started_pod_at == fake.environment(env_id).pod_started_at
+        assert row.started_pod_at is not None
+
+    @pytest.mark.parametrize("leaving", ["deleting", "gone"])
+    def test_one_with_no_conversation_lets_its_environment_go_when_it_is_leaving(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        leaving: str,
+    ) -> None:
+        failed = _failed_before_its_first_line(starts, fake, session, project)
+        env_id = _env(session, failed.id)
+        if leaving == "gone":
+            fake.remove_environment(env_id)
+        else:
+            fake.set_status(env_id, "deleting")
+        _row(session, env_id).last_state = leaving
+        session.flush()
+        calls = len(_calls_on(fake, env_id))
+
+        run = starts.resume(session, failed.id)
+        clear_after_commit_callbacks()
+
+        assert run.environment_id is None
+        _run(starts, run)
+        run = _read(session, run.id)
+        assert run.state_code == SessionState.RUNNING
+        # No free one to take: it creates one.
+        assert fake.created == [env_id, _env(session, run.id)]
+        assert len(_calls_on(fake, env_id)) == calls
+        assert _server(session, run.id)[-1] == (None, CREATING)
+
+    def test_one_with_no_conversation_held_and_stopped_leaves_it_under_the_timer(
+        self,
+        container: ServiceContainer,
+        fake: _Recording,
+        supervise: Supervise,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        # V19, D1: its claim cleared at its Resume, its reset never made.
+        starts, environments, _ = _services(
+            container, supervise, stop_after=timedelta(0)
+        )
+        failed = _failed_before_its_first_line(starts, fake, session, project)
+        env_id = _env(session, failed.id)
+        project.paused = True
+        session.flush()
+        run = starts.resume(session, failed.id)
+        clear_after_commit_callbacks()
+        assert run.state_code == SessionState.HELD
+        assert _claim(_row(session, env_id)) == (None, None, None)
+
+        starts.stop(session, run.id, person)
+        clear_after_commit_callbacks()
+        environments.run_shutdown_timer(session)
+
+        assert fake.environment(env_id).status == "stopped"
+        assert fake.environment(env_id).resets == 0
+        assert _claim(_row(session, env_id)) == (None, None, None)
+
+    @pytest.mark.parametrize("state", [SessionState.STOPPED, SessionState.FAILED])
+    def test_one_placed_by_id_before_slice_020_is_refused(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        state: SessionState,
+    ) -> None:
+        # Review A2: in an environment Pilot did not create.
+        run = _placed_by_id(starts, session, fake, project, state)
+
+        with pytest.raises(InvalidOperationException, match=NOT_PILOTS):
+            starts.resume(session, run.id)
+
+        assert len(_turns(session, run.id)) == 1
+        assert _calls_on(fake, BY_ID) == []
 
     def test_a_failed_turn_resumes_its_error_cleared(
         self,
@@ -2947,7 +3428,9 @@ class TestResume:
         assert run.state_code == SessionState.RUNNING
         assert fake.environment(env_id).status == "running"
         assert "409 conflict" in _server(session, run.id)[-3][1]["reason"]
-        assert f"POST /environments/{env_id}/start" in fake.calls
+        # Started again, never reset (F131.2).
+        assert _verbs(fake, env_id) == ["start"]
+        assert fake.environment(env_id).resets == 0
         # Pilot's start brought the pod up: its claim (P2).
         assert _row(session, env_id).started_pod_at == (
             fake.environment(env_id).pod_started_at
