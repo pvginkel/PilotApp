@@ -1,8 +1,8 @@
 /**
- * Pilot's reply to one message (decision 14): bare in the column, without F38.2's border, a
- * little in from its left — the steps, the phantom while the turn runs, a failure in red — and
- * its working state, the cue. A finished turn stays as it streamed (decision 10, ruled
- * 2026-10-18).
+ * Pilot's reply to one message: bare in the column, without F38.2's border, 6px in from either
+ * side (D002, over the chat mockup's decision 14) — the steps, the phantom while the turn runs, a
+ * failure in red — and its working state, the cue. A finished turn stays as it streamed
+ * (decision 10, ruled 2026-10-18).
  */
 
 import { CircleAlert } from 'lucide-react';
