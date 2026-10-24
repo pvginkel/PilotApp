@@ -3,9 +3,11 @@
  * popover (F2.2, F3); the handbook's button (F129.4; its overlay in
  * timeline/project-documents.spec.ts); the plan's notes and a step's (F2.7, F3.6); the members (F2.5); the auto
  * pilot switch, the Finished chip in its place (F2.6, F4.1); a draft's and an archived project's
- * head (D012); everything it opens closed on another project (F1.6); two rows on a narrow window.
+ * head (D012); a tight head giving way beside the side panel, its menu clear of it; everything it
+ * opens closed on another project (F1.6); two rows on a narrow window.
  */
 
+import type { Locator } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 
@@ -368,6 +370,60 @@ test.describe('An archived project’s head', () => {
     await expect(projectHead.autopilot).toBeDisabled();
     await expect(projectHead.step).toHaveText('Step b');
     await expect(projectHead.notesButton).toBeVisible();
+  });
+});
+
+test.describe('A tight head beside the side panel', () => {
+  const LONG_STEP = { id: 'a', title: 'A step whose title runs on well past what the head has room for', status: 'in_progress' as const, notes: [] };
+  const cut = (locator: Locator) => locator.evaluate((element) => element.scrollWidth > element.clientWidth);
+
+  test('gives way in the repo and the step’s name first, the name whole', async ({ people, projects, projectHead, panel }) => {
+    const me = await people.signIn();
+    const id = await projects.make({
+      name: makeUnique('Tight'),
+      ticket: 'PL-7',
+      repo: 'pvginkel/a-repository-whose-name-runs-on-and-on',
+      members: [me.handle!],
+      tasks: [LONG_STEP],
+    });
+    await projectHead.open(id);
+    await expect(panel.root).toBeVisible();
+
+    expect(await cut(projectHead.step.getByTestId('project.step.name'))).toBe(true);
+    expect(await cut(projectHead.repo)).toBe(true);
+    expect(await cut(projectHead.name)).toBe(false);
+  });
+
+  test('gives way in the name once they have, the chips, the members and the icons whole, the menu inside the head and clear of the panel', async ({
+    people,
+    projects,
+    projectHead,
+    panel,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.make({
+      name: `${makeUnique('Tight')} has a name long enough to fill a project’s head on its own`,
+      state: 'finished',
+      archived: true,
+      ticket: 'PL-7',
+      repo: 'pvginkel/Example',
+      members: [me.handle!, 'ada'],
+      tasks: [LONG_STEP],
+      notes: [note('one')],
+    });
+    await projectHead.open(id);
+    await expect(panel.root).toBeVisible();
+
+    expect(await cut(projectHead.name)).toBe(true);
+    for (const whole of [projectHead.archived, projectHead.finished, projectHead.members]) expect(await cut(whole)).toBe(false);
+    expect(await projectHead.root.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+    const [head, menu, aside] = await Promise.all(
+      [projectHead.root, projectHead.menuButton, panel.root].map(async (locator) => (await locator.boundingBox())!),
+    );
+    expect(menu.x + menu.width).toBeLessThanOrEqual(head.x + head.width);
+    expect(head.x + head.width).toBeLessThanOrEqual(aside.x);
+    await projectHead.menuButton.click();
+    await expect(projectHead.menuItems).toHaveText(['Bring back']);
   });
 });
 

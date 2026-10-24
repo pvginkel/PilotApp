@@ -13,7 +13,7 @@
     border-bottom: 1px solid hsl(var(--border));
   }
   .feed-head .head-row { display: contents; }
-  .feed-head h1 { margin: 0; font-size: 17px; font-weight: 600; white-space: nowrap; }
+  .feed-head h1 { min-width: 0; margin: 0; overflow: hidden; font-size: 17px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
   .feed-head .meta { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 13px; color: hsl(var(--muted-foreground)); }
   .feed-head .meta > :first-child { white-space: nowrap; }
   .feed-head .meta .repo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -21,8 +21,12 @@
   .chip.draft-chip { background: hsl(var(--primary-muted)); color: hsl(var(--primary-muted-foreground)); }
   .chip.finished-chip, .chip.archived-chip { font-weight: 600; }
 
-  /* In a tight head the repo and the step's name give way; auto pilot, the members and the icons
-     keep their size. */
+  /* In a tight head the repo and the step's name give way, then the name; the chips, auto pilot,
+     the members and the icons keep their size, so the head's last control, the menu, stays inside
+     it, clear of the panel beside it. Flex items shrink in proportion to factor × size, so at this
+     factor the name gives up under a millionth of its width until the two have given way to
+     nothing. */
+  .feed-head .meta, .feed-head .step-anchor { flex-shrink: 1000000; }
   .feed-head .switch, .feed-head .members, .feed-head .head-icon { flex: none; }
   .feed-head .head-icon { align-self: center; }
   /* Icon buttons side by side touch: the row's gap stands only between them and the rest. */
@@ -120,7 +124,7 @@
   @media (max-width: 900px) {
     .feed-head { flex-direction: column; align-items: stretch; gap: 8px; padding: 8px 14px; }
     .feed-head .head-row { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
-    .feed-head h1 { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .feed-head .meta { flex-shrink: 1; }
     .feed-head .meta .repo { display: none; }
     .feed-head .step-anchor { flex: 1; }
     .plan-pop { right: auto; left: 0; width: min(320px, calc(100vw - 28px)); }
