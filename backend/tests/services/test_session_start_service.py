@@ -1765,6 +1765,8 @@ class TestHeldLoop:
         starts, _, coordinator = _services(container, supervise)
         project_id = _committed_project(container)
         coordinator.fire_startup()
+        # The probe's tick finds the controller still out until the write is in.
+        committed_fake.outage(answer="ingress")
         outage.call_unanswered()
 
         with scoped_session(container) as db:
@@ -1774,6 +1776,7 @@ class TestHeldLoop:
             # The controller answering again before this write's commit: the
             # release its off opened found nothing held. The pause cannot
             # lift so, as the write holds the project's row under a share lock.
+            committed_fake.outage(on=False)
             outage.probe_answered()
 
         loop_log.wait_for(rf"Session {run_id} goes on from held")

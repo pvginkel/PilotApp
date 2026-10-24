@@ -49,7 +49,7 @@ from app.core_exceptions import ExternalServiceException
 from app.database import scoped_session
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import Session as AgentSession
-from app.models import SessionRecord, Turn, Work
+from app.models import Turn, Work
 from app.models.reference import RecordKind, SessionState
 from app.services.controller_client import (
     ControllerClient,
@@ -275,7 +275,7 @@ class RelayService:
             if (
                 failure is None
                 and session.state_code == SessionState.STOPPED
-                and not _has_result(db, turn.id)
+                and not _has_result(db, session.id, turn.id)
             ):
                 self._stopped_under_send(db, session, turn)
             return turn
@@ -939,18 +939,18 @@ def _in_flight(db: Session, turn_id: int) -> bool:
     return turn.ended_at is None
 
 
-def _has_result(db: Session, turn_id: int) -> bool:
-    """Whether a relay recorded the Turn's `result`."""
-    return bool(
-        db.scalar(
-            select(
-                exists().where(
-                    SessionRecord.turn_id == turn_id,
-                    SessionRecord.kind_code == RecordKind.RESULT,
-                )
+def _has_result(db: Session, session_id: uuid.UUID, turn_id: int) -> bool:
+    """Whether a relay recorded the end of the Turn, the Session's latest:
+    the Session's last `result` record is the Turn's."""
+    last = next(
+        iter(
+            read_records(
+                db, session_id, kind=RecordKind.RESULT, limit=1, newest_first=True
             )
-        )
+        ),
+        None,
     )
+    return last is not None and last.record.turn_id == turn_id
 
 
 def _refresh_turns(db: Session, session: AgentSession, turn: Turn) -> None:
