@@ -1,18 +1,19 @@
 /**
- * A prose item on the timeline. Open, it is its head (F12), its title and its text, the prose drawn
- * as GFM (F29.1), the prose before its first block folding when long (F12.2), a one-ask item's
- * block answered in its place (F19.1, F20, F21) and a notice's Read under its text (F23), and
- * Pilot's dots at its end while Pilot writes it (F35); a confirmation is a card of its own (F22),
- * a short document stands inline (F24.1), and a larger one and a review leave a card (F24.2,
- * F25.1). Its attachments follow its text (F17.5). An urgent one is tinted (F10.1), and one whose
- * latest save is held shows its last published text with a dashed border, a concept (F78). Done,
- * it is its line (F13.1, F13.2), with Open (F13.3), its attachments' indicator (F13.6) and Undo
- * while the record offers it (F14.1).
+ * An item on the timeline. A prose item open is its head (F12), its title and its text, the prose
+ * drawn as GFM (F29.1), the prose before its first block folding when long (F12.2), a one-ask
+ * item's block answered in its place (F19.1, F20, F21) and a notice's Read under its text (F23),
+ * and Pilot's dots at its end while Pilot writes it (F35); a confirmation is a card of its own
+ * (F22), a short document stands inline (F24.1), and a larger one and a review leave a card
+ * (F24.2, F25.1). Its attachments follow its text (F17.5). An urgent one is tinted (F10.1), and one
+ * whose latest save is held shows its last published text with a dashed border, a concept (F78). A
+ * work item open is its session's (work.tsx, F26). Done, an item is its line (F13.1, F13.2), with
+ * Open (F13.3), its attachments' indicator (F13.6) and Undo while the record offers it (F14.1); a
+ * work item's is quieter, its Open the session log (F13.5, F26.6).
  */
 
 import type { AnimationEvent, ReactNode } from 'react';
 import { Link, useParams } from '@tanstack/react-router';
-import { Check, FileText, StickyNote, Undo2, X } from 'lucide-react';
+import { Check, FileText, ScrollText, StickyNote, Undo2, X } from 'lucide-react';
 import { Fold } from '@/components/shared/fold';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Markdown } from '@/components/shared/markdown';
@@ -25,6 +26,7 @@ import { isCard } from '@/components/timeline/document-state';
 import { ItemHead } from '@/components/timeline/item-head';
 import { kindOf } from '@/components/timeline/kinds';
 import { UserAvatar } from '@/components/timeline/user-avatar';
+import { WorkItem } from '@/components/timeline/work';
 import { PilotWriting } from '@/components/timeline/writing';
 import { useRead, useUndo } from '@/hooks/use-marks';
 import { blocksOf, isProse, titleOf, type BodyPart, type TimelineItem, type TimelineUser } from '@/hooks/use-timeline';
@@ -47,6 +49,7 @@ export function Item({ item, fresh, onFlashed }: ItemProps) {
         'item',
         done ? 'collapsed' : 'open',
         item.kind === 'confirmation' && 'confirm',
+        done && item.kind === 'work' && 'quiet',
         !done && item.concept && 'concept',
         !done && item.urgent && 'urgent',
         fresh && 'fresh',
@@ -64,6 +67,7 @@ export function Item({ item, fresh, onFlashed }: ItemProps) {
 }
 
 function OpenItem({ item }: { item: TimelineItem }) {
+  if (item.kind === 'work') return <WorkItem item={item} />;
   if (item.kind === 'confirmation') return <Confirmation item={item} />;
   if (isCard(item)) return <DocumentCard item={item} />;
   if (item.kind === 'document') return <InlineDocument item={item} />;
@@ -220,9 +224,26 @@ function LineLead({ item }: { item: TimelineItem }) {
   );
 }
 
-/** Open: the item's document in the overlay, as it was done (F13.3), at the document's address. */
+/**
+ * Open: the item's document in the overlay, as it was done (F13.3), at the document's address; a
+ * work item's session log, at its session's (F26.6).
+ */
 function Open({ item }: { item: TimelineItem }) {
   const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  if (item.kind === 'work') {
+    return (
+      <Link
+        to="/projects/$projectId/sessions/$sessionId"
+        params={{ projectId, sessionId: item.id }}
+        className="btn btn-ghost btn-sm btn-icon"
+        title="Open the session log"
+        aria-label="Open"
+        data-testid="timeline.line.open"
+      >
+        <ScrollText className="icon" aria-hidden="true" />
+      </Link>
+    );
+  }
   return (
     <Link
       to="/projects/$projectId/documents/$documentId"

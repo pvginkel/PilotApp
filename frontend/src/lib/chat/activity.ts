@@ -17,7 +17,7 @@ export interface Activity {
 }
 
 /** A line's words without their closing ellipsis: "Starting Example-1". */
-const phaseOf = (text: string) => text.replace(/\s*(…|\.\.\.)$/, '');
+export const phaseOf = (text: string) => text.replace(/\s*(…|\.\.\.)$/, '');
 
 function runningIn(steps: Step[]): Activity | null {
   for (let i = steps.length - 1; i >= 0; i--) {

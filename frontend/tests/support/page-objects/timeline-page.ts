@@ -10,7 +10,9 @@ import { waitTestEvent } from '../helpers';
  * and a done line's indicator of them (F17.5, F13.6), Pilot's dots (F35), the
  * urgent banners and the "N open above" chip
  * (F10.2, F11), a finished timeline's end (F5.3), and where it stands scrolled; opened at its
- * project's address or at an item's or a block's under it (F97).
+ * project's address or at an item's or a block's under it (F97). A work item open shows its env
+ * chip, "running N min", its one line — the working cue and the latest step — and its Session log
+ * (F26).
  */
 export class TimelinePage {
   readonly root: Locator;
@@ -126,6 +128,14 @@ export class TimelinePage {
       settledLines: root.getByTestId('timeline.settled.line'),
       settledLine: (blockId: string) => settledParts(root, blockId),
       send: root.getByTestId('timeline.item.send'),
+      work: {
+        environment: root.getByTestId('timeline.work.environment'),
+        running: root.getByTestId('timeline.work.running'),
+        line: root.getByTestId('timeline.work.line'),
+        cue: root.getByTestId('timeline.work.line').getByTestId('chat.cue'),
+        step: root.getByTestId('timeline.work.step'),
+        sessionLog: root.getByTestId('timeline.work.session-log'),
+      },
       card: {
         root: root.getByTestId('timeline.item.card'),
         summary: root.getByTestId('timeline.item.summary'),

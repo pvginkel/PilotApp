@@ -1,5 +1,6 @@
 /* A project's timeline (PilotAppSpecs design/mockup/style.css, "Layout", "Dividers", "Items", "The
-   collapsed line", "The prompt that started a project", "Blocks" and the confirmation's card). */
+   collapsed line", "The prompt that started a project", "Work", "Blocks" and the confirmation's
+   card). */
 
 @layer components {
   .feed { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; scrollbar-gutter: stable; }
@@ -411,6 +412,55 @@
   .line .said .note { white-space: nowrap; }
   .line .said .note .icon { margin-right: 4px; }
   .line time { flex: none; font-size: 12.5px; color: hsl(var(--muted-foreground)); font-variant-numeric: tabular-nums; }
+
+  /* A work item's line is quiet: a session that ran reads as a footnote between the items,
+     indented behind a 2px rule in the dividers' colour, one stroke down a run, stopping 1px short
+     of the text at either end. The rule is the border of a box of its own, so a run's ends trim it
+     without moving the text. Its text sets the row's height, its buttons overflowing it. Its icons
+     and time are smaller than the other lines'. Two in a row sit closer still. */
+  .item.collapsed.quiet { margin: 0; }
+  .item.collapsed.quiet + .item.collapsed.quiet { margin-top: -4px; }
+  .item.collapsed.quiet:not(:has(+ .quiet)) { margin-bottom: 1px; }
+  .quiet .line {
+    width: auto;
+    margin-left: 18px;
+    min-height: 0;
+    padding: 5px 12px 5px 10px;
+    font-size: 13px;
+    line-height: 22px;
+    color: hsl(var(--muted-foreground));
+  }
+  .quiet .line::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; border-left: 2px solid hsl(var(--border)); }
+  .quiet:not(.quiet + .quiet) .line { padding-top: 1px; }
+  .quiet:not(.quiet + .quiet) .line::before { top: 2px; }
+  .quiet:not(:has(+ .quiet)) .line { padding-bottom: 0; }
+  .quiet:not(:has(+ .quiet)) .line::before { bottom: 2px; }
+  .quiet .line .kind-icon { font-size: 12px; color: inherit; }
+  .quiet .line time { font-size: 10px; line-height: 20px; }
+  .quiet .line .btn { margin-block: -3px; font-size: 11px; opacity: 0.7; }
+  .quiet .line .btn:hover, .quiet .line .btn:focus-visible { opacity: 1; }
+
+  /* ---- Work: a running session, updated in place ---------------------------------------- */
+
+  .work-live { display: inline-flex; align-items: baseline; gap: 8px; }
+  /* The dot has no text, so its baseline is its bottom edge; it is lowered to centre on the capitals. */
+  .pulse {
+    position: relative;
+    top: calc(4px - 0.5cap);
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: hsl(var(--success));
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse { 50% { opacity: 0.35; } }
+  /* Its one line: the working cue and the latest step, cut short where long; a stop or a failure
+     in the stopped chip's colour, an error wrapping whole. */
+  .work-line { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 2px 0 0; font-size: 13px; }
+  .work-line .step { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: hsl(var(--foreground) / 0.8); }
+  .work-line.ended { align-items: baseline; font-size: 14px; color: hsl(var(--warning-text)); }
+  .work-line.ended .icon { position: relative; top: calc(0.5em - 0.5cap); }
 
   /* ---- The opening ---------------------------------------------------------------------- */
 

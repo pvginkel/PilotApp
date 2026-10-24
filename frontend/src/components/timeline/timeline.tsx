@@ -1,9 +1,9 @@
 /**
- * A project's timeline (F8): its prose items in their order under their date and step dividers
- * (F9), the opening first. It is anchored to the bottom: it opens at its end, a project's own on
- * each project (F1.6), and when items arrive it scrolls to the end unless the reader has scrolled
- * away from it; a new item flashes (F8.2). Empty, it reads "Nothing yet" (F113). Work items and
- * waits draw no line here.
+ * A project's timeline (F8): its prose and work items in their order under their date and step
+ * dividers (F9, F9.1), the opening first. It is anchored to the bottom: it opens at its end, a
+ * project's own on each project (F1.6), and when items arrive it scrolls to the end unless the
+ * reader has scrolled away from it; a new item flashes (F8.2). Empty, it reads "Nothing yet"
+ * (F113). Waits draw no line here.
  *
  * An open urgent item has a banner pinned to the top, whose Show scrolls to the item and flashes
  * it; a finished project's has none (F10.2). While open items are scrolled out above, a chip under
@@ -41,7 +41,7 @@ interface Address {
 
 export function Timeline({ projectId, address }: { projectId: string; address: Address | null }) {
   const { data } = useTimeline(projectId);
-  const items = data?.items.filter((item) => item.form === 'prose');
+  const items = data?.items.filter((item) => item.form !== 'wait');
   const finishedAt = data?.finished_at ?? null;
   const urgent = finishedAt === null ? (items ?? []).filter((item) => item.urgent && item.done === null) : [];
   const { fresh, flashed, flash } = useFresh(items);

@@ -1,11 +1,14 @@
 /**
  * How a project's standing reads (STATUS-4): the head's step reading (F2.2), a tab's status line
  * (F1.2), derived from the record, never written by the brain (database.md decision 15), and a
- * step's standing in the plan popover (F3.1). How a work item's session reads: why the gate holds
- * its start (F26.1), why it stopped when no one stopped it (F71), and its session log's tail (F69.2).
+ * step's standing in the plan popover (F3.1). How a work item's session reads: its one line on the
+ * timeline (F26.1, F26.2, F125), why the gate holds its start (F26.1), why it stopped when no one
+ * stopped it (F71), and its session log's tail (F69.2).
  */
 
 import type { components } from '@/lib/api/generated/types';
+import { phaseOf, type Activity } from '@/lib/chat/activity';
+import { summarizeTool } from '@/lib/chat/tools';
 
 type ProjectTab = components['schemas']['ProjectListResponseSchema.e86ccd6.ProjectTabSchema'];
 type PlanProgress = components['schemas']['ProjectListResponseSchema.e86ccd6.PlanProgressSchema'];
@@ -13,6 +16,7 @@ type TaskStatus = components['schemas']['ProjectHeadSchema.e86ccd6.TaskStatus'];
 type Work = components['schemas']['TimelineSchema.1fdd8ae.WorkSchema'];
 type HeldReason = components['schemas']['TimelineSchema.1fdd8ae.HeldReason'];
 type StopCause = components['schemas']['TimelineSchema.1fdd8ae.StopCause'];
+type CurrentLine = components['schemas']['TimelineSchema.1fdd8ae.CurrentLineSchema'];
 
 interface StepReading {
   text: string;
@@ -97,6 +101,96 @@ function stopCauseLabel(cause: StopCause, environment: string): string {
     default: {
       const unknown: never = cause;
       return String(unknown);
+    }
+  }
+}
+
+/** A work item's one line on the timeline while its session is held, starts or runs: the working cue's state, and the latest step. */
+interface WorkCue {
+  kind: 'cue';
+  activity: Activity;
+  /** The latest tool call, worded as the chat words a call; a sub-agent's description while it runs. */
+  step: string | null;
+}
+
+/** "Stopped · <time>", and the cause of a stop made elsewhere. */
+interface WorkStopped {
+  kind: 'stopped';
+  at: string | null;
+  cause: string | null;
+}
+
+/** A failed start, or a turn ended in error, shown as a stopped one is, with the error (F125). */
+interface WorkFailed {
+  kind: 'failed';
+  error: string | null;
+}
+
+type WorkLine = WorkCue | WorkStopped | WorkFailed;
+
+const STARTING: Activity = { kind: 'starting', phase: 'Starting' };
+const WAITING: Activity = { kind: 'waiting', phase: 'Waiting for Pilot' };
+
+const cue = (activity: Activity, step: string | null = null): WorkCue => ({ kind: 'cue', activity, step });
+
+/**
+ * A work item's one line (F26.1, F26.2): why the gate holds its start; the current line as the
+ * chat words its cue, or that it starts, or waits for Pilot, before its session gives one;
+ * "Stopped · <time>" with a stop made elsewhere's cause; the error it failed on. Null once its
+ * turn ended, when its done line stands for it.
+ */
+export function workLine(work: Work): WorkLine | null {
+  const line = work.current_line;
+  switch (work.state) {
+    case 'held':
+      if (work.held_reason !== null) return cue({ kind: 'waiting', phase: heldReasonLabel(work.held_reason) });
+      return line === null ? cue(STARTING) : lineCue(line);
+    case 'starting':
+      return line === null ? cue(STARTING) : lineCue(line);
+    case 'running':
+      return line === null ? cue(WAITING) : lineCue(line);
+    case 'stopped':
+      return {
+        kind: 'stopped',
+        at: work.stopped_at,
+        cause: work.stopped_cause === null ? null : stopCauseLabel(work.stopped_cause, work.environment.name),
+      };
+    case 'failed':
+      return { kind: 'failed', error: work.error };
+    case 'idle':
+    case 'ended':
+      return null;
+    default: {
+      const unknown: never = work.state;
+      return cue({ kind: 'working', phase: String(unknown) });
+    }
+  }
+}
+
+/** The relay's current line in the chat cue's words (design 2 §9.5): the server's own while the session comes up. */
+function lineCue(line: CurrentLine): WorkCue {
+  const call = line.step;
+  const step = call === null || call.tool === null ? null : summarizeTool(call.tool, (call.input ?? {}) as Record<string, unknown>);
+  const done = step === null ? null : [step.verb, step.target].filter(Boolean).join(' ');
+  switch (line.state) {
+    case 'starting':
+      return cue({ kind: 'starting', phase: line.text === null ? STARTING.phase : phaseOf(line.text) });
+    case 'thinking':
+      return cue({ kind: 'thinking', phase: 'Thinking' }, done);
+    case 'writing':
+      return cue({ kind: 'writing', phase: 'Writing' }, done);
+    case 'working':
+      return cue({ kind: 'tool', phase: 'Working' }, step === null ? null : [step.verbRunning, step.target].filter(Boolean).join(' '));
+    case 'waiting': {
+      const type = line.agent?.type ?? null;
+      return cue(
+        { kind: 'agent', phase: type === null ? 'Waiting for the agent' : `Waiting for the ${type} agent` },
+        line.agent?.description ?? null,
+      );
+    }
+    default: {
+      const unknown: never = line.state;
+      return cue({ kind: 'working', phase: String(unknown) }, done);
     }
   }
 }
