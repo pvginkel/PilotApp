@@ -1388,6 +1388,42 @@ class TestRelayWorkItem:
             moved,
         ]
 
+    def test_a_resume_of_its_gone_controller_session_moves_the_item(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        project: Project,
+        work_item: models.Session,
+        engine_events: list[EngineEvent],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _send(relays, session, work_item)
+        fake_controller.restart(ENV)
+        fake_controller.set_status(ENV, "running")
+        handle = LoopHandle(f"relay:{work_item.id}")
+        resume = relays._resume
+
+        def resume_once(*args: Any) -> None:
+            resume(*args)
+            handle._request_stop()
+
+        monkeypatch.setattr(relays, "_resume", resume_once)
+        engine_events.clear()
+
+        relays.relay(work_item.id, handle)
+
+        # The re-create leaves it idle, and the resume's Turn runs it again
+        # on a line moved on: the browsers read the item and the project again
+        # (F71).
+        assert work_item.state_code == SessionState.RUNNING
+        line = work_item.current_line
+        assert line is not None and line["state"] == "thinking"
+        assert _moves(engine_events) == [
+            WorkMoved(project.id, work_item.id),
+            ProjectChanged(project.id),
+        ]
+
     def test_a_send_to_a_stopped_item_moves_its_state(
         self,
         container: ServiceContainer,
