@@ -19,6 +19,12 @@ A stream that drops, or stays silent past the client's read timeout, raises, and
 the supervisor runs the loop again with backoff: it reopens at the last
 committed offset.
 
+A Session stopped under its turn (F67.1) keeps its relay to the turn's
+`result`, which the controller's interrupt brings: its lines are recorded and
+its state stays `stopped`, its line none. A turn the controller never got, or
+whose controller session is gone, ends there with no `result`. The interrupt
+runs on a loop of its own, `interrupt:<id>`, once the stop commits.
+
 Each run first asks the controller whether it has the turn in flight (§8.2): a
 Turn written before its send that the controller never got is sent then. A
 controller session that is gone is resumed (§9.6, F71): re-created with the
@@ -43,7 +49,7 @@ from app.core_exceptions import ExternalServiceException
 from app.database import scoped_session
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import Session as AgentSession
-from app.models import Turn, Work
+from app.models import SessionRecord, Turn, Work
 from app.models.reference import RecordKind, SessionState
 from app.services.controller_client import (
     ControllerClient,
@@ -73,6 +79,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 RELAY_JOB = "relay"
+
+INTERRUPT_JOB = "interrupt"
 
 SEND_FAILED = "send-failed"
 """The `type` of the `server` record a send that failed before its `202` writes."""
@@ -116,6 +124,9 @@ class _Opening:
     """The controller's number of the last turn the record ended in this
     controller session; 0 before the first."""
     current_line: CurrentLine | None
+    stopped: bool
+    """The Session was stopped under the turn: it is relayed to its end, and
+    never sent."""
 
 
 @dataclass
@@ -136,8 +147,19 @@ class _RelayStart:
         self.relays._start_relay(self.session_id)
 
 
+@dataclass(frozen=True)
+class _InterruptStart:
+    # `after_commit()` runs a callback equal to one it holds once.
+    relays: "RelayService"
+    session_id: uuid.UUID
+
+    def __call__(self) -> None:
+        self.relays._start_interrupt(self.session_id)
+
+
 class RelayService:
-    """Sends a Session its turns and relays each into its records."""
+    """Sends a Session its turns, relays each into its records, and interrupts
+    the turn of a Session stopped under it."""
 
     def __init__(
         self,
@@ -147,7 +169,9 @@ class RelayService:
         environment_service: EnvironmentService,
     ) -> None:
         """Register the `relay` job, whose loops are one per Session, and whose
-        reconcile runs the relay of every Session with a Turn in flight.
+        reconcile runs the relay of every Session with a Turn in flight; and the
+        `interrupt` job, whose reconcile interrupts the turn of every Session
+        stopped under it.
 
         Args:
             container: Gives each relay transaction its database session, and
@@ -163,6 +187,9 @@ class RelayService:
         self._environments = environment_service
         supervisor.register_job(
             RELAY_JOB, needs_controller=True, reconcile=self._reconcile
+        )
+        supervisor.register_job(
+            INTERRUPT_JOB, needs_controller=True, reconcile=self._reconcile_interrupts
         )
 
     def send(
@@ -185,8 +212,9 @@ class RelayService:
 
         A controller session that is gone (`404`) is resumed first, and the
         message sent to the one that replaces it (§9.6). A send refused because
-        the controller has a turn in flight writes nothing, and starts the
-        Session's relay when this process runs none.
+        the controller has a turn in flight writes nothing; while the record
+        has a Turn in flight, it starts the Session's relay when this process
+        runs none (refinement D2).
 
         Returns:
             The Turn; one whose send failed has its `error`
@@ -208,14 +236,16 @@ class RelayService:
         return turn
 
     def send_turn(self, db: Session, turn_id: int) -> Turn:
-        """Send the first Turn of a `starting` Session's controller session,
-        written before its send, as the session start writes its brief (§9.6),
-        and relay it once the caller's transaction commits. As `send`, with the
-        Turn's `started_at` moved to the send.
+        """Send a `starting` Session's Turn written before its send, as the
+        session start writes its brief and a Resume its own (§9.6), and relay it
+        once the caller's transaction commits. As `send`, with the Turn's
+        `started_at` moved to the send.
 
         A Turn the controller has already, sent before a cut or by another
         process (§8.2, §8.1), is not sent again; one whose send another
-        process's commit made `running` first is left as it is.
+        process's commit made `running` first is left as it is. One a Stop
+        ended while its send went out is in flight again, as the controller has
+        it: its relay records it to the end the interrupt gives it.
 
         Returns:
             The Turn; one whose send failed has its `error`
@@ -241,13 +271,66 @@ class RelayService:
         except ExternalServiceException as error:
             failure = error
         session = self._records(db).lock_session(session.id)
-        if not _in_flight(db, turn.id) or session.state_code == SessionState.RUNNING:
+        if not _in_flight(db, turn.id):
+            if (
+                failure is None
+                and session.state_code == SessionState.STOPPED
+                and not _has_result(db, turn.id)
+            ):
+                self._stopped_under_send(db, session, turn)
+            return turn
+        if session.state_code == SessionState.RUNNING:
             return turn
         if failure is None:
             self._accepted(db, turn)
         else:
             self._failed(db, turn, failure)
         return turn
+
+    def request_interrupt(self, session_id: uuid.UUID) -> None:
+        """Interrupt the turn of the Session, stopped under it, once the
+        caller's transaction commits, on a loop of its own (F67.1)."""
+        after_commit(_InterruptStart(self, session_id))
+
+    def interrupt(self, session_id: uuid.UUID, handle: LoopHandle) -> None:
+        """The interrupt loop's run: the controller's interrupt of the turn in
+        flight of the Session, while it is `stopped` with one. A controller
+        that does not answer leaves the turn to run out, the pause's
+        cooperative semantics (F141.3); a controller session or an environment
+        that is gone has no turn to interrupt.
+
+        Raises:
+            ExternalServiceException: The controller failed otherwise
+        """
+        with scoped_session(self._container) as db:
+            session = db.get_one(AgentSession, session_id)
+            if (
+                session.state_code != SessionState.STOPPED
+                or session.controller_session is None
+                or _turn_in_flight(db, session_id) is None
+            ):
+                return
+            env_id, name = session.environment_id, session.controller_session
+        try:
+            self._client().interrupt(env_id, name)
+        except ControllerUnreachable as error:
+            logger.warning(
+                "Session %s stopped; its turn runs out, the controller unreachable: %s",
+                session_id,
+                error,
+            )
+            return
+        except ControllerProblem as problem:
+            if problem.problem_type not in (
+                ControllerProblemType.NOT_FOUND,
+                ControllerProblemType.CONFLICT,
+            ):
+                raise
+            logger.info(
+                "Session %s stopped with no turn to interrupt: %s", session_id, problem
+            )
+            return
+        logger.info("Session %s stopped: its turn interrupted", session_id)
 
     def relay(self, session_id: uuid.UUID, handle: LoopHandle) -> None:
         """The relay loop's run: the Session's turn in flight relayed from the
@@ -259,7 +342,10 @@ class RelayService:
         A controller session that is gone is resumed, and an environment that
         is not running is waited for until it settles; then the run carries on
         with the Session as its rows have it. A stream the watchdog closes
-        (`Supervisor.interrupt_loop`) is reopened.
+        (`Supervisor.interrupt_loop`) is reopened. A Session stopped under its
+        turn is never sent it: the turn is relayed when the controller has it,
+        and ends with no `result` when the controller never got it or its
+        controller session is gone.
 
         Raises:
             ExternalServiceException: The controller failed, the stream dropped
@@ -272,16 +358,27 @@ class RelayService:
             if opening is None:
                 return
             try:
-                self._deliver_once(
-                    opening.env_id,
-                    opening.controller_session,
-                    opening.recorded_turn,
-                    opening.message,
-                )
+                if opening.stopped:
+                    snapshot = self._client().get_session(
+                        opening.env_id, opening.controller_session
+                    )
+                    if not _has_turn(snapshot, opening.recorded_turn):
+                        self._end_stopped(opening, None)
+                        return
+                else:
+                    self._deliver_once(
+                        opening.env_id,
+                        opening.controller_session,
+                        opening.recorded_turn,
+                        opening.message,
+                    )
                 if self._relay_turn(opening, handle):
                     return
             except ControllerProblem as problem:
                 match problem.problem_type:
+                    case ControllerProblemType.NOT_FOUND if opening.stopped:
+                        self._end_stopped(opening, problem)
+                        return
                     case ControllerProblemType.NOT_FOUND:
                         self._resume(opening, problem)
                     case ControllerProblemType.CONFLICT:
@@ -290,21 +387,28 @@ class RelayService:
                         raise
 
     def _reconcile(self, db: Session) -> None:
-        """At STARTUP: run the relay of every Session `running` with a Turn in
-        flight (§8.2). Its run decides from the controller's state whether to
-        relay the turn or send it first."""
-        in_flight = exists().where(
-            Turn.session_id == AgentSession.id, Turn.ended_at.is_(None)
-        )
-        for session_id in db.scalars(
-            select(AgentSession.id)
-            .where(AgentSession.state_code == SessionState.RUNNING, in_flight)
-            .order_by(AgentSession.id)
-        ):
+        """At STARTUP: run the relay of every Session `running` or `stopped`
+        with a Turn in flight (§8.2). Its run decides from the controller's
+        state whether to relay the turn, send it first, or end it."""
+        for session_id in _with_turn_in_flight(db, _RELAYED):
             logger.info("Resuming the relay of session %s", session_id)
             self._supervisor.start_loop(
                 RELAY_JOB, partial(self.relay, session_id), key=str(session_id)
             )
+
+    def _reconcile_interrupts(self, db: Session) -> None:
+        """At STARTUP: interrupt the turn of every Session stopped under it,
+        whose interrupt a restart may have cut."""
+        for session_id in _with_turn_in_flight(db, (SessionState.STOPPED,)):
+            self._start_interrupt(session_id)
+
+    def _start_interrupt(self, session_id: uuid.UUID) -> None:
+        self._supervisor.start_loop(
+            INTERRUPT_JOB,
+            partial(self.interrupt, session_id),
+            key=str(session_id),
+            again=True,
+        )
 
     def _start_relay(self, session_id: uuid.UUID) -> None:
         # A relay past its turn's last action still counts as live: `again`
@@ -329,9 +433,12 @@ class RelayService:
         except ControllerProblem as problem:
             match problem.problem_type:
                 case ControllerProblemType.SESSION_BUSY:
-                    self._supervisor.start_loop(
-                        RELAY_JOB, partial(self.relay, session.id), key=str(session.id)
-                    )
+                    if _turn_in_flight(db, session.id) is not None:
+                        self._supervisor.start_loop(
+                            RELAY_JOB,
+                            partial(self.relay, session.id),
+                            key=str(session.id),
+                        )
                     raise InvalidOperationException(
                         f"send a turn to session {session.id}", "a turn is in flight"
                     ) from problem
@@ -350,7 +457,8 @@ class RelayService:
         """Send a Turn written before its send, unless the controller has it
         already (§8.2): its session busy, or past the turn the record last
         ended in it. A send refused as busy while the controller has the turn
-        is one another process made first."""
+        is one another process made first. On return the controller has the
+        turn."""
         client = self._client()
         if _has_turn(client.get_session(env_id, name), recorded_turn):
             return
@@ -507,6 +615,49 @@ class RelayService:
         )
         _refresh_turns(db, session, turn)
 
+    def _stopped_under_send(
+        self, db: Session, session: AgentSession, turn: Turn
+    ) -> None:
+        """Under the Session's lock: the Turn a Stop ended while its send went
+        out in flight again, since the controller has it, its relay started
+        and the turn interrupted once the transaction commits."""
+        turn.ended_at = None
+        _refresh_turns(db, session, turn)
+        after_commit(_RelayStart(self, session.id))
+        self.request_interrupt(session.id)
+        logger.info(
+            "Session %s was stopped while its turn's send went out: interrupting it",
+            session.id,
+        )
+
+    def _end_stopped(
+        self, opening: _Opening, problem: ControllerProblem | None
+    ) -> None:
+        """A stopped Session's turn in flight ended with no `result`: one the
+        controller never got, or, with `problem`, whose controller session is
+        gone, a `server` record saying so (§9.6). Nothing is done when the
+        Session has moved on."""
+        with scoped_session(self._container) as db:
+            records = self._records(db)
+            session = records.lock_session(opening.session_id)
+            if (
+                session.state_code != SessionState.STOPPED
+                or session.controller_session != opening.controller_session
+                or not _in_flight(db, opening.turn_id)
+            ):
+                return
+            if problem is not None:
+                records.append(
+                    session.id,
+                    RecordKind.SERVER,
+                    payload={"type": SESSION_GONE, "reason": str(problem)},
+                )
+            turn = db.get_one(Turn, opening.turn_id)
+            turn.ended_at = datetime.now(UTC)
+            _refresh_turns(db, session, turn)
+            self._moved(session)
+            self._environments.arm_shutdown_timer(db, session.environment_id)
+
     def _relay_turn(self, opening: _Opening, handle: LoopHandle) -> bool:
         """Relay the stream to the turn's `result`; whether it came. A stream
         closed by the loop's stop or by the watchdog ends without it."""
@@ -568,10 +719,11 @@ class RelayService:
             raw_offset=frame.offset,
             controller_session=opening.controller_session,
         )
-        line = after_line(session.current_line, payload, record.at)
-        if line != session.current_line:
-            session.current_line = line
-            self._moved(session)
+        if session.state_code == SessionState.RUNNING:
+            line = after_line(session.current_line, payload, record.at)
+            if line != session.current_line:
+                session.current_line = line
+                self._moved(session)
         progress.current_line = session.current_line
         if session.conversation_id is None and isinstance(payload, dict):
             # Every line `claude` prints names its conversation, which a resume
@@ -585,13 +737,16 @@ class RelayService:
         self, opening: _Opening, line: dict[str, Any], progress: _Progress
     ) -> None:
         """Move the current line's state to the one the partial implies, in a
-        transaction of its own only when it changes."""
+        transaction of its own only when it changes; a stopped Session has
+        none."""
         at = datetime.now(UTC)
-        if after_partial(progress.current_line, line, at) is None:
+        if opening.stopped or after_partial(progress.current_line, line, at) is None:
             return
         with scoped_session(self._container) as db:
             session = self._records(db).lock_session(opening.session_id)
-            if _in_flight(db, opening.turn_id):
+            if session.state_code == SessionState.RUNNING and _in_flight(
+                db, opening.turn_id
+            ):
                 moved = after_partial(session.current_line, line, at)
                 if moved is not None:
                     session.current_line = moved
@@ -601,11 +756,12 @@ class RelayService:
     def _end_turn(self, opening: _Opening, frame: ResultFrame, offset: int) -> None:
         """The Turn's end, in one transaction (§9.2): the `result` record at the
         offset of the stream's last raw frame, the Turn ended, the Session
-        `idle` (`stopped` when interrupted) with no current line, and the
-        engine's turn end. A work item's Session whose turn ended in error is
-        `failed` instead, the error the Turn's (F125), and one that ended
-        neither interrupted nor in error makes the work item done (decision
-        44). After the commit, the environment's shutdown timer is armed if
+        `idle` (`stopped` when interrupted, by no one) with no current line,
+        and the engine's turn end. A work item's Session whose turn ended in
+        error is `failed` instead, the error the Turn's (F125), and one that
+        ended neither interrupted nor in error makes the work item done
+        (decision 44). A Session stopped under the turn stays as its stop left
+        it. After the commit, the environment's shutdown timer is armed if
         nothing runs there.
 
         A later Turn in flight is a send the controller accepted once this
@@ -641,18 +797,15 @@ class RelayService:
                 ):
                     earlier.ended_at = ended_at
                 following = _turn_in_flight(db, opening.session_id)
+                before = session.state_code
                 if following is None:
                     _refresh_turns(db, session, turn)
-                    work = db.get(Work, opening.session_id) is not None
-                    session.state_code = _ended(frame, work=work)
+                    if before != SessionState.STOPPED:
+                        self._ended(db, session, frame, ended_at)
                     session.current_line = None
-                    if work and session.state_code == SessionState.IDLE:
-                        self._container.record_service().work_done(
-                            opening.session_id, ended_at
-                        )
                 else:
                     session.current_line = at_send(None, following.started_at)
-                self._moved(session, state=following is None)
+                self._moved(session, state=session.state_code != before)
                 self._container.document_service().turn_ended(session)
         if not ended:
             # Another process's relay ended the turn.
@@ -660,6 +813,25 @@ class RelayService:
             return
         with scoped_session(self._container) as db:
             self._environments.arm_shutdown_timer(db, opening.env_id)
+
+    def _ended(
+        self, db: Session, session: AgentSession, frame: ResultFrame, at: datetime
+    ) -> None:
+        """The Session's state at its turn's end with no later Turn in flight:
+        `stopped` when interrupted, by no one, `failed` for a work item's turn
+        ended in error, else `idle`, its work item done (§9.2; DB Session
+        State; decision 44)."""
+        work = db.get(Work, session.id) is not None
+        if frame.interrupted:
+            session.state_code = SessionState.STOPPED
+            session.stopped_at = at
+            session.stopped_by_user_id = None
+        elif work and frame.is_error:
+            session.state_code = SessionState.FAILED
+        else:
+            session.state_code = SessionState.IDLE
+            if work:
+                self._container.record_service().work_done(session.id, at)
 
     def _moved(self, session: AgentSession, *, state: bool = False) -> None:
         work_moved(self._container.engine_bus(), session, state=state)
@@ -672,11 +844,15 @@ class RelayService:
         return client
 
 
+_RELAYED = (SessionState.RUNNING, SessionState.STOPPED)
+"""The states in which a Session's turn in flight is relayed."""
+
+
 def _opening(db: Session, session_id: uuid.UUID) -> _Opening | None:
     """The Session's turn in flight and where its stream resumes; None when the
-    Session is not `running`."""
+    Session is neither `running` nor stopped under its turn."""
     session = db.get_one(AgentSession, session_id)
-    if session.state_code != SessionState.RUNNING or session.controller_session is None:
+    if session.state_code not in _RELAYED or session.controller_session is None:
         return None
     turn = _turn_in_flight(db, session_id)
     if turn is None:
@@ -695,6 +871,23 @@ def _opening(db: Session, session_id: uuid.UUID) -> _Opening | None:
         offset=position.raw_offset if position is not None and resumed else 0,
         recorded_turn=_recorded_turn(db, session_id, session.controller_session),
         current_line=session.current_line,
+        stopped=session.state_code == SessionState.STOPPED,
+    )
+
+
+def _with_turn_in_flight(
+    db: Session, states: tuple[SessionState, ...]
+) -> list[uuid.UUID]:
+    """The Sessions in one of `states` with a Turn in flight, by id."""
+    in_flight = exists().where(
+        Turn.session_id == AgentSession.id, Turn.ended_at.is_(None)
+    )
+    return list(
+        db.scalars(
+            select(AgentSession.id)
+            .where(AgentSession.state_code.in_(states), in_flight)
+            .order_by(AgentSession.id)
+        )
     )
 
 
@@ -746,15 +939,18 @@ def _in_flight(db: Session, turn_id: int) -> bool:
     return turn.ended_at is None
 
 
-def _ended(frame: ResultFrame, *, work: bool) -> SessionState:
-    """The Session's state at its turn's end with no later Turn in flight:
-    `stopped` when interrupted, `failed` for a work item's turn ended in
-    error, else `idle` (§9.2; DB Session State)."""
-    if frame.interrupted:
-        return SessionState.STOPPED
-    if work and frame.is_error:
-        return SessionState.FAILED
-    return SessionState.IDLE
+def _has_result(db: Session, turn_id: int) -> bool:
+    """Whether a relay recorded the Turn's `result`."""
+    return bool(
+        db.scalar(
+            select(
+                exists().where(
+                    SessionRecord.turn_id == turn_id,
+                    SessionRecord.kind_code == RecordKind.RESULT,
+                )
+            )
+        )
+    )
 
 
 def _refresh_turns(db: Session, session: AgentSession, turn: Turn) -> None:

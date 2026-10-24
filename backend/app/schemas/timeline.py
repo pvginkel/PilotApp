@@ -309,8 +309,9 @@ class WorkSchema(BaseModel):
     )
     started_at: datetime | None = Field(
         description=(
-            'When the controller confirmed its session, which "running N min" '
-            "counts from; null before"
+            'When its run began, which "running N min" counts from: the '
+            "controller confirmed its session, or took its Resume's turn; null "
+            "before"
         )
     )
     error: str | None = Field(
@@ -327,6 +328,18 @@ class WorkSchema(BaseModel):
             "Why the gate holds its start, which its line says: its project "
             "paused, or the controller unreachable; null unless `state` is "
             "`held`, and while the gate opens for it (F26.1, F141.5)"
+        )
+    )
+    stopped_at: datetime | None = Field(
+        description=(
+            'When it was stopped, its "Stopped · <time>"; null unless `state` is '
+            "`stopped` (F26.1, F69.2)"
+        )
+    )
+    stopped_by: UserSchema | None = Field(
+        description=(
+            "Who stopped it, by Stop, Finish or Archive; null when no one of "
+            "Pilot's did, and unless `state` is `stopped` (F69.2)"
         )
     )
 

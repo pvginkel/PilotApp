@@ -11,7 +11,7 @@ import uuid
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from queue import Empty
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 from flask import Flask
@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session as DbSession
 from werkzeug.wrappers import Request, Response
 
 from app import models
+from app.core_exceptions import ExternalServiceException
 from app.database import scoped_session
 from app.engine.bus import EngineEvent, ProjectChanged, WorkMoved
 from app.exceptions import InvalidOperationException, RecordNotFoundException
@@ -44,6 +45,7 @@ from app.services.session_record_service import (
 )
 from app.services.sse_connection_manager import SSEConnection
 from app.services.supervisor import TIMER_RUNS_TOTAL, LoopHandle
+from app.utils import after_commit as after_commit_module
 from app.utils.after_commit import clear_after_commit_callbacks
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
 from tests.support.fake_controller import ServedFakeController, client_of, raw_turn
@@ -373,6 +375,33 @@ class TestSend:
         assert _records(session, idle.id) == []
         assert idle.state_code == SessionState.IDLE
 
+    def test_a_send_refused_as_busy_with_no_turn_in_flight_starts_no_relay(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        idle: models.Session,
+        person: User,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Refinement D2: the record has no Turn in flight, so no relay is
+        # missing; `test_a_send_refused_as_busy_starts_the_missing_relay` has
+        # the case with one.
+        asked: list[str] = []
+        monkeypatch.setattr(
+            relays._supervisor,
+            "start_loop",
+            lambda job, run, key=None, **_: asked.append(f"{job}:{key}") or True,
+        )
+        fake_controller.busy(ENV, controller_session)
+
+        with pytest.raises(InvalidOperationException, match="a turn is in flight"):
+            relays.send(session, idle.id, "Rename the badge", author_user_id=person.id)
+
+        assert asked == []
+        assert _records(session, idle.id) == []
+
     def test_a_send_to_a_controller_session_that_is_gone_resumes_it_then_sends(
         self,
         session: DbSession,
@@ -661,6 +690,68 @@ class TestSendTurn:
         assert run.current_line == working
         assert brief.started_at == started
         assert run.turn_started_at is None
+
+    def test_a_turn_a_stop_ended_while_its_send_went_out_is_in_flight_again(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        project: Project,
+        person: User,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _environment_row(session)
+        run = _agent_session(
+            session, project, controller_session, SessionState.STARTING
+        )
+        brief = self._brief(session, run)
+        deliver = relays._deliver_once
+
+        def stopped_meanwhile(*args: Any) -> None:
+            deliver(*args)
+            run.state_code = SessionState.STOPPED
+            run.stopped_by_user_id = person.id
+            brief.ended_at = datetime.now(UTC)
+            session.flush()
+
+        monkeypatch.setattr(relays, "_deliver_once", stopped_meanwhile)
+
+        relays.send_turn(session, brief.id)
+
+        # The controller has it: its relay records it, and the interrupt ends it.
+        assert {
+            type(callback).__name__ for callback in after_commit_module._callbacks.get()
+        } >= {"_RelayStart", "_InterruptStart"}
+        clear_after_commit_callbacks()
+        assert fake_controller.session(ENV, controller_session).status == "busy"
+        assert (brief.ended_at, brief.error) == (None, None)
+        assert (run.state_code, run.turn_ended_at) == (SessionState.STOPPED, None)
+
+    def test_a_turn_another_process_relayed_to_its_end_under_a_stop_stays_ended(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        project: Project,
+    ) -> None:
+        _environment_row(session)
+        run = _agent_session(session, project, controller_session, SessionState.STOPPED)
+        brief = self._brief(session, run)
+        controller_client.send_message(ENV, controller_session, brief.message)
+        _turn_of(fake_controller, controller_session, raw_turn("turn_text"))
+        run.state_code = SessionState.RUNNING
+        _relay(relays, run)
+        run.state_code = SessionState.STOPPED
+        session.flush()
+        ended = brief.ended_at
+
+        relays.send_turn(session, brief.id)
+
+        assert after_commit_module._callbacks.get() == ()
+        assert brief.ended_at == ended is not None
 
     def test_an_unknown_turn_is_refused(
         self, session: DbSession, relays: RelayService
@@ -1351,6 +1442,249 @@ class TestRelayWorkItem:
         ]
 
 
+def _stopped(run: models.Session, person: User | None = None) -> datetime:
+    """`run` stopped under its turn, as a Stop writes it; the stop's time."""
+    at = datetime.now(UTC)
+    run.state_code = SessionState.STOPPED
+    run.stopped_at = at
+    run.stopped_by_user_id = None if person is None else person.id
+    run.current_line = None
+    return at
+
+
+class TestStoppedUnderTheTurn:
+    """A Session stopped under its turn keeps its relay to the turn's end
+    (F67.1; V04)."""
+
+    @pytest.mark.parametrize("outcome", ["interrupted", "success", "error"])
+    def test_its_turn_is_relayed_to_its_end_and_it_stays_stopped(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        project: Project,
+        work_item: models.Session,
+        person: User,
+        engine_events: list[EngineEvent],
+        outcome: FinishOutcome,
+    ) -> None:
+        lines = raw_turn("turn_tool")
+        turn = _send(relays, session, work_item)
+        at = _stopped(work_item, person)
+        offsets = _turn_of(fake_controller, controller_session, lines, outcome)
+        engine_events.clear()
+
+        _relay(relays, work_item)
+
+        assert _claude(session, work_item.id) == _recorded(lines, offsets)
+        last = _records(session, work_item.id)[-1]
+        assert (last.record.kind_code, last.turn) == (RecordKind.RESULT, 1)
+        assert turn.ended_at is not None
+        assert work_item.turn_ended_at == turn.ended_at
+        assert work_item.state_code == SessionState.STOPPED
+        assert (work_item.stopped_at, work_item.stopped_by_user_id) == (at, person.id)
+        # Its lines move no line: a stopped item shows its stop.
+        assert work_item.current_line is None
+        assert _item_done(session, work_item) == (None, None, None)
+        assert ProjectChanged(project.id) not in engine_events
+
+    def test_an_interrupted_turn_with_no_stop_is_stopped_by_no_one(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        work_item: models.Session,
+        person: User,
+    ) -> None:
+        work_item.stopped_by_user_id = person.id
+        turn = _send(relays, session, work_item)
+        _turn_of(
+            fake_controller, controller_session, raw_turn("turn_text"), "interrupted"
+        )
+
+        _relay(relays, work_item)
+
+        assert work_item.state_code == SessionState.STOPPED
+        assert (work_item.stopped_at, work_item.stopped_by_user_id) == (
+            turn.ended_at,
+            None,
+        )
+
+    def test_a_turn_the_controller_never_got_ends_unsent(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        work_item: models.Session,
+    ) -> None:
+        # A resume's "continue", written before its send, then a Stop.
+        turn = Turn(
+            session_id=work_item.id,
+            seq=1,
+            message=CONTINUE,
+            started_at=datetime.now(UTC),
+        )
+        session.add(turn)
+        session.flush()
+        _stopped(work_item)
+        _row(session).stop_due_at = None
+
+        _relay(relays, work_item)
+
+        assert _sends(fake_controller, controller_session) == 0
+        assert fake_controller.session(ENV, controller_session).status == "idle"
+        assert turn.ended_at is not None and turn.error is None
+        assert work_item.turn_ended_at == turn.ended_at
+        assert _records(session, work_item.id) == []
+        assert work_item.state_code == SessionState.STOPPED
+        assert _row(session).stop_due_at is not None
+
+    def test_a_controller_session_gone_ends_its_turn_and_resumes_nothing(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        work_item: models.Session,
+    ) -> None:
+        turn = _send(relays, session, work_item)
+        _stopped(work_item)
+        fake_controller.restart(ENV)
+        fake_controller.set_status(ENV, "running")
+        before = len(fake_controller.calls)
+
+        _relay(relays, work_item)
+
+        assert not any("POST" in call for call in fake_controller.calls[before:])
+        [gone] = [
+            stored
+            for stored in _records(session, work_item.id)
+            if stored.record.kind_code == RecordKind.SERVER
+        ]
+        assert gone.turn is None and gone.record.payload["type"] == SESSION_GONE
+        assert turn.ended_at is not None
+        assert work_item.controller_session == controller_session
+        assert work_item.state_code == SessionState.STOPPED
+
+
+class TestInterrupt:
+    """The interrupt of a Session stopped under its turn (F67.1, F141.3)."""
+
+    def _interrupt(self, relays: RelayService, run: models.Session) -> None:
+        relays.interrupt(run.id, LoopHandle(f"interrupt:{run.id}"))
+
+    def test_it_ends_the_turn_where_it_is(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        work_item: models.Session,
+    ) -> None:
+        _send(relays, session, work_item)
+        _stopped(work_item)
+        session.flush()
+
+        self._interrupt(relays, work_item)
+
+        headless = fake_controller.session(ENV, controller_session)
+        assert headless.status == "idle"
+        assert headless.result is not None and headless.result["interrupted"]
+
+    @pytest.mark.parametrize("state", [SessionState.RUNNING, SessionState.IDLE])
+    def test_a_session_not_stopped_is_left_alone(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        work_item: models.Session,
+        state: SessionState,
+    ) -> None:
+        _send(relays, session, work_item)
+        work_item.state_code = state
+        session.flush()
+        before = len(fake_controller.calls)
+
+        self._interrupt(relays, work_item)
+
+        assert fake_controller.calls[before:] == []
+
+    def test_a_stopped_session_with_no_turn_in_flight_is_left_alone(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        work_item: models.Session,
+    ) -> None:
+        _stopped(work_item)
+        session.flush()
+        before = len(fake_controller.calls)
+
+        self._interrupt(relays, work_item)
+
+        assert fake_controller.calls[before:] == []
+
+    @pytest.mark.parametrize("answer", ["none", "ingress"])
+    def test_a_controller_that_does_not_answer_leaves_the_turn_to_run_out(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        work_item: models.Session,
+        answer: Literal["none", "ingress"],
+    ) -> None:
+        _send(relays, session, work_item)
+        _stopped(work_item)
+        session.flush()
+        fake_controller.outage(answer=answer)
+
+        self._interrupt(relays, work_item)
+
+        fake_controller.outage(on=False)
+        assert fake_controller.session(ENV, controller_session).status == "busy"
+
+    def test_a_controller_session_gone_has_no_turn_to_interrupt(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        work_item: models.Session,
+    ) -> None:
+        _send(relays, session, work_item)
+        _stopped(work_item)
+        session.flush()
+        fake_controller.restart(ENV)
+        fake_controller.set_status(ENV, "running")
+
+        self._interrupt(relays, work_item)
+
+        assert fake_controller.calls[-1] == (
+            f"POST /environments/{ENV}/sessions/headless/"
+            f"{work_item.controller_session}/interrupt"
+        )
+
+    def test_another_failure_raises_for_the_loop_to_run_again(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        work_item: models.Session,
+    ) -> None:
+        _send(relays, session, work_item)
+        _stopped(work_item)
+        session.flush()
+        fake_controller.unreachable(ENV)
+
+        with pytest.raises(ExternalServiceException, match="worker-unreachable"):
+            self._interrupt(relays, work_item)
+
+
 class TestRelaySkip:
     @pytest.fixture
     def replaying(self, container: ServiceContainer) -> Iterator[_Replaying]:
@@ -1804,6 +2138,37 @@ class TestRestartRecovery:
         _idle(container, run_id)
         assert _claude_committed(container, run_id) == _recorded(lines, offsets)
         assert len(_committed_turns(container, run_id)) == 1
+
+    def test_startup_interrupts_and_relays_the_turn_of_a_session_stopped_under_it(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        supervise: Supervise,
+        rows: tuple[str, uuid.UUID, uuid.UUID],
+    ) -> None:
+        container = committed_app.container
+        name, run_id, _ = rows
+        # A Stop committed, and the process gone before its interrupt.
+        _running_committed(container, run_id)
+        committed_controller_client.send_message(ENV, name, "Rename the badge")
+        lines = raw_turn("turn_text")
+        offsets = fake_controller.play(ENV, name, lines)
+        with scoped_session(container) as db:
+            _stopped(db.get_one(models.Session, run_id))
+        _, coordinator = _relay_service(container, supervise)
+
+        coordinator.fire_startup()
+
+        wait_until(
+            lambda: _committed_turns(container, run_id)[0].ended_at is not None,
+            "the stopped turn ended",
+        )
+        result = fake_controller.session(ENV, name).result
+        assert result is not None and result["interrupted"]
+        assert _claude_committed(container, run_id) == _recorded(lines, offsets)
+        assert _read(container, run_id).state_code == SessionState.STOPPED
+        assert _sends(fake_controller, name) == 1
 
 
 class TestEnvironmentRestartUnderARun:

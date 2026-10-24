@@ -249,6 +249,8 @@ class TestProjectEventService:
                     "error": None,
                     "autopilot": False,
                     "held_reason": None,
+                    "stopped_at": None,
+                    "stopped_by": None,
                 },
             },
         }

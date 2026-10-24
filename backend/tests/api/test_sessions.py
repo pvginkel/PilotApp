@@ -1,5 +1,5 @@
-"""The session routes: the records by page, and the stream's subscribe (design
-2 §11.1, §11.2)."""
+"""The session routes: the records by page, the stream's subscribe (design 2
+§11.1, §11.2), and a work item's Stop and Resume (F67)."""
 
 import json
 import uuid
@@ -9,20 +9,25 @@ from queue import Empty
 from typing import Any
 
 import pytest
+from dependency_injector import providers
 from flask import Flask
 from flask.testing import FlaskClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.database import scoped_session
-from app.models import Turn, User
+from app.models import Project, Turn, User
 from app.models.reference import RecordKind, SessionState
 from app.services.container import ServiceContainer
+from app.services.environment_service import EnvironmentService
+from app.services.relay_service import RelayService
 from app.services.session_record_service import SessionRecordService
+from app.services.session_start_service import SessionStartService
 from app.services.session_stream_service import STREAM_VIEWS
 from app.services.sse_connection_manager import SSEConnection, SSEConnectionManager
 from app.utils.after_commit import clear_after_commit_callbacks
-from tests.support.supervisor import metric_value
+from tests.support.supervisor import Supervise, metric_value
 
 LOCAL_ADMIN = "local-user"
 SUBJECT = "subject-ada"
@@ -489,3 +494,279 @@ class TestTheEditorGate:
         assert client.get(f"{url}/records").status_code == 403
         assert client.post(f"{url}/stream", json=body).status_code == 403
         assert client.delete(f"{url}/stream", json=body).status_code == 403
+
+
+def _work_item(
+    container: ServiceContainer,
+    session: DbSession,
+    project: Project,
+    run: models.Session,
+    state: SessionState,
+) -> models.Session:
+    """`run` placed as a work item, in `state`, its brief's turn ended
+    unless it runs."""
+    container.record_service().place_work(project, run, "Build the camp")
+    now = datetime.now(UTC)
+    session.add(
+        Turn(
+            session_id=run.id,
+            seq=1,
+            message="The brief",
+            started_at=now,
+            ended_at=None if state == SessionState.RUNNING else now,
+        )
+    )
+    run.state_code = state
+    run.turns = 1
+    session.flush()
+    clear_after_commit_callbacks()
+    return run
+
+
+def _starts(
+    container: ServiceContainer, supervise: Supervise, *, controller_configured: bool
+) -> SessionStartService:
+    """The session starts, on a supervisor of their own whose loops never run."""
+    supervisor, _ = supervise(container)
+    environments = EnvironmentService(
+        container=container, supervisor=supervisor, stop_after_seconds=1800
+    )
+    return SessionStartService(
+        container=container,
+        supervisor=supervisor,
+        session_streams=container.session_stream_service(),
+        environment_service=environments,
+        relay_service=RelayService(
+            container=container,
+            supervisor=supervisor,
+            session_streams=container.session_stream_service(),
+            environment_service=environments,
+        ),
+        controller_outage=container.controller_outage(),
+        controller_configured=controller_configured,
+    )
+
+
+@pytest.fixture
+def starts(container: ServiceContainer, supervise: Supervise) -> Iterator[None]:
+    """The routes' session starts with a controller configured."""
+    container.session_start_service.override(
+        providers.Object(_starts(container, supervise, controller_configured=True))
+    )
+    try:
+        yield
+    finally:
+        container.session_start_service.reset_last_overriding()
+
+
+class TestStopSession:
+    def test_it_stops_the_work_item_and_answers_its_status(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        run = _work_item(
+            container, session, project, project_session, SessionState.RUNNING
+        )
+        sign_in(client, SUBJECT)
+
+        response = client.post(f"/api/sessions/{run.id}/stop")
+
+        assert response.status_code == 200, response.get_json()
+        body = response.get_json()
+        assert (body["state"], body["current_line"]) == ("stopped", None)
+        assert body["stopped_at"] is not None
+        assert body["stopped_by"]["handle"] == "ada"
+        assert session.get_one(models.Session, run.id).stopped_by_user_id == person.id
+
+    @pytest.mark.parametrize(
+        ("state", "refusal"),
+        [
+            (SessionState.IDLE, "its turn has ended"),
+            (SessionState.STOPPED, "it is stopped already"),
+        ],
+    )
+    def test_a_work_item_it_cannot_stop_is_409(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        project: Project,
+        project_session: models.Session,
+        state: SessionState,
+        refusal: str,
+    ) -> None:
+        run = _work_item(container, session, project, project_session, state)
+        sign_in(client, SUBJECT)
+
+        response = client.post(f"/api/sessions/{run.id}/stop")
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            f"Cannot stop work item {run.id} because {refusal}"
+        )
+
+    def test_a_session_with_no_work_item_is_409(
+        self,
+        client: FlaskClient,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        sign_in(client, SUBJECT)
+
+        response = client.post(f"/api/sessions/{project_session.id}/stop")
+
+        assert response.status_code == 409
+
+    def test_a_caller_without_a_handle_is_409(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        run = _work_item(
+            container, session, project, project_session, SessionState.RUNNING
+        )
+        sign_in(client, "subject-newcomer")
+
+        response = client.post(f"/api/sessions/{run.id}/stop")
+
+        assert response.status_code == 409
+        assert "you have not chosen your handle yet" in response.get_json()["error"]
+
+    def test_an_unknown_session_is_404(self, client: FlaskClient, person: User) -> None:
+        sign_in(client, SUBJECT)
+
+        response = client.post(f"/api/sessions/{uuid.uuid4()}/stop")
+
+        assert response.status_code == 404
+
+    def test_without_the_editor_role_it_is_403(
+        self, client: FlaskClient, project_session: models.Session
+    ) -> None:
+        response = client.post(
+            "/api/testing/auth/session", json={"subject": SUBJECT, "roles": []}
+        )
+        assert response.status_code == 201
+
+        response = client.post(f"/api/sessions/{project_session.id}/stop")
+
+        assert response.status_code == 403
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        response = oidc_client.post(f"/api/sessions/{uuid.uuid4()}/stop")
+
+        assert response.status_code == 401
+
+
+@pytest.mark.usefixtures("starts")
+class TestResumeSession:
+    def test_it_resumes_the_work_item_through_the_gate(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        run = _work_item(
+            container, session, project, project_session, SessionState.STOPPED
+        )
+        sign_in(client, SUBJECT)
+
+        response = client.post(f"/api/sessions/{run.id}/resume")
+
+        assert response.status_code == 200, response.get_json()
+        body = response.get_json()
+        assert (body["state"], body["held_reason"]) == ("starting", None)
+        assert body["current_line"]["text"] == "Starting Example-1…"
+        assert [
+            turn.message
+            for turn in session.scalars(
+                select(Turn).where(Turn.session_id == run.id).order_by(Turn.seq)
+            )
+        ] == ["The brief", "The brief"]
+
+    def test_in_a_paused_project_it_answers_the_work_item_held(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        run = _work_item(
+            container, session, project, project_session, SessionState.FAILED
+        )
+        project.paused = True
+        session.flush()
+        sign_in(client, SUBJECT)
+
+        response = client.post(f"/api/sessions/{run.id}/resume")
+
+        assert response.status_code == 200
+        body = response.get_json()
+        assert (body["state"], body["held_reason"], body["error"]) == (
+            "held",
+            "paused",
+            None,
+        )
+
+    def test_a_work_item_it_cannot_resume_is_409(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        run = _work_item(
+            container, session, project, project_session, SessionState.RUNNING
+        )
+        sign_in(client, SUBJECT)
+
+        response = client.post(f"/api/sessions/{run.id}/resume")
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            f"Cannot resume work item {run.id} because it is running"
+        )
+
+    def test_an_unknown_session_is_404(self, client: FlaskClient, person: User) -> None:
+        sign_in(client, SUBJECT)
+
+        response = client.post(f"/api/sessions/{uuid.uuid4()}/resume")
+
+        assert response.status_code == 404
+
+    def test_without_the_editor_role_it_is_403(
+        self, client: FlaskClient, project_session: models.Session
+    ) -> None:
+        response = client.post(
+            "/api/testing/auth/session", json={"subject": SUBJECT, "roles": []}
+        )
+        assert response.status_code == 201
+
+        response = client.post(f"/api/sessions/{project_session.id}/resume")
+
+        assert response.status_code == 403
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        response = oidc_client.post(f"/api/sessions/{uuid.uuid4()}/resume")
+
+        assert response.status_code == 401

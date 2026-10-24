@@ -25,6 +25,7 @@ from app.schemas.projects import (
     ProjectListQuerySchema,
     ProjectListResponseSchema,
     ProjectTabSchema,
+    RunningWorkSchema,
     TransitionRequestSchema,
 )
 from app.schemas.timeline import ProjectDocumentSchema, TimelineSchema
@@ -85,6 +86,10 @@ def _head(head: ProjectHead) -> dict[str, Any]:
             for step in head.steps
         ],
         notes=[_note(note) for note in head.notes],
+        running_work=[
+            RunningWorkSchema(id=work.id, title=work.title)
+            for work in head.running_work
+        ],
         open_items=head.open_items,
     ).model_dump(mode="json")
 
@@ -258,9 +263,10 @@ def add_transition(
 ) -> Any:
     """Change the project's standing, as the signed-in person, now.
 
-    Finish also turns auto pilot off, resumes a paused project, and closes
-    the project's open items unanswered; Reopen leaves auto pilot off. A
-    resume lets the project's held starts go on.
+    Finish also turns auto pilot off, resumes a paused project, stops the
+    project's sessions and closes its open items unanswered; Archive stops
+    the sessions too, and nothing of the project starts after either. Reopen
+    leaves auto pilot off. A resume lets the project's held starts go on.
 
     Returns:
         201: The project's head, with its new standing

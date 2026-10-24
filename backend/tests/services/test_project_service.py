@@ -36,6 +36,7 @@ from app.models import (
     Project,
     ProjectMember,
     ProjectTransition,
+    Turn,
     User,
 )
 from app.models.reference import (
@@ -53,9 +54,11 @@ from app.services.project_service import (
     ARCHIVED_REFUSAL,
     Activity,
     PlanProgress,
+    RunningWork,
     plan_progress,
     project_status,
 )
+from app.services.supervisor import LoopHandle
 from app.services.timeline_service import Badge
 
 ADA = AuthContext(
@@ -132,7 +135,8 @@ def _run(
     kind: str = "work",
 ) -> models.Session:
     """A Session of the project in `state`; one of kind `work` with its work
-    item."""
+    item. One `held` or `starting` has its brief, unsent, as its start writes
+    it."""
     run = models.Session(
         project_id=project.id,
         environment_id=environment.id,
@@ -143,6 +147,17 @@ def _run(
     )
     session.add(run)
     session.flush()
+    if state in (SessionState.HELD, SessionState.STARTING):
+        session.add(
+            Turn(
+                session_id=run.id,
+                seq=1,
+                message="Build the camp",
+                started_at=datetime.now(UTC),
+            )
+        )
+        run.turns = 1
+        session.flush()
     if kind == "work":
         container.record_service().place_work(project, run, "Build the camp")
     return run
@@ -727,6 +742,33 @@ class TestHead:
 
         assert head.open_items == 2
 
+    def test_the_running_work_is_named_and_the_other_open_items_counted(
+        self, container: ServiceContainer, session: DbSession, environment: Environment
+    ) -> None:
+        """The Finish dialog's lines (F5.1): the sessions that stop, by their
+        work items' titles, and the items that close unanswered without them."""
+        made = _make(
+            container, name="Busy", open_items=2, environment_id=environment.id
+        )
+        running = [
+            _run(container, session, made, environment, state)
+            for state in (
+                SessionState.RUNNING,
+                SessionState.STARTING,
+                SessionState.HELD,
+            )
+        ]
+        _run(container, session, made, environment, SessionState.STOPPED)
+        _run(container, session, made, environment, SessionState.RUNNING, "chat")
+
+        head = container.project_service().head(ADA, made.id)
+
+        assert head.running_work == tuple(
+            RunningWork(id=run.id, title="Build the camp") for run in running
+        )
+        # The stopped work item waits on you, and closes unanswered.
+        assert head.open_items == 3
+
     def test_a_draft_has_no_plan_and_no_items(
         self, container: ServiceContainer
     ) -> None:
@@ -951,6 +993,74 @@ class TestTransition:
             (item.done_at, item.done_cause_code, item.done_by_user_id) for item in items
         ] == [(at, "finished", person.id)] * 2
         assert service.head(ADA, made.id).open_items == 0
+
+    @pytest.mark.parametrize("kind", [TransitionKind.FINISHED, TransitionKind.ARCHIVED])
+    def test_finish_and_archive_stop_every_running_starting_or_held_session(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        environment: Environment,
+        kind: TransitionKind,
+    ) -> None:
+        made = _make(container, name="Camp")
+        stopping = [
+            _run(container, session, made, environment, state)
+            for state in (
+                SessionState.RUNNING,
+                SessionState.STARTING,
+                SessionState.HELD,
+            )
+        ]
+        stopping.append(
+            _run(container, session, made, environment, SessionState.RUNNING, "chat")
+        )
+        idle = _run(container, session, made, environment, SessionState.IDLE)
+
+        container.project_service().transition(ADA, made.id, kind)
+
+        ((_, at, _),) = [
+            transition
+            for transition in _transitions(session, made)
+            if transition[0] is kind
+        ]
+        assert [
+            (run.state_code, run.stopped_at, run.stopped_by_user_id) for run in stopping
+        ] == [(SessionState.STOPPED, at, person.id)] * 4
+        assert idle.state_code is SessionState.IDLE
+
+    def test_finishs_resume_opens_no_held_start_of_the_finished_project(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        made = _make(container, name="Camp", paused=True)
+        held = _run(container, session, made, environment, SessionState.HELD)
+
+        container.project_service().transition(ADA, made.id, TransitionKind.FINISHED)
+        container.session_start_service().release(LoopHandle("start:held"))
+
+        assert held.state_code is SessionState.STOPPED
+        assert made.paused is False
+
+    def test_finish_closes_the_stopped_work_items_with_the_other_open_items(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        environment: Environment,
+    ) -> None:
+        made = _make(
+            container, name="Camp", open_items=1, environment_id=environment.id
+        )
+        run = _run(container, session, made, environment, SessionState.RUNNING)
+
+        container.project_service().transition(ADA, made.id, TransitionKind.FINISHED)
+
+        item = session.get_one(Item, run.id)
+        assert (item.done_cause_code, item.done_by_user_id) == ("finished", person.id)
+        assert item.done_at == run.stopped_at
 
     def test_reopen_leaves_auto_pilot_off(
         self, container: ServiceContainer, session: DbSession
@@ -1203,8 +1313,11 @@ class TestTransition:
         ("spec", "kind"),
         [
             ({"state": "open", "autopilot": True}, TransitionKind.AUTOPILOT_OFF),
-            ({"state": "open"}, TransitionKind.ARCHIVED),
-            ({"state": "open", "paused": True}, TransitionKind.ARCHIVED),
+            ({"state": "open", "paused": True}, TransitionKind.AUTOPILOT_ON),
+            (
+                {"state": "open", "paused": True, "archived": True},
+                TransitionKind.BROUGHT_BACK,
+            ),
         ],
     )
     def test_a_change_that_keeps_the_pause_moves_no_held_work_item(

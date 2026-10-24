@@ -1395,6 +1395,8 @@ class TestTimeline:
             "error": None,
             "autopilot": False,
             "held_reason": None,
+            "stopped_at": None,
+            "stopped_by": None,
         }
 
     def test_a_work_item_coming_up_has_the_servers_words_and_no_start_yet(
@@ -1601,6 +1603,78 @@ class TestWorkStatus:
 
         assert found[held.id].held_reason == reason
         assert found[running.id].held_reason is None
+
+    @pytest.mark.parametrize("by_a_person", [True, False])
+    def test_a_stopped_one_says_when_and_by_whom(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
+        by_a_person: bool,
+    ) -> None:
+        project = _make(container)
+        stopped = _work(session, project, environment, SessionState.STOPPED)
+        run = session.get_one(models.Session, stopped.id)
+        run.stopped_at = datetime(2026, 10, 24, 9, 5, tzinfo=UTC)
+        run.stopped_by_user_id = person.id if by_a_person else None
+        session.flush()
+
+        work = work_status(session, [stopped.id], unreachable=False)[stopped.id]
+
+        assert work.stopped_at == datetime(2026, 10, 24, 9, 5, tzinfo=UTC)
+        assert (work.stopped_by is not None and work.stopped_by.handle) == (
+            "ada" if by_a_person else False
+        )
+
+    def test_one_no_longer_stopped_says_nothing_of_its_last_stop(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        """A Resume keeps the stop's facts on the Session (DB s-15)."""
+        project = _make(container)
+        held = _work(session, project, environment, SessionState.HELD)
+        run = session.get_one(models.Session, held.id)
+        run.stopped_at = datetime(2026, 10, 24, 9, 5, tzinfo=UTC)
+        run.stopped_by_user_id = person.id
+        session.flush()
+
+        work = work_status(session, [held.id], unreachable=False)[held.id]
+
+        assert (work.stopped_at, work.stopped_by) == (None, None)
+
+    def test_the_service_reads_one_work_item(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        project = _make(container)
+        held = _work(session, project, environment, SessionState.HELD)
+        controller_outage.call_unanswered()
+
+        work = container.timeline_service().work(held.id)
+
+        assert (work.state, work.held_reason) == (
+            SessionState.HELD,
+            HeldReason.CONTROLLER_UNREACHABLE,
+        )
+
+    def test_the_service_finds_no_work_item_of_another_kind(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        run = _run(session, project, environment, SessionState.RUNNING)
+
+        with pytest.raises(RecordNotFoundException):
+            container.timeline_service().work(run.id)
 
     def test_the_timeline_reads_the_outage_as_it_stands(
         self,

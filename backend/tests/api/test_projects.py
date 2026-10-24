@@ -320,8 +320,32 @@ class TestGetProject:
                     "content": "No task covers printing yet.",
                 }
             ],
+            "running_work": [],
             "open_items": 2,
         }
+
+    def test_the_running_work_is_named_for_the_finish_dialog(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        environment: Environment,
+    ) -> None:
+        recipes = _make(
+            container, name="Recipe box", open_items=1, environment_id=environment.id
+        )
+        project = session.get_one(Project, recipes)
+        run = _run(session, project, environment)
+        run.state_code = SessionState.RUNNING
+        container.record_service().place_work(project, run, "Building the card page")
+        _sign_in(client)
+
+        body = client.get(f"{PROJECTS}/{recipes}").get_json()
+
+        assert body["running_work"] == [
+            {"id": str(run.id), "title": "Building the card page"}
+        ]
+        assert body["open_items"] == 1
 
     def test_an_archived_project_reads_as_it_was_left(
         self, client: FlaskClient, container: ServiceContainer
@@ -625,6 +649,8 @@ class TestGetTimeline:
             "error": None,
             "autopilot": False,
             "held_reason": None,
+            "stopped_at": None,
+            "stopped_by": None,
         }
 
     def test_a_block_s_own_section_rides_with_its_text(

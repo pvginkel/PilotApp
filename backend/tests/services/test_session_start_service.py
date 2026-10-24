@@ -41,8 +41,8 @@ from app.services.controller_client import (
 )
 from app.services.controller_outage import ControllerOutage
 from app.services.environment_service import EnvironmentService
-from app.services.fake_controller import FakeControllerProblem
-from app.services.relay_service import SEND_FAILED, RelayService
+from app.services.fake_controller import FakeControllerProblem, FinishOutcome
+from app.services.relay_service import CONTINUE, SEND_FAILED, SESSION_GONE, RelayService
 from app.services.session_record_service import StoredRecord, read_records
 from app.services.session_start_service import (
     START_FAILED,
@@ -52,6 +52,7 @@ from app.services.session_start_service import (
 )
 from app.services.supervisor import LoopHandle
 from app.services.timeline_service import work_status
+from app.utils import after_commit as after_commit_module
 from app.utils.after_commit import clear_after_commit_callbacks
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
 from tests.support.fake_controller import ServedFakeController, client_of, raw_turn
@@ -1760,24 +1761,20 @@ class TestHeldLoop:
         loop_log: LogWaiter,
     ) -> None:
         container = committed_app.container
+        outage = container.controller_outage()
         starts, _, coordinator = _services(container, supervise)
         project_id = _committed_project(container)
-        with scoped_session(container) as db:
-            db.get_one(Project, project_id).paused = True
         coordinator.fire_startup()
+        outage.call_unanswered()
 
         with scoped_session(container) as db:
             run_id = starts.start_session(
                 db, project_id, ENV, kind_code="work", cwd=CWD, brief=BRIEF
             ).id
-            # The pause lifted, committed before this write's commit: the
-            # release it opened found nothing held.
-            other: DbSession = container.session_maker()()
-            try:
-                other.get_one(Project, project_id).paused = False
-                other.commit()
-            finally:
-                other.close()
+            # The controller answering again before this write's commit: the
+            # release its off opened found nothing held. The pause cannot
+            # lift so, as the write holds the project's row under a share lock.
+            outage.probe_answered()
 
         loop_log.wait_for(rf"Session {run_id} goes on from held")
         loop_log.wait_for(rf"Loop relay:{run_id} started")
@@ -1825,3 +1822,743 @@ class TestHeldLoop:
 def _add_environment(container: ServiceContainer) -> None:
     with scoped_session(container) as db:
         db.add(Environment(id=ENV, name="Env-A", exempt=False))
+
+
+def _running(
+    starts: SessionStartService, db: DbSession, project: Project
+) -> models.Session:
+    """A work item whose start ran to its brief's send: `running`."""
+    run = _read(db, _start_work(starts, db, project).id)
+    _run(starts, run)
+    clear_after_commit_callbacks()
+    run = _read(db, run.id)
+    assert run.state_code == SessionState.RUNNING
+    return run
+
+
+def _callbacks() -> set[str]:
+    """The kinds of the callbacks waiting on the transaction's commit."""
+    return {
+        type(callback).__name__ for callback in after_commit_module._callbacks.get()
+    }
+
+
+def _turn_ends(
+    starts: SessionStartService,
+    fake: _Recording,
+    run: models.Session,
+    outcome: FinishOutcome,
+) -> None:
+    """The controller's turn ends as `outcome` says, and the relay records it
+    to its `result`, as its loop does."""
+    assert run.controller_session is not None
+    fake.finish(ENV, run.controller_session, outcome, "The tests failed.")
+    starts._relays.relay(run.id, LoopHandle(f"relay:{run.id}"))
+
+
+class TestStop:
+    """A work item's Stop (F67.1; review A1; V04)."""
+
+    def test_a_running_work_item_is_stopped_its_turn_left_to_its_relay(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        run = _running(starts, session, project)
+        engine_events.clear()
+        before = datetime.now(UTC)
+
+        stopped = starts.stop(session, run.id, person)
+
+        assert stopped.state_code == SessionState.STOPPED
+        assert stopped.stopped_by_user_id == person.id
+        assert stopped.stopped_at is not None and stopped.stopped_at >= before
+        assert stopped.current_line is None
+        (brief,) = _turns(session, run.id)
+        assert brief.ended_at is None and stopped.turn_ended_at is None
+        # The interrupt runs once the stop commits.
+        assert "_InterruptStart" in _callbacks()
+        name = stopped.controller_session
+        assert name is not None and fake.session(ENV, name).status == "busy"
+        # Nothing else runs there: Pilot's environment's timer is armed.
+        assert _row(session).stop_due_at is not None
+        clear_after_commit_callbacks()
+
+    def test_it_moves_the_item_and_its_state(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        run = _running(starts, session, project)
+        engine_events.clear()
+
+        with scoped_session(container) as db:
+            starts.stop(db, run.id, person)
+
+        assert _moves(engine_events) == [
+            WorkMoved(project.id, run.id),
+            ProjectChanged(project.id),
+        ]
+
+    def test_a_starting_work_item_is_stopped_and_its_loop_sends_nothing(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        work = _start_work(starts, session, project)
+
+        starts.stop(session, work.id, person)
+        assert "_InterruptStart" not in _callbacks()
+        clear_after_commit_callbacks()
+        before = len(fake.calls)
+        _run(starts, _read(session, work.id))
+
+        run = _read(session, work.id)
+        assert run.state_code == SessionState.STOPPED
+        (brief,) = _turns(session, run.id)
+        assert brief.ended_at == run.stopped_at == run.turn_ended_at
+        assert fake.calls[before:] == []
+
+    def test_a_held_work_item_is_stopped_and_nothing_of_it_starts_afterwards(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        controller_outage.call_unanswered()
+        work = _start_work(starts, session, project)
+        assert _read(session, work.id).state_code == SessionState.HELD
+
+        starts.stop(session, work.id, person)
+        clear_after_commit_callbacks()
+        controller_outage.probe_answered()
+        _release(starts)
+        before = len(fake.calls)
+        _run(starts, _read(session, work.id))
+
+        run = _read(session, work.id)
+        assert run.state_code == SessionState.STOPPED
+        (brief,) = _turns(session, run.id)
+        assert brief.ended_at is not None
+        assert fake.calls[before:] == []
+        assert _server(session, run.id) == []
+
+    def test_a_stop_while_its_session_is_created_sends_nothing(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        work = _start_work(starts, session, project)
+        client = container.controller_client()
+        create = client.create_headless_session
+
+        def stopped_meanwhile(*args: Any) -> Any:
+            created = create(*args)
+            starts.stop(session, work.id, person)
+            session.flush()
+            return created
+
+        monkeypatch.setattr(client, "create_headless_session", stopped_meanwhile)
+
+        _run(starts, _read(session, work.id))
+        clear_after_commit_callbacks()
+
+        run = _read(session, work.id)
+        assert (run.state_code, run.controller_session) == (SessionState.STOPPED, None)
+        (created,) = fake.sessions(ENV)
+        assert _sends(fake, created.name) == 0
+
+    @pytest.mark.parametrize(
+        ("state", "refusal"),
+        [
+            (SessionState.IDLE, "its turn has ended"),
+            (SessionState.STOPPED, "it is stopped already"),
+            (SessionState.FAILED, "it has failed"),
+            (SessionState.ENDED, "its session has ended"),
+        ],
+    )
+    def test_a_work_item_neither_running_starting_nor_held_is_refused(
+        self,
+        starts: SessionStartService,
+        session: DbSession,
+        project: Project,
+        person: User,
+        state: SessionState,
+        refusal: str,
+    ) -> None:
+        run = _read(session, _start_work(starts, session, project).id)
+        run.state_code = state
+        session.flush()
+
+        with pytest.raises(InvalidOperationException, match=refusal):
+            starts.stop(session, run.id, person)
+
+        assert _read(session, run.id).stopped_at is None
+
+    def test_a_session_with_no_work_item_is_refused(
+        self,
+        starts: SessionStartService,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        run = _start(starts, session, project)
+
+        with pytest.raises(InvalidOperationException, match="it is no work item"):
+            starts.stop(session, run.id, person)
+
+    def test_an_unknown_session_is_not_found(
+        self, starts: SessionStartService, session: DbSession, person: User
+    ) -> None:
+        with pytest.raises(RecordNotFoundException):
+            starts.stop(session, uuid.uuid4(), person)
+
+
+class TestStopProject:
+    """Finish's and Archive's stop (F5.1, F128.1; V11)."""
+
+    def test_every_session_running_starting_or_held_is_stopped(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        running = _running(starts, session, project)
+        starting = _start_work(starts, session, project)
+        chat = _start(starts, session, project)
+        chat.kind_code = "chat"
+        controller_outage.call_unanswered()
+        held = _start_work(starts, session, project)
+        controller_outage.probe_answered()
+        idle = _read(session, _start_work(starts, session, project).id)
+        idle.state_code = SessionState.IDLE
+        other = Project(created_by_user_id=person.id)
+        session.add(other)
+        session.flush()
+        elsewhere = _start(starts, session, other)
+        at = datetime.now(UTC)
+
+        starts.stop_project(session, project, person, at)
+
+        for stopped in (running.id, starting.id, chat.id, held.id):
+            run = _read(session, stopped)
+            assert (run.state_code, run.stopped_at, run.stopped_by_user_id) == (
+                SessionState.STOPPED,
+                at,
+                person.id,
+            )
+        assert _read(session, idle.id).state_code == SessionState.IDLE
+        assert _read(session, elsewhere.id).state_code == SessionState.STARTING
+        # No controller call in the transaction: the interrupt follows its commit.
+        assert "_InterruptStart" in _callbacks()
+        clear_after_commit_callbacks()
+
+
+def _stopped_item(
+    starts: SessionStartService,
+    fake: _Recording,
+    db: DbSession,
+    project: Project,
+    person: User,
+) -> models.Session:
+    """A work item stopped under its turn, its relay having recorded the
+    interrupt's `result`, with its conversation."""
+    run = _running(starts, db, project)
+    run.conversation_id = "conv-1"
+    starts.stop(db, run.id, person)
+    clear_after_commit_callbacks()
+    _turn_ends(starts, fake, run, "interrupted")
+    run = _read(db, run.id)
+    assert run.state_code == SessionState.STOPPED
+    assert run.turn_ended_at is not None
+    return run
+
+
+class TestResume:
+    """A work item's Resume (F67.2, F26.7; R15's rule; review A1; V04, V05)."""
+
+    def test_a_stopped_work_item_resumes_with_continue_through_the_start(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        stopped = _stopped_item(starts, fake, session, project, person)
+        name = stopped.controller_session
+        records = len(_records(session, stopped.id))
+
+        run = starts.resume(session, stopped.id)
+
+        assert run.state_code == SessionState.STARTING
+        brief, resumed = _turns(session, run.id)
+        assert (resumed.seq, resumed.message, resumed.author_user_id) == (
+            2,
+            CONTINUE,
+            None,
+        )
+        assert resumed.ended_at is None
+        assert (run.turns, run.turn_started_at, run.turn_ended_at) == (
+            2,
+            resumed.started_at,
+            None,
+        )
+        # Its controller session takes the turn: no phase of a start.
+        assert len(_records(session, run.id)) == records
+        assert run.current_line is None
+        # The facts of the stop stay (DB s-15).
+        assert (run.stopped_at, run.stopped_by_user_id) == (
+            stopped.stopped_at,
+            person.id,
+        )
+        assert "_LoopStart" in _callbacks()
+        clear_after_commit_callbacks()
+
+        _run(starts, run)
+
+        run = _read(session, run.id)
+        assert run.state_code == SessionState.RUNNING
+        assert run.controller_session == name
+        assert name is not None and fake.session(ENV, name).status == "busy"
+        assert _sends(fake, name) == 2
+        # "running N min" counts from the Resume's send.
+        assert run.started_at == _turns(session, run.id)[1].started_at
+        assert session.scalars(select(Item)).all() == [session.get_one(Item, run.id)]
+
+    def test_a_session_with_no_conversation_resumes_with_the_ended_turns_message(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        # A failed start: the controller refused the environment's start.
+        fake.capped(ENV)
+        work = _start_work(starts, session, project)
+        _run(starts, _read(session, work.id))
+        assert _read(session, work.id).state_code == SessionState.FAILED
+        fake.capped(ENV, on=False)
+
+        run = starts.resume(session, work.id)
+        clear_after_commit_callbacks()
+
+        assert run.error is None
+        _, resumed = _turns(session, run.id)
+        assert resumed.message == BRIEF
+        assert _server(session, run.id)[-1] == (None, STARTING_ENV)
+        _run(starts, run)
+        run = _read(session, run.id)
+        assert run.state_code == SessionState.RUNNING
+        (created,) = fake.sessions(ENV)
+        assert fake.create_bodies == [{"cwd": CWD}]
+        assert _sends(fake, created.name) == 1
+
+    def test_a_failed_turn_resumes_its_error_cleared(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        run = _running(starts, session, project)
+        run.conversation_id = "conv-1"
+        _turn_ends(starts, fake, run, "error")
+        assert _read(session, run.id).state_code == SessionState.FAILED
+
+        resumed = starts.resume(session, run.id)
+        clear_after_commit_callbacks()
+        _run(starts, resumed)
+
+        run = _read(session, run.id)
+        assert run.state_code == SessionState.RUNNING
+        assert [turn.message for turn in _turns(session, run.id)] == [BRIEF, CONTINUE]
+        assert work_status(session, [run.id], unreachable=False)[run.id].error is None
+
+    def test_while_the_gate_is_closed_it_is_held_and_runs_once_it_opens(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        stopped = _stopped_item(starts, fake, session, project, person)
+        name = stopped.controller_session
+        assert name is not None
+        controller_outage.call_unanswered()
+
+        run = starts.resume(session, stopped.id)
+
+        assert run.state_code == SessionState.HELD
+        assert "_HeldWritten" in _callbacks()
+        clear_after_commit_callbacks()
+        _, resumed = _turns(session, run.id)
+        assert (resumed.message, resumed.ended_at) == (CONTINUE, None)
+        assert work_status(session, [run.id], unreachable=True)[run.id].held_reason == (
+            HeldReason.CONTROLLER_UNREACHABLE
+        )
+        assert _sends(fake, name) == 1
+
+        controller_outage.probe_answered()
+        _release(starts)
+        _run(starts, run)
+
+        assert _read(session, run.id).state_code == SessionState.RUNNING
+        assert _sends(fake, name) == 2
+
+    def test_in_a_paused_project_it_is_held(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        stopped = _stopped_item(starts, fake, session, project, person)
+        project.paused = True
+        session.flush()
+
+        run = starts.resume(session, stopped.id)
+        clear_after_commit_callbacks()
+
+        assert run.state_code == SessionState.HELD
+        assert work_status(session, [run.id], unreachable=False)[
+            run.id
+        ].held_reason == (HeldReason.PAUSED)
+
+    def test_a_controller_session_gone_is_created_anew_with_its_conversation(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        stopped = _stopped_item(starts, fake, session, project, person)
+        gone = stopped.controller_session
+        fake.restart(ENV)
+        fake.set_status(ENV, "running")
+        run = starts.resume(session, stopped.id)
+        clear_after_commit_callbacks()
+
+        _run(starts, run)
+
+        run = _read(session, run.id)
+        assert run.state_code == SessionState.RUNNING
+        assert run.controller_session not in (None, gone)
+        server = _server(session, run.id)
+        assert server[-3][1]["type"] == SESSION_GONE
+        assert "404 not-found" in server[-3][1]["reason"]
+        assert server[-2:] == [(None, STARTING_ENV), (None, CREATING)]
+        assert fake.create_bodies[-1] == {"cwd": CWD, "resume": "conv-1"}
+        assert run.controller_session is not None
+        assert _sends(fake, run.controller_session) == 1
+
+    def test_an_environment_stopped_meanwhile_is_started_again(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        stopped = _stopped_item(starts, fake, session, project, person)
+        fake.set_status(ENV, "stopped")
+        run = starts.resume(session, stopped.id)
+        clear_after_commit_callbacks()
+
+        _run(starts, run)
+
+        run = _read(session, run.id)
+        assert run.state_code == SessionState.RUNNING
+        assert fake.environment(ENV).status == "running"
+        assert "409 conflict" in _server(session, run.id)[-3][1]["reason"]
+        # Pilot's start brought the pod up: its claim (P2).
+        assert _row(session).started_pod_at == fake.environment(ENV).pod_started_at
+
+    def test_a_resume_meeting_the_outage_is_held_again(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        stopped = _stopped_item(starts, fake, session, project, person)
+        run = starts.resume(session, stopped.id)
+        clear_after_commit_callbacks()
+        fake.outage(answer="ingress")
+
+        _run(starts, run)
+
+        assert _read(session, run.id).state_code == SessionState.HELD
+        assert controller_outage.holds
+        _, resumed = _turns(session, run.id)
+        assert (resumed.ended_at, resumed.error) == (None, None)
+
+    def test_a_resume_whose_send_fails_fails_the_item(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        stopped = _stopped_item(starts, fake, session, project, person)
+        run = starts.resume(session, stopped.id)
+        clear_after_commit_callbacks()
+        fake.refuse_sends = True
+
+        _run(starts, run)
+
+        run = _read(session, run.id)
+        assert run.state_code == SessionState.FAILED
+        _, resumed = _turns(session, run.id)
+        assert resumed.ended_at is not None and resumed.error is not None
+        assert run.error == resumed.error
+
+    def test_it_moves_the_item_and_its_state(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        stopped = _stopped_item(starts, fake, session, project, person)
+        engine_events.clear()
+
+        with scoped_session(container) as db:
+            starts.resume(db, stopped.id)
+
+        assert _moves(engine_events) == [
+            WorkMoved(project.id, stopped.id),
+            ProjectChanged(project.id),
+        ]
+
+    @pytest.mark.parametrize(
+        ("state", "refusal"),
+        [
+            (SessionState.HELD, "its start waits at the gate"),
+            (SessionState.STARTING, "it is starting"),
+            (SessionState.RUNNING, "it is running"),
+            (SessionState.IDLE, "its turn has ended"),
+            (SessionState.ENDED, "its session has ended"),
+        ],
+    )
+    def test_a_work_item_neither_stopped_nor_failed_is_refused(
+        self,
+        starts: SessionStartService,
+        session: DbSession,
+        project: Project,
+        state: SessionState,
+        refusal: str,
+    ) -> None:
+        run = _read(session, _start_work(starts, session, project).id)
+        run.state_code = state
+        session.flush()
+
+        with pytest.raises(InvalidOperationException, match=refusal):
+            starts.resume(session, run.id)
+
+        assert len(_turns(session, run.id)) == 1
+
+    def test_a_turn_still_ending_under_its_stop_is_refused(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        run = _running(starts, session, project)
+        starts.stop(session, run.id, person)
+        clear_after_commit_callbacks()
+
+        with pytest.raises(
+            InvalidOperationException, match="its stopped turn is still ending"
+        ):
+            starts.resume(session, run.id)
+
+    @pytest.mark.parametrize(
+        ("standing", "refusal"),
+        [
+            (
+                {"state_code": ProjectState.FINISHED, "slug": "camp"},
+                "its project is finished",
+            ),
+            ({"archived": True}, "its project is archived"),
+        ],
+    )
+    def test_a_finished_or_archived_project_refuses_it(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+        standing: dict[str, Any],
+        refusal: str,
+    ) -> None:
+        stopped = _stopped_item(starts, fake, session, project, person)
+        for column, value in standing.items():
+            setattr(project, column, value)
+        session.flush()
+
+        with pytest.raises(InvalidOperationException, match=refusal):
+            starts.resume(session, stopped.id)
+
+    def test_a_session_with_no_work_item_is_refused(
+        self,
+        starts: SessionStartService,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        run = _start(starts, session, project)
+        run.state_code = SessionState.STOPPED
+        session.flush()
+
+        with pytest.raises(InvalidOperationException, match="it is no work item"):
+            starts.resume(session, run.id)
+
+    def test_no_controller_refuses_it(
+        self,
+        container: ServiceContainer,
+        fake: _Recording,
+        supervise: Supervise,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        starts = _services(container, supervise)[0]
+        stopped = _stopped_item(starts, fake, session, project, person)
+        unconfigured = _services(container, supervise, controller_configured=False)[0]
+
+        with pytest.raises(InvalidOperationException, match="no controller"):
+            unconfigured.resume(session, stopped.id)
+
+    def test_an_unknown_session_is_not_found(
+        self, starts: SessionStartService, session: DbSession
+    ) -> None:
+        with pytest.raises(RecordNotFoundException):
+            starts.resume(session, uuid.uuid4())
+
+
+class TestStopLoop:
+    """A Stop's commit interrupts the turn, and its relay records it to its
+    end (F67.1)."""
+
+    @pytest.fixture
+    def committed_fake(self, committed_app: Flask) -> Iterator[_Recording]:
+        served = _Recording(keepalive_seconds=0.2)
+        client_of(committed_app.container, served)
+        served.add_environment(ENV, name="Env-A")
+        try:
+            yield served
+        finally:
+            served.close()
+
+    def test_a_stopped_work_item_ends_its_turn_interrupted_and_stays_stopped(
+        self,
+        committed_app: Flask,
+        committed_fake: _Recording,
+        supervise: Supervise,
+    ) -> None:
+        container = committed_app.container
+        starts, _, coordinator = _services(container, supervise)
+        project_id = _committed_project(container)
+        _add_environment(container)
+        coordinator.fire_startup()
+        with scoped_session(container) as db:
+            work_id = starts.start_work(
+                db, project_id, ENV, title="Renaming", brief=BRIEF, cwd=CWD
+            ).id
+        wait_until(
+            lambda: _committed(container, work_id).state_code == SessionState.RUNNING,
+            "the brief sent",
+        )
+        name = _committed(container, work_id).controller_session
+        assert name is not None
+        committed_fake.play(ENV, name, raw_turn("turn_text")[:3])
+
+        with scoped_session(container) as db:
+            person = db.scalars(select(User).where(User.handle == "ada")).one()
+            starts.stop(db, work_id, person)
+
+        def interrupted() -> bool:
+            with scoped_session(container) as db:
+                return all(turn.ended_at for turn in _turns(db, work_id))
+
+        wait_until(interrupted, "the stopped turn ended")
+        result = committed_fake.session(ENV, name).result
+        assert result is not None and result["interrupted"]
+        run = _committed(container, work_id)
+        assert run.state_code == SessionState.STOPPED
+        assert run.current_line is None
+        with scoped_session(container) as db:
+            assert db.get_one(Item, work_id).done_at is None
+
+
+class TestStartInAClosedProject:
+    """Nothing of a finished or an archived project starts (F5.1, F128.1)."""
+
+    @pytest.mark.parametrize(
+        ("standing", "refusal"),
+        [
+            (
+                {"state_code": ProjectState.FINISHED, "slug": "camp"},
+                "its project is finished",
+            ),
+            ({"archived": True}, "its project is archived"),
+        ],
+    )
+    def test_a_work_start_is_refused_and_a_chats_is_not(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        standing: dict[str, Any],
+        refusal: str,
+    ) -> None:
+        for column, value in standing.items():
+            setattr(project, column, value)
+        session.flush()
+
+        with pytest.raises(InvalidOperationException, match=refusal):
+            _start_work(starts, session, project)
+        chat = starts.start_session(
+            session, project.id, ENV, kind_code="chat", cwd=CWD, brief=BRIEF
+        )
+        clear_after_commit_callbacks()
+
+        assert session.scalars(select(Item).where(Item.kind_code == "work")).all() == []
+        assert chat.state_code == SessionState.STARTING

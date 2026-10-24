@@ -134,6 +134,15 @@ class PlanTaskSchema(BaseModel):
     notes: list[PlanNoteSchema] = Field(description="The step's open notes")
 
 
+class RunningWorkSchema(BaseModel):
+    """A work item whose session runs, starts or waits at the gate."""
+
+    id: uuid.UUID = Field(description="The work item's id, its session's")
+    title: str | None = Field(
+        description="The work item's title", examples=["Renaming the badge"]
+    )
+
+
 class ProjectHeadSchema(BaseModel):
     """What a project's head, its popovers and its menu read."""
 
@@ -163,10 +172,16 @@ class ProjectHeadSchema(BaseModel):
     progress: PlanProgressSchema
     tasks: list[PlanTaskSchema] = Field(description="The plan's steps, in order")
     notes: list[PlanNoteSchema] = Field(description="The plan's own open notes")
+    running_work: list[RunningWorkSchema] = Field(
+        description=(
+            "The work items whose session runs, starts or waits at the gate, in "
+            "timeline order: those whose sessions Finish and Archive stop (F5.1)"
+        )
+    )
     open_items: int = Field(
         description=(
-            "The project's open items, the opening not counted: those Finish "
-            "closes unanswered"
+            "The project's open items, the opening and `running_work` not counted: "
+            "those Finish closes unanswered"
         ),
         examples=[3],
     )

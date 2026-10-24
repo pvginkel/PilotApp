@@ -37,7 +37,7 @@ from app.models.reference import (
 from app.schemas.projects import ProjectStatus
 from app.services.auth_service import AuthContext
 from app.services.people_service import PeopleService
-from app.services.session_start_service import SessionStartService
+from app.services.session_start_service import STOPPABLE, SessionStartService
 from app.services.timeline_service import (
     WAIT,
     Badge,
@@ -74,6 +74,14 @@ class PlanStep:
 
 
 @dataclass(frozen=True)
+class RunningWork:
+    """A work item whose Session Finish and Archive stop."""
+
+    id: uuid.UUID
+    title: str | None
+
+
+@dataclass(frozen=True)
 class ProjectHead:
     project: Project
     status: ProjectStatus | None
@@ -82,6 +90,7 @@ class ProjectHead:
     progress: PlanProgress
     steps: tuple[PlanStep, ...]
     notes: tuple[PlanNote, ...]
+    running_work: tuple[RunningWork, ...]
     open_items: int
 
 
@@ -249,6 +258,19 @@ class ProjectService:
             .order_by(PlanNote.id)
         ):
             notes.setdefault(note.plan_task_id, []).append(note)
+        running_work = tuple(
+            RunningWork(id=row.id, title=row.title)
+            for row in self.db.execute(
+                select(Item.id, Item.title)
+                .join(AgentSession, AgentSession.id == Item.id)
+                .where(
+                    Item.project_id == project.id,
+                    Item.done_at.is_(None),
+                    AgentSession.state_code.in_(STOPPABLE),
+                )
+                .order_by(Item.seq)
+            )
+        )
         open_items = self.db.scalar(
             select(func.count())
             .select_from(Item)
@@ -256,6 +278,7 @@ class ProjectService:
                 Item.project_id == project.id,
                 Item.done_at.is_(None),
                 Item.kind_code != OPENING,
+                Item.id.not_in([work.id for work in running_work]),
             )
         )
         progress = plan_progress(tasks)
@@ -271,6 +294,7 @@ class ProjectService:
                 PlanStep(task, tuple(notes.get(task.task_id, []))) for task in tasks
             ),
             notes=tuple(notes.get(None, [])),
+            running_work=running_work,
             open_items=open_items or 0,
         )
 
@@ -280,9 +304,11 @@ class ProjectService:
         """The caller's transition of `kind`, now, the project's caches
         refreshed with it (DB §7.4). Finish is followed at its instant by
         `autopilot_off` while auto pilot is on and by `resumed` while the
-        project is paused (DB 171), and closes the open items unanswered
-        (F5.1). A finished project's auto pilot is off and it is not paused,
-        so Reopen leaves both so (F6). Archive keeps the pause, and Bring back
+        project is paused (DB 171), stops every session of the project that
+        runs, starts or is held, and closes the open items unanswered (F5.1).
+        Archive stops them too (F128.1), and nothing of either starts after
+        it. A finished project's auto pilot is off and it is not paused, so
+        Reopen leaves both so (F6). Archive keeps the pause, and Bring back
         returns it (F141.2). A pause and a resume move the reason on the
         project's held work items' lines, and once a resume commits the gate
         opens for its held starts (F141.5). Archive and Bring back raise the
@@ -303,6 +329,9 @@ class ProjectService:
         at = datetime.now(UTC)
         paused = project.paused
         self._write(project, person, at, kind)
+        if kind in (TransitionKind.FINISHED, TransitionKind.ARCHIVED):
+            # Before the close, which locks the Items after their Sessions.
+            self.session_start_service.stop_project(self.db, project, person, at)
         if kind is TransitionKind.FINISHED:
             if project.autopilot:
                 self._write(project, person, at, TransitionKind.AUTOPILOT_OFF)

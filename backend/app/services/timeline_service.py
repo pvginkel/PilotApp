@@ -12,7 +12,7 @@ from typing import Any, cast
 
 from sqlalchemy import ColumnElement, and_, func, or_, select
 from sqlalchemy.dialects.postgresql import distinct_on
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app.engine import dsl
 from app.engine.documents import OPENING, PROSE
@@ -157,17 +157,21 @@ def work_status(
     head show it, the controller `unreachable` or not; an item of another kind
     is left out. A failed one's error is its latest Turn's, else its
     Session's: a turn's failure is its Turn's, a start's the Session's (DB
-    Session `error?`). A held one's reason is the gate's as it reads now."""
+    Session `error?`). A held one's reason is the gate's as it reads now. A
+    stopped one's stop is when and by whom, a Resume keeping both on the
+    Session (DB Session `stopped_at?`, `stopped_by?`)."""
+    stopper = aliased(User)
     rows = db.execute(
-        select(AgentSession, Environment.name, Work.autopilot, Project.paused)
+        select(AgentSession, Environment.name, Work.autopilot, Project.paused, stopper)
         .join(Work, Work.id == AgentSession.id)
         .join(Environment, Environment.id == AgentSession.environment_id)
         .join(Project, Project.id == AgentSession.project_id)
+        .outerjoin(stopper, stopper.id == AgentSession.stopped_by_user_id)
         .where(AgentSession.id.in_(list(item_ids)))
     ).all()
     failed = [
         session.id
-        for session, _, _, _ in rows
+        for session, _, _, _, _ in rows
         if session.state_code is SessionState.FAILED
     ]
     turn_errors: dict[uuid.UUID, str | None] = (
@@ -203,9 +207,29 @@ def work_status(
                 if session.state_code is SessionState.HELD
                 else None
             ),
+            stopped_at=(
+                session.stopped_at
+                if session.state_code is SessionState.STOPPED
+                else None
+            ),
+            stopped_by=(
+                _user_schema(stopped_by)
+                if session.state_code is SessionState.STOPPED and stopped_by is not None
+                else None
+            ),
         )
-        for session, name, autopilot, paused in rows
+        for session, name, autopilot, paused, stopped_by in rows
     }
+
+
+def _user_schema(user: User) -> UserSchema:
+    return UserSchema(
+        kind=user.kind_code,
+        handle=user.handle,
+        name=user.name,
+        initials=initials(user.name),
+        avatar_slot=user.avatar_slot,
+    )
 
 
 class TimelineService:
@@ -234,6 +258,19 @@ class TimelineService:
             .group_by(Item.project_id)
         ).all()
         return {row.project_id: Badge(row.waiting, row.urgent) for row in rows}
+
+    def work(self, item_id: uuid.UUID) -> WorkSchema:
+        """The work item's status, as its line and head show it.
+
+        Raises:
+            RecordNotFoundException: no work item has the id.
+        """
+        work = work_status(
+            self.db, [item_id], unreachable=self.controller_outage.holds
+        ).get(item_id)
+        if work is None:
+            raise RecordNotFoundException("Work item", str(item_id))
+        return work
 
     def timeline(self, project_id: uuid.UUID) -> TimelineSchema:
         """The project's every item in order, as its line and its open form
@@ -582,14 +619,7 @@ class _Reader:
     def user(self, key: uuid.UUID | str | None) -> UserSchema | None:
         if key is None:
             return None
-        user = self.users[key]
-        return UserSchema(
-            kind=user.kind_code,
-            handle=user.handle,
-            name=user.name,
-            initials=initials(user.name),
-            avatar_slot=user.avatar_slot,
-        )
+        return _user_schema(self.users[key])
 
     def part(self, part: dsl.Prose | dsl.Block) -> BodyPartSchema:
         if isinstance(part, dsl.Prose):

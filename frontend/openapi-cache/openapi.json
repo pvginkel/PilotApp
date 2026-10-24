@@ -2105,12 +2105,36 @@
                 "type": "null"
               }
             ],
-            "description": "When the controller confirmed its session, which \"running N min\" counts from; null before",
+            "description": "When its run began, which \"running N min\" counts from: the controller confirmed its session, or took its Resume's turn; null before",
             "title": "Started At"
           },
           "state": {
             "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.SessionState",
             "description": "Its Session's state: `held` while the gate holds its start, `starting` while it comes up, `running` while a turn is in flight, `idle` once its turn ended, `stopped` and `failed` waiting on you, `ended` once its controller session is gone"
+          },
+          "stopped_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When it was stopped, its \"Stopped · <time>\"; null unless `state` is `stopped` (F26.1, F69.2)",
+            "title": "Stopped At"
+          },
+          "stopped_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.UserSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who stopped it, by Stop, Finish or Archive; null when no one of Pilot's did, and unless `state` is `stopped` (F69.2)"
           }
         },
         "required": [
@@ -2120,7 +2144,9 @@
           "started_at",
           "error",
           "autopilot",
-          "held_reason"
+          "held_reason",
+          "stopped_at",
+          "stopped_by"
         ],
         "title": "WorkSchema",
         "type": "object"
@@ -2823,7 +2849,7 @@
             "type": "array"
           },
           "open_items": {
-            "description": "The project's open items, the opening not counted: those Finish closes unanswered",
+            "description": "The project's open items, the opening and `running_work` not counted: those Finish closes unanswered",
             "examples": [
               3
             ],
@@ -2847,6 +2873,14 @@
               "pvginkel/RecipeBox"
             ],
             "title": "Repo"
+          },
+          "running_work": {
+            "description": "The work items whose session runs, starts or waits at the gate, in timeline order: those whose sessions Finish and Archive stop (F5.1)",
+            "items": {
+              "$ref": "#/components/schemas/ProjectHeadSchema.e86ccd6.RunningWorkSchema"
+            },
+            "title": "Running Work",
+            "type": "array"
           },
           "state": {
             "$ref": "#/components/schemas/ProjectHeadSchema.e86ccd6.ProjectState",
@@ -2901,6 +2935,7 @@
           "progress",
           "tasks",
           "notes",
+          "running_work",
           "open_items"
         ],
         "title": "ProjectHeadSchema",
@@ -3088,6 +3123,38 @@
         ],
         "title": "ProjectStatus",
         "type": "string"
+      },
+      "ProjectHeadSchema.e86ccd6.RunningWorkSchema": {
+        "description": "A work item whose session runs, starts or waits at the gate.",
+        "properties": {
+          "id": {
+            "description": "The work item's id, its session's",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The work item's title",
+            "examples": [
+              "Renaming the badge"
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "id",
+          "title"
+        ],
+        "title": "RunningWorkSchema",
+        "type": "object"
       },
       "ProjectHeadSchema.e86ccd6.TaskStatus": {
         "enum": [
@@ -5788,12 +5855,36 @@
                 "type": "null"
               }
             ],
-            "description": "When the controller confirmed its session, which \"running N min\" counts from; null before",
+            "description": "When its run began, which \"running N min\" counts from: the controller confirmed its session, or took its Resume's turn; null before",
             "title": "Started At"
           },
           "state": {
             "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.SessionState",
             "description": "Its Session's state: `held` while the gate holds its start, `starting` while it comes up, `running` while a turn is in flight, `idle` once its turn ended, `stopped` and `failed` waiting on you, `ended` once its controller session is gone"
+          },
+          "stopped_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When it was stopped, its \"Stopped · <time>\"; null unless `state` is `stopped` (F26.1, F69.2)",
+            "title": "Stopped At"
+          },
+          "stopped_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.UserSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who stopped it, by Stop, Finish or Archive; null when no one of Pilot's did, and unless `state` is `stopped` (F69.2)"
           }
         },
         "required": [
@@ -5803,7 +5894,9 @@
           "started_at",
           "error",
           "autopilot",
-          "held_reason"
+          "held_reason",
+          "stopped_at",
+          "stopped_by"
         ],
         "title": "WorkSchema",
         "type": "object"
@@ -5965,6 +6058,367 @@
           "type"
         ],
         "title": "ValidationErrorElement",
+        "type": "object"
+      },
+      "WorkSchema.1fdd8ae": {
+        "description": "A work item's Session, as its line and its head show it (F26, F12).",
+        "properties": {
+          "autopilot": {
+            "description": "The auto pilot setting its start was briefed under (F4.3)",
+            "title": "Autopilot",
+            "type": "boolean"
+          },
+          "current_line": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkSchema.1fdd8ae.CurrentLineSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its one current line; null while no turn is in flight"
+          },
+          "environment": {
+            "$ref": "#/components/schemas/WorkSchema.1fdd8ae.EnvironmentNameSchema",
+            "description": "The environment it runs in: its env chip and the chip's link"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why it failed: a failed start's error, or the error its latest turn ended in; null unless `state` is `failed` (F125)",
+            "title": "Error"
+          },
+          "held_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkSchema.1fdd8ae.HeldReason"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the gate holds its start, which its line says: its project paused, or the controller unreachable; null unless `state` is `held`, and while the gate opens for it (F26.1, F141.5)"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When its run began, which \"running N min\" counts from: the controller confirmed its session, or took its Resume's turn; null before",
+            "title": "Started At"
+          },
+          "state": {
+            "$ref": "#/components/schemas/WorkSchema.1fdd8ae.SessionState",
+            "description": "Its Session's state: `held` while the gate holds its start, `starting` while it comes up, `running` while a turn is in flight, `idle` once its turn ended, `stopped` and `failed` waiting on you, `ended` once its controller session is gone"
+          },
+          "stopped_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When it was stopped, its \"Stopped · <time>\"; null unless `state` is `stopped` (F26.1, F69.2)",
+            "title": "Stopped At"
+          },
+          "stopped_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkSchema.1fdd8ae.UserSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who stopped it, by Stop, Finish or Archive; null when no one of Pilot's did, and unless `state` is `stopped` (F69.2)"
+          }
+        },
+        "required": [
+          "state",
+          "current_line",
+          "environment",
+          "started_at",
+          "error",
+          "autopilot",
+          "held_reason",
+          "stopped_at",
+          "stopped_by"
+        ],
+        "title": "WorkSchema",
+        "type": "object"
+      },
+      "WorkSchema.1fdd8ae.CurrentLineSchema": {
+        "description": "A work item's one current line while a turn of its Session is in flight,\nwhich the client words as it words the chat's cue (F26.2; design 2 §9.5).",
+        "properties": {
+          "agent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkSchema.1fdd8ae.LineAgentSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The sub-agent; null unless `state` is `waiting`"
+          },
+          "since": {
+            "description": "When that state, or the latest step, began",
+            "format": "date-time",
+            "title": "Since",
+            "type": "string"
+          },
+          "state": {
+            "description": "What the turn is doing: the session coming up, thinking, writing a main-thread text block, running a tool call, or waiting on a sub-agent",
+            "enum": [
+              "starting",
+              "thinking",
+              "writing",
+              "working",
+              "waiting"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkSchema.1fdd8ae.LineStepSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The latest tool call; null before the first"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The server's own words while the session comes up; null unless `state` is `starting`",
+            "examples": [
+              "Starting Camp-1…"
+            ],
+            "title": "Text"
+          }
+        },
+        "required": [
+          "state",
+          "since",
+          "step",
+          "agent",
+          "text"
+        ],
+        "title": "CurrentLineSchema",
+        "type": "object"
+      },
+      "WorkSchema.1fdd8ae.EnvironmentNameSchema": {
+        "description": "An environment of the record, by its id and the name text calls it by.",
+        "properties": {
+          "id": {
+            "description": "The KubeCoder environment id",
+            "examples": [
+              "example-env-1"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "The environment's name",
+            "examples": [
+              "Example-1"
+            ],
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "EnvironmentNameSchema",
+        "type": "object"
+      },
+      "WorkSchema.1fdd8ae.HeldReason": {
+        "description": "Why the gate holds a start (design 2 §13.4; F26.1): its project paused,\nor the controller unreachable. Read at display, never stored (decision\n53).",
+        "enum": [
+          "paused",
+          "controller_unreachable"
+        ],
+        "title": "HeldReason",
+        "type": "string"
+      },
+      "WorkSchema.1fdd8ae.LineAgentSchema": {
+        "description": "The sub-agent a current line waits on, from its `Task` call.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The call's `description`",
+            "examples": [
+              "Survey the tent makers"
+            ],
+            "title": "Description"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The call's `subagent_type`",
+            "examples": [
+              "Explore"
+            ],
+            "title": "Type"
+          }
+        },
+        "required": [
+          "type",
+          "description"
+        ],
+        "title": "LineAgentSchema",
+        "type": "object"
+      },
+      "WorkSchema.1fdd8ae.LineStepSchema": {
+        "description": "The latest tool call of a current line.",
+        "properties": {
+          "input": {
+            "description": "The call's `input`, as the line has it",
+            "examples": [
+              {
+                "file_path": "/work/Camp/plan.json"
+              }
+            ],
+            "title": "Input"
+          },
+          "tool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The call's `name`",
+            "examples": [
+              "Read"
+            ],
+            "title": "Tool"
+          }
+        },
+        "required": [
+          "tool",
+          "input"
+        ],
+        "title": "LineStepSchema",
+        "type": "object"
+      },
+      "WorkSchema.1fdd8ae.SessionState": {
+        "enum": [
+          "held",
+          "starting",
+          "running",
+          "idle",
+          "stopped",
+          "ended",
+          "failed"
+        ],
+        "title": "SessionState",
+        "type": "string"
+      },
+      "WorkSchema.1fdd8ae.UserKind": {
+        "enum": [
+          "person",
+          "agent"
+        ],
+        "title": "UserKind",
+        "type": "string"
+      },
+      "WorkSchema.1fdd8ae.UserSchema": {
+        "description": "A person, or Pilot, as an avatar draws them (F106, F132).",
+        "properties": {
+          "avatar_slot": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The avatar's palette slot, from 1; null for Pilot",
+            "examples": [
+              1
+            ],
+            "title": "Avatar Slot"
+          },
+          "handle": {
+            "description": "The handle; Pilot's is `agent`",
+            "examples": [
+              "ada"
+            ],
+            "title": "Handle",
+            "type": "string"
+          },
+          "initials": {
+            "description": "The avatar's initials",
+            "examples": [
+              "AE"
+            ],
+            "title": "Initials",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/WorkSchema.1fdd8ae.UserKind",
+            "description": "A person, or Pilot itself"
+          },
+          "name": {
+            "description": "The full name, the avatar's tooltip",
+            "examples": [
+              "Ada Example"
+            ],
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "handle",
+          "name",
+          "initials",
+          "avatar_slot"
+        ],
+        "title": "UserSchema",
         "type": "object"
       }
     },
@@ -7523,7 +7977,7 @@
     },
     "/api/projects/{project_id}/transitions": {
       "post": {
-        "description": "Finish also turns auto pilot off, resumes a paused project, and closes the project's open items unanswered; Reopen leaves auto pilot off. A resume lets the project's held starts go on.\n\nReturns:     201: The project's head, with its new standing     400: The kind is not one a person makes     401: No one is signed in     403: The caller lacks the editor role     404: No project has the id     409: The caller has not chosen a handle, or the project's standing         does not allow the change",
+        "description": "Finish also turns auto pilot off, resumes a paused project, stops the project's sessions and closes its open items unanswered; Archive stops the sessions too, and nothing of the project starts after either. Reopen leaves auto pilot off. A resume lets the project's held starts go on.\n\nReturns:     201: The project's head, with its new standing     400: The kind is not one a person makes     401: No one is signed in     403: The caller lacks the editor role     404: No project has the id     409: The caller has not chosen a handle, or the project's standing         does not allow the change",
         "operationId": "post__api_projects_{project_id}_transitions",
         "parameters": [
           {
@@ -7700,6 +8154,182 @@
           }
         ],
         "summary": "A page of the Session's records after a record number, in order.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/sessions/{session_id}/resume": {
+      "post": {
+        "description": "Returns:     200: The work item's status, starting, or held at the gate     401: No one is signed in     403: The caller lacks the editor role     404: No session has the id     409: No controller is configured; the session is no work item's, is         neither stopped nor failed, or has its stopped turn still ending;         or its project is finished or archived",
+        "operationId": "post__api_sessions_{session_id}_resume",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkSchema.1fdd8ae"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Resume the stopped or failed work item: a turn of the server's own carries it on, \"continue\", or its last turn's message while it has no conversation, through the gate. It is held while the gate is closed; else its send runs once the request commits, its environment started again when it is not running. It stays one item.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/sessions/{session_id}/stop": {
+      "post": {
+        "description": "Returns:     200: The work item's status, stopped     401: No one is signed in     403: The caller lacks the editor role     404: No session has the id     409: The caller has not chosen a handle; the session is no work         item's, or is neither running, starting nor held",
+        "operationId": "post__api_sessions_{session_id}_stop",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkSchema.1fdd8ae"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Stop the work item's session where it is, as the signed-in person: a turn in flight is interrupted, the conversation kept, and a start held or under way ends, nothing of it sent afterwards. The interrupt runs once the request commits; a controller that does not answer lets the turn run out.",
         "tags": [],
         "x-required-role": "editor"
       }
