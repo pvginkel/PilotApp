@@ -6,18 +6,23 @@
  * environment restarts; the working state and the latest step while it runs; why the gate holds
  * its start; "Stopped · <time>" with the cause of a stop made elsewhere; the error a failed start
  * or a turn ended in error left, shown as a stopped one is (F125). Its Session log opens the
- * session's records in the overlay (F26.3, F69).
+ * session's records in the overlay (F26.3, F69). Stop, while it runs, starts or is held, asks
+ * first in its actions' place, Esc dismissing the question; Resume, once it stopped or failed,
+ * carries it on (F67).
  */
 
+import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from '@tanstack/react-router';
-import { CircleAlert, ScrollText, Square } from 'lucide-react';
+import { CircleAlert, Play, ScrollText, Square } from 'lucide-react';
 import { WorkingCue } from '@/components/chat/working-cue';
 import { EnvironmentLink, LinkedText } from '@/components/shared/linked-text';
 import { Time } from '@/components/shared/time';
 import { ItemHead } from '@/components/timeline/item-head';
 import { useNow } from '@/hooks/use-now';
 import { titleOf, type TimelineItem } from '@/hooks/use-timeline';
+import { RESUMABLE, STOPPABLE, useResume, useStop } from '@/hooks/use-work-acts';
 import type { components } from '@/lib/api/generated/types';
+import { useEscape } from '@/lib/keys';
 import { workLine } from '@/lib/utils/status-labels';
 
 type Work = components['schemas']['TimelineSchema.1fdd8ae.WorkSchema'];
@@ -40,9 +45,83 @@ export function WorkItem({ item }: { item: TimelineItem }) {
         <LinkedText text={titleOf(item)} />
       </div>
       <Line work={work} />
-      <div className="item-actions">
-        <SessionLog item={item} />
+      {STOPPABLE.includes(work.state) ? (
+        <StopActions item={item} />
+      ) : RESUMABLE.includes(work.state) ? (
+        <ResumeActions item={item} />
+      ) : (
+        <div className="item-actions">
+          <SessionLog item={item} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Session log and Stop, which asks first in the actions' place, as the mockup asks; Cancel takes
+ * the focus, so that Enter pressed again cancels, and gives it back to Stop.
+ */
+function StopActions({ item }: { item: TimelineItem }) {
+  const { act, pending } = useStop(item.id);
+  const [asking, setAsking] = useState(false);
+  const stopButton = useRef<HTMLButtonElement>(null);
+  const cancelButton = useRef<HTMLButtonElement>(null);
+  const asked = useRef(false);
+  const cancel = () => {
+    if (!pending) setAsking(false);
+  };
+  useEscape('menu', asking, cancel);
+  useEffect(() => {
+    if (asking) cancelButton.current?.focus();
+    else if (asked.current) stopButton.current?.focus();
+    asked.current = asking;
+  }, [asking]);
+
+  if (asking) {
+    return (
+      <div className="item-actions confirm" data-testid="timeline.work.stop-confirm">
+        <span className="confirm-text" data-testid="timeline.work.stop-confirm.text">
+          Stop the session? Its turn ends where it is; Resume sends it on.
+        </span>
+        <button type="button" className="btn btn-sm btn-danger" disabled={pending} onClick={act} data-testid="timeline.work.stop-confirm.yes">
+          <Square className="icon" aria-hidden="true" />
+          Stop it
+        </button>
+        <button
+          ref={cancelButton}
+          type="button"
+          className="btn btn-sm"
+          disabled={pending}
+          onClick={cancel}
+          data-testid="timeline.work.stop-confirm.cancel"
+        >
+          Cancel
+        </button>
       </div>
+    );
+  }
+  return (
+    <div className="item-actions">
+      <SessionLog item={item} />
+      <button ref={stopButton} type="button" className="btn btn-sm" onClick={() => setAsking(true)} data-testid="timeline.work.stop">
+        <Square className="icon" aria-hidden="true" />
+        Stop
+      </button>
+    </div>
+  );
+}
+
+/** Resume, before Session log. */
+function ResumeActions({ item }: { item: TimelineItem }) {
+  const { act, pending } = useResume(item.id);
+  return (
+    <div className="item-actions">
+      <button type="button" className="btn btn-sm btn-primary" disabled={pending} onClick={act} data-testid="timeline.work.resume">
+        <Play className="icon" aria-hidden="true" />
+        Resume
+      </button>
+      <SessionLog item={item} />
     </div>
   );
 }

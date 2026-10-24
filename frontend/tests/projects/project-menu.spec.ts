@@ -2,7 +2,7 @@
  * The project's menu at the end of its head (F2.4): what each standing offers, an archived
  * project only Bring back (D012); Join and Leave at once, each with its toast (F127, D011);
  * Finish, Reopen, Archive and Bring back, each asking first in a dialog with D010's texts,
- * no toast after (F5.1, F6, F128); the list and the head showing the new standing; the dialog
+ * Finish's and Archive's naming the running sessions they stop, no toast after (F5.1, F6, F128); the list and the head showing the new standing; the dialog
  * taking the focus to Cancel, holding it, and giving it back to the menu's button; everything
  * closed on another project (F1.6).
  */
@@ -14,6 +14,7 @@ import type { Projects } from '../support/projects';
 type Spec = Omit<Parameters<Projects['make']>[0], 'name'>;
 
 const PILOT_LINE = 'Pilot starts nothing more, and auto pilot’s permissions end with the project.';
+const ARCHIVE_LINE = 'It leaves the project list for Archived, in the menu beside the list’s head.';
 
 test.describe('The menu', () => {
   test('offers Join or Leave, Finish or Reopen, and Archive by the project’s standing; an archived project only Bring back', async ({
@@ -270,7 +271,7 @@ test.describe('Archive', () => {
 
       await projectHead.choose('archive');
       await expect(dialog.title).toHaveText(`Archive ${name}?`);
-      await expect(dialog.lines).toHaveText(['It leaves the project list for Archived, in the menu beside the list’s head.']);
+      await expect(dialog.lines).toHaveText([ARCHIVE_LINE]);
       await expect(dialog.note).toHaveText('Nothing is deleted: Bring back returns it where it was.');
       await expect(dialog.cancel).toHaveText('Cancel');
       await expect(dialog.confirm).toHaveText('Archive project');
@@ -295,6 +296,42 @@ test.describe('Archive', () => {
     await projectList.menuButton.click();
     await projectList.archivedItem.click();
     for (const name of names) await expect(projectList.tab(name, projectList.archived)).toBeVisible();
+  });
+});
+
+test.describe('The running sessions', () => {
+  test('Finish’s and Archive’s dialogs name the work items whose sessions they stop, a held one among them; confirmed, none runs', async ({
+    page,
+    people,
+    projects,
+    controller,
+    projectHead,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.make({ name: makeUnique('Stopping'), members: [me.handle!] });
+    const brief = { brief: 'Survey.', cwd: '/work/Example' };
+    const running = await projects.startWork(id, { environment_id: await controller.environment(), title: 'Surveying the stylesheets', ...brief });
+    await expect.poll(async () => (await projects.work(id, running)).state).toBe('running');
+    await projectHead.open(id);
+
+    await projectHead.choose('finish');
+    await expect(projectHead.dialog('finish').lines).toHaveText(['The running session stops: Surveying the stylesheets.', PILOT_LINE]);
+    await page.keyboard.press('Escape');
+
+    await projects.transition(id, 'paused');
+    const held = await projects.startWork(id, { environment_id: await controller.environment(), title: 'Renaming the badge', ...brief });
+    await expect.poll(async () => (await projects.work(id, held)).state).toBe('held');
+    await projectHead.open(id);
+    const both = '2 running sessions stop: Surveying the stylesheets and Renaming the badge.';
+    await projectHead.choose('finish');
+    await expect(projectHead.dialog('finish').lines).toHaveText([both, PILOT_LINE]);
+    await page.keyboard.press('Escape');
+    await expect(projectHead.dialog('finish').root).toHaveCount(0);
+    await projectHead.choose('archive');
+    await expect(projectHead.dialog('archive').lines).toHaveText([both, ARCHIVE_LINE]);
+
+    await projectHead.confirm('archive');
+    for (const work of [running, held]) expect((await projects.work(id, work)).state).toBe('stopped');
   });
 });
 

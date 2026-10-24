@@ -1,8 +1,9 @@
 /**
  * The project's menu, at the end of its head (F2.4): Join or Leave, each at once with its toast
- * (F127); Finish or Reopen, and Archive, each asking first in a dialog (F5.1, F6, F128.1); on an
- * archived project only Bring back, which asks too (F128.3, D012). What follows a write, the toast
- * or the dialog's closing, comes once the list and the head show the new standing.
+ * (F127); Finish or Reopen, and Archive, each asking first in a dialog (F5.1, F6, F128.1), Finish's
+ * and Archive's naming the running sessions they stop; on an archived project only Bring back,
+ * which asks too (F128.3, D012). What follows a write, the toast or the dialog's closing, comes
+ * once the list and the head show the new standing.
  */
 
 import { useRef, useState } from 'react';
@@ -33,8 +34,19 @@ interface Question {
   act: { label: string; icon: LucideIcon };
 }
 
-// The texts are the operator's (D010); none names the notifications, which a person assumes to
-// work (D011). The running sessions' line joins Finish's and Archive's with 008, which stops them.
+/** "A", "A and B", "A, B and C". */
+const listOf = (names: string[]) => (names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`);
+
+/** The work items whose sessions run, start or are held, which Finish and Archive stop, named; none when there are none. */
+function runningLines(project: Project): string[] {
+  // A work item always has its title.
+  const names = project.running_work.map((work) => work.title!);
+  if (names.length === 0) return [];
+  return [names.length > 1 ? `${names.length} running sessions stop: ${listOf(names)}.` : `The running session stops: ${names[0]}.`];
+}
+
+// The texts are the operator's (D010), the running sessions' line the mockup's with each named
+// (F5.1); none names the notifications, which a person assumes to work (D011).
 function question(ask: Ask, project: Project): Question {
   switch (ask) {
     case 'finish': {
@@ -43,6 +55,7 @@ function question(ask: Ask, project: Project): Question {
         kind: 'finished',
         verb: 'Finish',
         lines: [
+          ...runningLines(project),
           ...(open > 0 ? [`${open} open item${open > 1 ? 's close' : ' closes'} unanswered.`] : []),
           'Pilot starts nothing more, and auto pilot’s permissions end with the project.',
         ],
@@ -61,7 +74,7 @@ function question(ask: Ask, project: Project): Question {
       return {
         kind: 'archived',
         verb: 'Archive',
-        lines: ['It leaves the project list for Archived, in the menu beside the list’s head.'],
+        lines: [...runningLines(project), 'It leaves the project list for Archived, in the menu beside the list’s head.'],
         note: 'Nothing is deleted: Bring back returns it where it was.',
         act: { label: 'Archive project', icon: Archive },
       };

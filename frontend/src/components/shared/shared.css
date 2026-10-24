@@ -63,6 +63,8 @@
   }
   .btn-ghost { border-color: transparent; background: none; color: hsl(var(--muted-foreground)); }
   .btn-ghost:hover:not(:disabled) { color: hsl(var(--foreground)); }
+  .btn-danger { border-color: hsl(var(--destructive) / 0.6); color: hsl(var(--destructive-text)); }
+  .btn-danger:hover:not(:disabled) { background: hsl(var(--destructive) / 0.1); }
 
   /* A button that reads as a link: Show more. */
   .link {

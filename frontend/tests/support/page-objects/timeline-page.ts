@@ -11,8 +11,8 @@ import { waitTestEvent } from '../helpers';
  * urgent banners and the "N open above" chip
  * (F10.2, F11), a finished timeline's end (F5.3), and where it stands scrolled; opened at its
  * project's address or at an item's or a block's under it (F97). A work item open shows its env
- * chip, "running N min", its one line — the working cue and the latest step — and its Session log
- * (F26).
+ * chip, "running N min", its one line — the working cue and the latest step — its Session log
+ * (F26), and Stop with its question or Resume (F67).
  */
 export class TimelinePage {
   readonly root: Locator;
@@ -135,6 +135,15 @@ export class TimelinePage {
         cue: root.getByTestId('timeline.work.line').getByTestId('chat.cue'),
         step: root.getByTestId('timeline.work.step'),
         sessionLog: root.getByTestId('timeline.work.session-log'),
+        stop: root.getByTestId('timeline.work.stop'),
+        resume: root.getByTestId('timeline.work.resume'),
+        /** Stop's question, in the actions' place: its words, Stop it and Cancel. */
+        stopConfirm: {
+          root: root.getByTestId('timeline.work.stop-confirm'),
+          text: root.getByTestId('timeline.work.stop-confirm.text'),
+          yes: root.getByTestId('timeline.work.stop-confirm.yes'),
+          cancel: root.getByTestId('timeline.work.stop-confirm.cancel'),
+        },
       },
       card: {
         root: root.getByTestId('timeline.item.card'),

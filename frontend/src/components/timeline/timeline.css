@@ -101,6 +101,8 @@
   .item-sub { margin: 0 0 6px; font-size: 14px; color: hsl(var(--muted-foreground)); }
   .item-after { margin-top: 12px; }
   .item-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+  /* A question asked in the actions' place: Stop's. */
+  .item-actions.confirm .confirm-text { flex: 1 1 260px; font-size: 13.5px; color: hsl(var(--muted-foreground)); }
   /* The attachments hung on an item, a chip each (attachments.tsx). */
   .attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
   .attachments .btn { max-width: 100%; }

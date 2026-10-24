@@ -63,9 +63,20 @@ function readAgain(queryClient: QueryClient, projects: ReadonlySet<string>): voi
 
 const timelineOf = (project_id: string) => [TIMELINE, { path: { project_id } }];
 
-function moveWork(queryClient: QueryClient, project: string, item: string, work: Work): void {
+/**
+ * Writes `work` into the item's in its project's timeline as read; given `from`, only while the
+ * item there is still in one of those states, so that a move heard first is not undone.
+ */
+export function moveWork(queryClient: QueryClient, project: string, item: string, work: Work, from?: readonly Work['state'][]): void {
   queryClient.setQueryData<Timeline>(timelineOf(project), (timeline) =>
-    timeline === undefined ? undefined : { ...timeline, items: timeline.items.map((each) => (each.id === item ? { ...each, work } : each)) },
+    timeline === undefined
+      ? undefined
+      : {
+          ...timeline,
+          items: timeline.items.map((each) =>
+            each.id === item && (from === undefined || (each.work !== null && from.includes(each.work.state))) ? { ...each, work } : each,
+          ),
+        },
   );
 }
 
