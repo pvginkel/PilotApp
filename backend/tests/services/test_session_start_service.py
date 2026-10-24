@@ -2126,6 +2126,38 @@ class TestStop:
         assert fake.calls == []
         assert _server(session, run.id) == []
 
+    def test_a_held_work_item_stopped_has_the_environment_pilot_created_stopped(
+        self,
+        container: ServiceContainer,
+        fake: _Recording,
+        supervise: Supervise,
+        session: DbSession,
+        project: Project,
+        person: User,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        # Review r1, F1: its create's row committed, its settle unanswered and
+        # its bring-up come to a running pod meanwhile; no time to stand idle.
+        starts, environments, _ = _services(
+            container, supervise, stop_after=timedelta(0)
+        )
+        fake.during_provision = fake.outage
+        run = _start(starts, session, project)
+        _run(starts, run)
+        assert _read(session, run.id).state_code == SessionState.HELD
+        env_id = _env(session, run.id)
+        assert _row(session, env_id).started_pod_at is None
+        fake.outage(on=False)
+        controller_outage.probe_answered()
+
+        starts.stop(session, run.id, person)
+        clear_after_commit_callbacks()
+        environments.run_shutdown_timer(session)
+
+        assert fake.environment(env_id).status == "stopped"
+        row = _row(session, env_id)
+        assert (row.server_started_at, row.stop_due_at) == (None, None)
+
     def test_a_stop_while_its_session_is_created_sends_nothing(
         self,
         container: ServiceContainer,

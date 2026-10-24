@@ -29,6 +29,7 @@ from app.services.controller_client import (
     ControllerClient,
     ControllerProblem,
     ControllerProblemType,
+    ControllerUnreachable,
 )
 from app.services.environment_service import (
     SHUTDOWN_TIMER,
@@ -379,6 +380,29 @@ class TestStopUntaken:
         row = _row(session, created.env_id)
         assert _claim(row) == _NO_CLAIM
         assert row is not None and row.server_created_at is not None
+
+    def test_one_whose_stop_went_unanswered_the_timer_stops(
+        self,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        supervise: Supervise,
+        session: Session,
+    ) -> None:
+        # Review r1, F1: its claim has no pod, and no start waits there.
+        service = _service(container, supervise, stop_after=timedelta(0))
+        created = service.create(REPO, "camp")
+        service.record_created(session, created, REPO)
+        fake_controller.outage()
+        with pytest.raises(ControllerUnreachable):
+            service.stop_untaken(created.env_id)
+        fake_controller.outage(on=False)
+
+        service.run_shutdown_timer(session)  # armed
+        service.run_shutdown_timer(session)
+
+        assert fake_controller.environment(created.env_id).status == "stopped"
+        assert _claim(_row(session, created.env_id)) == _NO_CLAIM
 
 
 class TestStart:

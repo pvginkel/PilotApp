@@ -5,12 +5,13 @@ Pilot starts an environment knowing whether it started it, and stops only what
 it started. The claim is `server_started_at`, set when Pilot's own `start` or
 create scheduled the bring-up, and `started_pod_at`, the `pod.startedAt` that
 bring-up settled on (D12; DB 233). An environment Pilot created is its own,
-`server_created_at` and `repo` set (DB 239). The shutdown timer stops an environment only while its
-pod is still the claim's, it is not exempt, and no Session is `running` or
-`starting` there. A pod gone, another's or unknown ends the claim with no stop,
-at the tick or at a settled start; the claim's three columns, its deadline
-`stop_due_at` among them, end together. The fleet consumer writes none of them
-(§13.1).
+`server_created_at` and `repo` set (DB 239). The shutdown timer stops an
+environment only while its pod is still the claim's — one of Pilot's own also
+while its claim has no pod yet — it is not exempt, and no Session is `running`
+or `starting` there. A pod gone, another's or unknown ends the claim with no
+stop, at the tick or at a settled start; the claim's three columns, its
+deadline `stop_due_at` among them, end together. The fleet consumer writes none
+of them (§13.1).
 """
 
 import logging
@@ -269,8 +270,10 @@ class EnvironmentService:
         Ends the claim on every overdue environment Pilot started, not exempt,
         with no Session `running` or `starting` there: read afresh, it is
         stopped while its pod is the claim's, and left running when its pod is
-        gone, another's or unknown. A claim with no pod yet ends with no stop,
-        unless a start of Pilot's waits there to resume, `held`, which keeps it.
+        gone, another's or unknown. A claim with no pod yet is kept while a
+        start of Pilot's waits there to resume, `held`; otherwise it ends, the
+        environment stopped when it is Pilot's own, whose every pod is Pilot's
+        (§13.5), left running when it is not.
         Then arms every such environment that has no `stop_due_at`, which a
         restart between a Session's end and its arm leaves. Each environment's
         action is a transaction of its own, under the row's lock: a row another
@@ -315,12 +318,15 @@ class EnvironmentService:
         if row.started_pod_at is None:
             if db.scalar(select(_starting(env_id))):
                 return
-            logger.info(
-                "Environment %s has no pod of Pilot's start: its claim, due %s, "
-                "ends with no stop",
-                env_id,
-                due.isoformat(),
-            )
+            if row.server_created_at is not None:
+                self._stop(env_id, due)
+            else:
+                logger.info(
+                    "Environment %s has no pod of Pilot's start: its claim, due "
+                    "%s, ends with no stop",
+                    env_id,
+                    due.isoformat(),
+                )
         elif self._runs_pod(env_id, row.started_pod_at):
             self._stop(env_id, due)
         else:
