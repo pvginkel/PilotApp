@@ -45,7 +45,7 @@ _BUSY_STATES = (SessionState.RUNNING, SessionState.STARTING)
 _START_STATES = (SessionState.HELD, SessionState.STARTING)
 _FAILED_SETTLES = ("error", "stopped", "deleting")
 _AT_REST = ("running", *_FAILED_SETTLES)
-"""The statuses a settled wait answers at; a wait run out reads another."""
+"""The statuses a settled wait answers at; a wait run out can read running too."""
 
 
 def reported_columns(

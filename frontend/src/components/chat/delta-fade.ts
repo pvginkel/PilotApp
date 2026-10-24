@@ -13,7 +13,7 @@
 import { cutOpenQuote, quotesToLinks, QUOTE_SCHEME } from '@/lib/chat/quotes';
 import type { Delta } from '@/lib/chat/stream-state';
 
-/** How long a delta fades in (`.delta-fresh` in index.css). */
+/** How long a delta fades in (`.delta-fresh` in components/shared/shared.css). */
 const FADE_MS = 300;
 /** A delta stays fresh a little past its fade, so that no re-render cuts the fade short. */
 const FRESH_MS = FADE_MS + 100;
