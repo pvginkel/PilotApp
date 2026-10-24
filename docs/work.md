@@ -74,8 +74,9 @@ An open work item (`WorkItem`, `frontend/src/components/timeline/work.tsx`) is:
 - **Its actions**, while `running`, `starting` or `held`: Session log, then Stop. Stop asks first in
   the actions' place, "Stop the session? Its turn ends where it is; Resume sends it on.", with Stop
   it and Cancel, which takes the focus; Esc or Cancel puts the focus back on Stop, and the question
-  goes as the item leaves those states. While `stopped` or `failed`: Resume, then Session log.
-  Otherwise Session log alone.
+  goes as the item leaves those states. While `stopped` or `failed`: Resume, then Session log;
+  Resume is disabled while the project is archived, as its head's switch is (D012), the API
+  refusing it until Bring back. Otherwise Session log alone.
 
 Stop and Resume (`useStop`, `useResume`, `frontend/src/hooks/use-work-acts.ts`) call
 [`sessions.md`](sessions.md)'s routes and write the answer into the cached timeline, only while the

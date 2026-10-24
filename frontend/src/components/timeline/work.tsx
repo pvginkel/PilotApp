@@ -8,7 +8,7 @@
  * or a turn ended in error left, shown as a stopped one is (F125). Its Session log opens the
  * session's records in the overlay (F26.3, F69). Stop, while it runs, starts or is held, asks
  * first in its actions' place, Esc dismissing the question; Resume, once it stopped or failed,
- * carries it on (F67).
+ * carries it on (F67), disabled while the project is archived, as its head's switch is (D012).
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -19,6 +19,7 @@ import { EnvironmentLink, LinkedText } from '@/components/shared/linked-text';
 import { Time } from '@/components/shared/time';
 import { ItemHead } from '@/components/timeline/item-head';
 import { useNow } from '@/hooks/use-now';
+import { useArchived } from '@/hooks/use-projects';
 import { titleOf, type TimelineItem } from '@/hooks/use-timeline';
 import { RESUMABLE, STOPPABLE, useResume, useStop } from '@/hooks/use-work-acts';
 import type { components } from '@/lib/api/generated/types';
@@ -112,12 +113,20 @@ function StopActions({ item }: { item: TimelineItem }) {
   );
 }
 
-/** Resume, before Session log. */
+/** Resume, before Session log; disabled while the project is archived, which the API refuses until Bring back. */
 function ResumeActions({ item }: { item: TimelineItem }) {
+  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
   const { act, pending } = useResume(item.id);
+  const archived = useArchived(projectId);
   return (
     <div className="item-actions">
-      <button type="button" className="btn btn-sm btn-primary" disabled={pending} onClick={act} data-testid="timeline.work.resume">
+      <button
+        type="button"
+        className="btn btn-sm btn-primary"
+        disabled={pending || archived}
+        onClick={act}
+        data-testid="timeline.work.resume"
+      >
         <Play className="icon" aria-hidden="true" />
         Resume
       </button>

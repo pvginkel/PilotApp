@@ -3,8 +3,8 @@
  * the item's actions' place, Esc and Cancel dismissing the question (UC, *Keys*); Stop it ends the
  * session where it is, the item "Stopped · <time>" and waiting on you, Resume in Stop's place.
  * Resume, on a stopped item, a failed start or a turn ended in error, carries it on in the same
- * item through the gate, held while the project is paused; a held start stopped starts no more. A
- * refusal shows as the API words it.
+ * item through the gate, held while the project is paused, disabled while it is archived; a held
+ * start stopped starts no more. A refusal shows as the API words it.
  */
 
 import { test, expect } from '../support/fixtures';
@@ -251,5 +251,27 @@ test.describe('Resume', () => {
     await turnEnded(projects, work);
     await item.resume.click();
     await expect.poll(async () => (await projects.work(project, work)).state).toBe('running');
+  });
+
+  test('stands disabled on the item Archive stopped, as the head’s switch does, until Bring back', async ({
+    people,
+    projects,
+    controller,
+    timeline,
+    deploymentSse,
+  }) => {
+    const { project, environment } = await setUp({ people, projects, controller });
+    const work = await startIn(projects, project, environment);
+    await timeline.open(project);
+    await deploymentSse.ensureConnected();
+    const item = timeline.item(work).work;
+
+    await projects.transition(project, 'archived');
+    await expect(item.line).toHaveAttribute('data-state', 'stopped');
+    await expect(item.resume).toHaveText('Resume');
+    await expect(item.resume).toBeDisabled();
+
+    await projects.transition(project, 'brought_back');
+    await expect(item.resume).toBeEnabled();
   });
 });

@@ -49,3 +49,11 @@ export function useProjectHead(id: string) {
   useUiStateInstrumentation('project.head', { isLoading: query.isLoading, error: query.error });
   return query;
 }
+
+/**
+ * Whether the project is archived, from the head the page already reads (useProjectHead), its
+ * cache shared and not read again on mount; false until it is read.
+ */
+export function useArchived(id: string): boolean {
+  return useGetProjectsByProjectId({ path: { project_id: id } }, { refetchOnMount: false }).data?.archived ?? false;
+}
