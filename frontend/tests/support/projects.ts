@@ -7,7 +7,9 @@
  * /api/testing/items/<id>/saves), its handbook and its project document saved
  * (/api/testing/projects/<id>/{handbook,draft}/saves), its session's turn ended, a document it settled whole marked
  * Done by Pilot and files it copied attached to an item (/api/testing/items/<id>/attachments); they
- * are answered through the items API.
+ * are answered through the items API. A work item is placed and its session started in an
+ * environment of the worker's fake controller (/api/testing/projects/<id>/work; `controller.ts`
+ * drives the fake), and read as the timeline and the session log read it.
  */
 
 import { expect, type Page } from '@playwright/test';
@@ -23,7 +25,11 @@ type Save = components['schemas']['InventedSaveSchema.6d6b324'];
 type InventedFile = components['schemas']['InventedAttachmentsCreateSchema.6d6b324.InventedFileSchema'];
 /** A file to attach, its bytes as they are. */
 export type AttachedFile = Omit<InventedFile, 'content'> & { content: string | Buffer };
+type WorkSpec = components['schemas']['InventedWorkCreateSchema.6d6b324'];
 type Timeline = components['schemas']['TimelineSchema.1fdd8ae'];
+type TimelineItem = Timeline['items'][number];
+type Work = NonNullable<TimelineItem['work']>;
+type RecordPage = components['schemas']['SessionRecordPageSchema.01118bb'];
 type Block = components['schemas']['TimelineSchema.1fdd8ae.BlockSchema'];
 type BlockPart = components['schemas']['TimelineSchema.1fdd8ae.BlockPartSchema'];
 
@@ -129,9 +135,37 @@ export class Projects {
     return (await response.json()) as Timeline;
   }
 
+  /**
+   * A work item placed on the project's timeline, its session started in the fake controller's
+   * environment `environment_id` as Pilot starts one, through the gate, once the request
+   * commits; answers its id, its session's.
+   */
+  async startWork(projectId: string, spec: WorkSpec): Promise<string> {
+    const response = await this.page.request.post(`${this.backendUrl}/api/testing/projects/${projectId}/work`, { data: spec });
+    expect(response.status(), await response.text()).toBe(201);
+    return ((await response.json()) as { id: string }).id;
+  }
+
+  /** An item, as the signed-in person reads the project's timeline. */
+  async item(projectId: string, itemId: string): Promise<TimelineItem> {
+    return (await this.timeline(projectId)).items.find((each) => each.id === itemId)!;
+  }
+
+  /** A work item's session, as the signed-in person reads the project's timeline. */
+  async work(projectId: string, itemId: string): Promise<Work> {
+    return (await this.item(projectId, itemId)).work!;
+  }
+
+  /** A work item's session's records after record `after`, as the session log reads them. */
+  async records(sessionId: string, after = 0): Promise<RecordPage> {
+    const response = await this.page.request.get(`${this.backendUrl}/api/sessions/${sessionId}/records?after=${after}`);
+    expect(response.status(), await response.text()).toBe(200);
+    return (await response.json()) as RecordPage;
+  }
+
   /** A one-ask item's block, as the signed-in person reads the project's timeline. */
   async block(projectId: string, itemId: string): Promise<Block> {
-    const item = (await this.timeline(projectId)).items.find((each) => each.id === itemId)!;
+    const item = await this.item(projectId, itemId);
     return (item.body!.find((part) => part.type === 'block') as BlockPart).block;
   }
 

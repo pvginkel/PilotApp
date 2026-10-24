@@ -3,12 +3,14 @@
  * App-owned — extends infrastructure fixtures with domain page objects.
  *
  * `people` signs the spec in as a fresh person, `projects` puts projects on the record, `links` sets
- * what links in text, `shell` is the frame every screen sits in, `handleStep` and `profile` the
- * person's own pages, `projectList` the side column's list, `projectHead` a project's head, `timeline`
- * its timeline, `overlay` the overlay over it, `panel` the side panel beside it.
+ * what links in text, `controller` drives the worker's fake controller, `shell` is the frame every
+ * screen sits in, `handleStep` and `profile` the person's own pages, `projectList` the side column's
+ * list, `projectHead` a project's head, `timeline` its timeline, `overlay` the overlay over it,
+ * `panel` the side panel beside it. `conditions`, the worker's, reads what the gold bar reads.
  */
 
 /* eslint-disable react-hooks/rules-of-hooks */
+import { Conditions, Controller } from './controller';
 import { infrastructureFixtures } from './fixtures-infrastructure';
 import { Links } from './links';
 import { HandleStepPage } from './page-objects/handle-step-page';
@@ -26,6 +28,7 @@ interface DomainFixtures {
   people: People;
   projects: Projects;
   links: Links;
+  controller: Controller;
   shell: ShellPage;
   handleStep: HandleStepPage;
   profile: ProfilePage;
@@ -36,7 +39,11 @@ interface DomainFixtures {
   panel: PanelPage;
 }
 
-export const test = infrastructureFixtures.extend<DomainFixtures>({
+interface DomainWorkerFixtures {
+  conditions: Conditions;
+}
+
+export const test = infrastructureFixtures.extend<DomainFixtures, DomainWorkerFixtures>({
   people: async ({ page, auth, backendUrl }, use) => {
     await use(new People(page, auth, backendUrl));
   },
@@ -48,6 +55,22 @@ export const test = infrastructureFixtures.extend<DomainFixtures>({
     await use(links);
     await links.set({});
   },
+  controller: async ({ page, backendUrl, conditions }, use) => {
+    const controller = new Controller(page, backendUrl, conditions);
+    await use(controller);
+    await controller.answerAgain();
+  },
+  conditions: [
+    async ({ playwright, _serviceManager }, use) => {
+      const conditions = await Conditions.open(playwright, _serviceManager.backendUrl);
+      // The backend opens its fleet stream before it listens, so the outage holds from that first
+      // failed open until the stream reconnects.
+      await conditions.outage(false);
+      await use(conditions);
+      await conditions.dispose();
+    },
+    { scope: 'worker', auto: true },
+  ],
   shell: async ({ page }, use) => {
     await use(new ShellPage(page));
   },
