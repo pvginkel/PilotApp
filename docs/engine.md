@@ -11,7 +11,7 @@ nothing it emits is delivered before that transaction commits.
 |---|---|
 | `DocumentService` (`documents.py`) | the births, `publish()`, the document's row lock, versions, the turn's end |
 | `IngestService` (`ingest.py`) | an agent's save of a path of the tree |
-| `RecordService` (`record.py`) | a person's answer, Done, undo, Read, Reviewed; Finish's close |
+| `RecordService` (`record.py`) | a person's answer, Done, undo, Read, Reviewed; Finish's close; a work item placed and done |
 | `PlanService` (`plan.py`) | `plan.json`, rendered and saved; the deferrals without a home |
 | `TreeService` (`tree.py`) | what a path names, the bytes it must hold, its tree hash; the manifest |
 | `ViewService` (`views.py`) | `reference.json` and `timeline.json` |
@@ -37,6 +37,16 @@ cause `born`:
 - `bear_opening(project, title, user, text)`: the opening, the words of the person who started the
   project, taken as written. The record reads nothing from its text: it has no blocks, and its kind,
   title and caches stay as it was born.
+
+The births, and a work item's placing, take the Item's `seq` from
+`DocumentService.next_seq(project)`, under the project's row lock until the transaction ends, so
+that items in one project take theirs one at a time. A work item has no document:
+`RecordService.place_work(project, session, title, plan_task_id=None)` writes its Item, kind `work`,
+created by its own `session` and sharing its id, on the plan's task when given (a task not in the
+plan is a `RecordNotFoundException`), and its Work, `autopilot` the project's switch as it stands;
+`work_done(work_id, at)`, at its turn's end, marks the Item done at `at`, by no one, cause
+`turn_ended`, under the Item's row lock, and leaves one done already, as Finish's close leaves it
+([`sessions.md`](sessions.md)). Each moves `timeline.json`.
 
 A birth but the opening's refuses a text with a fault of its own (an unclosed fence, a body that is
 no mapping, and the like) and then writes nothing. The opening's is never refused, whatever it
@@ -163,7 +173,8 @@ trim every value and read a blank note as none.
 writing, cuts a `turn` version of each whose published text changed since its last version, and
 returns the paths, from the tree's root and sorted, of those whose latest save is still held. It
 emits nothing. The relay calls it in the transaction that ends a turn on the controller's `result`
-frame ([`sessions.md`](sessions.md)), and drops the paths it returns.
+frame, and in the one that ends a turn its environment was stopped under
+([`sessions.md`](sessions.md)), and drops the paths it returns.
 
 ## The bus
 
@@ -179,7 +190,8 @@ already emitted in the transaction is delivered once.
 | `ErrorsRaised(project_id, path)` | on every held save |
 | `ErrorsResolved(project_id, path)` | on a clean save after a held one, and when a held `plan.json` is written down |
 | `ManifestChanged()` | when the set of syncing projects changed: a project archived or brought back ([`projects.md`](projects.md)), and the sync's testing endpoint |
-| `ProjectChanged(project_id)` | when what the project's timeline, head or tab shows moved: with every `TreeHashMoved` of its `timeline.json`; on a publish that changes an item's published text, a record write on a held item included; on a save that holds an item or ends its hold; on a save of `plan.json` that moved its rendering. `ProjectEventService` sends it to the browsers ([`timeline.md`](timeline.md)) |
+| `ProjectChanged(project_id)` | when what the project's timeline, head or tab shows moved: with every `TreeHashMoved` of its `timeline.json`; on a publish that changes an item's published text, a record write on a held item included; on a save that holds an item or ends its hold; on a save of `plan.json` that moved its rendering; on a pause, a resume, a join and a leave ([`projects.md`](projects.md)); on every move of one of its Sessions' state. `ProjectEventService` sends it to the browsers ([`timeline.md`](timeline.md)) |
+| `WorkMoved(project_id, work_id)` | when what a work item's line shows of its Session moved: its state, its current line, its start or its error ([`work.md`](work.md)). `ProjectEventService` sends it with the work item's status |
 
 ## Testing it
 

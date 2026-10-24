@@ -128,9 +128,13 @@ objects into each stage's namespace:
   `chart/files/homelab-root.crt` into the ConfigMap `homelab-root-ca` and mounts it read-only at
   `/etc/ssl/homelab`. `migrate` sets none of the three. The backend refuses to start without the
   URL and the token; with them it holds the controller's fleet stream open and keeps the
-  Environment rows current. Neither stage starts, sends to or stops an environment: no route
-  outside testing mode starts a session ([`sessions.md`](sessions.md)), and the shutdown timer
-  stops only an environment Pilot started.
+  Environment rows current. Only the dev stage starts, sends to and stops an environment: the
+  record's testing route `POST /api/testing/projects/<id>/work`, which `prd` refuses, places a work
+  item in one of `kubecoder-dev`'s environments and starts its session, and the shutdown timer then
+  stops the environment its start brought up ([`work.md`](work.md), [`sessions.md`](sessions.md)).
+  Production places no work item, so nothing starts there. On either stage a controller that does
+  not answer shows as the gold bar's line over the project list ([`ui.md`](ui.md)); `kubecoder-dev`
+  is on the dev cluster, which is often powered off, and the dev stage's bar then says so.
 - **Service `pilot`**, port 80 to the UI, its annotation `nginx.webathome.org/server-name` the
   stage's host. Production's `nginx.webathome.org/is-public: "true"` has the estate's front door
   serve it as a public site, over HTTPS with a Let's Encrypt certificate. Dev's `is-public: "false"`

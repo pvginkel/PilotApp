@@ -56,11 +56,12 @@ The title and the stored type do not travel on the stream: the timeline's `attac
 the sheet, whose head holds the titles, maximize and the cross, over its body and its foot. It
 opens in place, two thirds of the window wide, at least 640px and at most the text column with its
 scrollbar, and maximized it takes the window's width; on a wide window both stop at the open panel.
-It lies over the side column and the centre, under the top bar and the drawer. The cross, Esc and a
-click on the backdrop close it, which goes to the project's address. Its body keeps its scroll
-while what it shows is read again, and starts at its top for each thing it shows. On a phone, at
-900px and below, it is the whole screen, with no maximize. Where a read fails, its body reads "The
-document did not load."
+It lies over the side column, the gold bar and the centre, under the top bar and the drawer. The
+cross, Esc and a click on the backdrop close it, which goes to the project's address. Its body keeps
+its scroll while what it shows is read again, and starts at its top for each thing it shows. On a
+phone, at 900px and below, it takes the window's width in the centre's row, under the gold bar
+([`ui.md`](ui.md)), with no maximize. Where a read fails, its body reads "The document did not
+load." A work item's session log opens in it too ([`work.md`](work.md)).
 
 ### A document
 

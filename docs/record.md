@@ -17,12 +17,12 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   counting from 1 ([`sign-in.md`](sign-in.md)).
 - `projects`: `number` (an identity, which names a draft's folder), `slug` (none while the project
   is a draft and set once it is not; lower-case letters, digits and hyphens, never starting with
-  `draft-`), `name`, the state (`draft`, `open`, `finished`), `archived`, `autopilot`, and the
-  plan's `ticket` and `repo`.
+  `draft-`), `name`, the state (`draft`, `open`, `finished`), `archived`, `autopilot`, `paused`,
+  and the plan's `ticket` and `repo`.
 - `project_members`: a membership from `joined_at` to `left_at`; one open membership per user and
   project, and a rejoin is a new row; nothing makes Pilot a member.
-- `project_transitions`: each change of a project's state, archived flag or auto pilot switch, with
-  when and by whom ([`projects.md`](projects.md)).
+- `project_transitions`: each change of a project's state, archived flag, auto pilot switch or
+  pause, with when and by whom ([`projects.md`](projects.md)).
 
 **The plan**, which `plan.json` renders and is parsed back into
 
@@ -70,16 +70,25 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
 
 - `environments`: a KubeCoder environment Pilot has touched, keyed by its environment id. A
   session start makes the row from the controller's report when it first touches the environment,
-  and the store's sidecar's first sync call makes the store's the same way ([`sync.md`](sync.md)),
-  or by its id alone while no controller is configured. The fleet stream
-  keeps its `name`, `last_state`, `last_seen_at` and `exempt` current; `server_started_at` says that
-  Pilot started it, and `stop_due_at` is when Pilot stops it ([`controller.md`](controller.md)).
+  or by its id alone, exempt, while the controller does not answer, and the store's sidecar's first
+  sync call makes the store's the same way ([`sync.md`](sync.md)), or by its id alone while no
+  controller is configured. The fleet stream keeps its `name`, `last_state`, `last_seen_at` and
+  `exempt` current; `server_started_at` and `started_pod_at` are Pilot's claim, that it started the
+  environment and the pod's start that bring-up settled on, and `stop_due_at` is when Pilot stops
+  it ([`controller.md`](controller.md)).
 - `sessions`: a run of a Claude Code conversation in one environment, for one project, of a session
-  kind, in a state (`starting`, `running`, `idle`, `stopped`, `ended`, `failed`):
+  kind, in a state (`held`, `starting`, `running`, `idle`, `stopped`, `ended`, `failed`), the held
+  ones indexed by `created_at`, the gate's order:
   `controller_session` names its headless session at the controller and `conversation_id` its
   Claude conversation; `current_line`, a JSON object, says what its turn in flight is doing, and is
   null while none is ([`sessions.md`](sessions.md)). `token_hash` is unique, so a bearer token
   resolves to one session.
+- `work`: a work item, the extension table its Item and its Session share their id with
+  ([`work.md`](work.md)): `project_id`, `session_kind_code` (`work` or `job`, never a Chat's),
+  `trigger_code` (a job's Work Trigger; a worker's run has none) and `trigger_item_id` (an item of
+  the same project, never the work item itself), and `autopilot`, the switch's setting at its
+  brief. Its keys reach its Item and its Session through the one project. A `work`-kind Session may
+  stand with no `work` row, as a testing-mode session does ([`sessions.md`](sessions.md)).
 - `turns`: a message sent to a session and the reply it produced, numbered by `seq` from 1 within
   the session: its `message`, its `author_user_id` (none for the server's own, such as a start's
   brief), the item or the block it quotes (one at most; a quoted block's removal clears the key),
@@ -123,8 +132,8 @@ to it ([`engine.md`](engine.md)):
 The opening's text is read for nothing: it has no `blocks`, and its item keeps the kind, title and
 caches it was born with.
 
-The project's `state_code`, `archived` and `autopilot` are caches of its transitions, written with
-each one ([`projects.md`](projects.md)). A session's `turns`, `turn_started_at` and
+The project's `state_code`, `archived`, `autopilot` and `paused` are caches of its transitions,
+written with each one ([`projects.md`](projects.md)). A session's `turns`, `turn_started_at` and
 `turn_ended_at` are caches of its turns, which the send, the turn's end and the session start
 refresh ([`sessions.md`](sessions.md)).
 

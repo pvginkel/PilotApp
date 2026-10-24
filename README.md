@@ -12,19 +12,23 @@ plan, its members, the auto pilot switch, and Finish, Reopen, Archive and Bring 
 ([`docs/projects.md`](docs/projects.md)); under the head, its timeline, where every item that asks
 one thing is answered in place and a document inline or from its card, its answers sent at once,
 with Undo, urgent banners, a badge per tab and a URL per item, and which every open browser follows
-live ([`docs/timeline.md`](docs/timeline.md)); and the overlay that opens a document, an attachment
-or the handbook, beside the side panel with the project's documents
-([`docs/documents.md`](docs/documents.md)). Nothing creates a
-project yet, so production's list is empty. Beneath the screens are the record's schema and the
-engine behind it: the block DSL, the parse gate and the merge by ownership, the record's own writes,
+live ([`docs/timeline.md`](docs/timeline.md)); its work items, each a session Pilot runs, live on
+the timeline with its one current line, Stop and Resume, and its session log
+([`docs/work.md`](docs/work.md)); each project's status as one icon on its tab, which pauses it, and
+the gold bar over the list while the controller does not answer; and the overlay that opens a
+document, an attachment or the handbook, beside the side panel with the project's documents
+([`docs/documents.md`](docs/documents.md)). Nothing in the app creates a project or places a work
+item yet, so production's list is empty. Beneath the screens are the record's schema and the engine
+behind it: the block DSL, the parse gate and the merge by ownership, the record's own writes,
 and the rendered `timeline.json`, `reference.json` and `plan.json`
 ([`docs/engine.md`](docs/engine.md)); and the sync that keeps the store environment's tree in step
 with the record: the `/api/sync` routes and `pilot-sync`, the Go sidecar, in each stage's store
 environment, with the hook that tells the brain what the record made of each edit
 ([`docs/sync.md`](docs/sync.md)); and the server's jobs on the KubeCoder controller: the
-environments Pilot starts and stops, and the sessions it runs there, recorded and streamed live
-([`docs/sessions.md`](docs/sessions.md)). Each stage follows its own KubeCoder's fleet stream and
-starts nothing yet. It is built on the ModernAppTemplate stack (Flask on PostgreSQL, React + Vite,
-Playwright), which CI builds and Argo CD deploys: every green build to the dev stage at
+environments Pilot starts and stops, and the sessions it runs there through the gate every start
+passes, recorded and streamed live ([`docs/sessions.md`](docs/sessions.md)). Each stage follows its
+own KubeCoder's fleet stream; only the dev stage starts anything, through its testing routes. It
+is built on the ModernAppTemplate stack (Flask on PostgreSQL, React + Vite, Playwright), which CI
+builds and Argo CD deploys: every green build to the dev stage at
 `https://pilot-dev.home`, and production at `https://pilot.ginbov.nl` when the operator promotes it
 ([`docs/deployment.md`](docs/deployment.md)).

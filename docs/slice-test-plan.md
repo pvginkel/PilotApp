@@ -40,8 +40,12 @@ What the checks cannot show from here is reported as *not verified*: production 
 its store included, and anything that needs a part of the fleet no slice has wired into the
 deployment yet (YouTrack). The dev stage's store is wired, and a check that needs it works it
 (step 4.7). The KubeCoder controller is wired: what Pilot does with it is proven on a
-real turn against `kubecoder-dev` (§2, the fleet's live check), and `pilot-dev` shows only that its
-backend reaches that controller (step 4.3), since no route of a deployed stage starts anything yet.
+real turn against `kubecoder-dev` (§2, the fleet's live check), and `pilot-dev` shows that its
+backend reaches that controller (step 4.3). A check that needs a work item on the dev stage places
+one through the record's testing route `POST /api/testing/projects/<id>/work` in one of
+`kubecoder-dev`'s `pvginkel/KubeCoderTestRepo` environments ([`projects.md`](projects.md)), which
+needs the dev cluster up; with it powered off, the dev stage's gold bar reads the controller
+unreachable, and what the check would prove is *not verified*.
 
 ## 0. Preconditions
 

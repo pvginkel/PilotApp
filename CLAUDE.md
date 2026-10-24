@@ -6,13 +6,13 @@ timeline per managed project shows its work, its decision documents and their as
 talks to Pilot's brain, a headless Claude Code session in a store environment.
 
 **Its first screens are in**: the handle step, the project list, a project's head and its timeline,
-its documents in the overlay and the side panel, on the record's schema, the engine behind it
-(`backend/app/engine/`), the sync of the store's tree and the server's jobs on the KubeCoder
-controller. Every green build of `main` deploys itself to the dev stage at `https://pilot-dev.home`,
-and production at `https://pilot.ginbov.nl` runs what the operator promotes from there
-([`docs/deployment.md`](docs/deployment.md)). Version 1 is built from the design record in
-`../PilotAppSpecs/design/` (start at its README), along the steps of its `implementation-plan.md`.
-Its `features.md` is the version-1 scope, and
+its work items, its documents in the overlay and the side panel, on the record's schema, the engine
+behind it (`backend/app/engine/`), the sync of the store's tree and the server's jobs on the
+KubeCoder controller. Every green build of `main` deploys itself to the dev stage at
+`https://pilot-dev.home`, and production at `https://pilot.ginbov.nl` runs what the operator
+promotes from there ([`docs/deployment.md`](docs/deployment.md)). Version 1 is built from the design
+record in `../PilotAppSpecs/design/` (start at its README), along the steps of its
+`implementation-plan.md`. Its `features.md` is the version-1 scope, and
 [`docs/change-discipline.md`](docs/change-discipline.md) says how the record binds a change. A
 decision it leaves open is the operator's to rule, not something to settle in code. Delivery is
 tracked per feature in the record's `feature-ledger.md`, and that is not optional: every slice's doc
@@ -95,8 +95,8 @@ the template gives an app no place for a plugin; and the Playwright backends' ow
 `frontend/tests/support/process/servers.ts` merges over the template's from `loadAppBackendEnv()`
 in the app-owned `frontend/tests/support/backend-env-extensions.ts`, given the backend's URL, where
 the template gives an app no place for a backend setting under Playwright: this app's points each
-backend's controller at the fake it serves itself. uv, the migration that keeps the app's loggers, the
-masked database URL in `backend/app/cli.py` and the declarative `Jenkinsfile` on the library's
+backend's controller at the fake it serves itself. uv, the migration that keeps the app's loggers,
+the masked database URL in `backend/app/cli.py` and the declarative `Jenkinsfile` on the library's
 `modernApp.test` are the template's own since root v0.2.0 and backend v0.14.0, and
 `backend/scripts/init-dev-database.py` (production's locale) since backend v0.15.0.
 
@@ -171,6 +171,7 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
 - [`docs/sync.md`](docs/sync.md): the sync protocol and `pilot-sync`, the sidecar that keeps the
   store's tree in step with the record.
 - [`docs/jobs.md`](docs/jobs.md), [`docs/controller.md`](docs/controller.md),
-  [`docs/sessions.md`](docs/sessions.md): the supervisor that runs the server's long-lived jobs;
-  the KubeCoder controller's client, its fleet stream and environments on demand, with its fake;
-  the sessions, their records, relay and live stream.
+  [`docs/sessions.md`](docs/sessions.md), [`docs/work.md`](docs/work.md): the supervisor that runs
+  the server's long-lived jobs; the KubeCoder controller's client, its outage, its fleet stream and
+  environments on demand, with its fake; the sessions, the gate, their records, relay and live
+  stream, Stop and Resume; a work item's status, its line and its session log.

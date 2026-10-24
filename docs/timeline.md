@@ -44,7 +44,9 @@ is finished, else null. `items` are every item, by `seq`, each with:
 - `attachments`, on every item, work included, in the order they hang on it: `{id, title, filename,
   content_type, size, batch, copied_at, source}`, `batch` the project's attach call it came in,
   from 1, and `source` where it was copied from, `<environment>:<path>`, null for the draft's copy.
-  Its bytes are streamed apart ([`documents.md`](documents.md)).
+  Its bytes are streamed apart ([`documents.md`](documents.md));
+- `work`, a work item's status, its Session as its line shows it, null for every other kind
+  ([`work.md`](work.md)).
 
 A block is `{id, kind, confirmation, because, proposal, default, check, options, answer, by, at,
 note, via, done, deferral, section}`. `id` is its local id; `because` is a confirmation's reason,
@@ -84,24 +86,27 @@ Once a change to what a project's timeline, head or tab shows commits, the engin
 `project_changed`, `{"project_id": "<id>"}`, the writer's own browser included
 (`ProjectEventService`, `backend/app/services/project_event_service.py`). A person is a user with a
 handle, so a connection whose user has none hears nothing. Only the process that holds a connection
-delivers to it.
+delivers to it. A work item's status moves on an event of its own, `work_moved`, which carries it
+and moves nothing else ([`work.md`](work.md)).
 
 `useProjectEvents` (`frontend/src/hooks/use-project-events.ts`), called by the shell, reads again,
 on the event, the project lists and the named project's head, timeline, handbook and project
 document, and every document read of an item of it ([`documents.md`](documents.md)), events that
 arrive together once after them; and on every rise of the stream's `isConnected`, the first
 included, every one of those reads, which covers an event sent from a process that does not hold
-the browser's stream. A person's own write reads every query again as well.
+the browser's stream. A person's own write reads every query again as well. Each `work_moved`'s
+status it writes into the timeline as read, with no read.
 
 ## The timeline
 
 `Timeline` (`timeline.tsx`) draws under the project's head, from `useTimeline`
-(`hooks/use-timeline.ts`). It draws the prose items in their order, the opening first; work items
-and waits draw no line. A project with none reads "Nothing yet".
+(`hooks/use-timeline.ts`). It draws every item in its order, the opening first, but waits, which
+draw no line. A project with none reads "Nothing yet".
 
 - **Dividers** (`rows.ts`). A day divider falls at each new date in the browser's time zone,
   "Thursday 22 October"; a step divider where the step changes, the task's title. An item serving
-  no step starts no divider and ends no step.
+  no step starts no divider and ends no step. No divider falls between consecutive work items: a
+  run of them stands under its last member's day and step dividers, placed before the run.
 - **Anchored to its end.** It opens at its end and stays there as items arrive or its height
   changes, until the reader scrolls more than 48px away from it. An item that arrives after the
   first read flashes once.
@@ -116,7 +121,8 @@ and waits draw no line. A project with none reads "Nothing yet".
   tooltip, the Urgent chip and "for <full name>" while it is for someone. The text's prose is GFM
   (`Markdown`, [`ui.md`](ui.md)); the prose before the first block folds past 13.5em with Show
   more, the ask stands in that block's place, and the prose after it shows whole. A concept has a
-  dashed border.
+  dashed border. An open work item is its session's: its env chip, its one line and its Stop or
+  Resume ([`work.md`](work.md)).
 - **Attachments** (`attachments.tsx`) are chips, the clip and the title, a long one cut short:
   after a one-ask item's or a notice's text, at a confirmation card's end, in the opening's bubble,
   after an inline document's text and on a card. A chip opens the attachment in the overlay
@@ -236,6 +242,9 @@ unanswered.
   its button at the line's end, no wider than the line.
 - **A document Pilot marked Done** (cause `settled`, which no unanswered block allows) is a done
   line as any other, and its overlay's foot names Pilot.
+- **A work item's line** is quieter than the others: set in behind a rule that runs down a run of
+  consecutive work lines, in muted text, its icon, its time and its buttons smaller. Its Open opens
+  its session log ([`work.md`](work.md)), and it never offers Undo.
 
 **Finished.** Finish closes every open item but the opening, so a finished project's timeline is its
 opening and done lines, and ends in "Finished · <stamp>", "22 Oct 2026, 14:05". No line offers
@@ -267,7 +276,7 @@ The engine's side is pinned in `backend/tests/engine/`, the read in
 writes and the event in `tests/api/test_items.py`, `tests/services/test_item_service.py` and
 `tests/services/test_project_event_service.py`. The browser suites are `frontend/tests/timeline/`,
 with `tests/projects/badge.spec.ts`; `document.spec.ts`, `card.spec.ts` and `settled.spec.ts` pin
-the documents.
+the documents, and `frontend/tests/work/timeline.spec.ts` the work items ([`work.md`](work.md)).
 
 A spec makes its project with `projects.makeWithSession`, places items with `projects.place`, a
 text written in the block DSL, and posts an agent's save with `projects.save`; `projects.answer`,

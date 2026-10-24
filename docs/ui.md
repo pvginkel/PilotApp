@@ -4,8 +4,9 @@ The React app is the mockup converted ([`change-discipline.md`](change-disciplin
 is its frame as built: the shell every screen sits in, the tokens and the shared pieces, the keys,
 what the browser remembers, links in text and the PWA. The screens have their own pages:
 [`projects.md`](projects.md) for the project list and the head, [`timeline.md`](timeline.md) for a
-project's timeline and its items, [`documents.md`](documents.md) for the overlay and the side panel,
-and [`sign-in.md`](sign-in.md) for the handle step and the profile page.
+project's timeline and its items, [`work.md`](work.md) for a work item's line and its session log,
+[`documents.md`](documents.md) for the overlay and the side panel, and [`sign-in.md`](sign-in.md)
+for the handle step and the profile page.
 
 ## Where things go
 
@@ -21,20 +22,33 @@ are the template's (`CLAUDE.md` § Template ownership). The app's own:
 
 ## The shell
 
-`src/routes/_shell.tsx` is a layout route: the top bar, then the side column (`nav.tabs`, the
-project list) and the centre (`main.centre`), where the child route shows. It reads the signed-in
-person through `useSelf()` (`GET /api/people/self`). Until they have a handle, the handle step
-stands under the top bar in place of the side column and the centre; a screen under the shell
-reads the person with `usePerson()`, whose handle, name and avatar slot are never null.
+`src/routes/_shell.tsx` is a layout route: the top bar, then, in `.app`'s grid, the gold bar over
+the side column (`nav.tabs`, the project list), and the centre (`main.centre`) beside both, where
+the child route shows. It reads the signed-in person through `useSelf()` (`GET /api/people/self`).
+Until they have a handle, the handle step stands under the top bar in place of the side column and
+the centre; a screen under the shell reads the person with `usePerson()`, whose handle, name and
+avatar slot are never null.
 
 - **The top bar** (`components/shell/top-bar.tsx`): the drawer toggle on a narrow window once the
   app is open, the logo and the name, and the person's avatar, which opens the profile menu. The
   menu holds the person's name, Theme (System, Light, Dark), Profile once the handle is chosen, and
   Sign out. The bar keeps the template's `app-shell.topbar.user*` test ids, so the template's
   sign-in specs pass against it.
-- **The narrow window.** Under the mockup's breakpoint, 900px wide, the side column is a drawer
-  over the centre, with a scrim. The top bar's toggle opens it; the scrim closes it, and so does
-  any change of address.
+- **The gold bar** (`components/shell/gold-bar.tsx`), a `role="status"` region, is a line per
+  condition that holds all work, and none while nothing does; a line stands while its condition
+  holds and goes when it ends, and nothing dismisses it. Its one condition is the controller
+  unreachable ([`controller.md`](controller.md)): "The controller has been unreachable since
+  <hh:mm>. Nothing starts until it answers.", with a server-off icon (`conditionLine()`,
+  `src/lib/utils/status-labels.ts`). The lines are in the server's order. **`GET
+  /api/conditions`** answers `{conditions: [{code, since}]}`, `code` `outage` and `since` when it
+  began, as this server last met the controller; at each turn of a condition the SSE event
+  `conditions_changed` carries the same body to every person's connections. `useConditions()`
+  (`src/hooks/use-conditions.ts`) reads it, writes each event over the read, and reads it again at
+  every rise of the stream's `isConnected`. On a wide window the bar stands in the side column's
+  width, over `nav.tabs`, and the overlay's backdrop lies over it as over the project list.
+- **The narrow window.** Under the mockup's breakpoint, 900px wide, the gold bar spans the window
+  under the top bar, and in the row under it the side column is a drawer over the centre, with a
+  scrim. The top bar's toggle opens it; the scrim closes it, and so does any change of address.
 - **Empty states** are `EmptyState`: "No projects yet" when there is no project, "None yet" for an
   empty list of archived projects.
 
@@ -58,6 +72,10 @@ better in both themes. Pilot's mark is `--avatar-pilot`, grey, outside the palet
 (`components/shared/avatar.tsx`) shows a person's initials with their full name as its tooltip, or
 a user icon for a name without initials.
 
+**The gold bar's** are `--gold`, `--gold-foreground` and `--gold-edge`, its surface, its text and
+the rule under each line, light and dark; `tests/shell/gold-bar.spec.ts` measures its text at 4.5:1
+or better and its hue gold in each theme.
+
 ## The shared pieces
 
 In `src/components/shared/`:
@@ -79,9 +97,11 @@ In `src/components/shared/`:
   `format`, the day and the month ("19 Oct", the default), `clock`, the hour and the minute
   ("14:05"), or `stamp`, the date and the time ("22 Oct 2026, 14:05"). The record and the API hold
   times in UTC.
-- `LinkedText`: below.
-- `Markdown({text})`: GFM (react-markdown with remark-gfm) inside `.prose`, its text linked as the
-  record's words are except in code and inside a link, every link opening in a new tab.
+- `LinkedText` and `EnvironmentLink`: below.
+- `Markdown({text, className?, deltas?})`: GFM (react-markdown with remark-gfm) inside `.prose`, its
+  text linked as the record's words are except in code and inside a link, every link opening in a
+  new tab. A quote tag is drawn as a chip, and with `deltas`, a streamed text's, its new text fades
+  in (`.delta-fresh`); the chat's view code draws its text through it ([`work.md`](work.md)).
   `HeadingWords({text})` is a heading's inline Markdown alone, for inside a button: emphasis, code
   and links as the heading shows them, each link nested as `LinkedText`'s are.
 - `Fold({children, testId})`: a text cut at 13.5em, fading out, with Show more; one that fits shows
@@ -92,9 +112,11 @@ In `src/components/shared/`:
   it. While it has the focus, its parent, the row holding what sends it, is kept in view.
 
 `shared.css` has the mockup's buttons (`.btn` with `.btn-sm`, `.btn-icon`, `.btn-primary`,
-`.btn-soft`, `.btn-ghost`), the text field (`.field` in a `.field-row` with its button beside it,
-level with its bottom edge), `.chip`, `.popover`, `.menu-pop`, `.dialog`, `.empty-state`,
-`.mention`, `.prose`, `.fold` and `.link`.
+`.btn-danger`, `.btn-soft`, `.btn-ghost`), the text field (`.field` in a `.field-row` with its
+button beside it, level with its bottom edge), `.chip`, `.popover`, `.menu-pop`, `.dialog`,
+`.empty-state`, `.mention`, `.prose` (its lists with their bullets and numbers, a task list's
+checkboxes), `.fold` and `.link`; `.icon-cap`, an icon on its text's capitals in a flex row;
+`.delta-fresh`; and `@keyframes pulse`.
 
 ## The keys
 
@@ -168,6 +190,10 @@ the mouse. With `nested`, for text inside a link or a button, where a link canno
 is a `span role="link"` that opens on a click or on Enter and keeps the link or button around it
 from acting.
 
+**`<EnvironmentLink environment={{id, name}} />`** is an environment by its name, linked by its id
+to `<base>/environments/<id>/ssh/open`, "Open <name> in VS Code", while the base is set, and plain
+text while it is unset or not yet read: the env chip's and the session log's.
+
 ## The PWA
 
 The app's mark is the operator's control tower in three-quarter perspective, modelled in
@@ -201,11 +227,14 @@ The frontend suite's fixtures (`frontend/tests/support/fixtures.ts`):
 - `people`: `signIn({name?, handle?})` signs in a person with a handle, chosen through the API;
   `firstSignIn({name?})` one at their first sign-in, `null` for a token with no name;
   `other(handle, name?)` puts another person on the record; `self()` reads the signed-in person.
-- `shell`: `open(path)` opens an address once the signed-in person is read.
+- `shell`: `open(path)` opens an address once the signed-in person is read; `goldBar` and
+  `goldLine(code)` read the gold bar.
+- `controller` drives the worker's fake controller, and `conditions` reads what the gold bar reads
+  ([`work.md`](work.md)).
 - `links`: `set({ticket_url_template?, environment_link_base_url?})` sets the link settings for the
   spec, a setting left out unset, and unsets both after it, through `PUT /api/testing/links`, which
   answers only in testing mode and refuses what the boot refuses; `environment(id, name)` puts an
   environment on the record through `POST /api/testing/environments` ([`projects.md`](projects.md)).
-- The page objects `handleStep`, `profile`, `projectList`, `projectHead`, `timeline`, `overlay` and
-  `panel`, and `projects` ([`projects.md`](projects.md), [`timeline.md`](timeline.md),
-  [`documents.md`](documents.md)).
+- The page objects `handleStep`, `profile`, `projectList`, `projectHead`, `timeline`, `overlay`,
+  `sessionLog` and `panel`, and `projects` ([`projects.md`](projects.md),
+  [`timeline.md`](timeline.md), [`work.md`](work.md), [`documents.md`](documents.md)).

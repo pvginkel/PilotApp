@@ -2,7 +2,8 @@
 
 The backend's long-lived work runs as threads of its own process, under the supervisor
 (`backend/app/services/supervisor.py`, the container's `supervisor` singleton): the fleet stream's
-consumer, a relay per session with a turn in flight, a start per session coming up, and the timers.
+consumer, a relay per session with a turn in flight, an interrupt per turn stopped under it, a start
+per session coming up and the release of the held ones, and the timers.
 Every job resumes from rows, so nothing drains to completion: a roll or a crash costs a restart of
 the job, never its work.
 
@@ -10,11 +11,14 @@ the job, never its work.
 |---|---|---|
 | `fleet` | a job with one loop | keeps the Environment rows current from the controller's fleet stream ([`controller.md`](controller.md)) |
 | `relay:<session id>` | a loop of the job `relay` | relays a Session's turn in flight into its records ([`sessions.md`](sessions.md)) |
+| `interrupt:<session id>` | a loop of the job `interrupt` | asks the controller's interrupt of a turn stopped under it ([`sessions.md`](sessions.md)) |
 | `start:<session id>` | a loop of the job `start` | brings a `starting` Session up ([`sessions.md`](sessions.md)) |
+| `start:held` | a loop of the job `start` | moves the held Sessions on once the gate opens for them ([`sessions.md`](sessions.md)) |
 | `environment-shutdown` | a timer | stops the idle environments Pilot started ([`controller.md`](controller.md)) |
-| `relay-watchdog` | a timer | restarts a relay the fleet stream shows stuck ([`sessions.md`](sessions.md)) |
+| `relay-watchdog` | a timer | restarts a relay the fleet stream shows stuck or stopped ([`sessions.md`](sessions.md)) |
+| `controller-probe` | a timer | while the controller is unreachable, asks whether it answers ([`controller.md`](controller.md)) |
 
-Each needs the controller. With `CONTROLLER_URL` unset (the suites, CI, a dev stack without the
+Each needs the controller. With `CONTROLLER_URL` unset (the backend suite, a dev stack without the
 credential), none of them starts, and the log says so once at STARTUP: `No controller configured
 (CONTROLLER_URL unset): the jobs and timers that need one do not start (<names>)`. Production
 refuses to start without `CONTROLLER_URL` and `CONTROLLER_TOKEN`; the check is in the server's
@@ -28,8 +32,9 @@ a registration after STARTUP raises `InvalidOperationException`.
 - **A job**: `register_job(job, *, needs_controller, reconcile=None)`. Its reconcile,
   `Callable[[Session], None]`, runs once at STARTUP in a database session of its own, which commits
   when it returns and rolls back when it raises. The reconciles run in registration order (`fleet`,
-  `relay`, `start`) on a thread of the supervisor's, not the lifecycle coordinator's, so the server
-  serves while they run. One that raises is logged, and its job's loops start regardless.
+  `relay`, `interrupt`, `start`) on a thread of the supervisor's, not the lifecycle coordinator's,
+  so the server serves while they run. One that raises is logged, and its job's loops start
+  regardless.
 - **A loop**: `start_loop(job, run, key=None, *, again=False) -> bool` runs `run(handle)` on a
   daemon thread named `job` or `job:key`, one live loop per name. A loop requested before its job's
   reconcile has run waits for it. A request for a name with a live or waiting loop does nothing, a
@@ -46,9 +51,10 @@ a registration after STARTUP raises `InvalidOperationException`.
   returns. `interrupt_loop(job, key=None) -> bool` closes what a live loop's run holds without
   stopping the loop, and is True when it closed something.
 - **A timer**: `register_timer(timer, run, *, needs_controller)`. The scheduler runs the timers in
-  registration order (`environment-shutdown`, then `relay-watchdog`), the first round at STARTUP,
-  then each round `SCHEDULER_TICK_SECONDS` after the last ended. Each run has a database session of
-  its own; one that raises is logged and counted, and the rest of the round runs.
+  registration order (`environment-shutdown`, `relay-watchdog`, then `controller-probe`), the first
+  round at STARTUP, then each round `SCHEDULER_TICK_SECONDS` after the last ended. Each run has a
+  database session of its own; one that raises is logged and counted, and the rest of the round
+  runs.
 
 The suite and the CLI never fire STARTUP, so there a requested loop never runs. A test that needs
 loops builds a supervisor on a lifecycle coordinator of its own with the `supervise` fixture
@@ -67,8 +73,8 @@ the next process resumes from the rows. The pod's timing around it is in
 [`deployment.md`](deployment.md).
 
 During a roll the old and the new backend overlap, each running every job. That is safe because
-each write a job makes is conditional on rows it reads under their lock: a relay, a start and a
-send under the Session row's, the shutdown timer under the Environment row's, skipping one another
+each write a job makes is conditional on rows it reads under their lock: a relay, a start, the
+release of a held one and a send under the Session row's, the shutdown timer under the Environment row's, skipping one another
 process holds. The watchdog restarts only this process's relays.
 
 ## Settings and metrics
