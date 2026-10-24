@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.database import scoped_session
-from app.models import Environment, Project, User
+from app.models import Environment, Project, Turn, User
 from app.models.reference import RecordKind, SessionState, UserKind
 from app.services.container import ServiceContainer
 from app.services.controller_client import (
@@ -334,6 +334,29 @@ class TestRelayWatchdog:
         wedged.finish(ENV, "claude-2", "success", "Done.")
         _idle(container, run_id)
 
+    def test_an_environment_stopped_elsewhere_has_its_relay_restarted(
+        self,
+        committed_app: Flask,
+        wedged: _Wedged,
+        relaying: tuple[str, uuid.UUID, list[str], list[int]],
+        watch_log: LogWaiter,
+    ) -> None:
+        container = committed_app.container
+        _, run_id, _, _ = relaying
+
+        # The wedged stream outlives the pod: only the watchdog moves it on.
+        _client(container).stop_environment(ENV)
+
+        watch_log.wait_for(
+            rf"Restarted the relay of session {run_id}: environment {ENV} is "
+            "(stopping|stopped)"
+        )
+        wait_until(
+            lambda: _read(container, run_id).state_code == SessionState.STOPPED,
+            "the session stopped",
+        )
+        assert _read(container, run_id).stopped_by_user_id is None
+
     def test_a_turn_still_working_is_left_alone(
         self,
         committed_app: Flask,
@@ -521,6 +544,52 @@ class TestRun:
             watchdog.run(session)
 
         assert not relay.closed.is_set()
+
+    @pytest.mark.parametrize("status", ["stopping", "stopped", "deleting"])
+    def test_an_environment_stopped_elsewhere_restarts_it_at_once(
+        self,
+        session: DbSession,
+        watched: tuple[RelayWatchdog, _Fleet, _Relay, str],
+        watch_log: LogWaiter,
+        status: str,
+    ) -> None:
+        watchdog, fleet, relay, env_id = watched
+        fleet.states[env_id] = _state(env_id, status=status)
+        fleet.views[env_id] = ()
+
+        watchdog.run(session)
+
+        assert relay.closed.is_set()
+        assert watch_log.matching(
+            rf"Restarted the relay .*: environment {env_id} is {status}"
+        )
+
+    @pytest.mark.parametrize("in_flight", [True, False])
+    def test_a_session_stopped_is_watched_while_its_turn_is_in_flight(
+        self,
+        session: DbSession,
+        project_session: models.Session,
+        watched: tuple[RelayWatchdog, _Fleet, _Relay, str],
+        in_flight: bool,
+    ) -> None:
+        watchdog, fleet, relay, env_id = watched
+        project_session.state_code = SessionState.STOPPED
+        now = datetime.now(UTC)
+        session.add(
+            Turn(
+                session_id=project_session.id,
+                seq=1,
+                message="Build the camp",
+                started_at=now,
+                ended_at=None if in_flight else now,
+            )
+        )
+        session.flush()
+        fleet.states[env_id] = _state(env_id, status="stopped")
+
+        watchdog.run(session)
+
+        assert relay.closed.is_set() is in_flight
 
     def test_a_restart_count_that_moved_restarts_it_at_once(
         self,

@@ -4,19 +4,23 @@
 A Turn ends on its response stream's `result` frame and on nothing else. The
 watchdog restarts a relay this process has open when the fleet stream says its
 turn is no longer running: its controller session not working on two ticks in a
-row, the environment running with no such session on two ticks in a row, or the
-environment's pod restarted. The relay's run then reopens the stream, which
-delivers the buffered `result` of a turn that ended, carries on with one that
-did not, or meets the session gone and resumes it (§9.6).
+row, the environment running with no such session on two ticks in a row, the
+environment's pod restarted, or the environment stopped elsewhere — `stopping`,
+`stopped` or `deleting`, which no restart reads as. The relay's run then reopens
+the stream, which delivers the buffered `result` of a turn that ended, carries
+on with one that did not, meets the session gone and resumes it, or meets the
+environment stopped and stops the Session (§9.6). The fleet consumer writes no
+Session.
 """
 
 import logging
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.orm import Session
 
 from app.models import Session as AgentSession
+from app.models import Turn
 from app.models.reference import SessionState
 from app.services.fleet_consumer import FleetConsumer
 from app.services.relay_service import RELAY_JOB
@@ -25,6 +29,8 @@ from app.services.supervisor import Supervisor
 logger = logging.getLogger(__name__)
 
 WATCHDOG_TIMER = "relay-watchdog"
+
+_STOPPED_ELSEWHERE = ("stopping", "stopped", "deleting")
 
 
 class RelayWatchdog:
@@ -46,8 +52,13 @@ class RelayWatchdog:
         supervisor.register_timer(WATCHDOG_TIMER, self.run, needs_controller=True)
 
     def run(self, db: Session) -> None:
-        """The watchdog's tick: every `running` Session's relay, if this
-        process has it open, restarted when the fleet stream says so."""
+        """The watchdog's tick: the relay of every Session with a turn
+        relayed, `running` or stopped under its turn, if this process has it
+        open, restarted when the fleet stream says so."""
+        stopped_under_turn = and_(
+            AgentSession.state_code == SessionState.STOPPED,
+            exists().where(Turn.session_id == AgentSession.id, Turn.ended_at.is_(None)),
+        )
         sessions = db.execute(
             select(
                 AgentSession.id,
@@ -55,7 +66,10 @@ class RelayWatchdog:
                 AgentSession.controller_session,
             )
             .where(
-                AgentSession.state_code == SessionState.RUNNING,
+                or_(
+                    AgentSession.state_code == SessionState.RUNNING,
+                    stopped_under_turn,
+                ),
                 AgentSession.controller_session.is_not(None),
             )
             .order_by(AgentSession.id)
@@ -65,6 +79,12 @@ class RelayWatchdog:
         for session_id, env_id, name in sessions:
             if env_id in restarted:
                 self._restart(session_id, f"environment {env_id} restarted")
+                continue
+            environment = self._fleet.environment(env_id)
+            if environment is not None and environment.status in _STOPPED_ELSEWHERE:
+                self._restart(
+                    session_id, f"environment {env_id} is {environment.status}"
+                )
                 continue
             cause = self._amiss(env_id, name)
             if cause is None:

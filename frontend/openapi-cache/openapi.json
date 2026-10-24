@@ -1638,9 +1638,10 @@
                 "type": "null"
               }
             ],
-            "description": "The server's own words while the session comes up; null unless `state` is `starting`",
+            "description": "The server's own words while the session comes up, or comes back while its environment restarts; null unless `state` is `starting`",
             "examples": [
-              "Starting Camp-1…"
+              "Starting Camp-1…",
+              "Camp-1 is restarting…"
             ],
             "title": "Text"
           }
@@ -1984,6 +1985,16 @@
         "title": "StepSchema",
         "type": "object"
       },
+      "ItemDocumentSchema.1fdd8ae.StopCause": {
+        "description": "Why a work item stopped when its environment was stopped under its\nturn, a stop made elsewhere (design 2 §9.6; F71): it settled `stopped`,\nit settled `deleting`, or the controller has it no longer. The `server`\nrecord that ended the turn holds it.",
+        "enum": [
+          "environment_stopped",
+          "environment_deleting",
+          "environment_gone"
+        ],
+        "title": "StopCause",
+        "type": "string"
+      },
       "ItemDocumentSchema.1fdd8ae.UserKind": {
         "enum": [
           "person",
@@ -2135,6 +2146,17 @@
               }
             ],
             "description": "Who stopped it, by Stop, Finish or Archive; null when no one of Pilot's did, and unless `state` is `stopped` (F69.2)"
+          },
+          "stopped_cause": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.StopCause"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why it stopped when its environment was stopped under it, a stop made elsewhere, which its stopped line and its session log's tail say: stopped, being deleted, or gone; null when someone stopped it, and unless `state` is `stopped` (F26.1, F69.2, F71)"
           }
         },
         "required": [
@@ -2146,7 +2168,8 @@
           "autopilot",
           "held_reason",
           "stopped_at",
-          "stopped_by"
+          "stopped_by",
+          "stopped_cause"
         ],
         "title": "WorkSchema",
         "type": "object"
@@ -5102,9 +5125,10 @@
                 "type": "null"
               }
             ],
-            "description": "The server's own words while the session comes up; null unless `state` is `starting`",
+            "description": "The server's own words while the session comes up, or comes back while its environment restarts; null unless `state` is `starting`",
             "examples": [
-              "Starting Camp-1…"
+              "Starting Camp-1…",
+              "Camp-1 is restarting…"
             ],
             "title": "Text"
           }
@@ -5447,6 +5471,16 @@
         ],
         "title": "StepSchema",
         "type": "object"
+      },
+      "TimelineSchema.1fdd8ae.StopCause": {
+        "description": "Why a work item stopped when its environment was stopped under its\nturn, a stop made elsewhere (design 2 §9.6; F71): it settled `stopped`,\nit settled `deleting`, or the controller has it no longer. The `server`\nrecord that ended the turn holds it.",
+        "enum": [
+          "environment_stopped",
+          "environment_deleting",
+          "environment_gone"
+        ],
+        "title": "StopCause",
+        "type": "string"
       },
       "TimelineSchema.1fdd8ae.TimelineItemSchema": {
         "description": "An entry on the timeline, with what its line and its open form show.",
@@ -5885,6 +5919,17 @@
               }
             ],
             "description": "Who stopped it, by Stop, Finish or Archive; null when no one of Pilot's did, and unless `state` is `stopped` (F69.2)"
+          },
+          "stopped_cause": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.StopCause"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why it stopped when its environment was stopped under it, a stop made elsewhere, which its stopped line and its session log's tail say: stopped, being deleted, or gone; null when someone stopped it, and unless `state` is `stopped` (F26.1, F69.2, F71)"
           }
         },
         "required": [
@@ -5896,7 +5941,8 @@
           "autopilot",
           "held_reason",
           "stopped_at",
-          "stopped_by"
+          "stopped_by",
+          "stopped_cause"
         ],
         "title": "WorkSchema",
         "type": "object"
@@ -6146,6 +6192,17 @@
               }
             ],
             "description": "Who stopped it, by Stop, Finish or Archive; null when no one of Pilot's did, and unless `state` is `stopped` (F69.2)"
+          },
+          "stopped_cause": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkSchema.1fdd8ae.StopCause"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why it stopped when its environment was stopped under it, a stop made elsewhere, which its stopped line and its session log's tail say: stopped, being deleted, or gone; null when someone stopped it, and unless `state` is `stopped` (F26.1, F69.2, F71)"
           }
         },
         "required": [
@@ -6157,7 +6214,8 @@
           "autopilot",
           "held_reason",
           "stopped_at",
-          "stopped_by"
+          "stopped_by",
+          "stopped_cause"
         ],
         "title": "WorkSchema",
         "type": "object"
@@ -6214,9 +6272,10 @@
                 "type": "null"
               }
             ],
-            "description": "The server's own words while the session comes up; null unless `state` is `starting`",
+            "description": "The server's own words while the session comes up, or comes back while its environment restarts; null unless `state` is `starting`",
             "examples": [
-              "Starting Camp-1…"
+              "Starting Camp-1…",
+              "Camp-1 is restarting…"
             ],
             "title": "Text"
           }
@@ -6354,6 +6413,16 @@
           "failed"
         ],
         "title": "SessionState",
+        "type": "string"
+      },
+      "WorkSchema.1fdd8ae.StopCause": {
+        "description": "Why a work item stopped when its environment was stopped under its\nturn, a stop made elsewhere (design 2 §9.6; F71): it settled `stopped`,\nit settled `deleting`, or the controller has it no longer. The `server`\nrecord that ended the turn holds it.",
+        "enum": [
+          "environment_stopped",
+          "environment_deleting",
+          "environment_gone"
+        ],
+        "title": "StopCause",
         "type": "string"
       },
       "WorkSchema.1fdd8ae.UserKind": {

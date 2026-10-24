@@ -29,8 +29,14 @@ Each run first asks the controller whether it has the turn in flight (§8.2): a
 Turn written before its send that the controller never got is sent then. A
 controller session that is gone is resumed (§9.6, F71): re-created with the
 Session's conversation in the same environment, and carried on by a server-own
-"continue" Turn. An environment that is not running is waited for. At STARTUP
-the job's reconcile runs the relay of every Session with a Turn in flight.
+"continue" Turn, or the ended Turn's message again when the Session has no
+conversation. An environment that is not running is waited for, the running
+Session's line saying it restarts while it reads `provisioning` or `starting`.
+One that settles `stopped` or `deleting`, or is gone, was stopped elsewhere,
+which no restart reads as: the Turn ends with a `server` record naming the
+cause, and a running Session is `stopped` as Stop stops it, by no one. At
+STARTUP the job's reconcile runs the relay of every Session with a Turn in
+flight.
 """
 
 import json
@@ -48,20 +54,28 @@ from sqlalchemy.orm import Session
 from app.core_exceptions import ExternalServiceException
 from app.database import scoped_session
 from app.exceptions import InvalidOperationException, RecordNotFoundException
+from app.models import Environment, Turn, Work
 from app.models import Session as AgentSession
-from app.models import Turn, Work
 from app.models.reference import RecordKind, SessionState
+from app.schemas.timeline import StopCause
 from app.services.controller_client import (
     ControllerClient,
     ControllerProblem,
     ControllerProblemType,
     ControllerUnreachable,
+    EnvironmentWait,
     HeadlessCreateRequest,
     RawFrame,
     ResultFrame,
     SessionSnapshot,
 )
-from app.services.current_line import CurrentLine, after_line, after_partial, at_send
+from app.services.current_line import (
+    CurrentLine,
+    after_line,
+    after_partial,
+    at_send,
+    while_starting,
+)
 from app.services.environment_service import EnvironmentService
 from app.services.session_record_service import (
     SessionRecordService,
@@ -89,6 +103,14 @@ SESSION_GONE = "session-gone"
 """The `type` of the `server` record a resume writes: the controller session was
 gone."""
 
+RESTARTING = "restarting"
+"""The `type` of the `server` record whose `text` a running Session's line
+takes while its environment restarts under the turn (F71)."""
+
+ENVIRONMENT_STOPPED = "environment-stopped"
+"""The `type` of the `server` record that ends a Turn whose environment was
+stopped under it, its `cause` a Stop Cause (F71)."""
+
 CONTINUE = "continue"
 """The message of the server's own Turn that carries a resumed session on (F71)."""
 
@@ -96,8 +118,12 @@ SETTLE_WAIT_MS = 10_000
 """How long one wait for an environment to settle is held; a loop that is not
 told to stop waits again until it settles."""
 
-_SETTLING = ("provisioning", "starting", "stopping")
 _TURN_IN_FLIGHT = ("busy", "interrupting")
+
+_STOP_CAUSES = {
+    "stopped": StopCause.ENVIRONMENT_STOPPED,
+    "deleting": StopCause.ENVIRONMENT_DELETING,
+}
 
 _TURN_FAILED = "The turn ended in an error"
 
@@ -341,16 +367,16 @@ class RelayService:
         The turn in flight is sent first when the controller does not have it.
         A controller session that is gone is resumed, and an environment that
         is not running is waited for until it settles; then the run carries on
-        with the Session as its rows have it. A stream the watchdog closes
-        (`Supervisor.interrupt_loop`) is reopened. A Session stopped under its
-        turn is never sent it: the turn is relayed when the controller has it,
-        and ends with no `result` when the controller never got it or its
-        controller session is gone.
+        with the Session as its rows have it. An environment stopped
+        elsewhere, or gone, ends the turn and stops the Session. A stream the
+        watchdog closes (`Supervisor.interrupt_loop`) is reopened. A Session
+        stopped under its turn is never sent it: the turn is relayed when the
+        controller has it, and ends with no `result` when the controller never
+        got it or its controller session is gone.
 
         Raises:
             ExternalServiceException: The controller failed, the stream dropped
-                before the turn's `result`, or the environment settled other
-                than `running`
+                before the turn's `result`, or the environment settled `error`
         """
         while not handle.stopping:
             with scoped_session(self._container) as db:
@@ -382,7 +408,7 @@ class RelayService:
                     case ControllerProblemType.NOT_FOUND:
                         self._resume(opening, problem)
                     case ControllerProblemType.CONFLICT:
-                        self._await_environment(opening.env_id, handle)
+                        self._await_environment(opening, handle)
                     case _:
                         raise
 
@@ -472,9 +498,12 @@ class RelayService:
 
     def _resume(self, opening: _Opening, problem: ControllerProblem) -> None:
         """The relay's resume of a controller session that is gone (§9.6): it
-        is re-created, and a server-own "continue" Turn, which the run sends
-        next, carries the Session on. Nothing is done when another process
-        resumed it first, or the Session has moved on."""
+        is re-created, and a server-own Turn, which the run sends next, carries
+        the Session on: "continue", or the ended Turn's message while the
+        Session has no conversation, which the new session would not know. An
+        environment the create does not find is gone, and stops the Session.
+        Nothing is done when another process resumed it first, or the Session
+        has moved on."""
         with scoped_session(self._container) as db:
             session = self._records(db).lock_session(opening.session_id)
             if (
@@ -482,8 +511,22 @@ class RelayService:
                 or session.controller_session != opening.controller_session
             ):
                 return
-            self._recreate(db, session, problem)
-            turn = self._new_turn(db, session.id, CONTINUE, None)
+            try:
+                self._recreate(db, session, problem)
+            except ControllerProblem as missing:
+                # The create's one `404` is its environment's.
+                if missing.problem_type is not ControllerProblemType.NOT_FOUND:
+                    raise
+                self._stop_elsewhere(
+                    db,
+                    session,
+                    opening.turn_id,
+                    StopCause.ENVIRONMENT_GONE,
+                    str(missing),
+                )
+                return
+            message = opening.message if session.conversation_id is None else CONTINUE
+            turn = self._new_turn(db, session.id, message, None)
             session.state_code = SessionState.RUNNING
             session.current_line = at_send(None, turn.started_at)
             _refresh_turns(db, session, turn)
@@ -544,25 +587,133 @@ class RelayService:
             session.environment_id,
         )
 
-    def _await_environment(self, env_id: str, handle: LoopHandle) -> None:
-        """Wait until the environment settles (§9.6), or the loop is told to
-        stop.
+    def _await_environment(self, opening: _Opening, handle: LoopHandle) -> None:
+        """Wait until the turn's environment settles `running` (§9.6), or the
+        loop is told to stop. While it reads `provisioning` or `starting`, as a
+        restart reads, the running Session's line says it restarts. One that
+        settles `stopped` or `deleting`, or is gone, was stopped elsewhere: the
+        turn ends there, and the Session stops.
 
         Raises:
-            ExternalServiceException: It settled other than `running`
+            ExternalServiceException: It settled `error`
         """
+        env_id = opening.env_id
         logger.info("Environment %s is not running: waiting for it to settle", env_id)
+        # The first read answers at once, so the line says so from the start.
+        wait: EnvironmentWait | None = None
         while not handle.stopping:
-            environment = self._client().get_environment(
-                env_id, wait="settled", wait_ms=SETTLE_WAIT_MS
-            )
-            if environment.status == "running":
-                return
-            if environment.status not in _SETTLING:
-                raise ExternalServiceException(
-                    f"relay a turn in environment {env_id}",
-                    f"the environment settled {environment.status}",
+            try:
+                environment = self._client().get_environment(
+                    env_id, wait=wait, wait_ms=SETTLE_WAIT_MS
                 )
+            except ControllerProblem as problem:
+                if problem.problem_type is not ControllerProblemType.NOT_FOUND:
+                    raise
+                self._stopped_elsewhere(
+                    opening, StopCause.ENVIRONMENT_GONE, str(problem)
+                )
+                return
+            wait = "settled"
+            match environment.status:
+                case "running":
+                    return
+                case "stopped" | "deleting":
+                    self._stopped_elsewhere(
+                        opening,
+                        _STOP_CAUSES[environment.status],
+                        f"environment {env_id} is {environment.status}",
+                    )
+                    return
+                case "provisioning" | "starting":
+                    self._restarting(opening)
+                case "stopping":
+                    pass
+                case _:
+                    raise ExternalServiceException(
+                        f"relay a turn in environment {env_id}",
+                        f"the environment settled {environment.status}",
+                    )
+
+    def _restarting(self, opening: _Opening) -> None:
+        """The running Session's line, and a `server` record of the Turn in
+        flight, saying its environment restarts (F71, F26.2), once: the
+        session's next line moves it on, as does the resume. Nothing is done
+        when the Session has moved on."""
+        with scoped_session(self._container) as db:
+            records = self._records(db)
+            session = records.lock_session(opening.session_id)
+            if (
+                session.state_code != SessionState.RUNNING
+                or session.controller_session != opening.controller_session
+                or not _in_flight(db, opening.turn_id)
+            ):
+                return
+            environment = db.get_one(Environment, session.environment_id)
+            text = f"{environment.name} is restarting…"
+            line = session.current_line
+            if line is not None and line.get("text") == text:
+                return
+            record = records.append(
+                session.id,
+                RecordKind.SERVER,
+                payload={"type": RESTARTING, "text": text},
+                turn_id=opening.turn_id,
+            )
+            session.current_line = while_starting(text, record.at)
+            self._moved(session)
+
+    def _stopped_elsewhere(
+        self, opening: _Opening, cause: StopCause, reason: str
+    ) -> None:
+        """`_stop_elsewhere` in a transaction of its own, unless the Session
+        has moved on: it is neither running nor stopped, has another
+        controller session, or its turn ended."""
+        with scoped_session(self._container) as db:
+            session = self._records(db).lock_session(opening.session_id)
+            if (
+                session.state_code not in _RELAYED
+                or session.controller_session != opening.controller_session
+                or not _in_flight(db, opening.turn_id)
+            ):
+                return
+            self._stop_elsewhere(db, session, opening.turn_id, cause, reason)
+
+    def _stop_elsewhere(
+        self,
+        db: Session,
+        session: AgentSession,
+        turn_id: int,
+        cause: StopCause,
+        reason: str,
+    ) -> None:
+        """Under the Session's lock: its environment stopped under the Turn in
+        flight `turn_id`, a stop made elsewhere (§9.6, F71). A `server` record
+        naming the `cause` is the Turn's last, every Turn in flight ends with
+        no `result`, and a `running` Session is `stopped` as Stop stops it, by
+        no one, with no current line; one stopped already keeps its stop. The
+        documents it was writing are let go, as at a turn's end, and the
+        environment's shutdown timer is armed."""
+        self._records(db).append(
+            session.id,
+            RecordKind.SERVER,
+            payload={"type": ENVIRONMENT_STOPPED, "cause": cause, "reason": reason},
+            turn_id=turn_id,
+        )
+        now = datetime.now(UTC)
+        for turn in db.scalars(
+            select(Turn).where(Turn.session_id == session.id, Turn.ended_at.is_(None))
+        ):
+            turn.ended_at = now
+        _refresh_turns(db, session, db.get_one(Turn, turn_id))
+        if session.state_code == SessionState.RUNNING:
+            session.state_code = SessionState.STOPPED
+            session.stopped_at = now
+            session.stopped_by_user_id = None
+            session.current_line = None
+            self._moved(session, state=True)
+        self._container.document_service().turn_ended(session)
+        self._environments.arm_shutdown_timer(db, session.environment_id)
+        logger.info("Session %s stopped under its turn: %s", session.id, reason)
 
     def _new_turn(
         self,

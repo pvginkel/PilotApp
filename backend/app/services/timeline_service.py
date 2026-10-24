@@ -44,6 +44,7 @@ from app.models.reference import (
     DocumentRole,
     ErrorKind,
     ProjectState,
+    RecordKind,
     SessionState,
     TransitionKind,
     VersionCause,
@@ -67,6 +68,7 @@ from app.schemas.timeline import (
     ProsePartSchema,
     SectionSchema,
     StepSchema,
+    StopCause,
     TimelineItemSchema,
     TimelineSchema,
     UserSchema,
@@ -74,6 +76,8 @@ from app.schemas.timeline import (
 )
 from app.services.controller_outage import ControllerOutage
 from app.services.people_service import initials
+from app.services.relay_service import ENVIRONMENT_STOPPED
+from app.services.session_record_service import last_record
 from app.services.start_gate import held_reason
 
 WORK = "work"
@@ -159,7 +163,8 @@ def work_status(
     Session's: a turn's failure is its Turn's, a start's the Session's (DB
     Session `error?`). A held one's reason is the gate's as it reads now. A
     stopped one's stop is when and by whom, a Resume keeping both on the
-    Session (DB Session `stopped_at?`, `stopped_by?`)."""
+    Session (DB Session `stopped_at?`, `stopped_by?`); one no one stopped has
+    the cause its environment's stop under it left as its last record."""
     stopper = aliased(User)
     rows = db.execute(
         select(AgentSession, Environment.name, Work.autopilot, Project.paused, stopper)
@@ -186,6 +191,12 @@ def work_status(
         if failed
         else {}
     )
+    causes = {
+        session.id: _stop_cause(db, session.id)
+        for session, _, _, _, _ in rows
+        if session.state_code is SessionState.STOPPED
+        and session.stopped_by_user_id is None
+    }
     return {
         session.id: WorkSchema(
             state=session.state_code,
@@ -217,9 +228,23 @@ def work_status(
                 if session.state_code is SessionState.STOPPED and stopped_by is not None
                 else None
             ),
+            stopped_cause=causes.get(session.id),
         )
         for session, name, autopilot, paused, stopped_by in rows
     }
+
+
+def _stop_cause(db: Session, session_id: uuid.UUID) -> StopCause | None:
+    """The cause of the Session's stop when its environment was stopped under
+    its turn: its last record is the `server` record that ended the turn
+    naming it (design 2 §9.6); None for any other stop."""
+    last = last_record(db, session_id)
+    if last is None or last.record.kind_code != RecordKind.SERVER:
+        return None
+    payload = last.record.payload
+    if payload.get("type") != ENVIRONMENT_STOPPED:
+        return None
+    return StopCause(payload["cause"])
 
 
 def _user_schema(user: User) -> UserSchema:

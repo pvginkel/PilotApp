@@ -38,6 +38,17 @@ class HeldReason(StrEnum):
     CONTROLLER_UNREACHABLE = "controller_unreachable"
 
 
+class StopCause(StrEnum):
+    """Why a work item stopped when its environment was stopped under its
+    turn, a stop made elsewhere (design 2 §9.6; F71): it settled `stopped`,
+    it settled `deleting`, or the controller has it no longer. The `server`
+    record that ended the turn holds it."""
+
+    ENVIRONMENT_STOPPED = "environment_stopped"
+    ENVIRONMENT_DELETING = "environment_deleting"
+    ENVIRONMENT_GONE = "environment_gone"
+
+
 ItemForm = Literal["prose", "work", "wait"]
 """Item Kind's forms: which subtype an item is."""
 
@@ -283,10 +294,10 @@ class CurrentLineSchema(BaseModel):
     )
     text: str | None = Field(
         description=(
-            "The server's own words while the session comes up; null unless "
-            "`state` is `starting`"
+            "The server's own words while the session comes up, or comes back "
+            "while its environment restarts; null unless `state` is `starting`"
         ),
-        examples=["Starting Camp-1…"],
+        examples=["Starting Camp-1…", "Camp-1 is restarting…"],
     )
 
 
@@ -340,6 +351,14 @@ class WorkSchema(BaseModel):
         description=(
             "Who stopped it, by Stop, Finish or Archive; null when no one of "
             "Pilot's did, and unless `state` is `stopped` (F69.2)"
+        )
+    )
+    stopped_cause: StopCause | None = Field(
+        description=(
+            "Why it stopped when its environment was stopped under it, a stop "
+            "made elsewhere, which its stopped line and its session log's tail "
+            "say: stopped, being deleted, or gone; null when someone stopped "
+            "it, and unless `state` is `stopped` (F26.1, F69.2, F71)"
         )
     )
 

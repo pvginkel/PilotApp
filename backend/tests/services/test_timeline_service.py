@@ -34,6 +34,7 @@ from app.models.reference import (
     AttachmentSource,
     DocumentRole,
     ErrorKind,
+    RecordKind,
     SessionState,
     TransitionKind,
     VersionCause,
@@ -44,10 +45,13 @@ from app.schemas.timeline import (
     DoneCauseCode,
     HeldReason,
     ItemKindCode,
+    StopCause,
 )
 from app.services.auth_service import AuthContext
 from app.services.container import ServiceContainer
 from app.services.controller_outage import ControllerOutage
+from app.services.relay_service import ENVIRONMENT_STOPPED
+from app.services.session_record_service import SessionRecordService
 from app.services.timeline_service import Badge, work_status
 
 ADA = AuthContext(
@@ -291,6 +295,24 @@ def _turn(
     session.add(turn)
     session.flush()
     return turn
+
+
+def _stop_record(
+    container: ServiceContainer,
+    session: DbSession,
+    run: models.Session,
+    cause: StopCause,
+) -> None:
+    """The `server` record that ended the Session's turn 1, its environment
+    stopped under it for `cause`."""
+    turn = _turn(session, run, 1)
+    SessionRecordService(session, container.session_stream_service()).append(
+        run.id,
+        RecordKind.SERVER,
+        payload={"type": ENVIRONMENT_STOPPED, "cause": cause, "reason": "invented"},
+        turn_id=turn.id,
+    )
+    session.flush()
 
 
 def _wait(session: DbSession, project: Project, run: models.Session) -> Item:
@@ -1397,6 +1419,7 @@ class TestTimeline:
             "held_reason": None,
             "stopped_at": None,
             "stopped_by": None,
+            "stopped_cause": None,
         }
 
     def test_a_work_item_coming_up_has_the_servers_words_and_no_start_yet(
@@ -1645,6 +1668,82 @@ class TestWorkStatus:
         work = work_status(session, [held.id], unreachable=False)[held.id]
 
         assert (work.stopped_at, work.stopped_by) == (None, None)
+
+    @pytest.mark.parametrize("cause", list(StopCause))
+    def test_one_its_environment_stopped_names_the_cause(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        cause: StopCause,
+    ) -> None:
+        project = _make(container)
+        stopped = _work(session, project, environment, SessionState.STOPPED)
+        run = session.get_one(models.Session, stopped.id)
+        run.stopped_at = datetime(2026, 10, 24, 9, 5, tzinfo=UTC)
+        _stop_record(container, session, run, cause)
+
+        work = work_status(session, [stopped.id], unreachable=False)[stopped.id]
+
+        assert (work.stopped_cause, work.stopped_by) == (cause, None)
+
+    def test_one_a_person_stopped_first_names_no_cause(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        """Its environment then stopped under the turn its Stop let run out."""
+        project = _make(container)
+        stopped = _work(session, project, environment, SessionState.STOPPED)
+        run = session.get_one(models.Session, stopped.id)
+        run.stopped_by_user_id = person.id
+        _stop_record(container, session, run, StopCause.ENVIRONMENT_STOPPED)
+
+        work = work_status(session, [stopped.id], unreachable=False)[stopped.id]
+
+        assert work.stopped_cause is None
+
+    def test_one_interrupted_elsewhere_names_no_cause(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        """Its last record is its turn's `result`, after an earlier stop's."""
+        project = _make(container)
+        stopped = _work(session, project, environment, SessionState.STOPPED)
+        run = session.get_one(models.Session, stopped.id)
+        _stop_record(container, session, run, StopCause.ENVIRONMENT_GONE)
+        turn = _turn(session, run, 2)
+        SessionRecordService(session, container.session_stream_service()).append(
+            run.id,
+            RecordKind.RESULT,
+            payload={"turn": 1, "interrupted": True},
+            turn_id=turn.id,
+            raw_offset=120,
+            controller_session="claude-2",
+        )
+
+        work = work_status(session, [stopped.id], unreachable=False)[stopped.id]
+
+        assert work.stopped_cause is None
+
+    def test_one_no_longer_stopped_names_no_cause(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        held = _work(session, project, environment, SessionState.HELD)
+        run = session.get_one(models.Session, held.id)
+        _stop_record(container, session, run, StopCause.ENVIRONMENT_STOPPED)
+
+        work = work_status(session, [held.id], unreachable=False)[held.id]
+
+        assert work.stopped_cause is None
 
     def test_the_service_reads_one_work_item(
         self,

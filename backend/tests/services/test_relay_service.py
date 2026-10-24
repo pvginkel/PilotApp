@@ -26,14 +26,21 @@ from app.engine.bus import EngineEvent, ProjectChanged, WorkMoved
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import DocumentVersion, Environment, Item, Project, Turn, User
 from app.models.reference import RecordKind, SessionState, UserKind, VersionCause
+from app.schemas.timeline import StopCause
 from app.services.container import ServiceContainer
-from app.services.controller_client import ControllerClient, HeadlessCreateRequest
+from app.services.controller_client import (
+    ControllerClient,
+    EnvironmentStatus,
+    HeadlessCreateRequest,
+)
 from app.services.environment_service import SHUTDOWN_TIMER, EnvironmentService
 from app.services.fake_controller import FakeControllerProblem, FinishOutcome
 from app.services.relay_service import (
     CONTINUE,
+    ENVIRONMENT_STOPPED,
     PARTIALS_FORWARDED_TOTAL,
     RELAYS_RUNNING,
+    RESTARTING,
     SEND_FAILED,
     SESSION_GONE,
     RelayService,
@@ -1571,6 +1578,295 @@ class TestStoppedUnderTheTurn:
         assert work_item.state_code == SessionState.STOPPED
 
 
+class _Settling(ServedFakeController):
+    """The fake, where each read of an environment first meets the next of
+    `script` — the status it moves to, or None for the environment gone — and
+    is answered at once, wait or not."""
+
+    def __init__(self, keepalive_seconds: float) -> None:
+        super().__init__(keepalive_seconds)
+        self.script: list[EnvironmentStatus | None] = []
+
+    def _get_environment(self, request: Request, env_id: str) -> Response:
+        if self.script:
+            status = self.script.pop(0)
+            if status is None:
+                self.remove_environment(env_id)
+            else:
+                self.set_status(env_id, status)
+        environ = dict(request.environ, QUERY_STRING="")
+        return super()._get_environment(Request(environ), env_id)
+
+
+def _servers(db: DbSession, run: models.Session) -> list[tuple[int | None, Any]]:
+    """The Session's `server` records: each one's Turn and payload."""
+    return [
+        (stored.turn, stored.record.payload)
+        for stored in _records(db, run.id)
+        if stored.record.kind_code == RecordKind.SERVER
+    ]
+
+
+def _stopped_by_its_environment(
+    run: models.Session, turn: Turn, cause: StopCause, reason: str
+) -> list[tuple[int | None, Any]]:
+    """`run` stopped as a stop made elsewhere leaves it, its turn `turn` ended
+    by the server; the `server` record that ended it."""
+    assert run.state_code == SessionState.STOPPED
+    assert turn.ended_at is not None and turn.error is None
+    assert (run.stopped_at, run.stopped_by_user_id) == (turn.ended_at, None)
+    assert run.turn_ended_at == turn.ended_at
+    assert run.current_line is None
+    return [
+        (1, {"type": ENVIRONMENT_STOPPED, "cause": cause, "reason": reason}),
+    ]
+
+
+class TestEnvironmentUnderATurn:
+    """An environment that restarts, or is stopped elsewhere, under a work
+    item's turn (F71, F26.1, F69.2; design 2 §9.6; V06, V19)."""
+
+    @pytest.fixture
+    def fake_controller(self) -> Iterator[_Settling]:
+        fake = _Settling(keepalive_seconds=0.2)
+        try:
+            yield fake
+        finally:
+            fake.close()
+
+    @pytest.fixture
+    def turn(
+        self, session: DbSession, relays: RelayService, work_item: models.Session
+    ) -> Turn:
+        """The work item's turn, in flight."""
+        return _send(relays, session, work_item)
+
+    @pytest.mark.parametrize(
+        ("status", "cause"),
+        [
+            ("stopped", StopCause.ENVIRONMENT_STOPPED),
+            ("deleting", StopCause.ENVIRONMENT_DELETING),
+        ],
+    )
+    def test_an_environment_that_settles_stopped_stops_the_item(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: _Settling,
+        project: Project,
+        work_item: models.Session,
+        turn: Turn,
+        engine_events: list[EngineEvent],
+        status: EnvironmentStatus,
+        cause: StopCause,
+    ) -> None:
+        fake_controller.set_status(ENV, status)
+        engine_events.clear()
+
+        _relay(relays, work_item)
+
+        reason = f"environment {ENV} is {status}"
+        assert _servers(session, work_item) == _stopped_by_its_environment(
+            work_item, turn, cause, reason
+        )
+        assert [
+            stored.record.kind_code
+            for stored in _records(session, work_item.id)
+            if stored.record.kind_code == RecordKind.RESULT
+        ] == []
+        # It waits on you, open, as a Stop leaves it.
+        assert _item_done(session, work_item) == (None, None, None)
+        work = container.timeline_service().work(work_item.id)
+        assert (work.state, work.stopped_cause, work.stopped_by) == (
+            SessionState.STOPPED,
+            cause,
+            None,
+        )
+        assert work.stopped_at == turn.ended_at
+        assert _row(session).stop_due_at is not None
+        assert _moves(engine_events) == [
+            WorkMoved(project.id, work_item.id),
+            ProjectChanged(project.id),
+        ]
+
+    def test_an_environment_the_resume_does_not_find_is_gone_and_stops_the_item(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: _Settling,
+        controller_session: str,
+        work_item: models.Session,
+        turn: Turn,
+    ) -> None:
+        fake_controller.remove_environment(ENV)
+
+        _relay(relays, work_item)
+
+        [(at, payload)] = _servers(session, work_item)
+        reason = payload["reason"]
+        assert f"404 not-found: no environment {ENV}" in reason
+        assert [(at, payload)] == _stopped_by_its_environment(
+            work_item, turn, StopCause.ENVIRONMENT_GONE, reason
+        )
+        # Nothing of the resume is written: no `session-gone`, no next Turn.
+        assert work_item.controller_session == controller_session
+        assert work_item.turns == 1
+
+    def test_an_environment_gone_while_waited_for_stops_the_item(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: _Settling,
+        work_item: models.Session,
+        turn: Turn,
+    ) -> None:
+        fake_controller.set_status(ENV, "stopping")
+        fake_controller.script = [None]
+
+        _relay(relays, work_item)
+
+        [(at, payload)] = _servers(session, work_item)
+        reason = payload["reason"]
+        assert "404 not-found" in reason
+        assert [(at, payload)] == _stopped_by_its_environment(
+            work_item, turn, StopCause.ENVIRONMENT_GONE, reason
+        )
+
+    def test_a_restart_says_so_on_the_items_line_once(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: _Settling,
+        project: Project,
+        work_item: models.Session,
+        turn: Turn,
+        engine_events: list[EngineEvent],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        fake_controller.set_status(ENV, "starting")
+        fake_controller.script = ["provisioning", "starting", "stopped"]
+        lines: list[Any] = []
+        stopped_elsewhere = relays._stopped_elsewhere
+
+        def seen_first(*args: Any) -> None:
+            lines.append(work_item.current_line)
+            stopped_elsewhere(*args)
+
+        monkeypatch.setattr(relays, "_stopped_elsewhere", seen_first)
+        engine_events.clear()
+
+        _relay(relays, work_item)
+
+        text = "Env-A is restarting…"
+        [line] = lines
+        assert (line["state"], line["text"]) == ("starting", text)
+        [restarting, _stop] = _servers(session, work_item)
+        assert restarting == (1, {"type": RESTARTING, "text": text})
+        moved = WorkMoved(project.id, work_item.id)
+        assert _moves(engine_events) == [moved, moved, ProjectChanged(project.id)]
+
+    def test_a_stopping_environment_is_no_restart(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: _Settling,
+        work_item: models.Session,
+        turn: Turn,
+    ) -> None:
+        fake_controller.set_status(ENV, "stopping")
+        fake_controller.script = ["stopping", "stopped"]
+
+        _relay(relays, work_item)
+
+        assert [payload["type"] for _, payload in _servers(session, work_item)] == [
+            ENVIRONMENT_STOPPED
+        ]
+
+    def test_a_session_stopped_already_keeps_its_stop_and_its_turn_ends(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: _Settling,
+        project: Project,
+        work_item: models.Session,
+        turn: Turn,
+        person: User,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        at = _stopped(work_item, person)
+        fake_controller.set_status(ENV, "stopped")
+        engine_events.clear()
+
+        _relay(relays, work_item)
+
+        assert turn.ended_at is not None
+        assert work_item.state_code == SessionState.STOPPED
+        assert (work_item.stopped_at, work_item.stopped_by_user_id) == (at, person.id)
+        assert _servers(session, work_item) == [
+            (
+                1,
+                {
+                    "type": ENVIRONMENT_STOPPED,
+                    "cause": StopCause.ENVIRONMENT_STOPPED,
+                    "reason": f"environment {ENV} is stopped",
+                },
+            )
+        ]
+        # Its stop is the person's: its line names no other cause.
+        assert container.timeline_service().work(work_item.id).stopped_cause is None
+        assert ProjectChanged(project.id) not in engine_events
+
+    def test_the_stop_lets_go_of_the_documents_it_was_writing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        fake_controller: _Settling,
+        project: Project,
+        work_item: models.Session,
+    ) -> None:
+        documents = container.document_service()
+        draft = documents.bear_draft(project, "# Badges\n")
+        container.ingest_service().ingest(
+            f"draft-{project.number}/project.md",
+            b"# Badge colours\n",
+            None,
+            _row(session),
+            work_item,
+        )
+        _send(relays, session, work_item)
+        fake_controller.set_status(ENV, "stopped")
+
+        _relay(relays, work_item)
+
+        assert draft.writing_session_id is None
+        versions = session.scalars(
+            select(DocumentVersion.cause_code)
+            .where(DocumentVersion.document_id == draft.id)
+            .order_by(DocumentVersion.number)
+        ).all()
+        assert versions == [VersionCause.BORN, VersionCause.TURN]
+
+    def test_an_environment_in_error_is_polled_again(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: _Settling,
+        work_item: models.Session,
+        turn: Turn,
+    ) -> None:
+        fake_controller.set_status(ENV, "error")
+
+        with pytest.raises(ExternalServiceException, match="settled error"):
+            _relay(relays, work_item)
+
+        assert turn.ended_at is None
+        assert work_item.state_code == SessionState.RUNNING
+        assert _servers(session, work_item) == []
+
+
 class TestInterrupt:
     """The interrupt of a Session stopped under its turn (F67.1, F141.3)."""
 
@@ -2219,8 +2515,13 @@ class TestEnvironmentRestartUnderARun:
         controller session to its result."""
         records = _committed_records(container, run_id)
         first_turn = [s.record.seq for s in records if s.turn == 1]
-        [gone] = [s for s in records if s.record.kind_code == RecordKind.SERVER]
-        assert gone.turn is None and gone.record.payload["type"] == SESSION_GONE
+        [gone] = [
+            s
+            for s in records
+            if s.record.kind_code == RecordKind.SERVER
+            and s.record.payload["type"] == SESSION_GONE
+        ]
+        assert gone.turn is None
         assert "404 not-found" in gone.record.payload["reason"]
         assert max(first_turn) < gone.record.seq
         assert all(s.turn == 2 for s in records if s.record.seq > gone.record.seq)
@@ -2262,6 +2563,11 @@ class TestEnvironmentRestartUnderARun:
         relay_log.wait_for(
             rf"Environment {ENV} is not running: waiting for it to settle"
         )
+        wait_until(
+            lambda: _line_text(container, run_id) == "Env-A is restarting…",
+            "the line says it restarts",
+        )
+        assert _read(container, run_id).state_code == SessionState.RUNNING
         fake_controller.set_status(ENV, "running")
         relay_log.wait_for(
             rf"Session {run_id} lost controller session {name}; resumed as "
@@ -2271,6 +2577,9 @@ class TestEnvironmentRestartUnderARun:
             lambda: fake_controller.session(ENV, "claude-2").status == "busy",
             "the continue sent",
         )
+        # The resume moved the line on, before its Turn was sent.
+        line = _read(container, run_id).current_line
+        assert line is not None and line["state"] == "thinking"
         assert (
             fake_controller.session(ENV, "claude-2").session_id
             == json.loads(lines[0])["session_id"]
@@ -2279,6 +2588,12 @@ class TestEnvironmentRestartUnderARun:
         _idle(container, run_id)
 
         self._assert_resumed(container, run_id, lines, offsets, second)
+        assert [
+            (s.turn, s.record.payload)
+            for s in _committed_records(container, run_id)
+            if s.record.kind_code == RecordKind.SERVER
+            and s.record.payload["type"] == RESTARTING
+        ] == [(1, {"type": RESTARTING, "text": "Env-A is restarting…"})]
         path = f"GET /environments/{ENV}/sessions/headless/claude-2/response"
         assert [c for c in fake_controller.calls if c.startswith(path)][0] == (
             f"{path}?format=raw&offset=0"
@@ -2307,6 +2622,76 @@ class TestEnvironmentRestartUnderARun:
 
         self._assert_resumed(container, run_id, lines, offsets, second)
         assert not relay_log.matching(r"Environment .* waiting for it to settle")
+
+    def test_a_restart_before_the_first_line_resumes_with_the_ended_turns_message(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        supervise: Supervise,
+        relay_log: LogWaiter,
+    ) -> None:
+        container = committed_app.container
+        relays, coordinator = _relay_service(container, supervise)
+        name = _headless(fake_controller, committed_controller_client)
+        run_id, person_id = _committed_session(container, name)
+        coordinator.fire_startup()
+        _send_committed(container, relays, run_id, person_id)
+
+        fake_controller.restart(ENV)
+
+        relay_log.wait_for(
+            rf"Environment {ENV} is not running: waiting for it to settle"
+        )
+        # No line was recorded: there is no conversation to carry on.
+        assert _read(container, run_id).conversation_id is None
+        fake_controller.set_status(ENV, "running")
+        relay_log.wait_for(rf"Session {run_id} lost controller session {name}; .*")
+        wait_until(
+            lambda: fake_controller.session(ENV, "claude-2").status == "busy",
+            "the brief sent again",
+        )
+        _turn_of(fake_controller, "claude-2", raw_turn("turn_text"))
+        _idle(container, run_id)
+        brief, again = _committed_turns(container, run_id)
+        assert (again.message, again.author_user_id) == (brief.message, None)
+        assert brief.message == "Rename the badge"
+
+    def test_an_environment_stopped_under_a_run_stops_it(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        relaying: tuple[str, uuid.UUID, list[str], list[int]],
+        relay_log: LogWaiter,
+    ) -> None:
+        container = committed_app.container
+        name, run_id, lines, offsets = relaying
+
+        committed_controller_client.stop_environment(ENV)
+
+        wait_until(
+            lambda: _read(container, run_id).state_code == SessionState.STOPPED,
+            "the session stopped",
+        )
+        run = _read(container, run_id)
+        assert (run.stopped_by_user_id, run.current_line) == (None, None)
+        assert run.controller_session == name
+        last = _committed_records(container, run_id)[-1]
+        assert (last.turn, last.record.payload["cause"]) == (
+            1,
+            StopCause.ENVIRONMENT_STOPPED,
+        )
+        [turn] = _committed_turns(container, run_id)
+        assert turn.ended_at == run.stopped_at
+        assert _claude_committed(container, run_id) == _recorded(lines[:11], offsets)
+        assert fake_controller.sessions(ENV) == []
+        assert relay_log.matching(rf"Session {run_id} stopped under its turn: .*")
+
+
+def _line_text(container: ServiceContainer, run_id: uuid.UUID) -> str | None:
+    line = _read(container, run_id).current_line
+    return None if line is None else line.get("text")
 
 
 class TestTwoProcesses:
@@ -2370,9 +2755,11 @@ class TestTwoProcesses:
 
         assert len(log.matching(r"Session .* lost controller session .*")) == 1
         assert [s.name for s in fake_controller.sessions(ENV)] == ["claude-2"]
+        # No line was recorded, so the Session has no conversation: the resume
+        # sends the ended Turn's message again.
         assert [turn.message for turn in _committed_turns(container, run_id)] == [
             "Rename the badge",
-            CONTINUE,
+            "Rename the badge",
         ]
         assert _sends(fake_controller, "claude-2") >= 1
         servers = [
