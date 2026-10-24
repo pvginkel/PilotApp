@@ -1527,8 +1527,10 @@ class TestStoppedUnderTheTurn:
         assert work_item.turn_ended_at == turn.ended_at
         assert work_item.state_code == SessionState.STOPPED
         assert (work_item.stopped_at, work_item.stopped_by_user_id) == (at, person.id)
-        # Its lines move no line: a stopped item shows its stop.
+        # Its lines move no line: a stopped item shows its stop, and the
+        # turn's end alone moves it.
         assert work_item.current_line is None
+        assert _moves(engine_events) == [WorkMoved(project.id, work_item.id)]
         assert _item_done(session, work_item) == (None, None, None)
         assert ProjectChanged(project.id) not in engine_events
 
