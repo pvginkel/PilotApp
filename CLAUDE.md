@@ -35,7 +35,8 @@ commands need `cexec modern-app`, and `go` ones `cexec go`. The root and `backen
 projects, each with its own `uv.lock`, and both locks are committed, because CI and the image sync
 `--locked`. `scripts/dev.py` starts the dev stack and `scripts/dev.py stop` stops it from another
 shell. After a backend API change, `scripts/regenerate-openapi.py --frontend` refreshes the
-frontend's OpenAPI cache and client; a backend test fails while the committed cache is stale.
+OpenAPI cache, the backend's file in `backend/openapi-cache/` that the frontend reads through the
+symlink `frontend/openapi-cache`, and the client; a backend test fails while the committed cache is stale.
 `cexec modern-app python3 scripts/check_updates.py` reports the dependencies with a newer release,
 major, minor and patch, in every component it finds.
 
@@ -75,7 +76,9 @@ stand today: the `Jenkinsfile`, the app's own as a whole, which tags its images 
 `dev-latest` and pins `dev-<n>` into PilotDeploy's `config/dev` and `prd-<n>` into its `config/prd`
 in one commit, where the template's tags `<n>` and `latest` and pins production alone, and which
 carries the sidecar's `golang` container and its `Test sidecar` and `Build pilot-sync image` stages,
-which the template, rendering no `sidecar/`, has no place for (D008); the page head of
+which the template, rendering no `sidecar/`, has no place for (D008), and which copies the
+backend's OpenAPI cache into the `pilot-ui` build context, where `frontend/openapi-cache` is a
+symlink to `backend/openapi-cache`; the page head of
 `frontend/index.html`, which links the PWA's `/manifest.json` and sets `theme-color`, which no
 app-owned file can; the cache rule of `frontend/nginx.conf`, which keeps the year-long immutable
 cache to the build's hashed `/assets/` and has the root's files — the icons, the logo, the manifest,

@@ -107,6 +107,13 @@ pipeline {
                 // The frontend shows the commit it was built from, and its build context holds no
                 // .git to read it from.
                 sh 'git rev-parse HEAD > frontend/git-rev'
+                // frontend/openapi-cache links to ../backend/openapi-cache, outside the build
+                // context, where the link would dangle in the image.
+                sh '''
+                    test -f backend/openapi-cache/openapi.json
+                    rm frontend/openapi-cache
+                    cp -r backend/openapi-cache frontend/openapi-cache
+                '''
                 container('kaniko') {
                     script {
                         helmCharts.kaniko2(
