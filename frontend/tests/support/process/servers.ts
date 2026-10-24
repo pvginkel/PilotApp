@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import getPort from 'get-port';
 import type { Readable } from 'node:stream';
 import split2 from 'split2';
+import { loadAppBackendEnv } from '../backend-env-extensions';
 
 const BACKEND_READY_PATH = '/health/readyz';
 const FRONTEND_READY_PATH = '/';
@@ -71,6 +72,7 @@ export async function startBackend(
       ...(options.frontendVersionUrl
         ? { FRONTEND_VERSION_URL: options.frontendVersionUrl }
         : {}),
+      ...loadAppBackendEnv(`http://${HOSTNAME}:${port}`),
     },
   });
 }

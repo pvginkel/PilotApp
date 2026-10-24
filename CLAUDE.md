@@ -65,11 +65,12 @@ template-owned file to add app behaviour; use the extension points instead:
 | Test fixtures | `backend/tests/conftest.py`, `frontend/tests/support/fixtures.ts` |
 | Sidecars CI must wait for | `backend/scripts/wait-for-services.py` (the suite runner calls it) |
 | Vite plugins | `loadAppPlugins()` in `frontend/vite-plugin-extensions.ts` |
+| Settings of the Playwright backends | `loadAppBackendEnv()` in `frontend/tests/support/backend-env-extensions.ts` |
 
 Template-owned code is improved in this repo, not in the template repos (D018): what the template
 gets wrong, or does less well than the work needs, is changed here, with no need to stay backwards
 compatible, in a commit of its own, and listed here as a standing edit, so that a `copier update`
-that conflicts on it resolves to this repo's side; an agent merges it into ModernAppTemplate. Six
+that conflicts on it resolves to this repo's side; an agent merges it into ModernAppTemplate. Seven
 stand today: the `Jenkinsfile`, the app's own as a whole, which tags its images `dev-<n>` and
 `dev-latest` and pins `dev-<n>` into PilotDeploy's `config/dev` and `prd-<n>` into its `config/prd`
 in one commit, where the template's tags `<n>` and `latest` and pins production alone, and which
@@ -87,10 +88,14 @@ one per server: `frontend/tests/support/process/servers.ts` gives each its own `
 `node_modules/.tmp/vite-playwright/<port>`, removed when it stops, and `frontend/vite.config.ts`
 reads it as `cacheDir`, where the template's `scripts/testing-server.sh` set a variable nothing
 read, so that its servers shared `node_modules/.vite` and swapped its `deps/` under each other's
-first pages on a cold start (`tests/infrastructure/dev-server.spec.ts` pins it); and the app's Vite
+first pages on a cold start (`tests/infrastructure/dev-server.spec.ts` pins it); the app's Vite
 plugins, which `frontend/vite.config.ts` appends from `loadAppPlugins()` in the app-owned
 `frontend/vite-plugin-extensions.ts`, as it merges the proxies of `vite-proxy-extensions.ts`, where
-the template gives an app no place for a plugin. uv, the migration that keeps the app's loggers, the
+the template gives an app no place for a plugin; and the Playwright backends' own settings, which
+`frontend/tests/support/process/servers.ts` merges over the template's from `loadAppBackendEnv()`
+in the app-owned `frontend/tests/support/backend-env-extensions.ts`, given the backend's URL, where
+the template gives an app no place for a backend setting under Playwright: this app's points each
+backend's controller at the fake it serves itself. uv, the migration that keeps the app's loggers, the
 masked database URL in `backend/app/cli.py` and the declarative `Jenkinsfile` on the library's
 `modernApp.test` are the template's own since root v0.2.0 and backend v0.14.0, and
 `backend/scripts/init-dev-database.py` (production's locale) since backend v0.15.0.

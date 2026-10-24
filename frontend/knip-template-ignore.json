@@ -56,6 +56,7 @@
   "playwright.config.ts",
 
   "tests/infrastructure/**",
+  "tests/support/backend-env-extensions.ts",
   "tests/support/backend-url.ts",
   "tests/support/fixtures-infrastructure.ts",
   "tests/support/fixtures.ts",
