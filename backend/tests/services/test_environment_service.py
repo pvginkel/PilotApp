@@ -27,6 +27,7 @@ from app.database import scoped_session
 from app.models import Environment, Project, User
 from app.models import Session as AgentSession
 from app.models.reference import SessionState, UserKind
+from app.services import environment_service
 from app.services.container import ServiceContainer
 from app.services.controller_client import (
     ControllerClient,
@@ -668,6 +669,32 @@ class TestTake:
                 assert db.get_one(AgentSession, run.id).environment_id == ENV
         finally:
             first.close()
+
+    def test_a_take_committed_between_the_read_and_the_lock_is_seen(
+        self,
+        committed_app: Flask,
+        supervise: Supervise,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # The later start read its candidates before the earlier's take
+        # committed, and locks the row once it has: unlocked by then.
+        container = committed_app.container
+        service = _service(container, supervise)
+        with scoped_session(container) as db:
+            _own(db)
+            project_id = _project(db).id
+        earlier: list[uuid.UUID] = []
+        _before_the_next_lock(
+            monkeypatch,
+            lambda: earlier.append(_take_and_start(container, service, project_id)),
+        )
+
+        with scoped_session(container) as db:
+            assert _taken(service, db) is None
+
+        assert len(earlier) == 1
+        with scoped_session(container) as db:
+            assert db.get_one(AgentSession, earlier[0]).environment_id == ENV
 
 
 class TestName:
@@ -1825,6 +1852,66 @@ class TestDeleteTimer:
 
         assert taken == [None]
         assert _committed(container, "delete_due_at") is not None
+
+    def test_a_take_committed_between_the_ticks_read_and_its_lock_keeps_its_name(
+        self,
+        committed_app: Flask,
+        supervise: Supervise,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # The tick read the environment free with no deadline; a start took it
+        # before the tick locked its row.
+        container = committed_app.container
+        fake = ServedFakeController(keepalive_seconds=0.2)
+        try:
+            client_of(container, fake)
+            service = _service(container, supervise)
+            fake.add_environment(ENV, name="camp")
+            with scoped_session(container) as db:
+                _own(db).name = "camp"
+                project_id = _project(db).id
+            earlier: list[uuid.UUID] = []
+            _before_the_next_lock(
+                monkeypatch,
+                lambda: earlier.append(_take_and_start(container, service, project_id)),
+            )
+            _delete_tick(container, service)
+        finally:
+            fake.close()
+
+        assert len(earlier) == 1
+        assert fake.calls == []
+        assert fake.environment(ENV).name == "camp"
+        assert _committed(container, "name") == "camp"
+        assert _committed(container, "delete_due_at") is None
+
+
+def _before_the_next_lock(
+    monkeypatch: pytest.MonkeyPatch, run: Callable[[], None]
+) -> None:
+    """Run `run` once, in a transaction of its own, just before the next
+    Environment row lock that skips a locked row: after that transaction read
+    the row it is about to lock."""
+    try_lock = environment_service._try_lock
+    pending = [run]
+
+    def hooked(db: Session, env_id: str) -> Environment | None:
+        if pending:
+            pending.pop()()
+        return try_lock(db, env_id)
+
+    monkeypatch.setattr(environment_service, "_try_lock", hooked)
+
+
+def _take_and_start(
+    container: ServiceContainer, service: EnvironmentService, project_id: uuid.UUID
+) -> uuid.UUID:
+    """A start's take of ENV, its Session `starting` there, committed."""
+    with scoped_session(container) as db:
+        assert _taken(service, db) == ENV
+        return _agent_session(
+            db, db.get_one(Project, project_id), SessionState.STARTING
+        ).id
 
 
 class _Outcome:
