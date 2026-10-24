@@ -164,7 +164,8 @@ def work_status(
     Session `error?`). A held one's reason is the gate's as it reads now. A
     stopped one's stop is when and by whom, a Resume keeping both on the
     Session (DB Session `stopped_at?`, `stopped_by?`); one no one stopped has
-    the cause its environment's stop under it left as its last record."""
+    the cause its environment's stop under it left as its last record. One
+    whose start has no environment yet has none (DB 107)."""
     stopper = aliased(User)
     rows = db.execute(
         select(
@@ -176,7 +177,7 @@ def work_status(
             stopper,
         )
         .join(Work, Work.id == AgentSession.id)
-        .join(Environment, Environment.id == AgentSession.environment_id)
+        .outerjoin(Environment, Environment.id == AgentSession.environment_id)
         .join(Project, Project.id == AgentSession.project_id)
         .outerjoin(stopper, stopper.id == AgentSession.stopped_by_user_id)
         .where(AgentSession.id.in_(list(item_ids)))
@@ -208,7 +209,9 @@ def work_status(
         session.id: WorkSchema(
             state=session.state_code,
             current_line=_current_line(session.current_line),
-            environment=EnvironmentNameSchema(id=env_id, name=name),
+            environment=(
+                None if env_id is None else EnvironmentNameSchema(id=env_id, name=name)
+            ),
             started_at=session.started_at,
             error=(
                 turn_errors.get(session.id) or session.error

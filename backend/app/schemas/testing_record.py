@@ -159,13 +159,13 @@ class InventedItemSchema(BaseModel):
 
 
 class InventedWorkCreateSchema(BaseModel):
-    """A work item placed in an environment of the stage's own controller and
-    started, as Pilot starts one."""
+    """A work item placed by repository and started, as Pilot starts one, in
+    an environment of Pilot's own the stage's controller creates from it."""
 
-    environment_id: str = Field(
+    repo: str = Field(
         min_length=1,
-        description="The controller's id of the environment it runs in",
-        examples=["example-env-1"],
+        description="The repository it is placed by, `owner/Name`",
+        examples=["example/Example"],
     )
     title: str = Field(
         min_length=1,

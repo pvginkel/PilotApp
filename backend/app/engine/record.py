@@ -290,12 +290,15 @@ class RecordService:
         session: AgentSession,
         title: str,
         plan_task_id: str | None = None,
+        *,
+        repo: str | None = None,
     ) -> Work:
         """A work item of `session`, one identity with it (DB Work, decision
         3): its Item of kind `work` at the project's next place on the
         timeline, on the plan's task `plan_task_id` when given, created by its
         own Session, and its Work under the switch's setting as it stands
-        (F54.7).
+        (F54.7), placed by the repository `repo` its environment is made from
+        (F61.1), none for a job.
 
         Raises:
             RecordNotFoundException: the project's plan has no task
@@ -319,6 +322,7 @@ class RecordService:
             id=session.id,
             project_id=project.id,
             session_kind_code=session.kind_code,
+            repo=repo,
             autopilot=project.autopilot,
         )
         self.db.add(work)

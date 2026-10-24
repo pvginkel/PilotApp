@@ -2,7 +2,8 @@
 UI cannot make (TEST-6), on every stage but prd, behind the API's sign-in
 (D027): among them the handbook an open project is born with, an agent's
 saves of the project's draft and handbook, Pilot's Done, and a work item
-started in an environment of the stage's own controller."""
+placed by repository, started in an environment of Pilot's own the stage's
+own controller creates."""
 
 import base64
 import uuid
@@ -34,9 +35,12 @@ from app.models.reference import ProjectState, SessionState, VersionCause
 from app.schemas.testing_record import OPENING_WORDS
 from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerClient
+from app.services.controller_outage import ControllerOutage
 from app.services.environment_service import EnvironmentService
+from app.services.fake_controller import CLIENT_NAME
 from app.services.relay_service import RelayService
 from app.services.session_start_service import SessionStartService
+from app.services.supervisor import LoopHandle
 from app.utils.after_commit import clear_after_commit_callbacks
 from tests.support.fake_controller import ServedFakeController
 from tests.support.supervisor import Supervise
@@ -82,10 +86,10 @@ def _work_path(project_id: uuid.UUID | str) -> str:
     return f"{PROJECTS}/{project_id}/work"
 
 
-WORK_ENV = "env-a"
+WORK_REPO = "example/Camp"
 
 WORK = {
-    "environment_id": WORK_ENV,
+    "repo": WORK_REPO,
     "title": "Building the camp",
     "brief": "Build the camp.",
     "cwd": "/work/Camp",
@@ -1185,9 +1189,8 @@ class TestCreateWork:
         fake_controller: ServedFakeController,
         supervise: Supervise,
     ) -> Iterator[None]:
-        """The route on the fake, which has the environment `WORK_ENV`,
-        stopped."""
-        fake_controller.add_environment(WORK_ENV, name="Env-A")
+        """The route on the fake, which has no environment: the start creates
+        its own."""
         container.session_start_service.override(
             providers.Object(_starts(container, supervise, controller_configured=True))
         )
@@ -1200,8 +1203,12 @@ class TestCreateWork:
     def _work_items(session: Session) -> list[Item]:
         return list(session.scalars(select(Item).where(Item.kind_code == "work")))
 
-    def test_it_places_a_work_item_and_starts_it(
-        self, client: FlaskClient, served: None, session: Session
+    def test_it_places_a_work_item_by_repository_and_starts_it(
+        self,
+        client: FlaskClient,
+        served: None,
+        session: Session,
+        fake_controller: ServedFakeController,
     ) -> None:
         project_id = _make(client, name="Camp", tasks=TASKS)
 
@@ -1221,38 +1228,71 @@ class TestCreateWork:
             },
         ), item
         run = session.get_one(models.Session, uuid.UUID(work_id))
+        # Its environment is the start's to provide, once the request commits.
         assert (run.state_code, run.environment_id, run.kind_code, run.cwd) == (
             SessionState.STARTING,
-            WORK_ENV,
+            None,
             "work",
             "/work/Camp",
         )
         work = session.get_one(Work, run.id)
-        assert work.autopilot is False
+        assert (work.repo, work.autopilot) == (WORK_REPO, False)
+        assert item["work"]["environment"] is None
+        assert fake_controller.calls == []
 
-    @pytest.mark.parametrize("answer", ["none", "ingress"])
+    def test_its_start_creates_an_environment_of_the_repository(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        served: None,
+        session: Session,
+        fake_controller: ServedFakeController,
+    ) -> None:
+        project_id = _make(client, name="Camp")
+        response = client.post(_work_path(project_id), json=WORK)
+        assert response.status_code == 201, response.get_json()
+        work_id = uuid.UUID(response.get_json()["id"])
+        clear_after_commit_callbacks()
+
+        container.session_start_service().run(work_id, LoopHandle(f"start:{work_id}"))
+
+        run = session.get_one(models.Session, work_id, populate_existing=True)
+        assert run.state_code == SessionState.RUNNING
+        assert run.environment_id is not None
+        created = fake_controller.environment(run.environment_id)
+        slug = session.get_one(Project, uuid.UUID(project_id)).slug
+        assert (created.repo, created.managed_by, created.name) == (
+            WORK_REPO,
+            CLIENT_NAME,
+            slug,
+        )
+        work = _timeline_item(client, project_id, str(work_id))["work"]
+        assert work["environment"] == {"id": run.environment_id, "name": slug}
+
     def test_with_the_controller_unreachable_it_places_the_work_item_held(
         self,
         client: FlaskClient,
         served: None,
         session: Session,
+        controller_outage: ControllerOutage,
         fake_controller: ServedFakeController,
-        answer: str,
     ) -> None:
         project_id = _make(client)
-        fake_controller.outage(answer=answer)
+        controller_outage.call_unanswered()
 
         response = client.post(_work_path(project_id), json=WORK)
 
         assert response.status_code == 201, response.get_json()
         work_id = response.get_json()["id"]
         run = session.get_one(models.Session, uuid.UUID(work_id))
-        assert run.state_code == SessionState.HELD
+        assert (run.state_code, run.environment_id) == (SessionState.HELD, None)
         work = _timeline_item(client, project_id, work_id)["work"]
-        assert (work["state"], work["held_reason"]) == (
+        assert (work["state"], work["held_reason"], work["environment"]) == (
             "held",
             "controller_unreachable",
+            None,
         )
+        assert fake_controller.calls == []
 
     def test_in_a_paused_project_it_places_the_work_item_held(
         self, client: FlaskClient, served: None, session: Session
@@ -1280,8 +1320,8 @@ class TestCreateWork:
 
     @pytest.mark.parametrize(
         "changes",
-        [{"title": ""}, {"brief": ""}, {"cwd": ""}, {"environment_id": ""}],
-        ids=["no-title", "no-brief", "no-cwd", "no-environment"],
+        [{"title": ""}, {"brief": ""}, {"cwd": ""}, {"repo": ""}],
+        ids=["no-title", "no-brief", "no-cwd", "no-repository"],
     )
     def test_a_body_out_of_the_record_is_invalid(
         self,
@@ -1319,16 +1359,37 @@ class TestCreateWork:
         assert self._work_items(session) == []
         assert session.scalars(select(models.Session)).all() == []
 
-    def test_an_environment_the_controller_lacks_is_502(
+    def test_an_environment_id_is_no_placement(
         self, client: FlaskClient, served: None, session: Session
     ) -> None:
         project_id = _make(client)
+        body = {key: value for key, value in WORK.items() if key != "repo"}
 
         response = client.post(
-            _work_path(project_id), json={**WORK, "environment_id": "env-missing"}
+            _work_path(project_id), json={**body, "environment_id": "example-env-1"}
         )
 
-        assert response.status_code == 502
+        assert response.status_code == 400
+        assert self._work_items(session) == []
+
+    @pytest.mark.parametrize(
+        ("standing", "refusal"),
+        [({"state": "finished"}, "finished"), ({"archived": True}, "archived")],
+    )
+    def test_a_finished_or_archived_project_is_409(
+        self,
+        client: FlaskClient,
+        served: None,
+        session: Session,
+        standing: dict[str, Any],
+        refusal: str,
+    ) -> None:
+        project_id = _make(client, **standing)
+
+        response = client.post(_work_path(project_id), json=WORK)
+
+        assert response.status_code == 409
+        assert f"its project is {refusal}" in response.get_json()["error"]
         assert self._work_items(session) == []
 
     def test_no_controller_configured_is_409(

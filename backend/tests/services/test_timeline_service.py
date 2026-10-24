@@ -229,13 +229,14 @@ def _make(container: ServiceContainer, **spec: Any) -> Project:
 def _run(
     session: DbSession,
     project: Project,
-    environment: Environment,
+    environment: Environment | None,
     state: SessionState = SessionState.IDLE,
 ) -> models.Session:
-    """A work session of `project`."""
+    """A work session of `project`, in `environment` or, while its start has
+    provided none, in no environment."""
     run = models.Session(
         project_id=project.id,
-        environment_id=environment.id,
+        environment_id=None if environment is None else environment.id,
         kind_code="work",
         cwd="/work/Camp",
         token_hash=uuid.uuid4().hex * 2,
@@ -249,7 +250,7 @@ def _run(
 def _work(
     session: DbSession,
     project: Project,
-    environment: Environment,
+    environment: Environment | None,
     state: SessionState,
     *,
     autopilot: bool = False,
@@ -1597,6 +1598,47 @@ class TestWorkStatus:
 
     def test_no_ids_read_nothing(self, session: DbSession) -> None:
         assert work_status(session, [], unreachable=False) == {}
+
+    @pytest.mark.parametrize(
+        "state", [SessionState.HELD, SessionState.STOPPED, SessionState.FAILED]
+    )
+    def test_one_whose_start_provided_no_environment_yet_has_none(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        state: SessionState,
+    ) -> None:
+        """Held before its take, stopped there, or failed on a refused create
+        (DB 107)."""
+        project = _make(container)
+        placed = _work(session, project, None, state)
+        running = _work(session, project, environment, SessionState.RUNNING)
+
+        found = work_status(session, [placed.id, running.id], unreachable=False)
+
+        assert found[placed.id].state == state
+        assert found[placed.id].environment is None
+        assert found[running.id].environment is not None
+
+    def test_the_env_chip_names_the_environment_as_its_row_stands(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        idle = _work(session, project, environment, SessionState.IDLE)
+        environment.name = environment.id
+        session.flush()
+
+        found = work_status(session, [idle.id], unreachable=False)[idle.id]
+
+        assert found.environment is not None
+        assert (found.environment.id, found.environment.name) == (
+            environment.id,
+            environment.id,
+        )
 
     @pytest.mark.parametrize(
         ("paused", "unreachable", "reason"),

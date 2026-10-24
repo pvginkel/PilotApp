@@ -882,7 +882,7 @@
         "type": "object"
       },
       "InventedWorkCreateSchema.6d6b324": {
-        "description": "A work item placed in an environment of the stage's own controller and\nstarted, as Pilot starts one.",
+        "description": "A work item placed by repository and started, as Pilot starts one, in\nan environment of Pilot's own the stage's controller creates from it.",
         "properties": {
           "brief": {
             "description": "Its first turn's message",
@@ -902,13 +902,13 @@
             "title": "Cwd",
             "type": "string"
           },
-          "environment_id": {
-            "description": "The controller's id of the environment it runs in",
+          "repo": {
+            "description": "The repository it is placed by, `owner/Name`",
             "examples": [
-              "example-env-1"
+              "example/Example"
             ],
             "minLength": 1,
-            "title": "Environment Id",
+            "title": "Repo",
             "type": "string"
           },
           "step": {
@@ -938,7 +938,7 @@
           }
         },
         "required": [
-          "environment_id",
+          "repo",
           "title",
           "brief",
           "cwd"
@@ -2080,8 +2080,15 @@
             "description": "Its one current line; null while no turn is in flight"
           },
           "environment": {
-            "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.EnvironmentNameSchema",
-            "description": "The environment it runs in: its env chip and the chip's link"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.EnvironmentNameSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The environment it runs in, as its row stands: its env chip and the chip's link; null until its start provides one"
           },
           "error": {
             "anyOf": [
@@ -4516,120 +4523,6 @@
         "title": "TestSessionResponseSchema",
         "type": "object"
       },
-      "TestingSessionStartSchema.e784b23": {
-        "description": "A work Session to start for a project, in an environment of the\nconfigured controller.",
-        "properties": {
-          "agent": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "description": "The agent name to create with",
-            "title": "Agent"
-          },
-          "brief": {
-            "description": "The first Turn's message",
-            "examples": [
-              "Rename the badge."
-            ],
-            "minLength": 1,
-            "title": "Brief",
-            "type": "string"
-          },
-          "cwd": {
-            "description": "The headless session's working directory",
-            "examples": [
-              "/work/Example"
-            ],
-            "minLength": 1,
-            "title": "Cwd",
-            "type": "string"
-          },
-          "environment_id": {
-            "description": "The controller's id of the environment it runs in",
-            "examples": [
-              "example-env-1"
-            ],
-            "minLength": 1,
-            "title": "Environment Id",
-            "type": "string"
-          },
-          "model": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "description": "The model to create with",
-            "title": "Model"
-          },
-          "project_id": {
-            "description": "The Project the Session works",
-            "format": "uuid",
-            "title": "Project Id",
-            "type": "string"
-          },
-          "reasoning_effort": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "description": "The reasoning effort to create with",
-            "title": "Reasoning Effort"
-          },
-          "resume": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "description": "A Claude conversation id to resume",
-            "title": "Resume"
-          }
-        },
-        "required": [
-          "project_id",
-          "environment_id",
-          "cwd",
-          "brief"
-        ],
-        "title": "TestingSessionStartSchema",
-        "type": "object"
-      },
-      "TestingSessionStartedSchema.e784b23": {
-        "description": "The Session the start wrote, `starting`, or `held` while the gate is\nclosed.",
-        "properties": {
-          "id": {
-            "description": "The Session's id",
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id"
-        ],
-        "title": "TestingSessionStartedSchema",
-        "type": "object"
-      },
       "TestingSyncAnswerRequestSchema.05888e5": {
         "description": "A person's answer to a block of a document of the store's tree.",
         "properties": {
@@ -5853,8 +5746,15 @@
             "description": "Its one current line; null while no turn is in flight"
           },
           "environment": {
-            "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.EnvironmentNameSchema",
-            "description": "The environment it runs in: its env chip and the chip's link"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.EnvironmentNameSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The environment it runs in, as its row stands: its env chip and the chip's link; null until its start provides one"
           },
           "error": {
             "anyOf": [
@@ -6126,8 +6026,15 @@
             "description": "Its one current line; null while no turn is in flight"
           },
           "environment": {
-            "$ref": "#/components/schemas/WorkSchema.1fdd8ae.EnvironmentNameSchema",
-            "description": "The environment it runs in: its env chip and the chip's link"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkSchema.1fdd8ae.EnvironmentNameSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The environment it runs in, as its row stands: its env chip and the chip's link; null until its start provides one"
           },
           "error": {
             "anyOf": [
@@ -10042,7 +9949,7 @@
     },
     "/api/testing/projects/{project_id}/work": {
       "post": {
-        "description": "Returns:     201: The work item's id, its Work's and its Session's     400: The body is invalid, or the stage is prd     404: No project has the id, or its plan has no task of the step     409: No controller is configured     502: The controller has no such environment, or failed",
+        "description": "Returns:     201: The work item's id, its Work's and its Session's     400: The body is invalid, or the stage is prd     404: No project has the id, or its plan has no task of the step     409: No controller is configured, or the project is finished or         archived",
         "operationId": "post__api_testing_projects_{project_id}_work",
         "parameters": [
           {
@@ -10106,16 +10013,6 @@
               }
             },
             "description": "Conflict"
-          },
-          "502": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
-                }
-              }
-            },
-            "description": "Bad Gateway"
           }
         },
         "security": [
@@ -10123,84 +10020,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Place a work item on the project's timeline, in an environment of the stage's own controller, and start its session as every work item's starts; the start runs once the request commits.",
-        "tags": [],
-        "x-required-role": "editor"
-      }
-    },
-    "/api/testing/sessions": {
-      "post": {
-        "description": "Returns:     201: The Session, `starting`, or `held` while the gate is closed     404: No Project has the id     409: No controller is configured     502: The controller has no such environment, or failed",
-        "operationId": "post__api_testing_sessions",
-        "parameters": [],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TestingSessionStartSchema.e784b23"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TestingSessionStartedSchema.e784b23"
-                }
-              }
-            },
-            "description": "Created"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "502": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
-                }
-              }
-            },
-            "description": "Bad Gateway"
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "summary": "Start a work Session for an existing project in an environment of the configured controller; its start runs once the request commits.",
+        "summary": "Place a work item on the project's timeline by repository, and start its session as every work item's starts: once the request commits, its start creates an environment of Pilot's own from the repository on the stage's own controller.",
         "tags": [],
         "x-required-role": "editor"
       }

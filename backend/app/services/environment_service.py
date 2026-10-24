@@ -1,10 +1,11 @@
-"""Environments on demand, and the shutdown timer (design 2 §13.2, §13.3; F88.1,
-F73.1).
+"""Environments on demand, Pilot's own created, and the shutdown timer (design 2
+§13.2, §13.3, §13.5; F88.1, F73.1, F143.1).
 
 Pilot starts an environment knowing whether it started it, and stops only what
-it started. The claim is `server_started_at`, set when Pilot's own `start`
-scheduled the bring-up, and `started_pod_at`, the `pod.startedAt` that bring-up
-settled on (D12; DB 233). The shutdown timer stops an environment only while its
+it started. The claim is `server_started_at`, set when Pilot's own `start` or
+create scheduled the bring-up, and `started_pod_at`, the `pod.startedAt` that
+bring-up settled on (D12; DB 233). An environment Pilot created is its own,
+`server_created_at` and `repo` set (DB 239). The shutdown timer stops an environment only while its
 pod is still the claim's, it is not exempt, and no Session is `running` or
 `starting` there. A pod gone, another's or unknown ends the claim with no stop,
 at the tick or at a settled start; the claim's three columns, its deadline
@@ -30,7 +31,6 @@ from app.services.controller_client import (
     ControllerEnvironment,
     ControllerProblem,
     ControllerProblemType,
-    ControllerUnreachable,
 )
 from app.services.supervisor import Supervisor
 
@@ -74,7 +74,8 @@ class EnvironmentStartFailed(ExternalServiceException):
 
 
 class EnvironmentService:
-    """Starts environments, and arms, clears and runs their shutdown timer."""
+    """Creates environments of Pilot's own, starts environments, and arms,
+    clears and runs their shutdown timer."""
 
     def __init__(
         self,
@@ -114,25 +115,66 @@ class EnvironmentService:
             .on_conflict_do_nothing(index_elements=[Environment.id])
         )
 
-    def ensure_for_start(self, db: Session, env_id: str) -> None:
-        """Make the environment's row on Pilot's first touch, as
-        `ensure_environment` does, for a start the gate may hold: while the
-        controller does not answer, named by its id and exempt, until the
-        fleet consumer's report gives its columns. Exempt, the timer arms
-        nothing there before the report says it may.
+    def create(self, repo: str, slug: str | None) -> ControllerEnvironment:
+        """Create an environment of Pilot's own from `repo`, `owner/Name`,
+        managed by Pilot's client (§13.5), without `wait`: its answer,
+        `provisioning`, carries its env id before its bring-up ends in a
+        running pod. It is named `slug`, or on a `409 name-conflict` the first
+        of `slug-2`, `slug-3`, … the fleet does not hold, KubeCoder's names
+        being unique across it; with no slug, it has no name.
 
         Raises:
-            ControllerProblem: `not-found` if the controller has no such
-                environment
+            ControllerProblem: The controller refused it: `409
+                admission-blocked` at the node's cap, `403
+                namespace-not-whitelisted`, `422 validation-error`
+            ControllerUnreachable: The controller did not answer
+            ExternalServiceException: The controller failed otherwise
         """
-        try:
-            self.ensure_environment(db, env_id)
-        except ControllerUnreachable:
-            db.execute(
-                insert(Environment)
-                .values(id=env_id, name=env_id, exempt=True)
-                .on_conflict_do_nothing(index_elements=[Environment.id])
-            )
+        client = self._client()
+        if slug is None:
+            return client.create_environment(repo)
+        suffix = 1
+        while True:
+            name = slug if suffix == 1 else f"{slug}-{suffix}"
+            try:
+                return client.create_environment(repo, name)
+            except ControllerProblem as problem:
+                if problem.problem_type is not ControllerProblemType.NAME_CONFLICT:
+                    raise
+                logger.info("The fleet holds the name %s already", name)
+            suffix += 1
+
+    def record_created(
+        self, db: Session, created: ControllerEnvironment, repo: str
+    ) -> Environment:
+        """The row of the environment Pilot's create made from `repo`, in the
+        caller's transaction: Pilot's own, its claim taken from the create's
+        `202`, its pod unknown until its bring-up settles."""
+        now = datetime.now(UTC)
+        row = Environment(
+            id=created.env_id,
+            **reported_columns(created, now),
+            server_created_at=now,
+            repo=repo,
+            server_started_at=now,
+        )
+        db.add(row)
+        db.flush()
+        logger.info("Created environment %s from %s", created.env_id, repo)
+        return row
+
+    def stop_untaken(self, env_id: str) -> None:
+        """Stop an environment Pilot created for a start that moved on before
+        taking it, its claim ended: free, it holds no node slot.
+
+        Raises:
+            ControllerUnreachable: The controller did not answer
+            ExternalServiceException: The controller failed otherwise
+        """
+        self._client().stop_environment(env_id)
+        with scoped_session(self._container) as db:
+            _end_claim(_lock(db, env_id))
+        logger.info("Stopped environment %s, which no Session took", env_id)
 
     def start(self, env_id: str) -> ControllerEnvironment:
         """Bring the environment up and wait until it settles (§13.2).
@@ -141,9 +183,7 @@ class EnvironmentService:
         whether this call scheduled the bring-up: on `202` Pilot started it, and
         `server_started_at` is set in a transaction of its own before the wait,
         the claim's pod unknown until it settles; on `200` it was running
-        already, and nothing is set. Then the single `GET` with `wait=settled`,
-        whose pod the claim is checked against, and the shutdown timer armed if
-        nothing runs or starts there.
+        already, and nothing is set. Then the wait, as `settle` makes it.
 
         Returns:
             The environment as the wait left it, `running`
@@ -175,8 +215,25 @@ class EnvironmentService:
             logger.info("Started environment %s", env_id)
         else:
             logger.info("Environment %s was running already", env_id)
+        return self.settle(env_id)
 
-        settled = client.get_environment(env_id, wait="settled")
+    def settle(self, env_id: str) -> ControllerEnvironment:
+        """Wait until the environment's bring-up settles: the single `GET` with
+        `wait=settled`, whose pod the claim is checked against, a claim with no
+        pod yet taking it, and the shutdown timer armed if nothing runs or
+        starts there.
+
+        Returns:
+            The environment as the wait left it, `running`
+
+        Raises:
+            EnvironmentStartFailed: The environment settled `error`, `stopped`
+                or `deleting`
+            ControllerUnreachable: The controller did not answer
+            ExternalServiceException: The wait ran out before it settled, or
+                the controller failed otherwise
+        """
+        settled = self._client().get_environment(env_id, wait="settled")
         with scoped_session(self._container) as db:
             _settle_claim(_lock(db, env_id), settled)
             self.arm_shutdown_timer(db, env_id)

@@ -583,6 +583,34 @@ class TestStopSession:
         assert body["stopped_by"]["handle"] == "ada"
         assert session.get_one(models.Session, run.id).stopped_by_user_id == person.id
 
+    def test_a_held_work_item_with_no_environment_yet_answers_its_status(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        project: Project,
+    ) -> None:
+        held = models.Session(
+            project_id=project.id,
+            kind_code="work",
+            cwd="/work/Example",
+            token_hash="2" * 64,
+            state_code=SessionState.HELD,
+        )
+        session.add(held)
+        session.flush()
+        run = _work_item(container, session, project, held, SessionState.HELD)
+        sign_in(client, SUBJECT)
+
+        response = client.post(f"/api/sessions/{run.id}/stop")
+        records = client.get(f"/api/sessions/{run.id}/records")
+
+        assert response.status_code == 200, response.get_json()
+        body = response.get_json()
+        assert (body["state"], body["environment"]) == ("stopped", None)
+        assert records.status_code == 200, records.get_json()
+
     @pytest.mark.parametrize(
         ("state", "refusal"),
         [

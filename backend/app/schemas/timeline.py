@@ -315,8 +315,11 @@ class WorkSchema(BaseModel):
     current_line: CurrentLineSchema | None = Field(
         description="Its one current line; null while no turn is in flight"
     )
-    environment: EnvironmentNameSchema = Field(
-        description="The environment it runs in: its env chip and the chip's link"
+    environment: EnvironmentNameSchema | None = Field(
+        description=(
+            "The environment it runs in, as its row stands: its env chip and the "
+            "chip's link; null until its start provides one"
+        )
     )
     started_at: datetime | None = Field(
         description=(

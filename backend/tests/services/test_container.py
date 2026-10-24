@@ -340,7 +340,6 @@ class TestSessionStartWiring:
             AppSettings(controller_url=fake_controller.url, scheduler_tick_seconds=0.05)
         )
         client_of(container, fake_controller)
-        fake_controller.add_environment("env-a", status="running")
         with scoped_session(container) as db:
             person = User(
                 kind_code=UserKind.PERSON,
@@ -362,11 +361,11 @@ class TestSessionStartWiring:
         coordinator.fire_startup()
         try:
             with scoped_session(container) as db:
-                run_id = starts.start_session(
+                run_id = starts.start_work(
                     db,
                     project_id,
-                    "env-a",
-                    kind_code="work",
+                    "example/Example",
+                    title="Renaming the badge",
                     cwd="/work/Example",
                     brief="Rename the badge.",
                 ).id

@@ -35,7 +35,7 @@ from app.services.environment_service import (
     EnvironmentService,
     EnvironmentStartFailed,
 )
-from app.services.fake_controller import FakeController
+from app.services.fake_controller import CLIENT_NAME, FakeController
 from tests.support.fake_controller import ServedFakeController, client_of
 from tests.support.supervisor import WAIT_SECONDS, Supervise, listening, wait_until
 
@@ -204,6 +204,181 @@ class TestEnsureEnvironment:
 
         assert raised.value.problem_type is ControllerProblemType.NOT_FOUND
         assert _row(session) is None
+
+
+REPO = "example/Example"
+
+
+class TestCreate:
+    """An environment of Pilot's own (§13.5; F143.1)."""
+
+    def test_it_is_managed_by_pilots_client_named_the_slug(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+    ) -> None:
+        created = environments.create(REPO, "camp")
+
+        assert (created.status, created.name, created.repo, created.managed_by) == (
+            "provisioning",
+            "camp",
+            REPO,
+            CLIENT_NAME,
+        )
+        assert fake_controller.environment(created.env_id).managed_by == CLIENT_NAME
+        assert fake_controller.calls == ["POST /environments"]
+
+    def test_a_name_the_fleet_holds_takes_the_first_free_suffix(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+    ) -> None:
+        fake_controller.add_environment("operators-env", name="camp")
+        fake_controller.add_environment("second-env", name="Camp-2")
+
+        created = environments.create(REPO, "camp")
+
+        assert created.name == "camp-3"
+        assert fake_controller.calls == ["POST /environments"] * 3
+
+    def test_with_no_slug_it_is_unnamed(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+    ) -> None:
+        fake_controller.add_environment("operators-env", name="camp")
+
+        created = environments.create(REPO, None)
+
+        assert created.name is None
+
+    @pytest.mark.parametrize(
+        ("refusal", "repo", "problem_type"),
+        [
+            ("capped", REPO, ControllerProblemType.ADMISSION_BLOCKED),
+            (
+                "not-whitelisted",
+                REPO,
+                ControllerProblemType.NAMESPACE_NOT_WHITELISTED,
+            ),
+            ("invalid", "no-owner", ControllerProblemType.VALIDATION_ERROR),
+        ],
+    )
+    def test_a_refusal_is_the_controllers_problem_unretried(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        refusal: str,
+        repo: str,
+        problem_type: ControllerProblemType,
+    ) -> None:
+        if refusal == "capped":
+            fake_controller.capped()
+        elif refusal == "not-whitelisted":
+            fake_controller.not_whitelisted("example")
+
+        with pytest.raises(ControllerProblem) as raised:
+            environments.create(repo, "camp")
+
+        assert raised.value.problem_type is problem_type
+        assert fake_controller.calls == ["POST /environments"]
+
+
+class TestRecordCreated:
+    def test_the_row_is_pilots_own_its_claim_the_creates(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        created = environments.create(REPO, "camp")
+        before = datetime.now(UTC)
+
+        environments.record_created(session, created, REPO)
+
+        row = _row(session, created.env_id)
+        assert row is not None
+        assert (row.name, row.repo, row.exempt, row.last_state) == (
+            "camp",
+            REPO,
+            False,
+            "provisioning",
+        )
+        assert row.server_created_at is not None and row.server_created_at >= before
+        assert row.server_started_at == row.server_created_at
+        assert (row.started_pod_at, row.stop_due_at, row.delete_due_at) == (
+            None,
+            None,
+            None,
+        )
+
+    def test_the_row_is_the_callers_to_commit(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        created = environments.create(REPO, "camp")
+
+        environments.record_created(session, created, REPO)
+        session.rollback()
+
+        assert _row(session, created.env_id) is None
+
+
+class TestSettle:
+    def test_a_created_environment_settled_running_takes_its_pod_as_the_claims(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        created = environments.create(REPO, "camp")
+        environments.record_created(session, created, REPO)
+
+        settled = environments.settle(created.env_id)
+
+        assert settled.status == "running"
+        row = _row(session, created.env_id)
+        assert row is not None
+        assert row.started_pod_at == _pod(fake_controller, created.env_id)
+        # Nothing runs or starts there: the timer covers it.
+        assert _armed_around(row, row.server_created_at or datetime.now(UTC))
+        (wait,) = fake_controller.calls[1:]
+        assert wait.startswith(f"GET /environments/{created.env_id}?wait=settled")
+
+    @pytest.mark.parametrize("status", ["error", "stopped"])
+    def test_a_bring_up_that_settles_other_than_running_is_the_starts_failure(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+        status: str,
+    ) -> None:
+        fake_controller.settle_creates(status)
+        created = environments.create(REPO, "camp")
+        environments.record_created(session, created, REPO)
+
+        with pytest.raises(EnvironmentStartFailed, match=f"it settled {status}"):
+            environments.settle(created.env_id)
+
+
+class TestStopUntaken:
+    def test_it_is_stopped_at_once_its_claim_ended(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+    ) -> None:
+        created = environments.create(REPO, "camp")
+        environments.record_created(session, created, REPO)
+
+        environments.stop_untaken(created.env_id)
+
+        assert fake_controller.environment(created.env_id).status == "stopped"
+        row = _row(session, created.env_id)
+        assert _claim(row) == _NO_CLAIM
+        assert row is not None and row.server_created_at is not None
 
 
 class TestStart:

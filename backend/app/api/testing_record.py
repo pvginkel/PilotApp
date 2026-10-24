@@ -3,7 +3,8 @@
 standing, with members, a plan, their opening and open items, the items a
 project's session adds, an agent's saves of them and of the project's draft
 and handbook, the files it attaches, Pilot's Done, and the end of its turn;
-and a work item started in an environment of the stage's own controller.
+and a work item placed by repository, started in an environment of Pilot's
+own the stage's own controller creates.
 Nothing in the UI creates a project before the definition chat (F46), nor
 places a work item, which the brain adds (F66).
 
@@ -190,7 +191,6 @@ def create_item(
         HTTP_400=ApiErrorResponseSchema,
         HTTP_404=ApiErrorResponseSchema,
         HTTP_409=ApiErrorResponseSchema,
-        HTTP_502=ApiErrorResponseSchema,
     ),
 )
 @inject
@@ -201,22 +201,23 @@ def create_work(
     ],
     db: Session = Provide[ServiceContainer.db_session],
 ) -> Any:
-    """Place a work item on the project's timeline, in an environment of the
-    stage's own controller, and start its session as every work item's
-    starts; the start runs once the request commits.
+    """Place a work item on the project's timeline by repository, and start
+    its session as every work item's starts: once the request commits, its
+    start creates an environment of Pilot's own from the repository on the
+    stage's own controller.
 
     Returns:
         201: The work item's id, its Work's and its Session's
         400: The body is invalid, or the stage is prd
         404: No project has the id, or its plan has no task of the step
-        409: No controller is configured
-        502: The controller has no such environment, or failed
+        409: No controller is configured, or the project is finished or
+            archived
     """
     data = InventedWorkCreateSchema.model_validate(request.get_json())
     work = session_starts.start_work(
         db,
         project_id,
-        data.environment_id,
+        data.repo,
         title=data.title,
         brief=data.brief,
         cwd=data.cwd,
