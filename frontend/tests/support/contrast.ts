@@ -1,4 +1,4 @@
-/** Colours as the browser computes them, and WCAG's contrast between them. */
+/** Colours as the browser computes them, WCAG's contrast between them, and a colour's hue. */
 
 import type { Locator } from '@playwright/test';
 
@@ -35,4 +35,13 @@ export async function coloursOf(locator: Locator): Promise<Colours> {
     const [hi, lo] = [luminance(text), luminance(background)].sort((a, b) => b - a);
     return { text, background, ratio: (hi + 0.05) / (lo + 0.05) };
   });
+}
+
+/** A colour's hue, in degrees. */
+export function hue([r, g, b]: [number, number, number]): number {
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const d = max - min;
+  const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return (h * 60 + 360) % 360;
 }

@@ -3,9 +3,11 @@
  * (F1.2), derived from the record, never written by the brain (database.md decision 15), and a
  * step's standing in the plan popover (F3.1). How a work item's session reads: its one line on the
  * timeline (F26.1, F26.2, F125), why the gate holds its start (F26.1), why it stopped when no one
- * stopped it (F71), and its session log's tail (F69.2).
+ * stopped it (F71), and its session log's tail (F69.2). How a condition that holds all work reads
+ * on the gold bar (F125).
  */
 
+import { ServerOff, type LucideIcon } from 'lucide-react';
 import type { components } from '@/lib/api/generated/types';
 import { phaseOf, type Activity } from '@/lib/chat/activity';
 import { summarizeTool } from '@/lib/chat/tools';
@@ -17,6 +19,7 @@ type Work = components['schemas']['TimelineSchema.1fdd8ae.WorkSchema'];
 type HeldReason = components['schemas']['TimelineSchema.1fdd8ae.HeldReason'];
 type StopCause = components['schemas']['TimelineSchema.1fdd8ae.StopCause'];
 type CurrentLine = components['schemas']['TimelineSchema.1fdd8ae.CurrentLineSchema'];
+type ConditionCode = components['schemas']['ConditionsSchema.6c014b4.ConditionCode'];
 
 interface StepReading {
   text: string;
@@ -85,6 +88,26 @@ export function heldReasonLabel(reason: HeldReason): string {
     default: {
       const unknown: never = reason;
       return String(unknown);
+    }
+  }
+}
+
+interface ConditionLine {
+  /** What holds, followed by the time it began. */
+  title: string;
+  /** What it holds. */
+  detail: string;
+  icon: LucideIcon;
+}
+
+/** A condition that holds all work, as its line on the gold bar says it (F125). */
+export function conditionLine(code: ConditionCode): ConditionLine {
+  switch (code) {
+    case 'outage':
+      return { title: 'The controller has been unreachable', detail: 'Nothing starts until it answers.', icon: ServerOff };
+    default: {
+      const unknown: never = code;
+      return { title: String(unknown), detail: '', icon: ServerOff };
     }
   }
 }

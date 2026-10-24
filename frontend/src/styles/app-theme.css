@@ -104,6 +104,11 @@
   --primary-edge: 213 52% 34%;
   --urgent: 24 95% 53%;
   --urgent-text: 20 90% 35%;
+  /* The gold bar's (UC *The gold bar*): its surface, its text at 4.5:1 or better on it, and the
+     rule under each line. */
+  --gold: 45 93% 62%;
+  --gold-foreground: 36 85% 15%;
+  --gold-edge: 42 85% 46%;
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
   --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
   --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
@@ -169,6 +174,9 @@
   --primary-edge: 213 50% 30%;
   --urgent: 24 90% 55%;
   --urgent-text: 28 95% 65%;
+  --gold: 43 60% 20%;
+  --gold-foreground: 46 92% 72%;
+  --gold-edge: 43 65% 34%;
   --side: 218 36% 10.5%;
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.25);
   --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.25), 0 2px 4px -2px rgb(0 0 0 / 0.25);

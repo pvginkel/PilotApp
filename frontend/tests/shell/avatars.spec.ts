@@ -7,7 +7,7 @@
 
 import type { Page } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
-import { coloursOf } from '../support/contrast';
+import { coloursOf, hue } from '../support/contrast';
 
 const COLOURS = [1, 2, 3, 4, 5, 6];
 
@@ -32,14 +32,6 @@ async function drawPalette(page: Page): Promise<void> {
     row.append(tint);
     document.body.append(row);
   }, COLOURS);
-}
-
-function hue([r, g, b]: [number, number, number]): number {
-  const max = Math.max(r, g, b);
-  const min = Math.min(r, g, b);
-  const d = max - min;
-  const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
-  return (h * 60 + 360) % 360;
 }
 
 for (const theme of ['light', 'dark'] as const) {

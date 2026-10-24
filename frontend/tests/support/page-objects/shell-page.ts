@@ -1,12 +1,13 @@
 import type { Locator, Page } from '@playwright/test';
 import { waitForUiState } from '../helpers';
 
-/** The frame every screen sits in: the top bar and its profile menu, the side column, the keys list. */
+/** The frame every screen sits in: the top bar and its profile menu, the gold bar, the side column, the keys list. */
 export class ShellPage {
   readonly topBar: Locator;
   readonly brand: Locator;
   readonly drawerToggle: Locator;
   readonly app: Locator;
+  readonly goldBar: Locator;
   readonly side: Locator;
   readonly scrim: Locator;
   readonly centre: Locator;
@@ -26,6 +27,7 @@ export class ShellPage {
     this.brand = this.topBar.locator('.brand');
     this.drawerToggle = page.getByTestId('shell.drawer-toggle');
     this.app = page.getByTestId('shell.app');
+    this.goldBar = page.getByTestId('shell.gold-bar');
     this.side = page.getByTestId('shell.side');
     this.scrim = page.getByTestId('shell.scrim');
     this.centre = page.getByTestId('shell.centre');
@@ -39,6 +41,11 @@ export class ShellPage {
     this.signOut = page.getByTestId('app-shell.topbar.user.logout');
     this.keys = page.getByTestId('shell.keys');
     this.keysBackdrop = page.getByTestId('shell.keys.backdrop');
+  }
+
+  /** The gold bar's line for a condition, by its code: `outage`, the controller unreachable. */
+  goldLine(code: 'outage'): Locator {
+    return this.goldBar.locator(`[data-testid="shell.gold-bar.line"][data-condition="${code}"]`);
   }
 
   /** Opens the app at `path`, once the signed-in person is read. */

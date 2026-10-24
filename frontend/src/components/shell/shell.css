@@ -1,6 +1,7 @@
-/* The frame every screen sits in: the top bar, the side column and the centre, the drawer on a
-   narrow window, the profile menu and the keys list (PilotAppSpecs design/mockup/style.css,
-   "Header", "Layout" and "Narrow screens"). */
+/* The frame every screen sits in: the top bar, the gold bar, the side column and the centre, the
+   drawer on a narrow window, the profile menu and the keys list (PilotAppSpecs
+   design/mockup/style.css, "Header", "Layout" and "Narrow screens"; the gold bar is not in the
+   mockup). */
 
 @layer components {
   /* ---- The top bar ---------------------------------------------------------------------- */
@@ -60,31 +61,62 @@
 
   /* ---- The side column and the centre --------------------------------------------------- */
 
-  .app { position: relative; flex: 1; min-height: 0; display: flex; }
+  /* The gold bar over the side column, the centre beside both. */
+  .app {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: var(--tabs) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
 
   .tabs {
-    flex: none;
+    grid-area: 2 / 1 / 3 / 2;
+    min-height: 0;
     display: flex;
     flex-direction: column;
-    width: var(--tabs);
     border-right: 1px solid hsl(var(--border));
     background: hsl(var(--side));
     overflow-y: auto;
   }
 
-  /* Not positioned: the overlay in it lies over the side column too, placed on .app. */
-  .centre { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  /* Not positioned on a wide window: the overlay in it lies over the side column and the gold bar
+     too, placed on .app. */
+  .centre { grid-area: 1 / 2 / 3 / 3; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+
+  /* ---- The gold bar: a line per condition that holds all work, none while nothing does --- */
+
+  .gold-bar { grid-area: 1 / 1 / 2 / 2; min-width: 0; }
+  .gold-line {
+    display: flex;
+    gap: 8px;
+    padding: 8px 14px 8px 18px;
+    border-bottom: 1px solid hsl(var(--gold-edge));
+    background: hsl(var(--gold));
+    color: hsl(var(--gold-foreground));
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  /* Centred on the first line. */
+  .gold-line .icon { margin-top: 0.225em; }
+  .gold-line p { margin: 0; }
+  .gold-line strong { font-weight: 600; }
 
   /* ---- The keys list -------------------------------------------------------------------- */
 
   dl.keys { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: 14px; }
   dl.keys dd { margin: 0; color: hsl(var(--muted-foreground)); }
 
-  /* ---- A narrow window: the side column is a drawer over the centre, behind a scrim ----- */
+  /* ---- A narrow window: the gold bar across it, under it the side column a drawer over the
+     centre, behind a scrim; the centre's overlay lies over the centre alone ------------------ */
 
   @media (max-width: 900px) {
     .drawer-toggle { display: grid; place-items: center; }
-    /* Hidden once it has slid out, so a closed drawer takes no focus. */
+    .app { grid-template-columns: minmax(0, 1fr); }
+    .centre { grid-area: 2 / 1 / 3 / 2; position: relative; }
+    /* Hidden once it has slid out, so a closed drawer takes no focus. Placed in the centre's grid
+       area, which is its containing block. */
     .tabs {
       position: absolute;
       top: 0;
@@ -99,7 +131,7 @@
       transition: transform 160ms ease-out, visibility 0s 160ms;
     }
     .app[data-drawer="open"] .tabs { transform: none; visibility: visible; transition: transform 160ms ease-out; }
-    .drawer-scrim { position: absolute; inset: 0; z-index: 24; background: rgb(0 0 0 / 0.3); }
+    .drawer-scrim { position: absolute; grid-area: 2 / 1 / 3 / 2; inset: 0; z-index: 24; background: rgb(0 0 0 / 0.3); }
     .app:not([data-drawer="open"]) .drawer-scrim { display: none; }
   }
   @media (min-width: 901px) { .drawer-scrim { display: none; } }
