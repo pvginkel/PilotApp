@@ -28,7 +28,11 @@ projects:
       - "test -f .env || printf 'DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/pilot\\n' > .env"
       - cexec modern-app uv run python scripts/init-dev-database.py
       - cexec modern-app uv run cli upgrade-db
-    test: cexec modern-app uv run pytest
+    # Eight processes, each on databases of its own
+    # (tests/conftest_infrastructure.py): about 1 min where serial took 5. Here,
+    # not in addopts, so that a targeted `uv run pytest tests/...` stays one
+    # process.
+    test: cexec modern-app uv run pytest -n 8
     # The same three checks backend/scripts/check.py runs, and the formatter's
     # check.
     lint:
@@ -47,7 +51,10 @@ projects:
     # `pnpm build` also runs `pnpm check`; the lint verb below repeats it so the
     # gate stands on its own.
     build: cexec modern-app pnpm build
-    test: cexec modern-app pnpm playwright test
+    # Four workers over the template's two: 2.4 min where two took 4.3.
+    # More gain nothing on the node's 8 cores, each worker a backend, a Vite
+    # server and a Chromium of its own, about 1.1 GiB apiece.
+    test: cexec modern-app pnpm playwright test --workers=4
     lint: cexec modern-app pnpm check
 
   sidecar:
