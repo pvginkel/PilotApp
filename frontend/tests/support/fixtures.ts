@@ -6,7 +6,7 @@
  * what links in text, `controller` drives the worker's fake controller, `shell` is the frame every
  * screen sits in, `handleStep` and `profile` the person's own pages, `projectList` the side column's
  * list, `projectHead` a project's head, `timeline` its timeline, `overlay` the overlay over it,
- * `panel` the side panel beside it. `conditions`, the worker's, reads what the gold bar reads.
+ * `sessionLog` a work item's session log in it, `panel` the side panel beside it. `conditions`, the worker's, reads what the gold bar reads.
  */
 
 /* eslint-disable react-hooks/rules-of-hooks */
@@ -19,6 +19,7 @@ import { PanelPage } from './page-objects/panel-page';
 import { ProfilePage } from './page-objects/profile-page';
 import { ProjectHeadPage } from './page-objects/project-head-page';
 import { ProjectListPage } from './page-objects/project-list-page';
+import { SessionLogPage } from './page-objects/session-log-page';
 import { ShellPage } from './page-objects/shell-page';
 import { TimelinePage } from './page-objects/timeline-page';
 import { People } from './people';
@@ -36,6 +37,7 @@ interface DomainFixtures {
   projectHead: ProjectHeadPage;
   timeline: TimelinePage;
   overlay: OverlayPage;
+  sessionLog: SessionLogPage;
   panel: PanelPage;
 }
 
@@ -91,6 +93,9 @@ export const test = infrastructureFixtures.extend<DomainFixtures, DomainWorkerFi
   },
   overlay: async ({ page }, use) => {
     await use(new OverlayPage(page));
+  },
+  sessionLog: async ({ page }, use) => {
+    await use(new SessionLogPage(page));
   },
   panel: async ({ page }, use) => {
     await use(new PanelPage(page));

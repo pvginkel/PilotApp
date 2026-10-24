@@ -6,8 +6,9 @@
  * card, at the block (F33). An attachment's address under an item's opens it in the overlay over
  * the timeline where the timeline stands, and under a document's in the document's overlay
  * (F28.5). The handbook's address, and the project document's, open it in the overlay over the
- * timeline (F129.4, F37.4). Another project's address closes it. Beside the head and the timeline
- * stands the side panel, the project's own (F38.1), which a draft does not have.
+ * timeline (F129.4, F37.4), and a work item's session log's opens it there (F69). Another
+ * project's address closes it. Beside the head and the timeline stands the side panel, the
+ * project's own (F38.1), which a draft does not have.
  */
 
 import { useEffect, useState } from 'react';
@@ -15,6 +16,7 @@ import { createFileRoute, useMatch, useParams, useRouterState } from '@tanstack/
 import { ItemAttachmentOverlay } from '@/components/overlay/attachment-overlay';
 import { DocumentOverlay } from '@/components/overlay/document-overlay';
 import { HandbookOverlay, ProjectDocumentOverlay } from '@/components/overlay/project-document-overlay';
+import { SessionLogOverlay } from '@/components/overlay/session-log-overlay';
 import { Panel } from '@/components/panel/panel';
 import { ProjectHead } from '@/components/projects/project-head';
 import { isCard } from '@/components/timeline/document-state';
@@ -33,7 +35,7 @@ export const Route = createFileRoute('/_shell/projects/$projectId')({
 
 function Project() {
   const { projectId } = Route.useParams();
-  const { itemId, blockId, documentId, attachmentId } = useParams({ strict: false });
+  const { itemId, blockId, documentId, attachmentId, sessionId } = useParams({ strict: false });
   useEffect(() => rememberInBrowser({ project: projectId }), [projectId]);
   const { data } = useProjectHead(projectId);
   const addressed = useTimelineItem(projectId, blockId === undefined ? undefined : itemId);
@@ -44,7 +46,7 @@ function Project() {
   const handbook = useMatch({ from: '/_shell/projects/$projectId/handbook', shouldThrow: false }) !== undefined;
   const projectDocument = useMatch({ from: '/_shell/projects/$projectId/project-document', shouldThrow: false }) !== undefined;
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const overlay = overlaid !== null || attached !== null || handbook || projectDocument ? pathname : null;
+  const overlay = overlaid !== null || attached !== null || handbook || projectDocument || sessionId !== undefined ? pathname : null;
   const toItem = itemId === undefined || attached !== null ? null : `${itemId}/${blockId ?? ''}`;
   const { panel, front, show, close, toggle, overlayOnTop } = usePanel(projectId, overlay, toItem);
   const [head, setHead] = useState<HTMLElement | null>(null);
@@ -67,6 +69,7 @@ function Project() {
       {attached !== null && <ItemAttachmentOverlay projectId={projectId} {...attached} />}
       {handbook && <HandbookOverlay projectId={projectId} project={data} />}
       {projectDocument && <ProjectDocumentOverlay projectId={projectId} project={data} />}
+      {sessionId !== undefined && <SessionLogOverlay projectId={projectId} sessionId={sessionId} />}
     </div>
   );
 }

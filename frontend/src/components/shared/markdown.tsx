@@ -1,17 +1,22 @@
 /**
  * Markdown as every screen draws it (F29.1): GFM, inside `.prose`. Ticket ids, repos and
  * environments in its text link as they do in all of the record's words (F91, F93), except in code
- * and inside a link; every link opens in a new tab. A heading's words stand alone, inline, as the
- * heading shows them.
+ * and inside a link; every link opens in a new tab. A quote tag is a chip (F39.3), and a streamed
+ * text's new deltas fade in (the chat's decision 1; delta-fade.ts). A heading's words stand
+ * alone, inline, as the heading shows them.
  */
 
 import { memo, useMemo } from 'react';
-import ReactMarkdown, { type Components, type Options } from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform, type Components, type Options } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { ElementContent, Root } from 'hast';
+import { rehypeDeltas, type DeltaMarks } from '@/components/chat/delta-fade';
+import { QuoteChip } from '@/components/chat/quote-chip';
 import { NestedLink } from '@/components/shared/linked-text';
 import { useLinker } from '@/components/shared/links-context';
+import { parseQuoteHref, QUOTE_SCHEME, quotesToLinks } from '@/lib/chat/quotes';
 import type { Linker } from '@/lib/links';
+import { cn } from '@/lib/utils';
 
 const UNLINKED = new Set(['a', 'code', 'pre']);
 
@@ -43,12 +48,18 @@ function rehypeLinks(link: Linker) {
 }
 
 const components: Components = {
-  a: ({ href, title, className, children }) => (
-    <a href={href} title={title} className={className} target="_blank" rel="noreferrer">
-      {children}
-    </a>
-  ),
+  a: ({ href, title, className, children }) => {
+    const quote = href === undefined ? null : parseQuoteHref(href);
+    if (quote) return <QuoteChip quote={{ ...quote, label: String(children) }} label={children} />;
+    return (
+      <a href={href} title={title} className={className} target="_blank" rel="noreferrer">
+        {children}
+      </a>
+    );
+  },
 };
+
+const urlTransform = (url: string) => (url.startsWith(QUOTE_SCHEME) ? url : defaultUrlTransform(url));
 
 const nestedComponents: Components = {
   a: ({ href, title, children }) => (
@@ -83,13 +94,24 @@ export const HeadingWords = memo(function HeadingWords({ text }: { text: string 
   );
 });
 
-export const Markdown = memo(function Markdown({ text }: { text: string }) {
+interface MarkdownProps {
+  text: string;
+  className?: string;
+  /** A streamed text's deltas, its new text fading in. */
+  deltas?: DeltaMarks;
+}
+
+export const Markdown = memo(function Markdown({ text, className, deltas }: MarkdownProps) {
   const link = useLinker();
-  const rehypePlugins = useMemo((): Options['rehypePlugins'] => [[rehypeLinks, link]], [link]);
+  // The deltas split the text by its source positions, which the links' pieces do not keep.
+  const rehypePlugins = useMemo(
+    (): Options['rehypePlugins'] => (deltas === undefined ? [[rehypeLinks, link]] : [[rehypeDeltas, deltas], [rehypeLinks, link]]),
+    [deltas, link],
+  );
   return (
-    <div className="prose">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins} components={components}>
-        {text}
+    <div className={cn('prose', className)}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins} components={components} urlTransform={urlTransform}>
+        {quotesToLinks(text)}
       </ReactMarkdown>
     </div>
   );

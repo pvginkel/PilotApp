@@ -6,6 +6,9 @@
 
   /* An icon centres on the capitals of the text it sits in: cap is the font's own cap height. */
   .icon { display: inline-block; flex: none; width: 1em; height: 1em; vertical-align: calc(0.5cap - 0.5em); }
+  /* The same in a flex row, where vertical-align does nothing: its bottom sits on the baseline, and
+     the shift drops it to the capitals' middle. */
+  .icon-cap { display: inline-block; flex: none; width: 1em; height: 1em; position: relative; top: calc(0.5em - 0.5cap); }
 
   /* ---- Buttons -------------------------------------------------------------------------- */
 
@@ -110,17 +113,29 @@
   .prose > :last-child { margin-bottom: 0; }
   .prose p { margin: 0 0 0.7em; }
   .prose ul, .prose ol { margin: 0 0 0.7em; padding-left: 1.4em; }
+  .prose ul { list-style: disc; }
+  .prose ol { list-style: decimal; }
   .prose li { margin: 0.15em 0; }
+  .prose li > input[type="checkbox"] { margin: 0 0.4em 0 -1.2em; vertical-align: -0.1em; }
+  .prose li:has(> input[type="checkbox"]) { list-style: none; }
   .prose h1 { font-size: 19px; margin: 1.4em 0 0.5em; line-height: 1.35; }
   .prose h2 { font-size: 17px; margin: 1.4em 0 0.5em; line-height: 1.35; }
   .prose h3 { font-size: 15.5px; margin: 1.2em 0 0.4em; }
   .prose h1, .prose h2, .prose h3 { font-weight: 600; }
+  .prose strong { font-weight: 600; }
   .prose blockquote { margin: 0 0 0.7em; padding: 2px 12px; border-left: 3px solid hsl(var(--border)); color: hsl(var(--muted-foreground)); }
   .prose table { border-collapse: collapse; margin: 0 0 1em; font-size: 13.5px; display: block; overflow-x: auto; }
   .prose th, .prose td { padding: 5px 9px; border: 1px solid hsl(var(--border)); vertical-align: top; text-align: left; }
-  .prose th { background: hsl(var(--muted)); }
+  .prose th { background: hsl(var(--muted)); font-weight: 600; }
   .prose hr { border: 0; border-top: 1px solid hsl(var(--border)); margin: 1.4em 0; }
   .prose del { color: hsl(var(--muted-foreground)); }
+  .prose pre { margin: 0 0 0.7em; }
+  .prose pre code { font-size: inherit; overflow-wrap: normal; }
+
+  /* A streamed text's new deltas fading in (delta-fade.ts, FADE_MS), under reduced motion too: a
+     change of opacity moves nothing. */
+  .delta-fresh { animation: delta-in 300ms ease-out; }
+  @keyframes delta-in { from { opacity: 0; } }
 
   /* ---- Long texts folded (fold.tsx) ----------------------------------------------------- */
 

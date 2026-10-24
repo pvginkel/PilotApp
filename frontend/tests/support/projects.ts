@@ -156,6 +156,20 @@ export class Projects {
     return (await this.item(projectId, itemId)).work!;
   }
 
+  /** Stops a work item's session, as the signed-in person: answers its status. */
+  async stop(sessionId: string): Promise<Work> {
+    const response = await this.page.request.post(`${this.backendUrl}/api/sessions/${sessionId}/stop`);
+    expect(response.status(), await response.text()).toBe(200);
+    return (await response.json()) as Work;
+  }
+
+  /** Resumes a stopped or failed work item's session: answers its status. */
+  async resume(sessionId: string): Promise<Work> {
+    const response = await this.page.request.post(`${this.backendUrl}/api/sessions/${sessionId}/resume`);
+    expect(response.status(), await response.text()).toBe(200);
+    return (await response.json()) as Work;
+  }
+
   /** A work item's session's records after record `after`, as the session log reads them. */
   async records(sessionId: string, after = 0): Promise<RecordPage> {
     const response = await this.page.request.get(`${this.backendUrl}/api/sessions/${sessionId}/records?after=${after}`);

@@ -41,6 +41,11 @@ const quote = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const environmentName = (name: string) =>
   /-\d+$/.test(name) ? String.raw`\b${quote(name)}\b` : String.raw`\b${quote(name)}(?= environments?\b)`;
 
+/** An environment's KubeCoder Open, by its id, under the deployment's base URL, `name` naming it in the title. */
+export function environmentLink(base: string, id: string, name: string): Link {
+  return { href: `${base}/environments/${encodeURIComponent(id)}/ssh/open`, title: `Open ${name} in VS Code` };
+}
+
 /** The ticket id pattern is the backend's, in Python `re` syntax; its default reads the same here. */
 export function linker(settings: LinkSettings): Linker {
   const { ticket_url_template: ticketUrl, environment_link_base_url: base } = settings;
@@ -53,10 +58,7 @@ export function linker(settings: LinkSettings): Linker {
   }
   kinds.push({ pattern: REPO, link: (repo) => ({ href: `https://github.com/${repo}`, title: `Open ${repo} on GitHub` }) });
   if (base !== null) {
-    const open = (id: string, found: string) => ({
-      href: `${base}/environments/${encodeURIComponent(id)}/ssh/open`,
-      title: `Open ${found} in VS Code`,
-    });
+    const open = (id: string, found: string) => environmentLink(base, id, found);
     kinds.push({ pattern: ENVIRONMENT_ID, link: (id) => open(id, id) });
     // The longest name first: of Lab-1 and Lab-1-2, both matching at "Lab-1-2", the longer wins.
     for (const { id, name } of [...settings.environments].sort((a, b) => b.name.length - a.name.length)) {

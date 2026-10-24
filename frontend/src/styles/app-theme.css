@@ -39,6 +39,13 @@
   --color-urgent-text: hsl(var(--urgent-text));
   --color-side: hsl(var(--side));
 
+  /* What a stream brings fades in; loaded history does not (DesignAssistant's rule). */
+  --animate-fade-in: fade-in 200ms ease-out forwards;
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
   /* A toast slides in from above (src/styles/toast.ts). */
   --animate-toast-in: toast-in 150ms ease-out;
   @keyframes toast-in {

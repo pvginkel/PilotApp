@@ -7,7 +7,8 @@
 import { useMemo, type ReactNode, type SyntheticEvent } from 'react';
 import { LinksContext, useLinker } from '@/components/shared/links-context';
 import { useGetLinks } from '@/lib/api/generated/hooks';
-import { linker, unlinked } from '@/lib/links';
+import type { components } from '@/lib/api/generated/types';
+import { environmentLink, linker, unlinked } from '@/lib/links';
 import { useUiStateInstrumentation } from '@/lib/test/ui-state';
 
 /** Reads what links once for every text under it; until then, text shows unlinked. */
@@ -62,5 +63,20 @@ export function NestedLink({ href, title, children }: { href: string; title?: st
     >
       {children}
     </span>
+  );
+}
+
+type Environment = components['schemas']['TimelineSchema.1fdd8ae.EnvironmentNameSchema'];
+
+/** An environment by its name, linked by its id to KubeCoder's Open (F93); unlinked while what links is unread or unset. */
+export function EnvironmentLink({ environment, testId }: { environment: Environment; testId?: string }) {
+  const { data } = useGetLinks();
+  const base = data?.environment_link_base_url ?? null;
+  if (base === null) return <span data-testid={testId}>{environment.name}</span>;
+  const { href, title } = environmentLink(base, environment.id, environment.name);
+  return (
+    <a className="mention" href={href} title={title} target="_blank" rel="noreferrer" data-testid={testId}>
+      {environment.name}
+    </a>
   );
 }

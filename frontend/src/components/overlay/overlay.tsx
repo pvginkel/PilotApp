@@ -7,7 +7,7 @@
  * collapsed section (F31.5). On a phone it is the whole screen, with no maximize (F98.3).
  */
 
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
 import { Maximize2, Minimize2, X } from 'lucide-react';
 import { blockKey, FlashContext, GoToContext, useFlashes } from '@/components/timeline/flash';
@@ -26,12 +26,15 @@ interface OverlayProps {
   titles: ReactNode;
   foot: ReactNode;
   onClose: () => void;
+  /** Its body, the scroll container, for what it shows. */
+  bodyRef?: RefObject<HTMLDivElement | null>;
   children: ReactNode;
 }
 
-export function Overlay({ showing, at = null, back = null, titles, foot, onClose, children }: OverlayProps) {
+export function Overlay({ showing, at = null, back = null, titles, foot, onClose, bodyRef, children }: OverlayProps) {
   const [max, setMax] = useState(false);
-  const body = useRef<HTMLDivElement>(null);
+  const ownBody = useRef<HTMLDivElement>(null);
+  const body = bodyRef ?? ownBody;
   const { fresh, flashed, flash } = useFlashes();
   const sections = useSections(at === null ? null : blockKey(at.item, at.block));
   useEscape('overlay', true, onClose);
@@ -111,10 +114,10 @@ export function Overlay({ showing, at = null, back = null, titles, foot, onClose
 }
 
 /** What it shows where a read of it fails (F113). */
-export function DidNotLoad() {
+export function DidNotLoad({ what = 'The document' }: { what?: string }) {
   return (
     <p className="item-sub" data-testid="overlay.failed">
-      The document did not load.
+      {what} did not load.
     </p>
   );
 }
