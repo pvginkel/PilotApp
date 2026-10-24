@@ -33,6 +33,9 @@ type RawTurn = 'turn_text' | 'turn_tool' | 'turn_subagent';
 // backoff doubles from 1 s to 30 s while the outage holds.
 const OUTAGE_TIMEOUT_MS = 45_000;
 
+// The supervisor counts each restart of the fleet consumer's loop as it begins its reconnect.
+const FLEET_RESTARTS = /^pilot_job_restarts_total\{job="fleet"\} (\S+)$/m;
+
 const BACKEND_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..', process.env.BACKEND_ROOT || '../backend');
 
 /** An invented turn's lines, as `claude` prints them. */
@@ -67,6 +70,20 @@ export class Conditions {
       .toBe(on);
   }
 
+  /** How many times the backend's fleet consumer has restarted its stream. */
+  async fleetRestarts(): Promise<number> {
+    const response = await this.request.get('/metrics');
+    expect(response.status(), await response.text()).toBe(200);
+    const match = FLEET_RESTARTS.exec(await response.text());
+    return match === null ? 0 : Number(match[1]);
+  }
+
+  /** Returns once the fleet stream has restarted more than `restarts` times and the backend reads the controller answering. */
+  async reconnected(restarts: number): Promise<void> {
+    await expect.poll(() => this.fleetRestarts(), { timeout: OUTAGE_TIMEOUT_MS }).toBeGreaterThan(restarts);
+    await this.outage(false);
+  }
+
   async dispose(): Promise<void> {
     await this.request.dispose();
   }
@@ -99,9 +116,15 @@ export class Controller {
     await this.verb('finish', { env_id: envId, name: session, outcome, result });
   }
 
-  /** Every open stream ends at once, as a dropped connection does, the fleet stream's included. */
+  /**
+   * Every open stream ends at once, as a dropped connection does, the fleet stream's included. The
+   * backend reads the controller unreachable until its fleet stream reconnects, and this returns
+   * once it has, unless the controller is unreachable (`outage(true)`).
+   */
   async dropStreams(): Promise<void> {
+    const restarts = await this.conditions.fleetRestarts();
     await this.verb('drop-streams', {});
+    if (!this.unanswered) await this.conditions.reconnected(restarts);
   }
 
   /** The pod's containers restart: its sessions are gone, and the environment reads `starting` until `setStatus(envId, 'running')`. */

@@ -55,3 +55,16 @@ test.describe('The fake controller', () => {
     await expect.poll(async () => (await projects.work(id, work)).state).toBe('running');
   });
 });
+
+test.describe('The fake controller, its streams dropped', () => {
+  test.describe.configure({ mode: 'serial' });
+
+  test('a spec that drops every stream goes on with the controller answering', async ({ controller, conditions }) => {
+    await controller.dropStreams();
+    expect(await conditions.read()).toEqual([]);
+  });
+
+  test('the next spec starts with the controller answering', async ({ conditions }) => {
+    expect(await conditions.read()).toEqual([]);
+  });
+});
