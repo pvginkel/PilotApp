@@ -786,8 +786,9 @@ class RelayService:
     ) -> None:
         """A stopped Session's turn in flight ended with no `result`: one the
         controller never got, or, with `problem`, whose controller session is
-        gone, a `server` record saying so (§9.6). Nothing is done when the
-        Session has moved on."""
+        gone, a `server` record saying so (§9.6). The documents it was writing
+        are let go, as at a turn's end. Nothing is done when the Session has
+        moved on."""
         with scoped_session(self._container) as db:
             records = self._records(db)
             session = records.lock_session(opening.session_id)
@@ -807,6 +808,7 @@ class RelayService:
             turn.ended_at = datetime.now(UTC)
             _refresh_turns(db, session, turn)
             self._moved(session)
+            self._container.document_service().turn_ended(session)
             self._environments.arm_shutdown_timer(db, session.environment_id)
 
     def _relay_turn(self, opening: _Opening, handle: LoopHandle) -> bool:

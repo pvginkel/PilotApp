@@ -1577,6 +1577,39 @@ class TestStoppedUnderTheTurn:
         assert work_item.controller_session == controller_session
         assert work_item.state_code == SessionState.STOPPED
 
+    def test_a_turn_ended_with_no_result_lets_go_of_the_documents_it_was_writing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        project: Project,
+        work_item: models.Session,
+    ) -> None:
+        documents = container.document_service()
+        draft = documents.bear_draft(project, "# Badges\n")
+        container.ingest_service().ingest(
+            f"draft-{project.number}/project.md",
+            b"# Badge colours\n",
+            None,
+            _row(session),
+            work_item,
+        )
+        _send(relays, session, work_item)
+        _stopped(work_item)
+        fake_controller.restart(ENV)
+        fake_controller.set_status(ENV, "running")
+
+        _relay(relays, work_item)
+
+        assert draft.writing_session_id is None
+        versions = session.scalars(
+            select(DocumentVersion.cause_code)
+            .where(DocumentVersion.document_id == draft.id)
+            .order_by(DocumentVersion.number)
+        ).all()
+        assert versions == [VersionCause.BORN, VersionCause.TURN]
+
 
 class _Settling(ServedFakeController):
     """The fake, where each read of an environment first meets the next of
