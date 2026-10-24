@@ -19,8 +19,8 @@ import uuid
 from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.orm import Session
 
+from app.models import Environment, Turn
 from app.models import Session as AgentSession
-from app.models import Turn
 from app.models.reference import SessionState
 from app.services.fleet_consumer import FleetConsumer
 from app.services.relay_service import RELAY_JOB
@@ -62,9 +62,10 @@ class RelayWatchdog:
         sessions = db.execute(
             select(
                 AgentSession.id,
-                AgentSession.environment_id,
+                Environment.id,
                 AgentSession.controller_session,
             )
+            .join(Environment, Environment.id == AgentSession.environment_id)
             .where(
                 or_(
                     AgentSession.state_code == SessionState.RUNNING,

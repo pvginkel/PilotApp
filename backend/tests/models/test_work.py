@@ -82,6 +82,26 @@ class TestWork:
         assert session.get_one(Item, work_id).project_id == project.id
         assert session.get_one(Session, work_id).project_id == project.id
 
+    def test_a_workers_run_is_placed_in_a_repository(
+        self,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        project_session: Session,
+    ) -> None:
+        work_id = uuid.uuid4()
+        session.add_all(
+            [
+                _entry(project, project_session, work_id, seq=2),
+                _run(project, environment, work_id),
+                _work(project, work_id, repo="pvginkel/Example"),
+            ]
+        )
+        session.flush()
+        session.expire_all()
+
+        assert session.get_one(Work, work_id).repo == "pvginkel/Example"
+
     def test_a_job_has_its_trigger_and_the_item_that_triggered_it(
         self,
         session: DbSession,
@@ -291,3 +311,27 @@ class TestWork:
         )
 
         assert violated_constraint(session) == "ck_work_trigger_item"
+
+    def test_a_job_is_placed_in_no_repository(
+        self,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        project_session: Session,
+    ) -> None:
+        work_id = uuid.uuid4()
+        session.add_all(
+            [
+                _entry(project, project_session, work_id, seq=2),
+                _run(project, environment, work_id, kind_code="job"),
+                _work(
+                    project,
+                    work_id,
+                    session_kind_code="job",
+                    trigger_code=WorkTrigger.SETUP,
+                    repo="pvginkel/Example",
+                ),
+            ]
+        )
+
+        assert violated_constraint(session) == "ck_work_repo"

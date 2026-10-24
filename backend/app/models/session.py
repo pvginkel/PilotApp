@@ -62,7 +62,7 @@ class Session(db.Model):  # type: ignore[name-defined]
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     project_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("projects.id"))
-    environment_id: Mapped[str] = mapped_column(ForeignKey("environments.id"))
+    environment_id: Mapped[str | None] = mapped_column(ForeignKey("environments.id"))
     kind_code: Mapped[str] = mapped_column(ForeignKey("session_kinds.code"))
     controller_session: Mapped[str | None] = mapped_column(Text)
     conversation_id: Mapped[str | None] = mapped_column(Text)

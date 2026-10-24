@@ -167,7 +167,14 @@ def work_status(
     the cause its environment's stop under it left as its last record."""
     stopper = aliased(User)
     rows = db.execute(
-        select(AgentSession, Environment.name, Work.autopilot, Project.paused, stopper)
+        select(
+            AgentSession,
+            Environment.id,
+            Environment.name,
+            Work.autopilot,
+            Project.paused,
+            stopper,
+        )
         .join(Work, Work.id == AgentSession.id)
         .join(Environment, Environment.id == AgentSession.environment_id)
         .join(Project, Project.id == AgentSession.project_id)
@@ -176,7 +183,7 @@ def work_status(
     ).all()
     failed = [
         session.id
-        for session, _, _, _, _ in rows
+        for session, _, _, _, _, _ in rows
         if session.state_code is SessionState.FAILED
     ]
     turn_errors: dict[uuid.UUID, str | None] = (
@@ -193,7 +200,7 @@ def work_status(
     )
     causes = {
         session.id: _stop_cause(db, session.id)
-        for session, _, _, _, _ in rows
+        for session, _, _, _, _, _ in rows
         if session.state_code is SessionState.STOPPED
         and session.stopped_by_user_id is None
     }
@@ -201,7 +208,7 @@ def work_status(
         session.id: WorkSchema(
             state=session.state_code,
             current_line=_current_line(session.current_line),
-            environment=EnvironmentNameSchema(id=session.environment_id, name=name),
+            environment=EnvironmentNameSchema(id=env_id, name=name),
             started_at=session.started_at,
             error=(
                 turn_errors.get(session.id) or session.error
@@ -230,7 +237,7 @@ def work_status(
             ),
             stopped_cause=causes.get(session.id),
         )
-        for session, name, autopilot, paused, stopped_by in rows
+        for session, env_id, name, autopilot, paused, stopped_by in rows
     }
 
 

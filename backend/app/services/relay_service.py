@@ -291,7 +291,7 @@ class RelayService:
         recorded = _recorded_turn(db, session.id, name)
         failure: ExternalServiceException | None = None
         try:
-            self._deliver_once(session.environment_id, name, recorded, turn.message)
+            self._deliver_once(_environment_id(session), name, recorded, turn.message)
         except ControllerUnreachable:
             raise
         except ExternalServiceException as error:
@@ -336,7 +336,7 @@ class RelayService:
                 or _turn_in_flight(db, session_id) is None
             ):
                 return
-            env_id, name = session.environment_id, session.controller_session
+            env_id, name = _environment_id(session), session.controller_session
         try:
             self._client().interrupt(env_id, name)
         except ControllerUnreachable as error:
@@ -445,7 +445,7 @@ class RelayService:
 
     def _deliver(self, session: AgentSession, message: str) -> None:
         self._client().send_message(
-            session.environment_id, _controller_session(session), message
+            _environment_id(session), _controller_session(session), message
         )
 
     def _deliver_resuming(
@@ -547,7 +547,7 @@ class RelayService:
         """
         gone = session.controller_session
         created = self._client().create_headless_session(
-            session.environment_id,
+            _environment_id(session),
             HeadlessCreateRequest(
                 cwd=session.cwd,
                 resume=session.conversation_id,
@@ -712,7 +712,7 @@ class RelayService:
             session.current_line = None
             self._moved(session, state=True)
         self._container.document_service().turn_ended(session)
-        self._environments.arm_shutdown_timer(db, session.environment_id)
+        self._environments.arm_shutdown_timer(db, _environment_id(session))
         logger.info("Session %s stopped under its turn: %s", session.id, reason)
 
     def _new_turn(
@@ -748,7 +748,7 @@ class RelayService:
         session.current_line = at_send(session.current_line, turn.started_at)
         _refresh_turns(db, session, turn)
         self._moved(session, state=moved_state)
-        self._environments.clear_shutdown_timer(db, session.environment_id)
+        self._environments.clear_shutdown_timer(db, _environment_id(session))
         after_commit(_RelayStart(self, session.id))
 
     def _failed(self, db: Session, turn: Turn, error: ExternalServiceException) -> None:
@@ -809,7 +809,7 @@ class RelayService:
             _refresh_turns(db, session, turn)
             self._moved(session)
             self._container.document_service().turn_ended(session)
-            self._environments.arm_shutdown_timer(db, session.environment_id)
+            self._environments.arm_shutdown_timer(db, _environment_id(session))
 
     def _relay_turn(self, opening: _Opening, handle: LoopHandle) -> bool:
         """Relay the stream to the turn's `result`; whether it came. A stream
@@ -1017,7 +1017,7 @@ def _opening(db: Session, session_id: uuid.UUID) -> _Opening | None:
     )
     return _Opening(
         session_id=session_id,
-        env_id=session.environment_id,
+        env_id=_environment_id(session),
         controller_session=session.controller_session,
         turn_id=turn.id,
         message=turn.message,
@@ -1042,6 +1042,12 @@ def _with_turn_in_flight(
             .order_by(AgentSession.id)
         )
     )
+
+
+def _environment_id(session: AgentSession) -> str:
+    # The relay serves a Session its start placed in an Environment.
+    assert session.environment_id is not None
+    return session.environment_id
 
 
 def _controller_session(session: AgentSession) -> str:

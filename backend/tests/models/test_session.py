@@ -107,6 +107,18 @@ class TestSession:
 
         assert run.state_code == SessionState.HELD
 
+    def test_a_held_start_has_no_environment_yet(
+        self, session: DbSession, project: Project, environment: Environment
+    ) -> None:
+        run = _session(
+            project, environment, environment_id=None, state_code=SessionState.HELD
+        )
+        session.add(run)
+        session.flush()
+        session.expire(run)
+
+        assert run.environment_id is None
+
     def test_its_kind_is_a_session_kind(
         self, session: DbSession, project: Project, environment: Environment
     ) -> None:

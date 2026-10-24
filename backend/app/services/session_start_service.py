@@ -605,7 +605,7 @@ class SessionStartService:
         if session.controller_session is None:
             environment = db.get_one(Environment, session.environment_id)
             self._phase(db, session.id, f"Starting {environment.name}…")
-        self._environments.clear_shutdown_timer(db, session.environment_id)
+        self._environments.clear_shutdown_timer(db, _environment_id(session))
         after_commit(_LoopStart(self, session.id))
 
     def _stop(
@@ -628,7 +628,7 @@ class SessionStartService:
             turn = _latest_turn(db, session.id)
             turn.ended_at = at
             session.turn_ended_at = at
-        self._environments.arm_shutdown_timer(db, session.environment_id)
+        self._environments.arm_shutdown_timer(db, _environment_id(session))
         self._moved(session, state=True)
         logger.info("Session %s stopped by %s, %s", session.id, person.handle, before)
 
@@ -758,7 +758,7 @@ class SessionStartService:
         session.error = reason
         session.current_line = None
         self._moved(session, state=True)
-        self._environments.arm_shutdown_timer(db, session.environment_id)
+        self._environments.arm_shutdown_timer(db, _environment_id(session))
         logger.warning("Session %s failed to start: %s", session_id, reason)
 
     def _moved(self, session: AgentSession, *, state: bool = False) -> None:
@@ -780,7 +780,7 @@ def _pending(db: Session, session_id: uuid.UUID) -> _Pending | None:
         return None
     turn = _latest_turn(db, session_id)
     return _Pending(
-        env_id=session.environment_id,
+        env_id=_environment_id(session),
         controller_session=session.controller_session,
         create=HeadlessCreateRequest(
             cwd=session.cwd,
@@ -792,6 +792,12 @@ def _pending(db: Session, session_id: uuid.UUID) -> _Pending | None:
         turn_id=turn.id,
         resuming=turn.seq > 1,
     )
+
+
+def _environment_id(session: AgentSession) -> str:
+    # `start_session` writes every Session with the Environment it names.
+    assert session.environment_id is not None
+    return session.environment_id
 
 
 def _latest_turn(db: Session, session_id: uuid.UUID) -> Turn:

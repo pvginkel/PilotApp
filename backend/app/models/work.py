@@ -42,6 +42,10 @@ class Work(db.Model):  # type: ignore[name-defined]
             name="ck_work_trigger",
         ),
         CheckConstraint("trigger_item_id <> id", name="ck_work_trigger_item"),
+        # A job runs in the store, placed in no repository (DB §2.2).
+        CheckConstraint(
+            "session_kind_code = 'work' OR repo IS NULL", name="ck_work_repo"
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
@@ -49,4 +53,5 @@ class Work(db.Model):  # type: ignore[name-defined]
     session_kind_code: Mapped[str] = mapped_column(Text)
     trigger_code: Mapped[WorkTrigger | None] = mapped_column(WORK_TRIGGER)
     trigger_item_id: Mapped[uuid.UUID | None]
+    repo: Mapped[str | None] = mapped_column(Text)
     autopilot: Mapped[bool] = mapped_column(Boolean)

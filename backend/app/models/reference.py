@@ -1,7 +1,7 @@
 """The reference entities (DB §2.4).
 
 A reference entity with a fact about the category is a table: Item Kind, Done
-Cause, Confirmation Reason and Session Kind. The other nineteen are PostgreSQL
+Cause, Confirmation Reason and Session Kind. The other eighteen are PostgreSQL
 enums (DB §7.2). The revisions are the one place a value is added, a table's
 rows included.
 """
@@ -85,12 +85,6 @@ class FiringCause(StrEnum):
     REQUESTED = "requested"
 
 
-class SyncOutcome(StrEnum):
-    PULLED = "pulled"
-    REBASED = "rebased"
-    SKIPPED = "skipped"
-
-
 class AttachmentSource(StrEnum):
     FILE = "file"
     DRAFT = "draft"
@@ -160,7 +154,6 @@ BLOCK_KIND = _enum_type(BlockKind, "block_kind")
 ANSWER_CHANNEL = _enum_type(AnswerChannel, "answer_channel")
 WORK_TRIGGER = _enum_type(WorkTrigger, "work_trigger")
 FIRING_CAUSE = _enum_type(FiringCause, "firing_cause")
-SYNC_OUTCOME = _enum_type(SyncOutcome, "sync_outcome")
 ATTACHMENT_SOURCE = _enum_type(AttachmentSource, "attachment_source")
 SESSION_STATE = _enum_type(SessionState, "session_state")
 RECORD_KIND = _enum_type(RecordKind, "record_kind")
@@ -183,7 +176,6 @@ ENUM_TYPES = (
     ANSWER_CHANNEL,
     WORK_TRIGGER,
     FIRING_CAUSE,
-    SYNC_OUTCOME,
     ATTACHMENT_SOURCE,
     SESSION_STATE,
     RECORD_KIND,
