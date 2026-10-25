@@ -4,11 +4,11 @@ the caller's."""
 
 import uuid
 
+import pilot_dsl as dsl
 import pytest
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
-from app.engine import dsl
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import Document, Item, Project, User
 from app.services.auth_service import AuthContext

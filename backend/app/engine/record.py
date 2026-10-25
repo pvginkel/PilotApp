@@ -18,14 +18,15 @@ document of the run is consumed by it, its Undo gone.
 """
 
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Protocol
 
+import pilot_dsl as dsl
 from sqlalchemy import ColumnElement, and_, exists, select
 from sqlalchemy.orm import Session
 
-from app.engine import dsl
 from app.engine.bus import EngineBus, ProjectChanged, WriteBackOwed
 from app.engine.documents import (
     DOCUMENT,
@@ -148,9 +149,8 @@ class RecordService:
                 operation, "an action without options is done, not answered"
             )
         at = _now()
-        self.document_service.publish(
-            document,
-            dsl.write_answer(
+        with _refusal_as_invalid():
+            text = dsl.write_answer(
                 _published(document),
                 local_id,
                 answer=answer_text,
@@ -159,8 +159,8 @@ class RecordService:
                 via=dsl.AnswerChannel(via.value),
                 note=note,
                 to=to,
-            ),
-        )
+            )
+        self.document_service.publish(document, text)
         self._done_by_its_answer(project, item, document, blocks, user, at)
 
     def done_action(
@@ -193,12 +193,11 @@ class RecordService:
                 operation, "an action with options is answered with one of them"
             )
         at = _now()
-        self.document_service.publish(
-            document,
-            dsl.write_done(
+        with _refusal_as_invalid():
+            text = dsl.write_done(
                 _published(document), local_id, by=user.handle, at=at, note=_value(note)
-            ),
-        )
+            )
+        self.document_service.publish(document, text)
         self._done_by_its_answer(project, item, document, blocks, user, at)
 
     def undo(self, item: Item) -> None:
@@ -236,9 +235,9 @@ class RecordService:
                 for block in dsl.parse(_published(document)).blocks
                 if block.by is not None and block.by != dsl.AGENT
             )
-            self.document_service.publish(
-                document, dsl.clear_answer(_published(document), block.local_id)
-            )
+            with _refusal_as_invalid():
+                text = dsl.clear_answer(_published(document), block.local_id)
+            self.document_service.publish(document, text)
         item.done_at = None
         item.done_cause_code = None
         item.done_by_user_id = None
@@ -660,6 +659,16 @@ def _block(
     if block is None:
         raise RecordNotFoundException("Block", f"{document.id}/{local_id}")
     return block
+
+
+@contextmanager
+def _refusal_as_invalid() -> Iterator[None]:
+    """A refusal of the DSL's writer as the engine's own
+    `InvalidOperationException`, with its message."""
+    try:
+        yield
+    except dsl.WriteRefused as refused:
+        raise InvalidOperationException(refused.operation, refused.cause) from refused
 
 
 def _published(document: Document) -> str:

@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 
 import yaml
 
-from app.engine.dsl.document import (
+from pilot_dsl.document import (
     AnswerChannel,
     Block,
     BlockKind,
@@ -21,19 +21,27 @@ from app.engine.dsl.document import (
     ParsedDocument,
     Span,
 )
-from app.engine.dsl.reader import (
+from pilot_dsl.reader import (
     AGENT,
     ANSWER_KEYS,
     YAML_LINE_BREAKS,
     DocumentKind,
     parse,
 )
-from app.exceptions import InvalidOperationException
 
 _STR = "tag:yaml.org,2002:str"
 _MAP = "tag:yaml.org,2002:map"
 _UNBOUNDED = 2**31
 _FENCE_PROOF_INDENT = 4
+
+
+class WriteRefused(Exception):
+    """A splice the text cannot take: "Cannot <operation> because <cause>"."""
+
+    def __init__(self, operation: str, cause: str) -> None:
+        self.operation = operation
+        self.cause = cause
+        super().__init__(f"Cannot {operation} because {cause}")
 
 
 @dataclass(frozen=True)
@@ -429,7 +437,7 @@ def _rewrite(
 ) -> str:
     block = next((b for b in parse(text).blocks if b.local_id == local_id), None)
     if block is None:
-        raise InvalidOperationException(operation, f"the text has no block {local_id}")
+        raise WriteRefused(operation, f"the text has no block {local_id}")
     edit = _Edit(text)
     edit.replace_answer(block, entries)
     return edit.apply()[0]

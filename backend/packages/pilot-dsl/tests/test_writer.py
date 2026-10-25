@@ -7,13 +7,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
-from app.engine.dsl import (
+from pilot_dsl import (
     AnswerChannel,
     DocumentKind,
     Facts,
     Fault,
     Merge,
+    WriteRefused,
     clear_answer,
     merge,
     parse,
@@ -24,9 +24,8 @@ from app.engine.dsl import (
     write_done,
     write_recommended,
 )
-from app.exceptions import InvalidOperationException
 
-CORPUS = Path(__file__).parents[2] / "fixtures" / "dsl"
+CORPUS = Path(__file__).parent / "corpus"
 SPLICES = sorted((CORPUS / "splice").glob("*.json"))
 MERGES = sorted((CORPUS / "merge").glob("*.json"))
 
@@ -71,7 +70,8 @@ SECTION_6_4 = (
 
 
 def _case(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text())
+    case: dict[str, Any] = json.loads(path.read_text())
+    return case
 
 
 def _text(path: Path) -> str:
@@ -132,7 +132,7 @@ def _clean(text: str, document: DocumentKind) -> list[Fault]:
 
 
 class TestConformanceCorpus:
-    """The splice and merge cases of `tests/fixtures/dsl/`: a published text,
+    """The splice and merge cases of `corpus/`: a published text,
     the record's write or the agent's save, and the text that results."""
 
     @pytest.mark.parametrize("path", SPLICES, ids=lambda path: path.stem)
@@ -442,12 +442,12 @@ class TestWriteAnswer:
         )
 
     def test_a_block_the_text_lacks_is_refused(self) -> None:
-        with pytest.raises(InvalidOperationException) as raised:
+        with pytest.raises(WriteRefused) as raised:
             write_answer(
                 QUESTION, "D9", answer="Oak", by="ada", at=AT, via=AnswerChannel.APP
             )
 
-        assert raised.value.message == (
+        assert str(raised.value) == (
             "Cannot write an answer into block D9 because the text has no block D9"
         )
 
@@ -495,10 +495,10 @@ class TestWriteDone:
         )
 
     def test_a_block_the_text_lacks_is_refused(self) -> None:
-        with pytest.raises(InvalidOperationException) as raised:
+        with pytest.raises(WriteRefused) as raised:
             write_done("```action id=A1\n```\n", "A2", by="ben", at=AT)
 
-        assert raised.value.message == (
+        assert str(raised.value) == (
             "Cannot mark block A2 done because the text has no block A2"
         )
 
@@ -520,10 +520,10 @@ class TestClearAnswer:
         assert clear_answer(QUESTION, "Q1") == QUESTION
 
     def test_a_block_the_text_lacks_is_refused(self) -> None:
-        with pytest.raises(InvalidOperationException) as raised:
+        with pytest.raises(WriteRefused) as raised:
             clear_answer(QUESTION, "Q2")
 
-        assert raised.value.message == (
+        assert str(raised.value) == (
             "Cannot undo the answer of block Q2 because the text has no block Q2"
         )
 

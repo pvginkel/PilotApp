@@ -7,10 +7,9 @@ from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+import pilot_dsl as dsl
 import pytest
-
-import app.engine.dsl as dsl
-from app.engine.dsl import (
+from pilot_dsl import (
     BlockKind,
     DocumentKind,
     Facts,
@@ -23,7 +22,7 @@ from app.engine.dsl import (
     validate,
 )
 
-CORPUS = Path(__file__).parents[2] / "fixtures" / "dsl"
+CORPUS = Path(__file__).parent / "corpus"
 GROUPS = ("accepted", "held", "never-a-fault", "normalised")
 CASES = sorted(path for group in GROUPS for path in (CORPUS / group).glob("*.md"))
 
@@ -117,7 +116,8 @@ def _corpus_facts(path: Path) -> Facts:
 
 
 def _case(path: Path) -> dict[str, Any]:
-    return json.loads(path.with_suffix(".json").read_text())
+    case: dict[str, Any] = json.loads(path.with_suffix(".json").read_text())
+    return case
 
 
 def _text(path: Path) -> str:
@@ -219,7 +219,7 @@ def _messages(text: str, facts: Facts = FACTS) -> list[str]:
 
 
 class TestConformanceCorpus:
-    """Every case of `tests/fixtures/dsl/`: a document beside the parse and the
+    """Every case of `corpus/`: a document beside the parse and the
     faults expected of it, validated against `facts.json` and the case's own
     `facts`."""
 
@@ -260,9 +260,7 @@ class TestConformanceCorpus:
 
 
 class TestPurity:
-    def test_the_library_imports_only_the_standard_library_yaml_and_exceptions(
-        self,
-    ) -> None:
+    def test_the_library_imports_only_the_standard_library_and_yaml(self) -> None:
         package = Path(dsl.__file__).parent
         imported: set[str] = set()
         for module in package.glob("*.py"):
@@ -277,8 +275,7 @@ class TestPurity:
             for name in imported
             if name.split(".")[0]
             not in {"re", "collections", "dataclasses", "datetime", "enum", "yaml"}
-            and not name.startswith("app.engine.dsl")
-            and name != "app.exceptions"
+            and not name.startswith("pilot_dsl")
         }
         assert foreign == set()
 
@@ -1242,3 +1239,67 @@ class TestValidate:
         assert _messages(
             "```question id=Q1\nanswer: a\nby: ada\nto: deploy\n```\n"
         ) == ["block Q1: `to` without `answer: deferred`"]
+
+
+class TestValidateWithUnknownFacts:
+    """A caller without the record, on the store's tree, knows neither the
+    handles nor the removed tasks."""
+
+    TEXT = (
+        "---\nstep: deploy\nfor: carol\n---\n"
+        "```question id=Q1\nproposal: x\nanswer: deferred\nby: carol\nto: deploy\n```\n"
+        "```decision id=C1\ntype: confirmation\nproposal: Ship it\nbecause: hunch\n```\n"
+    )
+    STEP = "front matter: `step: deploy` names no task of the project"
+    FOR = "front matter: `for: carol` names no handle"
+    BY = "block Q1: `by: carol` names no handle"
+
+    @pytest.mark.parametrize(
+        ("unknown", "skipped"),
+        [
+            pytest.param({"handles": None}, {FOR, BY}, id="handles"),
+            pytest.param({"removed_task_ids": None}, {STEP}, id="removed-tasks"),
+            pytest.param(
+                {"handles": None, "removed_task_ids": None},
+                {STEP, FOR, BY},
+                id="both",
+            ),
+        ],
+    )
+    def test_an_unknown_fact_skips_only_the_rules_resting_on_it(
+        self, unknown: dict[str, None], skipped: set[str]
+    ) -> None:
+        known = _messages(self.TEXT, _facts(document=DocumentKind.OWN_ITEM))
+
+        assert skipped <= set(known)
+        assert _messages(
+            self.TEXT, _facts(document=DocumentKind.OWN_ITEM, **unknown)
+        ) == [message for message in known if message not in skipped]
+
+    def test_every_other_rule_judges_as_with_the_facts(self) -> None:
+        facts = _facts(
+            document=DocumentKind.OWN_ITEM, handles=None, removed_task_ids=None
+        )
+
+        assert _messages(self.TEXT, facts) == [
+            "block Q1: a question takes no `proposal`",
+            "block Q1: `to: deploy` names neither `plan` nor a task in the plan",
+            "block C1: `because: hunch` is not a confirmation reason (auto-pilot-off,"
+            " rider, irreversible, product-hold, self-approval); the reasons are in"
+            " `reference.json`",
+            "the item has no title: give it `title` in the front matter"
+            " or a first heading",
+        ]
+
+    def test_a_to_carried_unchanged_still_passes(self) -> None:
+        facts = _facts(
+            handles=None, removed_task_ids=None, published_to={"Q1": "spike"}
+        )
+
+        assert (
+            _messages(
+                "```question id=Q1\nanswer: deferred\nby: ada\nto: spike\n```\n",
+                facts,
+            )
+            == []
+        )

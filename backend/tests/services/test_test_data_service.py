@@ -8,6 +8,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import pilot_dsl as dsl
 import pytest
 from flask import Flask
 from sqlalchemy import select
@@ -16,7 +17,6 @@ from sqlalchemy.orm import Session as DbSession
 from app import models
 from app.app import App
 from app.database import scoped_session
-from app.engine import dsl
 from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved
 from app.engine.tree import TreeDocument, TreeFile, TreePlan
 from app.exceptions import (

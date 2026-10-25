@@ -10,11 +10,11 @@ import mimetypes
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from pilot_dsl import parse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.engine.bus import EngineBus, TreeHashMoved
-from app.engine.dsl.reader import parse
 from app.engine.paths import attachment_path, tree_path
 from app.engine.views import ViewService
 from app.exceptions import ValidationException

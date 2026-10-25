@@ -16,7 +16,7 @@ from enum import StrEnum
 
 import yaml
 
-from app.engine.dsl.document import (
+from pilot_dsl.document import (
     AnswerChannel,
     Block,
     BlockKind,
@@ -107,12 +107,17 @@ class Facts:
     project's (decision 19); a `to` the save writes or changes must name a
     task in the plan (DB 203). `published_to` is each `to` of the published
     text by block id: one the save carries unchanged is not checked again.
+
+    `handles` or `removed_task_ids` is none where the caller cannot know it,
+    as on the store's tree, which carries neither: the rules resting on it,
+    the handle of `for` and of a block's `by` or the front matter's `step`,
+    are then skipped, and every other rule judges as it does with it.
     """
 
     document: DocumentKind
-    handles: AbstractSet[str]
+    handles: AbstractSet[str] | None
     plan_task_ids: AbstractSet[str]
-    removed_task_ids: AbstractSet[str]
+    removed_task_ids: AbstractSet[str] | None
     confirmation_reasons: Sequence[str]
     taken_slugs: AbstractSet[str]
     published_to: Mapping[str, str]
@@ -303,6 +308,7 @@ def validate(document: ParsedDocument, facts: Facts) -> list[Fault]:
     step = front_matter.step
     if (
         step is not None
+        and facts.removed_task_ids is not None
         and step not in facts.plan_task_ids
         and step not in facts.removed_task_ids
     ):
@@ -313,7 +319,11 @@ def validate(document: ParsedDocument, facts: Facts) -> list[Fault]:
             )
         )
     addressee = front_matter.addressee
-    if addressee is not None and addressee not in facts.handles:
+    if (
+        addressee is not None
+        and facts.handles is not None
+        and addressee not in facts.handles
+    ):
         faults.append(
             Fault(
                 lines["for"].first, f"front matter: `for: {addressee}` names no handle"
@@ -359,7 +369,11 @@ def _record_faults(block: Block, facts: Facts) -> list[Fault]:
                 f" ({reasons}); the reasons are in `reference.json`",
             )
         )
-    if block.by is not None and block.by not in facts.handles:
+    if (
+        block.by is not None
+        and facts.handles is not None
+        and block.by not in facts.handles
+    ):
         faults.append(
             Fault(block.lines["by"].first, f"{prefix}`by: {block.by}` names no handle")
         )

@@ -1,10 +1,11 @@
 """The reference entities: the enum types, and the four tables' rows the revisions write."""
 
+import pilot_dsl
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.models import ConfirmationReason, DoneCause, ItemKind, SessionKind
-from app.models.reference import ENUM_TYPES
+from app.models.reference import ENUM_TYPES, AnswerChannel, BlockKind
 from tests.support.database import violated_constraint
 
 
@@ -42,6 +43,18 @@ class TestEnumTypes:
             "close_cause",
             "effect_kind",
             "task_status",
+        }
+
+
+class TestTheBlockDsl:
+    def test_its_answer_channels_are_the_record_s(self) -> None:
+        assert {str(channel) for channel in pilot_dsl.AnswerChannel} == {
+            str(channel) for channel in AnswerChannel
+        }
+
+    def test_its_block_kinds_are_the_record_s(self) -> None:
+        assert {str(kind) for kind in pilot_dsl.BlockKind} == {
+            str(kind) for kind in BlockKind
         }
 
 

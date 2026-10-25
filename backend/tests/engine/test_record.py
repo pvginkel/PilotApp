@@ -7,6 +7,7 @@ import json
 import uuid
 from datetime import UTC, datetime
 
+import pilot_dsl
 import pytest
 from flask import Flask
 from psycopg.errors import LockNotAvailable
@@ -254,6 +255,21 @@ def _task(
     session.add(task)
     session.flush()
     return task
+
+
+def _writer_without_the_block(
+    monkeypatch: pytest.MonkeyPatch, writer: str, local_id: str
+) -> None:
+    """The DSL's `writer` handed the text with block `local_id` gone, which
+    the engine's own look-up of the block keeps from it: its real refusal."""
+    real = getattr(pilot_dsl, writer)
+    monkeypatch.setattr(
+        pilot_dsl,
+        writer,
+        lambda text, *args, **kwargs: real(
+            text.replace(f"id={local_id}", "id=Z9"), *args, **kwargs
+        ),
+    )
 
 
 def _done(item: Item) -> tuple[datetime | None, str | None, uuid.UUID | None]:
@@ -653,6 +669,34 @@ class TestRecordServiceAnswer:
         assert (block.answer, block.done_at) == ("deferred", None)
         assert _done(item) == (block.answered_at, "answered", person.id)
 
+    def test_a_refusal_of_the_writer_is_an_invalid_operation(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _, document = _bear(
+            session,
+            container,
+            project,
+            project_session,
+            "decision",
+            "Which tent?",
+            DECISION,
+        )
+        _writer_without_the_block(monkeypatch, "write_answer", "D1")
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.record_service().answer(document, "D1", person, "Tunnel")
+
+        assert refused.value.message == (
+            "Cannot write an answer into block D1 because the text has no block D1"
+        )
+        assert document.published_text == DECISION
+
 
 class TestRecordServiceDoneAction:
     def test_done_writes_done_and_by_with_the_paste_back(
@@ -827,6 +871,34 @@ class TestRecordServiceDoneAction:
             records.done_action(document, "A1", person)
 
         assert refused.value.cause == "the item is done"
+
+    def test_a_refusal_of_the_writer_is_an_invalid_operation(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _, document = _bear(
+            session,
+            container,
+            project,
+            project_session,
+            "action",
+            "Put the key into OpenBao",
+            ACTION,
+        )
+        _writer_without_the_block(monkeypatch, "write_done", "A1")
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.record_service().done_action(document, "A1", person)
+
+        assert refused.value.message == (
+            "Cannot mark block A1 done because the text has no block A1"
+        )
+        assert document.published_text == ACTION
 
 
 class TestRecordServiceUndo:
@@ -1094,6 +1166,37 @@ class TestRecordServiceUndo:
             container.record_service().undo(work)
 
         assert refused.value.cause == "a work item offers no undo"
+
+    def test_a_refusal_of_the_writer_is_an_invalid_operation(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        item, document = _bear(
+            session,
+            container,
+            project,
+            project_session,
+            "decision",
+            "Which tent?",
+            DECISION,
+        )
+        records = container.record_service()
+        records.answer(document, "D1", person, "Tunnel")
+        answered = document.published_text
+        _writer_without_the_block(monkeypatch, "clear_answer", "D1")
+
+        with pytest.raises(InvalidOperationException) as refused:
+            records.undo(item)
+
+        assert refused.value.message == (
+            "Cannot undo the answer of block D1 because the text has no block D1"
+        )
+        assert document.published_text == answered
 
 
 class TestRecordServiceOffersUndo:

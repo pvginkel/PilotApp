@@ -9,6 +9,7 @@
 .env
 .env.*
 tests
+packages/*/tests
 docs
 .claude
 logs

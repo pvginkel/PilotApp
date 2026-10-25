@@ -1,8 +1,8 @@
-"""The block DSL as a pure library (design 1 §9): it imports nothing of the
-database, Flask or the app's services, and takes what it validates against as
-values."""
+"""The block DSL as a pure library (design 1 §9, design 3 §7): it imports
+nothing of the database, Flask or the app, and takes what it validates against
+as values."""
 
-from app.engine.dsl.document import (
+from pilot_dsl.document import (
     AnswerChannel,
     Block,
     BlockKind,
@@ -14,7 +14,7 @@ from app.engine.dsl.document import (
     Section,
     Span,
 )
-from app.engine.dsl.reader import (
+from pilot_dsl.reader import (
     AGENT,
     ANSWER_KEYS,
     DEFERRED,
@@ -26,8 +26,9 @@ from app.engine.dsl.reader import (
     validate,
     words,
 )
-from app.engine.dsl.writer import (
+from pilot_dsl.writer import (
     Merge,
+    WriteRefused,
     clear_answer,
     merge,
     recommendation,
@@ -55,6 +56,7 @@ __all__ = [
     "Prose",
     "Section",
     "Span",
+    "WriteRefused",
     "body",
     "clear_answer",
     "merge",

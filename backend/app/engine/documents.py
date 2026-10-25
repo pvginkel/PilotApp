@@ -13,10 +13,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
 
+import pilot_dsl as dsl
 from sqlalchemy import ColumnElement, and_, func, select
 from sqlalchemy.orm import Session
 
-from app.engine import dsl
 from app.engine.bus import EngineBus, ProjectChanged, TreeHashMoved
 from app.engine.paths import DRAFT, HANDBOOK, sha256_hex, tree_path
 from app.engine.tree import TreeService

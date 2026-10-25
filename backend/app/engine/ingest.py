@@ -9,10 +9,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 
+import pilot_dsl as dsl
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from app.engine import dsl
 from app.engine.bus import (
     DocumentModified,
     EngineBus,

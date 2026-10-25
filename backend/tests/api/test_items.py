@@ -9,12 +9,12 @@ from collections.abc import Iterator
 from queue import Empty
 from typing import Any
 
+import pilot_dsl as dsl
 import pytest
 from flask.testing import FlaskClient
 from sqlalchemy.orm import Session
 
 from app import models
-from app.engine import dsl
 from app.engine.paths import tree_path
 from app.models import Document, Environment, Item, Project, User
 from app.models.reference import SessionState

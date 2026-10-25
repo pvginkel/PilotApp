@@ -8,6 +8,7 @@ import time
 import uuid
 from datetime import UTC, datetime
 
+import pilot_dsl as dsl
 import pytest
 from flask import Flask
 from psycopg.errors import LockNotAvailable
@@ -18,7 +19,6 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.database import scoped_session
-from app.engine import dsl
 from app.engine.bus import (
     DocumentModified,
     EngineEvent,

@@ -10,10 +10,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+import pilot_dsl as dsl
 from sqlalchemy import and_, delete, exists, or_, select
 from sqlalchemy.orm import Session
 
-from app.engine import dsl
 from app.engine.paths import tree_path
 from app.engine.views import Rendering, render_json, utc_time
 from app.models import (

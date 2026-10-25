@@ -1,23 +1,7 @@
 """The block DSL's types."""
 
 import pytest
-
-from app.engine.dsl import AnswerChannel, BlockKind, parse
-from app.models import reference
-
-
-class TestAnswerChannel:
-    def test_its_values_are_the_record_s(self) -> None:
-        assert {str(channel) for channel in AnswerChannel} == {
-            str(channel) for channel in reference.AnswerChannel
-        }
-
-
-class TestBlockKind:
-    def test_its_values_are_the_record_s(self) -> None:
-        assert {str(kind) for kind in BlockKind} == {
-            str(kind) for kind in reference.BlockKind
-        }
+from pilot_dsl import parse
 
 
 class TestBlock:

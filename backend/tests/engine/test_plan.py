@@ -8,12 +8,12 @@ import re
 from datetime import UTC, datetime
 from typing import Any
 
+import pilot_dsl as dsl
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
-from app.engine import dsl
 from app.engine.plan import HomelessDeferral, PlanService
 from app.models import (
     Document,

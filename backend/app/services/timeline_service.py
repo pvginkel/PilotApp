@@ -10,11 +10,11 @@ from datetime import datetime
 from pathlib import PurePosixPath
 from typing import Any, cast
 
+import pilot_dsl as dsl
 from sqlalchemy import ColumnElement, and_, func, or_, select
 from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import Session, aliased
 
-from app.engine import dsl
 from app.engine.documents import OPENING, PROSE, awaiting_read, awaits_read
 from app.engine.paths import tree_path
 from app.engine.record import MARKED, NOTICE, SETTLED, RecordService
