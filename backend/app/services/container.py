@@ -40,6 +40,7 @@ from app.services.session_record_service import SessionRecordService
 from app.services.session_start_service import SessionStartService
 from app.services.session_stream_service import SessionStreamService
 from app.services.sse_connection_manager import SSEConnectionManager
+from app.services.start_gate import WorkSlots
 from app.services.supervisor import Supervisor
 from app.services.sync_service import SyncService
 from app.services.sync_stream_service import SyncStreamService
@@ -113,6 +114,14 @@ class ServiceContainer(containers.DeclarativeContainer):
     # The controller unreachable, as this process last met it (design 2
     # §13.4): every call of the client's, and the fleet stream, turn it.
     controller_outage = providers.Singleton(ControllerOutage)
+
+    # The slot, the gate's fourth condition (design 2 §13.5): the relay and
+    # the start raise its open event at a work item's end.
+    work_slots = providers.Singleton(
+        WorkSlots,
+        work_max=app_config.provided.work_parallelism_max,
+        project_max=app_config.provided.project_parallelism_max,
+    )
 
     # The KubeCoder controller's client (design 2 §14). Its starter is
     # registered before any that starts a thread, so a refusal starts none.
@@ -212,6 +221,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         supervisor=supervisor,
         session_streams=session_stream_service,
         environment_service=environment_service,
+        work_slots=work_slots,
     )
     register_for_background_startup(lambda c: c.relay_service())
     # The relays' watchdog, on the fleet stream (design 2 §9.3); its timer
@@ -231,6 +241,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         environment_service=environment_service,
         relay_service=relay_service,
         controller_outage=controller_outage,
+        work_slots=work_slots,
         controller_configured=providers.Callable(
             lambda url: url is not None, app_config.provided.controller_url
         ),
@@ -331,6 +342,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         db=db_session,
         record_service=record_service,
         controller_outage=controller_outage,
+        work_slots=work_slots,
     )
     # An attachment's bytes, streamed (F28.5, F36)
     attachment_service = providers.Factory(

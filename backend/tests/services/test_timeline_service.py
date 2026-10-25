@@ -52,7 +52,11 @@ from app.services.container import ServiceContainer
 from app.services.controller_outage import ControllerOutage
 from app.services.relay_service import ENVIRONMENT_STOPPED
 from app.services.session_record_service import SessionRecordService
+from app.services.start_gate import WorkSlots
 from app.services.timeline_service import Badge, work_status
+
+SLOTS = WorkSlots(work_max=3, project_max=3)
+"""The slot of the defaults: the work items these tests place leave it room."""
 
 ADA = AuthContext(
     subject="subject-ada", email=None, name="Ada Example", roles={"editor"}
@@ -1418,6 +1422,7 @@ class TestTimeline:
             "error": None,
             "autopilot": False,
             "held_reason": None,
+            "held_running": None,
             "stopped_at": None,
             "stopped_by": None,
             "stopped_cause": None,
@@ -1590,14 +1595,17 @@ class TestWorkStatus:
         notice = _bear(container, project, no_work, "notice", "The site", NOTICE)
 
         found = work_status(
-            session, [work.id, no_work.id, notice.id, uuid.uuid4()], unreachable=False
+            session,
+            [work.id, no_work.id, notice.id, uuid.uuid4()],
+            unreachable=False,
+            slots=SLOTS,
         )
 
         assert list(found) == [work.id]
         assert found[work.id].state == SessionState.RUNNING
 
     def test_no_ids_read_nothing(self, session: DbSession) -> None:
-        assert work_status(session, [], unreachable=False) == {}
+        assert work_status(session, [], unreachable=False, slots=SLOTS) == {}
 
     @pytest.mark.parametrize(
         "state", [SessionState.HELD, SessionState.STOPPED, SessionState.FAILED]
@@ -1615,7 +1623,9 @@ class TestWorkStatus:
         placed = _work(session, project, None, state)
         running = _work(session, project, environment, SessionState.RUNNING)
 
-        found = work_status(session, [placed.id, running.id], unreachable=False)
+        found = work_status(
+            session, [placed.id, running.id], unreachable=False, slots=SLOTS
+        )
 
         assert found[placed.id].state == state
         assert found[placed.id].environment is None
@@ -1632,13 +1642,47 @@ class TestWorkStatus:
         environment.name = environment.id
         session.flush()
 
-        found = work_status(session, [idle.id], unreachable=False)[idle.id]
+        found = work_status(session, [idle.id], unreachable=False, slots=SLOTS)[idle.id]
 
         assert found.environment is not None
         assert (found.environment.id, found.environment.name) == (
             environment.id,
             environment.id,
         )
+
+    @pytest.mark.parametrize(
+        ("work_max", "project_max", "running"),
+        [
+            # Across every project, or the project's own.
+            (2, 3, 2),
+            (3, 1, 1),
+        ],
+    )
+    def test_a_held_one_waiting_for_a_slot_counts_the_work_items_that_fill_it(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        work_max: int,
+        project_max: int,
+        running: int,
+    ) -> None:
+        """F143.4: "Waiting for a slot · N running"."""
+        project = _make(container)
+        _work(session, project, environment, SessionState.RUNNING)
+        _work(
+            session, _make(container, name="Site"), environment, SessionState.STARTING
+        )
+        held = _work(session, project, environment, SessionState.HELD)
+
+        found = work_status(
+            session,
+            [held.id],
+            unreachable=False,
+            slots=WorkSlots(work_max=work_max, project_max=project_max),
+        )[held.id]
+
+        assert (found.held_reason, found.held_running) == (HeldReason.SLOT, running)
 
     @pytest.mark.parametrize(
         ("paused", "unreachable", "reason"),
@@ -1664,9 +1708,12 @@ class TestWorkStatus:
         held = _work(session, project, environment, SessionState.HELD)
         running = _work(session, project, environment, SessionState.RUNNING)
 
-        found = work_status(session, [held.id, running.id], unreachable=unreachable)
+        found = work_status(
+            session, [held.id, running.id], unreachable=unreachable, slots=SLOTS
+        )
 
         assert found[held.id].held_reason == reason
+        assert found[held.id].held_running is None
         assert found[running.id].held_reason is None
 
     @pytest.mark.parametrize("by_a_person", [True, False])
@@ -1685,7 +1732,9 @@ class TestWorkStatus:
         run.stopped_by_user_id = person.id if by_a_person else None
         session.flush()
 
-        work = work_status(session, [stopped.id], unreachable=False)[stopped.id]
+        work = work_status(session, [stopped.id], unreachable=False, slots=SLOTS)[
+            stopped.id
+        ]
 
         assert work.stopped_at == datetime(2026, 10, 24, 9, 5, tzinfo=UTC)
         assert (work.stopped_by is not None and work.stopped_by.handle) == (
@@ -1707,7 +1756,7 @@ class TestWorkStatus:
         run.stopped_by_user_id = person.id
         session.flush()
 
-        work = work_status(session, [held.id], unreachable=False)[held.id]
+        work = work_status(session, [held.id], unreachable=False, slots=SLOTS)[held.id]
 
         assert (work.stopped_at, work.stopped_by) == (None, None)
 
@@ -1725,7 +1774,9 @@ class TestWorkStatus:
         run.stopped_at = datetime(2026, 10, 24, 9, 5, tzinfo=UTC)
         _stop_record(container, session, run, cause)
 
-        work = work_status(session, [stopped.id], unreachable=False)[stopped.id]
+        work = work_status(session, [stopped.id], unreachable=False, slots=SLOTS)[
+            stopped.id
+        ]
 
         assert (work.stopped_cause, work.stopped_by) == (cause, None)
 
@@ -1743,7 +1794,9 @@ class TestWorkStatus:
         run.stopped_by_user_id = person.id
         _stop_record(container, session, run, StopCause.ENVIRONMENT_STOPPED)
 
-        work = work_status(session, [stopped.id], unreachable=False)[stopped.id]
+        work = work_status(session, [stopped.id], unreachable=False, slots=SLOTS)[
+            stopped.id
+        ]
 
         assert work.stopped_cause is None
 
@@ -1768,7 +1821,9 @@ class TestWorkStatus:
             controller_session="claude-2",
         )
 
-        work = work_status(session, [stopped.id], unreachable=False)[stopped.id]
+        work = work_status(session, [stopped.id], unreachable=False, slots=SLOTS)[
+            stopped.id
+        ]
 
         assert work.stopped_cause is None
 
@@ -1783,7 +1838,7 @@ class TestWorkStatus:
         run = session.get_one(models.Session, held.id)
         _stop_record(container, session, run, StopCause.ENVIRONMENT_STOPPED)
 
-        work = work_status(session, [held.id], unreachable=False)[held.id]
+        work = work_status(session, [held.id], unreachable=False, slots=SLOTS)[held.id]
 
         assert work.stopped_cause is None
 

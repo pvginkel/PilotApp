@@ -101,6 +101,22 @@ class AppEnvironment(BaseSettings):
             "timer deletes it"
         ),
     )
+    WORK_PARALLELISM_MAX: int = Field(
+        default=3,
+        gt=0,
+        description=(
+            "Work items running or starting across every project at which the "
+            "gate holds a work item's start (F143.4)"
+        ),
+    )
+    PROJECT_PARALLELISM_MAX: int | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Work items running or starting in one project at which the gate "
+            "holds its work items' starts; unset, WORK_PARALLELISM_MAX (F143.4)"
+        ),
+    )
 
 
 class AppSettings(BaseModel):
@@ -176,6 +192,14 @@ class AppSettings(BaseModel):
     """How long an environment of Pilot's own stands free before the delete
     timer deletes it (design 2 §13.5)."""
 
+    work_parallelism_max: int = 3
+    """The work items running or starting across every Project at which the
+    gate holds a work item's start (design 2 §13.5; F143.4)."""
+
+    project_parallelism_max: int = 3
+    """The work items running or starting in one Project at which the gate
+    holds its work items' starts (design 2 §13.5; F143.4)."""
+
     def dump_for_logging(self) -> dict[str, str]:
         """Every setting, for the boot log, with the Sensitive ones as ``***``."""
         return dump_config_for_logging(self)
@@ -203,4 +227,10 @@ class AppSettings(BaseModel):
             scheduler_tick_seconds=env.SCHEDULER_TICK_SECONDS,
             environment_stop_after_seconds=env.ENVIRONMENT_STOP_AFTER_SECONDS,
             environment_delete_after_seconds=env.ENVIRONMENT_DELETE_AFTER_SECONDS,
+            work_parallelism_max=env.WORK_PARALLELISM_MAX,
+            project_parallelism_max=(
+                env.WORK_PARALLELISM_MAX
+                if env.PROJECT_PARALLELISM_MAX is None
+                else env.PROJECT_PARALLELISM_MAX
+            ),
         )

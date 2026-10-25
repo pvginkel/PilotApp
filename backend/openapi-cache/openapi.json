@@ -1765,10 +1765,11 @@
         "type": "object"
       },
       "ItemDocumentSchema.1fdd8ae.HeldReason": {
-        "description": "Why the gate holds a start (design 2 §13.4; F26.1): its project paused,\nor the controller unreachable. Read at display, never stored (decision\n53).",
+        "description": "Why the gate holds a start (design 2 §13.4, §13.5; F26.1, F143.4): its\nproject paused, the controller unreachable, or, a work item's, no slot\nfree. Read at display, never stored (decision 53).",
         "enum": [
           "paused",
-          "controller_unreachable"
+          "controller_unreachable",
+          "slot"
         ],
         "title": "HeldReason",
         "type": "string"
@@ -2111,7 +2112,19 @@
                 "type": "null"
               }
             ],
-            "description": "Why the gate holds its start, which its line says: its project paused, or the controller unreachable; null unless `state` is `held`, and while the gate opens for it (F26.1, F141.5)"
+            "description": "Why the gate holds its start, which its line says: its project paused, the controller unreachable, or no slot free; null unless `state` is `held`, and while the gate opens for it (F26.1, F141.5, F143.4)"
+          },
+          "held_running": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The running work items that leave it no slot, which its line counts, \"Waiting for a slot · N running\": those across every project, or its project's own, whichever maximum closed the gate; null unless `held_reason` is `slot` (F143.4)",
+            "title": "Held Running"
           },
           "started_at": {
             "anyOf": [
@@ -2174,6 +2187,7 @@
           "error",
           "autopilot",
           "held_reason",
+          "held_running",
           "stopped_at",
           "stopped_by",
           "stopped_cause"
@@ -5145,10 +5159,11 @@
         "type": "object"
       },
       "TimelineSchema.1fdd8ae.HeldReason": {
-        "description": "Why the gate holds a start (design 2 §13.4; F26.1): its project paused,\nor the controller unreachable. Read at display, never stored (decision\n53).",
+        "description": "Why the gate holds a start (design 2 §13.4, §13.5; F26.1, F143.4): its\nproject paused, the controller unreachable, or, a work item's, no slot\nfree. Read at display, never stored (decision 53).",
         "enum": [
           "paused",
-          "controller_unreachable"
+          "controller_unreachable",
+          "slot"
         ],
         "title": "HeldReason",
         "type": "string"
@@ -5777,7 +5792,19 @@
                 "type": "null"
               }
             ],
-            "description": "Why the gate holds its start, which its line says: its project paused, or the controller unreachable; null unless `state` is `held`, and while the gate opens for it (F26.1, F141.5)"
+            "description": "Why the gate holds its start, which its line says: its project paused, the controller unreachable, or no slot free; null unless `state` is `held`, and while the gate opens for it (F26.1, F141.5, F143.4)"
+          },
+          "held_running": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The running work items that leave it no slot, which its line counts, \"Waiting for a slot · N running\": those across every project, or its project's own, whichever maximum closed the gate; null unless `held_reason` is `slot` (F143.4)",
+            "title": "Held Running"
           },
           "started_at": {
             "anyOf": [
@@ -5840,6 +5867,7 @@
           "error",
           "autopilot",
           "held_reason",
+          "held_running",
           "stopped_at",
           "stopped_by",
           "stopped_cause"
@@ -6057,7 +6085,19 @@
                 "type": "null"
               }
             ],
-            "description": "Why the gate holds its start, which its line says: its project paused, or the controller unreachable; null unless `state` is `held`, and while the gate opens for it (F26.1, F141.5)"
+            "description": "Why the gate holds its start, which its line says: its project paused, the controller unreachable, or no slot free; null unless `state` is `held`, and while the gate opens for it (F26.1, F141.5, F143.4)"
+          },
+          "held_running": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The running work items that leave it no slot, which its line counts, \"Waiting for a slot · N running\": those across every project, or its project's own, whichever maximum closed the gate; null unless `held_reason` is `slot` (F143.4)",
+            "title": "Held Running"
           },
           "started_at": {
             "anyOf": [
@@ -6120,6 +6160,7 @@
           "error",
           "autopilot",
           "held_reason",
+          "held_running",
           "stopped_at",
           "stopped_by",
           "stopped_cause"
@@ -6225,10 +6266,11 @@
         "type": "object"
       },
       "WorkSchema.1fdd8ae.HeldReason": {
-        "description": "Why the gate holds a start (design 2 §13.4; F26.1): its project paused,\nor the controller unreachable. Read at display, never stored (decision\n53).",
+        "description": "Why the gate holds a start (design 2 §13.4, §13.5; F26.1, F143.4): its\nproject paused, the controller unreachable, or, a work item's, no slot\nfree. Read at display, never stored (decision 53).",
         "enum": [
           "paused",
-          "controller_unreachable"
+          "controller_unreachable",
+          "slot"
         ],
         "title": "HeldReason",
         "type": "string"

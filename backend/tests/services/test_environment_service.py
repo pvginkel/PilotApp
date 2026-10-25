@@ -10,7 +10,6 @@ taken, renamed or deleted, nor one a Session holds, a stopped or failed work
 item's among them (`TestTake`, `TestDeleteTimer`)."""
 
 import json
-import threading
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -45,7 +44,8 @@ from app.services.environment_service import (
 )
 from app.services.fake_controller import CLIENT_NAME, FakeController
 from tests.support.fake_controller import ServedFakeController, client_of
-from tests.support.supervisor import WAIT_SECONDS, Supervise, listening, wait_until
+from tests.support.locks import Outcome, in_thread, lock_waits
+from tests.support.supervisor import Supervise, listening, wait_until
 
 STOP_AFTER = timedelta(minutes=30)
 DELETE_AFTER = timedelta(days=7)
@@ -1012,7 +1012,7 @@ class TestStart:
         fake_controller.add_environment(ENV, status="stopped")
         fake_controller.settle_starts(ENV, None)
 
-        outcome = _in_thread(lambda: service.start(ENV))
+        outcome = in_thread(lambda: service.start(ENV))
         wait_until(
             lambda: _committed(container, "server_started_at") is not None,
             "marked Pilot's",
@@ -1034,7 +1034,7 @@ class TestStart:
         fake_controller.add_environment(ENV, status="stopped")
         fake_controller.settle_starts(ENV, None)
 
-        outcome = _in_thread(lambda: service.start(ENV))
+        outcome = in_thread(lambda: service.start(ENV))
         wait_until(
             lambda: any("wait=settled" in call for call in fake_controller.calls),
             "waiting",
@@ -1229,7 +1229,7 @@ class TestReset:
         fake_controller.add_environment(ENV, status="stopped")
         fake_controller.settle_starts(ENV, None)
 
-        outcome = _in_thread(lambda: service.reset(ENV))
+        outcome = in_thread(lambda: service.reset(ENV))
         wait_until(
             lambda: _committed(container, "server_started_at") is not None,
             "claimed",
@@ -1404,8 +1404,8 @@ class TestArmShutdownTimer:
             _end_turn(first, first_id)
             service.arm_shutdown_timer(first, ENV)
             _end_turn(second, second_id)
-            arming = _in_thread(lambda: _arm_and_commit(service, second))
-            wait_until(lambda: _lock_waits(container) == 1, "waiting on the row")
+            arming = in_thread(lambda: _arm_and_commit(service, second))
+            wait_until(lambda: lock_waits(container) == 1, "waiting on the row")
 
             # The first saw the second Session still running.
             assert _committed(container, "stop_due_at") is None
@@ -1856,11 +1856,11 @@ class TestShutdownTimer:
             fake.add_environment(ENV, status="running")
             with scoped_session(container) as db:
                 _environment(db, pod=_pod(fake), due=_overdue())
-            other: list[_Outcome] = []
+            other: list[Outcome] = []
 
             def other_tick() -> None:
                 # Another process's tick, while this one holds the row.
-                other.append(_in_thread(lambda: _tick(container, service)))
+                other.append(in_thread(lambda: _tick(container, service)))
                 other[0].result()
 
             fake.during_stop = other_tick
@@ -2103,7 +2103,7 @@ class TestDeleteTimer:
 
             def other_tick() -> None:
                 # Another process's tick, while this one holds the row.
-                _in_thread(lambda: _delete_tick(container, service)).result()
+                in_thread(lambda: _delete_tick(container, service)).result()
 
             fake.during["DELETE"] = other_tick
             _delete_tick(container, service)
@@ -2131,7 +2131,7 @@ class TestDeleteTimer:
                     with scoped_session(container) as db:
                         taken.append(_taken(service, db))
 
-                _in_thread(run).result()
+                in_thread(run).result()
 
             fake.during["rename"] = take
             _delete_tick(container, service)
@@ -2200,31 +2200,6 @@ def _take_and_start(
         return _agent_session(
             db, db.get_one(Project, project_id), SessionState.STARTING
         ).id
-
-
-class _Outcome:
-    def __init__(self, run: Callable[[], Any]) -> None:
-        self._value: Any = None
-        self._error: BaseException | None = None
-        self.thread = threading.Thread(target=self._run, args=(run,), daemon=True)
-        self.thread.start()
-
-    def _run(self, run: Callable[[], Any]) -> None:
-        try:
-            self._value = run()
-        except BaseException as error:
-            self._error = error
-
-    def result(self) -> Any:
-        self.thread.join(WAIT_SECONDS)
-        assert not self.thread.is_alive(), "the thread did not finish"
-        if self._error is not None:
-            raise self._error
-        return self._value
-
-
-def _in_thread(run: Callable[[], Any]) -> _Outcome:
-    return _Outcome(run)
 
 
 class _StopHook(ServedFakeController):
@@ -2400,15 +2375,3 @@ def _committed(container: ServiceContainer, column: str) -> Any:
     with scoped_session(container) as db:
         row = _row(db)
         return None if row is None else getattr(row, column)
-
-
-def _lock_waits(container: ServiceContainer) -> int:
-    """The connections of the app's database waiting on a lock."""
-    with scoped_session(container) as db:
-        waits: int = db.scalar(
-            text(
-                "SELECT count(*) FROM pg_stat_activity"
-                " WHERE datname = current_database() AND wait_event_type = 'Lock'"
-            )
-        )
-        return waits

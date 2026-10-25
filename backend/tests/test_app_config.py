@@ -153,6 +153,42 @@ class TestAppSettings:
         with pytest.raises(ValidationError, match="ENVIRONMENT_DELETE_AFTER_SECONDS"):
             AppEnvironment(_env_file=None, ENVIRONMENT_DELETE_AFTER_SECONDS=0)
 
+    def test_the_slot_is_three_work_items_across_every_project_and_in_each_by_default(
+        self,
+    ) -> None:
+        settings = AppSettings.load(AppEnvironment(_env_file=None))
+
+        assert (settings.work_parallelism_max, settings.project_parallelism_max) == (
+            3,
+            3,
+        )
+
+    def test_load_reads_the_slots_maxima_from_the_environment(self) -> None:
+        settings = AppSettings.load(
+            AppEnvironment(
+                _env_file=None, WORK_PARALLELISM_MAX=5, PROJECT_PARALLELISM_MAX=2
+            )
+        )
+
+        assert (settings.work_parallelism_max, settings.project_parallelism_max) == (
+            5,
+            2,
+        )
+
+    def test_the_per_project_maximum_unset_is_the_cross_project_one(self) -> None:
+        settings = AppSettings.load(
+            AppEnvironment(_env_file=None, WORK_PARALLELISM_MAX=5)
+        )
+
+        assert settings.project_parallelism_max == 5
+
+    @pytest.mark.parametrize(
+        "name", ["WORK_PARALLELISM_MAX", "PROJECT_PARALLELISM_MAX"]
+    )
+    def test_load_refuses_a_maximum_below_one(self, name: str) -> None:
+        with pytest.raises(ValidationError, match=name):
+            AppEnvironment.model_validate({name: 0})
+
     def test_the_controller_token_is_hidden_in_the_log(self) -> None:
         settings = AppSettings(
             controller_url="https://controller.example", controller_token="a-token"
@@ -182,6 +218,8 @@ class TestAppSettings:
             "scheduler_tick_seconds": repr(10.0),
             "environment_stop_after_seconds": repr(1800.0),
             "environment_delete_after_seconds": repr(604800.0),
+            "work_parallelism_max": "3",
+            "project_parallelism_max": "3",
         }
 
     def test_the_link_settings_are_unset_by_default(self) -> None:
@@ -246,4 +284,6 @@ class TestAppSettings:
             "scheduler_tick_seconds": repr(10.0),
             "environment_stop_after_seconds": repr(1800.0),
             "environment_delete_after_seconds": repr(604800.0),
+            "work_parallelism_max": "3",
+            "project_parallelism_max": "3",
         }

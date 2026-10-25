@@ -9,6 +9,7 @@ called as its loop calls it. `TestStartLoop` and `TestHeldLoop` run the loops
 from the write's commit on a database of their own, as the supervisor does."""
 
 import json
+import threading
 import uuid
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
@@ -18,7 +19,9 @@ import pytest
 import requests
 from dependency_injector import providers
 from flask import Flask
-from sqlalchemy import select
+from psycopg.errors import LockNotAvailable
+from sqlalchemy import select, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session as DbSession
 from werkzeug.wrappers import Request, Response
 
@@ -54,6 +57,7 @@ from app.services.session_start_service import (
     STARTING,
     SessionStartService,
 )
+from app.services.start_gate import WorkSlots
 from app.services.supervisor import LoopHandle
 from app.services.timeline_service import work_status
 from app.utils import after_commit as after_commit_module
@@ -65,7 +69,14 @@ from tests.support.fake_controller import (
     client_of,
     raw_turn,
 )
-from tests.support.supervisor import LogWaiter, Supervise, listening, wait_until
+from tests.support.locks import in_thread, lock_waits
+from tests.support.supervisor import (
+    WAIT_SECONDS,
+    LogWaiter,
+    Supervise,
+    listening,
+    wait_until,
+)
 
 REPO = "example/Example"
 SLUG = "camp"
@@ -215,9 +226,12 @@ def _services(
     delete_after: timedelta = DELETE_AFTER,
     controller_configured: bool = True,
     outage: ControllerOutage | None = None,
+    work_max: int = 3,
+    project_max: int = 3,
 ) -> tuple[SessionStartService, EnvironmentService, LifecycleCoordinator]:
     """The start's services on a supervisor of their own, on the client's
-    outage unless `outage` gives another, as a process of its own has."""
+    outage unless `outage` gives another, and on a slot of their own of
+    `work_max` and `project_max`, as a process of its own has."""
     supervisor, coordinator = supervise(container)
     environments = EnvironmentService(
         container=container,
@@ -225,11 +239,13 @@ def _services(
         stop_after_seconds=stop_after.total_seconds(),
         delete_after_seconds=delete_after.total_seconds(),
     )
+    slots = WorkSlots(work_max=work_max, project_max=project_max)
     relays = RelayService(
         container=container,
         supervisor=supervisor,
         session_streams=container.session_stream_service(),
         environment_service=environments,
+        work_slots=slots,
     )
     starts = SessionStartService(
         container=container,
@@ -238,6 +254,7 @@ def _services(
         environment_service=environments,
         relay_service=relays,
         controller_outage=outage or container.controller_outage(),
+        work_slots=slots,
         controller_configured=controller_configured,
     )
     return starts, environments, coordinator
@@ -648,7 +665,9 @@ class TestRun:
             "since": preparing.at.isoformat(),
             "text": "Preparing camp…",
         }
-        status = work_status(session, [run.id], unreachable=False)[run.id]
+        status = work_status(session, [run.id], unreachable=False, slots=starts._slots)[
+            run.id
+        ]
         assert status.environment is not None
         assert (status.environment.id, status.environment.name) == (
             run.environment_id,
@@ -1224,7 +1243,9 @@ class TestRunTakes:
         assert fake.environment(env_id).name is None
         row = _row(session, env_id)
         assert row.name == env_id and row.delete_due_at is not None
-        chip = work_status(session, [first.id], unreachable=False)[first.id]
+        chip = work_status(session, [first.id], unreachable=False, slots=starts._slots)[
+            first.id
+        ]
         assert chip.environment is not None and chip.environment.name == env_id
 
         # The shutdown timer stopped it, as the fleet reports.
@@ -1244,7 +1265,9 @@ class TestRunTakes:
         row = _row(session, env_id)
         assert (row.name, row.delete_due_at) == ("dune", None)
         # The env chip shows the row as it stands.
-        chip = work_status(session, [first.id], unreachable=False)[first.id]
+        chip = work_status(session, [first.id], unreachable=False, slots=starts._slots)[
+            first.id
+        ]
         assert chip.environment is not None and chip.environment.name == "dune"
 
 
@@ -1820,9 +1843,9 @@ class TestStartThroughTheGate:
         work = _start_work(starts, session, project)
 
         assert session.get_one(Item, work.id).done_at is None
-        status = work_status(session, [work.id], unreachable=controller_outage.holds)[
-            work.id
-        ]
+        status = work_status(
+            session, [work.id], unreachable=controller_outage.holds, slots=starts._slots
+        )[work.id]
         assert (status.state, status.held_reason) == (SessionState.HELD, reason)
         assert status.current_line is None
         # Held before its start provides one, it has none (DB 107).
@@ -2858,7 +2881,7 @@ class TestHeldLoop:
             ).id
             # The controller answering again before this write's commit: the
             # release its off opened found nothing held. The pause cannot
-            # lift so, as the write holds the project's row under a share lock.
+            # lift so, as the write holds the project's row under its lock.
             committed_fake.outage(on=False)
             outage.probe_answered()
 
@@ -3457,7 +3480,12 @@ class TestResume:
         run = _read(session, run.id)
         assert run.state_code == SessionState.RUNNING
         assert [turn.message for turn in _turns(session, run.id)] == [BRIEF, CONTINUE]
-        assert work_status(session, [run.id], unreachable=False)[run.id].error is None
+        assert (
+            work_status(session, [run.id], unreachable=False, slots=starts._slots)[
+                run.id
+            ].error
+            is None
+        )
 
     def test_while_the_gate_is_closed_it_is_held_and_runs_once_it_opens(
         self,
@@ -3481,7 +3509,9 @@ class TestResume:
         clear_after_commit_callbacks()
         _, resumed = _turns(session, run.id)
         assert (resumed.message, resumed.ended_at) == (CONTINUE, None)
-        status = work_status(session, [run.id], unreachable=True)[run.id]
+        status = work_status(session, [run.id], unreachable=True, slots=starts._slots)[
+            run.id
+        ]
         assert status.held_reason == HeldReason.CONTROLLER_UNREACHABLE
         # Held in the environment it is bound to, its chip as the row stands.
         assert status.environment is not None
@@ -3511,7 +3541,7 @@ class TestResume:
         clear_after_commit_callbacks()
 
         assert run.state_code == SessionState.HELD
-        assert work_status(session, [run.id], unreachable=False)[
+        assert work_status(session, [run.id], unreachable=False, slots=starts._slots)[
             run.id
         ].held_reason == (HeldReason.PAUSED)
 
@@ -3861,3 +3891,568 @@ class TestStartInAClosedProject:
 
         assert session.scalars(select(Item).where(Item.kind_code == "work")).all() == []
         assert fake.calls == []
+
+
+def _occupying(
+    db: DbSession,
+    project: Project,
+    count: int,
+    state: SessionState = SessionState.RUNNING,
+    *,
+    kind_code: str = "work",
+) -> None:
+    """`count` Sessions of the project's in `state`, as their rows have them:
+    work items' take their slots running or starting."""
+    db.add_all(
+        models.Session(
+            project_id=project.id,
+            kind_code=kind_code,
+            cwd=CWD,
+            token_hash=uuid.uuid4().hex,
+            state_code=state,
+        )
+        for _ in range(count)
+    )
+    db.flush()
+
+
+@pytest.fixture
+def slotted(
+    container: ServiceContainer, fake: _Recording, supervise: Supervise
+) -> SessionStartService:
+    """The session starts with 2 slots across every project and 1 in each."""
+    return _services(container, supervise, work_max=2, project_max=1)[0]
+
+
+def _held_for(
+    starts: SessionStartService, db: DbSession, work_id: uuid.UUID
+) -> tuple[HeldReason | None, int | None]:
+    status = work_status(db, [work_id], unreachable=False, slots=starts._slots)[work_id]
+    return status.held_reason, status.held_running
+
+
+class TestSlot:
+    """The slot, the gate's fourth condition, for a work item's start alone
+    (§13.4, §13.5; F143.4; DB 243; V04)."""
+
+    def test_a_start_waits_for_a_slot_while_the_work_items_of_every_project_fill_it(
+        self,
+        slotted: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        _occupying(session, _project_named(session, person, "site"), 1)
+        _occupying(
+            session, _project_named(session, person, "shop"), 1, SessionState.STARTING
+        )
+
+        work = _start_work(slotted, session, project)
+
+        run = _read(session, work.id)
+        assert (run.state_code, run.environment_id) == (SessionState.HELD, None)
+        assert _server(session, run.id) == []
+        assert fake.calls == []
+        assert _held_for(slotted, session, work.id) == (HeldReason.SLOT, 2)
+
+    def test_a_start_waits_for_a_slot_while_its_projects_work_items_fill_it(
+        self,
+        slotted: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        _occupying(session, project, 1)
+
+        held = _start_work(slotted, session, project)
+
+        assert _read(session, held.id).state_code == SessionState.HELD
+        assert _held_for(slotted, session, held.id) == (HeldReason.SLOT, 1)
+        elsewhere = _start_work(
+            slotted, session, _project_named(session, person, "site")
+        )
+        assert _read(session, elsewhere.id).state_code == SessionState.STARTING
+
+    def test_a_chat_a_job_and_a_work_item_that_has_ended_take_no_slot(
+        self,
+        container: ServiceContainer,
+        fake: _Recording,
+        supervise: Supervise,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        starts = _services(container, supervise, work_max=1, project_max=1)[0]
+        _chat(session, project, environment, SessionState.RUNNING)
+        _occupying(session, project, 1, kind_code="job")
+        for state in (
+            SessionState.HELD,
+            SessionState.IDLE,
+            SessionState.STOPPED,
+            SessionState.FAILED,
+        ):
+            _occupying(session, project, 1, state)
+
+        work = _start_work(starts, session, project)
+
+        assert _read(session, work.id).state_code == SessionState.STARTING
+
+    def test_the_pause_and_the_outage_come_before_the_slot(
+        self,
+        slotted: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        _occupying(session, project, 2)
+        controller_outage.call_unanswered()
+
+        work = _start_work(slotted, session, project)
+
+        assert _read(session, work.id).state_code == SessionState.HELD
+        status = work_status(
+            session, [work.id], unreachable=True, slots=slotted._slots
+        )[work.id]
+        assert (status.held_reason, status.held_running) == (
+            HeldReason.CONTROLLER_UNREACHABLE,
+            None,
+        )
+
+    def test_a_resume_waits_for_a_slot(
+        self,
+        slotted: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        stopped = _stopped_item(slotted, fake, session, project, person)
+        _occupying(session, project, 1)
+
+        run = slotted.resume(session, stopped.id)
+        clear_after_commit_callbacks()
+
+        assert run.state_code == SessionState.HELD
+        assert _held_for(slotted, session, run.id) == (HeldReason.SLOT, 1)
+
+    def test_the_release_starts_the_oldest_held_work_items_whose_projects_have_room(
+        self,
+        slotted: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        site = _project_named(session, person, "site")
+        _occupying(session, project, 1)
+        controller_outage.call_unanswered()
+        full, first, second = (
+            _held(slotted, session, held_in) for held_in in (project, site, site)
+        )
+        asked = datetime.now(UTC)
+        for offset, work in enumerate((full, first, second)):
+            _read(session, work.id).created_at = asked + timedelta(seconds=offset)
+        session.flush()
+        controller_outage.probe_answered()
+
+        _release(slotted)
+
+        # Its project has no room: it is passed over for the next.
+        assert _read(session, full.id).state_code == SessionState.HELD
+        assert _read(session, first.id).state_code == SessionState.STARTING
+        # Then the slots of every project are taken.
+        assert _read(session, second.id).state_code == SessionState.HELD
+        assert _held_for(slotted, session, full.id) == (HeldReason.SLOT, 2)
+        assert _held_for(slotted, session, second.id) == (HeldReason.SLOT, 2)
+
+    def test_a_held_start_goes_on_once_a_work_items_end_frees_its_slot(
+        self,
+        container: ServiceContainer,
+        fake: _Recording,
+        supervise: Supervise,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        starts = _services(container, supervise, work_max=1, project_max=1)[0]
+        running = _running(starts, session, project)
+        waiting = _held(starts, session, project)
+        _release(starts)
+        assert _read(session, waiting.id).state_code == SessionState.HELD
+
+        _turn_ends(starts, fake, running, "success")
+        _release(starts)
+
+        assert _read(session, waiting.id).state_code == SessionState.STARTING
+
+
+class _Opened:
+    """A listener of the slot's open event, counting its calls."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def __call__(self) -> None:
+        self.calls += 1
+
+
+def _opened(starts: SessionStartService) -> _Opened:
+    opened = _Opened()
+    starts._slots.subscribe(opened)
+    return opened
+
+
+class TestSlotOpens:
+    """A work item's end opens the gate: its Stop and its failed start here,
+    its turn's `result` and a stop made elsewhere at the relay (§13.5;
+    F143.4; V04)."""
+
+    @pytest.mark.parametrize("state", [SessionState.RUNNING, SessionState.STARTING])
+    def test_a_stop_opens_the_slot_once_it_commits(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+        state: SessionState,
+    ) -> None:
+        run = (
+            _running(starts, session, project)
+            if state == SessionState.RUNNING
+            else _start(starts, session, project)
+        )
+        clear_after_commit_callbacks()
+        opened = _opened(starts)
+
+        starts.stop(session, run.id, person)
+
+        assert opened in after_commit_module._callbacks.get()
+
+    def test_a_held_starts_stop_opens_none(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        controller_outage.call_unanswered()
+        held = _held(starts, session, project)
+        opened = _opened(starts)
+
+        starts.stop(session, held.id, person)
+
+        assert opened not in after_commit_module._callbacks.get()
+
+    def test_a_failed_start_opens_the_slot_once_it_commits(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        fake.not_whitelisted("example")
+        run = _start(starts, session, project)
+        opened = _opened(starts)
+
+        _run(starts, run)
+
+        _assert_failed(session, run.id)
+        assert opened.calls == 1
+
+
+class TestSlotLoop:
+    @pytest.fixture
+    def loop_log(self) -> Iterator[LogWaiter]:
+        with listening(SUPERVISOR_LOGGER, START_LOGGER) as waiter:
+            yield waiter
+
+    def test_a_work_item_waiting_for_a_slot_starts_once_a_running_one_ends(
+        self,
+        committed_app: Flask,
+        committed_fake: _Recording,
+        supervise: Supervise,
+        loop_log: LogWaiter,
+    ) -> None:
+        container = committed_app.container
+        starts, _, coordinator = _services(
+            container, supervise, work_max=1, project_max=1
+        )
+        project_id = _committed_project(container)
+        coordinator.fire_startup()
+        first_id = _committed_work(starts, container, project_id)
+        loop_log.wait_for(rf"Loop relay:{first_id} started")
+
+        waiting_id = _committed_work(starts, container, project_id)
+
+        assert _committed(container, waiting_id).state_code == SessionState.HELD
+        first = _committed(container, first_id)
+        assert first.environment_id is not None
+        assert first.controller_session is not None
+        committed_fake.finish(
+            first.environment_id, first.controller_session, "success", "Done."
+        )
+        loop_log.wait_for(rf"Session {waiting_id} goes on from held")
+        loop_log.wait_for(rf"Loop relay:{waiting_id} started")
+        assert _committed(container, first_id).state_code == SessionState.IDLE
+
+
+def _another_project(
+    container: ServiceContainer, project_id: uuid.UUID, slug: str
+) -> uuid.UUID:
+    """A project of the same person's, committed."""
+    with scoped_session(container) as db:
+        project = Project(
+            created_by_user_id=db.get_one(Project, project_id).created_by_user_id,
+            state_code=ProjectState.OPEN,
+            slug=slug,
+        )
+        db.add(project)
+        db.flush()
+        return project.id
+
+
+OWN = "example-example-own"
+
+
+def _committed_stopped(
+    starts: SessionStartService, container: ServiceContainer, project_id: uuid.UUID
+) -> uuid.UUID:
+    """A work item stopped under its turn in an environment of Pilot's own,
+    with its conversation to continue there, its rows committed: its Resume
+    clears that environment's shutdown timer."""
+    work_id = _committed_work(starts, container, project_id)
+    now = datetime.now(UTC)
+    with scoped_session(container) as db:
+        db.add(
+            Environment(
+                id=OWN,
+                name=SLUG,
+                exempt=False,
+                last_state="stopped",
+                server_created_at=now,
+                repo=REPO,
+            )
+        )
+        db.flush()
+        run = db.get_one(models.Session, work_id)
+        run.environment_id = OWN
+        run.state_code = SessionState.STOPPED
+        run.conversation_id = "conv-1"
+        run.turn_ended_at = now
+        (brief,) = _turns(db, work_id)
+        brief.ended_at = now
+    return work_id
+
+
+def _committed_resume(
+    starts: SessionStartService, container: ServiceContainer, run_id: uuid.UUID
+) -> None:
+    with scoped_session(container) as db:
+        starts.resume(db, run_id)
+
+
+def _seqs(container: ServiceContainer, ids: list[uuid.UUID]) -> list[int]:
+    with scoped_session(container) as db:
+        return sorted(db.scalars(select(Item.seq).where(Item.id.in_(ids))))
+
+
+class TestLockOrder:
+    """Every start, Resume and the release take their locks in one order, the
+    slot counted under its own (P-45; V14). No loop of theirs runs: the
+    supervisor never starts."""
+
+    def test_a_resume_and_a_start_in_one_project_both_go_through(
+        self,
+        committed_app: Flask,
+        committed_fake: _Recording,
+        supervise: Supervise,
+    ) -> None:
+        container = committed_app.container
+        starts, _, _ = _services(container, supervise)
+        project_id = _committed_project(container)
+        stopped_id = _committed_stopped(starts, container, project_id)
+        holder = container.session_maker()()
+        try:
+            # The Resume waits on its Session's row with its project's locked,
+            # and the start then waits on the Resume.
+            holder.execute(
+                text("SELECT id FROM sessions WHERE id = :id FOR UPDATE"),
+                {"id": stopped_id},
+            )
+            resuming = in_thread(
+                lambda: _committed_resume(starts, container, stopped_id)
+            )
+            wait_until(lambda: lock_waits(container) == 1, "the Resume waiting")
+            starting = in_thread(lambda: _committed_work(starts, container, project_id))
+            wait_until(lambda: lock_waits(container) == 2, "the start waiting")
+            holder.rollback()
+        finally:
+            holder.close()
+
+        resuming.result()
+        placed_id = starting.result()
+        assert _committed(container, stopped_id).state_code == SessionState.STARTING
+        assert _committed(container, placed_id).state_code == SessionState.STARTING
+        assert _seqs(container, [stopped_id, placed_id]) == [1, 2]
+
+    def test_two_starts_in_one_project_both_go_through(
+        self,
+        committed_app: Flask,
+        committed_fake: _Recording,
+        supervise: Supervise,
+    ) -> None:
+        container = committed_app.container
+        starts, _, _ = _services(container, supervise)
+        project_id = _committed_project(container)
+        holder = container.session_maker()()
+        try:
+            # A Resume's lock on the project's row, which both starts wait on.
+            holder.execute(
+                text("SELECT id FROM projects WHERE id = :id FOR SHARE"),
+                {"id": project_id},
+            )
+            first, second = (
+                in_thread(lambda: _committed_work(starts, container, project_id))
+                for _ in range(2)
+            )
+            wait_until(lambda: lock_waits(container) == 2, "both starts waiting")
+            holder.rollback()
+        finally:
+            holder.close()
+
+        ids = [first.result(), second.result()]
+        for run_id in ids:
+            assert _committed(container, run_id).state_code == SessionState.STARTING
+        assert _seqs(container, ids) == [1, 2]
+
+    def test_two_starts_never_both_take_the_last_slot(
+        self,
+        committed_app: Flask,
+        committed_fake: _Recording,
+        supervise: Supervise,
+    ) -> None:
+        container = committed_app.container
+        starts, _, _ = _services(container, supervise, work_max=1, project_max=1)
+        project_id = _committed_project(container)
+        site_id = _another_project(container, project_id, "site")
+        counted, proceed = threading.Event(), threading.Event()
+
+        def first_start() -> uuid.UUID:
+            with scoped_session(container) as db:
+                run_id = starts.start_work(
+                    db, project_id, REPO, title="Renaming", brief=BRIEF, cwd=CWD
+                ).id
+                counted.set()
+                assert proceed.wait(WAIT_SECONDS)
+                return run_id
+
+        first = in_thread(first_start)
+        assert counted.wait(WAIT_SECONDS)
+        # The first's Session is `starting`, uncommitted: the second, of
+        # another project, waits on the slot until it commits.
+        second = in_thread(lambda: _committed_work(starts, container, site_id))
+        wait_until(lambda: lock_waits(container) == 1, "the second start waiting")
+        proceed.set()
+
+        first_id, second_id = first.result(), second.result()
+        assert _committed(container, first_id).state_code == SessionState.STARTING
+        assert _committed(container, second_id).state_code == SessionState.HELD
+        with scoped_session(container) as db:
+            assert _held_for(starts, db, second_id) == (HeldReason.SLOT, 1)
+
+    @pytest.mark.parametrize("asked", ["start", "resume"])
+    def test_a_start_and_a_resume_wait_for_a_finish_of_their_project(
+        self,
+        committed_app: Flask,
+        committed_fake: _Recording,
+        supervise: Supervise,
+        asked: str,
+    ) -> None:
+        container = committed_app.container
+        starts, _, _ = _services(container, supervise)
+        project_id = _committed_project(container)
+        stopped_id = _committed_stopped(starts, container, project_id)
+        holder = container.session_maker()()
+        try:
+            # The lock a Finish or an Archive holds on the project's row.
+            holder.execute(
+                text("SELECT id FROM projects WHERE id = :id FOR NO KEY UPDATE"),
+                {"id": project_id},
+            )
+            with (
+                pytest.raises(OperationalError) as raised,
+                scoped_session(container) as db,
+            ):
+                db.execute(text("SET LOCAL lock_timeout = '200ms'"))
+                if asked == "start":
+                    starts.start_work(
+                        db, project_id, REPO, title="Renaming", brief=BRIEF, cwd=CWD
+                    )
+                else:
+                    starts.resume(db, stopped_id)
+            holder.rollback()
+        finally:
+            holder.close()
+
+        assert isinstance(raised.value.orig, LockNotAvailable)
+        assert _committed(container, stopped_id).state_code == SessionState.STOPPED
+
+
+class _Probing(_Recording):
+    """The fake, trying every Project's row as each call it answers comes in,
+    as another transaction would lock it: `locked` lists the calls that came
+    while one was locked."""
+
+    def __init__(self, container: ServiceContainer) -> None:
+        super().__init__(keepalive_seconds=0.2)
+        self._maker = container.session_maker()
+        self.locked: list[str] = []
+
+    def _respond(self, request: Request) -> Response:
+        probe = self._maker()
+        try:
+            probe.execute(text("SELECT id FROM projects FOR UPDATE NOWAIT"))
+        except OperationalError:
+            self.locked.append(f"{request.method} {request.path}")
+        finally:
+            probe.rollback()
+            probe.close()
+        return super()._respond(request)
+
+
+class TestNoCallUnderAProjectsLock:
+    @pytest.mark.parametrize("free", [True, False])
+    def test_a_start_makes_no_controller_call_while_a_projects_row_is_locked(
+        self,
+        committed_app: Flask,
+        supervise: Supervise,
+        free: bool,
+    ) -> None:
+        """P-45; V14: the take, the rename, the stop, the reset, the create and
+        their waits, the headless session's create and the brief's send."""
+        container = committed_app.container
+        probing = _Probing(container)
+        client_of(container, probing)
+        try:
+            starts, _, coordinator = _services(container, supervise)
+            project_id = _committed_project(container)
+            if free:
+                with scoped_session(container) as db:
+                    _free(db, probing)
+            coordinator.fire_startup()
+
+            with listening(SUPERVISOR_LOGGER) as loop_log:
+                run_id = _committed_work(starts, container, project_id)
+                loop_log.wait_for(rf"Loop relay:{run_id} started")
+        finally:
+            probing.close()
+
+        assert (_committed_env(container, run_id) == FREE) is free
+        assert any("/reset" in call for call in probing.calls) is free
+        assert probing.locked == []

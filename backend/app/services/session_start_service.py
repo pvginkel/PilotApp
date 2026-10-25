@@ -22,10 +22,20 @@ controller during the start leaves the Session `failed` with its `error` and a
 retried (F125).
 
 When the gate opens — the outage off, at the probe's success or the fleet
-stream's reconnect — the held Sessions it opens for move to `starting` in
-`created_at` order, each under its lock while it is still `held`, and each
-loop resumes its start where the rows left it. The probe, the controller's
-readiness call, runs on the scheduler's tick while the outage holds.
+stream's reconnect; a work item's end, its turn's `result`, its Stop, its
+failure or a stop made elsewhere, which frees its slot (`WorkSlots.left`) —
+the held Sessions it opens for move to `starting` in `created_at` order, each
+under its lock while it is still `held`, a work item whose Project has no
+slot passed over, and each loop resumes its start where the rows left it. The
+probe, the controller's readiness call, runs on the scheduler's tick while the
+outage holds.
+
+The lock order (P-45). A start, a Resume and the release take their locks in
+one order: the Project's row, then the Session's, then the slot's
+(`WorkSlots.lock`), then an Environment's. A start that places a work item
+locks its Project's row as `next_seq` does, so its Item's birth takes no lock
+stronger than one it holds. The start loop's transactions lock no Project
+row: no controller call is made while one is locked.
 
 At STARTUP the job's reconcile runs the start loop of every Session still
 `starting`, which resumes where its rows left it, and opens the gate for the
@@ -80,7 +90,7 @@ from app.services.environment_service import EnvironmentService
 from app.services.relay_service import CONTINUE, SESSION_GONE, RelayService
 from app.services.session_record_service import SessionRecordService
 from app.services.session_stream_service import SessionStreamService
-from app.services.start_gate import held_reason
+from app.services.start_gate import WORK_KIND, Held, WorkSlots, held_reason
 from app.services.supervisor import LoopHandle, Supervisor
 from app.services.work_status import work_moved
 from app.utils.after_commit import after_commit
@@ -106,8 +116,6 @@ START_FAILED = "start-failed"
 CREATING = "Creating the session…"
 
 NOT_PILOTS = "its environment is not Pilot's"
-
-WORK_KIND = "work"
 
 STOPPABLE = (SessionState.RUNNING, SessionState.STARTING, SessionState.HELD)
 """The states a Stop ends a Session in: a turn in flight, a start under way or
@@ -201,12 +209,13 @@ class SessionStartService:
         environment_service: EnvironmentService,
         relay_service: RelayService,
         controller_outage: ControllerOutage,
+        work_slots: WorkSlots,
         controller_configured: bool,
     ) -> None:
         """Register the `start` job, whose loops are one per Session and one
         that moves the held Sessions on, and whose reconcile runs the start of
-        every Session still `starting` and opens the gate; and the probe's
-        timer.
+        every Session still `starting` and opens the gate; the probe's timer;
+        and the release, on the outage's off and on a slot's opening.
 
         Args:
             container: Gives each start transaction its database session, and
@@ -219,6 +228,7 @@ class SessionStartService:
             relay_service: Sends the brief, and relays its turn
             controller_outage: The gate's outage, which the probe turns off;
                 its turning off opens the gate
+            work_slots: The gate's slot, which a work item's end opens
             controller_configured: False refuses every start
         """
         self._container = container
@@ -227,12 +237,14 @@ class SessionStartService:
         self._environments = environment_service
         self._relays = relay_service
         self._outage = controller_outage
+        self._slots = work_slots
         self._controller_configured = controller_configured
         supervisor.register_job(
             START_JOB, needs_controller=True, reconcile=self._reconcile
         )
         supervisor.register_timer(PROBE_TIMER, self.run_probe, needs_controller=True)
         controller_outage.subscribe(self._outage_moved)
+        work_slots.subscribe(self.release_held)
 
     def start_work(
         self,
@@ -253,12 +265,14 @@ class SessionStartService:
         taken as the placement gives them (F61.1). The Session has no
         Environment until its start provides one (DB 107), and gets the hash
         of a token minted for it. It passes the gate (§13.4): `held` while
-        the gate is closed for it, with nothing run; else `starting`, its
-        start run once this commits. No controller call is made.
+        the gate is closed for it, with nothing run, its slot counted under
+        the slot's lock; else `starting`, its start run once this commits. No
+        controller call is made.
 
         Nothing of a finished or an archived project starts (F5.1, F128.1):
-        the project's row is read under a share lock, so a start and a Finish
-        or an Archive never interleave.
+        the project's row is read under the lock its Item's birth takes
+        (`next_seq`), so a start and a Finish or an Archive never interleave,
+        and two starts of the project take it one after the other.
 
         Returns:
             The Work
@@ -272,15 +286,11 @@ class SessionStartService:
         operation = f"place a work item of {repo}"
         if not self._controller_configured:
             raise InvalidOperationException(operation, "no controller is configured")
-        project = _shared(db, project_id)
+        project = _standing(db, project_id, births=True)
         refusal = _closed(project)
         if refusal is not None:
             raise InvalidOperationException(operation, refusal)
-        held = held_reason(
-            paused=project.paused,
-            kind_code=WORK_KIND,
-            unreachable=self._outage.holds,
-        )
+        held = self._held(db, project, WORK_KIND)
         now = datetime.now(UTC)
         session = AgentSession(
             project_id=project_id,
@@ -302,7 +312,7 @@ class SessionStartService:
             self._begin(db, session)
         else:
             after_commit(_HeldWritten(self))
-            logger.info("Session %s is held at its start: %s", session.id, held)
+            logger.info("Session %s is held at its start: %s", session.id, held.reason)
         return work
 
     def run(self, session_id: uuid.UUID, handle: LoopHandle) -> None:
@@ -418,8 +428,9 @@ class SessionStartService:
     def release(self, handle: LoopHandle) -> None:
         """The release loop's run: each held Session in `created_at` order,
         moved to `starting` under its lock while it is still `held` and the
-        gate is open for it, its loop run once that commits. Ends while the
-        outage holds, which holds every start."""
+        gate is open for it, a work item's slot counted under the slot's
+        lock, its loop run once that commits. Ends while the outage holds,
+        which holds every start."""
         with scoped_session(self._container) as db:
             held = db.scalars(
                 select(AgentSession.id)
@@ -486,7 +497,8 @@ class SessionStartService:
         (`_fresh`).
 
         The project's row is read under a share lock, so a Resume and a
-        Finish or an Archive never interleave.
+        Finish or an Archive never interleave, and the slot is counted under
+        its lock before the environment's row is locked (the lock order).
 
         Returns:
             The Session, `starting`, or `held` while the gate is closed
@@ -502,7 +514,9 @@ class SessionStartService:
         if not self._controller_configured:
             raise InvalidOperationException(operation, "no controller is configured")
         records = self._records(db)
-        project = _shared(db, records.require_session(session_id).project_id)
+        project = _standing(
+            db, records.require_session(session_id).project_id, births=False
+        )
         session = records.lock_session(session_id)
         if db.get(Work, session_id) is None:
             raise InvalidOperationException(operation, "it is no work item")
@@ -534,13 +548,9 @@ class SessionStartService:
         session.turn_ended_at = None
         session.error = None
         session.current_line = None
+        held = self._held(db, project, session.kind_code)
         if session.conversation_id is None:
             self._fresh(db, session)
-        held = held_reason(
-            paused=project.paused,
-            kind_code=session.kind_code,
-            unreachable=self._outage.holds,
-        )
         if held is None:
             session.state_code = SessionState.STARTING
             self._begin(db, session)
@@ -551,7 +561,7 @@ class SessionStartService:
         logger.info(
             "Session %s resumed%s",
             session_id,
-            "" if held is None else f", held: {held}",
+            "" if held is None else f", held: {held.reason}",
         )
         return session
 
@@ -586,14 +596,7 @@ class SessionStartService:
         if session.state_code != SessionState.HELD:
             return
         project = db.get_one(Project, session.project_id, populate_existing=True)
-        if (
-            held_reason(
-                paused=project.paused,
-                kind_code=session.kind_code,
-                unreachable=self._outage.holds,
-            )
-            is not None
-        ):
+        if self._held(db, project, session.kind_code) is not None:
             return
         session.state_code = SessionState.STARTING
         self._begin(db, session)
@@ -625,7 +628,8 @@ class SessionStartService:
         record to the end the controller's interrupt gives it once this
         commits; a start held or under way has its Turn ended unsent, and its
         loop sends nothing more. Its environment is handed to the shutdown
-        timer (`_hand_to_timer`); a start held before it had one arms none."""
+        timer (`_hand_to_timer`); a start held before it had one arms none. A
+        work item's slot opens once this commits."""
         before = session.state_code
         session.state_code = SessionState.STOPPED
         session.stopped_at = at
@@ -639,6 +643,7 @@ class SessionStartService:
             session.turn_ended_at = at
         self._hand_to_timer(db, session)
         self._moved(session, state=True)
+        self._slots.left(session, before)
         logger.info("Session %s stopped by %s, %s", session.id, person.handle, before)
 
     def _fresh(self, db: Session, session: AgentSession) -> None:
@@ -925,8 +930,9 @@ class SessionStartService:
         """The Session `failed` with `reason`, the Turn `turn_id` its start
         sends ended, and a `server` record saying so unless that Turn's failed
         send `recorded` one. Then its environment is handed to the shutdown
-        timer (`_hand_to_timer`). A Session no longer `starting` to send that
-        Turn is left as it is."""
+        timer (`_hand_to_timer`), and a work item's slot opens once this
+        commits. A Session no longer `starting` to send that Turn is left as it
+        is."""
         records = self._records(db)
         if not _sends(db, records.lock_session(session_id), turn_id):
             return
@@ -946,7 +952,25 @@ class SessionStartService:
         session.current_line = None
         self._moved(session, state=True)
         self._hand_to_timer(db, session)
+        self._slots.left(session, SessionState.STARTING)
         logger.warning("Session %s failed to start: %s", session_id, reason)
+
+    def _held(self, db: Session, project: Project, kind_code: str) -> Held | None:
+        """Why the gate holds a start of a Session of `kind_code` in
+        `project` now; None while it is open. A work item's counts the slot
+        under the slot's lock (`WorkSlots.lock`), held to the transaction's
+        end, so the next start's count sees the Session this one moves to
+        `starting`."""
+        filled = None
+        if kind_code == WORK_KIND:
+            self._slots.lock(db)
+            filled = self._slots.filled(db, [project.id]).get(project.id)
+        return held_reason(
+            paused=project.paused,
+            kind_code=kind_code,
+            unreachable=self._outage.holds,
+            filled=filled,
+        )
 
     def _moved(self, session: AgentSession, *, state: bool = False) -> None:
         work_moved(self._container.engine_bus(), session, state=state)
@@ -1046,9 +1070,12 @@ def _latest_turn(db: Session, session_id: uuid.UUID) -> Turn:
     ).one()
 
 
-def _shared(db: Session, project_id: uuid.UUID) -> Project:
-    """The project, its row under a share lock until the transaction ends, so
-    no change of its standing interleaves, read as the lock found it.
+def _standing(db: Session, project_id: uuid.UUID, *, births: bool) -> Project:
+    """The project, its row locked until the transaction ends, so no change
+    of its standing interleaves, read as the lock found it. A transaction
+    that `births` an Item locks it as `next_seq` does, which then takes no
+    stronger lock than the one it holds (the lock order); any other shares
+    it.
 
     Raises:
         RecordNotFoundException: No Project has the id
@@ -1056,7 +1083,7 @@ def _shared(db: Session, project_id: uuid.UUID) -> Project:
     project = db.scalars(
         select(Project)
         .where(Project.id == project_id)
-        .with_for_update(read=True)
+        .with_for_update(read=not births)
         .execution_options(populate_existing=True)
     ).one_or_none()
     if project is None:

@@ -51,6 +51,7 @@ from app.services.session_record_service import (
     read_records,
 )
 from app.services.sse_connection_manager import SSEConnection
+from app.services.start_gate import WorkSlots
 from app.services.supervisor import TIMER_RUNS_TOTAL, LoopHandle
 from app.utils import after_commit as after_commit_module
 from app.utils.after_commit import clear_after_commit_callbacks
@@ -92,6 +93,7 @@ def _relay_service(
         supervisor=supervisor,
         session_streams=container.session_stream_service(),
         environment_service=environments,
+        work_slots=WorkSlots(work_max=3, project_max=3),
     )
     return relays, coordinator
 
@@ -1288,8 +1290,45 @@ def _moves(events: list[EngineEvent]) -> list[EngineEvent]:
     return [event for event in events if isinstance(event, WorkMoved | ProjectChanged)]
 
 
+class _Opened:
+    """A listener of the slot's open event, counting its calls."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def __call__(self) -> None:
+        self.calls += 1
+
+
+def _opened(relays: RelayService) -> _Opened:
+    """A listener of the relays' slot."""
+    opened = _Opened()
+    relays._slots.subscribe(opened)
+    return opened
+
+
 class TestRelayWorkItem:
     """A work item's turn's end (decision 44; DB Session State, F125)."""
+
+    @pytest.mark.parametrize("outcome", ["success", "error", "interrupted"])
+    def test_its_end_opens_the_slot_once_it_commits(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        work_item: models.Session,
+        outcome: FinishOutcome,
+    ) -> None:
+        """F143.4: a work item ending opens the gate."""
+        _send(relays, session, work_item)
+        opened = _opened(relays)
+        _turn_of(fake_controller, controller_session, raw_turn("turn_text"), outcome)
+
+        _relay(relays, work_item)
+
+        assert work_item.state_code != SessionState.RUNNING
+        assert opened.calls == 1
 
     @pytest.mark.parametrize(
         ("outcome", "result", "state", "error"),
@@ -1761,6 +1800,23 @@ class TestEnvironmentUnderATurn:
             WorkMoved(project.id, work_item.id),
             ProjectChanged(project.id),
         ]
+
+    def test_a_stop_made_elsewhere_opens_the_slot_once_it_commits(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: _Settling,
+        work_item: models.Session,
+        turn: Turn,
+    ) -> None:
+        """F143.4: a work item ending opens the gate."""
+        fake_controller.set_status(ENV, "stopped")
+        opened = _opened(relays)
+
+        _relay(relays, work_item)
+
+        assert work_item.state_code == SessionState.STOPPED
+        assert opened.calls == 1
 
     def test_an_environment_the_resume_does_not_find_is_gone_and_stops_the_item(
         self,

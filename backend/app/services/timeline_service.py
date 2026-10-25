@@ -78,7 +78,7 @@ from app.services.controller_outage import ControllerOutage
 from app.services.people_service import initials
 from app.services.relay_service import ENVIRONMENT_STOPPED
 from app.services.session_record_service import last_record
-from app.services.start_gate import held_reason
+from app.services.start_gate import WORK_KIND, Held, WorkSlots, held_reason
 
 WORK = "work"
 WAIT = "wait"
@@ -155,17 +155,22 @@ def _waiting() -> ColumnElement[bool]:
 
 
 def work_status(
-    db: Session, item_ids: Collection[uuid.UUID], *, unreachable: bool
+    db: Session,
+    item_ids: Collection[uuid.UUID],
+    *,
+    unreachable: bool,
+    slots: WorkSlots,
 ) -> dict[uuid.UUID, WorkSchema]:
     """The work status of each work item among `item_ids`, as its line and
     head show it, the controller `unreachable` or not; an item of another kind
     is left out. A failed one's error is its latest Turn's, else its
     Session's: a turn's failure is its Turn's, a start's the Session's (DB
-    Session `error?`). A held one's reason is the gate's as it reads now. A
-    stopped one's stop is when and by whom, a Resume keeping both on the
-    Session (DB Session `stopped_at?`, `stopped_by?`); one no one stopped has
-    the cause its environment's stop under it left as its last record. One
-    whose start has no environment yet has none (DB 107)."""
+    Session `error?`). A held one's reason is the gate's as it reads now, the
+    slot's with the count that closed it (`slots`). A stopped one's stop is
+    when and by whom, a Resume keeping both on the Session (DB Session
+    `stopped_at?`, `stopped_by?`); one no one stopped has the cause its
+    environment's stop under it left as its last record. One whose start has
+    no environment yet has none (DB 107)."""
     stopper = aliased(User)
     rows = db.execute(
         select(
@@ -205,6 +210,24 @@ def work_status(
         if session.state_code is SessionState.STOPPED
         and session.stopped_by_user_id is None
     }
+    waiting = {
+        session.project_id
+        for session, _, _, _, _, _ in rows
+        if session.state_code is SessionState.HELD and session.kind_code == WORK_KIND
+    }
+    filled = slots.filled(db, waiting) if waiting else {}
+    held: dict[uuid.UUID, Held] = {}
+    for session, _, _, _, paused, _ in rows:
+        if session.state_code is not SessionState.HELD:
+            continue
+        reason = held_reason(
+            paused=paused,
+            kind_code=session.kind_code,
+            unreachable=unreachable,
+            filled=filled.get(session.project_id),
+        )
+        if reason is not None:
+            held[session.id] = reason
     return {
         session.id: WorkSchema(
             state=session.state_code,
@@ -219,15 +242,8 @@ def work_status(
                 else None
             ),
             autopilot=autopilot,
-            held_reason=(
-                held_reason(
-                    paused=paused,
-                    kind_code=session.kind_code,
-                    unreachable=unreachable,
-                )
-                if session.state_code is SessionState.HELD
-                else None
-            ),
+            held_reason=held[session.id].reason if session.id in held else None,
+            held_running=held[session.id].running if session.id in held else None,
             stopped_at=(
                 session.stopped_at
                 if session.state_code is SessionState.STOPPED
@@ -240,7 +256,7 @@ def work_status(
             ),
             stopped_cause=causes.get(session.id),
         )
-        for session, env_id, name, autopilot, paused, stopped_by in rows
+        for session, env_id, name, autopilot, _, stopped_by in rows
     }
 
 
@@ -273,10 +289,12 @@ class TimelineService:
         db: Session,
         record_service: RecordService,
         controller_outage: ControllerOutage,
+        work_slots: WorkSlots,
     ) -> None:
         self.db = db
         self.record_service = record_service
         self.controller_outage = controller_outage
+        self.work_slots = work_slots
 
     def badges(
         self, person: User | None, project_ids: Iterable[uuid.UUID]
@@ -301,7 +319,10 @@ class TimelineService:
             RecordNotFoundException: no work item has the id.
         """
         work = work_status(
-            self.db, [item_id], unreachable=self.controller_outage.holds
+            self.db,
+            [item_id],
+            unreachable=self.controller_outage.holds,
+            slots=self.work_slots,
         ).get(item_id)
         if work is None:
             raise RecordNotFoundException("Work item", str(item_id))
@@ -416,6 +437,7 @@ class TimelineService:
             self.db,
             [item.id for item, _, form in rows if form == WORK],
             unreachable=self.controller_outage.holds,
+            slots=self.work_slots,
         )
         reader = self._reader(
             project,

@@ -649,6 +649,7 @@ class TestGetTimeline:
             "error": None,
             "autopilot": False,
             "held_reason": None,
+            "held_running": None,
             "stopped_at": None,
             "stopped_by": None,
             "stopped_cause": None,

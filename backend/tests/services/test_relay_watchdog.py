@@ -33,6 +33,7 @@ from app.services.fleet_consumer import FLEET_STREAM_CONNECTED, FleetConsumer
 from app.services.relay_service import RELAY_JOB, RELAYS_RUNNING, RelayService
 from app.services.relay_watchdog import WATCHDOG_TIMER, RelayWatchdog
 from app.services.session_record_service import read_records
+from app.services.start_gate import WorkSlots
 from app.services.supervisor import TIMER_RUNS_TOTAL, LoopHandle, Supervisor
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
 from tests.support.fake_controller import ServedFakeController, client_of, raw_turn
@@ -117,6 +118,7 @@ def _watch(
         supervisor=supervisor,
         session_streams=container.session_stream_service(),
         environment_service=environments,
+        work_slots=WorkSlots(work_max=3, project_max=3),
     )
     RelayWatchdog(supervisor=supervisor, fleet_consumer=fleet)
     return relays, coordinator

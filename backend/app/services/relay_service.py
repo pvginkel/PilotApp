@@ -83,6 +83,7 @@ from app.services.session_record_service import (
     stream_position,
 )
 from app.services.session_stream_service import SessionStreamService
+from app.services.start_gate import WorkSlots
 from app.services.supervisor import LoopHandle, Supervisor
 from app.services.work_status import work_moved
 from app.utils.after_commit import after_commit
@@ -193,6 +194,7 @@ class RelayService:
         supervisor: Supervisor,
         session_streams: SessionStreamService,
         environment_service: EnvironmentService,
+        work_slots: WorkSlots,
     ) -> None:
         """Register the `relay` job, whose loops are one per Session, and whose
         reconcile runs the relay of every Session with a Turn in flight; and the
@@ -206,11 +208,13 @@ class RelayService:
             session_streams: The hubs the partials go to, and the wakes
             environment_service: Clears and arms the environments' shutdown
                 timer around a turn
+            work_slots: Opened by a work item's run that ends under its turn
         """
         self._container = container
         self._supervisor = supervisor
         self._streams = session_streams
         self._environments = environment_service
+        self._slots = work_slots
         supervisor.register_job(
             RELAY_JOB, needs_controller=True, reconcile=self._reconcile
         )
@@ -692,7 +696,8 @@ class RelayService:
         no `result`, and a `running` Session is `stopped` as Stop stops it, by
         no one, with no current line; one stopped already keeps its stop. The
         documents it was writing are let go, as at a turn's end, and the
-        environment's shutdown timer is armed."""
+        environment's shutdown timer is armed. A work item's slot opens once
+        this commits."""
         self._records(db).append(
             session.id,
             RecordKind.SERVER,
@@ -711,6 +716,7 @@ class RelayService:
             session.stopped_by_user_id = None
             session.current_line = None
             self._moved(session, state=True)
+            self._slots.left(session, SessionState.RUNNING)
         self._container.document_service().turn_ended(session)
         self._environments.arm_shutdown_timer(db, _environment_id(session))
         logger.info("Session %s stopped under its turn: %s", session.id, reason)
@@ -914,8 +920,8 @@ class RelayService:
         error is `failed` instead, the error the Turn's (F125), and one that
         ended neither interrupted nor in error makes the work item done
         (decision 44). A Session stopped under the turn stays as its stop left
-        it. After the commit, the environment's shutdown timer is armed if
-        nothing runs there.
+        it. After the commit, a work item's slot opens, and the environment's
+        shutdown timer is armed if nothing runs there.
 
         A later Turn in flight is a send the controller accepted once this
         turn's result was out, committed first: the Session stays `running`
@@ -959,6 +965,7 @@ class RelayService:
                 else:
                     session.current_line = at_send(None, following.started_at)
                 self._moved(session, state=session.state_code != before)
+                self._slots.left(session, before)
                 self._container.document_service().turn_ended(session)
         if not ended:
             # Another process's relay ended the turn.

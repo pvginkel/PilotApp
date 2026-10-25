@@ -30,12 +30,13 @@ ItemKindCode = Literal[
 
 
 class HeldReason(StrEnum):
-    """Why the gate holds a start (design 2 §13.4; F26.1): its project paused,
-    or the controller unreachable. Read at display, never stored (decision
-    53)."""
+    """Why the gate holds a start (design 2 §13.4, §13.5; F26.1, F143.4): its
+    project paused, the controller unreachable, or, a work item's, no slot
+    free. Read at display, never stored (decision 53)."""
 
     PAUSED = "paused"
     CONTROLLER_UNREACHABLE = "controller_unreachable"
+    SLOT = "slot"
 
 
 class StopCause(StrEnum):
@@ -340,8 +341,17 @@ class WorkSchema(BaseModel):
     held_reason: HeldReason | None = Field(
         description=(
             "Why the gate holds its start, which its line says: its project "
-            "paused, or the controller unreachable; null unless `state` is "
-            "`held`, and while the gate opens for it (F26.1, F141.5)"
+            "paused, the controller unreachable, or no slot free; null unless "
+            "`state` is `held`, and while the gate opens for it (F26.1, F141.5, "
+            "F143.4)"
+        )
+    )
+    held_running: int | None = Field(
+        description=(
+            "The running work items that leave it no slot, which its line "
+            'counts, "Waiting for a slot · N running": those across every '
+            "project, or its project's own, whichever maximum closed the "
+            "gate; null unless `held_reason` is `slot` (F143.4)"
         )
     )
     stopped_at: datetime | None = Field(

@@ -26,6 +26,7 @@ from app.services.session_record_service import SessionRecordService
 from app.services.session_start_service import NOT_PILOTS, SessionStartService
 from app.services.session_stream_service import STREAM_VIEWS
 from app.services.sse_connection_manager import SSEConnection, SSEConnectionManager
+from app.services.start_gate import WorkSlots
 from app.utils.after_commit import clear_after_commit_callbacks
 from tests.support.supervisor import Supervise, metric_value
 
@@ -551,6 +552,7 @@ def _starts(
         stop_after_seconds=1800,
         delete_after_seconds=604800,
     )
+    slots = WorkSlots(work_max=3, project_max=3)
     return SessionStartService(
         container=container,
         supervisor=supervisor,
@@ -561,8 +563,10 @@ def _starts(
             supervisor=supervisor,
             session_streams=container.session_stream_service(),
             environment_service=environments,
+            work_slots=slots,
         ),
         controller_outage=container.controller_outage(),
+        work_slots=slots,
         controller_configured=controller_configured,
     )
 

@@ -40,6 +40,7 @@ from app.services.environment_service import EnvironmentService
 from app.services.fake_controller import CLIENT_NAME
 from app.services.relay_service import RelayService
 from app.services.session_start_service import SessionStartService
+from app.services.start_gate import WorkSlots
 from app.services.supervisor import LoopHandle
 from app.utils.after_commit import clear_after_commit_callbacks
 from tests.support.fake_controller import ServedFakeController
@@ -1160,6 +1161,7 @@ def _starts(
         stop_after_seconds=1800,
         delete_after_seconds=604800,
     )
+    slots = WorkSlots(work_max=3, project_max=3)
     return SessionStartService(
         container=container,
         supervisor=supervisor,
@@ -1170,8 +1172,10 @@ def _starts(
             supervisor=supervisor,
             session_streams=container.session_stream_service(),
             environment_service=environments,
+            work_slots=slots,
         ),
         controller_outage=container.controller_outage(),
+        work_slots=slots,
         controller_configured=controller_configured,
     )
 
@@ -1309,6 +1313,37 @@ class TestCreateWork:
         assert response.status_code == 201, response.get_json()
         work = _timeline_item(client, project_id, response.get_json()["id"])["work"]
         assert (work["state"], work["held_reason"]) == ("held", "paused")
+
+    def test_with_no_slot_free_it_places_the_work_item_held(
+        self,
+        client: FlaskClient,
+        served: None,
+        session: Session,
+        fake_controller: ServedFakeController,
+    ) -> None:
+        project_id = _make(client)
+        session.add_all(
+            models.Session(
+                project_id=uuid.UUID(project_id),
+                kind_code="work",
+                cwd="/work/Example",
+                token_hash=uuid.uuid4().hex,
+                state_code=SessionState.RUNNING,
+            )
+            for _ in range(3)
+        )
+        session.flush()
+
+        response = client.post(_work_path(project_id), json=WORK)
+
+        assert response.status_code == 201, response.get_json()
+        work = _timeline_item(client, project_id, response.get_json()["id"])["work"]
+        assert (work["state"], work["held_reason"], work["held_running"]) == (
+            "held",
+            "slot",
+            3,
+        )
+        assert fake_controller.calls == []
 
     def test_without_a_step_it_works_on_none(
         self, client: FlaskClient, served: None, session: Session
