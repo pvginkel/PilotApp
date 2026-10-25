@@ -12,6 +12,8 @@ import { slugOf } from '../support/projects';
 
 const BRIEF = 'Rename the badge.';
 const WORK = { title: 'Renaming the badge', brief: BRIEF, cwd: '/work/Example' };
+// Two of the backend's scheduler ticks (SCHEDULER_TICK_SECONDS, 10 s), past the expect timeout's one.
+const RELEASE_TIMEOUT_MS = 20_000;
 
 test.describe('The fake controller', () => {
   test('a work item runs its turn to its end in the environment its start created, named after its project', async ({
@@ -60,6 +62,11 @@ test.describe('The fake controller', () => {
     await expect.poll(async () => (await projects.work(first, done)).state).toBe('running');
     await controller.finish(environment, 'claude-1');
     await expect.poll(async () => (await projects.item(first, done)).done?.cause).toBe('turn_ended');
+    // The delete timer's next tick releases the freed environment, its name cleared, under its
+    // row's lock, which a take passes over to create instead: the start waits for the release.
+    await expect
+      .poll(async () => (await projects.work(first, done)).environment, { timeout: RELEASE_TIMEOUT_MS })
+      .toEqual({ id: environment, name: environment });
 
     const second = await projects.make({ name: makeUnique('Taking'), members: [me.handle!] });
     const work = await projects.startWork(second, WORK);
