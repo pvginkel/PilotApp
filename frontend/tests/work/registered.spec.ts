@@ -32,6 +32,9 @@ const text = (id: string, words: string) =>
 
 const SURVEY_PATH = '/work/Example/survey.md';
 const SURVEY = '# The survey\n\nNine of ten want the lake.\n';
+// What a process in the environment writes over the survey's file after its read: only a write-back
+// makes the file read SURVEY again.
+const SURVEY_EDITED = '# The survey\n\nEdited after its read.\n';
 const PITCH_PATH = '/work/Example/pitch.md';
 const PITCH = '# Where do we pitch?\n\nThe lake or the hill.\n\n```question id=Q1\n```\n';
 
@@ -177,7 +180,9 @@ test.describe('A registered document', () => {
     const survey = await registered(controller, projects, environment, work, SURVEY_PATH, SURVEY);
     const pitch = await registered(controller, projects, environment, work, PITCH_PATH, PITCH);
     await endRun(controller, environment);
+    await expect.poll(async () => (await projects.item(project, survey)).title).toBe('The survey');
     await expect.poll(async () => (await projects.item(project, pitch)).title).toBe('Where do we pitch?');
+    await controller.putFile(environment, SURVEY_PATH, SURVEY_EDITED);
     await timeline.open(project);
     await deploymentSse.ensureConnected();
     const surveyItem = timeline.item(survey);
@@ -186,8 +191,10 @@ test.describe('A registered document', () => {
     // Undo stands while another document of the run is open, and its close writes it back again.
     await surveyItem.card.reviewed.click();
     await expect(surveyItem.root).toHaveAttribute('data-state', 'done');
+    await expect.poll(() => controller.fileText(environment, SURVEY_PATH)).toBe(SURVEY);
     await surveyItem.undo.click();
     await expect(surveyItem.root).toHaveAttribute('data-state', 'open');
+    await controller.putFile(environment, SURVEY_PATH, SURVEY_EDITED);
     await surveyItem.card.reviewed.click();
     await expect(surveyItem.root).toHaveAttribute('data-state', 'done');
     await expect(surveyItem.undo).toBeVisible();
