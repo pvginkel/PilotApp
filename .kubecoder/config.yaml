@@ -47,6 +47,9 @@ tools:
   - use: aac-tools
   # The sync sidecar (slice 003) is Go: Go and golangci-lint.
   - use: go
+  # The gates of PilotProjects (pilot.py and its tests, under uv) and of the
+  # dev plugin's repo, AIWorkflow, both `cexec python`.
+  - use: python
 
 # Proves PilotApp's Dockerfiles with `kaniko --no-push` before a push hands
 # them to Jenkins, which builds them with helmCharts.kaniko2(...).
