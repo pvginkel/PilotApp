@@ -1557,6 +1557,82 @@ FINISH = datetime(2026, 10, 19, 15, 0, 1, 250000, tzinfo=UTC)
 """Finish's instant, kept whole by the close."""
 
 
+_AWAITING = (
+    "its file has not been read yet: it is read at the end of the turn that"
+    " registered it"
+)
+
+
+class TestRecordServiceAwaitingRead:
+    """A registered document takes no close before its read at the end of the
+    turn that registered it (review 7); Finish's close still takes it."""
+
+    @pytest.mark.parametrize(
+        ("close", "operation"),
+        [
+            ("reviewed", "mark {path} Reviewed"),
+            ("read", "mark {path} Read"),
+            ("done", "mark {path} done"),
+            ("answer", "answer block D1 of {path}"),
+            ("done_action", "mark action A1 of {path} done"),
+        ],
+    )
+    def test_every_close_is_refused_with_the_reason(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+        close: str,
+        operation: str,
+    ) -> None:
+        item = (
+            container.document_service()
+            .register(project, project_session, "/work/Example/refinement.md")
+            .item
+        )
+        document = session.get_one(Document, item.id)
+        records = container.record_service()
+
+        with pytest.raises(InvalidOperationException) as refused:
+            if close == "answer":
+                records.answer(document, "D1", person, "Dome")
+            elif close == "done_action":
+                records.done_action(document, "A1", person)
+            else:
+                getattr(records, close)(item, person)
+
+        path = f"draft-{project.number}/inbox/1-refinement.md"
+        assert refused.value.operation == operation.format(path=path)
+        assert refused.value.cause == _AWAITING
+        assert _done(item) == (None, None, None)
+        assert document.published_text is None
+
+    def test_finishs_close_takes_it_and_it_awaits_nothing_more(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        item = (
+            container.document_service()
+            .register(project, project_session, "/work/Example/refinement.md")
+            .item
+        )
+        records = container.record_service()
+
+        records.close_unanswered(project, person, FINISH)
+
+        assert _done(item) == (FINISH, "finished", person.id)
+        with pytest.raises(InvalidOperationException) as refused:
+            records.reviewed(item, person)
+        assert refused.value.cause == "the item is done"
+        assert session.get_one(Document, item.id).published_text is None
+
+
 class TestRecordServiceCloseUnanswered:
     def test_every_open_item_but_the_opening_is_done_unanswered(
         self,

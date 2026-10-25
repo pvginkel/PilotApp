@@ -1,17 +1,20 @@
 """Documents born in the record and published with their derived caches."""
 
+import threading
 from datetime import UTC, datetime
 
 import pytest
 from flask import Flask
+from psycopg.errors import LockNotAvailable
 from sqlalchemy import func, select
 from sqlalchemy import text as sql
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.database import scoped_session
 from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved
+from app.engine.documents import DocumentService, awaits_read
 from app.engine.paths import sha256_hex
 from app.exceptions import InvalidOperationException
 from app.extensions import db
@@ -38,6 +41,10 @@ from app.models.reference import (
     VersionCause,
 )
 from app.services.container import ServiceContainer
+from tests.support.locks import in_thread, lock_waits
+from tests.support.supervisor import WAIT_SECONDS, wait_until
+
+REGISTERED_PATH = "/work/Example/docs/refinement.md"
 
 ONE_DECISION = """---
 title: Which tent for the trip?
@@ -576,6 +583,314 @@ class TestDocumentServiceBirth:
             ),
             ProjectChanged(project.id),
         ]
+
+
+def _committed_run(app: Flask) -> tuple[object, object]:
+    """A draft project and a work Session of it, committed: their ids."""
+    with scoped_session(app.container) as session:
+        person = User(
+            kind_code=UserKind.PERSON,
+            subject="subject-ada",
+            handle="ada",
+            name="Ada Example",
+            avatar_slot=1,
+        )
+        session.add(person)
+        session.flush()
+        project = Project(created_by_user_id=person.id)
+        session.add(project)
+        session.add(Environment(id="example-env-1", name="Example-1", exempt=False))
+        session.flush()
+        run = models.Session(
+            project_id=project.id,
+            environment_id="example-env-1",
+            kind_code="work",
+            cwd="/work/Example",
+            token_hash="1" * 64,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(run)
+        session.flush()
+        return project.id, run.id
+
+
+class TestDocumentServiceRegister:
+    def test_a_registered_document_is_minted_with_no_text(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+    ) -> None:
+        documents = container.document_service()
+        documents.bear_item(project, "notice", "The palette", project_session)
+
+        registration = documents.register(project, project_session, REGISTERED_PATH)
+
+        item = registration.item
+        assert registration.minted
+        assert (item.project_id, item.seq, item.kind_code, item.title) == (
+            project.id,
+            2,
+            "review",
+            None,
+        )
+        assert (item.created_by_session_id, item.created_by_user_id) == (
+            project_session.id,
+            None,
+        )
+        assert item.done_at is None
+        document = session.get_one(Document, item.id)
+        assert (
+            document.path,
+            document.source_environment_id,
+            document.source_path,
+        ) == ("inbox/2-refinement.md", environment.id, REGISTERED_PATH)
+        assert (document.published_text, document.ingested_text) == (None, None)
+        assert (document.summary, document.written_back_at) == (None, None)
+        assert _versions(session, document) == []
+        assert _blocks(session, document.id) == []
+        assert awaits_read(item, document)
+
+    @pytest.mark.parametrize(
+        ("source_path", "path"),
+        [
+            (
+                "/work/Example/TheTVDB v4 or TVmaze.md",
+                "inbox/1-thetvdb-v4-or-tvmaze.md",
+            ),
+            ("/work/Example/Crème brûlée.md", "inbox/1-creme-brulee.md"),
+            ("/work/Example/notes", "inbox/1-notes.md"),
+            ("/work/Example/¿?.md", "inbox/1.md"),
+            ("/work/Example/" + "x" * 80 + ".md", f"inbox/1-{'x' * 60}.md"),
+        ],
+    )
+    def test_its_file_in_the_tree_is_named_by_its_files_name(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        source_path: str,
+        path: str,
+    ) -> None:
+        registration = container.document_service().register(
+            project, project_session, source_path
+        )
+
+        assert session.get_one(Document, registration.item.id).path == path
+
+    def test_a_path_registered_again_in_the_run_is_the_same_item(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        documents = container.document_service()
+        first = documents.register(project, project_session, REGISTERED_PATH)
+
+        again = documents.register(project, project_session, REGISTERED_PATH)
+        other = documents.register(project, project_session, "/work/Example/other.md")
+
+        assert (again.item.id, again.minted) == (first.item.id, False)
+        assert (other.item.seq, other.minted) == (2, True)
+        assert session.scalar(select(func.count()).select_from(Item)) == 2
+
+    def test_a_later_runs_registration_of_the_path_is_a_new_item(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        documents = container.document_service()
+        answered = documents.register(project, project_session, REGISTERED_PATH).item
+        answered.done_at = datetime.now(UTC)
+        answered.done_cause_code = "finished"
+        answered.done_by_user_id = person.id
+        continuation = models.Session(
+            project_id=project.id,
+            environment_id=environment.id,
+            kind_code="work",
+            cwd="/work/Example",
+            token_hash="2" * 64,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(continuation)
+        session.flush()
+
+        registration = documents.register(project, continuation, REGISTERED_PATH)
+
+        assert registration.minted
+        assert registration.item.id != answered.id
+        assert registration.item.created_by_session_id == continuation.id
+        assert answered.done_cause_code == "finished"
+
+    def test_a_registration_moves_the_timeline_and_no_path_of_the_tree(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        with scoped_session(container):
+            container.document_service().register(
+                project, project_session, REGISTERED_PATH
+            )
+
+        assert engine_events == [
+            TreeHashMoved(
+                f"draft-{project.number}/timeline.json",
+                container.view_service().timeline(project).hash,
+            ),
+            ProjectChanged(project.id),
+        ]
+
+    def test_a_registration_waits_for_the_projects_row(
+        self, committed_app: Flask
+    ) -> None:
+        project_id, run_id = _committed_run(committed_app)
+        container = committed_app.container
+        with committed_app.app_context():
+            engine = db.engine
+
+        with engine.connect() as holder:
+            holder.execute(
+                sql("SELECT id FROM projects WHERE id = :id FOR KEY SHARE"),
+                {"id": project_id},
+            )
+            with (
+                pytest.raises(OperationalError) as raised,
+                scoped_session(container) as session,
+            ):
+                session.execute(sql("SET LOCAL lock_timeout = '200ms'"))
+                container.document_service().register(
+                    session.get_one(Project, project_id),
+                    session.get_one(models.Session, run_id),
+                    REGISTERED_PATH,
+                )
+            holder.rollback()
+
+        assert isinstance(raised.value.orig, LockNotAvailable)
+        with scoped_session(container) as session:
+            assert session.scalar(select(func.count()).select_from(Item)) == 0
+
+    def test_a_path_registered_twice_at_once_is_minted_once(
+        self, committed_app: Flask, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        project_id, run_id = _committed_run(committed_app)
+        container = committed_app.container
+        locked, release = threading.Event(), threading.Event()
+        next_seq = DocumentService.next_seq
+        threads: list[threading.Thread] = []
+
+        def held_next_seq(self: DocumentService, project: Project) -> int:
+            seq = next_seq(self, project)
+            if threading.current_thread() is threads[0]:
+                locked.set()
+                assert release.wait(WAIT_SECONDS)
+            return seq
+
+        def register() -> tuple[object, bool]:
+            with scoped_session(container) as session:
+                registration = container.document_service().register(
+                    session.get_one(Project, project_id),
+                    session.get_one(models.Session, run_id),
+                    REGISTERED_PATH,
+                )
+                return registration.item.id, registration.minted
+
+        monkeypatch.setattr(DocumentService, "next_seq", held_next_seq)
+        first = in_thread(register)
+        threads.append(first.thread)
+        try:
+            assert locked.wait(WAIT_SECONDS)
+            second = in_thread(register)
+            wait_until(lambda: lock_waits(container) == 1, "the second waiting")
+        finally:
+            release.set()
+
+        first_id, minted = first.result()
+        assert minted
+        assert second.result() == (first_id, False)
+        with scoped_session(container) as session:
+            assert session.scalar(select(func.count()).select_from(Item)) == 1
+
+    def test_its_first_text_gives_it_its_file_and_shows_on_the_timeline(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        with scoped_session(container):
+            documents = container.document_service()
+            item_id = documents.register(
+                project, project_session, REGISTERED_PATH
+            ).item.id
+        engine_events.clear()
+        text = "# Refinement\n\nTwo options.\n"
+
+        with scoped_session(container) as db_session:
+            documents = container.document_service()
+            documents.publish(db_session.get_one(Document, item_id), text)
+
+        folder = f"draft-{project.number}"
+        assert engine_events == [
+            TreeHashMoved(f"{folder}/inbox/1-refinement.md", sha256_hex(text)),
+            TreeHashMoved(
+                f"{folder}/timeline.json",
+                container.view_service().timeline(project).hash,
+            ),
+            ProjectChanged(project.id),
+        ]
+        assert (
+            container.tree_service().read(f"{folder}/inbox/1-refinement.md").content
+            == text.encode()
+        )
+
+
+class TestAwaitsRead:
+    def test_a_registered_document_awaits_its_read_while_open_with_no_text(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        documents = container.document_service()
+        item = documents.register(project, project_session, REGISTERED_PATH).item
+        document = session.get_one(Document, item.id)
+        assert awaits_read(item, document)
+
+        item.done_at = datetime.now(UTC)
+        item.done_cause_code = "finished"
+        item.done_by_user_id = person.id
+        assert not awaits_read(item, document)
+
+    def test_a_document_with_a_text_awaits_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+    ) -> None:
+        documents = container.document_service()
+        own = documents.bear_item(project, "notice", "The palette", project_session)
+        registered = documents.bear_item(project, "review", "Notes", project_session)
+        registered_document = session.get_one(Document, registered.id)
+        registered_document.source_environment_id = environment.id
+        registered_document.source_path = REGISTERED_PATH
+
+        assert not awaits_read(own, session.get_one(Document, own.id))
+        assert not awaits_read(registered, registered_document)
 
 
 class TestDocumentServicePublish:

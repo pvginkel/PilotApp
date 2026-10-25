@@ -81,7 +81,7 @@ class ViewService:
         """The project's timeline: the project's state, its items in order,
         and its attachments, in the files' vocabulary."""
         rows = self.db.execute(
-            select(Item, Document.path, Document.summary)
+            select(Item, Document.path, Document.summary, Document.published_hash)
             .outerjoin(Document, Document.id == Item.id)
             .where(Item.project_id == project.id)
             .order_by(Item.seq)
@@ -104,7 +104,7 @@ class ViewService:
         handles = self._handles(
             {
                 user_id
-                for item, _, _ in rows
+                for item, _, _, _ in rows
                 for user_id in (item.for_user_id, item.done_by_user_id)
                 if user_id is not None
             }
@@ -121,8 +121,15 @@ class ViewService:
                     "autopilot": project.autopilot,
                 },
                 "items": [
-                    _item(item, path, summary, handles, hung.get(item.id, []))
-                    for item, path, summary in rows
+                    _item(
+                        item,
+                        # A registered document before its text has no file.
+                        None if published_hash is None else path,
+                        summary,
+                        handles,
+                        hung.get(item.id, []),
+                    )
+                    for item, path, summary, published_hash in rows
                 ],
                 "attachments": [
                     {

@@ -41,6 +41,15 @@ def _at(hour: int, minute: int = 0) -> datetime:
     return datetime(2026, 10, 12, hour, minute, tzinfo=UTC)
 
 
+def _published(text: str) -> dict[str, Any]:
+    """A document's published columns, holding `text`."""
+    return {
+        "published_text": text,
+        "published_hash": hashlib.sha256(text.encode()).hexdigest(),
+        "published_at": _at(9),
+    }
+
+
 def _attachment(
     project: Project, batch: int, filename: str, **values: Any
 ) -> Attachment:
@@ -202,11 +211,14 @@ class TestViewService:
         session.flush()
         session.add_all(
             [
-                Document(id=opening.id, path="items/1-badge-colours.md"),
+                Document(
+                    id=opening.id, path="items/1-badge-colours.md", **_published("")
+                ),
                 Document(
                     id=decision.id,
                     path="items/2-which-colour-for-the-badge.md",
                     summary="Blue or green.",
+                    **_published(""),
                 ),
             ]
         )
@@ -308,6 +320,34 @@ class TestViewService:
                 },
             ],
         }
+
+    def test_a_registered_document_with_no_text_names_no_path(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        documents = container.document_service()
+        item = documents.register(
+            project, project_session, "/work/Example/refinement.md"
+        ).item
+
+        [entry] = _json(container.view_service().timeline(project))["items"]
+        assert (entry["id"], entry["kind"], entry["title"], entry["path"]) == (
+            str(item.id),
+            "review",
+            None,
+            None,
+        )
+
+        documents.publish(session.get_one(Document, item.id), "# Refinement\n")
+
+        [entry] = _json(container.view_service().timeline(project))["items"]
+        assert (entry["title"], entry["path"]) == (
+            "Refinement",
+            "inbox/1-refinement.md",
+        )
 
     def test_an_items_attachments_keep_their_order_on_it(
         self,

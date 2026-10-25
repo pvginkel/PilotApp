@@ -968,6 +968,11 @@
             ],
             "description": "The opening's author (F18.1); null for every other item"
           },
+          "awaiting_read": {
+            "description": "Whether it is a registered document whose file has not been read yet: it is read at the end of the turn that registered it, and until then it has no text, `body` is null, and it takes no close (F85.1)",
+            "title": "Awaiting Read",
+            "type": "boolean"
+          },
           "body": {
             "anyOf": [
               {
@@ -1231,6 +1236,7 @@
           "word_count",
           "read_minutes",
           "writing",
+          "awaiting_read",
           "edited_at",
           "attachments",
           "work",
@@ -3511,6 +3517,45 @@
         "title": "ReadinessCheckSchema",
         "type": "object"
       },
+      "RegisterDocumentRequestSchema.ce33d8b": {
+        "additionalProperties": false,
+        "description": "A document a worker wrote, to register.",
+        "properties": {
+          "path": {
+            "description": "The file's absolute path in the session's environment, under `/work`",
+            "examples": [
+              "/work/Example/docs/refinement.md"
+            ],
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "RegisterDocumentRequestSchema",
+        "type": "object"
+      },
+      "RegisteredDocumentSchema.ce33d8b": {
+        "description": "The registered document.",
+        "properties": {
+          "id": {
+            "description": "Its item's id on the project's timeline",
+            "examples": [
+              "0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15"
+            ],
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "RegisteredDocumentSchema",
+        "type": "object"
+      },
       "SelfResponseSchema.d1d9f70": {
         "description": "The signed-in person, as the app's shell and the handle step draw them.",
         "properties": {
@@ -5414,6 +5459,11 @@
             ],
             "description": "The opening's author (F18.1); null for every other item"
           },
+          "awaiting_read": {
+            "description": "Whether it is a registered document whose file has not been read yet: it is read at the end of the turn that registered it, and until then it has no text, `body` is null, and it takes no close (F85.1)",
+            "title": "Awaiting Read",
+            "type": "boolean"
+          },
           "body": {
             "anyOf": [
               {
@@ -5671,6 +5721,7 @@
           "word_count",
           "read_minutes",
           "writing",
+          "awaiting_read",
           "edited_at",
           "attachments",
           "work"
@@ -10497,6 +10548,97 @@
         "parameters": [],
         "responses": {},
         "summary": "Return metrics in Prometheus text format.",
+        "tags": []
+      }
+    },
+    "/tools/pilot-work/documents": {
+      "post": {
+        "description": "Returns:     200: The document the session registered from the path already     201: The document, minted     400: The body is not a path     401: No bearer, or one no session has     403: The bearer's session is not a work item's     409: The file cannot be registered, nothing minted: the reason, the         text's faults each with its line     502: The controller did not answer, or refused for a reason of its own",
+        "operationId": "post__tools_pilot-work_documents",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterDocumentRequestSchema.ce33d8b"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegisteredDocumentSchema.ce33d8b"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegisteredDocumentSchema.ce33d8b"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          }
+        },
+        "summary": "`register_document(path)` (F85.1, ruling D1): the file the worker wrote at `path` in its environment, read and parsed now, registered as a document on its project's timeline, its text read at the end of the turn.",
         "tags": []
       }
     }

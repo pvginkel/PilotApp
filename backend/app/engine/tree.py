@@ -19,6 +19,9 @@ _DRAFT_FOLDER = re.compile(r"draft-(?P<number>[1-9][0-9]*)")
 _ATTACHMENT = re.compile(r"attachments/(?P<batch>[1-9][0-9]*)/(?P<filename>[^/]+)")
 _SYNCING = Project.archived.is_(False)
 """The projects whose folders the store syncs (design 1 §5.5)."""
+_HAS_TEXT = Document.published_hash.is_not(None)
+"""The documents with a file in the tree: all but a registered one before
+its text arrives."""
 
 
 @dataclass(frozen=True)
@@ -62,7 +65,8 @@ class TreeService:
 
     A path's `parse` Save Errors are the store's: its tree is the one the
     engine ingests from (design 1 §5.1), so a path is held whatever
-    Environment holds the error.
+    Environment holds the error. A registered document has no file while it
+    has no text (TD §4.4).
     """
 
     def __init__(
@@ -108,6 +112,7 @@ class TreeService:
                 .outerjoin(Item, Item.id == Document.id)
                 .where(
                     Document.path == rest,
+                    _HAS_TEXT,
                     or_(
                         Document.project_id == project.id,
                         Item.project_id == project.id,
@@ -136,7 +141,8 @@ class TreeService:
         document = resolved.document
         held = self.held(resolved.project, document)
         text = document.ingested_text if held else document.published_text
-        # Every document is born published, and a held save has its ingest.
+        # A path resolves to a document with a text, and a held save has its
+        # ingest.
         assert text is not None
         return TreeFile(text.encode(), _tree_hash(document, held))
 
@@ -184,12 +190,13 @@ class TreeService:
             tree_path(project, document.path): document
             for document in self.db.scalars(
                 select(Document).where(
+                    _HAS_TEXT,
                     or_(
                         Document.project_id == project.id,
                         Document.id.in_(
                             select(Item.id).where(Item.project_id == project.id)
                         ),
-                    )
+                    ),
                 )
             )
         }

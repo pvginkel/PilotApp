@@ -8,7 +8,10 @@ an agent's merged save and the record's own writes go through it.
 import re
 import unicodedata
 import uuid
+from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import PurePosixPath
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -40,9 +43,18 @@ from app.models.reference import (
 OPENING = "opening"
 CONFIRMATION = "confirmation"
 DOCUMENT = "document"
+REVIEW = "review"
 PROSE = "prose"
 
 _FILE_SLUG_LENGTH = 60
+
+
+@dataclass(frozen=True)
+class Registration:
+    """A registered document's item, and whether the registration minted it."""
+
+    item: Item
+    minted: bool
 
 
 class DocumentService:
@@ -105,13 +117,59 @@ class DocumentService:
             None,
         )
 
+    def register(
+        self, project: Project, session: AgentSession, source_path: str
+    ) -> Registration:
+        """The document `session` registered from the file at `source_path` in
+        its environment (F85.1): the one it registered from that path already
+        in its run, else one minted — a `review` until its text arrives (DB
+        decision 2), with no title, no text and no file in the tree until its
+        read at the end of the turn, at the project's next place, under
+        `inbox/` by its file's name. Under the project's row lock, so a path
+        registered twice at once is minted once."""
+        seq = self.next_seq(project)
+        registered = self.db.scalars(
+            select(Item)
+            .join(Document, Document.id == Item.id)
+            .where(
+                Item.created_by_session_id == session.id,
+                Document.source_path == source_path,
+            )
+        ).one_or_none()
+        if registered is not None:
+            return Registration(registered, minted=False)
+        item = Item(
+            id=uuid.uuid4(),
+            project_id=project.id,
+            seq=seq,
+            kind_code=REVIEW,
+            created_by_session_id=session.id,
+        )
+        self.db.add(item)
+        self.db.add(
+            Document(
+                id=item.id,
+                path=_path("inbox", seq, PurePosixPath(source_path).stem),
+                source_environment_id=session.environment_id,
+                source_path=source_path,
+            )
+        )
+        self.db.flush()
+        self.view_service.timeline_moved(project)
+        return Registration(item, minted=True)
+
     def publish(self, document: Document, text: str) -> None:
         """Publish `text` as the document's truth and rebuild every cache read
         from it, in the transaction. Refused for a text with a fault: only a
-        parseable text is published (F78). The opening's is never parsed."""
+        parseable text is published (F78). The opening's is never parsed. A
+        registered document's first text gives it its file in the tree."""
         project, item = self.owner(document)
         parsed = self._read(project, item, document, text)
-        tree_hash = self.tree_service.hash(project, document)
+        tree_hash = (
+            None
+            if document.published_text is None
+            else self.tree_service.hash(project, document)
+        )
         shown = self._shown(project, item, document)
         published = document.published_text
         self._set_published(document, text)
@@ -247,7 +305,7 @@ class DocumentService:
         item.id = uuid.uuid4()
         item.project_id = project.id
         item.seq = seq
-        document = Document(id=item.id, path=_item_path(seq, title))
+        document = Document(id=item.id, path=_path("items", seq, title))
         parsed = self._read(project, item, document, text)
         self.db.add(item)
         self._bear(project, item, document, text, parsed, session_id)
@@ -289,15 +347,9 @@ class DocumentService:
     ) -> dsl.ParsedDocument:
         parsed = dsl.parse(text)
         if parsed.faults:
-            faults = "; ".join(
-                f"line {fault.line}: {fault.message}"
-                if fault.line is not None
-                else fault.message
-                for fault in parsed.faults
-            )
             raise InvalidOperationException(
                 f"publish {tree_path(project, document.path)}",
-                f"its text holds a fault: {faults}",
+                f"its text holds a fault: {listed(parsed.faults)}",
             )
         return parsed
 
@@ -311,9 +363,11 @@ class DocumentService:
     def _shown(
         project: Project, item: Item | None, document: Document
     ) -> tuple[object, ...]:
-        """The caches of the document that `timeline.json` shows."""
+        """The caches of the document that `timeline.json` shows, and whether
+        it has a text, without which its path names no file."""
         if item is not None:
             return (
+                document.published_text is None,
                 item.kind_code,
                 item.title,
                 item.plan_task_id,
@@ -445,14 +499,34 @@ def _kind(item: Item, blocks: tuple[dsl.Block, ...]) -> str:
     return item.kind_code
 
 
-def _item_path(seq: int, title: str) -> str:
-    """`items/<seq>-<slug>.md`, the number as written (DB decision 35), the
-    slug the title's ASCII letters and digits."""
-    ascii_title = (
-        unicodedata.normalize("NFKD", title).encode("ascii", "ignore").decode()
+def awaits_read(item: Item, document: Document) -> bool:
+    """Whether the document is a registered one still awaiting its read at the
+    end of the turn that registered it: open, with no text. It takes no close
+    until then (review 7)."""
+    return (
+        document.source_path is not None
+        and document.published_text is None
+        and item.done_at is None
     )
-    slug = re.sub(r"[^a-z0-9]+", "-", ascii_title.lower()).strip("-")
+
+
+def listed(faults: Iterable[dsl.Fault]) -> str:
+    """Faults as an agent reads them, each with its line where it has one."""
+    return "; ".join(
+        f"line {fault.line}: {fault.message}"
+        if fault.line is not None
+        else fault.message
+        for fault in faults
+    )
+
+
+def _path(folder: str, seq: int, name: str) -> str:
+    """`<folder>/<seq>-<slug>.md`, the number as written (DB decision 35), the
+    slug `name`'s ASCII letters and digits: `items/` by the title Pilot's own
+    was added with, `inbox/` by a registered document's file name."""
+    ascii_name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
+    slug = re.sub(r"[^a-z0-9]+", "-", ascii_name.lower()).strip("-")
     if len(slug) > _FILE_SLUG_LENGTH:
         cut = slug[: _FILE_SLUG_LENGTH + 1]
         slug = cut.rsplit("-", 1)[0] if "-" in cut else slug[:_FILE_SLUG_LENGTH]
-    return f"items/{seq}-{slug}.md" if slug else f"items/{seq}.md"
+    return f"{folder}/{seq}-{slug}.md" if slug else f"{folder}/{seq}.md"

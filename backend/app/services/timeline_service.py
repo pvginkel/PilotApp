@@ -15,7 +15,7 @@ from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import Session, aliased
 
 from app.engine import dsl
-from app.engine.documents import OPENING, PROSE
+from app.engine.documents import OPENING, PROSE, awaits_read
 from app.engine.paths import tree_path
 from app.engine.record import MARKED, NOTICE, SETTLED, RecordService
 from app.exceptions import RecordNotFoundException
@@ -350,9 +350,11 @@ class TimelineService:
                 project,
                 [(item, document, form) for item, document, form in rows],
                 {
-                    item.id: _published(document)
+                    item.id: document.published_text
                     for item, document, _ in rows
-                    if document is not None and item.kind_code != OPENING
+                    if document is not None
+                    and item.kind_code != OPENING
+                    and document.published_text is not None
                 },
             ),
         )
@@ -362,7 +364,7 @@ class TimelineService:
         it, but that an item done by Done, Pilot's included, reads as Done
         fixed it (F13.3): the text of its latest `done` Version. Only Done
         cuts one; an open item, and one done any other way, reads as last
-        published.
+        published. A registered document with no text reads with no body.
 
         Raises:
             RecordNotFoundException: no item has the id, or it has no
@@ -379,11 +381,8 @@ class TimelineService:
         item, document, form = row
         project = self.db.get_one(Project, item.project_id)
         fixed = self._fixed_at_done(item)
-        texts = (
-            {}
-            if item.kind_code == OPENING
-            else {item.id: _published(document) if fixed is None else fixed}
-        )
+        text = document.published_text if fixed is None else fixed
+        texts = {} if item.kind_code == OPENING or text is None else {item.id: text}
         (entry,) = self._items(project, [(item, document, form)], texts)
         if fixed is not None:
             parsed = dsl.parse(fixed)
@@ -428,7 +427,8 @@ class TimelineService:
     ) -> list[TimelineItemSchema]:
         """`rows`, items of `project` with their documents and forms, as their
         lines and open forms show them; a prose item's text as drawn is its
-        text in `texts`, where the opening, work and waits have none."""
+        text in `texts`, where the opening, work, waits and a registered
+        document with no text have none."""
         bodies = {item_id: dsl.body(text) for item_id, text in texts.items()}
         counts = {item_id: dsl.words(text) for item_id, text in texts.items()}
         edited = self._edited(list(texts))
@@ -515,6 +515,7 @@ class TimelineService:
                 writing=(
                     document is not None and document.writing_session_id is not None
                 ),
+                awaiting_read=document is not None and awaits_read(item, document),
                 edited_at=edited.get(item.id),
                 attachments=attachments.get(item.id, []),
                 work=works[item.id] if form == WORK else None,
@@ -765,6 +766,7 @@ def _read_minutes(words: int) -> int:
 
 
 def _published(document: Document) -> str:
-    # Every document is born published.
+    # Every document but a registered one is born published: the opening and
+    # a project's draft and handbook are.
     assert document.published_text is not None
     return document.published_text

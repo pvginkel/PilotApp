@@ -33,6 +33,7 @@ from app.services.metrics_service import MetricsService
 from app.services.oidc_client_service import OidcClientService
 from app.services.people_service import PeopleService
 from app.services.pilot_server import PilotServer
+from app.services.pilot_work_service import PilotWorkService
 from app.services.project_event_service import ProjectEventService
 from app.services.project_service import ProjectService
 from app.services.relay_service import RelayService
@@ -349,6 +350,16 @@ class ServiceContainer(containers.DeclarativeContainer):
         engine_bus=engine_bus,
         record_service=record_service,
         tree_service=tree_service,
+    )
+
+    # A worker session's tools, under its bearer (TD §4.5, F85); the client is
+    # built at the call, so the service is built without a controller
+    pilot_work_service = providers.Factory(
+        PilotWorkService,
+        db=db_session,
+        controller_client=controller_client.provider,
+        document_service=document_service,
+        ingest_service=ingest_service,
     )
 
     # The signed-in person on the record (F137), and what links in text (F93)

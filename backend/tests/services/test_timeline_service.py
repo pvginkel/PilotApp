@@ -1045,6 +1045,50 @@ class TestTimeline:
             {"type": "prose", "markdown": "The camp's refinement.", "section": None}
         ]
 
+    def test_a_registered_document_awaiting_its_read_has_no_text_and_says_so(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        run = _run(session, project, environment)
+        container.document_service().register(
+            project, run, "/work/Camp/docs/refinement.md"
+        )
+
+        _opening, line = _items(container, project)
+
+        assert (line["kind"], line["title"], line["file_name"]) == (
+            "review",
+            None,
+            "refinement.md",
+        )
+        assert line["awaiting_read"] is True
+        facts = ("body", "summary", "word_count", "read_minutes", "edited_at")
+        assert [line[key] for key in facts] == [None] * 5
+        assert (line["done"], line["concept"], line["writing"]) == (None, False, False)
+
+    def test_no_item_but_a_registered_document_awaiting_its_read_awaits_it(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        run = _run(session, project, environment)
+        person = session.scalars(select(User).where(User.handle == "ada")).one()
+        documents = container.document_service()
+        documents.bear_item(project, "notice", "Palette", run, "Blue.\n")
+        closed = documents.register(project, run, "/work/Camp/docs/closed.md").item
+        container.record_service().close_unanswered(project, person, datetime.now(UTC))
+        _work(session, project, environment, SessionState.RUNNING)
+
+        items = _items(container, project)
+
+        assert [item["awaiting_read"] for item in items] == [False] * 4
+        assert items[2]["id"] == str(closed.id)
+
     def test_the_opening_work_and_waits_say_nothing_of_a_text(
         self,
         container: ServiceContainer,
@@ -1981,6 +2025,28 @@ class TestItemDocument:
             with pytest.raises(RecordNotFoundException) as raised:
                 container.timeline_service().item_document(item.id)
             assert raised.value.message == f"Document of item {item.id} was not found"
+
+    def test_a_registered_document_awaiting_its_read_reads_with_no_body(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        item = (
+            container.document_service()
+            .register(
+                project,
+                _run(session, project, environment),
+                "/work/Camp/docs/refinement.md",
+            )
+            .item
+        )
+
+        read = _read(container, item)
+
+        assert read == {**_items(container, project)[1], "project_id": str(project.id)}
+        assert (read["body"], read["awaiting_read"]) == (None, True)
 
     def test_an_open_document_reads_as_its_timeline_entry_with_its_project(
         self,

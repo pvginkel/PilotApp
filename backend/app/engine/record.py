@@ -18,7 +18,14 @@ from sqlalchemy import ColumnElement, and_, exists, select
 from sqlalchemy.orm import Session
 
 from app.engine import dsl
-from app.engine.documents import DOCUMENT, OPENING, PROSE, DocumentService
+from app.engine.documents import (
+    DOCUMENT,
+    OPENING,
+    PROSE,
+    REVIEW,
+    DocumentService,
+    awaits_read,
+)
 from app.engine.paths import tree_path
 from app.engine.views import ViewService
 from app.exceptions import InvalidOperationException, RecordNotFoundException
@@ -36,7 +43,6 @@ from app.models import Session as AgentSession
 from app.models.reference import AnswerChannel, ProjectState, UserKind, VersionCause
 
 NOTICE = "notice"
-REVIEW = "review"
 WORK = "work"
 
 ANSWERED = "answered"
@@ -75,6 +81,7 @@ class RecordService:
         the answer to a one-ask item is its done (DB 163)."""
         project, item = self._locked(document)
         operation = f"answer block {local_id} of {tree_path(project, document.path)}"
+        _not_awaiting_read(item, document, operation)
         _a_person(user, operation, "Pilot answers in the file, `by: agent`")
         _not_done(item, operation)
         answer_text, note, to = _value(answer), _value(note), _value(to)
@@ -132,6 +139,7 @@ class RecordService:
         operation = (
             f"mark action {local_id} of {tree_path(project, document.path)} done"
         )
+        _not_awaiting_read(item, document, operation)
         _a_person(user, operation, "Pilot settles an action in the file")
         _not_done(item, operation)
         blocks = _blocks(item, document)
@@ -215,6 +223,7 @@ class RecordService:
         document = self.db.get_one(Document, item.id)
         project, _ = self._locked(document)
         operation = f"mark {tree_path(project, document.path)} done"
+        _not_awaiting_read(item, document, operation)
         if item.kind_code != DOCUMENT:
             raise InvalidOperationException(
                 operation, f"a {item.kind_code} item is not done by Done"
@@ -352,6 +361,7 @@ class RecordService:
         document = self.db.get_one(Document, item.id)
         project, _ = self._locked(document)
         operation = f"mark {tree_path(project, document.path)} {mark}"
+        _not_awaiting_read(item, document, operation)
         _a_person(user, operation, "Pilot marks done only a document it settled whole")
         if item.kind_code != kind:
             raise InvalidOperationException(
@@ -423,6 +433,17 @@ def _open_in(project: Project) -> ColumnElement[bool]:
 def _a_person(user: User, operation: str, cause: str) -> None:
     if user.kind_code is UserKind.AGENT:
         raise InvalidOperationException(operation, cause)
+
+
+def _not_awaiting_read(item: Item | None, document: Document, operation: str) -> None:
+    """A registered document takes no close before its read at the end of the
+    turn that registered it (review 7)."""
+    if item is not None and awaits_read(item, document):
+        raise InvalidOperationException(
+            operation,
+            "its file has not been read yet: it is read at the end of the turn"
+            " that registered it",
+        )
 
 
 def _not_done(item: Item | None, operation: str) -> None:

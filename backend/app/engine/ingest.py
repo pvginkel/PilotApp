@@ -4,7 +4,7 @@ transaction that holds the document's row; and what the reconcile's write-down
 does to a held `plan.json` (§5.5 step 2)."""
 
 import hashlib
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -65,6 +65,15 @@ class Ingested:
     faults: tuple[dsl.Fault, ...]
 
 
+@dataclass(frozen=True)
+class WorkerVersion:
+    """A registered document's file as its worker's turn left it: its text,
+    and every fault it holds."""
+
+    text: str
+    faults: tuple[dsl.Fault, ...]
+
+
 class IngestService:
     def __init__(
         self,
@@ -121,6 +130,18 @@ class IngestService:
             )
         return self._ingest_document(
             path, resolved, content, base_hash, environment, session
+        )
+
+    def worker_version(self, project: Project, content: bytes) -> WorkerVersion:
+        """`content`, the bytes of a registered document's file as its
+        worker's turn left it, read as a text of `project`'s: its bytes'
+        faults, its own and those against the record, in line order, outside
+        the title rule (`dsl.DocumentKind.WORKER_VERSION`)."""
+        text, faults = _decoded(content)
+        facts = self._facts(project, dsl.DocumentKind.WORKER_VERSION, {})
+        return WorkerVersion(
+            text,
+            tuple(_in_line_order([*faults, *dsl.validate(dsl.parse(text), facts)])),
         )
 
     def write_down(self, paths: Iterable[str]) -> None:
@@ -210,15 +231,8 @@ class IngestService:
             # whatever it holds (DB decision 2).
             faults = []
         else:
-            faults = sorted(
-                [
-                    *faults,
-                    *dsl.validate(
-                        dsl.parse(text), self._facts(project, document, kind)
-                    ),
-                ],
-                key=lambda fault: (fault.line is None, fault.line or 0),
-            )
+            facts = self._facts(project, kind, _published_to(document))
+            faults = _in_line_order([*faults, *dsl.validate(dsl.parse(text), facts)])
         held = bool(faults)
         if held:
             self._raise(environment, path, ErrorKind.PARSE, faults)
@@ -291,10 +305,13 @@ class IngestService:
         )
 
     def _facts(
-        self, project: Project, document: Document, kind: dsl.DocumentKind
+        self,
+        project: Project,
+        kind: dsl.DocumentKind,
+        published_to: Mapping[str, str],
     ) -> dsl.Facts:
-        """What the record holds at the save; a `to` the published text has is
-        not checked again (DB 203)."""
+        """What the record holds at the save; a `to` the published text has,
+        `published_to`, is not checked again (DB 203)."""
         tasks = self.db.execute(
             select(PlanTask.task_id, PlanTask.removed_at).where(
                 PlanTask.project_id == project.id
@@ -317,12 +334,22 @@ class IngestService:
                 )
                 if slug is not None
             },
-            published_to={
-                block.local_id: block.to
-                for block in dsl.parse(_published(document)).blocks
-                if block.to is not None
-            },
+            published_to=published_to,
         )
+
+
+def _published_to(document: Document) -> dict[str, str]:
+    """Each `to` of the document's published text, by its block's id."""
+    return {
+        block.local_id: block.to
+        for block in dsl.parse(_published(document)).blocks
+        if block.to is not None
+    }
+
+
+def _in_line_order(faults: list[dsl.Fault]) -> list[dsl.Fault]:
+    """File order, the faults of the document as a whole last."""
+    return sorted(faults, key=lambda fault: (fault.line is None, fault.line or 0))
 
 
 def _decoded(content: bytes) -> tuple[str, list[dsl.Fault]]:

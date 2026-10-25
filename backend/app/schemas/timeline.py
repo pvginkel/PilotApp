@@ -458,6 +458,13 @@ class TimelineItemSchema(BaseModel):
             "event announces"
         )
     )
+    awaiting_read: bool = Field(
+        description=(
+            "Whether it is a registered document whose file has not been read yet: "
+            "it is read at the end of the turn that registered it, and until then "
+            "it has no text, `body` is null, and it takes no close (F85.1)"
+        )
+    )
     edited_at: datetime | None = Field(
         description=(
             "*Edited <time>* (F28.7): the time of the latest `turn` Version that "

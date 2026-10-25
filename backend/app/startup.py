@@ -58,14 +58,17 @@ def register_error_handlers(app: Flask) -> None:
 
 def register_root_blueprints(app: Flask) -> None:
     """Register app-specific blueprints directly on the app, outside api_bp's
-    OIDC gate: the store sidecar's sync routes, under the store's bearer, and
-    the testing endpoints refused outside testing mode."""
+    OIDC gate: the store sidecar's sync routes, under the store's bearer; the
+    worker sessions' tool routes, under each session's bearer, outside `/api/`;
+    and the testing endpoints refused outside testing mode."""
+    from app.api.pilot_work import pilot_work_bp
     from app.api.sync import sync_bp
     from app.api.testing_controller import testing_controller_bp
     from app.api.testing_links import testing_links_bp
     from app.api.testing_sync import testing_sync_bp
 
     app.register_blueprint(sync_bp)
+    app.register_blueprint(pilot_work_bp)
     app.register_blueprint(testing_sync_bp)
     app.register_blueprint(testing_links_bp)
     app.register_blueprint(testing_controller_bp)

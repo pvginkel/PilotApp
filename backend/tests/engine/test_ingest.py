@@ -28,7 +28,7 @@ from app.engine.bus import (
     TreeHashMoved,
 )
 from app.engine.documents import DocumentService
-from app.engine.ingest import Ingested, PathKind
+from app.engine.ingest import Ingested, PathKind, WorkerVersion
 from app.engine.paths import sha256_hex
 from app.engine.tree import TreeFile
 from app.exceptions import RecordNotFoundException
@@ -177,6 +177,58 @@ def _open(session: DbSession, project: Project, slug: str) -> None:
     project.slug = slug
     project.state_code = ProjectState.OPEN
     session.flush()
+
+
+class TestIngestServiceWorkerVersion:
+    """A registered document's file read as its worker's turn left it."""
+
+    def test_a_clean_text_has_no_fault_and_needs_no_title(
+        self, container: ServiceContainer, project: Project
+    ) -> None:
+        text = "Two options for the camp.\n\n```question id=Q1\n```\n"
+
+        version = container.ingest_service().worker_version(project, text.encode())
+
+        assert version == WorkerVersion(text, ())
+
+    def test_every_fault_in_line_order_its_bytes_its_own_and_the_records(
+        self, session: DbSession, container: ServiceContainer, project: Project
+    ) -> None:
+        _task(session, project, "build")
+        content = (
+            b"---\nfor: nobody\nstep: build\n---\n\nCamp \xff notes.\n\n"
+            b"```decision id=D1\nproposal: [\n```\n"
+        )
+
+        version = container.ingest_service().worker_version(project, content)
+
+        text = content.decode(errors="replace")
+        assert version.text == text
+        own = list(dsl.parse(text).faults)
+        assert own
+        assert list(version.faults) == sorted(
+            [
+                dsl.Fault(2, "front matter: `for: nobody` names no handle"),
+                dsl.Fault(
+                    6,
+                    "the file is not UTF-8 text: each sequence that is not, and"
+                    " each NUL, is replaced by U+FFFD",
+                ),
+                *own,
+            ],
+            key=lambda fault: (fault.line is None, fault.line or 0),
+        )
+
+    def test_a_step_of_another_project_is_a_fault(
+        self, container: ServiceContainer, project: Project
+    ) -> None:
+        content = b"---\nstep: build\n---\n\nCamp notes.\n"
+
+        version = container.ingest_service().worker_version(project, content)
+
+        assert version.faults == (
+            dsl.Fault(2, "front matter: `step: build` names no task of the project"),
+        )
 
 
 class TestIngestServicePaths:

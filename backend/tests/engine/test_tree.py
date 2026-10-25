@@ -181,6 +181,29 @@ class TestTreeService:
             f"draft-{other.number}/timeline.json",
         }
 
+    def test_a_registered_document_has_no_file_until_its_text_arrives(
+        self,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        documents = container.document_service()
+        documents.bear_draft(project, "# Badges\n")
+        documents.register(project, project_session, "/work/Example/refinement.md")
+        folder = f"draft-{project.number}"
+        tree = container.tree_service()
+
+        assert sorted(tree.hashes(project)) == [
+            f"{folder}/plan.json",
+            f"{folder}/project.md",
+            f"{folder}/timeline.json",
+        ]
+        assert f"{folder}/inbox/1-refinement.md" not in {
+            entry.path for entry in tree.manifest()
+        }
+        with pytest.raises(RecordNotFoundException):
+            tree.resolve(f"{folder}/inbox/1-refinement.md")
+
 
 class TestTreeServiceManifest:
     def test_the_manifest_is_every_syncing_folder_and_the_reference(
