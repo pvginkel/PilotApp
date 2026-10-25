@@ -586,6 +586,20 @@ class TestFakeController:
         assert fake.environment("env-1").status == "starting"
         assert fake.environment("env-1").resets == 1
 
+    def test_reset_refuses_in_the_controllers_order(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.add_environment("env-1", status="running")
+        fake.capped()
+
+        response = http.post("/environments/env-1/reset", headers=BEARER)
+
+        assert (response.status_code, response.get_json()["type"]) == (
+            409,
+            "conflict",
+        )
+        assert fake.environment("env-1").resets == 0
+
     @pytest.mark.parametrize("body", [{}, {"name": None}, {"name": 5}, ["x"]])
     def test_rename_refuses_a_body_of_another_shape(
         self, fake: FakeController, http: Client, body: object
@@ -595,6 +609,22 @@ class TestFakeController:
         response = http.post("/environments/env-1/rename", json=body, headers=BEARER)
 
         assert response.status_code == 422
+        assert fake.environment("env-1").name == "Example"
+
+    def test_rename_refuses_in_the_controllers_order(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.add_environment("env-1", name="Example", status="deleting")
+        fake.add_environment("env-2", name="Taken")
+
+        response = http.post(
+            "/environments/env-1/rename", json={"name": "taken"}, headers=BEARER
+        )
+
+        assert (response.status_code, response.get_json()["type"]) == (
+            409,
+            "conflict",
+        )
         assert fake.environment("env-1").name == "Example"
 
     def test_a_rename_is_announced(self, fake: FakeController, http: Client) -> None:
