@@ -35,6 +35,7 @@ from app.services.controller_client import (
 )
 from app.services.environment_service import SHUTDOWN_TIMER, EnvironmentService
 from app.services.fake_controller import FakeControllerProblem, FinishOutcome
+from app.services.pilot_server import PilotServer, token_hash
 from app.services.relay_service import (
     CONTINUE,
     ENVIRONMENT_STOPPED,
@@ -66,6 +67,7 @@ from tests.support.supervisor import (
 )
 
 ENV = "env-a"
+MCP_URL = "https://pilot-mcp.example.com/mcp"
 SUBJECT = "subject-ada"
 STOP_AFTER = timedelta(minutes=30)
 SUPERVISOR_LOGGER = "app.services.supervisor"
@@ -79,8 +81,10 @@ def _no_callbacks() -> Iterator[None]:
 
 
 def _relay_service(
-    container: ServiceContainer, supervise: Supervise
+    container: ServiceContainer, supervise: Supervise, mcp_url: str | None = None
 ) -> tuple[RelayService, LifecycleCoordinator]:
+    """The relays on a supervisor of their own; their re-creates hand Pilot's
+    MCP server at `mcp_url`, none when it is None."""
     supervisor, coordinator = supervise(container)
     environments = EnvironmentService(
         container=container,
@@ -94,6 +98,7 @@ def _relay_service(
         session_streams=container.session_stream_service(),
         environment_service=environments,
         work_slots=WorkSlots(work_max=3, project_max=3),
+        pilot_server=PilotServer(mcp_url),
     )
     return relays, coordinator
 
@@ -197,6 +202,14 @@ def _claude(db: DbSession, run_id: uuid.UUID) -> list[tuple[int | None, Any]]:
         for stored in _records(db, run_id)
         if stored.record.kind_code == RecordKind.CLAUDE
     ]
+
+
+def _token(body: dict[str, Any]) -> str:
+    """The token a headless create's body carries as `PILOT_TOKEN`."""
+    (entry,) = body["env"]
+    name, _, token = entry.partition("=")
+    assert name == "PILOT_TOKEN"
+    return token
 
 
 def _relay(relays: RelayService, run: models.Session) -> None:
@@ -471,6 +484,36 @@ class TestSend:
                 "reasoningEffort": "high",
             }
         ]
+
+    def test_a_resume_hands_the_new_session_pilots_server_with_a_token_of_its_own(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        supervise: Supervise,
+        creating: tuple[RelayService, "_Creating"],
+        project: Project,
+    ) -> None:
+        _, fake = creating
+        relays = _relay_service(container, supervise, mcp_url=MCP_URL)[0]
+        run = _agent_session(session, project, "claude-gone")
+        run.conversation_id = "conversation-1"
+        before = run.token_hash
+
+        turn = _send(relays, session, run, "Rename the badge")
+
+        assert turn.error is None
+        (body,) = fake.create_bodies
+        assert body["resume"] == "conversation-1"
+        (entry,) = body["mcpConfig"]
+        assert json.loads(entry)["mcpServers"]["pilot"]["url"] == MCP_URL
+        assert "strictMcpConfig" not in body
+        assert run.token_hash == token_hash(_token(body)) != before
+        [gone] = [
+            stored.record.payload
+            for stored in _records(session, run.id)
+            if stored.record.kind_code == RecordKind.SERVER
+        ]
+        assert _token(body) not in json.dumps(gone)
 
     def test_a_resume_the_controller_refuses_fails_the_turn_and_writes_nothing_else(
         self,
@@ -1247,6 +1290,20 @@ def creating(
         yield _relay_service(container, supervise)[0], fake
     finally:
         fake.close()
+
+
+class _SendWatched(ServedFakeController):
+    """The fake, calling `on_send` with the session's name as it answers each
+    send, when it is set."""
+
+    def __init__(self, keepalive_seconds: float) -> None:
+        super().__init__(keepalive_seconds)
+        self.on_send: Callable[[str], None] | None = None
+
+    def _send(self, request: Request, env_id: str, name: str) -> Response:
+        if self.on_send is not None:
+            self.on_send(name)
+        return super()._send(request, env_id, name)
 
 
 class _GoneOnce(ServedFakeController):
@@ -2830,6 +2887,40 @@ class TestEnvironmentRestartUnderARun:
 
         self._assert_resumed(container, run_id, lines, offsets, second)
         assert not relay_log.matching(r"Environment .* waiting for it to settle")
+
+    def test_the_resumes_token_hash_is_committed_before_its_turn_is_sent(
+        self,
+        committed_app: Flask,
+        supervise: Supervise,
+        relay_log: LogWaiter,
+    ) -> None:
+        container = committed_app.container
+        fake = _SendWatched(keepalive_seconds=0.2)
+        try:
+            client = client_of(container, fake)
+            relays, coordinator = _relay_service(container, supervise, mcp_url=MCP_URL)
+            name = _headless(fake, client)
+            run_id, person_id = _committed_session(container, name)
+            coordinator.fire_startup()
+            _send_committed(container, relays, run_id, person_id)
+            before = _read(container, run_id).token_hash
+            at_send: list[tuple[str, str]] = []
+            fake.on_send = lambda sent: at_send.append(
+                (sent, _read(container, run_id).token_hash)
+            )
+
+            client.end_session(ENV, name)
+
+            relay_log.wait_for(rf"Session {run_id} lost controller session {name}; .*")
+            wait_until(
+                lambda: fake.session(ENV, "claude-2").status == "busy",
+                "the continue sent",
+            )
+            token = _token(fake.session(ENV, "claude-2").create_body)
+            assert at_send == [("claude-2", token_hash(token))]
+            assert token_hash(token) != before
+        finally:
+            fake.close()
 
     def test_a_restart_before_the_first_line_resumes_with_the_ended_turns_message(
         self,

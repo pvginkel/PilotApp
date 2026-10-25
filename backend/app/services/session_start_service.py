@@ -11,7 +11,10 @@ loop, `start:<id>`, runs once that commits: it takes a free environment of
 Pilot's own made from the repository, the take committed before any controller
 call and the environment then renamed after the Project and reset, or creates
 one, whose row commits before its bring-up is waited on; then it creates the
-headless session and sends the brief, whose `202` starts the relay. Each phase the
+headless session, Pilot's MCP server handed to it with a token minted for it
+(`PilotServer`), and sends the brief, whose `202` starts the relay. The token's
+hash is the Session's from the commit that makes the create's controller
+session its own, before any Turn goes to that session. Each phase the
 start enters is a `server` record in no Turn (DB assertion 220), and each such
 record rebuilds the current line in its transaction.
 
@@ -89,6 +92,7 @@ from app.services.controller_client import (
 from app.services.controller_outage import ControllerOutage
 from app.services.current_line import while_starting
 from app.services.environment_service import EnvironmentService
+from app.services.pilot_server import PilotServer
 from app.services.relay_service import CONTINUE, SESSION_GONE, RelayService
 from app.services.session_record_service import SessionRecordService
 from app.services.session_stream_service import SessionStreamService
@@ -212,6 +216,7 @@ class SessionStartService:
         relay_service: RelayService,
         controller_outage: ControllerOutage,
         work_slots: WorkSlots,
+        pilot_server: PilotServer,
         controller_configured: bool,
     ) -> None:
         """Register the `start` job, whose loops are one per Session and one
@@ -232,6 +237,8 @@ class SessionStartService:
             controller_outage: The gate's outage, which the probe turns off
             work_slots: The gate's slot, whose count a work item's start and
                 its end move
+            pilot_server: Hands each headless create Pilot's MCP server, with
+                a token minted for it
             controller_configured: False refuses every start
         """
         self._container = container
@@ -241,6 +248,7 @@ class SessionStartService:
         self._relays = relay_service
         self._outage = controller_outage
         self._slots = work_slots
+        self._pilot_server = pilot_server
         self._controller_configured = controller_configured
         supervisor.register_job(
             START_JOB, needs_controller=True, reconcile=self._reconcile
@@ -266,8 +274,9 @@ class SessionStartService:
         Item, its Work, which keeps `repo`, and its Session one id (DB Work,
         decision 3), its first Turn the brief. The repository and `cwd` are
         taken as the placement gives them (F61.1). The Session has no
-        Environment until its start provides one (DB 107), and gets the hash
-        of a token minted for it. It passes the gate (§13.4): `held` while
+        Environment until its start provides one (DB 107), and the hash of a
+        token no one holds until its create mints the one its controller
+        session carries (`run`). It passes the gate (§13.4): `held` while
         the gate is closed for it, with nothing run, its slot counted under
         the slot's lock; else `starting`, its start run once this commits. No
         controller call is made.
@@ -322,7 +331,11 @@ class SessionStartService:
         """The start loop's run, from where the Session's rows left its start:
         the environment brought up and the headless session created while the
         Session has no controller session, then its Turn sent, the brief or a
-        Resume's, unless the controller has it already. A Resume's controller
+        Resume's, unless the controller has it already. The create hands the
+        session Pilot's MCP server with a token minted for it, whose hash the
+        Session takes as it takes the controller session, in the commit before
+        the Turn is sent; a Turn to a controller session that stands keeps the
+        token its create carried. A Resume's controller
         session that is gone, or whose environment is not running, is given up
         first, a `server` record saying so, and the start goes on from the
         environment. Returns at once for a Session no longer `starting`, and
@@ -383,9 +396,10 @@ class SessionStartService:
                     pending = self._creating(db, session_id, turn_id)
                 if pending is None:
                     return
+                injected = self._pilot_server.inject(pending.create)
                 created = (
                     self._client().create_headless_session(
-                        pending.environment, pending.create
+                        pending.environment, injected.request
                     )
                     if pending.controller_session is None
                     else None
@@ -405,6 +419,7 @@ class SessionStartService:
                         return
                     if session.controller_session is None:
                         session.controller_session = created.name
+                        session.token_hash = injected.token_hash
                         session.started_at = datetime.now(UTC)
                         self._moved(session)
             if handle.stopping:

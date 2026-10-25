@@ -215,6 +215,7 @@ class TestAppSettings:
             "controller_url": "None",
             "controller_token": "***",
             "controller_ca_file": "None",
+            "mcp_server_url": "None",
             "scheduler_tick_seconds": repr(10.0),
             "environment_stop_after_seconds": repr(1800.0),
             "environment_delete_after_seconds": repr(604800.0),
@@ -267,6 +268,28 @@ class TestAppSettings:
         with pytest.raises(ValidationError, match="must be an http"):
             AppSettings.load(AppEnvironment(ENVIRONMENT_LINK_BASE_URL=base))
 
+    def test_load_reads_the_mcp_servers_endpoint(self) -> None:
+        settings = AppSettings.load(
+            AppEnvironment(MCP_SERVER_URL="https://pilot-mcp.example.com/mcp")
+        )
+
+        assert settings.mcp_server_url == "https://pilot-mcp.example.com/mcp"
+
+    def test_the_mcp_servers_endpoint_is_unset_by_default_and_when_empty(
+        self,
+    ) -> None:
+        assert AppSettings.load(AppEnvironment()).mcp_server_url is None
+        assert (
+            AppSettings.load(AppEnvironment(MCP_SERVER_URL="")).mcp_server_url is None
+        )
+
+    @pytest.mark.parametrize(
+        "url", ["pilot-mcp.example.com/mcp", "ftp://pilot-mcp.example.com/mcp"]
+    )
+    def test_an_mcp_endpoint_that_is_no_http_address_is_refused(self, url: str) -> None:
+        with pytest.raises(ValidationError, match="MCP_SERVER_URL must be an http"):
+            AppSettings.load(AppEnvironment(MCP_SERVER_URL=url))
+
     def test_the_settings_are_logged_as_they_stand(self) -> None:
         settings = AppSettings(ticket_url_template="https://tracker.example.com/{id}")
 
@@ -281,6 +304,7 @@ class TestAppSettings:
             "controller_url": "None",
             "controller_token": "***",
             "controller_ca_file": repr(None),
+            "mcp_server_url": repr(None),
             "scheduler_tick_seconds": repr(10.0),
             "environment_stop_after_seconds": repr(1800.0),
             "environment_delete_after_seconds": repr(604800.0),

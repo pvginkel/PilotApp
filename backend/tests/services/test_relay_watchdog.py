@@ -119,6 +119,7 @@ def _watch(
         session_streams=container.session_stream_service(),
         environment_service=environments,
         work_slots=WorkSlots(work_max=3, project_max=3),
+        pilot_server=container.pilot_server(),
     )
     RelayWatchdog(supervisor=supervisor, fleet_consumer=fleet)
     return relays, coordinator

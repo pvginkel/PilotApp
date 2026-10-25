@@ -9,6 +9,7 @@ called as its loop calls it. `TestStartLoop` and `TestHeldLoop` run the loops
 from the write's commit on a database of their own, as the supervisor does."""
 
 import json
+import logging
 import threading
 import uuid
 from collections.abc import Callable, Iterator
@@ -20,7 +21,7 @@ import requests
 from dependency_injector import providers
 from flask import Flask
 from psycopg.errors import LockNotAvailable
-from sqlalchemy import select, text
+from sqlalchemy import inspect, select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session as DbSession
 from werkzeug.wrappers import Request, Response
@@ -49,6 +50,7 @@ from app.services.fake_controller import (
     FakeControllerProblem,
     FinishOutcome,
 )
+from app.services.pilot_server import PilotServer, token_hash
 from app.services.relay_service import CONTINUE, SEND_FAILED, SESSION_GONE, RelayService
 from app.services.session_record_service import StoredRecord, read_records
 from app.services.session_start_service import (
@@ -90,6 +92,7 @@ PREPARING = {"type": STARTING, "text": "Preparing camp…"}
 STARTING_ENV = {"type": STARTING, "text": "Starting camp…"}
 CREATING = {"type": STARTING, "text": "Creating the session…"}
 CREATE_ENVIRONMENT = "POST /environments"
+MCP_URL = "https://pilot-mcp.example.com/mcp"
 SUPERVISOR_LOGGER = "app.services.supervisor"
 START_LOGGER = "app.services.session_start_service"
 
@@ -100,11 +103,11 @@ class _Recording(ServedFakeController):
     worker-unreachable` while `refuse_sends` is set, and answering the next
     reset, made, with an ingress's `502` while `lose_reset` is set, as a
     reset whose `202` was lost leaves it. `during_provision`,
-    `during_rename`, `during_start`, `during_settle`, `during_create` and
-    `during_snapshot`, when set, run once, as an environment's create, its
-    rename, its start, its `wait`, a headless create or a session's snapshot
-    is answered: another process's action then, or the controller going down
-    after that call."""
+    `during_rename`, `during_start`, `during_settle`, `during_create`,
+    `during_snapshot` and `during_send`, when set, run once, as an
+    environment's create, its rename, its start, its `wait`, a headless
+    create, a session's snapshot or a send is answered: another process's
+    action then, or the controller going down after that call."""
 
     def __init__(self, keepalive_seconds: float) -> None:
         super().__init__(keepalive_seconds)
@@ -119,6 +122,7 @@ class _Recording(ServedFakeController):
         self.during_create: Callable[[], None] | None = None
         self.during_settle: Callable[[], None] | None = None
         self.during_snapshot: Callable[[], None] | None = None
+        self.during_send: Callable[[], None] | None = None
 
     def _create_environment(self, request: Request) -> Response:
         self.environment_bodies.append(request.get_json(silent=True) or {})
@@ -173,6 +177,9 @@ class _Recording(ServedFakeController):
             raise FakeControllerProblem(
                 502, "worker-unreachable", f"the worker of {env_id} does not answer"
             )
+        hook, self.during_send = self.during_send, None
+        if hook is not None:
+            hook()
         return super()._send(request, env_id, name)
 
     def managed(self) -> list[dict[str, Any]]:
@@ -230,10 +237,12 @@ def _services(
     outage: ControllerOutage | None = None,
     work_max: int = 3,
     project_max: int = 3,
+    mcp_url: str | None = None,
 ) -> tuple[SessionStartService, EnvironmentService, LifecycleCoordinator]:
     """The start's services on a supervisor of their own, on the client's
     outage unless `outage` gives another, and on a slot of their own of
-    `work_max` and `project_max`, as a process of its own has."""
+    `work_max` and `project_max`, as a process of its own has; their creates
+    hand Pilot's MCP server at `mcp_url`, none when it is None."""
     supervisor, coordinator = supervise(container)
     environments = EnvironmentService(
         container=container,
@@ -242,12 +251,14 @@ def _services(
         delete_after_seconds=delete_after.total_seconds(),
     )
     slots = WorkSlots(work_max=work_max, project_max=project_max)
+    pilot_server = PilotServer(mcp_url)
     relays = RelayService(
         container=container,
         supervisor=supervisor,
         session_streams=container.session_stream_service(),
         environment_service=environments,
         work_slots=slots,
+        pilot_server=pilot_server,
     )
     starts = SessionStartService(
         container=container,
@@ -257,6 +268,7 @@ def _services(
         relay_service=relays,
         controller_outage=outage or container.controller_outage(),
         work_slots=slots,
+        pilot_server=pilot_server,
         controller_configured=controller_configured,
     )
     return starts, environments, coordinator
@@ -296,6 +308,14 @@ def _start(
 ) -> models.Session:
     """A work item's start written, its Session as it stands."""
     return _read(db, _start_work(starts, db, project).id)
+
+
+def _token(body: dict[str, Any]) -> str:
+    """The token a headless create's body carries as `PILOT_TOKEN`."""
+    (entry,) = body["env"]
+    name, _, token = entry.partition("=")
+    assert name == "PILOT_TOKEN"
+    return token
 
 
 def _run(starts: SessionStartService, run: models.Session) -> None:
@@ -949,6 +969,199 @@ def _project_named(db: DbSession, person: User, slug: str) -> Project:
 
 def _calls_on(fake: ServedFakeController, env_id: str) -> list[str]:
     return [call for call in fake.calls if f"/environments/{env_id}" in call]
+
+
+class TestPilotServerHanded:
+    """Every headless create the start makes hands its session Pilot's MCP
+    server, with a token minted for that create (TD §4.5; F84; V02)."""
+
+    @pytest.fixture
+    def starts(
+        self, container: ServiceContainer, fake: _Recording, supervise: Supervise
+    ) -> SessionStartService:
+        return _services(container, supervise, mcp_url=MCP_URL)[0]
+
+    def test_the_create_carries_the_token_and_the_server_and_the_session_takes_its_hash(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        run = _start(starts, session, project)
+        placed = run.token_hash
+
+        _run(starts, run)
+
+        (body,) = fake.create_bodies
+        token = _token(body)
+        (entry,) = body["mcpConfig"]
+        assert json.loads(entry) == {
+            "mcpServers": {
+                "pilot": {
+                    "type": "http",
+                    "url": MCP_URL,
+                    "headers": {"Authorization": "Bearer ${PILOT_TOKEN}"},
+                }
+            }
+        }
+        assert "strictMcpConfig" not in body
+        assert body["cwd"] == CWD
+        run = _read(session, run.id)
+        assert run.state_code == SessionState.RUNNING
+        assert run.token_hash == token_hash(token)
+        assert run.token_hash != placed
+        assert run.environment_id is not None and run.controller_session is not None
+        created = fake.session(run.environment_id, run.controller_session)
+        assert created.create_body == body
+
+    def test_the_tokens_plaintext_is_in_no_row_record_or_log_line(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        run = _start(starts, session, project)
+
+        with caplog.at_level(logging.DEBUG):
+            _run(starts, run)
+
+        token = _token(fake.create_bodies[0])
+        assert token not in caplog.text
+        for stored in _records(session, run.id):
+            assert token not in json.dumps(stored.record.payload)
+        row = _read(session, run.id)
+        for column in inspect(models.Session).column_attrs:
+            assert token not in str(getattr(row, column.key))
+
+    def test_each_start_gets_a_token_of_its_own(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        first = _start(starts, session, project)
+        second = _start(starts, session, project)
+
+        _run(starts, first)
+        _run(starts, second)
+
+        tokens = {_token(body) for body in fake.create_bodies}
+        assert len(tokens) == 2
+        assert {
+            _read(session, first.id).token_hash,
+            _read(session, second.id).token_hash,
+        } == {token_hash(token) for token in tokens}
+
+    def test_a_session_already_created_keeps_the_token_its_create_carried(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        # A run cut after the create and its record.
+        run = _brought_up(starts, session, project)
+        env_id = _env(session, run.id)
+        name = (
+            container.controller_client()
+            .create_headless_session(env_id, HeadlessCreateRequest())
+            .name
+        )
+        run.controller_session = name
+        session.flush()
+        carried = run.token_hash
+
+        _run(starts, run)
+
+        assert fake.create_bodies == [{}]
+        assert _read(session, run.id).token_hash == carried
+
+    def test_a_resume_to_a_controller_session_that_stands_keeps_its_token(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        stopped = _stopped_item(starts, fake, session, project, person)
+        carried = stopped.token_hash
+        creates = len(fake.create_bodies)
+
+        run = starts.resume(session, stopped.id)
+        clear_after_commit_callbacks()
+        _run(starts, run)
+
+        run = _read(session, run.id)
+        assert run.state_code == SessionState.RUNNING
+        assert len(fake.create_bodies) == creates
+        assert run.token_hash == carried == token_hash(_token(fake.create_bodies[0]))
+
+    def test_a_resume_whose_controller_session_is_gone_gets_a_token_of_its_own(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        stopped = _stopped_item(starts, fake, session, project, person)
+        env_id = _env(session, stopped.id)
+        first = _token(fake.create_bodies[0])
+        fake.restart(env_id)
+        fake.set_status(env_id, "running")
+
+        run = starts.resume(session, stopped.id)
+        clear_after_commit_callbacks()
+        _run(starts, run)
+
+        run = _read(session, run.id)
+        assert run.state_code == SessionState.RUNNING
+        body = fake.create_bodies[-1]
+        assert body["resume"] == "conv-1"
+        assert _token(body) != first
+        assert run.token_hash == token_hash(_token(body))
+
+    def test_a_fresh_resume_gets_a_token_of_its_own(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        failed = _failed_before_its_first_line(starts, fake, session, project)
+        first = _token(fake.create_bodies[0])
+
+        run = starts.resume(session, failed.id)
+        clear_after_commit_callbacks()
+        _run(starts, run)
+
+        run = _read(session, run.id)
+        assert run.state_code == SessionState.RUNNING
+        token = _token(fake.create_bodies[-1])
+        assert token != first
+        assert run.token_hash == token_hash(token)
+
+    def test_with_no_server_configured_the_create_carries_neither(
+        self,
+        container: ServiceContainer,
+        fake: _Recording,
+        supervise: Supervise,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        unhanded = _services(container, supervise)[0]
+        run = _start(unhanded, session, project)
+
+        _run(unhanded, run)
+
+        assert fake.create_bodies == [{"cwd": CWD}]
+        assert _read(session, run.id).state_code == SessionState.RUNNING
 
 
 class TestRunTakes:
@@ -2356,7 +2569,9 @@ class TestStartLoop:
                 client.create_headless_session(env_id, HeadlessCreateRequest()).name
             )
             with scoped_session(container) as db:
-                db.get_one(models.Session, run_id).controller_session = other[0]
+                run = db.get_one(models.Session, run_id)
+                run.controller_session = other[0]
+                run.token_hash = "f" * 64
 
         committed_fake.during_create = another_process_creates
 
@@ -2365,11 +2580,36 @@ class TestStartLoop:
         env_id = _committed_env(container, run_id)
         run = _committed(container, run_id)
         assert run.controller_session == other[0]
+        # The token the recorded session carries is the one the record knows.
+        assert run.token_hash == "f" * 64
         assert run.started_at is None
         assert run.state_code == SessionState.RUNNING
         assert committed_fake.session(env_id, other[0]).status == "busy"
         orphan = [s.name for s in committed_fake.sessions(env_id) if s.name != other[0]]
         assert [committed_fake.session(env_id, n).status for n in orphan] == ["idle"]
+
+    def test_the_tokens_hash_is_committed_before_the_brief_is_sent(
+        self,
+        committed_app: Flask,
+        committed_fake: _Recording,
+        supervise: Supervise,
+    ) -> None:
+        container = committed_app.container
+        starts, _, _ = _services(container, supervise, mcp_url=MCP_URL)
+        project_id = _committed_project(container)
+        run_id = _committed_work(starts, container, project_id)
+        placed = _committed(container, run_id).token_hash
+        at_send: list[str] = []
+        committed_fake.during_send = lambda: at_send.append(
+            _committed(container, run_id).token_hash
+        )
+
+        starts.run(run_id, LoopHandle(f"start:{run_id}"))
+
+        (body,) = committed_fake.create_bodies
+        assert at_send == [token_hash(_token(body))]
+        assert at_send[0] != placed
+        assert _committed(container, run_id).state_code == SessionState.RUNNING
 
     def test_a_failure_after_another_process_ran_the_session_changes_nothing(
         self,

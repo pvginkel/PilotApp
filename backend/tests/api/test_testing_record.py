@@ -1173,9 +1173,11 @@ def _starts(
             session_streams=container.session_stream_service(),
             environment_service=environments,
             work_slots=slots,
+            pilot_server=container.pilot_server(),
         ),
         controller_outage=container.controller_outage(),
         work_slots=slots,
+        pilot_server=container.pilot_server(),
         controller_configured=controller_configured,
     )
 

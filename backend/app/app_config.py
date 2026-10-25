@@ -80,6 +80,13 @@ class AppEnvironment(BaseSettings):
             "empty leaves it to requests' own trust"
         ),
     )
+    MCP_SERVER_URL: str = Field(
+        default="",
+        description=(
+            "Pilot's MCP server's endpoint as a session reaches it, handed to "
+            "every session Pilot creates; empty hands it none"
+        ),
+    )
     SCHEDULER_TICK_SECONDS: float = Field(
         default=10.0,
         gt=0,
@@ -181,6 +188,18 @@ class AppSettings(BaseModel):
     """The CAs that verify the controller's certificate, PEM; None leaves it to
     requests' own trust."""
 
+    mcp_server_url: str | None = None
+    """Pilot's MCP server's endpoint as a session reaches it, which every
+    headless create Pilot makes hands the session (TD §4.5); None hands it
+    none, and production refuses to start so."""
+
+    @field_validator("mcp_server_url")
+    @classmethod
+    def _is_an_endpoint(cls, url: str | None) -> str | None:
+        if url is not None and not url.startswith(("https://", "http://")):
+            raise ValueError("MCP_SERVER_URL must be an http(s) address")
+        return url
+
     scheduler_tick_seconds: float = 10.0
     """The wait between two rounds of the supervisor's timers (design 2 §7.1)."""
 
@@ -224,6 +243,7 @@ class AppSettings(BaseModel):
             controller_ca_file=(
                 Path(env.CONTROLLER_CA_FILE) if env.CONTROLLER_CA_FILE else None
             ),
+            mcp_server_url=env.MCP_SERVER_URL or None,
             scheduler_tick_seconds=env.SCHEDULER_TICK_SECONDS,
             environment_stop_after_seconds=env.ENVIRONMENT_STOP_AFTER_SECONDS,
             environment_delete_after_seconds=env.ENVIRONMENT_DELETE_AFTER_SECONDS,

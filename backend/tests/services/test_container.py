@@ -1,6 +1,7 @@
 """The container's start of the controller's client (design 2 §14; V12), its
 supervisor (design 2 §7), and the jobs registered on it (design 2 §9, §13)."""
 
+import json
 import logging
 import threading
 import uuid
@@ -19,10 +20,15 @@ from app.exceptions import ConfigurationError
 from app.models import Environment, Project, User
 from app.models import Session as AgentSession
 from app.models.reference import SessionState, UserKind
-from app.services.container import ServiceContainer, start_controller_client
+from app.services.container import (
+    ServiceContainer,
+    require_pilot_server,
+    start_controller_client,
+)
 from app.services.controller_client import HeadlessCreateRequest
 from app.services.environment_service import EnvironmentService
 from app.services.fleet_consumer import FleetConsumer
+from app.services.pilot_server import token_hash
 from app.services.relay_service import RelayService
 from app.services.relay_watchdog import WATCHDOG_TIMER, RelayWatchdog
 from app.services.session_start_service import SessionStartService
@@ -152,6 +158,47 @@ class TestStartControllerClient:
         )
 
         _dispose_app(production)
+
+
+class TestRequirePilotServer:
+    def test_production_refuses_to_start_without_the_mcp_servers_endpoint(
+        self, test_settings: Settings
+    ) -> None:
+        container = _container(
+            test_settings.model_copy(update={"flask_env": "production"}),
+            AppSettings(
+                controller_url="http://controller.example", controller_token="t"
+            ),
+        )
+
+        with pytest.raises(ConfigurationError, match="MCP_SERVER_URL"):
+            require_pilot_server(container)
+
+    def test_production_with_the_endpoint_starts(self, test_settings: Settings) -> None:
+        container = _container(
+            test_settings.model_copy(update={"flask_env": "production"}),
+            AppSettings(mcp_server_url="https://pilot-mcp.example.com/mcp"),
+        )
+
+        require_pilot_server(container)
+
+    def test_outside_production_the_app_runs_without_one(
+        self, test_settings: Settings
+    ) -> None:
+        require_pilot_server(_container(test_settings, AppSettings()))
+
+    def test_a_production_server_with_a_controller_and_no_endpoint_does_not_start(
+        self, test_settings: Settings, fake_controller: ServedFakeController
+    ) -> None:
+        _clear_prometheus_registry()
+
+        with pytest.raises(ConfigurationError, match="MCP_SERVER_URL"):
+            create_app(
+                test_settings.model_copy(update={"flask_env": "production"}),
+                app_settings=AppSettings(
+                    controller_url=fake_controller.url, controller_token="a-token"
+                ),
+            )
 
 
 class TestSupervisorWiring:
@@ -375,6 +422,66 @@ class TestSessionStartWiring:
             )
         finally:
             coordinator.shutdown()
+
+    def test_a_start_hands_its_session_the_configured_mcp_server(
+        self, committed_app: Flask, fake_controller: ServedFakeController
+    ) -> None:
+        container = committed_app.container
+        container.app_config.override(
+            AppSettings(
+                controller_url=fake_controller.url,
+                scheduler_tick_seconds=0.05,
+                mcp_server_url="https://pilot-mcp.example.com/mcp",
+            )
+        )
+        client_of(container, fake_controller)
+        with scoped_session(container) as db:
+            person = User(
+                kind_code=UserKind.PERSON,
+                subject="subject-ada",
+                handle="ada",
+                name="Ada Example",
+                avatar_slot=1,
+            )
+            db.add(person)
+            db.flush()
+            project = Project(created_by_user_id=person.id)
+            db.add(project)
+            db.flush()
+            project_id = project.id
+        starts = container.session_start_service()
+        coordinator = container.lifecycle_coordinator()
+
+        coordinator.fire_startup()
+        try:
+            with scoped_session(container) as db:
+                run_id = starts.start_work(
+                    db,
+                    project_id,
+                    "example/Example",
+                    title="Renaming the badge",
+                    cwd="/work/Example",
+                    brief="Rename the badge.",
+                ).id
+            wait_until(
+                lambda: _state(container, run_id) == SessionState.RUNNING,
+                "the brief sent",
+            )
+        finally:
+            coordinator.shutdown()
+        with scoped_session(container) as db:
+            run = db.get_one(AgentSession, run_id)
+            assert run.environment_id is not None
+            assert run.controller_session is not None
+            body = fake_controller.session(
+                run.environment_id, run.controller_session
+            ).create_body
+            (entry,) = body["mcpConfig"]
+            assert json.loads(entry)["mcpServers"]["pilot"]["url"] == (
+                "https://pilot-mcp.example.com/mcp"
+            )
+            (token,) = body["env"]
+            assert run.token_hash == token_hash(token.removeprefix("PILOT_TOKEN="))
 
 
 def _watchdog_ticks() -> float:

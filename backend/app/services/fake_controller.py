@@ -92,6 +92,9 @@ _CREATE_FIELDS = {
 
 _ENVIRONMENT_FIELDS = {"repo", "managed", "name"}
 
+_RESERVED_ENV_PREFIX = "KUBECODER_"
+"""The environment's own variables: no create's `env` names one."""
+
 _NAME_MAX = 64
 
 _WORK = "/work"
@@ -212,6 +215,9 @@ class FakeSession:
     log: list[str] = field(default_factory=list)
     result: dict[str, Any] | None = None
     """The last turn's result frame, held until the next send."""
+    create_body: dict[str, Any] = field(default_factory=dict)
+    """The headless create's body as it came: its `env` and `mcpConfig`
+    among it."""
 
     def snapshot(self) -> dict[str, Any]:
         return {
@@ -983,6 +989,15 @@ class FakeController:
             )
         with self._changed:
             environment = self._gate(env_id)
+            for entry in body.get("env") or []:
+                if entry.partition("=")[0].startswith(_RESERVED_ENV_PREFIX):
+                    raise FakeControllerProblem(
+                        422,
+                        "validation-error",
+                        f"invalid env {entry!r}: NAME must not begin with "
+                        f"{_RESERVED_ENV_PREFIX} (reserved for the environment's "
+                        "own variables)",
+                    )
             environment.sessions_created += 1
             cwd = body.get("cwd") or "Example"
             session = FakeSession(
@@ -990,6 +1005,7 @@ class FakeController:
                 f"claude-{environment.sessions_created}",
                 cwd if cwd.startswith("/") else f"/work/{cwd}",
                 body.get("resume") or "",
+                create_body=body,
             )
             self._sessions[(env_id, session.name)] = session
             self._publish(self._sessions_frame(env_id))

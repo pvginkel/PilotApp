@@ -32,6 +32,7 @@ from app.services.link_service import LinkService
 from app.services.metrics_service import MetricsService
 from app.services.oidc_client_service import OidcClientService
 from app.services.people_service import PeopleService
+from app.services.pilot_server import PilotServer
 from app.services.project_event_service import ProjectEventService
 from app.services.project_service import ProjectService
 from app.services.relay_service import RelayService
@@ -80,6 +81,17 @@ def start_controller_client(container: "ServiceContainer") -> None:
         )
     if app_config.controller_url is not None:
         container.controller_client()
+
+
+def require_pilot_server(container: "ServiceContainer") -> None:
+    """Production refuses to start without Pilot's MCP server's endpoint,
+    which every session it creates is handed (TD §4.5). The CLI never gets
+    here, as `start_controller_client` says."""
+    if (
+        container.config().is_production
+        and container.app_config().mcp_server_url is None
+    ):
+        raise ConfigurationError("MCP_SERVER_URL must be set in production")
 
 
 class ServiceContainer(containers.DeclarativeContainer):
@@ -134,6 +146,13 @@ class ServiceContainer(containers.DeclarativeContainer):
         ca_file=app_config.provided.controller_ca_file,
     )
     register_for_background_startup(lambda c: start_controller_client(c))
+
+    # Pilot's MCP server, handed to every headless session the start and the
+    # relay create (TD §4.5); its check, too, starts no thread.
+    pilot_server = providers.Singleton(
+        PilotServer, url=app_config.provided.mcp_server_url
+    )
+    register_for_background_startup(lambda c: require_pilot_server(c))
 
     # The controller's fake, served under /api/testing/controller in testing mode
     fake_controller = providers.Singleton(
@@ -222,6 +241,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         session_streams=session_stream_service,
         environment_service=environment_service,
         work_slots=work_slots,
+        pilot_server=pilot_server,
     )
     register_for_background_startup(lambda c: c.relay_service())
     # The relays' watchdog, on the fleet stream (design 2 §9.3); its timer
@@ -242,6 +262,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         relay_service=relay_service,
         controller_outage=controller_outage,
         work_slots=work_slots,
+        pilot_server=pilot_server,
         controller_configured=providers.Callable(
             lambda url: url is not None, app_config.provided.controller_url
         ),

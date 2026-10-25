@@ -28,7 +28,8 @@ runs on a loop of its own, `interrupt:<id>`, once the stop commits.
 Each run first asks the controller whether it has the turn in flight (§8.2): a
 Turn written before its send that the controller never got is sent then. A
 controller session that is gone is resumed (§9.6, F71): re-created with the
-Session's conversation in the same environment, and carried on by a server-own
+Session's conversation in the same environment, Pilot's MCP server handed to it
+with a token minted for it (`PilotServer`), and carried on by a server-own
 "continue" Turn, or the ended Turn's message again when the Session has no
 conversation. An environment that is not running is waited for, the running
 Session's line saying it restarts while it reads `provisioning` or `starting`.
@@ -78,6 +79,7 @@ from app.services.current_line import (
     while_starting,
 )
 from app.services.environment_service import EnvironmentService
+from app.services.pilot_server import PilotServer
 from app.services.session_record_service import (
     SessionRecordService,
     read_records,
@@ -202,6 +204,7 @@ class RelayService:
         session_streams: SessionStreamService,
         environment_service: EnvironmentService,
         work_slots: WorkSlots,
+        pilot_server: PilotServer,
     ) -> None:
         """Register the `relay` job, whose loops are one per Session, and whose
         reconcile runs the relay of every Session with a Turn in flight; and the
@@ -216,12 +219,15 @@ class RelayService:
             environment_service: Clears and arms the environments' shutdown
                 timer around a turn
             work_slots: Opened by a work item's run that ends under its turn
+            pilot_server: Hands each re-create Pilot's MCP server, with a token
+                minted for it
         """
         self._container = container
         self._supervisor = supervisor
         self._streams = session_streams
         self._environments = environment_service
         self._slots = work_slots
+        self._pilot_server = pilot_server
         supervisor.register_job(
             RELAY_JOB, needs_controller=True, reconcile=self._reconcile
         )
@@ -549,23 +555,26 @@ class RelayService:
         """Under the Session's lock: a `server` record outside any Turn saying
         the controller session is gone, every Turn in flight ended with no
         `result`, the session re-created with `resume` the Session's
-        conversation in its environment, and `controller_session` overwritten
-        (§9.6; decision 9). A `running` Session is left `idle`, for its caller's
-        next Turn.
+        conversation in its environment, Pilot's MCP server handed to it with
+        a token minted for it, and `controller_session` and `token_hash`
+        overwritten (§9.6; decision 9). A `running` Session is left `idle`, for
+        its caller's next Turn.
 
         Raises:
             ExternalServiceException: The create failed, and nothing is written
         """
         gone = session.controller_session
-        created = self._client().create_headless_session(
-            _environment_id(session),
+        injected = self._pilot_server.inject(
             HeadlessCreateRequest(
                 cwd=session.cwd,
                 resume=session.conversation_id,
                 agent=session.agent,
                 model=session.model,
                 reasoning_effort=session.reasoning_effort,
-            ),
+            )
+        )
+        created = self._client().create_headless_session(
+            _environment_id(session), injected.request
         )
         self._records(db).append(
             session.id,
@@ -578,6 +587,7 @@ class RelayService:
         ):
             turn.ended_at = now
         session.controller_session = created.name
+        session.token_hash = injected.token_hash
         if session.state_code == SessionState.RUNNING:
             session.state_code = SessionState.IDLE
             session.current_line = None

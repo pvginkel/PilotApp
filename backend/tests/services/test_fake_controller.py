@@ -220,6 +220,50 @@ class TestFakeController:
         assert response.status_code == 422
         assert fake.sessions("env-1") == []
 
+    def test_a_session_keeps_its_creates_body_as_it_came(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.add_environment("env-1", status="running")
+        body = {
+            "cwd": "/work/Example",
+            "env": ["EXAMPLE_TOKEN=an-example", "OTHER=1"],
+            "mcpConfig": ['{"mcpServers": {}}'],
+        }
+
+        http.post("/environments/env-1/sessions/headless", json=body, headers=BEARER)
+
+        assert fake.session("env-1", "claude-1").create_body == body
+
+    def test_create_refuses_an_env_name_of_the_environments_own(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        # The worker's 400, which the controller answers as 422.
+        fake.add_environment("env-1", status="running")
+
+        response = http.post(
+            "/environments/env-1/sessions/headless",
+            json={"env": ["EXAMPLE=1", "KUBECODER_EXAMPLE=2"]},
+            headers=BEARER,
+        )
+
+        assert response.status_code == 422
+        assert response.get_json()["type"] == "validation-error"
+        assert "KUBECODER_EXAMPLE=2" in response.get_json()["title"]
+        assert fake.sessions("env-1") == []
+
+    def test_create_takes_a_name_that_holds_the_reserved_prefix_further_in(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.add_environment("env-1", status="running")
+
+        response = http.post(
+            "/environments/env-1/sessions/headless",
+            json={"env": ["MY_KUBECODER_EXAMPLE=1", "EXAMPLE=KUBECODER_2"]},
+            headers=BEARER,
+        )
+
+        assert response.status_code == 200
+
     def test_send_needs_a_message(self, fake: FakeController, http: Client) -> None:
         fake.add_environment("env-1", status="running")
         http.post("/environments/env-1/sessions/headless", headers=BEARER)
