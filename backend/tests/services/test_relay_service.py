@@ -2451,12 +2451,10 @@ def _sends(fake: ServedFakeController, name: str) -> int:
     )
 
 
-def _has_busy(fake: ServedFakeController, name: str) -> bool:
-    """Whether the fake has the headless session `name`, busy with a turn."""
-    return any(
-        session.name == name and session.status == "busy"
-        for session in fake.sessions(ENV)
-    )
+def _streams(fake: ServedFakeController, name: str) -> int:
+    """How many response streams of the headless session `name` were opened."""
+    path = f"GET /environments/{ENV}/sessions/headless/{name}/response?"
+    return sum(1 for call in fake.calls if call.startswith(path))
 
 
 def _committed_records(
@@ -2931,8 +2929,11 @@ class TestTwoProcesses:
 
         with listening(RELAY_LOGGER) as log:
             committed_controller_client.end_session(ENV, name)
+            # A relay opens the stream only once its send was made or refused,
+            # and a send after the turn's end starts a turn of its own.
             wait_until(
-                lambda: _has_busy(fake_controller, "claude-2"), "the continue sent"
+                lambda: _streams(fake_controller, "claude-2") >= 2,
+                "both relays past their send",
             )
             _turn_of(fake_controller, "claude-2", raw_turn("turn_text"))
             _idle(container, run_id)

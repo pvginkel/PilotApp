@@ -358,6 +358,32 @@ class TestSettle:
         (wait,) = fake_controller.calls[1:]
         assert wait.startswith(f"GET /environments/{created.env_id}?wait=settled")
 
+    @pytest.mark.parametrize("elsewhere", ["stopped-and-started", "recreated"])
+    def test_one_of_pilots_own_settled_on_another_pod_keeps_its_claim_on_it(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+        elsewhere: str,
+    ) -> None:
+        # Close-out B1: every pod of Pilot's own is Pilot's (§13.5), one
+        # KubeCoder replaced among them.
+        created = environments.create(REPO, "camp")
+        environments.record_created(session, created, REPO)
+        environments.settle(created.env_id)
+        started, old, _ = _claim(_row(session, created.env_id))
+        if elsewhere == "recreated":
+            fake_controller.recreate_pod(created.env_id)
+        else:
+            fake_controller.set_status(created.env_id, "stopped")
+        fake_controller.set_status(created.env_id, "running")
+
+        environments.settle(created.env_id)
+
+        pod = _pod(fake_controller, created.env_id)
+        assert pod != old
+        assert _claim(_row(session, created.env_id))[:2] == (started, pod)
+
     @pytest.mark.parametrize("status", ["error", "stopped"])
     def test_a_bring_up_that_settles_other_than_running_is_the_starts_failure(
         self,
@@ -1597,6 +1623,38 @@ class TestShutdownTimer:
         environments.run_shutdown_timer(session)
 
         assert fake_controller.calls == [f"GET /environments/{ENV}"]
+        assert _claim(_row(session)) == _NO_CLAIM
+
+    @pytest.mark.parametrize(
+        "elsewhere", ["stopped", "stopped-and-started", "recreated"]
+    )
+    def test_pilots_own_is_stopped_whatever_pod_runs_there(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+        project: Project,
+        elsewhere: str,
+    ) -> None:
+        # Close-out B1: the pod replaced under a work item that has since
+        # ended, every pod of Pilot's own being Pilot's (§13.5).
+        fake_controller.add_environment(ENV, status="running")
+        row = _own(session, state="running", claimed=True)
+        row.started_pod_at = _pod(fake_controller)
+        row.stop_due_at = _overdue()
+        _agent_session(session, project, SessionState.STOPPED)
+        if elsewhere == "recreated":
+            fake_controller.recreate_pod(ENV)
+            fake_controller.set_status(ENV, "running")
+        else:
+            fake_controller.set_status(ENV, "stopped")
+            if elsewhere == "stopped-and-started":
+                fake_controller.set_status(ENV, "running")
+
+        environments.run_shutdown_timer(session)
+
+        assert fake_controller.calls == [f"POST /environments/{ENV}/stop"]
+        assert fake_controller.environment(ENV).status == "stopped"
         assert _claim(_row(session)) == _NO_CLAIM
 
     def test_a_container_restart_leaves_the_pod_the_claims(

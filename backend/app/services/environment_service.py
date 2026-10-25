@@ -7,12 +7,12 @@ it started. The claim is `server_started_at`, set when Pilot's own `start` or
 create scheduled the bring-up, and `started_pod_at`, the `pod.startedAt` that
 bring-up settled on (D12; DB 233). An environment Pilot created is its own,
 `server_created_at` and `repo` set (DB 239). The shutdown timer stops an
-environment only while its pod is still the claim's — one of Pilot's own also
-while its claim has no pod yet — it is not exempt, and no Session is `running`
-or `starting` there. A pod gone, another's or unknown ends the claim with no
-stop, at the tick or at a settled start; the claim's three columns, its
-deadline `stop_due_at` among them, end together. The fleet consumer writes none
-of them (§13.1).
+environment only while it is not exempt, no Session is `running` or `starting`
+there, and its pod is still the claim's — on one of Pilot's own, whose every
+pod is Pilot's, whatever pod runs there. On any other, a pod gone,
+another's or unknown ends the claim with no stop, at the tick or at a settled
+start; the claim's three columns, its deadline `stop_due_at` among them, end
+together. The fleet consumer writes none of them (§13.1).
 
 An environment of Pilot's own is free while it is neither gone nor deleting and
 no Session there is `running`, `starting` or `held`, nor `stopped` or `failed`,
@@ -426,12 +426,13 @@ class EnvironmentService:
         """The shutdown timer's tick, and its reconcile.
 
         Ends the claim on every overdue environment Pilot started, not exempt,
-        with no Session `running` or `starting` there: read afresh, it is
-        stopped while its pod is the claim's, and left running when its pod is
-        gone, another's or unknown. A claim with no pod yet is kept while a
-        start of Pilot's waits there to resume, `held`; otherwise it ends, the
-        environment stopped when it is Pilot's own, whose every pod is Pilot's
-        (§13.5), left running when it is not.
+        with no Session `running` or `starting` there. One of Pilot's own,
+        whose every pod is Pilot's (§13.5), is stopped whatever pod runs
+        there; any other, read afresh, is stopped while its pod is the
+        claim's, and left running when its pod is gone, another's or unknown.
+        A claim with no pod yet is kept while a start of Pilot's waits there
+        to resume, `held`; otherwise it ends, the environment stopped when it
+        is Pilot's own, left running when it is not.
         Then arms every such environment that has no `stop_due_at`, which a
         restart between a Session's end and its arm leaves. Each environment's
         action is a transaction of its own, under the row's lock: a row another
@@ -542,19 +543,18 @@ class EnvironmentService:
             or not _stoppable(db, row)
         ):
             return
+        if row.started_pod_at is None and db.scalar(select(_starting(env_id))):
+            return
         due = row.stop_due_at
-        if row.started_pod_at is None:
-            if db.scalar(select(_starting(env_id))):
-                return
-            if row.server_created_at is not None:
-                self._stop(env_id, due)
-            else:
-                logger.info(
-                    "Environment %s has no pod of Pilot's start: its claim, due "
-                    "%s, ends with no stop",
-                    env_id,
-                    due.isoformat(),
-                )
+        if row.server_created_at is not None:
+            self._stop(env_id, due)
+        elif row.started_pod_at is None:
+            logger.info(
+                "Environment %s has no pod of Pilot's start: its claim, due "
+                "%s, ends with no stop",
+                env_id,
+                due.isoformat(),
+            )
         elif self._runs_pod(env_id, row.started_pod_at):
             self._stop(env_id, due)
         else:
@@ -638,11 +638,13 @@ def _settle_claim(row: Environment, settled: ControllerEnvironment) -> None:
     """The claim, as a settled start finds the environment: a claim with no pod
     yet — its `202` just made, or recorded by a start cut before its settle —
     takes the settled pod, and ends when the environment came to rest with no
-    pod of known start; a claim on another pod ends (D12)."""
+    pod of known start. On one of Pilot's own, whose every pod is Pilot's
+    (§13.5), a claim on another pod takes the pod it reads as one with no pod
+    yet does; on any other it ends (D12)."""
     if row.server_started_at is None:
         return
     pod_started_at = _pod_started_at(settled)
-    if row.started_pod_at is None:
+    if row.started_pod_at is None or row.server_created_at is not None:
         if pod_started_at is None and settled.status in _AT_REST:
             logger.info(
                 "Environment %s settled %s with no pod of Pilot's start: its "
