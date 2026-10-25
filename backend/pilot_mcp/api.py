@@ -3,7 +3,8 @@ one call per tool, under the bearer the tool's caller presented, which the API
 resolves to its Session.
 
 An answer outside 2xx is a `ToolError` carrying the API's `error`, its reason
-whole; an API that does not answer is one naming that.
+whole, or the answer's status where it is not the API's envelope; an API that
+does not answer is one naming that.
 """
 
 import uuid
@@ -72,8 +73,23 @@ class PilotWorkApi:
                 f"Cannot call pilot-work because Pilot's API at {self._base_url}"
                 f" did not answer ({type(exc).__name__})"
             ) from exc
-        # Every error the API answers is its envelope
-        # (`ApiErrorResponseSchema`), its reason in `error`.
         if response.is_error:
-            raise ToolError(response.json()["error"])
+            raise ToolError(_refusal(response))
         return response.json()
+
+
+def _refusal(response: httpx.Response) -> str:
+    """The reason of an answer outside 2xx: the `error` of the API's envelope
+    (`ApiErrorResponseSchema`), which every error its handlers build carries;
+    else its status, for an answer that is not that envelope — spectree's own
+    validation answer, or something other than the API at the URL."""
+    try:
+        error = response.json().get("error")
+    except (ValueError, AttributeError):
+        error = None
+    if isinstance(error, str):
+        return error
+    return (
+        f"Pilot's API answered {response.status_code} {response.reason_phrase},"
+        " not its error envelope"
+    )

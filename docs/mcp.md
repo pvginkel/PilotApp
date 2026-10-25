@@ -27,7 +27,9 @@ answers (`server.py`'s `INSTRUCTIONS`).
   not a uuid, before calling. Each then makes one `POST <PILOT_MCP_API_URL>/tools/pilot-work/<route>`
   (`api.py`, `PilotWorkApi`) with the call's `Authorization` header as it came, waiting 5 s to
   connect and 300 s for the answer. An error answer is a `ToolError` of the route's `error`, the
-  reason whole, which the session reads as "Error executing tool <name>: <reason>"; an API that does
+  reason whole, which the session reads as "Error executing tool <name>: <reason>"; one that is not
+  the API's envelope, as spectree's own validation answer or something other than the API at the URL
+  writes, is "Pilot's API answered <status> <reason phrase>, not its error envelope"; an API that does
   not answer is "Cannot call pilot-work because Pilot's API at <url> did not answer (<error>)".
 - **The surface** is what the session reads: each tool's description, its parameters' and its
   answer's, and the server's instructions, pinned word for word in
