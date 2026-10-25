@@ -5,6 +5,7 @@
 import uuid
 
 import pytest
+from dependency_injector import providers
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
@@ -32,6 +33,7 @@ from app.services.controller_client import (
     ControllerProblem,
     ControllerProblemType,
     ControllerUnreachable,
+    FileContent,
 )
 from app.services.pilot_server import token_hash
 from app.services.pilot_work_service import Worker
@@ -370,6 +372,25 @@ class TestPilotWorkServiceRegisterDocument:
 FOLDER = "/work/Example/docs/survey"
 
 
+class _Refusing:
+    """A controller client whose read refuses with `read`, and its listing
+    with `listing`: what the fake, which holds no links and no FIFOs, never
+    answers."""
+
+    def __init__(
+        self, read: ControllerProblem, listing: ControllerProblem | None
+    ) -> None:
+        self._read = read
+        self._listing = listing
+
+    def read_file(self, env_id: str, path: str) -> FileContent:
+        raise self._read
+
+    def list_folder_files(self, env_id: str, path: str) -> list[str]:
+        assert self._listing is not None
+        raise self._listing
+
+
 def _attached(session: DbSession, item: Item) -> list[tuple[int, int, str, str]]:
     """The item's attachments in order: position, batch, filename and source."""
     return [
@@ -556,6 +577,51 @@ class TestPilotWorkServiceAttachFile:
 
         assert refused.value.operation == f"attach {path}"
         assert refused.value.cause == cause
+        assert _attachments(session) == 0
+
+    @pytest.mark.parametrize(
+        ("read", "listing"),
+        [
+            # A link loop at the path.
+            (ControllerProblemType.CONFLICT, None),
+            # A FIFO at the path: neither a file nor a folder.
+            (ControllerProblemType.NOT_A_FILE, ControllerProblemType.NOT_A_DIRECTORY),
+        ],
+        ids=["link-loop", "fifo"],
+    )
+    def test_a_link_loop_or_a_fifo_at_the_path_attaches_nothing_with_the_reads_reason(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        read: ControllerProblemType,
+        listing: ControllerProblemType | None,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        problem = ControllerProblem(
+            f"read {PATH} in environment {environment.id}", read, "a scripted refusal"
+        )
+        container.controller_client.override(
+            providers.Object(
+                _Refusing(
+                    problem,
+                    None
+                    if listing is None
+                    else ControllerProblem(
+                        f"list {PATH} in environment {environment.id}",
+                        listing,
+                        "a scripted listing refusal",
+                    ),
+                )
+            )
+        )
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.pilot_work_service().attach_file(_worker(run), PATH, None)
+
+        assert refused.value.operation == f"attach {PATH}"
+        assert refused.value.cause == problem.cause
         assert _attachments(session) == 0
 
     def test_a_folder_over_the_calls_cap_of_files_reads_none(
