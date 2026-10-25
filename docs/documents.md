@@ -35,7 +35,9 @@ An attachment is a copy of a file kept for the reader, never edited, hung on an 
 content)` keeps a new row with its bytes, their size and their sha256; `get(attachment)` reads the
 bytes; `delete(attachment)` takes the row off the record, which an Item Attachment holding it
 refuses. Every other read leaves the bytes alone: `content` is deferred, and touching it on a loaded
-row raises. An attachment is at most 16 MiB (`MAX_SIZE`), checked where a file enters the record.
+row raises. An attachment is at most 16 MiB (`MAX_SIZE`), checked where a file enters the record:
+`AttachService.attach`, by which a work item's session copies its files in with `attach_file`
+([`mcp.md`](mcp.md)), and the record's testing route alike.
 
 **`GET /api/attachments/<attachment_id>`** streams the bytes (`AttachmentService.served`), behind
 the sign-in and the `editor` role, `404` for an unknown id. It sends `Content-Length`, a
@@ -82,6 +84,11 @@ At a document's address (`DocumentOverlay`, read by `useItemDocument`):
   the signed-in person did not do it; on an open review, Reviewed; on an open document, *Send
   answers*, which closes the overlay once the record holds the answers; on an open one-ask item or
   notice, nothing.
+
+A registered document with no text, awaiting its read at the end of the run that registered it or
+after one that failed ([`round-trip.md`](round-trip.md)), draws its head, titled by its file's
+name, and "The document did not load." as its body; its foot holds Reviewed once the read was made,
+and nothing while it awaits it. Its attachments open at their addresses.
 
 Opened at a card's block address, it goes to the block once its body draws it, and flashes it. Open
 on a done line shows the document as Done fixed it (above), with no *Edited <time>* and no dots: those
@@ -158,8 +165,8 @@ it shares the overlay's rank, so it is always the one opened later ([`ui.md`](ui
 - **Attachments**, newest batch first, a batch being the files hung in one call. A batch of one is
   its title over "<item> · <stamp>"; a batch of several is a folder row, the last directory their
   sources share, else "N files", over "<item> · <stamp>", with each file under it, its title over
-  its file name. With none: "None yet. A session attaches reader’s material here: a design, a
-  survey, a log."
+  its file name, a folder's file named by its path relative to the folder. With none: "None yet. A
+  session attaches reader’s material here: a design, a survey, a log."
 - **In the timeline**: the timeline's documents and reviews, newest first, each its title over
   "<Open | Unsent | Done> · <stamp>", *Unsent* as the timeline reads it. With none: "None yet."
 

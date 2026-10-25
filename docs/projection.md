@@ -19,9 +19,10 @@ At the tree's root are `reference.json` and a folder per project that is not arc
 | `project.md` | the draft | is ingested |
 | `handbook.md` | the handbook | is ingested |
 | `items/<seq>-<slug>.md` | a prose item's document | is ingested; the opening's is reverted whole |
+| `inbox/<seq>-<slug>.md` | a worker's registered document, once its file was read | is ingested |
 | `plan.json` | the plan, rendered from its rows | is parsed back into the rows |
 | `timeline.json` | the timeline, rendered from the rows | stores nothing |
-| `attachments/<batch>/<filename>` | an attachment's copy | stores nothing |
+| `attachments/<batch>/<filename>` | an attachment's copy, its `filename` holding slashes where it came in a folder | stores nothing |
 
 `reference.json` is read-only too. A save that stores nothing is answered with the file as the
 record renders it. Any other path, a stray file, a folder no project has or an archived project's,
@@ -29,7 +30,9 @@ is not the record's: the engine refuses a save of it.
 
 An item's file name is fixed when it is born: its `seq`, then the title it was added with as a
 slug, its letters and digits made ASCII and lower-case and joined by hyphens, cut at a hyphen to at
-most 60 characters. With nothing left of the title it is `items/<seq>.md`.
+most 60 characters. With nothing left of the title it is `items/<seq>.md`. A registered document's
+is `inbox/<seq>-<slug>.md` the same way, from its file's name without its extension, and stands in
+the tree only once it has a text: one awaiting its read, or whose read failed, has no file there.
 
 ## Hashes
 
@@ -67,9 +70,9 @@ The values the agent writes from a closed list:
   `open` or `finished`), `archived`, `autopilot`.
 - `items`, in `seq` order, each with:
   - `id`, `seq`, `kind` (an item kind's code) and `title` (null for a registered document whose
-    text gives none);
+    text gives none or that has no text);
   - `path`, its document's within the folder (`items/4-card-layout.md`), null for an item with no
-    document;
+    document and for a registered document with no text;
   - `step` (a task id, or null), `urgent`, `for` (a handle, or null) and `summary` (or null);
   - `created_at`;
   - `done`: null while open, else `at`, `cause` (a done cause's code) and `by` (a handle, or null);

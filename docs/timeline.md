@@ -17,8 +17,12 @@ for an unknown project. `finished_at` is the latest `finished` transition's time
 is finished, else null. `items` are every item, by `seq`, each with:
 
 - `id`, `seq`, `kind` (an item kind's code) and `form` (`prose`, `work` or `wait`);
-- `title`, null for a registered document whose text gives none, and `file_name`, a registered
-  document's file name from its source path, which its line shows while `title` is null;
+- `title`, null for a registered document whose text gives none or that has no text, and
+  `file_name`, a registered document's file name from its source path, which its line shows while
+  `title` is null;
+- `awaiting_read`: whether it is a registered document whose file has not been read yet, at the end
+  of the run that registered it ([`round-trip.md`](round-trip.md)); until then it has no text and
+  takes no close;
 - `created_at`; `step`, `{id, title}`, the plan task it serves with the task's title live from the
   plan (a removed task's last), or null; `urgent`; `for_user`, a person or null;
 - `done`, null while open, else `{at, cause, by, undo}`: `by` is null when the server did it, and
@@ -28,7 +32,8 @@ is finished, else null. `items` are every item, by `seq`, each with:
 - the opening's `author` and its `words`, verbatim; null on every other item;
 - `body`: every other prose item's text as drawn (`dsl.body`), its parts in order, `{type: prose,
   markdown, section}` and `{type: block, block}`, the front matter and the heading that is the
-  title left out; null for the opening, work and waits. A prose part's `section` is the local id of
+  title left out; null for the opening, work and waits, and for a registered document with no text,
+  awaiting its read or after one that failed. A prose part's `section` is the local id of
   the block whose own section holds it, null outside every section ([`block-dsl.md`](block-dsl.md));
 - `summary`: the front matter's `summary`, null where the text gives none and for the opening, work
   and waits;
@@ -156,6 +161,10 @@ answer moves the count, so a document stays as it stands while it is answered.
   chip. Open goes to the document's address, which opens it in the overlay
   ([`documents.md`](documents.md)); none of the text shows on the card. Reviewed (`POST reviewed`)
   makes the review a done line.
+- **A registered document with no text**, awaiting its read or after one that failed, is a review's
+  card titled by its file's name, with no "N min read", and its Reviewed only once `awaiting_read` is
+  false: a failed read closes so ([`round-trip.md`](round-trip.md)). Its text, once read, gives it
+  its title and its blocks live.
 - **The segment bar**: a segment per block, filled once the block is answered, its tooltip what the
   block asks, its section's heading, else its kind, and whether it is answered. Inline, a segment
   scrolls to its block, which flashes; on a card it opens the overlay at the block's address.
@@ -233,7 +242,8 @@ the time it was done. Under the title stands a person's answer to a one-ask item
 person's after their avatar, its note after " · " with the note icon: an option, the words, or
 "Deferred to <task>"; a confirmation's Yes or No shows only its note, and nothing of Pilot's shows.
 Undo ("Undo, until a session has taken it") opens the item again, and a one-ask item's block
-unanswered.
+unanswered. A worker's registered documents lose it together, as the close of the last of their run
+places the continuation that takes their answers ([`round-trip.md`](round-trip.md)).
 
 - **Open**, on every done line, opens the item's document in the overlay at its address, as Done
   fixed it ([`documents.md`](documents.md)).
@@ -281,7 +291,7 @@ the documents, and `frontend/tests/work/timeline.spec.ts` the work items ([`work
 
 A spec makes its project with `projects.makeWithSession`, places items with `projects.place`, a
 text written in the block DSL, and posts an agent's save with `projects.save`; `projects.answer`,
-`markDone`, `send`, `undo`, `timeline` and `block` drive the routes above, and `endTurn` and
+`markDone`, `send`, `reviewed`, `undo`, `timeline` and `block` drive the routes above, and `endTurn` and
 `doneByPilot` end the session's turn and mark a document Done as Pilot ([`projects.md`](projects.md)
 has the testing endpoints they call). A text with one block makes its item that block's kind, so a
 spec's document carries two blocks or more. The `timeline` page object

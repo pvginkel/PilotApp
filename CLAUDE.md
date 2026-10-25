@@ -7,12 +7,12 @@ talks to Pilot's brain, a headless Claude Code session in a store environment.
 
 **Its first screens are in**: the handle step, the project list, a project's head and its timeline,
 its work items, its documents in the overlay and the side panel, on the record's schema, the engine
-behind it (`backend/app/engine/`), the sync of the store's tree and the server's jobs on the
-KubeCoder controller. Every green build of `main` deploys itself to the dev stage at
-`https://pilot-dev.home`, and production at `https://pilot.ginbov.nl` runs what the operator
-promotes from there ([`docs/deployment.md`](docs/deployment.md)). Version 1 is built from the design
-record in `../PilotAppSpecs/design/` (start at its README), along the steps of its
-`implementation-plan.md`. Its `features.md` is the version-1 scope, and
+behind it (`backend/app/engine/`), the sync of the store's tree, the server's jobs on the KubeCoder
+controller, and Pilot's MCP server with the worker's round trip. Every green build of `main` deploys
+itself to the dev stage at `https://pilot-dev.home`, and production at `https://pilot.ginbov.nl`
+runs what the operator promotes from there ([`docs/deployment.md`](docs/deployment.md)). Version 1
+is built from the design record in `../PilotAppSpecs/design/` (start at its README), along the steps
+of its `implementation-plan.md`. Its `features.md` is the version-1 scope, and
 [`docs/change-discipline.md`](docs/change-discipline.md) says how the record binds a change. A
 decision it leaves open is the operator's to rule, not something to settle in code. Delivery is
 tracked per feature in the record's `feature-ledger.md`, and that is not optional: every slice's doc
@@ -24,7 +24,8 @@ phase ticks it ([`docs/slice-doc-plan.md`](docs/slice-doc-plan.md) §6), and an 
 - **Root** — the `run-suite` orchestrator (`tools/suite_runner/`, CI's single entry point), the
   shared `Procfile.dev` dev stack and its `scripts/dev.py` launcher, the `Jenkinsfile`, and the
   `Jenkinsfile.architecture` that publishes the hand-authored model in `docs/architecture/`.
-- **`backend/`** — the Flask API (Python, uv), on PostgreSQL.
+- **`backend/`** — the Flask API (Python, uv), on PostgreSQL, and `pilot_mcp/`, Pilot's MCP server,
+  the image's second entry point (`python -m pilot_mcp`).
 - **`frontend/`** — the React + Vite SPA (TypeScript, pnpm) with TanStack Router/Query, an
   OpenAPI-generated client, and a Playwright E2E suite that boots the backend per worker.
 - **`sidecar/`** — `pilot-sync`, the store environment's sync sidecar (Go), app-owned.
@@ -179,3 +180,6 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
   environments on demand and Pilot's own, with its fake; the sessions, the gate and its slot, their
   records, relay and live stream, Stop and Resume; a work item's status, its line and its session
   log.
+- [`docs/mcp.md`](docs/mcp.md), [`docs/round-trip.md`](docs/round-trip.md): Pilot's MCP server,
+  handed to every session it creates, and the worker's tools; a registered document's read at the
+  run's end, its write-back and the run's continuation.

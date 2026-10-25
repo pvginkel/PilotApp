@@ -18,6 +18,7 @@ number):
 | Application and namespace | `pilot-dev` | `pilot-prd` |
 | Follows PilotDeploy's | `main` | `prd` |
 | Site | `https://pilot-dev.home`, internal | `https://pilot.ginbov.nl`, public |
+| Pilot's MCP server ([`mcp.md`](mcp.md)) | `https://pilot-dev-mcp.home/mcp`, internal | `https://pilot-mcp.home/mcp`, internal |
 | Images | `:dev-<n>` | `:prd-<n>` |
 | `STAGE` | `dev` | `prd` |
 | The record's testing endpoints ([`projects.md`](projects.md)) | answer a signed-in editor | refused, `400` |
@@ -107,9 +108,17 @@ objects into each stage's namespace:
 
 - **Deployment `pilot`**, one pod. Its init container `migrate` applies the database migrations
   (`python -m app.cli upgrade-db`) to completion before the pod's containers start: `backend` (the
-  Flask API and the SSE stream, port 3501) and `ui` (the SPA's nginx, port 3500, which proxies
-  `/api/` to the backend). `migrate` and `backend` run with the stage's `STAGE` and with
-  `HOMELAB_INTERNAL` true in both stages.
+  Flask API and the SSE stream, port 3501), `mcp` (Pilot's MCP server, the backend image's
+  `python -m pilot_mcp`, port 3502) and `ui` (the SPA's nginx, port 3500, which proxies `/api/` to
+  the backend and nothing else of it). `migrate` and `backend` run with the stage's `STAGE` and
+  with `HOMELAB_INTERNAL` true in both stages.
+  `mcp` calls the backend's worker routes, `/tools/pilot-work/`, over the pod's loopback
+  (`PILOT_MCP_API_URL` `http://localhost:3501`, and `PILOT_MCP_PORT` 3502, its only settings); it
+  reads no database, Secret or `FLASK_ENV`. Its readiness and liveness are `/health/readyz` and
+  `/health/healthz` on its port, which ask for no bearer, and its preStop waits the 15 s that `ui`'s
+  does. The backend's `MCP_SERVER_URL` is `https://<mcp.host>/mcp`, `mcp.host` the stage's in the
+  values, the address every session it creates is handed; the backend refuses to start without it,
+  and `migrate` gets none.
   The backend serves the store's sync routes, `/api/sync/` ([`sync.md`](sync.md)), to the stage's
   store environment alone ([below](#the-store-environments)): `store.environmentId` in the values
   as `STORE_ENVIRONMENT_ID`, and the store's bearer as `SYNC_TOKEN`, from the Secret `pilot-sync`.
@@ -143,6 +152,12 @@ objects into each stage's namespace:
   and `enable-ssl: "yes"` have the front door serve `pilot-dev.home` as an internal site, over HTTPS
   with a certificate from the homelab step-ca (D023), and the homelab DNS publish the name, with no
   hand step. Prometheus scrapes the backend's `/metrics` on port 3501.
+- **Service `pilot-mcp`**, port 80 to `mcp`, its `server-name` the stage's `mcp.host`,
+  `pilot-dev-mcp.home` or `pilot-mcp.home`, with `is-public: "false"` and `enable-ssl: "yes"` on
+  both stages: the front door serves it as an internal site over HTTPS from the homelab step-ca, and
+  the homelab DNS publishes the name. The session's bearer is the whole of its authentication, so it
+  is never public. Neither stage's site reaches the worker routes: the UI's nginx proxies `/api/`
+  alone, and `/tools/` is outside it.
 - The secrets below.
 
 ## The store environments
@@ -246,7 +261,8 @@ Three producers publish Pilot into the estate's architecture model, all register
 Both stages are published (D025), each as a producer of its own, as Keycloak's two are: a pipeline
 publishes one stage, from the branch Argo CD syncs it from. The judgment layer is the stages' one
 file, and marks each stage's host a web UI, `pilot.ginbov.nl` and `pilot-dev.home`, so the Home
-launcher shows Pilot as two tiles under the Pilot mark, one tagged PRD and one DEV. PilotDeploy's
+launcher shows Pilot as two tiles under the Pilot mark, one tagged PRD and one DEV; the MCP
+server's hosts, the `mcp` container's, are machine endpoints. PilotDeploy's
 `kc project test` generates both and reads this repo's model, so it needs PilotApp checked out
 beside it.
 

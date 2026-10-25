@@ -3,7 +3,8 @@
 The backend's long-lived work runs as threads of its own process, under the supervisor
 (`backend/app/services/supervisor.py`, the container's `supervisor` singleton): the fleet stream's
 consumer, a relay per session with a turn in flight, an interrupt per turn stopped under it, a start
-per session coming up and the release of the held ones, and the timers.
+per session coming up and the release of the held ones, the reads and the write-backs of the
+documents a work item's run registered, and the timers.
 Every job resumes from rows, so nothing drains to completion: a roll or a crash costs a restart of
 the job, never its work.
 
@@ -14,6 +15,8 @@ the job, never its work.
 | `interrupt:<session id>` | a loop of the job `interrupt` | asks the controller's interrupt of a turn stopped under it ([`sessions.md`](sessions.md)) |
 | `start:<session id>` | a loop of the job `start` | brings a `starting` Session up ([`sessions.md`](sessions.md)) |
 | `start:held` | a loop of the job `start` | moves the held Sessions on once the gate opens for them ([`sessions.md`](sessions.md)) |
+| `read:<session id>` | a loop of the job `read` | reads the documents a work item's ended run registered, and publishes each or fails its read ([`round-trip.md`](round-trip.md)) |
+| `write-back:<session id>` | a loop of the job `write-back` | writes a run's closed registered documents back to their files ([`round-trip.md`](round-trip.md)) |
 | `environment-shutdown` | a timer | stops the idle environments Pilot started ([`controller.md`](controller.md)) |
 | `environment-delete` | a timer | clears the name of a free environment of Pilot's own, and deletes one that stays free ([`controller.md`](controller.md)) |
 | `relay-watchdog` | a timer | restarts a relay the fleet stream shows stuck or stopped ([`sessions.md`](sessions.md)) |
@@ -33,9 +36,9 @@ a registration after STARTUP raises `InvalidOperationException`.
 - **A job**: `register_job(job, *, needs_controller, reconcile=None)`. Its reconcile,
   `Callable[[Session], None]`, runs once at STARTUP in a database session of its own, which commits
   when it returns and rolls back when it raises. The reconciles run in registration order (`fleet`,
-  `relay`, `interrupt`, `start`) on a thread of the supervisor's, not the lifecycle coordinator's,
-  so the server serves while they run. One that raises is logged, and its job's loops start
-  regardless.
+  `read`, `relay`, `interrupt`, `start`, `write-back`) on a thread of the supervisor's, not the
+  lifecycle coordinator's, so the server serves while they run. One that raises is logged, and its
+  job's loops start regardless.
 - **A loop**: `start_loop(job, run, key=None, *, again=False) -> bool` runs `run(handle)` on a
   daemon thread named `job` or `job:key`, one live loop per name. A loop requested before its job's
   reconcile has run waits for it. A request for a name with a live or waiting loop does nothing, a
@@ -73,10 +76,12 @@ the process exits at the end of the budget even with a loop still running: whate
 the next process resumes from the rows. The pod's timing around it is in
 [`deployment.md`](deployment.md).
 
-During a roll the old and the new backend overlap, each running every job. That is safe because
-each write a job makes is conditional on rows it reads under their lock: a relay, a start, the
-release of a held one and a send under the Session row's, the shutdown and delete timers and a
-start's take under the Environment row's, skipping one another process holds. The watchdog restarts only this process's relays.
+During a roll the old and the new backend overlap, each running every job. That is safe because each
+write a job makes is conditional on rows it reads under their lock: a relay, a start, the release of
+a held one and a send under the Session row's, the shutdown and delete timers and a start's take
+under the Environment row's, skipping one another process holds, and a read's or a write-back's take
+under the Project's, the Session's and the Document's rows, re-checked there. The watchdog restarts
+only this process's relays.
 
 ## Settings and metrics
 

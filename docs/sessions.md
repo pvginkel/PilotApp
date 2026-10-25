@@ -13,7 +13,7 @@ threads the loops run on in [`jobs.md`](jobs.md).
 
 | Service | Does |
 |---|---|
-| `SessionStartService` (`session_start_service.py`) | a work item placed by repository, its Session written `held` or `starting` through the gate and brought up by its start loop in an environment of Pilot's own; Stop and Resume |
+| `SessionStartService` (`session_start_service.py`) | a work item placed by repository, or a run's continuation, its Session written `held` or `starting` through the gate and brought up by its start loop in an environment of Pilot's own; Stop and Resume |
 | `start_gate.py` | `held_reason`, the gate every start passes, and `WorkSlots`, its slot |
 | `RelayService` (`relay_service.py`) | the send of a Turn, the relay of each turn into the records, and the interrupt of a turn stopped under it |
 | `SessionRecordService` (`session_record_service.py`) | the records' one writer and the one read function |
@@ -21,9 +21,10 @@ threads the loops run on in [`jobs.md`](jobs.md).
 | `RelayWatchdog` (`relay_watchdog.py`) | the relays' restart when the fleet stream shows a turn stuck or its environment stopped |
 | `current_line.py` | what a turn in flight is doing, rebuilt from its records |
 
-All are in `backend/app/services/`. Only the record's testing route starts a Session (below);
-nothing in the app places a work item yet. A person's Resume carries a stopped or failed work item
-on, and Stop, Finish and Archive stop one.
+All are in `backend/app/services/`. The record's testing route places a work item (below), and the
+close that leaves none of a run's registered documents open places the run's continuation
+([`round-trip.md`](round-trip.md)); nothing else in the app places one yet. A person's Resume
+carries a stopped or failed work item on, and Stop, Finish and Archive stop one.
 
 ## The session start
 
@@ -35,7 +36,8 @@ item by repository, `owner/Name`, and writes its Session's start, in the caller'
   given, created by its own Session; the Work, its `repo` the repository and its `autopilot` the
   project's switch as it stands. The Item, the Work and the Session share one id;
 - the Session, kind `work`, with its `cwd`, no Environment until its start provides one, and
-  `token_hash` the sha256 of a token minted for it and not kept;
+  `token_hash` the sha256 of a token no one holds, until its create mints the one its controller
+  session carries (below);
 - Turn 1, the brief, with no author.
 
 The repository and `cwd` are taken as the placement gives them: the server maps and checks
@@ -73,8 +75,10 @@ elsewhere. Each asks for the release once its transaction commits.
 **The lock order.** A start, a Resume and the release take their locks in one order: the Project's
 row, the Session's, the slot's lock, then an Environment's. A start that places a work item holds
 its Project's row `FOR UPDATE`, as `next_seq` takes it, so its Item's birth asks for no lock
-stronger than one it holds; a Resume shares the row. The start loop's transactions lock no Project
-row, so no controller call is made while one is locked.
+stronger than one it holds; a Resume shares the row. A close that places a continuation holds the
+Project's row `FOR UPDATE`, then the Document's, the slot's and an Environment's; a Resume of a
+continuation locks the documents it carries after its Session's, before the slot. The start loop's
+transactions lock no Project row, so no controller call is made while one is locked.
 
 **The start loop.** Once a `starting` Session's transaction commits, the loop `start:<session id>`
 runs the start from the rows, its environment first:
@@ -95,9 +99,12 @@ runs the start from the rows, its environment first:
   settle is awaited, never a second scheduled.
 - **Any other**: started ([`controller.md`](controller.md)).
 
-Then it writes `{"type": "starting", "text": "Creating the session…"}`, creates the headless
-session with the Session's `cwd`, `agent`, `model`, `reasoning_effort` and `conversation_id` as
-`resume`, records its name as `controller_session` with `started_at`, and sends its latest Turn
+A continuation's start first writes back what the documents it carries still owe, before its
+environment is brought up ([`round-trip.md`](round-trip.md)). Then it writes `{"type": "starting",
+"text": "Creating the session…"}`, creates the headless session with the Session's `cwd`, `agent`,
+`model`, `reasoning_effort` and `conversation_id` as `resume`, Pilot's MCP server handed to it with
+a token minted for this create ([`mcp.md`](mcp.md)), records its name as `controller_session` with
+`started_at` and the token's sha256 as `token_hash` in one transaction, and sends its latest Turn
 (`send_turn`, below), whose `202` starts the relay. A run told to stop after the environment's
 bring-up or after the create returns and leaves the Session `starting`, for the next process's
 reconcile. One that finds its Session no longer `starting` to send the Turn it began with, stopped
@@ -136,6 +143,16 @@ Pilot started for it is stopped, one whose reset was still to make claimed first
 stops it too. The log says `Session <id> failed to start: <error>`. A Turn whose send fails fails
 the Session the same way, with its Turn's `send-failed` record (below) instead of a `start-failed`
 one. Nothing is retried but by a Resume.
+
+**A run's continuation.** `continue_run(db, project, run_id, released, message)` places the work
+item that continues the conversation of the work item `run_id`, in the caller's transaction, the
+close's, which holds the project's row: its Item titled as the run, at the project's next `seq`,
+its trigger the Item `released` whose close released it; its Work with the run's repository; its
+Session in the run's environment from its placement on, with the run's conversation, `cwd`,
+`agent`, `model` and effort; its Turn 1 `message`, with no author. It passes the gate as
+`start_work`'s does, and refuses as it does in a finished or an archived project, which refuses
+the close. Its environment is never reset: the
+conversation goes on in the tree as the run left it ([`round-trip.md`](round-trip.md)).
 
 **The testing route.** The record's `POST /api/testing/projects/<id>/work`, open on every stage but
 `prd`, places a work item through `start_work` ([`projects.md`](projects.md)), and the fleet's live
@@ -195,7 +212,9 @@ otherwise, and takes each frame in order:
   Turn ended, with `error` the result's text (or "The turn ended in an error") when the frame says
   `isError`; with no later Turn in flight, the Session's state (below), no current line and its
   turn caches refreshed; and the engine's `turn_ended(session)` ([`engine.md`](engine.md)). Once it
-  commits, the environment's shutdown timer is armed if nothing else runs there. A `result` whose
+  commits, the environment's shutdown timer is armed if nothing else runs there, and, when the
+  turn made a work item done, the documents its run registered are read
+  ([`round-trip.md`](round-trip.md)). A `result` whose
   Turn has already ended, through another process's relay, writes nothing.
 
 The Session's state at its turn's end: `stopped` when the turn was interrupted, by no one
@@ -219,7 +238,8 @@ backoff, reopening at the last committed offset.
 **Resuming a controller session that is gone.** A `404` on the stream or the send is the
 controller session gone, as a pod restart leaves it. Under the Session's lock, and only while the
 Session still has that controller session: a headless session is created in the same
-environment with the Session's options and `resume` its `conversation_id`; then the `server`
+environment with the Session's options, `resume` its `conversation_id` and a token minted for it,
+whose hash is the Session's from then; then the `server`
 record `{"type": "session-gone", "reason": <error>}` in no Turn, every Turn in flight ended with no
 `result`, and `controller_session` the new name. The log says `Session <id> lost controller session
 <name>; resumed as <name> in environment <id>`. The relay carries the turn on with a Turn of the
@@ -277,8 +297,10 @@ neither running, starting nor held ("its turn has ended", "it is stopped already
 
 **`POST /api/sessions/<id>/resume`**, no body (`SessionStartService.resume`), carries a stopped or
 failed work item on: a Turn of the server's own, `continue`, or the latest Turn's message while the
-Session has no conversation (D037), so that a failed start's Resume carries its brief. Its Session's
-`error` and current line are cleared, and it passes the gate as a start does, `held` or `starting`,
+Session has no conversation (D037), so that a failed start's Resume carries its brief, or while no
+Turn of it has gone out, so that a continuation's carries its message. Its Session's `error` and
+current line are cleared, a write-back the controller refused of a document it carries is owed
+again ([`round-trip.md`](round-trip.md)), and it passes the gate as a start does, `held` or `starting`,
 under a share lock on the project's row, its slot counted before its environment's row is locked.
 A stopped or failed work item keeps its environment meanwhile: no other start takes it, and
 nothing resets or deletes it (D042, [`controller.md`](controller.md)).
@@ -339,7 +361,7 @@ A record is one of four kinds:
 | `claude` | a line of the raw response stream, as `claude` printed it, with its controller session and the raw offset after it | the turn it came in |
 | `result` | the worker's `result` frame, `{turn, result, isError, interrupted}` as sent, with its controller session and offset | the turn it ended |
 | `send` | a person's message, in its place among the lines; its words and author are the Turn's | the Turn it sent |
-| `server` | the server's own line, a JSON object whose `type` says which: `starting`, `start-failed`, `send-failed`, `session-gone`, `restarting`, `environment-stopped` | a `send-failed`, `restarting` or `environment-stopped` its Turn's; the others none |
+| `server` | the server's own line, a JSON object whose `type` says which: `starting`, `start-failed`, `send-failed`, `session-gone`, `restarting`, `environment-stopped`; on the Session that registered a document, `read-failed` and `write-back-refused` ([`round-trip.md`](round-trip.md)) | a `send-failed`, `restarting` or `environment-stopped` its Turn's; the others none |
 
 **The writer.** `SessionRecordService.append(session_id, kind, *, payload, turn_id, raw_offset,
 controller_session)` is the only one: in the caller's transaction it locks the Session row, reads
@@ -400,7 +422,8 @@ At STARTUP the job `relay`'s reconcile runs the relay of every Session `running`
 with a Turn in flight (`Resuming the relay of session <id>`); the job `interrupt`'s asks the
 interrupt of every Session stopped with a Turn in flight; and the job `start`'s runs the start of
 every Session still `starting` (`Resuming the start of session <id>`), then the release of the held
-ones, the outage being off in a fresh process. Each run resumes from the rows:
+ones, the outage being off in a fresh process; the jobs `read` and `write-back` run what the
+registered documents owe ([`round-trip.md`](round-trip.md)). Each run resumes from the rows:
 
 - **Sent or not.** Before it opens the stream, a relay's run reads the controller session's status
   snapshot. The controller has the turn when the session is `busy` or `interrupting`, or its `turn`

@@ -2,11 +2,12 @@
 
 Pilot works the KubeCoder fleet through its controller's API, under a named client credential. It
 creates environments of its own from a repository for its work items, takes, renames, resets and
-deletes them, starts and stops environments, drives headless Claude Code sessions in them, and
-follows the fleet on the controller's `/stream`. This page is the client, the outage, the fleet
-stream's consumer, the environments started on demand with their shutdown timer, Pilot's own
-environments with their delete timer, and the fake the suites run against. The sessions the client drives are
-[`sessions.md`](sessions.md), and the threads it all runs on [`jobs.md`](jobs.md).
+deletes them, starts and stops environments, drives headless Claude Code sessions in them, reads and
+writes their files, and follows the fleet on the controller's `/stream`. This page is the client,
+the outage, the fleet stream's consumer, the environments started on demand with their shutdown
+timer, Pilot's own environments with their delete timer, and the fake the suites run against. The
+sessions the client drives are [`sessions.md`](sessions.md), and the threads it all runs on
+[`jobs.md`](jobs.md).
 
 ## The client
 
@@ -25,6 +26,9 @@ against `CONTROLLER_CA_FILE` when that is set, and against requests' own trust o
 | `reset_environment(env_id)` | `POST /environments/<id>/reset`, without `wait`, of a `stopped` environment only: its folder cleared and its bring-up run again, answered `starting`, ending in a running pod as a start does |
 | `rename_environment(env_id, name)` | `POST /environments/<id>/rename {name}`; a blank `name` clears it |
 | `delete_environment(env_id)` | `DELETE /environments/<id>`, `202`; one already gone, answered `404`, is deleted |
+| `read_file(env_id, path)` | `GET /environments/<id>/file?path=<path>`: a `FileContent(data, sha256)`, the raw bytes and their `KubeCoder-Content-Sha256` |
+| `write_file(env_id, path, data)` | `PUT /environments/<id>/file?path=<path>`, the raw body, `204`: the file overwritten whole, or created with the folders it needs, and the SHA-256 of what was written; it sends no `expectedSha256` |
+| `list_folder_files(env_id, path)` | `GET /environments/<id>/files?path=…&offset=…&limit=1000`, page by page and folder by folder: every file under the folder, its subfolders' included, in path order, each named through the folder as given, so a link under it is followed as a read follows it |
 | `create_headless_session(env_id, HeadlessCreateRequest)` | `POST /environments/<id>/sessions/headless`; a field left None is not sent |
 | `send_message(env_id, name, message)` | `POST /environments/<id>/sessions/headless/<name>/messages`, `202`: the session is busy with the turn |
 | `interrupt(env_id, name)` | `POST /environments/<id>/sessions/headless/<name>/interrupt` |
@@ -47,7 +51,15 @@ another.
 fleet holds already: KubeCoder's names are unique across it), `409 session-busy`, `409
 admission-blocked` (the node at its cap), `403 namespace-not-whitelisted` (a repository whose owner
 the controller does not take), `422 validation-error` or `502 worker-unreachable`, as problem+json
-of that type, raises `ControllerProblem`, whose `problem_type` its callers switch on. A call the controller does not
+of that type, raises `ControllerProblem`, whose `problem_type` its callers switch on; so do the file
+routes' `503 environment-unreadable` (the controller cannot read the environment off its share, its
+"try again"), `403 path-outside-work`, `409 not-a-file` (a folder given to `read_file`, a FIFO or a
+socket), `409 not-a-directory` (a file given to `list_folder_files`) and `413 file-too-large` (past
+`FILE_SIZE_CAP`, 16 MiB each way). Its `cause` reads `the controller answered <status> <type>:
+<title>; <detail>`, the controller's reason whole. The file routes answer from the environment's
+share, never through its pod, so a stopped environment's files are read and written too; a path
+outside `/work` is refused, and so is a write while the controller brings the environment up,
+resets or deletes it (`409 conflict`). A call the controller does not
 answer, a connection error, a timeout, or a 5xx without the controller's own problem+json (an
 ingress's page in front of it), raises `ControllerUnreachable` and turns the outage on (below). Any
 other failure, another status or an answer that does not parse, raises a plain
@@ -191,8 +203,11 @@ controller, its `managedBy`, by which the controller's list filters. Pilot takes
 and deletes only its own: never an operator's environment of the same repository, the store, or an
 environment a work item was placed in by its id.
 
-**Free.** One of Pilot's own is free while it is neither `deleting` nor `gone` and no Session there
-is `running`, `starting` or `held`, nor `stopped` or `failed`. A work item that shows Resume keeps
+**Free.** One of Pilot's own is free while it is neither `deleting` nor `gone`, no Session there
+is `running`, `starting` or `held`, nor `stopped` or `failed`, and no document a work item's run
+registered there is still open: the run's conversation goes on there once each is closed
+([`round-trip.md`](round-trip.md)), and the last close's continuation names the environment from
+its placement on, so it is never free between the two. A work item that shows Resume keeps
 its environment for as long as it does, with no expiry: nothing takes, resets or deletes it, its
 project's Finish and Archive included, since Bring back offers the Resume again (D042). The
 shutdown timer still stops it, and it holds no slot of the gate's ([`sessions.md`](sessions.md)).
@@ -263,7 +278,8 @@ unless `backend/.env` sets one, as the fleet's live check does against KubeCoder
 reaches by URL. It holds environments and headless sessions with the controller's state machines,
 answers with its status codes and problem+json, and serves the response stream and the fleet stream
 in its SSE framing: `raw` frames with the offset as their `id:`, and the worker's `result` and
-`incomplete`. An environment's pod has a `startedAt` from its move out of `stopped` until it
+`incomplete`. It serves the file routes, a read, a write and a folder's listing, over each
+environment's `files`. An environment's pod has a `startedAt` from its move out of `stopped` until it
 stops, in whole seconds and later than every pod's before it. It serves the create, the reset,
 the rename and the delete with the controller's refusals in its order, and the list filtered by
 `managedBy`, `repo` and `status`. An environment a create makes has an id minted from its
@@ -272,7 +288,10 @@ hex digits, and `managedBy` `pilot`, the client its one credential authenticates
 session's conversation id is minted by its first send, an environment that is not `running` holds
 no headless session, `wait=settled` is `wait=ready`, the create and the reset answer at once and
 take no `wait`, a delete's teardown ends as it is answered, `deleting` then `gone`, and the node's
-cap is a flag, not a count.
+cap is a flag, not a count. An environment's `/work` holds files alone, with no link, a folder being
+there while a file is under it; a write takes no `expectedSha256` (`422`), and is refused `409
+conflict` while the environment reads `provisioning`, `starting` or `deleting`; a reset clears the
+tree, a stop keeps it.
 
 - **Under pytest**, the fixture `fake_controller` serves it on a free port of 127.0.0.1
   (`ServedFakeController`, `backend/tests/support/fake_controller.py`; over HTTPS with
@@ -305,10 +324,13 @@ admission-blocked`; with none, the node's cap, every create too; never an exempt
 `not_whitelisted` (a create of a repository of that owner is `403 namespace-not-whitelisted`),
 `unprojectable`, `busy`, `play` (the lines `claude` prints, answered with their offsets), `finish`
 (the turn's outcome: `success`, `error`, `interrupted`, `spawn-failure` or `ended`), `write_log`,
-`publish_state`, `publish_sessions`, `drop_streams` and `reset`, which forgets everything, an
+`publish_state`, `publish_sessions`, `drop_streams`, `put_file` (a process in the environment
+writes the file, whatever its status; over HTTP its `content` is text), `remove_file`, `file_text`
+(the file's text, None when there is none: over HTTP a `204`), `unreadable` (the environment's read
+and its file routes `503 environment-unreadable`) and `reset`, which forgets everything, an
 outage, the node's cap, the refused owners and how creates settle included; it is not the
 controller's reset route. `environment()` (its `resets` counting the resets that cleared its
-folder), `session()`, `sessions()` and `calls` read its state.
+folder, its `files` the bytes by path), `session()`, `sessions()` and `calls` read its state.
 
 The turns a test plays are invented, in `backend/tests/fixtures/raw/turn_text.jsonl`,
 `turn_tool.jsonl` and `turn_subagent.jsonl`, read by `raw_turn(name)`: bare `claude` lines in the

@@ -255,13 +255,20 @@ answers only in testing mode ([`sign-in.md`](sign-in.md)).
   segment (empty, `.`, `..`, or holding a slash or NUL) or is named twice, content that is not
   base64, and a file over 16 MiB are a `400`; an unknown item a `404`; a project with no session a
   `409`.
+- `POST /api/testing/items/<id>/registrations` `{path}` registers the document the work item
+  `<id>`'s session wrote at `path` in its environment, as its worker's `register_document` does
+  ([`mcp.md`](mcp.md)): the file read through the stage's controller and parsed now, and read again
+  once the turn that ends its run commits ([`round-trip.md`](round-trip.md)). It answers `201`
+  `{id}` for the document minted, `200` for the one its run registered from the path already; an
+  unknown work item is a `404`, a session with no environment yet or a file that cannot be
+  registered a `409` with the reason, and the controller's own failure a `502`.
 
 A project past the draft, born with its opening, an item placed, a work item placed, an item's save
 posted, Pilot's Done and attachments hung each raise `project_changed` through the engine, so an
 open screen follows them ([`timeline.md`](timeline.md)); a turn's end raises none, and a save of the
 handbook none either. The frontend suite's `projects` fixture (`frontend/tests/support/projects.ts`)
 wraps them (`make`, `makeWithSession`, `place`, `save`, `saveProjectDocument`, `endTurn`,
-`doneByPilot`, `attach`, `list`, `head`, `transition`, the item writes of
+`doneByPilot`, `attach`, `register`, `list`, `head`, `transition`, the item writes of
 [`timeline.md`](timeline.md), and the work item's of [`work.md`](work.md)), and the page objects
 `projectList` and `projectHead` drive the screens: `projectList.statusIcon(name)` reads a tab's
 icon, its status and its glyphs, and `projectList.written(id, kind)` waits for its pause or resume

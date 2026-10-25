@@ -6,9 +6,11 @@ and as the screens show it: its status, its live event, its line and its actions
 and its session log. What the server does to start it through the gate, stop it and resume it is
 [`sessions.md`](sessions.md)'s, and the timeline it stands on [`timeline.md`](timeline.md)'s.
 
-Nothing in the app places one yet: the record's testing route `POST
-/api/testing/projects/<id>/work` does, by repository, on every stage but `prd`
-([`projects.md`](projects.md)).
+The record's testing route `POST /api/testing/projects/<id>/work` places one by repository, on every
+stage but `prd` ([`projects.md`](projects.md)). The app places one itself as a run's continuation:
+the close that leaves none of the documents a work item's run registered open places the work item
+that continues its conversation, titled as the run, after the answered items
+([`round-trip.md`](round-trip.md)).
 
 ## Its status
 
@@ -107,7 +109,10 @@ An address that names no work item of the project reads "The session log did not
 - **Its body**: the session's records rendered as the chat renders a reply, one reply per turn
   (`ReplyBody`), bare in the log's column, 6px in from either side (D002): the text as Markdown, the
   runs of tool calls with their summaries, a sub-agent's card with its own steps, the phantom of the
-  text block under way, and a failed turn's error. An earlier turn ends on its time, with " ·
+  text block under way, a failed turn's error, and the server's word on a document the session
+  registered, as a notice: "Could not read <path> because <reason>" for a read that failed at its
+  run's end, "Could not write <path> back because <reason>" for a write-back the controller
+  refused ([`round-trip.md`](round-trip.md)). An earlier turn ends on its time, with " ·
   Stopped" after an interrupted one and " · Failed" after a failed one.
 - **Its tail**: while the item is held, starts or runs, the working cue: the held reason, what the
   turn in flight is doing, or "Starting" and "Waiting for Pilot" before its first record. Otherwise
@@ -125,12 +130,13 @@ the frames that came meanwhile, a record it got both ways once ([`sessions.md`](
 routes). A read or a subscribe that fails drops the stream, which reopens after its last record, and
 so does a new SSE connection. The stream's `end` ends nothing here: the tail follows `work`.
 
-**The view.** A record outside any Turn, the start's lines, a failed start and a gone session,
-falls in the Turn in flight, else in the next one. A Turn ends at its `result`, at a failed send or
-start, at its environment stopped under it, or, where it ended with no record, where a later Turn's
-records begin; a call or a sub-agent still running then was stopped with it, and draws with no
-spinner. A Stop of a held or a starting item ends its Turn with no record. An `isError` result shows
-its text as the failure, or "The turn failed." where it has none.
+**The view.** A record outside any Turn, the start's lines, a failed start and a gone session, falls
+in the Turn in flight, else in the next one. A Turn ends at its `result`, at a failed send or start,
+at its environment stopped under it, or, where it ended with no record, where a later Turn's records
+begin. A `read-failed` or `write-back-refused` record is written after the run's last Turn ended,
+and stands at that Turn's end; a call or a sub-agent still running then was stopped with it, and
+draws with no spinner. A Stop of a held or a starting item ends its Turn with no record. An
+`isError` result shows its text as the failure, or "The turn failed." where it has none.
 
 **The chat's view code** is the chat mockup's, carried over for the session log and shared with
 the chat to come: `frontend/src/lib/chat/` (the records on the API's record types, `claude`'s lines,
@@ -146,7 +152,8 @@ The status, its event and the routes are pinned in `backend/tests/services/test_
 `test_timeline_service.py`, `test_project_event_service.py`, and
 `backend/tests/api/test_sessions.py` and `test_testing_record.py`. The browser suites are
 `frontend/tests/work/`: `harness.spec.ts`, `timeline.spec.ts`, `stop-resume.spec.ts`,
-`session-log.spec.ts` and `switch-warning.spec.ts`.
+`session-log.spec.ts`, `switch-warning.spec.ts` and `registered.spec.ts`, the round trip of a
+registered document ([`round-trip.md`](round-trip.md)).
 
 Each Playwright backend's controller is the fake it serves itself
 ([`controller.md`](controller.md)), which the `controller` fixture
@@ -157,7 +164,9 @@ result?)`, `restart`, `setStatus`, `settleStarts`, `removeEnvironment` and `unre
 `capped(on?)`, the node at its cap, refusing creates, starts and resets; `settleCreates(status)`,
 what a create brings its environment to, null holding it `provisioning`; `outage(on, answer?)`,
 returning once the backend reads the controller as asked; and `dropStreams()`, once the fleet stream
-has reconnected. The fake's verbs that act on every environment hold across a worker's specs, so
+has reconnected; and the files of an environment as a process in it writes them, `putFile(env, path,
+content)`, `removeFile(env, path)` and `fileText(env, path)`, null where there is none. The fake's
+verbs that act on every environment hold across a worker's specs, so
 the fixture's teardown (`restore()`) undoes an outage, the node's cap and held creates that a spec
 left. Pilot's headless sessions in an environment are
 `claude-1`, `claude-2`, … in the order it creates them, a Resume that re-creates its session making

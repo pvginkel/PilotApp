@@ -40,13 +40,19 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   item kind. The opening is a person's (`created_by_user_id`); every other item was added by a
   Session (`created_by_session_id`). Its done is `done_at` with `done_cause_code`, and
   `done_by_user_id` when a user did it; `consumed_at` with `consumed_session_id` is a session
-  taking its answers.
+  taking its answers: a registered document's, the continuation of the run that registered it, from
+  its placement ([`round-trip.md`](round-trip.md)).
 - `documents`: a Markdown file of a project's folder, `path` relative to the folder. A prose item's
   document shares its item's `id`, and its own columns are `summary` and, for a registered
-  document, the source environment and path. The draft (`project.md`) and the handbook
-  (`handbook.md`) are a project's documents instead, with `project_id` and `role_code` (`draft`,
-  `handbook`), one of each per project. Every document holds two texts, each with its sha256 and
-  time: `published_*`, the truth, and `ingested_*`, the agent's latest save with its session.
+  document, the source environment and path, both or neither, `read_failed_at` (its read at its
+  run's end failed, so it has no text: `ck_documents_read_failed`), `written_back_at` (its closed
+  text written to its file) and `write_back_refused_at` (that write refused by the controller, a
+  document with a text not written back: `ck_documents_write_back_refused`). The draft
+  (`project.md`) and the handbook (`handbook.md`) are a project's documents instead, with
+  `project_id` and `role_code` (`draft`, `handbook`), one of each per project. A document holds two
+  texts, each with its sha256 and time: `published_*`, the truth, and `ingested_*`, the agent's
+  latest save with its session; a registered document has no published text until its file is read,
+  and none after a failed read.
   `writing_session_id` with `writing_since` is the session whose turn is writing it.
 - `document_versions`: a published text fixed, numbered from 1 per document, with its cause
   (`born`, `registered`, `turn`, `done`) and the session it is of, if any.
@@ -61,7 +67,9 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   (what the merge put back or took out), with its line and message.
 - `attachments`: a copy of a file kept for the reader, never edited, at
   `attachments/<batch>/<filename>` of its project's folder: its bytes, `title`, `content_type`,
-  `size`, `sha256`, and its source environment and path, which the draft's copy has none of. Its
+  `size`, `sha256`, and its source environment and path, which the draft's copy has none of,
+  and `copied_at`; a file a session copied has that session (`created_by_session_id`), and its
+  `filename` may hold slashes, a folder's file named by its path relative to the folder. Its
   bytes, `content`, are read and written through the engine's `AttachmentStore` alone: a loaded row
   never holds them ([`documents.md`](documents.md)). `item_attachments` hangs one on an item, in a
   position among the item's.
@@ -84,11 +92,13 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   `controller_session` names its headless session at the controller and `conversation_id` its
   Claude conversation; `current_line`, a JSON object, says what its turn in flight is doing, and is
   null while none is ([`sessions.md`](sessions.md)). `token_hash` is unique, so a bearer token
-  resolves to one session.
+  resolves to one session: the sha256 of the token its latest create carried, and of one no one
+  holds before its first ([`mcp.md`](mcp.md)).
 - `work`: a work item, the extension table its Item and its Session share their id with
   ([`work.md`](work.md)): `project_id`, `session_kind_code` (`work` or `job`, never a Chat's),
   `trigger_code` (a job's Work Trigger; a worker's run has none) and `trigger_item_id` (an item of
-  the same project, never the work item itself), `repo`, the repository a worker's run is placed by
+  the same project, never the work item itself; a continuation's, the registered document whose
+  close released it), `repo`, the repository a worker's run is placed by
   (none for a job), and `autopilot`, the switch's setting at its brief. Its keys reach its Item and
   its Session through the one project. A `work`-kind Session may stand with no `work` row, as the
   seed's idle session and a testing project's do.

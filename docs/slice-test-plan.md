@@ -294,7 +294,8 @@ and only that, before it runs again: step 1's seed recreates the database step 8
    5: the delete timer deletes the environment 300 s after it became free, and one deleted before
    the take, a `Deleted environment` line before `took environment`, is the check's own pace, not a
    finding: step 8, then the check again. The turn's end left no Session there `running`,
-   `starting`, `held`, `stopped` or `failed`, so the environment is free, and the delete timer's
+   `starting`, `held`, `stopped` or `failed`, nor a document its run registered still open, so the
+   environment is free, and the delete timer's
    next tick (`SCHEDULER_TICK_SECONDS`, 10) clears its name at the controller and sets its
    `delete_due_at` (`Environment <id> is free: its name cleared, its delete due <iso>`). A file is
    then written on its checkout through the controller's file API, for the reset to clear, and a
@@ -728,8 +729,9 @@ POD=$(cexec iac kubectl -n pilot-dev get pods -l app.kubernetes.io/name=pilot -o
      -o jsonpath='{range .items[*]}{.metadata.name} {.spec.containers[*].image}{"\n"}{end}' | diff tmp/prd/before - && echo "pilot-prd unchanged"
    ```
 
-2. **The pod and its images.** One pod, `2/2 Running`; `migrate` terminated `Completed`; `backend`
-   and `ui` ready with no restarts; `pilot` and `pilot-ui` at the tag `origin/main`'s
+2. **The pod and its images.** One pod, `3/3 Running`; `migrate` terminated `Completed`; `backend`,
+   `mcp` and `ui` ready with no restarts; `pilot`, which `backend` and `mcp` both run, and `pilot-ui`
+   at the tag `origin/main`'s
    `config/dev/values.yaml` pins, `:dev-<n>`, `<n>` the latest green `PilotApp/Build-Main` build,
    and each `imageID` the digest the registry holds for that tag. The build pushed `pilot-sync`
    too, and each image's `dev-latest` is its `dev-<n>`:
@@ -814,6 +816,20 @@ POD=$(cexec iac kubectl -n pilot-dev get pods -l app.kubernetes.io/name=pilot -o
    homelab step-ca, so retry for ten minutes; past that it is a finding, with `cexec iac kubectl -n
    nginx-prd logs deploy/nginxmanager --all-containers` beside it. `pilot-dev.home` is internal: it
    resolves on the LAN alone, and there is no outside path to check.
+
+   Pilot's MCP server's host the same way: `https://pilot-dev-mcp.home/health/readyz` answers `200`
+   `{"status":"ok"}` against the homelab root alone, a `POST /mcp` with no bearer `401`, and the
+   Service `pilot-mcp` carries `server-name: pilot-dev-mcp.home`, `is-public: "false"` and
+   `enable-ssl: "yes"`. The site never reaches the worker's routes: the UI's nginx answers a `POST`
+   to `https://pilot-dev.home/tools/pilot-work/documents` itself, `405` `text/html`
+   ([`mcp.md`](mcp.md)):
+
+   ```bash
+   curl -s -m 10 --cacert /usr/local/share/ca-certificates/homelab-root.crt --capath tmp/ca-none -w '\n%{http_code}\n' https://pilot-dev-mcp.home/health/readyz
+   curl -s -m 10 --cacert /usr/local/share/ca-certificates/homelab-root.crt --capath tmp/ca-none -o /dev/null -w '%{http_code}\n' -X POST https://pilot-dev-mcp.home/mcp
+   curl -s -m 10 --cacert /usr/local/share/ca-certificates/homelab-root.crt --capath tmp/ca-none -o /dev/null -w '%{http_code} %{content_type}\n' -X POST -H 'Content-Type: application/json' -d '{}' https://pilot-dev.home/tools/pilot-work/documents
+   cexec iac kubectl -n pilot-dev get service pilot-mcp -o jsonpath='{.metadata.annotations}{"\n"}'
+   ```
 
 6. **Sign-in, as the test account.** `scripts/dev-sign-in.py` walks the app's sign-in as a browser
    does, through Keycloak's real login page, with the test account's username and password from
