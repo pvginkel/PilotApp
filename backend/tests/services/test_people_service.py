@@ -298,6 +298,8 @@ def _await_a_lock_wait(engine: Engine) -> None:
                     " WHERE datname = current_database() AND wait_event_type = 'Lock'"
                 )
             ).scalar()
+            # pg_stat_activity is read once per transaction.
+            watcher.rollback()
             if waiting:
                 return
             time.sleep(0.05)
