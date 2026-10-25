@@ -5,7 +5,8 @@
  * body the session's records as the chat renders a reply — a run of calls, a sub-agent's card,
  * the phantom fading in and gone at its record — streamed while it is open; its tail the working
  * cue while the session is held, starts or runs, else "Stopped by you · <time>", the environment
- * stopped under it, "The turn ended · <time>" or "Failed · <time>" under the error (F69.2, F125).
+ * stopped under it or in error, "The turn ended · <time>" or "Failed · <time>" under the error
+ * (F69.2, F125).
  * It follows the item through a Resume, sticks to its end until the reader scrolls up, and Esc
  * closes it.
  */
@@ -189,6 +190,38 @@ test.describe('A work item’s session log', () => {
     const stopped = await projects.work(project, work);
     await expect(sessionLog.tail).toHaveText(`${name} was stopped · ${clock(stopped.stopped_at!)}`);
     await expect(sessionLog.cue).toHaveCount(0);
+  });
+
+  test('an environment in error under the turn names it in its tail, and a Resume starts it again and carries the conversation on', async ({
+    people,
+    projects,
+    controller,
+    sessionLog,
+  }) => {
+    const { project, start } = await started({ people, projects });
+    const work = await start();
+    const { id: environment, name } = await projects.environment(project, work);
+    await sessionLog.open(project, work);
+    await controller.play(environment, 'claude-1', [text('looking', 'Looking at the stylesheets.')]);
+    await expect(sessionLog.texts).toHaveText(['Looking at the stylesheets.']);
+
+    await controller.setStatus(environment, 'error');
+    await expect.poll(async () => (await projects.work(project, work)).stopped_cause).toBe('environment_error');
+    const stopped = await projects.work(project, work);
+    await expect(sessionLog.tail).toHaveText(`${name} is in error · ${clock(stopped.stopped_at!)}`);
+    await expect(sessionLog.cue).toHaveCount(0);
+
+    // Held `starting`, so that the Resume's line shows it starts the environment, where a fresh
+    // start would reset it and read "Preparing".
+    await controller.settleStarts(environment, null);
+    await projects.resume(work);
+    await expect(sessionLog.cue).toHaveText(`Starting ${name}`);
+    await controller.setStatus(environment, 'running');
+    await expect.poll(async () => (await projects.work(project, work)).state).toBe('running');
+    expect((await projects.work(project, work)).environment).toEqual({ id: environment, name });
+    await controller.play(environment, 'claude-2', [text('two', 'There are two stylesheets.')]);
+    await expect(sessionLog.turns).toHaveCount(2);
+    await expect(sessionLog.texts).toHaveText(['Looking at the stylesheets.', 'There are two stylesheets.']);
   });
 
   test('an environment restarting under the turn says so in the cue, and the turn carries on in a new session', async ({

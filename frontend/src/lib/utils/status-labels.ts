@@ -19,6 +19,7 @@ type TaskStatus = components['schemas']['ProjectHeadSchema.e86ccd6.TaskStatus'];
 type Work = components['schemas']['TimelineSchema.1fdd8ae.WorkSchema'];
 type HeldReason = components['schemas']['TimelineSchema.1fdd8ae.HeldReason'];
 type CurrentLine = components['schemas']['TimelineSchema.1fdd8ae.CurrentLineSchema'];
+type LineStep = NonNullable<CurrentLine['step']>;
 type ConditionCode = components['schemas']['ConditionsSchema.6c014b4.ConditionCode'];
 
 interface StepReading {
@@ -107,13 +108,19 @@ export function planStep(status: TaskStatus): PlanStep {
   }
 }
 
-/** Why the gate holds a work item's start, as its line says it (F26.1, F141.5). */
-export function heldReasonLabel(reason: HeldReason): string {
+/**
+ * Why the gate holds a work item's start, as its line says it (F26.1, F141.5, F143.4); `running`,
+ * the work items that leave it no slot, counted while no slot is free.
+ */
+export function heldReasonLabel(reason: HeldReason, running: number | null): string {
   switch (reason) {
     case 'paused':
       return 'Paused';
     case 'controller_unreachable':
       return 'Waiting for the controller';
+    case 'slot':
+      // The API counts the running work items whenever it holds a start for a slot.
+      return `Waiting for a slot · ${running!} running`;
     default: {
       const unknown: never = reason;
       return String(unknown);
@@ -142,8 +149,8 @@ export function conditionLine(code: ConditionCode): ConditionLine {
 }
 
 /**
- * Why a work item stopped when its environment was stopped under it, a stop made elsewhere (F26.1,
- * F71); null for any other stop.
+ * Why a work item stopped when its environment was stopped under it or settled in error, a stop
+ * made elsewhere (F26.1, F71); null for any other stop.
  */
 function stopCause(work: Work): string | null {
   const cause = work.stopped_cause;
@@ -157,6 +164,8 @@ function stopCause(work: Work): string | null {
       return `${environment} is being deleted`;
     case 'environment_gone':
       return `${environment} is gone`;
+    case 'environment_error':
+      return `${environment} is in error`;
     default: {
       const unknown: never = cause;
       return String(unknown);
@@ -202,7 +211,7 @@ export function workLine(work: Work): WorkLine | null {
   const line = work.current_line;
   switch (work.state) {
     case 'held':
-      if (work.held_reason !== null) return cue({ kind: 'waiting', phase: heldReasonLabel(work.held_reason) });
+      if (work.held_reason !== null) return cue({ kind: 'waiting', phase: heldReasonLabel(work.held_reason, work.held_running) });
       return line === null ? cue(STARTING) : lineCue(line);
     case 'starting':
       return line === null ? cue(STARTING) : lineCue(line);
@@ -222,11 +231,20 @@ export function workLine(work: Work): WorkLine | null {
   }
 }
 
+/**
+ * A current line's step as the chat words its call, running or done: its verb alone while its
+ * input streams in, before the call's line gives its target; an empty target is not drawn.
+ */
+function stepWords(call: LineStep | null, running: boolean): string | null {
+  if (call === null || call.tool === null) return null;
+  const summary = summarizeTool(call.tool, (call.input ?? {}) as Record<string, unknown>);
+  const verb = running ? summary.verbRunning : summary.verb;
+  return call.input === null ? verb : [verb, summary.target].filter(Boolean).join(' ');
+}
+
 /** The relay's current line in the chat cue's words (design 2 §9.5): the server's own while the session comes up. */
 function lineCue(line: CurrentLine): WorkCue {
-  const call = line.step;
-  const step = call === null || call.tool === null ? null : summarizeTool(call.tool, (call.input ?? {}) as Record<string, unknown>);
-  const done = step === null ? null : [step.verb, step.target].filter(Boolean).join(' ');
+  const done = stepWords(line.step, false);
   switch (line.state) {
     case 'starting':
       return cue({ kind: 'starting', phase: line.text === null ? STARTING.phase : phaseOf(line.text) });
@@ -235,7 +253,7 @@ function lineCue(line: CurrentLine): WorkCue {
     case 'writing':
       return cue({ kind: 'writing', phase: 'Writing' }, done);
     case 'working':
-      return cue({ kind: 'tool', phase: 'Working' }, step === null ? null : [step.verbRunning, step.target].filter(Boolean).join(' '));
+      return cue({ kind: 'tool', phase: 'Working' }, stepWords(line.step, true));
     case 'waiting': {
       const type = line.agent?.type ?? null;
       return cue(

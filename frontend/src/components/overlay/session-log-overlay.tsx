@@ -205,7 +205,7 @@ function TurnEnd({ turn }: { turn: TurnView }) {
  */
 function Cue({ work, last, stream }: { work: Work; last: TurnView | undefined; stream: ChatStreamState }) {
   if (work.state === 'held' && work.held_reason !== null) {
-    return <WorkingCue activity={{ kind: 'waiting', phase: heldReasonLabel(work.held_reason) }} />;
+    return <WorkingCue activity={{ kind: 'waiting', phase: heldReasonLabel(work.held_reason, work.held_running) }} />;
   }
   if (last?.state === 'running') return <ReplyCue turn={last} phantom={stream.phantom} />;
   const activity: Activity =

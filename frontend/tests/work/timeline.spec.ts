@@ -2,9 +2,10 @@
  * A work item on the timeline (F26): open, its head with the env chip opening the environment once
  * its start has one and "running N min" while its turn runs (F26.1, F12), and its one line
  * (F26.2), live as the server moves it (F80.2) — the server's own words while the session comes up
- * or its environment restarts, the working state and the latest step, why the gate holds its start
- * (F141.5), "Stopped · <time>" with the cause of a stop made elsewhere (F71), a failure's error
- * (F125) — and its Session log (F26.3). Done, it is a quieter line, its Open the session log, with
+ * or its environment restarts, the working state and the latest step — a call whose input streams
+ * in by its verb alone — why the gate holds its start (F141.5), a slot among it (F143.4),
+ * "Stopped · <time>" with the cause of a stop made elsewhere (F71), a failure's error (F125) — and
+ * its Session log (F26.3). Done, it is a quieter line, its Open the session log, with
  * no Undo and its attachments' indicator (F13.5, F26.6, F13.6), and so is every work item of a
  * finished project (F5.3). A run of work items stands under its last member's dividers (F9.1).
  */
@@ -30,6 +31,8 @@ const toolResult = (id: string, content: string) =>
   line({ type: 'user', message: { role: 'user', content: [{ tool_use_id: id, type: 'tool_result', content }] }, parent_tool_use_id: null });
 const blockStart = () =>
   line({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }, parent_tool_use_id: null });
+const toolStart = (id: string, name: string) =>
+  line({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id, name, input: {} } }, parent_tool_use_id: null });
 
 interface Fixtures {
   people: People;
@@ -103,6 +106,38 @@ test.describe('An open work item', () => {
     await expect(sessionLog.item).toHaveText(TITLE);
   });
 
+  test('names the call whose input streams in by its running verb alone, never the finished call before it, and its target once its line arrives', async ({
+    people,
+    projects,
+    controller,
+    timeline,
+  }) => {
+    const project = await setUp({ people, projects });
+    const work = await startIn(projects, project);
+    const { id: environment } = await projects.environment(project, work);
+    await timeline.open(project);
+    const item = timeline.item(work).work;
+
+    await controller.play(environment, 'claude-1', [
+      toolUse('toolu_read', 'Read', { file_path: '/work/Example/README.md' }),
+      toolResult('toolu_read', '# Example'),
+    ]);
+    await expect(item.step).toHaveText('Read …/Example/README.md');
+    await controller.play(environment, 'claude-1', [toolStart('toolu_edit', 'Edit')]);
+    await expect(item.cue).toHaveText('Working');
+    await expect(item.step).toHaveText('Editing');
+    await controller.play(environment, 'claude-1', [
+      toolUse('toolu_edit', 'Edit', { file_path: '/work/Example/README.md', old_string: 'Example', new_string: 'Sample' }),
+    ]);
+    await expect(item.step).toHaveText('Editing …/Example/README.md');
+
+    // No search pattern is drawn before the call's line gives one.
+    await controller.play(environment, 'claude-1', [toolResult('toolu_edit', 'Edited.'), toolStart('toolu_grep', 'Grep')]);
+    await expect(item.step).toHaveText('Searching for');
+    await controller.play(environment, 'claude-1', [toolUse('toolu_grep', 'Grep', { pattern: 'badge' })]);
+    await expect(item.step).toHaveText('Searching for “badge”');
+  });
+
   test('held by the pause reads “Paused” with no env chip before its take, and comes up once the project resumes', async ({
     people,
     projects,
@@ -135,11 +170,48 @@ test.describe('An open work item', () => {
     await expect(timeline.item(work).work.running).toBeVisible();
   });
 
-  test('stopped reads “Stopped · <time>”, and a stop made elsewhere names its cause', async ({ people, projects, controller, timeline }) => {
+  test('held for a slot reads “Waiting for a slot · N running”, in its session log too, and comes up once a work item ends', async ({
+    people,
+    projects,
+    controller,
+    timeline,
+    sessionLog,
+    page,
+  }) => {
+    const project = await setUp({ people, projects });
+    // The worker's backends hold a project's fourth work item while three run.
+    const running: string[] = [];
+    for (const title of ['Surveying the badges', 'Surveying the icons', 'Surveying the fonts']) running.push(await startIn(projects, project, 'running', title));
+    const work = await startIn(projects, project, 'held');
+    await timeline.open(project);
+
+    const item = timeline.item(work).work;
+    await expect(item.line).toHaveAttribute('data-state', 'held');
+    await expect(item.cue).toHaveText('Waiting for a slot · 3 running');
+    await expect(item.environment).toHaveCount(0);
+    await item.sessionLog.click();
+    await expect(sessionLog.cue).toHaveText('Waiting for a slot · 3 running');
+    await page.keyboard.press('Escape');
+    await expect(sessionLog.overlay).toHaveCount(0);
+
+    const { id: environment } = await projects.environment(project, running[0]!);
+    await controller.finish(environment, 'claude-1');
+    await expect(item.running).toBeVisible();
+    await expect(item.environment).toBeVisible();
+  });
+
+  test('stopped reads “Stopped · <time>”, and a stop made elsewhere names its cause, an environment in error among them', async ({
+    people,
+    projects,
+    controller,
+    timeline,
+  }) => {
     const project = await setUp({ people, projects });
     const mine = await startIn(projects, project);
     const theirs = await startIn(projects, project, 'running', 'Renaming the badge');
     const other = await projects.environment(project, theirs);
+    const erred = await startIn(projects, project, 'running', 'Renaming the icon');
+    const broken = await projects.environment(project, erred);
     await timeline.open(project);
     await expect(timeline.item(mine).work.running).toBeVisible();
 
@@ -153,6 +225,12 @@ test.describe('An open work item', () => {
     await expect.poll(async () => (await projects.work(project, theirs)).stopped_cause).toBe('environment_stopped');
     const { stopped_at } = await projects.work(project, theirs);
     await expect(timeline.item(theirs).work.line).toHaveText(`Stopped · ${clock(stopped_at!)} · ${other.name} was stopped`);
+
+    await controller.setStatus(broken.id, 'error');
+    await expect.poll(async () => (await projects.work(project, erred)).stopped_cause).toBe('environment_error');
+    const halted = await projects.work(project, erred);
+    await expect(timeline.item(erred).work.line).toHaveText(`Stopped · ${clock(halted.stopped_at!)} · ${broken.name} is in error`);
+    await expect(timeline.item(erred).work.resume).toBeVisible();
   });
 
   test('reads its environment restarting under the turn, and moves on once it is back', async ({ people, projects, controller, timeline }) => {

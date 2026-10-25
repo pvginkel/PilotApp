@@ -8,6 +8,9 @@
 // Invented: the bearer the backend's client sends its own fake, which checks it.
 const FAKE_CONTROLLER_TOKEN = 'playwright-fake-controller';
 
+// More work items than a worker's specs start.
+const UNBOUNDED_WORK = 10_000;
+
 /** The settings of the backend serving at `backendUrl`. */
 export function loadAppBackendEnv(backendUrl: string): NodeJS.ProcessEnv {
   return {
@@ -15,5 +18,9 @@ export function loadAppBackendEnv(backendUrl: string): NodeJS.ProcessEnv {
     // mode (backend/app/api/testing_controller.py); tests/support/controller.ts drives it.
     CONTROLLER_URL: `${backendUrl}/api/testing/controller`,
     CONTROLLER_TOKEN: FAKE_CONTROLLER_TOKEN,
+    // A worker's specs share its backend and leave work items running, each spec in projects of
+    // its own: the slot across every project never closes, and one project's closes at 3.
+    WORK_PARALLELISM_MAX: String(UNBOUNDED_WORK),
+    PROJECT_PARALLELISM_MAX: '3',
   };
 }
