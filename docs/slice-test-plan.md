@@ -39,13 +39,13 @@ Three things follow:
 What the checks cannot show from here is reported as *not verified*: production after a promotion,
 its store included, and anything that needs a part of the fleet no slice has wired into the
 deployment yet (YouTrack). The dev stage's store is wired, and a check that needs it works it
-(step 4.7). The KubeCoder controller is wired: what Pilot does with it is proven on a
-real turn against `kubecoder-dev` (§2, the fleet's live check), and `pilot-dev` shows that its
+(step 4.7). The KubeCoder controller is wired: what Pilot does with it is proven on two
+real turns against `kubecoder-dev` (§2, the fleet's live check), and `pilot-dev` shows that its
 backend reaches that controller (step 4.3). A check that needs a work item on the dev stage places
-one through the record's testing route `POST /api/testing/projects/<id>/work` in one of
-`kubecoder-dev`'s `pvginkel/KubeCoderTestRepo` environments ([`projects.md`](projects.md)), which
-needs the dev cluster up; with it powered off, the dev stage's gold bar reads the controller
-unreachable, and what the check would prove is *not verified*.
+one by repository through the record's testing route `POST /api/testing/projects/<id>/work`
+([`projects.md`](projects.md)), whose start makes or takes an environment of Pilot's own on
+`kubecoder-dev`, which needs the dev cluster up; with it powered off, the dev stage's gold bar reads
+the controller unreachable, and what the check would prove is *not verified*.
 
 ## 0. Preconditions
 
@@ -148,38 +148,49 @@ up fails it at once; a failed run keeps its `/tmp/pilot-sync-proof-*` directory,
 in it.
 
 **The fleet's live check** (D019). A slice that changes how Pilot works the KubeCoder fleet (the
-controller's client, the fleet stream, an environment's start or stop, a session's start, send or
-relay: [`controller.md`](controller.md), [`sessions.md`](sessions.md)) proves it on one real turn against KubeCoder's dev stage, `https://kubecoder-dev.home`, with
-the stack up; a check of the slice's own that needs the fleet rides on the same turn. The dev stage
-is a KubeCoder instance of its own, not production, and its `pvginkel/KubeCoderTestRepo`
-environments are there for checks like this one: the check starts one, and Pilot stops it. Its
-waits come to 25 minutes at most (the environment's start and the turn 20, the timer's stop 5), so
-a slice that runs it starts the stack with `timeout 2700` rather than `timeout 900`. Without the
-token in this environment, or with the dev controller down, nothing below runs, and everything it
-would prove is *not verified*:
+controller's client, the fleet stream, an environment's create, take, reset, start, stop or delete,
+a session's start, send or relay: [`controller.md`](controller.md), [`sessions.md`](sessions.md))
+proves it on two real turns against KubeCoder's dev stage, `https://kubecoder-dev.home`, with the
+stack up; a check of the slice's own that needs the fleet rides on the same turns. The dev stage is
+a KubeCoder instance of its own, not production. The check places two work items of
+`pvginkel/KubeCoderTestRepo` by repository, one after the other, through the record's testing route:
+for the first, Pilot creates an environment of its own there, a managed one of Pilot's bearer; the
+second takes it once it is free and resets it; Pilot's timers then stop it and delete it. The
+stopped `pvginkel/KubeCoderTestRepo` environments the controller lists are the operator's: Pilot
+takes only what it created, and the check touches none of them. Its waits come to 56 minutes at most
+(the create and the first turn 20, the reset and the second turn 20, the delete timer 10, the rest
+6), so a slice that runs it starts the stack with `timeout 4500` rather than `timeout 900`. The node
+admits `maxEnvironments` environments that are not exempt (2 on `kubecoder-dev`), and a create or a
+reset beyond them is refused `409 admission-blocked`, F125's failed start; the check holds one at a
+time, so it needs `runningEnvironments` below `maxEnvironments`. Without the token in this
+environment, with the dev controller down, or with its node full, nothing below runs, and everything
+it would prove is *not verified*:
 
 ```bash
 [ -n "$PILOT_DEV_CONTROLLER_TOKEN" ] && echo "token present"
 curl -s -m 10 -o /dev/null -w '%{http_code}\n' https://kubecoder-dev.home/readyz     # 200
+curl -s -m 15 -H "Authorization: Bearer $PILOT_DEV_CONTROLLER_TOKEN" https://kubecoder-dev.home/capacity |
+  python3 -c 'import json, sys; c = json.load(sys.stdin); print(c["runningEnvironments"], "of", c["maxEnvironments"])'   # fewer than the cap
 ```
 
 Every step keeps what the next one reads in `tmp/fleet/`, since a shell variable does not outlive
-its command:
+its command. A check cut short after step 2 ends with step 8, which deletes what the check created
+and only that, before it runs again: step 1's seed recreates the database step 8 finds them in.
 
 1. **The dev backend in testing mode, on the dev controller**, by the switch the sync's live proof
    makes (`scripts/sync-live-proof.py`), not a second one: settings appended to `backend/.env`,
    which the backend restarts on (`backend/scripts/dev-watch.sh`) and whose last line for a key wins
-   (python-dotenv), and the file's original bytes written back in step 6, whatever happened before
-   it. A step 1 run again before step 6 keeps the copy the first one saved, the only copy of the
-   original, and step 6 clears `tmp/fleet/` once the original is back. `FLASK_ENV=testing` opens the
+   (python-dotenv), and the file's original bytes written back in step 8, whatever happened before
+   it. A step 1 run again before step 8 keeps the copy the first one saved, the only copy of the
+   original, and step 8 clears `tmp/fleet/` once the original is back. `FLASK_ENV=testing` opens the
    testing routes. The token is `PILOT_DEV_CONTROLLER_TOKEN`, which this environment projects from
    its secret catalog (`.kubecoder/config.yaml`) and the backend never reads by that name: it goes
    into the file as `CONTROLLER_TOKEN` and is never printed; the backend's start logs its settings
-   with the token as `***`.
-   `ENVIRONMENT_STOP_AFTER_SECONDS=60` shortens the shutdown timer to fit the check.
-   `CONTROLLER_CA_FILE` stays unset: the `modern-app` container's `REQUESTS_CA_BUNDLE` is the system
-   bundle, which holds the homelab root. The dev seed goes in first, for a project to start the
-   session for:
+   with the token as `***`. `ENVIRONMENT_STOP_AFTER_SECONDS=60` and
+   `ENVIRONMENT_DELETE_AFTER_SECONDS=300` shorten the shutdown timer and the delete timer to fit the
+   check. `CONTROLLER_CA_FILE` stays unset: the `modern-app` container's `REQUESTS_CA_BUNDLE` is the
+   system bundle, which holds the homelab root. The dev seed goes in first, for the person the
+   check's projects are made by:
 
    ```bash
    cexec modern-app sh -c 'cd backend && uv run cli load-test-data --yes-i-am-sure'
@@ -190,7 +201,8 @@ its command:
    DB=$(sed -n 's/^DATABASE_URL=postgresql+psycopg:/postgresql:/p' tmp/fleet/env.orig 2>/dev/null | tail -1)
    echo "${DB:-postgresql://postgres:postgres@localhost:5432/pilot}" > tmp/fleet/db
    { echo; echo FLASK_ENV=testing; echo CONTROLLER_URL=https://kubecoder-dev.home
-     printf 'CONTROLLER_TOKEN=%s\n' "$PILOT_DEV_CONTROLLER_TOKEN"; echo ENVIRONMENT_STOP_AFTER_SECONDS=60; } >> backend/.env
+     printf 'CONTROLLER_TOKEN=%s\n' "$PILOT_DEV_CONTROLLER_TOKEN"
+     echo ENVIRONMENT_STOP_AFTER_SECONDS=60; echo ENVIRONMENT_DELETE_AFTER_SECONDS=300; } >> backend/.env
    SECONDS=0; until curl -s -m 5 http://localhost:3501/health/readyz | grep -q '"controller"' || [ $SECONDS -ge 90 ]; do sleep 1; done
    curl -s -m 10 http://localhost:3501/health/readyz                                   # checks.controller.status "ok"
    curl -s -m 10 http://localhost:3501/metrics | grep '^pilot_fleet_stream_connected'  # 1.0
@@ -202,58 +214,126 @@ its command:
    show the token works: the fleet consumer's list of the controller's environments is
    authenticated.
 
-2. **An environment**: one of `pvginkel/KubeCoderTestRepo` that the controller lists `stopped` and
-   not exempt (`capabilities.capacityExempt.enabled` false), since Pilot's timer never stops an
-   exempt one. None listed is *not verified*:
+2. **Two projects, and the first work item placed by repository.** The record's testing route
+   `POST /api/testing/projects` makes two open projects of `ada`'s, each with a slug of its own,
+   `project-<12 hex>`, the name its environment takes. The SSE stream is held first, as a browser
+   holds it. The record's testing route `POST /api/testing/projects/<id>/work` places a work item in
+   the first by repository, as the brain places one: its Work keeps `repo`, and its Session is
+   `starting` with no Environment. Once the request commits, its start finds no free environment of
+   Pilot's own made from the repository and creates one (`POST /environments`, `managed: true`,
+   named the project's slug), commits its row, Pilot's own (`server_created_at`, `repo`), as the
+   Session's Environment, and awaits its bring-up; then the headless create in `cwd`, then the
+   brief as Turn 1. The route answers the work item's id, its Session's too; the subscribe follows
+   its `201`:
 
    ```bash
-   curl -s -m 15 -H "Authorization: Bearer $PILOT_DEV_CONTROLLER_TOKEN" https://kubecoder-dev.home/environments |
-     python3 -c 'import json, sys; print(*[e["envId"] for e in json.load(sys.stdin)["items"] if e["repo"] == "pvginkel/KubeCoderTestRepo" and e["status"] == "stopped" and not e["capabilities"]["capacityExempt"]["enabled"]][:1])' > tmp/fleet/env-id
-   cat tmp/fleet/env-id
-   ```
-
-3. **A session there, started by Pilot and watched.** The SSE stream is held first, as a browser
-   holds it. The testing route `POST /api/testing/sessions` starts a `work` Session for an existing
-   Project the way the server does: the Session `starting`, the environment's start (answered `202`,
-   so `server_started_at` is set), the headless create in `cwd`, then the brief as Turn 1. No route
-   lists projects, so the id comes from the database. The subscribe follows the route's `201`:
-
-   ```bash
+   for n in 1 2; do
+     curl -s -m 10 -X POST http://localhost:3501/api/testing/projects -H 'Content-Type: application/json' \
+       -d '{"members": ["ada"]}' | sed -n 's/.*"id": *"\([^"]*\)".*/\1/p' > tmp/fleet/project-$n
+     psql "$(cat tmp/fleet/db)" -Atc "select slug from projects where id = '$(cat tmp/fleet/project-$n)'" | tee tmp/fleet/slug-$n   # project-<12 hex>
+   done
    timeout 1500 curl -sN 'http://localhost:3501/api/sse/stream?request_id=fleet-check' > tmp/fleet/sse &
    timeout 30 sh -c 'until grep -q "^event: ready" tmp/fleet/sse; do sleep 0.5; done'
-   psql "$(cat tmp/fleet/db)" -Atc 'select id from projects order by number limit 1' > tmp/fleet/project
-   printf '{"project_id": "%s", "environment_id": "%s", "cwd": "/work/KubeCoderTestRepo", "brief": "%s"}' \
-     "$(cat tmp/fleet/project)" "$(cat tmp/fleet/env-id)" \
+   printf '{"repo": "pvginkel/KubeCoderTestRepo", "cwd": "/work/KubeCoderTestRepo", "title": "Fleet check", "brief": "%s"}' \
      "List the files at the root of this repository, then say in one sentence how many there are." > tmp/fleet/start.json
-   curl -s -m 30 -w '\n%{http_code}\n' -X POST http://localhost:3501/api/testing/sessions \
-     -H 'Content-Type: application/json' -d @tmp/fleet/start.json | tee tmp/fleet/started   # {"id": ...} 201
-   sed -n 's/.*"id": *"\([^"]*\)".*/\1/p' tmp/fleet/started > tmp/fleet/session
-   curl -s -m 10 -o /dev/null -w '%{http_code}\n' -X POST "http://localhost:3501/api/sessions/$(cat tmp/fleet/session)/stream" \
+   curl -s -m 30 -w '\n%{http_code}\n' -X POST "http://localhost:3501/api/testing/projects/$(cat tmp/fleet/project-1)/work" \
+     -H 'Content-Type: application/json' -d @tmp/fleet/start.json | tee tmp/fleet/started-1   # {"id": ...} 201
+   sed -n 's/.*"id": *"\([^"]*\)".*/\1/p' tmp/fleet/started-1 > tmp/fleet/session-1
+   curl -s -m 10 -o /dev/null -w '%{http_code}\n' -X POST "http://localhost:3501/api/sessions/$(cat tmp/fleet/session-1)/stream" \
      -H 'Content-Type: application/json' -d '{"request_id": "fleet-check", "view": "fleet-check"}'   # 204
    ```
 
-   Then the current line, read once a second until the turn has ended. It runs as long as the
-   environment's start and the turn, up to 20 minutes, so it goes in the background:
+   The environment is the Session's as soon as the create has answered, while it still provisions.
+   Its row is Pilot's own, and the controller reports it named the first project's slug and managed
+   by Pilot's client, its `managedBy`, under which its list, filtered, shows it:
 
    ```bash
-   SID=$(cat tmp/fleet/session); SECONDS=0
-   until psql "$(cat tmp/fleet/db)" -Atc "select state_code, current_line from sessions where id = '$SID'" | tee -a tmp/fleet/lines |
-     grep -Eq '^(idle|stopped|failed|ended)\|' || [ $SECONDS -ge 1200 ]; do sleep 1; done
-   uniq tmp/fleet/lines
+   SID=$(cat tmp/fleet/session-1); SECONDS=0
+   until psql "$(cat tmp/fleet/db)" -Atc "select environment_id from sessions where id = '$SID'" | grep -q . || [ $SECONDS -ge 120 ]; do sleep 1; done
+   psql "$(cat tmp/fleet/db)" -Atc "select environment_id from sessions where id = '$SID'" | tee tmp/fleet/env-id
+   ENV=$(cat tmp/fleet/env-id)
+   grep "Created environment $ENV from pvginkel/KubeCoderTestRepo" logs/backend.log
+   psql "$(cat tmp/fleet/db)" -Atc "select server_created_at is not null, repo, name from environments where id = '$ENV'"   # t|pvginkel/KubeCoderTestRepo|<slug-1>
+   curl -s -m 15 -H "Authorization: Bearer $PILOT_DEV_CONTROLLER_TOKEN" "https://kubecoder-dev.home/environments/$ENV" |
+     python3 -c 'import json, sys; e = json.load(sys.stdin); print(e["repo"], e["name"], e["status"], e["managedBy"]); open("tmp/fleet/client", "w").write(e["managedBy"] or "")'
+   curl -s -m 15 -G -H "Authorization: Bearer $PILOT_DEV_CONTROLLER_TOKEN" https://kubecoder-dev.home/environments \
+     --data-urlencode "managedBy=$(cat tmp/fleet/client)" --data-urlencode repo=pvginkel/KubeCoderTestRepo |
+     python3 -c 'import json, sys; print("listed under its client:", open("tmp/fleet/env-id").read().strip() in [e["envId"] for e in json.load(sys.stdin)["items"]])'
    ```
 
-   It moves through `starting` lines whose `text` is `Starting <environment name>…`, then
-   `Creating the session…`, then `running` with `thinking`, `working` (with the `step` of a tool call) and
-   `writing`, and ends `idle|` with nothing after the bar: `current_line` null at the turn's end. A
-   Session that ends `failed` failed the check; its `server` records say why (step 4).
+   The controller prints `pvginkel/KubeCoderTestRepo <slug-1> provisioning <client>` (or
+   `starting`, or `running` once it is up), the client's name not `None`, and the list `True`. No
+   Environment within the 2 minutes, or a Session `failed`, failed the check; its `server` records
+   say why (step 5), a `409 admission-blocked` among them if the node filled meanwhile.
 
-4. **The records, read back and seen live.** The records route pages them from `seq` 1; the SSE
-   stream carried the ones written after the subscribe as `record` frames, and the main thread's
-   block starts and text deltas as `partial` frames:
+3. **The first turn, watched.** The current line, read once a second until the turn has ended. It
+   runs as long as the environment's bring-up and the turn, up to 20 minutes, so it goes in the
+   background:
 
    ```bash
-   curl -s -m 10 "http://localhost:3501/api/sessions/$(cat tmp/fleet/session)/records?limit=1000" > tmp/fleet/records.json
-   python3 - <<'EOF'
+   SID=$(cat tmp/fleet/session-1); SECONDS=0
+   until psql "$(cat tmp/fleet/db)" -Atc "select state_code, current_line from sessions where id = '$SID'" | tee -a tmp/fleet/lines-1 |
+     grep -Eq '^(idle|stopped|failed)\|' || [ $SECONDS -ge 1200 ]; do sleep 1; done
+   uniq tmp/fleet/lines-1
+   ```
+
+   It moves through `starting` lines whose `text` is `Preparing <slug-1>…` (a `starting` line with
+   nothing after the bar before it, while the create has not answered), then `Creating the
+   session…`, then `running` with `thinking`, `working` (with the `step` of a tool call) and
+   `writing`, and ends `idle|` with nothing after the bar: `current_line` null at the turn's end. A
+   Session that ends `failed` failed the check; its `server` records say why (step 5).
+
+4. **Free, then a second fresh start that takes it**, run as soon as step 3 has ended, before step
+   5: the delete timer deletes the environment 300 s after it became free, and one deleted before
+   the take, a `Deleted environment` line before `took environment`, is the check's own pace, not a
+   finding: step 8, then the check again. The turn's end left no Session there `running`,
+   `starting`, `held`, `stopped` or `failed`, so the environment is free, and the delete timer's
+   next tick (`SCHEDULER_TICK_SECONDS`, 10) clears its name at the controller and sets its
+   `delete_due_at` (`Environment <id> is free: its name cleared, its delete due <iso>`). A file is
+   then written on its checkout through the controller's file API, for the reset to clear, and a
+   work item of the same repository placed in the second project:
+
+   ```bash
+   ENV=$(cat tmp/fleet/env-id); SECONDS=0
+   until grep -q "Environment $ENV is free" logs/backend.log || [ $SECONDS -ge 60 ]; do sleep 1; done
+   grep "Environment $ENV is free" logs/backend.log
+   psql "$(cat tmp/fleet/db)" -Atc "select name = id, delete_due_at is not null, server_started_at is not null, last_state from environments where id = '$ENV'"   # t|t|t|running
+   curl -s -m 15 -H "Authorization: Bearer $PILOT_DEV_CONTROLLER_TOKEN" "https://kubecoder-dev.home/environments/$ENV" |
+     python3 -c 'import json, sys; print(json.load(sys.stdin)["name"])'                     # None
+   printf 'Written before the reset.\n' | curl -s -m 15 -o /dev/null -w '%{http_code}\n' -X PUT --data-binary @- \
+     -H "Authorization: Bearer $PILOT_DEV_CONTROLLER_TOKEN" "https://kubecoder-dev.home/environments/$ENV/file?path=/work/KubeCoderTestRepo/pilot-fleet-check.txt"   # 204
+   curl -s -m 30 -w '\n%{http_code}\n' -X POST "http://localhost:3501/api/testing/projects/$(cat tmp/fleet/project-2)/work" \
+     -H 'Content-Type: application/json' -d @tmp/fleet/start.json | tee tmp/fleet/started-2   # {"id": ...} 201
+   sed -n 's/.*"id": *"\([^"]*\)".*/\1/p' tmp/fleet/started-2 > tmp/fleet/session-2
+   ```
+
+   The row reads the environment free and one a start takes: its name its id, its delete due, and
+   `running` under Pilot's claim, or `t|t|f|stopping` or `t|t|f|stopped` once the shutdown timer has
+   stopped it, 60 s after the turn's end; the controller's `name` is `None`. The second start takes
+   it, the most recently freed of the repository's, its claim and its delete cleared, renames it the
+   second project's slug and writes `Preparing <slug-2>…`; then it stops it, unless it is stopped,
+   waits for its settled `stopped`, resets it (`POST …/reset`) and awaits the bring-up the reset
+   ends in, with no start after it:
+
+   ```bash
+   SID=$(cat tmp/fleet/session-2); ENV=$(cat tmp/fleet/env-id); SECONDS=0
+   until psql "$(cat tmp/fleet/db)" -Atc "select current_line->>'text' from sessions where id = '$SID'" | grep -q '^Preparing' || [ $SECONDS -ge 120 ]; do sleep 1; done
+   psql "$(cat tmp/fleet/db)" -Atc "select environment_id = '$ENV', current_line->>'text' from sessions where id = '$SID'"   # t|Preparing <slug-2>…
+   grep "Session $SID took environment $ENV" logs/backend.log
+   curl -s -m 15 -H "Authorization: Bearer $PILOT_DEV_CONTROLLER_TOKEN" "https://kubecoder-dev.home/environments/$ENV" |
+     python3 -c 'import json, sys; e = json.load(sys.stdin); print(e["name"], e["status"])'   # <slug-2> and its status
+   ```
+
+   An `f` before the bar, a Session in another environment, is a second create where the take
+   belonged, and fails the check.
+
+5. **The first turn's records, read back and seen live.** The records route pages them from `seq`
+   1; the SSE stream carried the ones written after the subscribe as `record` frames, and the main
+   thread's block starts and text deltas as `partial` frames:
+
+   ```bash
+   curl -s -m 10 "http://localhost:3501/api/sessions/$(cat tmp/fleet/session-1)/records?limit=1000" > tmp/fleet/records.json
+   python3 - <<'PY'
    import collections, json
    page = json.load(open("tmp/fleet/records.json"))
    records = {r["seq"]: r for r in page["records"]}
@@ -269,43 +349,79 @@ its command:
    print("live records", len(live), "| consecutive to the last:", bool(seqs) and seqs == list(range(seqs[0], max(records) + 1)))
    print("live as read back:", all((r["kind"], r.get("payload")) == (records[r["seq"]]["kind"], records[r["seq"]].get("payload")) for r in live))
    print("partials", sum(f["frame"] == "partial" for f in frames), "| end", sum(f["frame"] == "end" for f in frames))
-   EOF
+   PY
    ```
 
    Every `True`, `ended` false; the kinds `server` (the start's phases), `claude` and one `result`,
    and no `send`, since the brief has no author; no `stream_event` line stored; partials above `0`;
    no `end`, since an `idle` Session's stream goes on.
 
-5. **Pilot's shutdown timer stops the environment.** The turn's end arms it (`Armed the shutdown
-   of environment <id>, due <iso>`), and the first scheduler tick past the due time
-   (`SCHEDULER_TICK_SECONDS`, 10) stops it (`Stopped environment <id>, due <iso>`), clearing
-   `server_started_at` and `stop_due_at`. The controller then reports it `stopping` or `stopped`:
+6. **The second turn, watched, in a tree made anew.** Its current line, as step 3 reads the first's,
+   up to 20 minutes for the stop, the reset's bring-up and the turn, in the background:
+
+   ```bash
+   SID=$(cat tmp/fleet/session-2); SECONDS=0
+   until psql "$(cat tmp/fleet/db)" -Atc "select state_code, current_line from sessions where id = '$SID'" | tee -a tmp/fleet/lines-2 |
+     grep -Eq '^(idle|stopped|failed)\|' || [ $SECONDS -ge 1200 ]; do sleep 1; done
+   uniq tmp/fleet/lines-2
+   ```
+
+   It moves through `Preparing <slug-2>…`, then `Creating the session…`, then `running`, and ends
+   `idle|`; a Session that ends `failed` failed the check, its `server` records saying why, a reset
+   refused `409 admission-blocked` among them. The log shows the reset made, the database a single
+   environment of Pilot's own, and the file step 4 wrote is gone, the checkout cloned again:
+
+   ```bash
+   ENV=$(cat tmp/fleet/env-id)
+   grep "Reset environment $ENV" logs/backend.log
+   psql "$(cat tmp/fleet/db)" -Atc 'select count(*) from environments where server_created_at is not null'   # 1
+   curl -s -m 15 -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $PILOT_DEV_CONTROLLER_TOKEN" \
+     "https://kubecoder-dev.home/environments/$ENV/file?path=/work/KubeCoderTestRepo/pilot-fleet-check.txt"   # 404
+   ```
+
+7. **Pilot's timers stop the environment, then delete it.** The second turn's end arms the shutdown
+   (`Armed the shutdown of environment <id>, due <iso>`), and the delete timer's next tick frees the
+   environment again (`Environment <id> is free: …`). The first scheduler tick past the shutdown's
+   due stops it (`Stopped environment <id>, due <iso>`), clearing `server_started_at` and
+   `stop_due_at`; the first past the delete's due, 300 s after it became free, deletes it (`Deleted
+   environment <id>, due <iso>`), its row kept with `last_state` `gone`, which the fleet stream's
+   `gone` frame writes again after its `deleting`, and the controller then answers `404`:
 
    ```bash
    ENV=$(cat tmp/fleet/env-id); SECONDS=0
-   until grep -q "Stopped environment $ENV" logs/backend.log || [ $SECONDS -ge 300 ]; do sleep 2; done
-   grep -E "(Armed the shutdown of|Stopped) environment $ENV" logs/backend.log
-   psql "$(cat tmp/fleet/db)" -Atc "select server_started_at, stop_due_at, last_state from environments where id = '$ENV'"   # ||stopping or ||stopped
-   curl -s -m 15 -H "Authorization: Bearer $PILOT_DEV_CONTROLLER_TOKEN" "https://kubecoder-dev.home/environments/$ENV" |
-     python3 -c 'import json, sys; print(json.load(sys.stdin)["status"])'
+   until grep -q "Deleted environment $ENV" logs/backend.log || [ $SECONDS -ge 420 ]; do sleep 2; done
+   grep -E "(Armed the shutdown of|Stopped|Deleted) environment $ENV|Environment $ENV is free" logs/backend.log
+   SECONDS=0
+   until [ "$(psql "$(cat tmp/fleet/db)" -Atc "select last_state from environments where id = '$ENV'")" = gone ] &&
+     [ "$(curl -s -m 15 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $PILOT_DEV_CONTROLLER_TOKEN" "https://kubecoder-dev.home/environments/$ENV")" = 404 ] ||
+     [ $SECONDS -ge 120 ]; do sleep 2; done
+   psql "$(cat tmp/fleet/db)" -Atc "select last_state, server_started_at, stop_due_at, delete_due_at from environments where id = '$ENV'"   # gone|||
+   curl -s -m 15 -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $PILOT_DEV_CONTROLLER_TOKEN" "https://kubecoder-dev.home/environments/$ENV"   # 404
    ```
 
-   No `Stopped environment` line within the 5 minutes fails this step, a finding. The environment
-   is then stopped through the controller, as cleanup only, never as the step's pass:
+   The lines come in that order after the first turn's armed shutdown and free; a `Stopped
+   environment` line between those and the take is the shutdown timer's stop of a free one, which
+   the take allows. No `Stopped environment` line after the second turn, no `Deleted environment`
+   line within the 7 minutes, or a row other than `gone`, fails this step, a finding.
 
-   ```bash
-   curl -s -m 15 -o /dev/null -w '%{http_code}\n' -X POST -H "Authorization: Bearer $PILOT_DEV_CONTROLLER_TOKEN" \
-     "https://kubecoder-dev.home/environments/$(cat tmp/fleet/env-id)/stop"   # 200 or 202
-   ```
-
-6. **The backend put back**, whatever happened before, once the environment the check started is
-   stopped: `backend/.env`'s original bytes written back, the backend restarted on them (which ends
-   the SSE stream), and the token found in none of the logs and files the check wrote:
+8. **The backend put back, and what the check created deleted**, whatever happened before:
+   `backend/.env`'s original bytes written back and the backend restarted on them, which ends the
+   SSE stream and leaves it no controller; then every environment of Pilot's own in the check's
+   database (`server_created_at` set, with `tmp/fleet/db` there) that the controller still has and
+   reports managed is deleted through it, as cleanup only, never as a step's pass: after a whole run
+   it answers `404`. The operator's environments are in neither set, and nothing else is deleted.
+   Then the token found in none of the logs and files the check wrote:
 
    ```bash
    if [ -e tmp/fleet/no-env ]; then rm -f backend/.env; else cp tmp/fleet/env.orig backend/.env && cmp backend/.env tmp/fleet/env.orig && echo "backend/.env restored"; fi
    SECONDS=0; until r=$(curl -s -m 5 http://localhost:3501/health/readyz) && [ -n "$r" ] && ! printf '%s' "$r" | grep -q '"controller"' || [ $SECONDS -ge 90 ]; do sleep 1; done
    echo "$r"                                                                                # no controller check
+   psql "$(cat tmp/fleet/db)" -Atc 'select id from environments where server_created_at is not null' | while read -r ENV; do
+     code=$(curl -s -m 15 -o tmp/fleet/left.json -w '%{http_code}' -H "Authorization: Bearer $PILOT_DEV_CONTROLLER_TOKEN" "https://kubecoder-dev.home/environments/$ENV")
+     if [ "$code" = 200 ] && python3 -c 'import json, sys; sys.exit(not json.load(open("tmp/fleet/left.json"))["managedBy"])'; then
+       curl -s -m 15 -o /dev/null -w "$ENV deleted: %{http_code}\n" -X DELETE -H "Authorization: Bearer $PILOT_DEV_CONTROLLER_TOKEN" "https://kubecoder-dev.home/environments/$ENV"
+     else echo "$ENV: $code"; fi
+   done                                                                                     # "<id>: 404" after a whole run, "<id> deleted: 202" after one cut short
    grep -cF -- "$PILOT_DEV_CONTROLLER_TOKEN" logs/backend.log /tmp/pilot-dev.log tmp/fleet/*   # 0 each
    { [ -e tmp/fleet/no-env ] && [ ! -e backend/.env ]; } || cmp -s backend/.env tmp/fleet/env.orig && rm -rf tmp/fleet && echo "tmp/fleet/ cleared"
    ```
