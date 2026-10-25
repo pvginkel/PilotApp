@@ -7,10 +7,18 @@ import uuid
 import pytest
 from flask import Flask
 from flask.testing import FlaskClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
-from app.models import Document, Environment, Item, Project
+from app.models import (
+    Attachment,
+    Document,
+    Environment,
+    Item,
+    ItemAttachment,
+    Project,
+)
 from app.models.reference import SessionState
 from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerClient
@@ -18,6 +26,8 @@ from app.services.pilot_server import token_hash
 from tests.support.fake_controller import ServedFakeController, client_of
 
 DOCUMENTS = "/tools/pilot-work/documents"
+
+ATTACHMENTS = "/tools/pilot-work/attachments"
 
 TOKEN = "worker-token"
 
@@ -60,14 +70,14 @@ def _file(fake_controller: ServedFakeController, environment: Environment) -> No
 
 
 class TestPilotWorkRoutes:
-    def test_the_surface_is_one_route_outside_the_api(self, app: Flask) -> None:
+    def test_the_surface_is_two_routes_outside_the_api(self, app: Flask) -> None:
         routes = sorted(
             (rule.rule, sorted(rule.methods - {"HEAD", "OPTIONS"}))
             for rule in app.url_map.iter_rules()
             if rule.endpoint.startswith("pilot_work.")
         )
 
-        assert routes == [(DOCUMENTS, ["POST"])]
+        assert routes == [(ATTACHMENTS, ["POST"]), (DOCUMENTS, ["POST"])]
 
     def test_the_routes_are_outside_the_oidc_gate(
         self,
@@ -246,6 +256,185 @@ class TestRegisterDocument:
         fake_controller.unreadable(environment.id)
 
         response = client.post(DOCUMENTS, json={"path": PATH}, headers=_bearer())
+
+        assert response.status_code == 502
+        assert "503 environment-unreadable" in response.get_json()["error"]
+
+
+class TestAttachFile:
+    """`POST /tools/pilot-work/attachments`: `attach_file(path, to?)`."""
+
+    def test_a_folder_attached_is_201_with_its_attachments_ids(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        fake_controller.add_environment(environment.id)
+        fake_controller.put_file(environment.id, "/work/Example/out/a.md", b"# A\n")
+        fake_controller.put_file(environment.id, "/work/Example/out/b/c.md", b"C")
+
+        response = client.post(
+            ATTACHMENTS, json={"path": "/work/Example/out"}, headers=_bearer()
+        )
+
+        assert response.status_code == 201
+        body = response.get_json()
+        assert list(body) == ["ids"]
+        attachments = [
+            session.get_one(Attachment, uuid.UUID(id_)) for id_ in body["ids"]
+        ]
+        assert [
+            (attachment.filename, attachment.source_path, attachment.batch)
+            for attachment in attachments
+        ] == [
+            ("a.md", "/work/Example/out/a.md", 1),
+            ("b/c.md", "/work/Example/out/b/c.md", 1),
+        ]
+        assert {attachment.created_by_session_id for attachment in attachments} == {
+            run.id
+        }
+
+    def test_to_names_the_item_they_hang_on(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _session(session, container, project, environment)
+        _file(fake_controller, environment)
+        registered = client.post(DOCUMENTS, json={"path": PATH}, headers=_bearer())
+        to = registered.get_json()["id"]
+
+        response = client.post(
+            ATTACHMENTS, json={"path": PATH, "to": to}, headers=_bearer()
+        )
+
+        assert response.status_code == 201
+        [attachment_id] = response.get_json()["ids"]
+        hung = session.scalars(
+            select(ItemAttachment.attachment_id).where(
+                ItemAttachment.item_id == uuid.UUID(to)
+            )
+        ).all()
+        assert hung == [uuid.UUID(attachment_id)]
+
+    def test_an_item_not_of_the_sessions_project_is_404(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _session(session, container, project, environment)
+        _file(fake_controller, environment)
+        to = uuid.uuid4()
+
+        response = client.post(
+            ATTACHMENTS, json={"path": PATH, "to": str(to)}, headers=_bearer()
+        )
+
+        assert response.status_code == 404
+        assert response.get_json()["error"] == f"Item {to} was not found"
+
+    def test_no_bearer_is_401(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _session(session, container, project, environment)
+
+        response = client.post(ATTACHMENTS, json={"path": PATH})
+
+        assert response.status_code == 401
+        assert response.get_json()["error"] == (
+            "Cannot call pilot-work because the request carries no bearer"
+        )
+
+    def test_a_session_that_is_not_a_work_items_is_403(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _session(session, container, project, environment, kind="chat")
+
+        response = client.post(ATTACHMENTS, json={"path": PATH}, headers=_bearer())
+
+        assert response.status_code == 403
+
+    @pytest.mark.parametrize(
+        "body",
+        [{}, {"path": ""}, {"path": PATH, "to": "x"}, {"path": PATH, "as": "x"}],
+    )
+    def test_a_body_that_is_not_a_path_and_an_item_is_400(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        body: dict[str, str],
+    ) -> None:
+        _session(session, container, project, environment)
+
+        response = client.post(ATTACHMENTS, json=body, headers=_bearer())
+
+        assert response.status_code == 400
+
+    def test_a_file_that_cannot_be_copied_is_409_with_the_reason(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _session(session, container, project, environment)
+        fake_controller.add_environment(environment.id)
+
+        response = client.post(ATTACHMENTS, json={"path": PATH}, headers=_bearer())
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            f"Cannot attach {PATH} because the controller answered 404 not-found:"
+            f" no such file or directory: {PATH!r}"
+        )
+
+    def test_a_controller_that_cannot_read_the_environment_is_502(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _session(session, container, project, environment)
+        _file(fake_controller, environment)
+        fake_controller.unreadable(environment.id)
+
+        response = client.post(ATTACHMENTS, json={"path": PATH}, headers=_bearer())
 
         assert response.status_code == 502
         assert "503 environment-unreadable" in response.get_json()["error"]

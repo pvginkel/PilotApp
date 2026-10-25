@@ -15,6 +15,8 @@ from spectree import Response as SpectreeResponse
 
 from app.schemas.common import ApiErrorResponseSchema
 from app.schemas.pilot_work import (
+    AttachedFilesSchema,
+    AttachFileRequestSchema,
     RegisterDocumentRequestSchema,
     RegisteredDocumentSchema,
 )
@@ -72,3 +74,41 @@ def register_document(
     registration = pilot_work_service.register_document(g.worker, body.path)
     answer = RegisteredDocumentSchema(id=registration.item.id)
     return answer.model_dump(mode="json"), 201 if registration.minted else 200
+
+
+@pilot_work_bp.route("/attachments", methods=["POST"])
+@public
+@api.validate(
+    json=AttachFileRequestSchema,
+    resp=SpectreeResponse(
+        HTTP_201=AttachedFilesSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+        HTTP_502=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def attach_file(
+    pilot_work_service: PilotWorkService = Provide[ServiceContainer.pilot_work_service],
+) -> Any:
+    """`attach_file(path, to?)` (F85.2, F36.1): the file or the folder the
+    worker wrote at `path` in its environment, copied into the record now
+    with its source and hung on the item `to` names, else on the session's
+    own work item.
+
+    Returns:
+        201: The attachments, one per file
+        400: The body is not a path and an optional item id
+        401: No bearer, or one no session has
+        403: The bearer's session is not a work item's
+        404: `to` names no item of the session's project
+        409: A file cannot be copied, nothing attached: the reason
+        502: The controller did not answer, or refused for a reason of its own
+    """
+    body = AttachFileRequestSchema.model_validate(request.get_json())
+    attachments = pilot_work_service.attach_file(g.worker, body.path, body.to)
+    answer = AttachedFilesSchema(ids=[attachment.id for attachment in attachments])
+    return answer.model_dump(mode="json"), 201

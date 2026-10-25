@@ -123,6 +123,67 @@
         "title": "ApiErrorDetailsSchema",
         "type": "object"
       },
+      "AttachFileRequestSchema.ce33d8b": {
+        "additionalProperties": false,
+        "description": "Material a worker wrote, to copy into the record.",
+        "properties": {
+          "path": {
+            "description": "The file's or the folder's absolute path in the session's environment, under `/work`: a folder's every file under it",
+            "examples": [
+              "/work/Example/docs/survey"
+            ],
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          },
+          "to": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The id of the item the material backs, of the session's project; without it, the session's own work item",
+            "examples": [
+              "0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15"
+            ],
+            "title": "To"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "AttachFileRequestSchema",
+        "type": "object"
+      },
+      "AttachedFilesSchema.ce33d8b": {
+        "description": "The attachments the material was copied into.",
+        "properties": {
+          "ids": {
+            "description": "Their ids, a folder's in its files' path order",
+            "examples": [
+              [
+                "5c2e9a1f-7b3d-4f6e-8a20-1d9c4b7e3f58"
+              ]
+            ],
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "title": "AttachedFilesSchema",
+        "type": "object"
+      },
       "ConditionsSchema.6c014b4": {
         "description": "The conditions that hold now, which the gold bar shows.",
         "properties": {
@@ -10548,6 +10609,97 @@
         "parameters": [],
         "responses": {},
         "summary": "Return metrics in Prometheus text format.",
+        "tags": []
+      }
+    },
+    "/tools/pilot-work/attachments": {
+      "post": {
+        "description": "Returns:     201: The attachments, one per file     400: The body is not a path and an optional item id     401: No bearer, or one no session has     403: The bearer's session is not a work item's     404: `to` names no item of the session's project     409: A file cannot be copied, nothing attached: the reason     502: The controller did not answer, or refused for a reason of its own",
+        "operationId": "post__tools_pilot-work_attachments",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachFileRequestSchema.ce33d8b"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachedFilesSchema.ce33d8b"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          }
+        },
+        "summary": "`attach_file(path, to?)` (F85.2, F36.1): the file or the folder the worker wrote at `path` in its environment, copied into the record now with its source and hung on the item `to` names, else on the session's own work item.",
         "tags": []
       }
     },

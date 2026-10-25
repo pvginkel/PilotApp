@@ -1,6 +1,6 @@
 """`pilot-work`, a worker session's tools (TD §4.5, F85): the bearer its
-Session was created with resolved to the Session, and `register_document`
-(ruling D1)."""
+Session was created with resolved to the Session, `register_document`
+(ruling D1) and `attach_file`."""
 
 import uuid
 from collections.abc import Callable
@@ -9,14 +9,22 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.engine.attachments import (
+    MAX_CALL_FILES,
+    MAX_CALL_SIZE,
+    AttachService,
+    Copy,
+    copied,
+)
 from app.engine.documents import DocumentService, Registration, listed
 from app.engine.ingest import IngestService
 from app.exceptions import (
     AuthenticationException,
     AuthorizationException,
     InvalidOperationException,
+    RecordNotFoundException,
 )
-from app.models import Project, SessionKind, Work
+from app.models import Attachment, Item, Project, SessionKind, Work
 from app.models import Session as AgentSession
 from app.services.controller_client import (
     ControllerClient,
@@ -38,6 +46,10 @@ _UNREADABLE_FILE = (
 )
 """The controller's refusals of a read that name what the worker can fix."""
 
+_UNCOPYABLE_FILE = (*_UNREADABLE_FILE, ControllerProblemType.CONFLICT)
+"""The controller's refusals of a copy's read or listing that name what the
+worker can fix: `CONFLICT` a link loop, in a folder or at the path."""
+
 
 @dataclass(frozen=True)
 class Worker:
@@ -57,11 +69,13 @@ class PilotWorkService:
         controller_client: Callable[[], ControllerClient],
         document_service: DocumentService,
         ingest_service: IngestService,
+        attach_service: AttachService,
     ) -> None:
         self.db = db
         self.controller_client = controller_client
         self.document_service = document_service
         self.ingest_service = ingest_service
+        self.attach_service = attach_service
 
     def admit(self, authorization: str | None) -> Worker:
         """The work item's Session whose bearer `authorization` carries.
@@ -134,3 +148,94 @@ class PilotWorkService:
         return self.document_service.register(
             project, self.db.get_one(AgentSession, worker.session_id), path
         )
+
+    def attach_file(
+        self, worker: Worker, path: str, to: uuid.UUID | None
+    ) -> list[Attachment]:
+        """The file or the folder at `path` in the worker's environment,
+        copied into the record now and hung on the item `to` names, else on
+        the worker's own work item (F85.2, F36.1): a file one attachment, a
+        folder one per file under it, named by its path relative to the
+        folder, in path order; all of one batch, each with its source.
+
+        Raises:
+            RecordNotFoundException: `to` names no item of the worker's
+                project.
+            InvalidOperationException: a file cannot be copied, nothing
+                attached: the controller refused its read or the folder's
+                listing — a path outside `/work`, nothing there, neither a
+                file nor a folder, more than 16 MiB, a link loop — or the
+                call is over its cap of files or bytes.
+            ExternalServiceException: the controller did not answer, or
+                refused for a reason of its own.
+        """
+        item = self.db.get(Item, worker.work_item_id if to is None else to)
+        if item is None or item.project_id != worker.project_id:
+            raise RecordNotFoundException("Item", str(to))
+        copies = self._copies(worker.environment_id, path, f"attach {path}")
+        return self.attach_service.attach(
+            item, self.db.get_one(AgentSession, worker.session_id), copies
+        )
+
+    def _copies(self, environment_id: str, path: str, operation: str) -> list[Copy]:
+        """The file at `path`, else every file under the folder at `path`,
+        read through the controller."""
+        client = self.controller_client()
+        try:
+            content = client.read_file(environment_id, path)
+        except ControllerProblem as problem:
+            if problem.problem_type is not ControllerProblemType.NOT_A_FILE:
+                _refuse(operation, problem)
+                raise
+            return self._folder(client, environment_id, path, operation, problem)
+        return [copied(path.rstrip("/").rsplit("/", 1)[-1], path, content.data)]
+
+    def _folder(
+        self,
+        client: ControllerClient,
+        environment_id: str,
+        path: str,
+        operation: str,
+        not_a_file: ControllerProblem,
+    ) -> list[Copy]:
+        try:
+            files = client.list_folder_files(environment_id, path)
+        except ControllerProblem as problem:
+            if problem.problem_type is ControllerProblemType.NOT_A_DIRECTORY:
+                # Neither a file nor a folder: a FIFO, a socket, a device.
+                raise InvalidOperationException(
+                    operation, not_a_file.cause
+                ) from not_a_file
+            _refuse(operation, problem)
+            raise
+        if len(files) > MAX_CALL_FILES:
+            raise InvalidOperationException(
+                operation,
+                f"the folder holds {len(files)} files, over the {MAX_CALL_FILES}"
+                "-file cap of one call",
+            )
+        folder = f"{path.rstrip('/')}/"
+        copies: list[Copy] = []
+        size = 0
+        for file in files:
+            try:
+                content = client.read_file(environment_id, file)
+            except ControllerProblem as problem:
+                _refuse(operation, problem)
+                raise
+            size += len(content.data)
+            if size > MAX_CALL_SIZE:
+                raise InvalidOperationException(
+                    operation,
+                    f"the folder's files are over the {MAX_CALL_SIZE}-byte cap of"
+                    " one call",
+                )
+            copies.append(copied(file.removeprefix(folder), file, content.data))
+        return copies
+
+
+def _refuse(operation: str, problem: ControllerProblem) -> None:
+    """Refuse the call when the controller's `problem` names what the worker
+    can fix."""
+    if problem.problem_type in _UNCOPYABLE_FILE:
+        raise InvalidOperationException(operation, problem.cause) from problem

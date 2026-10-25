@@ -16,7 +16,9 @@ from app.models import Attachment, Document, Item, Project, SaveError
 from app.models.reference import ErrorKind
 
 _DRAFT_FOLDER = re.compile(r"draft-(?P<number>[1-9][0-9]*)")
-_ATTACHMENT = re.compile(r"attachments/(?P<batch>[1-9][0-9]*)/(?P<filename>[^/]+)")
+_ATTACHMENT = re.compile(r"attachments/(?P<batch>[1-9][0-9]*)/(?P<filename>.+)")
+"""An attachment's path; a folder's filename keeps its slashes (DB decision
+39)."""
 _SYNCING = Project.archived.is_(False)
 """The projects whose folders the store syncs (design 1 §5.5)."""
 _HAS_TEXT = Document.published_hash.is_not(None)

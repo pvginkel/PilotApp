@@ -1,6 +1,9 @@
-"""The store of the attachments' bytes (TD §8): put, get, delete."""
+"""The store of the attachments' bytes (TD §8): put, get, delete; a file
+copied in, and the copies hung on an item as one batch (F36, DB decision
+39)."""
 
 import hashlib
+import json
 from datetime import UTC, datetime
 
 import pytest
@@ -8,7 +11,13 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DbSession
 
-from app.models import Attachment, Item, ItemAttachment, Project
+from app import models
+from app.database import scoped_session
+from app.engine.attachments import MAX_SIZE, Copy, copied
+from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved
+from app.engine.tree import TreeFile
+from app.exceptions import ValidationException
+from app.models import Attachment, Environment, Item, ItemAttachment, Project
 from app.models.reference import AttachmentSource
 from app.services.container import ServiceContainer
 
@@ -101,3 +110,227 @@ class TestAttachmentStore:
         assert raised.value.orig.diag.constraint_name == (  # type: ignore[attr-defined]
             "item_attachments_attachment_id_fkey"
         )
+
+
+def _hung(session: DbSession, item: Item) -> list[tuple[int, int, str]]:
+    """The item's attachments in order: position, batch and filename."""
+    return [
+        (position, batch, filename)
+        for position, batch, filename in session.execute(
+            select(ItemAttachment.position, Attachment.batch, Attachment.filename)
+            .join(Attachment, Attachment.id == ItemAttachment.attachment_id)
+            .where(ItemAttachment.item_id == item.id)
+            .order_by(ItemAttachment.position)
+        )
+    ]
+
+
+def _file(filename: str, content: bytes = b"A") -> Copy:
+    return Copy(
+        "A file", filename, "text/markdown", content, f"/work/Example/{filename}"
+    )
+
+
+class TestCopied:
+    @pytest.mark.parametrize(
+        ("filename", "content", "content_type"),
+        [
+            ("notes.md", b"# Notes\n", "text/markdown"),
+            ("survey/data.json", b"{}", "application/json"),
+            ("sketch.png", b"\x89PNG\r\n", "image/png"),
+            ("session.jsonl", b'{"type": "user"}\n', "text/plain; charset=utf-8"),
+            ("README", b"Read me.\n", "text/plain; charset=utf-8"),
+            ("blob", b"\xff\xfe\x00", "application/octet-stream"),
+            ("logs.tar.gz", b"\x1f\x8b\x08", "application/octet-stream"),
+        ],
+    )
+    def test_it_is_typed_by_its_extension_else_as_text_or_bytes(
+        self, filename: str, content: bytes, content_type: str
+    ) -> None:
+        assert copied(filename, f"/work/Example/{filename}", content).content_type == (
+            content_type
+        )
+
+    @pytest.mark.parametrize(
+        ("filename", "content", "title"),
+        [
+            ("notes.md", b"---\ntitle: Camp notes\n---\n\n# Notes\n", "Camp notes"),
+            ("notes.md", b"Intro.\n\n# Camp notes\n\n## Tents\n", "Camp notes"),
+            ("survey/notes.md", b"No heading.\n", "notes.md"),
+            ("notes.md", b"", "notes.md"),
+            ("notes.md", b"# Caf\xe9\n", "notes.md"),
+            ("survey/data.json", b'{"title": "x"}', "data.json"),
+            ("README", b"# Read me\n", "README"),
+        ],
+    )
+    def test_a_markdown_files_title_is_its_own_else_the_files_name(
+        self, filename: str, content: bytes, title: str
+    ) -> None:
+        assert copied(filename, f"/work/Example/{filename}", content).title == title
+
+    def test_it_keeps_its_name_its_source_and_its_bytes(self) -> None:
+        assert copied(
+            "survey/notes.md", "/work/Example/docs/survey/notes.md", b"# Notes\n"
+        ) == Copy(
+            "Notes",
+            "survey/notes.md",
+            "text/markdown",
+            b"# Notes\n",
+            "/work/Example/docs/survey/notes.md",
+        )
+
+
+class TestAttachService:
+    def test_each_copy_is_kept_with_its_source_and_its_session(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        item: Item,
+        project_session: models.Session,
+        environment: Environment,
+    ) -> None:
+        [attachment] = container.attach_service().attach(
+            item,
+            project_session,
+            [Copy("Notes", "notes.md", "text/markdown", _CONTENT, "/work/A/notes.md")],
+        )
+
+        now = session.scalar(select(func.now()))
+        assert (
+            attachment.title,
+            attachment.filename,
+            attachment.content_type,
+            attachment.size,
+            attachment.sha256,
+            attachment.source_code,
+            attachment.source_environment_id,
+            attachment.source_path,
+            attachment.copied_at,
+            attachment.created_by_session_id,
+        ) == (
+            "Notes",
+            "notes.md",
+            "text/markdown",
+            len(_CONTENT),
+            hashlib.sha256(_CONTENT).hexdigest(),
+            AttachmentSource.FILE,
+            environment.id,
+            "/work/A/notes.md",
+            now,
+            project_session.id,
+        )
+        assert container.attachment_store().get(attachment) == _CONTENT
+        hung = session.get_one(ItemAttachment, (item.id, attachment.id))
+        assert hung.attached_at == now
+
+    def test_one_call_is_one_batch_the_projects_next_after_the_items_own(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        project: Project,
+        item: Item,
+        project_session: models.Session,
+    ) -> None:
+        other = Item(
+            project_id=project.id,
+            seq=2,
+            kind_code="notice",
+            title="Tents",
+            created_by_session_id=project_session.id,
+        )
+        session.add(other)
+        session.flush()
+        attach = container.attach_service().attach
+
+        attach(item, project_session, [_file("a.md"), _file("b/c.md")])
+        attach(item, project_session, [_file("a.md")])
+        attach(other, project_session, [_file("d.md")])
+
+        assert _hung(session, item) == [
+            (1, 1, "a.md"),
+            (2, 1, "b/c.md"),
+            (3, 2, "a.md"),
+        ]
+        assert _hung(session, other) == [(1, 3, "d.md")]
+
+    def test_the_tree_holds_them_and_the_timeline_lists_them(
+        self,
+        container: ServiceContainer,
+        project: Project,
+        item: Item,
+        project_session: models.Session,
+    ) -> None:
+        attachments = container.attach_service().attach(
+            item, project_session, [_file("a.md", b"A"), _file("survey/b.md", b"B")]
+        )
+
+        folder = f"draft-{project.number}"
+        assert [
+            container.tree_service().resolve(f"{folder}/attachments/1/{name}")
+            for name in ("a.md", "survey/b.md")
+        ] == [
+            TreeFile(b"A", hashlib.sha256(b"A").hexdigest()),
+            TreeFile(b"B", hashlib.sha256(b"B").hexdigest()),
+        ]
+        timeline = json.loads(container.view_service().timeline(project).text)
+        [entry] = [entry for entry in timeline["items"] if entry["attachments"]]
+        assert entry["attachments"] == [
+            {"id": str(attachment.id), "path": f"attachments/1/{attachment.filename}"}
+            for attachment in attachments
+        ]
+
+    def test_their_paths_and_the_timeline_move_after_the_commit(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        item: Item,
+        project_session: models.Session,
+    ) -> None:
+        with scoped_session(container):
+            attachments = container.attach_service().attach(
+                item, project_session, [_file("a.md", b"A"), _file("b.md", b"B")]
+            )
+            assert engine_events == []
+
+        folder = f"draft-{project.number}"
+        assert engine_events == [
+            TreeHashMoved(f"{folder}/attachments/1/a.md", attachments[0].sha256),
+            TreeHashMoved(f"{folder}/attachments/1/b.md", attachments[1].sha256),
+            TreeHashMoved(
+                f"{folder}/timeline.json",
+                container.view_service().timeline(project).hash,
+            ),
+            ProjectChanged(project.id),
+        ]
+
+    def test_a_copy_over_16_mib_is_refused_and_none_kept(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        item: Item,
+        project_session: models.Session,
+    ) -> None:
+        over = MAX_SIZE + 1
+
+        with pytest.raises(ValidationException) as raised:
+            container.attach_service().attach(
+                item, project_session, [_file("a.md"), _file("big.bin", bytes(over))]
+            )
+
+        assert raised.value.message == (
+            f"big.bin is {over} bytes, over the 16777216-byte cap"
+        )
+        assert session.scalars(select(Attachment)).all() == []
+
+    def test_a_copy_of_exactly_16_mib_is_kept(
+        self,
+        container: ServiceContainer,
+        item: Item,
+        project_session: models.Session,
+    ) -> None:
+        [attachment] = container.attach_service().attach(
+            item, project_session, [_file("big.bin", bytes(MAX_SIZE))]
+        )
+
+        assert attachment.size == MAX_SIZE

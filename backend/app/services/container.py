@@ -8,7 +8,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.app_config import AppSettings
 from app.config import Settings
-from app.engine.attachments import AttachmentStore
+from app.engine.attachments import AttachmentStore, AttachService
 from app.engine.bus import EngineBus
 from app.engine.documents import DocumentService
 from app.engine.ingest import IngestService
@@ -306,6 +306,13 @@ class ServiceContainer(containers.DeclarativeContainer):
         plan_service=plan_service,
         attachment_store=attachment_store,
     )
+    attach_service = providers.Factory(
+        AttachService,
+        db=db_session,
+        attachment_store=attachment_store,
+        engine_bus=engine_bus,
+        view_service=view_service,
+    )
     document_service = providers.Factory(
         DocumentService,
         db=db_session,
@@ -360,6 +367,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         controller_client=controller_client.provider,
         document_service=document_service,
         ingest_service=ingest_service,
+        attach_service=attach_service,
     )
 
     # The signed-in person on the record (F137), and what links in text (F93)
@@ -426,9 +434,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         people_service=people_service,
         ingest_service=ingest_service,
         tree_service=tree_service,
-        view_service=view_service,
-        attachment_store=attachment_store,
-        engine_bus=engine_bus,
+        attach_service=attach_service,
     )
 
 

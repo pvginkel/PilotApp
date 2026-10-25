@@ -338,6 +338,17 @@ class TestTreeServicePaths:
             f"draft-{project.number}/attachments/3/palette.md"
         ) == TreeFile(content, hashlib.sha256(content).hexdigest())
 
+    def test_a_folders_attachment_path_keeps_its_slashes(
+        self, session: DbSession, container: ServiceContainer, project: Project
+    ) -> None:
+        content = b"# Palette\n"
+        _keep(container, project, 3, "survey/colours/palette.md", content)
+        session.flush()
+
+        assert container.tree_service().resolve(
+            f"draft-{project.number}/attachments/3/survey/colours/palette.md"
+        ) == TreeFile(content, hashlib.sha256(content).hexdigest())
+
     @pytest.mark.parametrize(
         "path",
         [

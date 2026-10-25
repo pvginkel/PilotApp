@@ -4,11 +4,11 @@ and the people, environments, projects, items, agent saves and Pilot's marks
 a spec or the dev stage's deployed check makes through `/api/testing/`
 (TEST-6, D027).
 
-Documents, the record's writes and the plan go through the engine's own
-operations, so the seed is a record the engine could have produced. The rows
-the engine does not write (people, projects with their members and
-transitions, an environment and the session that added the items, an
-attachment) are written through the models. Every name and text in it is
+Documents, attachments, the record's writes and the plan go through the
+engine's own operations, so the seed is a record the engine could have
+produced. The rows the engine does not write (people, projects with their
+members and transitions, an environment and the session that added the items)
+are written through the models. Every name and text in it is
 invented: this repository is public.
 """
 
@@ -16,22 +16,20 @@ import hashlib
 import json
 import uuid
 from collections.abc import Sequence
-from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.engine.attachments import MAX_SIZE, AttachmentStore
-from app.engine.bus import EngineBus, TreeHashMoved
+from app.engine.attachments import AttachService, Copy
 from app.engine.documents import DocumentService
 from app.engine.ingest import Ingested, IngestService
-from app.engine.paths import attachment_path, tree_path
+from app.engine.paths import tree_path
 from app.engine.plan import PlanService
 from app.engine.record import RecordService
 from app.engine.tree import TreeService
-from app.engine.views import ViewService, utc_time
+from app.engine.views import utc_time
 from app.exceptions import (
     InvalidOperationException,
     RecordNotFoundException,
@@ -44,7 +42,6 @@ from app.models import (
     Document,
     Environment,
     Item,
-    ItemAttachment,
     PlanNote,
     PlanTask,
     Project,
@@ -55,7 +52,6 @@ from app.models import (
 from app.models import Session as AgentSession
 from app.models.reference import (
     AnswerChannel,
-    AttachmentSource,
     DocumentRole,
     ProjectState,
     SessionState,
@@ -348,18 +344,6 @@ NOTICE_TEXT = "# {title}\n"
 """An open item a spec asks for: a notice, open until read."""
 
 
-@dataclass(frozen=True)
-class _Copy:
-    """A file a session copied from its environment, as its attachment keeps
-    it."""
-
-    title: str
-    filename: str
-    content_type: str
-    content: bytes
-    source_path: str
-
-
 class TestDataService:
     def __init__(
         self,
@@ -370,9 +354,7 @@ class TestDataService:
         people_service: PeopleService,
         ingest_service: IngestService,
         tree_service: TreeService,
-        view_service: ViewService,
-        attachment_store: AttachmentStore,
-        engine_bus: EngineBus,
+        attach_service: AttachService,
     ) -> None:
         self.db = db
         self.document_service = document_service
@@ -381,9 +363,7 @@ class TestDataService:
         self.people_service = people_service
         self.ingest_service = ingest_service
         self.tree_service = tree_service
-        self.view_service = view_service
-        self.attachment_store = attachment_store
-        self.engine_bus = engine_bus
+        self.attach_service = attach_service
 
     def load_all(self) -> dict[str, int]:
         """Seed the record into an empty database, in the caller's
@@ -450,11 +430,11 @@ class TestDataService:
         self.record_service.done_action(self._document(photo_storage), "A1", ada)
         self.record_service.done(photo_storage, ada)
 
-        self._hang(
+        self.attach_service.attach(
             decision,
             session,
             [
-                _Copy(
+                Copy(
                     "Layout sketches",
                     "layout-sketches.md",
                     "text/markdown",
@@ -462,7 +442,6 @@ class TestDataService:
                     "/work/RecipeBox/notes/layout-sketches.md",
                 )
             ],
-            now,
         )
 
         self._save_plan(
@@ -800,24 +779,16 @@ class TestDataService:
             RecordNotFoundException: no item has the id.
             InvalidOperationException: the project has no session.
         """
-        for file in files:
-            if len(file.content) > MAX_SIZE:
-                raise ValidationException(
-                    f"{file.filename} is {len(file.content)} bytes, over the "
-                    f"{MAX_SIZE}-byte cap"
-                )
         item = self.db.get(Item, item_id)
         if item is None:
             raise RecordNotFoundException("Item", str(item_id))
         project = self.db.get_one(Project, item.project_id)
         session = self._session_of(project, f"attach files to item {item.id}")
-        now = self.db.scalar(select(func.now()))
-        assert now is not None
-        return self._hang(
+        return self.attach_service.attach(
             item,
             session,
             [
-                _Copy(
+                Copy(
                     file.title,
                     file.filename,
                     file.content_type,
@@ -826,7 +797,6 @@ class TestDataService:
                 )
                 for file in files
             ],
-            now,
         )
 
     def _ingest(
@@ -931,69 +901,6 @@ class TestDataService:
 
     def _document(self, item: Item) -> Document:
         return self.db.get_one(Document, item.id)
-
-    def _hang(
-        self,
-        item: Item,
-        session: AgentSession,
-        copies: Sequence[_Copy],
-        now: datetime,
-    ) -> list[Attachment]:
-        """`copies` hung on `item` by `session`, kept through the store as one
-        batch, the project's next, after the item's attachments."""
-        project = self.db.scalars(
-            # Two attach calls of one project never take one batch.
-            select(Project).where(Project.id == item.project_id).with_for_update()
-        ).one()
-        batch = 1 + (
-            self.db.scalar(
-                select(func.max(Attachment.batch)).where(
-                    Attachment.project_id == project.id
-                )
-            )
-            or 0
-        )
-        position = (
-            self.db.scalar(
-                select(func.max(ItemAttachment.position)).where(
-                    ItemAttachment.item_id == item.id
-                )
-            )
-            or 0
-        )
-        attachments: list[Attachment] = []
-        for copy in copies:
-            attachment = Attachment(
-                project_id=project.id,
-                batch=batch,
-                title=copy.title,
-                filename=copy.filename,
-                content_type=copy.content_type,
-                source_code=AttachmentSource.FILE,
-                source_environment_id=session.environment_id,
-                source_path=copy.source_path,
-                copied_at=now,
-                created_by_session_id=session.id,
-            )
-            self.attachment_store.put(attachment, copy.content)
-            position += 1
-            self.db.add(
-                ItemAttachment(
-                    item_id=item.id,
-                    attachment_id=attachment.id,
-                    position=position,
-                    attached_at=now,
-                )
-            )
-            self.engine_bus.emit(
-                TreeHashMoved(
-                    tree_path(project, attachment_path(attachment)), attachment.sha256
-                )
-            )
-            attachments.append(attachment)
-        self.db.flush()
-        self.view_service.timeline_moved(project)
-        return attachments
 
     def _save_plan(
         self,

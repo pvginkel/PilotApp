@@ -1,18 +1,29 @@
-"""`pilot-work`: a bearer resolved to its work item's Session, and
-`register_document` (TD §4.5, F84, F85.1, ruling D1), against the fake
-controller."""
+"""`pilot-work`: a bearer resolved to its work item's Session,
+`register_document` (TD §4.5, F84, F85.1, ruling D1) and `attach_file`
+(F85.2, F36.1), against the fake controller."""
+
+import uuid
 
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
+from app.engine.attachments import MAX_CALL_FILES, MAX_CALL_SIZE
 from app.exceptions import (
     AuthenticationException,
     AuthorizationException,
     InvalidOperationException,
+    RecordNotFoundException,
 )
-from app.models import Document, Environment, Item, Project
+from app.models import (
+    Attachment,
+    Document,
+    Environment,
+    Item,
+    ItemAttachment,
+    Project,
+)
 from app.models.reference import SessionState
 from app.services.container import ServiceContainer
 from app.services.controller_client import (
@@ -354,3 +365,286 @@ class TestPilotWorkServiceRegisterDocument:
             container.pilot_work_service().register_document(_worker(run), PATH)
 
         assert _items(session) == 1
+
+
+FOLDER = "/work/Example/docs/survey"
+
+
+def _attached(session: DbSession, item: Item) -> list[tuple[int, int, str, str]]:
+    """The item's attachments in order: position, batch, filename and source."""
+    return [
+        (position, batch, filename, f"{environment_id}:{source_path}")
+        for position, batch, filename, environment_id, source_path in session.execute(
+            select(
+                ItemAttachment.position,
+                Attachment.batch,
+                Attachment.filename,
+                Attachment.source_environment_id,
+                Attachment.source_path,
+            )
+            .join(Attachment, Attachment.id == ItemAttachment.attachment_id)
+            .where(ItemAttachment.item_id == item.id)
+            .order_by(ItemAttachment.position)
+        )
+    ]
+
+
+def _attachments(session: DbSession) -> int:
+    return session.scalar(select(func.count()).select_from(Attachment)) or 0
+
+
+class TestPilotWorkServiceAttachFile:
+    def test_a_file_is_copied_onto_the_work_item_with_its_source(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        fake_controller.add_environment(environment.id)
+        fake_controller.put_file(environment.id, PATH, TEXT.encode())
+
+        [attachment] = container.pilot_work_service().attach_file(
+            _worker(run), PATH, None
+        )
+
+        assert (
+            attachment.title,
+            attachment.filename,
+            attachment.content_type,
+            attachment.created_by_session_id,
+            container.attachment_store().get(attachment),
+        ) == ("refinement.md", "refinement.md", "text/markdown", run.id, TEXT.encode())
+        assert _attached(session, session.get_one(Item, run.id)) == [
+            (1, 1, "refinement.md", f"{environment.id}:{PATH}")
+        ]
+
+    def test_a_folder_is_every_file_under_it_in_one_batch_by_relative_name(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        fake_controller.add_environment(environment.id)
+        for name in ("summary.md", "data/answers.json", "data/raw/b.csv"):
+            fake_controller.put_file(environment.id, f"{FOLDER}/{name}", b"x")
+        fake_controller.put_file(environment.id, PATH, TEXT.encode())
+
+        attachments = container.pilot_work_service().attach_file(
+            _worker(run), f"{FOLDER}/", None
+        )
+
+        source = environment.id
+        assert _attached(session, session.get_one(Item, run.id)) == [
+            (1, 1, "data/answers.json", f"{source}:{FOLDER}/data/answers.json"),
+            (2, 1, "data/raw/b.csv", f"{source}:{FOLDER}/data/raw/b.csv"),
+            (3, 1, "summary.md", f"{source}:{FOLDER}/summary.md"),
+        ]
+        assert [attachment.filename for attachment in attachments] == [
+            "data/answers.json",
+            "data/raw/b.csv",
+            "summary.md",
+        ]
+
+    def test_to_hangs_them_on_an_item_of_the_project(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        fake_controller.add_environment(environment.id)
+        fake_controller.put_file(environment.id, PATH, TEXT.encode())
+        fake_controller.put_file(environment.id, f"{FOLDER}/a.md", b"# A\n")
+        pilot_work = container.pilot_work_service()
+        document = pilot_work.register_document(_worker(run), PATH).item
+
+        [attachment] = pilot_work.attach_file(_worker(run), FOLDER, document.id)
+
+        assert attachment.title == "A"
+        assert _attached(session, document) == [
+            (1, 1, "a.md", f"{environment.id}:{FOLDER}/a.md")
+        ]
+        assert _attached(session, session.get_one(Item, run.id)) == []
+
+    def test_an_item_of_another_project_or_none_is_not_found(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+        person: models.User,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        other = Project(created_by_user_id=person.id)
+        session.add(other)
+        session.flush()
+        elsewhere = _session(
+            session, container, other, environment, token="another-token"
+        )
+        fake_controller.add_environment(environment.id)
+        fake_controller.put_file(environment.id, PATH, TEXT.encode())
+        pilot_work = container.pilot_work_service()
+
+        for to in (elsewhere.id, uuid.uuid4()):
+            with pytest.raises(RecordNotFoundException) as refused:
+                pilot_work.attach_file(_worker(run), PATH, to)
+
+            assert refused.value.message == f"Item {to} was not found"
+        assert _attachments(session) == 0
+
+    @pytest.mark.parametrize(
+        ("path", "cause"),
+        [
+            (
+                "/work/Example/docs/missing.md",
+                "the controller answered 404 not-found: no such file or directory:"
+                " '/work/Example/docs/missing.md'",
+            ),
+            (
+                "/etc/passwd",
+                "the controller answered 403 path-outside-work: the path is outside"
+                " the environment's /work; '/etc/passwd' leaves /work; only absolute"
+                " paths under /work are reachable",
+            ),
+            (
+                f"{FOLDER}/big.bin",
+                "the controller answered 413 file-too-large:"
+                f" '{FOLDER}/big.bin' is too large; the file surface reads and"
+                f" writes files of at most {FILE_SIZE_CAP} bytes",
+            ),
+            (
+                FOLDER,
+                "the controller answered 413 file-too-large:"
+                f" '{FOLDER}/big.bin' is too large; the file surface reads and"
+                f" writes files of at most {FILE_SIZE_CAP} bytes",
+            ),
+        ],
+    )
+    def test_a_file_that_cannot_be_copied_attaches_nothing_with_its_reason(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+        path: str,
+        cause: str,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        fake_controller.add_environment(environment.id)
+        fake_controller.put_file(environment.id, f"{FOLDER}/a.md", b"# A\n")
+        fake_controller.put_file(
+            environment.id, f"{FOLDER}/big.bin", bytes(FILE_SIZE_CAP + 1)
+        )
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.pilot_work_service().attach_file(_worker(run), path, None)
+
+        assert refused.value.operation == f"attach {path}"
+        assert refused.value.cause == cause
+        assert _attachments(session) == 0
+
+    def test_a_folder_over_the_calls_cap_of_files_reads_none(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        fake_controller.add_environment(environment.id)
+        # The first file in path order a read would refuse.
+        fake_controller.put_file(
+            environment.id, f"{FOLDER}/0.md", bytes(FILE_SIZE_CAP + 1)
+        )
+        for number in range(1, MAX_CALL_FILES + 1):
+            fake_controller.put_file(environment.id, f"{FOLDER}/{number}.md", b"x")
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.pilot_work_service().attach_file(_worker(run), FOLDER, None)
+
+        assert refused.value.cause == (
+            f"the folder holds {MAX_CALL_FILES + 1} files, over the"
+            f" {MAX_CALL_FILES}-file cap of one call"
+        )
+        assert _attachments(session) == 0
+
+    def test_a_folder_over_the_calls_cap_of_bytes_attaches_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        fake_controller.add_environment(environment.id)
+        for number in range(MAX_CALL_SIZE // FILE_SIZE_CAP):
+            fake_controller.put_file(
+                environment.id, f"{FOLDER}/{number}.bin", bytes(FILE_SIZE_CAP)
+            )
+        fake_controller.put_file(environment.id, f"{FOLDER}/last.bin", b"x")
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.pilot_work_service().attach_file(_worker(run), FOLDER, None)
+
+        assert refused.value.cause == (
+            f"the folder's files are over the {MAX_CALL_SIZE}-byte cap of one call"
+        )
+        assert _attachments(session) == 0
+
+    def test_an_unreadable_environment_is_the_controllers_failure(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        fake_controller.add_environment(environment.id)
+        fake_controller.put_file(environment.id, PATH, TEXT.encode())
+        fake_controller.unreadable(environment.id)
+
+        with pytest.raises(ControllerProblem) as failed:
+            container.pilot_work_service().attach_file(_worker(run), PATH, None)
+
+        assert failed.value.problem_type is ControllerProblemType.ENVIRONMENT_UNREADABLE
+        assert _attachments(session) == 0
+
+    def test_an_unanswered_read_attaches_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        fake_controller.add_environment(environment.id)
+        fake_controller.put_file(environment.id, PATH, TEXT.encode())
+        fake_controller.outage()
+
+        with pytest.raises(ControllerUnreachable):
+            container.pilot_work_service().attach_file(_worker(run), PATH, None)
+
+        assert _attachments(session) == 0
