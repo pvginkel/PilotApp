@@ -2402,6 +2402,29 @@ class TestBadges:
 
         assert self._badges(container, person, project) == {project.id: Badge(6, False)}
 
+    def test_a_registered_document_waits_only_once_its_read_is_made(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        # None takes a close before its turn-end read (review 7).
+        project = _make(container)
+        run = _run(session, project, environment)
+        documents = container.document_service()
+        awaiting, read, failed = (
+            documents.register(project, run, f"/work/Camp/docs/{name}.md").item
+            for name in ("awaiting", "read", "failed")
+        )
+        assert self._badges(container, person, project) == {}
+
+        documents.publish_read(_document(session, read), "Read me.\n", run.id)
+        documents.fail_read(_document(session, failed))
+
+        assert self._badges(container, person, project) == {project.id: Badge(2, False)}
+        assert _document(session, awaiting).published_text is None
+
     def test_a_done_item_waits_on_no_one(
         self,
         container: ServiceContainer,

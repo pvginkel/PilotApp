@@ -22,7 +22,8 @@ A registered document is a review on the timeline from its registration, in one 
 - **Awaiting its read**: open, with no text, its line titled by its file's name (`awaiting_read`,
   [`timeline.md`](timeline.md)). It takes no close until its read is made, succeeded or failed:
   every close of the record refuses it, "its file has not been read yet: it is read at the end of
-  the turn that registered it", and the screens offer none (D045).
+  the turn that registered it", and the screens offer none (D045). It waits on nobody meanwhile:
+  the badge and the project's waiting on you leave it out until its read is made.
 - **Published**: its file as the run left it, published as written. Its text gives it its kind,
   title, summary and blocks, and its file in the tree (`inbox/<seq>-<slug>.md`,
   [`projection.md`](projection.md)); its version 1 is `registered`, of the Session that registered

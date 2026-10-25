@@ -22,8 +22,8 @@ holds what the slices' deployed checks made there.
   false before they have a handle. `progress` is `{done, total, in_progress}` over the plan's steps,
   removed steps not counted, `in_progress` the titles of the steps in progress in the plan's order.
   `badge` is `{count, urgent}`: `count` the project's open items waiting on the caller, which are
-  its prose items but the opening, a notice only while it is urgent, and a work item whose session
-  stopped or failed, never a wait and never an item for another person (before the caller
+  its prose items but the opening, a notice only while it is urgent and a registered document only
+  once its turn-end read is made, and a work item whose session stopped or failed, never a wait and never an item for another person (before the caller
   has a handle, every item for someone is another's); `urgent` whether one of them is urgent.
 - **`GET /api/projects/<id>`** answers the project's head: `{id, name, ticket, repo, state,
   archived, autopilot, status, member, members, progress, tasks, notes, running_work, open_items}`.

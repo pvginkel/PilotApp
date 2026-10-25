@@ -15,7 +15,7 @@ from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import Session, aliased
 
 from app.engine import dsl
-from app.engine.documents import OPENING, PROSE, awaits_read
+from app.engine.documents import OPENING, PROSE, awaiting_read, awaits_read
 from app.engine.paths import tree_path
 from app.engine.record import MARKED, NOTICE, SETTLED, RecordService
 from app.exceptions import RecordNotFoundException
@@ -127,8 +127,10 @@ def waiting_on_a_member() -> ColumnElement[bool]:
 
 def _waiting() -> ColumnElement[bool]:
     """F94.5's set, whoever an item is for: open; a prose item but the
-    opening, a notice only when it is urgent (F23.2, F10.3); a work item
-    stopped or failed to start; never a wait (F27.5)."""
+    opening, a notice only when it is urgent (F23.2, F10.3), and a registered
+    document only once its turn-end read is made, since none takes a close
+    before it (review 7); a work item stopped or failed to start; never a
+    wait (F27.5)."""
     form = (
         select(ItemKind.form)
         .where(ItemKind.code == Item.kind_code)
@@ -141,6 +143,12 @@ def _waiting() -> ColumnElement[bool]:
         .correlate(Item)
         .scalar_subquery()
     )
+    unread = (
+        select(Document.id)
+        .where(Document.id == Item.id, awaiting_read())
+        .correlate(Item)
+        .exists()
+    )
     return and_(
         Item.done_at.is_(None),
         or_(
@@ -148,6 +156,7 @@ def _waiting() -> ColumnElement[bool]:
                 form == PROSE,
                 Item.kind_code != OPENING,
                 or_(Item.kind_code != NOTICE, Item.urgent),
+                ~unread,
             ),
             and_(form == WORK, state.in_(_STOPPED)),
         ),
