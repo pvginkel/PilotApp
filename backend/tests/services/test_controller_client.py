@@ -1,5 +1,6 @@
 """The controller's client against the fake over real HTTP and SSE (design 2 §12, §14)."""
 
+import hashlib
 import json
 import threading
 import time
@@ -16,11 +17,15 @@ from app.core_exceptions import ExternalServiceException
 from app.services import controller_client as controller_client_module
 from app.services.container import ServiceContainer
 from app.services.controller_client import (
+    CONTENT_SHA256_HEADER,
+    FILE_SIZE_CAP,
+    LISTING_PAGE_CAP,
     ControllerClient,
     ControllerProblem,
     ControllerProblemType,
     ControllerUnreachable,
     EnvironmentStatus,
+    FileContent,
     GoneFrame,
     HeadlessCreateRequest,
     IncompleteFrame,
@@ -1228,6 +1233,300 @@ class TestControllerClient:
 
         assert list(stream) == []
 
+    # -- Files ----------------------------------------------------------------
+
+    @pytest.mark.parametrize("status", ["running", "stopped", "starting", "error"])
+    def test_read_file_answers_its_bytes_and_their_sha256_in_any_status(
+        self,
+        fake_controller: ServedFakeController,
+        controller_client: ControllerClient,
+        status: EnvironmentStatus,
+    ) -> None:
+        fake_controller.add_environment(ENV, status=status)
+        data = "# Example\n\nä line\n".encode()
+        fake_controller.put_file(ENV, "/work/Example/docs/example.md", data)
+
+        content = controller_client.read_file(ENV, "/work/Example/docs/example.md")
+
+        assert content == FileContent(data, hashlib.sha256(data).hexdigest())
+
+    def test_read_file_of_a_file_at_the_cap_is_read_whole(
+        self, running: ServedFakeController, controller_client: ControllerClient
+    ) -> None:
+        data = b"x" * FILE_SIZE_CAP
+        running.put_file(ENV, "/work/large.bin", data)
+
+        assert controller_client.read_file(ENV, "/work/large.bin").data == data
+
+    @pytest.mark.parametrize(
+        ("path", "problem_type"),
+        [
+            ("/work/missing.md", ControllerProblemType.NOT_FOUND),
+            ("/work/Example", ControllerProblemType.NOT_A_FILE),
+            ("/work", ControllerProblemType.NOT_A_FILE),
+            ("/work/large.bin", ControllerProblemType.FILE_TOO_LARGE),
+            ("/etc/passwd", ControllerProblemType.PATH_OUTSIDE_WORK),
+            ("/work/../etc/passwd", ControllerProblemType.PATH_OUTSIDE_WORK),
+            ("work/Example/a.md", ControllerProblemType.PATH_OUTSIDE_WORK),
+        ],
+    )
+    def test_read_file_refusals_are_problems_to_switch_on(
+        self,
+        running: ServedFakeController,
+        controller_client: ControllerClient,
+        controller_outage: ControllerOutage,
+        path: str,
+        problem_type: ControllerProblemType,
+    ) -> None:
+        running.put_file(ENV, "/work/Example/a.md", b"a")
+        running.put_file(ENV, "/work/large.bin", b"x" * (FILE_SIZE_CAP + 1))
+
+        with pytest.raises(ControllerProblem) as caught:
+            controller_client.read_file(ENV, path)
+
+        assert caught.value.problem_type is problem_type
+        assert caught.value.operation == f"read {path} in environment {ENV}"
+        assert not controller_outage.holds
+
+    def test_read_file_of_an_unknown_environment_is_not_found(
+        self, fake_controller: ServedFakeController, controller_client: ControllerClient
+    ) -> None:
+        with pytest.raises(ControllerProblem) as caught:
+            controller_client.read_file(ENV, "/work/a.md")
+
+        assert caught.value.problem_type is ControllerProblemType.NOT_FOUND
+
+    def test_a_refusal_carries_the_controllers_detail(
+        self, running: ServedFakeController, controller_client: ControllerClient
+    ) -> None:
+        running.put_file(ENV, "/work/large.bin", b"x" * (FILE_SIZE_CAP + 1))
+
+        with pytest.raises(ControllerProblem) as caught:
+            controller_client.read_file(ENV, "/work/large.bin")
+
+        detail = (
+            f"the file surface reads and writes files of at most {FILE_SIZE_CAP} bytes"
+        )
+        assert caught.value.title == "'/work/large.bin' is too large"
+        assert caught.value.detail == detail
+        assert caught.value.cause == (
+            "the controller answered 413 file-too-large: "
+            f"'/work/large.bin' is too large; {detail}"
+        )
+
+    @pytest.mark.parametrize("status", ["running", "stopped", "error"])
+    def test_write_file_creates_the_file_and_its_folders_in_any_settled_status(
+        self,
+        fake_controller: ServedFakeController,
+        controller_client: ControllerClient,
+        status: EnvironmentStatus,
+    ) -> None:
+        fake_controller.add_environment(ENV, status=status)
+        data = b"# Answered\n"
+
+        written = controller_client.write_file(ENV, "/work/Example/new/a.md", data)
+
+        assert written == hashlib.sha256(data).hexdigest()
+        assert fake_controller.environment(ENV).files == {
+            "/work/Example/new/a.md": data
+        }
+
+    def test_write_file_overwrites_in_place_with_no_expected_hash(
+        self, running: ServedFakeController, controller_client: ControllerClient
+    ) -> None:
+        running.put_file(ENV, "/work/Example/a.md", b"# Asked\n")
+
+        controller_client.write_file(ENV, "/work/Example/a.md", b"# Answered\n")
+
+        assert running.file_text(ENV, "/work/Example/a.md") == "# Answered\n"
+        # The fake refuses an expectedSha256, so the write sent none.
+        assert running.calls == [
+            f"PUT /environments/{ENV}/file?path=%2Fwork%2FExample%2Fa.md"
+        ]
+
+    def test_write_file_of_a_file_at_the_cap_is_written_whole(
+        self, running: ServedFakeController, controller_client: ControllerClient
+    ) -> None:
+        data = b"x" * FILE_SIZE_CAP
+
+        controller_client.write_file(ENV, "/work/large.bin", data)
+
+        assert running.environment(ENV).files["/work/large.bin"] == data
+
+    @pytest.mark.parametrize(
+        ("path", "size", "problem_type"),
+        [
+            ("/work/Example", 1, ControllerProblemType.NOT_A_FILE),
+            ("/work/Example/a.md/b.md", 1, ControllerProblemType.NOT_A_DIRECTORY),
+            ("/work/b.md", FILE_SIZE_CAP + 1, ControllerProblemType.FILE_TOO_LARGE),
+            ("/home/example/b.md", 1, ControllerProblemType.PATH_OUTSIDE_WORK),
+        ],
+    )
+    def test_write_file_refusals_are_problems_to_switch_on(
+        self,
+        running: ServedFakeController,
+        controller_client: ControllerClient,
+        path: str,
+        size: int,
+        problem_type: ControllerProblemType,
+    ) -> None:
+        running.put_file(ENV, "/work/Example/a.md", b"a")
+
+        with pytest.raises(ControllerProblem) as caught:
+            controller_client.write_file(ENV, path, b"x" * size)
+
+        assert caught.value.problem_type is problem_type
+        assert caught.value.operation == f"write {path} in environment {ENV}"
+        assert running.environment(ENV).files == {"/work/Example/a.md": b"a"}
+
+    @pytest.mark.parametrize("status", ["provisioning", "starting", "deleting"])
+    def test_write_file_during_the_controllers_own_work_on_the_tree_is_a_conflict(
+        self,
+        fake_controller: ServedFakeController,
+        controller_client: ControllerClient,
+        status: EnvironmentStatus,
+    ) -> None:
+        fake_controller.add_environment(ENV, status=status)
+        fake_controller.put_file(ENV, "/work/a.md", b"a")
+
+        with pytest.raises(ControllerProblem) as caught:
+            controller_client.write_file(ENV, "/work/a.md", b"b")
+
+        assert caught.value.problem_type is ControllerProblemType.CONFLICT
+        assert fake_controller.environment(ENV).files == {"/work/a.md": b"a"}
+        # Reads are unaffected.
+        assert controller_client.read_file(ENV, "/work/a.md").data == b"a"
+
+    def test_write_file_once_the_bring_up_has_settled_is_written(
+        self, fake_controller: ServedFakeController, controller_client: ControllerClient
+    ) -> None:
+        fake_controller.add_environment(ENV)
+        fake_controller.settle_starts(ENV, None)
+        controller_client.start_environment(ENV)
+        with pytest.raises(ControllerProblem):
+            controller_client.write_file(ENV, "/work/a.md", b"a")
+
+        fake_controller.set_status(ENV, "running")
+        controller_client.write_file(ENV, "/work/a.md", b"a")
+
+        assert fake_controller.file_text(ENV, "/work/a.md") == "a"
+
+    @pytest.mark.parametrize("folder", ["/work/Example/docs", "/work/Example/docs/"])
+    def test_list_folder_files_names_every_file_under_it_through_the_folder(
+        self,
+        fake_controller: ServedFakeController,
+        controller_client: ControllerClient,
+        folder: str,
+    ) -> None:
+        fake_controller.add_environment(ENV)
+        for path in (
+            "/work/Example/docs/b.md",
+            "/work/Example/docs/A.md",
+            "/work/Example/docs/img/logo.png",
+            "/work/Example/docs/img/deep/er/x.txt",
+            "/work/Example/other.md",
+        ):
+            fake_controller.put_file(ENV, path, b"x")
+
+        files = controller_client.list_folder_files(ENV, folder)
+
+        assert files == [
+            "/work/Example/docs/A.md",
+            "/work/Example/docs/b.md",
+            "/work/Example/docs/img/deep/er/x.txt",
+            "/work/Example/docs/img/logo.png",
+        ]
+
+    def test_list_folder_files_reads_every_page_of_a_folder(
+        self, running: ServedFakeController, controller_client: ControllerClient
+    ) -> None:
+        names = [f"{index:04}.md" for index in range(LISTING_PAGE_CAP + 1)]
+        for name in names:
+            running.put_file(ENV, f"/work/many/{name}", b"x")
+
+        files = controller_client.list_folder_files(ENV, "/work/many")
+
+        assert files == [f"/work/many/{name}" for name in names]
+        assert running.calls == [
+            f"GET /environments/{ENV}/files?path=%2Fwork%2Fmany&offset=0&limit=1000",
+            f"GET /environments/{ENV}/files?path=%2Fwork%2Fmany&offset=1000&limit=1000",
+        ]
+
+    def test_list_folder_files_of_an_empty_tree_is_empty(
+        self, running: ServedFakeController, controller_client: ControllerClient
+    ) -> None:
+        assert controller_client.list_folder_files(ENV, "/work") == []
+
+    @pytest.mark.parametrize(
+        ("path", "problem_type"),
+        [
+            ("/work/a.md", ControllerProblemType.NOT_A_DIRECTORY),
+            ("/work/missing", ControllerProblemType.NOT_FOUND),
+            ("/srv", ControllerProblemType.PATH_OUTSIDE_WORK),
+        ],
+    )
+    def test_list_folder_files_refusals_are_problems_to_switch_on(
+        self,
+        running: ServedFakeController,
+        controller_client: ControllerClient,
+        path: str,
+        problem_type: ControllerProblemType,
+    ) -> None:
+        running.put_file(ENV, "/work/a.md", b"a")
+
+        with pytest.raises(ControllerProblem) as caught:
+            controller_client.list_folder_files(ENV, path)
+
+        assert caught.value.problem_type is problem_type
+        assert caught.value.operation == f"list {path} in environment {ENV}"
+
+    @pytest.mark.parametrize(
+        "call",
+        [
+            lambda client: client.read_file(ENV, "/work/a.md"),
+            lambda client: client.write_file(ENV, "/work/a.md", b"a"),
+            lambda client: client.list_folder_files(ENV, "/work"),
+        ],
+        ids=["read", "write", "list"],
+    )
+    def test_a_file_route_of_an_unreadable_environment_turns_no_outage_on(
+        self,
+        running: ServedFakeController,
+        controller_client: ControllerClient,
+        controller_outage: ControllerOutage,
+        call: Callable[[ControllerClient], Any],
+    ) -> None:
+        running.unreadable(ENV)
+
+        with pytest.raises(ControllerProblem) as caught:
+            call(controller_client)
+
+        assert caught.value.problem_type is ControllerProblemType.ENVIRONMENT_UNREADABLE
+        assert not controller_outage.holds
+
+    @pytest.mark.parametrize(
+        "call",
+        [
+            lambda client: client.read_file(ENV, "/work/a.md"),
+            lambda client: client.write_file(ENV, "/work/a.md", b"a"),
+            lambda client: client.list_folder_files(ENV, "/work"),
+        ],
+        ids=["read", "write", "list"],
+    )
+    def test_a_file_route_of_a_controller_out_is_unreachable(
+        self,
+        running: ServedFakeController,
+        controller_client: ControllerClient,
+        controller_outage: ControllerOutage,
+        call: Callable[[ControllerClient], Any],
+    ) -> None:
+        running.outage()
+
+        with pytest.raises(ControllerUnreachable):
+            call(controller_client)
+
+        assert controller_outage.holds
+
     # -- What the controller answers that no fake does ------------------------
 
     def test_a_problem_no_caller_switches_on_is_a_failing_upstream(
@@ -1321,6 +1620,49 @@ class TestControllerClient:
                 client.send_message(ENV, "claude-1", "Check the badge.")
 
         assert caught.value.cause.startswith("the controller answered 200")
+
+    def test_a_problem_no_caller_switches_on_carries_its_detail(
+        self, health_service: HealthService
+    ) -> None:
+        body = json.dumps(
+            {"type": "internal", "title": "a fault", "detail": "the log holds it"}
+        )
+        with _scripted(
+            "500 Internal Server Error",
+            [("Content-Type", "application/problem+json")],
+            [body.encode()],
+        ) as url:
+            client = ControllerClient(url, "t", health_service, ControllerOutage())
+            with pytest.raises(ExternalServiceException) as caught:
+                client.read_file(ENV, "/work/a.md")
+
+        assert caught.value.cause == (
+            "the controller answered 500 internal: a fault; the log holds it"
+        )
+
+    @pytest.mark.parametrize(
+        ("status", "call"),
+        [
+            ("200 OK", lambda client: client.read_file(ENV, "/work/a.md")),
+            ("204 No Content", lambda client: client.write_file(ENV, "/a", b"a")),
+        ],
+        ids=["read", "write"],
+    )
+    def test_a_file_answer_without_its_sha256_is_a_failing_upstream(
+        self,
+        health_service: HealthService,
+        status: str,
+        call: Callable[[ControllerClient], Any],
+    ) -> None:
+        headers = [("Content-Type", "application/octet-stream")]
+        with _scripted(status, headers, [b""]) as url:
+            client = ControllerClient(url, "t", health_service, ControllerOutage())
+            with pytest.raises(ExternalServiceException) as caught:
+                call(client)
+
+        assert caught.value.cause == (
+            f"the answer came without its {CONTENT_SHA256_HEADER}"
+        )
 
     def test_an_answer_that_does_not_parse_is_a_failing_upstream(
         self, health_service: HealthService

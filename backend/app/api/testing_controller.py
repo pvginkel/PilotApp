@@ -28,7 +28,7 @@ def check_testing_mode() -> Any:
     return reject_if_not_testing()
 
 
-@testing_controller_bp.route("/<path:path>", methods=["GET", "POST", "DELETE"])
+@testing_controller_bp.route("/<path:path>", methods=["GET", "POST", "PUT", "DELETE"])
 @inject
 def serve_fake_controller(
     path: str,

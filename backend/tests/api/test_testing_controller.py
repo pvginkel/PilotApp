@@ -94,6 +94,27 @@ class TestTestingControllerApi:
         assert isinstance(frames[1], ResultFrame)
         assert client.check_readiness().passed
 
+    def test_the_client_writes_reads_and_lists_files_through_the_mount(
+        self, app: Flask, mounted: FakeController, backend_url: str
+    ) -> None:
+        mounted.add_environment("env-1")
+        client = ControllerClient(
+            f"{backend_url}{PREFIX}",
+            TOKEN,
+            HealthService(
+                app.container.lifecycle_coordinator(), app.container.config()
+            ),
+            ControllerOutage(),
+        )
+
+        client.write_file("env-1", "/work/Example/a.md", b"# Answered\n")
+        content = client.read_file("env-1", "/work/Example/a.md")
+        files = client.list_folder_files("env-1", "/work")
+
+        assert content.data == b"# Answered\n"
+        assert mounted.file_text("env-1", "/work/Example/a.md") == "# Answered\n"
+        assert files == ["/work/Example/a.md"]
+
     @pytest.mark.parametrize(
         "update",
         [{"flask_env": "development"}, {"stage": Stage("prd")}],

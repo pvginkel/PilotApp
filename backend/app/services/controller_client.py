@@ -34,6 +34,15 @@ STREAM_READ_TIMEOUT_SECONDS = 60
 WAIT_MS_CAP = 3_600_000
 """The longest `waitMs` the controller holds a call for; it clamps a longer one."""
 
+FILE_SIZE_CAP = 16 * 1024 * 1024
+"""The most bytes a file route reads or writes: `413 file-too-large` past it."""
+
+CONTENT_SHA256_HEADER = "KubeCoder-Content-Sha256"
+"""The header a file read or write answers with: the bytes' lowercase hex SHA-256."""
+
+LISTING_PAGE_CAP = 1000
+"""The most entries a page of a folder's listing holds: its `limit`'s bound."""
+
 _CONNECT_TIMEOUT_SECONDS = 10
 _CALL_TIMEOUT_SECONDS = 30
 _READINESS_TIMEOUT_SECONDS = 2
@@ -57,6 +66,11 @@ class ControllerProblemType(StrEnum):
     NAMESPACE_NOT_WHITELISTED = "namespace-not-whitelisted"
     VALIDATION_ERROR = "validation-error"
     WORKER_UNREACHABLE = "worker-unreachable"
+    ENVIRONMENT_UNREADABLE = "environment-unreadable"
+    PATH_OUTSIDE_WORK = "path-outside-work"
+    NOT_A_FILE = "not-a-file"
+    NOT_A_DIRECTORY = "not-a-directory"
+    FILE_TOO_LARGE = "file-too-large"
 
 
 _PROBLEM_STATUS = {
@@ -68,6 +82,11 @@ _PROBLEM_STATUS = {
     ControllerProblemType.NAMESPACE_NOT_WHITELISTED: 403,
     ControllerProblemType.VALIDATION_ERROR: 422,
     ControllerProblemType.WORKER_UNREACHABLE: 502,
+    ControllerProblemType.ENVIRONMENT_UNREADABLE: 503,
+    ControllerProblemType.PATH_OUTSIDE_WORK: 403,
+    ControllerProblemType.NOT_A_FILE: 409,
+    ControllerProblemType.NOT_A_DIRECTORY: 409,
+    ControllerProblemType.FILE_TOO_LARGE: 413,
 }
 
 
@@ -78,14 +97,19 @@ class ControllerProblem(ExternalServiceException):
     """
 
     def __init__(
-        self, operation: str, problem_type: ControllerProblemType, title: str
+        self,
+        operation: str,
+        problem_type: ControllerProblemType,
+        title: str,
+        detail: str | None = None,
     ) -> None:
         self.problem_type = problem_type
         self.title = title
+        self.detail = detail
         super().__init__(
             operation,
             f"the controller answered {_PROBLEM_STATUS[problem_type]} "
-            f"{problem_type}: {title}",
+            f"{problem_type}: {_reason(title, detail)}",
         )
 
 
@@ -191,6 +215,26 @@ class HeadlessCreateRequest(_ControllerModel):
 
 
 @dataclass(frozen=True)
+class FileContent:
+    """A file as a read of it answered."""
+
+    data: bytes
+    sha256: str
+    """The controller's lowercase hex SHA-256 of `data`."""
+
+
+class _FileEntry(_ControllerModel):
+    path: str
+    """Its absolute path under the listed folder's resolved path; a folder's ends in `/`."""
+    is_directory: bool
+
+
+class _FileListing(_ControllerModel):
+    files: list[_FileEntry]
+    limit_hit: bool
+
+
+@dataclass(frozen=True)
 class StartOutcome:
     environment: ControllerEnvironment
     started: bool
@@ -276,6 +320,7 @@ class _SessionsData(_ControllerModel):
 class _ProblemData(_ControllerModel):
     type: str | None = None
     title: str | None = None
+    detail: str | None = None
 
 
 def _parse[ModelT: BaseModel](model: type[ModelT], data: str, operation: str) -> ModelT:
@@ -630,6 +675,79 @@ class ControllerClient:
         )
         return _parse(_SessionLog, response.text, operation).lines
 
+    def read_file(self, env_id: str, path: str) -> FileContent:
+        """The file at `path`, an absolute path under the environment's
+        `/work`, read off its share: a stopped environment's too."""
+        operation = f"read {path} in environment {env_id}"
+        response = self._call(
+            "GET",
+            f"/environments/{_segment(env_id)}/file",
+            operation,
+            expect=(200,),
+            params={"path": path},
+        )
+        return FileContent(response.content, _content_sha256(response, operation))
+
+    def write_file(self, env_id: str, path: str, data: bytes) -> str:
+        """Overwrite the file at `path` with `data`, or create it and the
+        folders it needs, on the environment's share: a stopped environment's
+        too. The SHA-256 of what it wrote.
+
+        It sends no `expectedSha256`: a write is a whole overwrite. Its
+        `409 conflict` is the controller's own work on the tree — a bring-up
+        under way, a delete accepted, the pod changing the path during the
+        call — which the controller's contract says to retry once settled.
+        """
+        operation = f"write {path} in environment {env_id}"
+        response = self._call(
+            "PUT",
+            f"/environments/{_segment(env_id)}/file",
+            operation,
+            expect=(204,),
+            params={"path": path},
+            content=data,
+        )
+        return _content_sha256(response, operation)
+
+    def list_folder_files(self, env_id: str, path: str) -> list[str]:
+        """Every file under the folder at `path`, its subfolders' included, in
+        path order: each `path` joined with the file's path relative to it, so
+        a file a link leads to is named through the folder, as the read
+        follows it. A link loop under it is the controller's `409 conflict`."""
+        files: list[str] = []
+        folders = [path]
+        while folders:
+            folder = folders.pop()
+            prefix = folder.rstrip("/")
+            for entry in self._list_folder(env_id, folder):
+                child = f"{prefix}/{entry.path.rstrip('/').rsplit('/', 1)[-1]}"
+                if entry.is_directory:
+                    folders.append(f"{child}/")
+                else:
+                    files.append(child)
+        return sorted(files)
+
+    def _list_folder(self, env_id: str, path: str) -> list[_FileEntry]:
+        """Every entry of the folder at `path`, over as many pages as it takes."""
+        operation = f"list {path} in environment {env_id}"
+        entries: list[_FileEntry] = []
+        while True:
+            response = self._call(
+                "GET",
+                f"/environments/{_segment(env_id)}/files",
+                operation,
+                expect=(200,),
+                params={
+                    "path": path,
+                    "offset": len(entries),
+                    "limit": LISTING_PAGE_CAP,
+                },
+            )
+            page = _parse(_FileListing, response.text, operation)
+            entries.extend(page.files)
+            if not page.limit_hit:
+                return entries
+
     def open_response_stream(
         self, env_id: str, name: str, offset: int, wait_ms: int | None = None
     ) -> ControllerStream[ResponseFrame]:
@@ -692,16 +810,21 @@ class ControllerClient:
         expect: tuple[int, ...],
         params: dict[str, str | int] | None = None,
         json_body: dict[str, Any] | None = None,
+        content: bytes | None = None,
         timeout: float = _CALL_TIMEOUT_SECONDS,
         stream: bool = False,
     ) -> requests.Response:
+        headers = self._headers
+        if content is not None:
+            headers = {**headers, "Content-Type": "application/octet-stream"}
         try:
             response = requests.request(
                 method,
                 f"{self._base_url}{path}",
                 params=params,
                 json=json_body,
-                headers=self._headers,
+                data=content,
+                headers=headers,
                 timeout=(_CONNECT_TIMEOUT_SECONDS, timeout),
                 stream=stream,
                 verify=self._verify,
@@ -735,13 +858,27 @@ def _failure(operation: str, response: requests.Response) -> ExternalServiceExce
     title = problem.title or response.reason
     for known, status in _PROBLEM_STATUS.items():
         if problem.type == known and response.status_code == status:
-            return ControllerProblem(operation, known, title)
+            return ControllerProblem(operation, known, title, problem.detail)
     answer = " ".join(
         str(part) for part in (response.status_code, problem.type) if part
     )
     return ExternalServiceException(
-        operation, f"the controller answered {answer}: {title}"
+        operation,
+        f"the controller answered {answer}: {_reason(title, problem.detail)}",
     )
+
+
+def _reason(title: str, detail: str | None) -> str:
+    return title if detail is None else f"{title}; {detail}"
+
+
+def _content_sha256(response: requests.Response, operation: str) -> str:
+    sha256 = response.headers.get(CONTENT_SHA256_HEADER)
+    if sha256 is None:
+        raise ExternalServiceException(
+            operation, f"the answer came without its {CONTENT_SHA256_HEADER}"
+        )
+    return sha256
 
 
 def _response_frame(event: _Event, operation: str) -> ResponseFrame:

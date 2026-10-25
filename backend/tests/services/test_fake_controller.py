@@ -71,6 +71,10 @@ class TestFakeController:
             "capped",
             "not-whitelisted",
             "unprojectable",
+            "unreadable",
+            "put-file",
+            "file-text",
+            "remove-file",
             "busy",
             "play",
             "finish",
@@ -665,6 +669,198 @@ class TestFakeController:
         assert gone == b'event: gone\ndata: {"envId":"env-1"}\n\n'
         assert (again.status_code, again.get_json()["type"]) == (404, "not-found")
         assert listing == []
+
+    # -- An environment's files ------------------------------------------------
+
+    def test_a_file_is_put_and_read_back_over_http(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.add_environment("env-1")
+
+        put = http.post(
+            "/fake/put-file",
+            json={"env_id": "env-1", "path": "/work/a/b.md", "content": "ä\n"},
+        )
+        text = http.post(
+            "/fake/file-text", json={"env_id": "env-1", "path": "/work/a/b.md"}
+        )
+        none = http.post("/fake/file-text", json={"env_id": "env-1", "path": "/work/c"})
+
+        assert put.status_code == 204
+        assert fake.environment("env-1").files == {"/work/a/b.md": "ä\n".encode()}
+        assert text.get_json() == "ä\n"
+        assert none.get_json() is None
+
+    def test_file_text_of_bytes_that_are_not_utf8_is_refused(
+        self, fake: FakeController
+    ) -> None:
+        fake.add_environment("env-1")
+        fake.put_file("env-1", "/work/logo.png", b"\x89PNG\xff")
+
+        with pytest.raises(FakeControllerProblem) as caught:
+            fake.file_text("env-1", "/work/logo.png")
+
+        assert caught.value.status == 422
+
+    def test_a_removed_file_is_gone_and_its_empty_folder_with_it(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.add_environment("env-1")
+        fake.put_file("env-1", "/work/a/b.md", b"b")
+
+        fake.remove_file("env-1", "/work/a/b.md")
+
+        assert fake.file_text("env-1", "/work/a/b.md") is None
+        listing = http.get("/environments/env-1/files?path=/work/a", headers=BEARER)
+        assert listing.status_code == 404
+        with pytest.raises(FakeControllerProblem) as caught:
+            fake.remove_file("env-1", "/work/a/b.md")
+        assert caught.value.status == 404
+
+    @pytest.mark.parametrize(
+        ("path", "status", "problem_type"),
+        [
+            ("/etc/a.md", 403, "path-outside-work"),
+            ("/work/../a.md", 403, "path-outside-work"),
+            ("a.md", 403, "path-outside-work"),
+            ("/work", 409, "not-a-file"),
+            ("/work/a", 409, "not-a-file"),
+            ("/work/a/b.md/c.md", 409, "not-a-directory"),
+        ],
+    )
+    def test_put_file_keeps_the_tree_one_a_pod_could_hold(
+        self, fake: FakeController, path: str, status: int, problem_type: str
+    ) -> None:
+        fake.add_environment("env-1")
+        fake.put_file("env-1", "/work/a/b.md", b"b")
+
+        with pytest.raises(FakeControllerProblem) as caught:
+            fake.put_file("env-1", path, b"x")
+
+        assert (caught.value.status, caught.value.problem_type) == (
+            status,
+            problem_type,
+        )
+        assert fake.environment("env-1").files == {"/work/a/b.md": b"b"}
+
+    def test_a_path_is_normalised(self, fake: FakeController, http: Client) -> None:
+        fake.add_environment("env-1")
+        fake.put_file("env-1", "/work/a/./c/../b.md", b"b")
+
+        response = http.get(
+            "/environments/env-1/file?path=/work//a/b.md", headers=BEARER
+        )
+
+        assert fake.environment("env-1").files == {"/work/a/b.md": b"b"}
+        assert response.get_data() == b"b"
+
+    def test_a_listing_names_folders_first_each_in_case_insensitive_order(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.add_environment("env-1")
+        for path in ("/work/b.md", "/work/A.md", "/work/z/x.md", "/work/C/d/e.md"):
+            fake.put_file("env-1", path, b"x")
+
+        first = http.get("/environments/env-1/files?limit=3", headers=BEARER)
+        rest = http.get("/environments/env-1/files?offset=3&limit=3", headers=BEARER)
+
+        assert first.get_json() == {
+            "files": [
+                {"path": "/work/C/", "isDirectory": True},
+                {"path": "/work/z/", "isDirectory": True},
+                {"path": "/work/A.md", "isDirectory": False},
+            ],
+            "totalCount": 4,
+            "limitHit": True,
+        }
+        assert rest.get_json() == {
+            "files": [{"path": "/work/b.md", "isDirectory": False}],
+            "totalCount": 4,
+            "limitHit": False,
+        }
+
+    @pytest.mark.parametrize(
+        "query", ["offset=-1", "limit=0", "limit=1001"], ids=["offset", "low", "high"]
+    )
+    def test_a_listing_refuses_a_page_out_of_range(
+        self, fake: FakeController, http: Client, query: str
+    ) -> None:
+        fake.add_environment("env-1")
+
+        response = http.get(f"/environments/env-1/files?{query}", headers=BEARER)
+
+        assert response.status_code == 422
+
+    @pytest.mark.parametrize("method", ["GET", "PUT"])
+    def test_a_file_route_needs_a_path(
+        self, fake: FakeController, http: Client, method: str
+    ) -> None:
+        fake.add_environment("env-1")
+
+        response = http.open("/environments/env-1/file", method=method, headers=BEARER)
+
+        assert response.status_code == 422
+        assert fake.environment("env-1").files == {}
+
+    def test_a_write_answers_the_sha256_of_what_it_wrote(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.add_environment("env-1")
+
+        response = http.put(
+            "/environments/env-1/file?path=/work/a.md", data=b"a", headers=BEARER
+        )
+
+        assert response.status_code == 204
+        assert response.headers["KubeCoder-Content-Sha256"] == (
+            "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb"
+        )
+        assert fake.environment("env-1").files == {"/work/a.md": b"a"}
+
+    def test_a_write_takes_no_expected_hash(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.add_environment("env-1")
+
+        response = http.put(
+            f"/environments/env-1/file?path=/work/a.md&expectedSha256={'0' * 64}",
+            data=b"a",
+            headers=BEARER,
+        )
+
+        assert response.status_code == 422
+        assert fake.environment("env-1").files == {}
+
+    def test_a_reset_clears_the_tree_and_a_stop_keeps_it(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.add_environment("env-1", status="running")
+        fake.add_environment("env-2", status="running")
+        fake.put_file("env-1", "/work/a.md", b"a")
+        fake.put_file("env-2", "/work/a.md", b"a")
+
+        http.post("/environments/env-1/stop", headers=BEARER)
+        http.post("/environments/env-2/stop", headers=BEARER)
+        http.post("/environments/env-2/reset", headers=BEARER)
+
+        assert fake.environment("env-1").files == {"/work/a.md": b"a"}
+        assert fake.environment("env-2").files == {}
+
+    def test_an_unreadable_environment_is_unreadable_to_its_read_too(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.add_environment("env-1")
+        fake.unreadable("env-1")
+
+        refused = http.get("/environments/env-1", headers=BEARER)
+        fake.unreadable("env-1", on=False)
+        read = http.get("/environments/env-1", headers=BEARER)
+
+        assert (refused.status_code, refused.get_json()["type"]) == (
+            503,
+            "environment-unreadable",
+        )
+        assert read.status_code == 200
 
 
 def _create(http: Client, body: object) -> TestResponse:

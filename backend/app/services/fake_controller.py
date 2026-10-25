@@ -5,7 +5,9 @@ under pytest (`tests/support/fake_controller.py`), and mounted for Playwright
 under `/api/testing/controller` (`app/api/testing_controller.py`). It holds
 environments and headless sessions with the controller's state machines,
 answers with the controller's status codes and problem+json, and serves the
-response stream and the fleet stream in the controller's SSE framing.
+response stream and the fleet stream in the controller's SSE framing, and
+reads, writes and lists the files of an environment's `/work`, whatever its
+status, as the controller does off its share.
 
 A test drives it through its verbs, the public methods below: in process under
 pytest, and over HTTP as `POST /fake/<verb>`, the verb's name hyphenated and its
@@ -16,12 +18,19 @@ is minted by its first send; an environment that is not `running` holds no
 headless session; `wait=settled` is `wait=ready`, since no setup runs here; the
 create and the reset answer at once, taking no `wait`; a delete's teardown ends
 as it is answered; the node's cap is a flag, of the node or of one environment,
-not a count.
+not a count. An environment's `/work` holds files alone, with no link, shared
+repo or mode, a folder there while a file is under it, and its path is
+normalised before it is checked; a write takes no `expectedSha256`, and is
+refused while the environment reads `provisioning` or `starting`, a bring-up
+under way, or `deleting`; a reset clears the tree, and a bring-up clones nothing
+into it.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
+import posixpath
 import re
 import secrets
 import socket
@@ -40,6 +49,9 @@ from werkzeug.routing import Map, Rule
 from werkzeug.wrappers import Request, Response
 
 from app.services.controller_client import (
+    CONTENT_SHA256_HEADER,
+    FILE_SIZE_CAP,
+    LISTING_PAGE_CAP,
     WAIT_MS_CAP,
     EnvironmentStatus,
     HeadlessStatus,
@@ -82,6 +94,12 @@ _ENVIRONMENT_FIELDS = {"repo", "managed", "name"}
 
 _NAME_MAX = 64
 
+_WORK = "/work"
+
+_BRINGING_UP: tuple[EnvironmentStatus, ...] = ("provisioning", "starting")
+"""The statuses of an environment whose bring-up is under way: its tree takes
+no write."""
+
 CLIENT_NAME = "pilot"
 """The named client the fake's one credential authenticates as: what a managed
 create records as the environment's `managedBy`."""
@@ -97,14 +115,23 @@ _INGRESS_PAGE = (
 class FakeControllerProblem(Exception):
     """A problem+json answer of the fake's; a verb called in process raises it."""
 
-    def __init__(self, status: int, problem_type: str, title: str) -> None:
+    def __init__(
+        self, status: int, problem_type: str, title: str, detail: str | None = None
+    ) -> None:
         super().__init__(f"{status} {problem_type}: {title}")
         self.status = status
         self.problem_type = problem_type
         self.title = title
+        self.detail = detail
 
     def response(self) -> Response:
-        body = {"type": self.problem_type, "title": self.title, "status": self.status}
+        body: dict[str, Any] = {
+            "type": self.problem_type,
+            "title": self.title,
+            "status": self.status,
+        }
+        if self.detail is not None:
+            body["detail"] = self.detail
         return Response(
             _compact(body),
             status=self.status,
@@ -129,9 +156,16 @@ class FakeEnvironment:
     unreachable: bool = False
     capped: bool = False
     unprojectable: bool = False
+    unreadable: bool = False
     sessions_created: int = 0
     pod_started_at: datetime | None = None
     """Its pod's `startedAt`; None while it has no pod, `stopped`."""
+    files: dict[str, bytes] = field(default_factory=dict)
+    """Its `/work`: each file's bytes by its absolute path."""
+
+    def holds_folder(self, path: str) -> bool:
+        """Whether `path`, normalised, is a folder: `/work`, or one a file is under."""
+        return path == _WORK or any(key.startswith(f"{path}/") for key in self.files)
 
     def to_json(self) -> dict[str, Any]:
         running = self.status == "running"
@@ -230,6 +264,9 @@ _ROUTES = Map(
             methods=["POST"],
         ),
         Rule("/environments/<env_id>/rename", endpoint="rename", methods=["POST"]),
+        Rule("/environments/<env_id>/file", endpoint="read_file", methods=["GET"]),
+        Rule("/environments/<env_id>/file", endpoint="write_file", methods=["PUT"]),
+        Rule("/environments/<env_id>/files", endpoint="list_files", methods=["GET"]),
         Rule(
             "/environments/<env_id>/sessions",
             endpoint="list_sessions",
@@ -307,6 +344,9 @@ class FakeController:
             "stop": self._stop,
             "reset_environment": self._reset_environment,
             "rename": self._rename,
+            "read_file": self._read_file,
+            "write_file": self._write_file,
+            "list_files": self._list_files,
             "list_sessions": self._list_sessions,
             "create_session": self._create_session,
             "get_session": self._get_session,
@@ -331,6 +371,10 @@ class FakeController:
             "capped": self.capped,
             "not-whitelisted": self.not_whitelisted,
             "unprojectable": self.unprojectable,
+            "unreadable": self.unreadable,
+            "put-file": self.put_file,
+            "file-text": self.file_text,
+            "remove-file": self.remove_file,
             "busy": self.busy,
             "play": self.play,
             "finish": self.finish,
@@ -481,6 +525,43 @@ class FakeController:
         under `unprojectable` rather than among its items."""
         with self._changed:
             self._environment(env_id).unprojectable = on
+
+    @validate_call
+    def unreadable(self, env_id: str, on: bool = True) -> None:
+        """The controller cannot read the environment's record off its share:
+        its read and its file routes are `503 environment-unreadable`."""
+        with self._changed:
+            self._environment(env_id).unreadable = on
+
+    @validate_call
+    def put_file(self, env_id: str, path: str, content: bytes) -> None:
+        """A process in the environment writes `content` as the file at `path`,
+        whatever the environment's status and size. Over HTTP, `content` is
+        text, its UTF-8 the file's bytes."""
+        with self._changed:
+            _store(self._environment(env_id), path, content)
+
+    @validate_call
+    def file_text(self, env_id: str, path: str) -> str | None:
+        """The text of the file at `path`, UTF-8; None when there is none. A
+        test in process reads its bytes as `environment(env_id).files`."""
+        with self._changed:
+            data = self._environment(env_id).files.get(_pod_path(path))
+        if data is None:
+            return None
+        try:
+            return data.decode()
+        except UnicodeDecodeError as error:
+            raise FakeControllerProblem(
+                422, "validation-error", f"{path} is not UTF-8 text"
+            ) from error
+
+    @validate_call
+    def remove_file(self, env_id: str, path: str) -> None:
+        """A process in the environment deletes the file at `path`."""
+        with self._changed:
+            if self._environment(env_id).files.pop(_pod_path(path), None) is None:
+                raise _no_such_path(path)
 
     @validate_call
     def busy(self, env_id: str, name: str) -> None:
@@ -732,6 +813,7 @@ class FakeController:
             if self._blocked(environment):
                 raise _admission_blocked()
             environment.resets += 1
+            environment.files.clear()
             body = self._bring_up(environment)
         return _json(body, 202)
 
@@ -762,7 +844,7 @@ class FakeController:
         if wait not in ("none", "ready", "settled"):
             raise FakeControllerProblem(422, "validation-error", f"wait={wait}")
         with self._changed:
-            environment = self._environment(env_id)
+            environment = self._readable(env_id)
             if wait != "none":
                 wait_ms = min(
                     request.args.get("waitMs", 900_000, type=int), WAIT_MS_CAP
@@ -801,6 +883,90 @@ class FakeController:
             body = environment.to_json()
             self._set_status(environment, "stopped")
         return _json(body, 202)
+
+    def _read_file(self, request: Request, env_id: str) -> Response:
+        raw = _path_argument(request)
+        with self._changed:
+            environment = self._readable(env_id)
+            path = _pod_path(raw)
+            data = environment.files.get(path)
+            if data is None and environment.holds_folder(path):
+                raise _not_a_file(raw)
+        if data is None:
+            raise _no_such_path(raw)
+        if len(data) > FILE_SIZE_CAP:
+            raise _too_large(raw)
+        return _file_answer(data, data)
+
+    def _write_file(self, request: Request, env_id: str) -> Response:
+        raw = _path_argument(request)
+        if "expectedSha256" in request.args:
+            raise FakeControllerProblem(
+                422, "validation-error", "the fake takes no expectedSha256"
+            )
+        data = request.get_data()
+        if len(data) > FILE_SIZE_CAP:
+            raise _too_large(raw)
+        with self._changed:
+            environment = self._readable(env_id)
+            if environment.status == "deleting":
+                raise FakeControllerProblem(
+                    409,
+                    "conflict",
+                    "the environment is being deleted",
+                    "its files are no longer written or deleted",
+                )
+            if environment.status in _BRINGING_UP:
+                raise FakeControllerProblem(
+                    409,
+                    "conflict",
+                    "the controller is building or removing the environment's /work",
+                    "a create, start, reset or delete of the environment is pending "
+                    "or under way; write or delete once the environment has settled",
+                )
+            _store(environment, raw, data)
+        return _file_answer(b"", data, 204)
+
+    def _list_files(self, request: Request, env_id: str) -> Response:
+        raw = request.args.get("path", _WORK)
+        offset = request.args.get("offset", 0, type=int)
+        limit = request.args.get("limit", 100, type=int)
+        if offset < 0 or not 1 <= limit <= LISTING_PAGE_CAP:
+            raise FakeControllerProblem(
+                422,
+                "validation-error",
+                f"offset is at least 0 and limit 1 to {LISTING_PAGE_CAP}",
+            )
+        with self._changed:
+            environment = self._readable(env_id)
+            path = _pod_path(raw)
+            if path in environment.files:
+                raise FakeControllerProblem(
+                    409, "not-a-directory", f"{raw!r} is not a directory"
+                )
+            if not environment.holds_folder(path):
+                raise _no_such_path(raw)
+            prefix = f"{path}/"
+            folders: set[str] = set()
+            files: set[str] = set()
+            for key in environment.files:
+                if key.startswith(prefix):
+                    name, _, rest = key.removeprefix(prefix).partition("/")
+                    (folders if rest else files).add(name)
+        entries = [
+            {"path": f"{prefix}{name}/", "isDirectory": True}
+            for name in sorted(folders, key=_name_order)
+        ] + [
+            {"path": f"{prefix}{name}", "isDirectory": False}
+            for name in sorted(files, key=_name_order)
+        ]
+        return _json(
+            {
+                "files": entries[offset : offset + limit],
+                "totalCount": len(entries),
+                "limitHit": offset + limit < len(entries),
+            }
+        )
 
     def _list_sessions(self, request: Request, env_id: str) -> Response:
         with self._changed:
@@ -973,6 +1139,19 @@ class FakeController:
             raise FakeControllerProblem(404, "not-found", f"no environment {env_id}")
         return environment
 
+    def _readable(self, env_id: str) -> FakeEnvironment:
+        """The environment, unless its record does not read off the share."""
+        environment = self._environment(env_id)
+        if environment.unreadable:
+            raise FakeControllerProblem(
+                503,
+                "environment-unreadable",
+                f"environment {env_id!r} could not be read",
+                "the environment is still there but the controller could not "
+                "read its record; try again",
+            )
+        return environment
+
     def _session(self, env_id: str, name: str) -> FakeSession:
         session = self._sessions.get((env_id, name))
         if session is None:
@@ -1115,6 +1294,80 @@ def _unanswered(request: Request, answer: Unanswered) -> Response:
     # drops the connection with nothing sent.
     request.environ["werkzeug.socket"].shutdown(socket.SHUT_RDWR)
     return Response(status=204)
+
+
+def _path_argument(request: Request) -> str:
+    raw = request.args.get("path")
+    if raw is None:
+        raise FakeControllerProblem(422, "validation-error", "path is required")
+    return raw
+
+
+def _pod_path(raw: str) -> str:
+    """`raw` normalised, the path it names under `/work`."""
+    path = posixpath.normpath(raw)
+    if raw.startswith("/") and (path == _WORK or path.startswith(f"{_WORK}/")):
+        return path
+    raise FakeControllerProblem(
+        403,
+        "path-outside-work",
+        "the path is outside the environment's /work",
+        f"{raw!r} leaves /work; only absolute paths under /work are reachable",
+    )
+
+
+def _store(environment: FakeEnvironment, raw: str, data: bytes) -> None:
+    """`data` as the file at `raw`, the folders it needs made."""
+    path = _pod_path(raw)
+    if environment.holds_folder(path):
+        raise _not_a_file(raw)
+    parent = posixpath.dirname(path)
+    while parent != _WORK:
+        if parent in environment.files:
+            raise FakeControllerProblem(
+                409,
+                "not-a-directory",
+                f"{parent!r} is not a directory",
+                f"writing {raw!r} needs it as a directory",
+            )
+        parent = posixpath.dirname(parent)
+    environment.files[path] = data
+
+
+def _no_such_path(raw: str) -> FakeControllerProblem:
+    return FakeControllerProblem(
+        404, "not-found", f"no such file or directory: {raw!r}"
+    )
+
+
+def _not_a_file(raw: str) -> FakeControllerProblem:
+    return FakeControllerProblem(
+        409, "not-a-file", f"{raw!r} is not a regular file", "it is a directory"
+    )
+
+
+def _too_large(raw: str) -> FakeControllerProblem:
+    return FakeControllerProblem(
+        413,
+        "file-too-large",
+        f"{raw!r} is too large",
+        f"the file surface reads and writes files of at most {FILE_SIZE_CAP} bytes",
+    )
+
+
+def _file_answer(body: bytes, data: bytes, status: int = 200) -> Response:
+    """`body`, with the SHA-256 of `data` as the controller's header."""
+    return Response(
+        body,
+        status=status,
+        content_type="application/octet-stream",
+        headers={CONTENT_SHA256_HEADER: hashlib.sha256(data).hexdigest()},
+    )
+
+
+def _name_order(name: str) -> tuple[str, str]:
+    """A listing's order within its folders and within its files: case-insensitive."""
+    return name.casefold(), name
 
 
 def _admission_blocked() -> FakeControllerProblem:
