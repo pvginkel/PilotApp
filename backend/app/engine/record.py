@@ -133,7 +133,7 @@ class RecordService:
             raise InvalidOperationException(
                 operation, "`to` goes with `deferred` alone"
             )
-        if to is not None and to != dsl.PLAN and not self._in_the_plan(project, to):
+        if to is not None and to != dsl.PLAN and not self.in_the_plan(project, to):
             raise InvalidOperationException(
                 operation, f"`to: {to}` names neither `plan` nor a task in the plan"
             )
@@ -383,7 +383,7 @@ class RecordService:
             RecordNotFoundException: the project's plan has no task
                 `plan_task_id`.
         """
-        if plan_task_id is not None and not self._in_the_plan(project, plan_task_id):
+        if plan_task_id is not None and not self.in_the_plan(project, plan_task_id):
             raise RecordNotFoundException("Plan task", f"{project.id}/{plan_task_id}")
         self.db.add(
             Item(
@@ -422,6 +422,20 @@ class RecordService:
         item.done_at = at
         item.done_cause_code = TURN_ENDED
         self.view_service.timeline_moved(self.db.get_one(Project, item.project_id))
+
+    def in_the_plan(self, project: Project, task_id: str) -> bool:
+        """Whether the project's plan has the task `task_id`, not removed."""
+        return bool(
+            self.db.scalar(
+                select(
+                    exists().where(
+                        PlanTask.project_id == project.id,
+                        PlanTask.task_id == task_id,
+                        PlanTask.removed_at.is_(None),
+                    )
+                )
+            )
+        )
 
     def _mark_by_kind(self, item: Item, user: User, kind: str, mark: str) -> None:
         if self.db.get_one(ItemKind, item.kind_code).form != PROSE:
@@ -471,19 +485,6 @@ class RecordService:
                 select(Project.id).where(Project.id == project.id).with_for_update()
             )
         return self._locked(document)
-
-    def _in_the_plan(self, project: Project, task_id: str) -> bool:
-        return bool(
-            self.db.scalar(
-                select(
-                    exists().where(
-                        PlanTask.project_id == project.id,
-                        PlanTask.task_id == task_id,
-                        PlanTask.removed_at.is_(None),
-                    )
-                )
-            )
-        )
 
     def _done_by_its_answer(
         self,

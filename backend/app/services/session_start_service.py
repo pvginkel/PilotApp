@@ -364,8 +364,9 @@ class SessionStartService:
         document it registered closed, continued as a new work item (decision
         44, F26.7), in the caller's transaction, which holds the project's row
         exclusively: titled as the run, at the project's next place, after
-        the answered items, its trigger the Item `released` whose close
-        released it, and no Work Trigger. Its Session is in the run's
+        the answered items, on the run's plan task while the plan still has
+        it, none once it was removed, its trigger the Item `released` whose
+        close released it, and no Work Trigger. Its Session is in the run's
         environment from its placement on, held or not, so the environment is
         never free between the two (DB 240, §13.5), and continues the run's
         conversation, never reset (DB 241), on the run's cwd, agent, model and
@@ -386,9 +387,14 @@ class SessionStartService:
                 f"continue {_work_named(db, run_id)}", refusal
             )
         run = db.get_one(AgentSession, run_id)
-        title = db.get_one(Item, run_id).title
+        item = db.get_one(Item, run_id)
+        title = item.title
         # A work item is titled at its placement.
         assert title is not None
+        record = self._container.record_service()
+        task = item.plan_task_id
+        if task is not None and not record.in_the_plan(project, task):
+            task = None
         held = self._held(db, project, WORK_KIND)
         now = datetime.now(UTC)
         session = AgentSession(
@@ -409,10 +415,11 @@ class SessionStartService:
         db.flush()
         db.add(Turn(session_id=session.id, seq=1, message=message, started_at=now))
         db.flush()
-        self._container.record_service().place_work(
+        record.place_work(
             project,
             session,
             title,
+            task,
             repo=db.get_one(Work, run_id).repo,
             trigger_item_id=released.id,
         )

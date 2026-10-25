@@ -9,8 +9,8 @@ and its session log. What the server does to start it through the gate, stop it 
 The record's testing route `POST /api/testing/projects/<id>/work` places one by repository, on every
 stage but `prd` ([`projects.md`](projects.md)). The app places one itself as a run's continuation:
 the close that leaves none of the documents a work item's run registered open places the work item
-that continues its conversation, titled as the run, after the answered items
-([`round-trip.md`](round-trip.md)).
+that continues its conversation, titled as the run, on its plan task while the plan still has it,
+after the answered items ([`round-trip.md`](round-trip.md)).
 
 ## Its status
 

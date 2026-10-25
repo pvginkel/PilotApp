@@ -98,7 +98,7 @@ documents is open: the continuation waits on every one.
 
 - **Placed** by `continue_run` ([`sessions.md`](sessions.md)): a new work item titled as the run, at
   the project's next place, after the answered items, its trigger the item whose close released it,
-  on no plan task. Its Session is in the run's environment from its placement on and continues the
+  on the run's plan task while the plan still has it, on none once it was removed. Its Session is in the run's environment from its placement on and continues the
   run's conversation, never reset, so it goes on in the tree as the run left it, with the answered
   files written back.
 - **Its message**, the continuation's Turn 1, verbatim: "Your documents were answered and written

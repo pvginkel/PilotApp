@@ -4939,11 +4939,15 @@ def continues(
 
 
 def _ended_run(
-    db: DbSession, container: ServiceContainer, fake: _Recording, project: Project
+    db: DbSession,
+    container: ServiceContainer,
+    fake: _Recording,
+    project: Project,
+    plan_task_id: str | None = None,
 ) -> models.Session:
-    """A work item's run in an environment of Pilot's own, stopped by its
-    timer, its claim ended, its turn ended on its conversation and its work
-    item done (decision 44)."""
+    """A work item's run in an environment of Pilot's own, on the plan's task
+    `plan_task_id` when given, stopped by its timer, its claim ended, its turn
+    ended on its conversation and its work item done (decision 44)."""
     fake.add_environment(RUN_ENV, name=SLUG, repo=REPO, status="stopped")
     db.add(
         Environment(
@@ -4973,7 +4977,7 @@ def _ended_run(
     db.add(run)
     db.flush()
     records = container.record_service()
-    records.place_work(project, run, "Refining the camp", repo=REPO)
+    records.place_work(project, run, "Refining the camp", plan_task_id, repo=REPO)
     records.work_done(run.id, datetime.now(UTC))
     return run
 
@@ -5001,10 +5005,12 @@ def _answered_and_reviewed(
     fake: _Recording,
     project: Project,
     person: User,
+    plan_task_id: str | None = None,
 ) -> tuple[models.Session, Item, Item]:
     """A run's two documents closed, its decision answered and its survey
-    reviewed last: the run and its documents."""
-    run = _ended_run(db, container, fake, project)
+    reviewed last: the run, on the plan's task `plan_task_id` when given, and
+    its documents."""
+    run = _ended_run(db, container, fake, project, plan_task_id)
     refinement = _read_at_its_end(
         db, container, fake, project, run, REFINEMENT, REFINEMENT_TEXT
     )
@@ -5024,6 +5030,16 @@ def _continuation(db: DbSession, run: models.Session) -> models.Session:
         .where(Item.created_by_session_id == run.id)
     ).one()
     return _read(db, work.id)
+
+
+def _plan_task(project: Project, task_id: str) -> PlanTask:
+    return PlanTask(
+        project_id=project.id,
+        task_id=task_id,
+        position=1,
+        title="The camp",
+        status_code=TaskStatus.PENDING,
+    )
 
 
 def _document(db: DbSession, item: Item) -> Document:
@@ -5097,6 +5113,50 @@ class TestContinueRun:
             continuation.id,
         ]
         assert fake.calls == []
+
+    def test_it_is_placed_on_the_runs_plan_task(
+        self,
+        container: ServiceContainer,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        session.add(_plan_task(project, "camp"))
+        session.flush()
+
+        run, _, _ = _answered_and_reviewed(
+            session, container, fake, project, person, "camp"
+        )
+
+        continuation = _continuation(session, run)
+        assert session.get_one(Item, continuation.id).plan_task_id == "camp"
+
+    def test_a_task_removed_from_the_plan_since_places_it_on_none(
+        self,
+        container: ServiceContainer,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        task = _plan_task(project, "camp")
+        session.add(task)
+        session.flush()
+        run = _ended_run(session, container, fake, project, "camp")
+        refinement = _read_at_its_end(
+            session, container, fake, project, run, REFINEMENT, REFINEMENT_TEXT
+        )
+        task.removed_at = datetime.now(UTC)
+        task.position = None
+        session.flush()
+
+        container.record_service().answer(
+            session.get_one(Document, refinement.id), "D1", person, "The lake"
+        )
+
+        continuation = _continuation(session, run)
+        assert session.get_one(Item, continuation.id).plan_task_id is None
 
     @pytest.mark.parametrize(
         ("closed_by", "reason"),
