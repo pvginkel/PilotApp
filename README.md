@@ -25,8 +25,9 @@ and the rendered `timeline.json`, `reference.json` and `plan.json`
 with the record: the `/api/sync` routes and `pilot-sync`, the Go sidecar, in each stage's store
 environment, with the hook that tells the brain what the record made of each edit
 ([`docs/sync.md`](docs/sync.md)); and the server's jobs on the KubeCoder controller: the
-environments Pilot starts and stops, and the sessions it runs there through the gate every start
-passes, recorded and streamed live ([`docs/sessions.md`](docs/sessions.md)). Each stage follows its
+environments of its own Pilot creates from a work item's repository, resets before each fresh
+start, stops and deletes, and the sessions it runs there through the gate every start passes,
+recorded and streamed live ([`docs/sessions.md`](docs/sessions.md)). Each stage follows its
 own KubeCoder's fleet stream; only the dev stage starts anything, through its testing routes. It
 is built on the ModernAppTemplate stack (Flask on PostgreSQL, React + Vite, Playwright), which CI
 builds and Argo CD deploys: every green build to the dev stage at

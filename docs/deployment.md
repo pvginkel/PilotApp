@@ -128,10 +128,12 @@ objects into each stage's namespace:
   `chart/files/homelab-root.crt` into the ConfigMap `homelab-root-ca` and mounts it read-only at
   `/etc/ssl/homelab`. `migrate` sets none of the three. The backend refuses to start without the
   URL and the token; with them it holds the controller's fleet stream open and keeps the
-  Environment rows current. Only the dev stage starts, sends to and stops an environment: the
-  record's testing route `POST /api/testing/projects/<id>/work`, which `prd` refuses, places a work
-  item in one of `kubecoder-dev`'s environments and starts its session, and the shutdown timer then
-  stops the environment its start brought up ([`work.md`](work.md), [`sessions.md`](sessions.md)).
+  Environment rows current. Only the dev stage creates, starts, sends to, stops and deletes an
+  environment: the record's testing route `POST /api/testing/projects/<id>/work`, which `prd`
+  refuses, places a work item by repository, whose start takes or creates an environment of
+  Pilot's own on `kubecoder-dev` and starts its session there; the shutdown timer then stops that
+  environment, and the delete timer deletes it once it has stood free for 7 days
+  ([`work.md`](work.md), [`sessions.md`](sessions.md), [`controller.md`](controller.md)).
   Production places no work item, so nothing starts there. On either stage a controller that does
   not answer shows as the gold bar's line over the project list ([`ui.md`](ui.md)); `kubecoder-dev`
   is on the dev cluster, which is often powered off, and the dev stage's bar then says so.

@@ -175,6 +175,7 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
   store's tree in step with the record.
 - [`docs/jobs.md`](docs/jobs.md), [`docs/controller.md`](docs/controller.md),
   [`docs/sessions.md`](docs/sessions.md), [`docs/work.md`](docs/work.md): the supervisor that runs
-  the server's long-lived jobs; the KubeCoder controller's client, its outage, its fleet stream and
-  environments on demand, with its fake; the sessions, the gate, their records, relay and live
-  stream, Stop and Resume; a work item's status, its line and its session log.
+  the server's long-lived jobs; the KubeCoder controller's client, its outage, its fleet stream,
+  environments on demand and Pilot's own, with its fake; the sessions, the gate and its slot, their
+  records, relay and live stream, Stop and Resume; a work item's status, its line and its session
+  log.

@@ -1,10 +1,11 @@
 # The KubeCoder controller
 
 Pilot works the KubeCoder fleet through its controller's API, under a named client credential. It
-starts and stops existing environments, drives headless Claude Code sessions in them, and follows
-the fleet on the controller's `/stream`; it creates no environment. This page is the client, the
-outage, the fleet stream's consumer, the environments started on demand with their shutdown timer,
-and the fake the suites run against. The sessions the client drives are
+creates environments of its own from a repository for its work items, takes, renames, resets and
+deletes them, starts and stops environments, drives headless Claude Code sessions in them, and
+follows the fleet on the controller's `/stream`. This page is the client, the outage, the fleet
+stream's consumer, the environments started on demand with their shutdown timer, Pilot's own
+environments with their delete timer, and the fake the suites run against. The sessions the client drives are
 [`sessions.md`](sessions.md), and the threads it all runs on [`jobs.md`](jobs.md).
 
 ## The client
@@ -19,7 +20,11 @@ against `CONTROLLER_CA_FILE` when that is set, and against requests' own trust o
 | `list_environments()` | `GET /environments`: the environments, and those it could not describe (`unprojectable`) |
 | `get_environment(env_id, wait=None, wait_ms=3_600_000)` | `GET /environments/<id>`; with `wait` (`ready` or `settled`), held until it is there, reads `error`, `stopped` or `deleting`, or `waitMs` runs out |
 | `start_environment(env_id)` | `POST /environments/<id>/start`, without `wait`: a `StartOutcome(environment, started)`, `started` true on `202` (this call scheduled the bring-up) and false on `200` (it was running) |
-| `stop_environment(env_id)` | `POST /environments/<id>/stop` |
+| `stop_environment(env_id)` | `POST /environments/<id>/stop`, which takes no `wait`: the environment, `stopping` on `202`, `stopped` on `200` |
+| `create_environment(repo, name=None)` | `POST /environments {repo, managed: true, name?}`, without `wait`: the environment, `provisioning`, its env id given before its bring-up ends in a running pod; `managed` makes it a managed environment of Pilot's client |
+| `reset_environment(env_id)` | `POST /environments/<id>/reset`, without `wait`, of a `stopped` environment only: its folder cleared and its bring-up run again, answered `starting`, ending in a running pod as a start does |
+| `rename_environment(env_id, name)` | `POST /environments/<id>/rename {name}`; a blank `name` clears it |
+| `delete_environment(env_id)` | `DELETE /environments/<id>`, `202`; one already gone, answered `404`, is deleted |
 | `create_headless_session(env_id, HeadlessCreateRequest)` | `POST /environments/<id>/sessions/headless`; a field left None is not sent |
 | `send_message(env_id, name, message)` | `POST /environments/<id>/sessions/headless/<name>/messages`, `202`: the session is busy with the turn |
 | `interrupt(env_id, name)` | `POST /environments/<id>/sessions/headless/<name>/interrupt` |
@@ -31,16 +36,18 @@ against `CONTROLLER_CA_FILE` when that is set, and against requests' own trust o
 | `open_fleet_stream()` | `GET /stream` |
 | `probe()` | `GET /readyz`, `200`: the gate's probe (below), with a 2 s timeout |
 
-`ControllerEnvironment` holds what Pilot reads of an environment: `env_id`, `name`, `repo`,
-`status`, `pod` (`started_at`, its `startedAt`, none when unreported; `restart_count`,
+`ControllerEnvironment` holds what Pilot reads of an environment: `env_id`, `name`, `managed_by`
+(the client a managed create recorded), `repo`, `status`, `pod` (`started_at`, its `startedAt`, none when unreported; `restart_count`,
 `restart_reason`; none while stopped), `setup_running`, and `exempt`, its
 `capabilities.capacityExempt.enabled`: the environment stands outside its node's cap. A pod's
 `started_at` is its identity: a container's restart in it leaves it as it is, and a new pod has
 another.
 
-**Failures.** An answer of `404 not-found`, `409 conflict`, `409 session-busy`, `409
-admission-blocked` or `502 worker-unreachable`, as problem+json of that type, raises
-`ControllerProblem`, whose `problem_type` its callers switch on. A call the controller does not
+**Failures.** An answer of `404 not-found`, `409 conflict`, `409 name-conflict` (a name the
+fleet holds already: KubeCoder's names are unique across it), `409 session-busy`, `409
+admission-blocked` (the node at its cap), `403 namespace-not-whitelisted` (a repository whose owner
+the controller does not take), `422 validation-error` or `502 worker-unreachable`, as problem+json
+of that type, raises `ControllerProblem`, whose `problem_type` its callers switch on. A call the controller does not
 answer, a connection error, a timeout, or a 5xx without the controller's own problem+json (an
 ingress's page in front of it), raises `ControllerUnreachable` and turns the outage on (below). Any
 other failure, another status or an answer that does not parse, raises a plain
@@ -116,36 +123,36 @@ The gauge `pilot_fleet_stream_connected` is 1 while the stream is open, and each
 
 ## Environments on demand
 
-`EnvironmentService` (`backend/app/services/environment_service.py`) starts environments, and arms,
-clears and runs their shutdown timer. Pilot stops only what it started, and only the pod its start
-brought up. The claim is `server_started_at`, set when Pilot's own start scheduled the bring-up,
-and `started_pod_at`, the `pod.startedAt` that bring-up settled on. Nothing stops an environment
-without the claim, while it is exempt, or while a Session is `running` or `starting` there, and the
-timer stops one only while it still runs the claim's pod. The claim ends with its deadline:
-`_end_claim` clears `server_started_at`, `started_pod_at` and `stop_due_at` together.
+`EnvironmentService` (`backend/app/services/environment_service.py`) starts environments, creates,
+takes, renames, resets and deletes environments of Pilot's own (below), and arms, clears and runs
+the shutdown and delete timers. Pilot stops only what it started. The claim is `server_started_at`,
+set when Pilot's own start, create or reset scheduled the bring-up, and `started_pod_at`, the
+`pod.startedAt` that bring-up settled on. Nothing stops an environment without the claim, while it
+is exempt, or while a Session is `running` or `starting` there. On an environment Pilot did not
+create, the claim holds only the pod its start brought up, and the timer stops one only while it
+still runs that pod; on one of Pilot's own every pod is Pilot's, and the claim holds whatever pod
+runs there. The claim ends with its deadline: `_end_claim` clears `server_started_at`,
+`started_pod_at` and `stop_due_at` together.
 
 - `ensure_environment(db, env_id)` makes the Environment row from the controller's own report on
   Pilot's first touch of the environment, in the caller's transaction, and leaves a row that exists
-  as it is. A Session's row needs it, and the sync's gate makes the store's row through it
+  as it is. `start` makes its row through it, and the sync's gate the store's
   ([`sync.md`](sync.md)); the controller's `404` raises `ControllerProblem` `not-found`.
-  `ensure_for_start(db, env_id)` is the same for a start the gate may hold: while the controller
-  does not answer, it makes the row by the id alone, named by it and exempt, so that the timer arms
-  nothing there until the fleet stream's report gives its columns.
 - `start(env_id) -> ControllerEnvironment` brings the environment up and waits until it settles.
   The `start` goes without `wait`, since only then does its answer say whether this call
   scheduled the bring-up: on `202` it commits `server_started_at`, `started_pod_at` none until it
   settles (`Started environment <id>`); on `200` it sets nothing (`Environment <id> was running
-  already`). Then the single `GET` with `wait=settled`, held up to an hour, whose pod settles the
-  claim: a claim with no pod yet takes the settled one, the `202`'s, or that of a start cut between
-  its `202` and its settle and run again, whose `200` keeps the claim; one with no pod yet ends
-  where the environment came to rest (`running`, `error`, `stopped`, `deleting`) with no pod of
-  known start; a claim on another pod ends. A wait run out before a pod leaves the claim without
-  one. Then it arms the shutdown timer. A `running` environment is returned; `409
-  admission-blocked`, or one that settled `error`, `stopped` or `deleting`, raises
-  `EnvironmentStartFailed`; one still settling when the wait ran out raises
-  `ExternalServiceException`; a call the controller does not answer raises
-  `ControllerUnreachable`. Each of its writes is a transaction of its own. It is safe to repeat:
-  a start resumed from its rows calls it as it is.
+  already`). Then `settle(env_id)`, the single `GET` with `wait=settled`, held up to an hour, whose
+  pod settles the claim: a claim with no pod yet takes the settled one, the `202`'s, or that of a
+  bring-up cut between its `202` and its settle and run again; one with no pod yet ends where the
+  environment came to rest (`running`, `error`, `stopped`, `deleting`) with no pod of known start;
+  a claim on another pod ends on an environment Pilot did not create, and takes the pod it reads on
+  one of Pilot's own. A wait run out before a pod leaves the claim without one. Then it arms the
+  shutdown timer. A `running` environment is returned; `409 admission-blocked`, or one that settled
+  `error`, `stopped` or `deleting`, raises `EnvironmentStartFailed`; one still settling when the
+  wait ran out raises `ExternalServiceException`; a call the controller does not answer raises
+  `ControllerUnreachable`. Each of its writes is a transaction of its own. It is safe to repeat: a
+  start resumed from its rows calls it as it is.
 
 **The shutdown timer.** `stop_due_at` is when Pilot stops an environment it started.
 
@@ -153,26 +160,88 @@ timer stops one only while it still runs the claim's pod. The claim ends with it
   one already set, when the environment is Pilot's to stop and idle: `server_started_at` set, not
   exempt, and no Session `running` or `starting` there. It reads the Sessions under the Environment
   row's lock, so of two Sessions whose turns end at once, the later call arms it. It runs after a
-  start's wait has answered, whatever the environment settled to, after a turn's end commits, when
-  a session start fails, and when a Session there is stopped ([`sessions.md`](sessions.md)).
+  bring-up's wait has answered, whatever the environment settled to, after a turn's end commits,
+  when a session start fails, and when a Session there is stopped ([`sessions.md`](sessions.md)).
 - `clear_shutdown_timer(db, env_id)` clears it, under the same lock, in the transaction that makes
   a Session there `running` or `starting`.
 - The timer `environment-shutdown` takes each overdue row `FOR UPDATE SKIP LOCKED`, so a row
-  another process's tick holds is skipped, and checks it again. A claim with its pod reads the
-  environment afresh, with no wait, and calls `stop` holding the lock only while its pod's
-  `startedAt` is `started_pod_at` (`Stopped environment <id>, due <iso>`; a `404` on the stop,
-  `Environment <id> is gone: its shutdown, due <iso>, is cleared`). A pod gone (`404`, or none),
-  another's or with no `startedAt` is left running (`Environment <id> no longer runs the pod
-  Pilot's start brought up: its claim, due <iso>, ends with no stop`). A claim with no pod ends
-  with no stop and no call (`Environment <id> has no pod of Pilot's start: …`), unless a Session
-  `held` or `starting` there waits to resume its start, which keeps it. Each of these ends the
-  claim, one commit per row. A refused stop, or a read that fails but for a `404`, raises, and the
-  rows after it wait for the next tick. Then it arms every environment Pilot started that is
-  idle, not exempt and unarmed, so an arm a restart lost is made within a tick (`Armed the shutdown
-  of environment <id>, due <iso>`).
+  another process's tick holds is skipped, and checks it again. A claim with no pod yet is kept
+  while a Session `held` or `starting` there waits to resume its start. One of Pilot's own is then
+  stopped, whatever pod runs there (`Stopped environment <id>, due <iso>`; a `404` on the stop,
+  `Environment <id> is gone: its shutdown, due <iso>, is cleared`). On any other, a claim with its
+  pod reads the environment afresh, with no wait, and calls `stop` holding the lock only while its
+  pod's `startedAt` is `started_pod_at`; a pod gone (`404`, or none), another's or with no
+  `startedAt` is left running (`Environment <id> no longer runs the pod Pilot's start brought up:
+  its claim, due <iso>, ends with no stop`), and a claim with no pod ends with no stop and no call
+  (`Environment <id> has no pod of Pilot's start: …`). Each of these ends the claim, one commit per
+  row. A refused stop, or a read that fails but for a `404`, raises, and the rows after it wait for
+  the next tick. Then it arms every environment Pilot started that is idle, not exempt and unarmed,
+  so an arm a restart lost is made within a tick (`Armed the shutdown of environment <id>, due
+  <iso>`).
 
-Only the tick and a settled start end the claim; the fleet consumer never writes
-`server_started_at` or `started_pod_at`. The tick reads the Sessions as committed.
+Only the environment service writes the claim; the fleet consumer never writes `server_started_at`
+or `started_pod_at`. The tick reads the Sessions as committed.
+
+## Pilot's own environments
+
+An environment is Pilot's own while its row has `server_created_at`: the server created it from its
+`repo`, `owner/Name`, for a work item placed by that repository ([`sessions.md`](sessions.md)). Pilot
+knows its own from its rows; the create also makes it a managed environment of Pilot's client at the
+controller, its `managedBy`, by which the controller's list filters. Pilot takes, renames, resets
+and deletes only its own: never an operator's environment of the same repository, the store, or an
+environment a work item was placed in by its id.
+
+**Free.** One of Pilot's own is free while it is neither `deleting` nor `gone` and no Session there
+is `running`, `starting` or `held`, nor `stopped` or `failed`. A work item that shows Resume keeps
+its environment for as long as it does, with no expiry: nothing takes, resets or deletes it, its
+project's Finish and Archive included, since Bring back offers the Resume again (D042). The
+shutdown timer still stops it, and it holds no slot of the gate's ([`sessions.md`](sessions.md)).
+Freedom is derived wherever it is read; no column holds it.
+
+- `take(db, repo)`, in the start's transaction, which commits before any controller call: of the
+  free environments of the repository that are `stopped`, `stopping`, or `running` under Pilot's
+  claim, the most recently freed, its row locked `FOR UPDATE SKIP LOCKED` and its freedom read
+  again once locked, so of two starts the later sees the earlier's Session there; its claim and its
+  `delete_due_at` cleared, so that its rows say its bring-up is still to make. One in `error`,
+  `provisioning` or `starting`, or running outside Pilot's claim, is passed over; with none left,
+  the start creates one. `retake(db, env_id)` takes back a fresh-start Resume's own environment the
+  same way, and leaves one `deleting` or `gone`, which the start lets go.
+- `create(repo, slug)` creates one, named `slug`, or on a `409 name-conflict` the first of
+  `slug-2`, `slug-3`, … the fleet does not hold; `record_created(db, created, repo)` writes its row,
+  Pilot's own, its claim taken from the create's `202` (`Created environment <id> from <repo>`). A
+  create whose answer was lost before its row costs an environment no tick deletes, listed under
+  Pilot's client at the controller. `stop_untaken(env_id)` stops one created for a start that moved
+  on, its claim ended, while it is still free under its row's lock (`Stopped environment <id>, which
+  no Session took`).
+- `name(env_id, slug)` renames a taken one after the taking project as the create names one, after
+  the take's commit, and sets the row's name from the answer. The name is the operator's reading
+  aid: nothing of Pilot's reads it, and the env chip shows the row as it stands, so that a finished
+  item's chip names the project now using that environment, or its id while it is free.
+- `reset(env_id)` brings a taken one up in a tree made anew, for a start on a new conversation. The
+  controller resets a `stopped` environment only, and its stop takes no `wait`: the stop goes first,
+  whatever the row says, answered `200` when it is stopped already, and a `202`'s settle is awaited;
+  one settled other than `stopped` raises `EnvironmentStartFailed` ("it settled <status> after its
+  stop"). Then `POST …/reset`, whose `409 admission-blocked` raises `EnvironmentStartFailed` ("the
+  controller refused its reset: …"). A reset ends in a running pod, as a start does, so no start
+  follows it: its `202` takes the claim (`Reset environment <id>`), and `settle` awaits it. A created
+  environment needs no reset, and a resume never resets: a work item that continues its
+  conversation does so in the tree as its session left it.
+- `reclaim(db, env_id)` claims one of Pilot's own that has no claim, for a start that stops or fails
+  before its reset, so that the shutdown timer stops it.
+
+**The delete timer.** The timer `environment-delete` (`run_delete_timer`) takes each row `FOR
+UPDATE SKIP LOCKED`, a transaction each:
+
+- an overdue `delete_due_at` on one still free is deleted, `DELETE` (a `404` counts as deleted), its
+  row kept `gone`, its claim ended and its deadline cleared (`Deleted environment <id>, due <iso>`);
+  one no longer free loses its deadline, nothing deleted (`Environment <id> is no longer free: its
+  delete, due <iso>, is cleared`);
+- then every free one with no deadline, freed since the last tick, has its name cleared at the
+  controller and its `delete_due_at` set to now plus `ENVIRONMENT_DELETE_AFTER_SECONDS`, both or
+  neither (`Environment <id> is free: its name cleared, its delete due <iso>`); a rename answered
+  `404` marks the row `gone`.
+
+An environment is freed by this tick's reading alone: a Session that lets one go calls nothing.
 
 ## Settings
 
@@ -182,6 +251,7 @@ Only the tick and a settled start end the claim; the fleet consumer never writes
 | `CONTROLLER_TOKEN` | empty | Pilot's named client credential, a secret; with `FLASK_ENV=production` the backend refuses to start without it |
 | `CONTROLLER_CA_FILE` | empty | a PEM file of the CAs that verify the controller's certificate; empty leaves it to requests' own trust, and a path that is no file fails the app's start |
 | `ENVIRONMENT_STOP_AFTER_SECONDS` | 1800 | how long an environment Pilot started stands idle before its shutdown timer stops it; above 0 |
+| `ENVIRONMENT_DELETE_AFTER_SECONDS` | 604800 | how long an environment of Pilot's own stands free before its delete timer deletes it, 7 days; above 0 |
 
 Each deployed stage's are in [`deployment.md`](deployment.md). The dev stack runs with no controller
 unless `backend/.env` sets one, as the fleet's live check does against KubeCoder's dev stage
@@ -194,9 +264,15 @@ reaches by URL. It holds environments and headless sessions with the controller'
 answers with its status codes and problem+json, and serves the response stream and the fleet stream
 in its SSE framing: `raw` frames with the offset as their `id:`, and the worker's `result` and
 `incomplete`. An environment's pod has a `startedAt` from its move out of `stopped` until it
-stops, in whole seconds and later than every pod's before it. Where it is simpler than the
-controller: a headless session's conversation id is minted by its first send, an environment that
-is not `running` holds no headless session, and `wait=settled` is `wait=ready`.
+stops, in whole seconds and later than every pod's before it. It serves the create, the reset,
+the rename and the delete with the controller's refusals in its order, and the list filtered by
+`managedBy`, `repo` and `status`. An environment a create makes has an id minted from its
+repository, lowercased, each run of other characters than letters and digits a `-`, then `-` and 6
+hex digits, and `managedBy` `pilot`, the client its one credential authenticates as. Where it is simpler than the controller: a headless
+session's conversation id is minted by its first send, an environment that is not `running` holds
+no headless session, `wait=settled` is `wait=ready`, the create and the reset answer at once and
+take no `wait`, a delete's teardown ends as it is answered, `deleting` then `gone`, and the node's
+cap is a flag, not a count.
 
 - **Under pytest**, the fixture `fake_controller` serves it on a free port of 127.0.0.1
   (`ServedFakeController`, `backend/tests/support/fake_controller.py`; over HTTPS with
@@ -215,18 +291,24 @@ is not `running` holds no headless session, and `wait=settled` is `wait=ready`.
 
 A test drives it through its verbs, in process, or over HTTP as `POST <base>/fake/<verb>` with the
 verb hyphenated and its keyword arguments as the JSON body: `add_environment`, `remove_environment`,
-`set_status`, `set_exempt`, `settle_starts` (what a start brings the environment to at once; None
-holds it `starting`), `restart` (the pod's containers restart: its restart count moves, its sessions
+`set_status`, `set_exempt`, `settle_starts` (what a start or a reset brings the environment to at
+once; None holds it `starting`), `settle_creates` (what a create brings its environment to at once,
+`running` by default, and that environment's starts and resets after it; None holds it
+`provisioning` until `set_status`), `restart` (the pod's containers restart: its restart count moves, its sessions
 go, it reads `starting` until `set_status`, and the pod and its `startedAt` stay), `recreate_pod` (a
 new pod, with a later `startedAt`, its sessions gone, the environment `starting` until
 `set_status`), `unreachable` (`502 worker-unreachable`), `outage` (`on`, `answer`: every call but
 the verbs, `/readyz` among them, has its connection closed with no answer, `none`, which needs
 werkzeug's server, or an ingress's `502` page, `ingress`, and every open stream ends; `on=False`
-answers again), `capped` (a start is `409 admission-blocked`, never an exempt one's),
+answers again), `capped` (with an `env_id`, that environment's start and reset are `409
+admission-blocked`; with none, the node's cap, every create too; never an exempt one's),
+`not_whitelisted` (a create of a repository of that owner is `403 namespace-not-whitelisted`),
 `unprojectable`, `busy`, `play` (the lines `claude` prints, answered with their offsets), `finish`
 (the turn's outcome: `success`, `error`, `interrupted`, `spawn-failure` or `ended`), `write_log`,
-`publish_state`, `publish_sessions`, `drop_streams` and `reset`, which ends an outage too.
-`environment()`, `session()`, `sessions()` and `calls` read its state.
+`publish_state`, `publish_sessions`, `drop_streams` and `reset`, which forgets everything, an
+outage, the node's cap, the refused owners and how creates settle included; it is not the
+controller's reset route. `environment()` (its `resets` counting the resets that cleared its
+folder), `session()`, `sessions()` and `calls` read its state.
 
 The turns a test plays are invented, in `backend/tests/fixtures/raw/turn_text.jsonl`,
 `turn_tool.jsonl` and `turn_subagent.jsonl`, read by `raw_turn(name)`: bare `claude` lines in the

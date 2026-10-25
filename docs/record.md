@@ -68,16 +68,18 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
 
 **Sessions and environments**
 
-- `environments`: a KubeCoder environment Pilot has touched, keyed by its environment id. A
-  session start makes the row from the controller's report when it first touches the environment,
-  or by its id alone, exempt, while the controller does not answer, and the store's sidecar's first
-  sync call makes the store's the same way ([`sync.md`](sync.md)), or by its id alone while no
-  controller is configured. The fleet stream keeps its `name`, `last_state`, `last_seen_at` and
-  `exempt` current; `server_started_at` and `started_pod_at` are Pilot's claim, that it started the
-  environment and the pod's start that bring-up settled on, and `stop_due_at` is when Pilot stops
-  it ([`controller.md`](controller.md)).
-- `sessions`: a run of a Claude Code conversation in one environment, for one project, of a session
-  kind, in a state (`held`, `starting`, `running`, `idle`, `stopped`, `ended`, `failed`), the held
+- `environments`: a KubeCoder environment Pilot has touched, keyed by its environment id. A work
+  item's start writes the row of an environment it creates from the create's answer, and an
+  environment's start makes one from the controller's report when it first touches it; the store's
+  sidecar's first sync call makes the store's the same way ([`sync.md`](sync.md)), or by its id
+  alone while no controller is configured. The fleet stream keeps its `name`, `last_state`,
+  `last_seen_at` and `exempt` current; `server_started_at` and `started_pod_at` are Pilot's claim,
+  that it started the environment and the pod's start that bring-up settled on, and `stop_due_at`
+  is when Pilot stops it. An environment Pilot created is its own: `server_created_at` and `repo`,
+  the repository it was made from, set together, and `delete_due_at`, when Pilot deletes it while
+  it stays free, which only one of its own has ([`controller.md`](controller.md)).
+- `sessions`: a run of a Claude Code conversation in one environment, none while its start has not
+  provided one, for one project, of a session kind, in a state (`held`, `starting`, `running`, `idle`, `stopped`, `ended`, `failed`), the held
   ones indexed by `created_at`, the gate's order:
   `controller_session` names its headless session at the controller and `conversation_id` its
   Claude conversation; `current_line`, a JSON object, says what its turn in flight is doing, and is
@@ -86,9 +88,10 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
 - `work`: a work item, the extension table its Item and its Session share their id with
   ([`work.md`](work.md)): `project_id`, `session_kind_code` (`work` or `job`, never a Chat's),
   `trigger_code` (a job's Work Trigger; a worker's run has none) and `trigger_item_id` (an item of
-  the same project, never the work item itself), and `autopilot`, the switch's setting at its
-  brief. Its keys reach its Item and its Session through the one project. A `work`-kind Session may
-  stand with no `work` row, as a testing-mode session does ([`sessions.md`](sessions.md)).
+  the same project, never the work item itself), `repo`, the repository a worker's run is placed by
+  (none for a job), and `autopilot`, the switch's setting at its brief. Its keys reach its Item and
+  its Session through the one project. A `work`-kind Session may stand with no `work` row, as the
+  seed's idle session and a testing project's do.
 - `turns`: a message sent to a session and the reply it produced, numbered by `seq` from 1 within
   the session: its `message`, its `author_user_id` (none for the server's own, such as a start's
   brief), the item or the block it quotes (one at most; a quoted block's removal clears the key),
@@ -104,7 +107,7 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
 
 ## The reference values
 
-Nineteen are PostgreSQL enum types, each a `StrEnum` in `backend/app/models/reference.py`, and four
+Eighteen are PostgreSQL enum types, each a `StrEnum` in `backend/app/models/reference.py`, and four
 are tables with rows, because each value carries a fact. The revisions write the rows; a value is
 added by a revision and nowhere else.
 

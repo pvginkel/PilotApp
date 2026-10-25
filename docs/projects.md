@@ -218,14 +218,15 @@ answers only in testing mode ([`sign-in.md`](sign-in.md)).
   finished project with auto pilot on, a paused project that is not open, a member named twice, open
   items without an environment and a plan with a fault are each a `400`; a handle that is no
   person's, `agent` included, and an unknown environment a `404`.
-- `POST /api/testing/projects/<id>/work` `{environment_id, title, brief, cwd, step?}` places a work
-  item in an environment of the stage's own controller and starts its session through the gate, as
-  every work item's starts ([`sessions.md`](sessions.md)), and answers `201` `{id}`, the item's,
-  its Work's and its Session's; the start runs once the request commits. `step` is the id of a plan
-  task it serves. An unknown project or a step not in the plan is a `404`; no controller
-  configured, or a finished or an archived project, a `409`; an environment the controller lacks,
-  or a controller that failed, a `502`. A work item is created by its own Session, so once one has
-  started, the routes below that act by the project's session started last act by it.
+- `POST /api/testing/projects/<id>/work` `{repo, title, brief, cwd, step?}` places a work item by
+  the repository `repo`, `owner/Name`, its session to run in `cwd`, and starts its session through
+  the gate, as every work item's starts ([`sessions.md`](sessions.md)): once the request commits,
+  its start takes or creates an environment of Pilot's own from the repository on the stage's own
+  controller. It answers `201` `{id}`, the item's, its Work's and its Session's. `step` is the id of
+  a plan task it serves. An unknown project or a step not in the plan is a `404`; no controller
+  configured, or a finished or an archived project, a `409`. A work item is created by its own
+  Session, so once one has started, the routes below that act by the project's session started
+  last act by it.
 - `POST /api/testing/projects/<id>/items` `{kind, title, text}` adds a prose item as Pilot adds one,
   born through the engine's `bear_item` by the project's session started last, and answers `201`
   `{id}`. `kind` is a prose kind but the opening; the text, front matter and blocks included, says

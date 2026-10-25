@@ -121,8 +121,8 @@ draw no line. A project with none reads "Nothing yet".
   tooltip, the Urgent chip and "for <full name>" while it is for someone. The text's prose is GFM
   (`Markdown`, [`ui.md`](ui.md)); the prose before the first block folds past 13.5em with Show
   more, the ask stands in that block's place, and the prose after it shows whole. A concept has a
-  dashed border. An open work item is its session's: its env chip, its one line and its Stop or
-  Resume ([`work.md`](work.md)).
+  dashed border. An open work item is its session's: its env chip once its start has an
+  environment, its one line and its Stop or Resume ([`work.md`](work.md)).
 - **Attachments** (`attachments.tsx`) are chips, the clip and the title, a long one cut short:
   after a one-ask item's or a notice's text, at a confirmation card's end, in the opening's bubble,
   after an inline document's text and on a card. A chip opens the attachment in the overlay

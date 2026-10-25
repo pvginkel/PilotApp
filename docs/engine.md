@@ -41,9 +41,10 @@ cause `born`:
 The births, and a work item's placing, take the Item's `seq` from
 `DocumentService.next_seq(project)`, under the project's row lock until the transaction ends, so
 that items in one project take theirs one at a time. A work item has no document:
-`RecordService.place_work(project, session, title, plan_task_id=None)` writes its Item, kind `work`,
-created by its own `session` and sharing its id, on the plan's task when given (a task not in the
-plan is a `RecordNotFoundException`), and its Work, `autopilot` the project's switch as it stands;
+`RecordService.place_work(project, session, title, plan_task_id=None, *, repo=None)` writes its
+Item, kind `work`, created by its own `session` and sharing its id, on the plan's task when given (a
+task not in the plan is a `RecordNotFoundException`), and its Work, `autopilot` the project's
+switch as it stands and `repo` the repository it is placed by, none for a job;
 `work_done(work_id, at)`, at its turn's end, marks the Item done at `at`, by no one, cause
 `turn_ended`, under the Item's row lock, and leaves one done already, as Finish's close leaves it
 ([`sessions.md`](sessions.md)). Each moves `timeline.json`.

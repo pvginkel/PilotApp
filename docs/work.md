@@ -7,7 +7,8 @@ and its session log. What the server does to start it through the gate, stop it 
 [`sessions.md`](sessions.md)'s, and the timeline it stands on [`timeline.md`](timeline.md)'s.
 
 Nothing in the app places one yet: the record's testing route `POST
-/api/testing/projects/<id>/work` does, on every stage but `prd` ([`projects.md`](projects.md)).
+/api/testing/projects/<id>/work` does, by repository, on every stage but `prd`
+([`projects.md`](projects.md)).
 
 ## Its status
 
@@ -20,19 +21,24 @@ for the live event:
 - `current_line`: `{state, since, step, agent, text}`, the Session's current line
   ([`sessions.md`](sessions.md)) with every key present, null where it leaves one out, `step`
   `{tool, input}` and `agent` `{type, description}`; null while no turn is in flight;
-- `environment`: `{id, name}`, the env chip and its link;
+- `environment`: `{id, name}`, the env chip and its link, as the Environment's row stands: null
+  until its start has one; a done item's names the project that took the environment after it, or
+  its id while it is free ([`controller.md`](controller.md));
 - `started_at`: the Session's, when the controller confirmed its session or a Resume's turn was
   sent, so that a held or a starting time does not count; null before;
 - `error`: only while `failed`, the latest Turn's error, else the Session's: a turn's failure is its
   Turn's, a start's the Session's;
 - `autopilot`: the switch's setting its start was briefed under;
-- `held_reason`: why the gate holds it as the gate reads now, `paused` or `controller_unreachable`;
-  null unless `held`, and while the gate has opened for it and its release is under way;
+- `held_reason`: why the gate holds it as the gate reads now, `paused`, `controller_unreachable`
+  or `slot`; null unless `held`, and while the gate has opened for it and its release is under way;
+- `held_running`: while it is held for a slot, the running work items of the maximum that closed
+  the gate, across every project or its project's own ([`sessions.md`](sessions.md)); else null;
 - `stopped_at` and `stopped_by`, the person who stopped it by Stop, Finish or Archive: only while
   `stopped`, `stopped_by` null when no person did;
-- `stopped_cause`: `environment_stopped`, `environment_deleting` or `environment_gone` while it is
-  `stopped` with no person's stop, its environment stopped under its turn, read from the session's
-  last record; null for a person's stop and for an interrupt made elsewhere.
+- `stopped_cause`: `environment_stopped`, `environment_deleting`, `environment_error` or
+  `environment_gone` while it is `stopped` with no person's stop, its environment stopped under its
+  turn or settled in error, read from the session's last record; null for a person's stop and for
+  an interrupt made elsewhere.
 
 A work item waits on you while `stopped` or `failed`, which its project's badge counts
 ([`projects.md`](projects.md)). It is done at the end of a turn neither interrupted nor in error
@@ -46,7 +52,8 @@ A write of a work item's state, its current line, its `started_at` or its `error
 since that moves the project's tab and head (`work_moved`, `backend/app/services/work_status.py`);
 equal events of one transaction go out once. A Chat's Session has no work item: its state's move
 raises `ProjectChanged` alone. A pause and a resume move the reason on the project's held items,
-each a `WorkMoved`. `ProjectEventService` sends a `WorkMoved` to every person's connections as the
+each a `WorkMoved`, and the release of the held starts tells every work item it still holds,
+since the outage's turn or the slot's count may have moved its reason. `ProjectEventService` sends a `WorkMoved` to every person's connections as the
 SSE event `work_moved`, `{project_id, item_id, work}`, `work` read after the commit, and nothing for
 a Session with no work item.
 
@@ -58,18 +65,22 @@ it follows. A move heard while that timeline is being read goes over the read on
 
 An open work item (`WorkItem`, `frontend/src/components/timeline/work.tsx`) is:
 
-- **Its head**, an item's head ([`timeline.md`](timeline.md)), with the env chip, the environment's
-  name linked to KubeCoder's Open by its id (`EnvironmentLink`, [`ui.md`](ui.md)), and, while
+- **Its head**, an item's head ([`timeline.md`](timeline.md)), with the env chip once its start has
+  an environment, the environment's name linked to KubeCoder's Open by its id (`EnvironmentLink`,
+  [`ui.md`](ui.md)), and, while
   `running` with a `started_at`, "running N min" with a pulse: "under a minute", "12 min", "1 h 5
   min", "3 h", "2 days", counted again every 15 s on the browser's clock.
 - **Its title.**
 - **Its one line** (`workLine()`, `frontend/src/lib/utils/status-labels.ts`): a held item's reason,
-  "Paused" or "Waiting for the controller"; else its current line in the chat's working cue
-  (`WorkingCue`), the server's own words while it starts or its environment restarts, "Thinking",
-  "Writing", "Working" or "Waiting for the <type> agent", with the latest step beside it, worded as
-  the chat words a call, or the sub-agent's description; "Starting" before a start's first line,
-  and "Waiting for Pilot" for a running one with none; "Stopped · <time>", with the cause of a stop
-  made elsewhere ("<environment> was stopped", "… is being deleted", "… is gone"); "Failed ·
+  "Paused", "Waiting for the controller" or "Waiting for a slot · N running"; else its current line
+  in the chat's working cue (`WorkingCue`), the server's own words while it starts ("Preparing
+  <environment>", "Starting <environment>", "Creating the session", the trailing "…" left out) or
+  its environment restarts, "Thinking", "Writing", "Working" or "Waiting for the <type> agent", with
+  the latest step beside it, worded as the chat words a call, or the sub-agent's description. A
+  call whose input still streams in is its verb alone ("Editing"), and its target joins it once the
+  call's line gives it; an empty target is not drawn. "Starting" before a start's first line, and "Waiting for
+  Pilot" for a running one with none; "Stopped · <time>", with the cause of a stop made elsewhere
+  ("<environment> was stopped", "… is being deleted", "… is gone", "… is in error"); "Failed ·
   <error>"; and nothing once `idle` or `ended`.
 - **Its actions**, while `running`, `starting` or `held`: Session log, then Stop. Stop asks first in
   the actions' place, "Stop the session? Its turn ends where it is; Resume sends it on.", with Stop
@@ -91,7 +102,8 @@ log in the overlay over the timeline (`SessionLogOverlay`,
 [`documents.md`](documents.md)'s). An open item's Session log and a done work line's Open go there.
 An address that names no work item of the project reads "The session log did not load".
 
-- **Its head**: "Session log", over the item's title, its environment's link and the session's id.
+- **Its head**: "Session log", over the item's title, its environment's link once its start has
+  one, and the session's id.
 - **Its body**: the session's records rendered as the chat renders a reply, one reply per turn
   (`ReplyBody`), bare in the log's column, 6px in from either side (D002): the text as Markdown, the
   runs of tool calls with their summaries, a sub-agent's card with its own steps, the phantom of the
@@ -138,24 +150,34 @@ The status, its event and the routes are pinned in `backend/tests/services/test_
 
 Each Playwright backend's controller is the fake it serves itself
 ([`controller.md`](controller.md)), which the `controller` fixture
-(`frontend/tests/support/controller.ts`) drives: `environment({name?, status?})` adds an
-environment, `stopped` and named by its unique id unless told, and answers its id; then, by the
-environment's id, `play(env, session, lines)` (answering the lines' offsets), `finish(env, session,
-outcome?, result?)`, `restart`, `setStatus`, `settleStarts`, `removeEnvironment`, `capped` and
-`unreachable`; and `outage(on, answer?)`, returning once the backend reads the controller as asked,
-and `dropStreams()`, once the fleet stream has reconnected. After a spec that left the controller
-unreachable, the fixture has it answer again. Pilot's headless sessions in an environment are
+(`frontend/tests/support/controller.ts`) drives. Its environments are those Pilot's starts create
+in it, each read from its work item (`projects.environment`, below); by the environment's id,
+`play(env, session, lines)` (answering the lines' offsets), `finish(env, session, outcome?,
+result?)`, `restart`, `setStatus`, `settleStarts`, `removeEnvironment` and `unreachable`; then
+`capped(on?)`, the node at its cap, refusing creates, starts and resets; `settleCreates(status)`,
+what a create brings its environment to, null holding it `provisioning`; `outage(on, answer?)`,
+returning once the backend reads the controller as asked; and `dropStreams()`, once the fleet stream
+has reconnected. The fake's verbs that act on every environment hold across a worker's specs, so
+the fixture's teardown (`restore()`) undoes an outage, the node's cap and held creates that a spec
+left. Pilot's headless sessions in an environment are
 `claude-1`, `claude-2`, … in the order it creates them, a Resume that re-creates its session making
 the next. `rawTurn(name)` reads the backend suite's invented turns. The worker's `conditions`
 fixture reads what the gold bar reads, and waits at the worker's start for the backend's first
 outage, its fleet stream's refused first open, to end. The fleet stream reconnects on the
 supervisor's backoff, up to 30 s, so a spec whose outage must end sets a timeout of its own.
 
-`projects.startWork(project, {environment_id, title, brief, cwd, step?})` places a work item,
-answering its id; `projects.work(project, item)` reads its `work`, `projects.records(session,
+`projects.startWork(project, {title, brief, cwd, step?})` places a work item by `projects.repo`, a
+repository of the spec's own (`example/Example-<unique>`), so that its start takes no environment
+an earlier spec of the worker left free, and answers its id; `projects.environment(project, item)`
+waits for the environment its start took or created and answers its `{id, name}`, the name the
+project's slug (`slugOf(project)`, the testing route's), `-2` for a second at once;
+`projects.work(project, item)` reads its `work`, `projects.records(session,
 after?)` its records, and `projects.stop(id)` and `projects.resume(id)` call the routes as the
 signed-in person. The `timeline` page object's `item(id).work` reads the open item (`environment`,
 `running`, `line`, whose `data-state` is the Session's state, `cue`, `step`, `sessionLog`, `stop`,
 `resume`, `stopConfirm`), and the `sessionLog` fixture the log (`sessionLogAddress()`). A spec
 placing an item in a project while a work item's start there still writes waits for that item to
-run first.
+run first. The backends run with `WORK_PARALLELISM_MAX` 10000 and `PROJECT_PARALLELISM_MAX` 3
+(`loadAppBackendEnv()`, [`controller.md`](controller.md)): a worker's specs share a backend and
+leave work items running, each in projects of its own, so the slot across every project never
+closes, and a project's fourth running or starting work item is held for a slot.
