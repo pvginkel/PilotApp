@@ -182,6 +182,26 @@ def _opened() -> None:
 
 
 @pytest.mark.usefixtures("_no_callbacks")
+class TestTook:
+    @pytest.mark.parametrize(("kind_code", "told"), [("work", True), ("chat", False)])
+    def test_a_work_items_start_tells_the_listeners_once_it_commits(
+        self, session: DbSession, person: User, kind_code: str, told: bool
+    ) -> None:
+        slots = WorkSlots(work_max=3, project_max=3)
+        slots.subscribe(_opened)
+        (run,) = _sessions(
+            session,
+            _project(session, person),
+            SessionState.STARTING,
+            kind_code=kind_code,
+        )
+
+        slots.took(run)
+
+        assert after_commit_module._callbacks.get() == ((_opened,) if told else ())
+
+
+@pytest.mark.usefixtures("_no_callbacks")
 class TestLeft:
     @pytest.mark.parametrize(
         ("kind_code", "before", "after"),

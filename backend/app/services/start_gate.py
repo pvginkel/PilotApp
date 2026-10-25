@@ -9,7 +9,9 @@ more than one holds, the pause comes first, then the outage, which is the
 gold bar's, then the slot. The halt is slice 016's condition.
 
 The slot is counted under one app-wide lock (`WorkSlots.lock`), so two starts
-never both take its last place. A work item's end opens it.
+never both take its last place. A work item's start and its end move the
+count: its end may open the gate, and either may move a held work item's
+count.
 """
 
 import uuid
@@ -67,8 +69,8 @@ def held_reason(
 
 
 class WorkSlots:
-    """The slot (§13.5): the maxima, the count under its lock, and the open
-    event, which a work item's end raises."""
+    """The slot (§13.5): the maxima, the count under its lock, and the event
+    of the count's move, which a work item's start and its end raise."""
 
     def __init__(self, work_max: int, project_max: int) -> None:
         """The slot of the maxima, with no listener yet.
@@ -84,8 +86,8 @@ class WorkSlots:
         self._listeners: list[SlotListener] = []
 
     def subscribe(self, listener: SlotListener) -> None:
-        """Call `listener` once a transaction that ended a work item's run
-        commits."""
+        """Call `listener` once a transaction that began or ended a work
+        item's run commits."""
         self._listeners.append(listener)
 
     def lock(self, db: Session) -> None:
@@ -122,14 +124,24 @@ class WorkSlots:
             if running.get(project_id, 0) >= self._project_max
         }
 
+    def took(self, session: AgentSession) -> None:
+        """The Session, under its lock, moved to `starting` through the gate
+        in the transaction: a work item's run that began tells the listeners
+        once the transaction commits."""
+        if session.kind_code == WORK_KIND:
+            self._moved()
+
     def left(self, session: AgentSession, before: SessionState) -> None:
         """The Session, under its lock, moved from `before` in the
         transaction: a work item's run that ended, `running` or `starting`
-        no longer, opens the gate once the transaction commits."""
+        no longer, tells the listeners once the transaction commits."""
         if (
             session.kind_code == WORK_KIND
             and before in COUNTED
             and session.state_code not in COUNTED
         ):
-            for listener in self._listeners:
-                after_commit(listener)
+            self._moved()
+
+    def _moved(self) -> None:
+        for listener in self._listeners:
+            after_commit(listener)

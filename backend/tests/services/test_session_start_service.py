@@ -53,7 +53,9 @@ from app.services.relay_service import CONTINUE, SEND_FAILED, SESSION_GONE, Rela
 from app.services.session_record_service import StoredRecord, read_records
 from app.services.session_start_service import (
     NOT_PILOTS,
+    RELEASE_KEY,
     START_FAILED,
+    START_JOB,
     STARTING,
     SessionStartService,
 )
@@ -4164,6 +4166,170 @@ class TestSlotOpens:
 
         _assert_failed(session, run.id)
         assert opened.calls == 1
+
+    def test_a_start_a_resume_and_a_release_taking_a_slot_tell_it_once_they_commit(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        stopped = _stopped_item(starts, fake, session, project, person)
+        controller_outage.call_unanswered()
+        held = _held(starts, session, project)
+        controller_outage.probe_answered()
+        clear_after_commit_callbacks()
+        opened = _opened(starts)
+
+        starts.start_work(
+            session, project.id, REPO, title="Renaming", brief=BRIEF, cwd=CWD
+        )
+        assert opened in after_commit_module._callbacks.get()
+        clear_after_commit_callbacks()
+        starts.resume(session, stopped.id)
+        assert opened in after_commit_module._callbacks.get()
+        clear_after_commit_callbacks()
+        _release(starts)
+
+        assert _read(session, held.id).state_code == SessionState.STARTING
+        assert opened.calls == 1
+
+
+def _release_asked(
+    starts: SessionStartService, monkeypatch: pytest.MonkeyPatch
+) -> list[str]:
+    """The release's loop each time its supervisor is asked for it from now
+    on."""
+    asked: list[str] = []
+    supervisor = starts._supervisor
+    start_loop = supervisor.start_loop
+
+    def recording(
+        job: str, run: Any, key: str | int | None = None, *, again: bool = False
+    ) -> bool:
+        if (job, key) == (START_JOB, RELEASE_KEY):
+            asked.append(f"{job}:{key}")
+        return start_loop(job, run, key, again=again)
+
+    monkeypatch.setattr(supervisor, "start_loop", recording)
+    return asked
+
+
+class TestHeldLines:
+    """A held work item's line is told again whenever its reason or its
+    slot's count may have moved, which the browsers hear of from nothing
+    else: the outage's every turn and a slot taken or left ask for the
+    release, which tells every work item it leaves held (V04)."""
+
+    def test_an_item_the_outage_held_that_the_slot_keeps_held_hears_its_reason_move(
+        self,
+        container: ServiceContainer,
+        fake: _Recording,
+        supervise: Supervise,
+        session: DbSession,
+        project: Project,
+        person: User,
+        controller_outage: ControllerOutage,
+        engine_events: list[EngineEvent],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        starts = _services(container, supervise, work_max=1, project_max=1)[0]
+        _occupying(session, _project_named(session, person, "site"), 1)
+        controller_outage.call_unanswered()
+        held = _held(starts, session, project)
+        clear_after_commit_callbacks()
+        asked = _release_asked(starts, monkeypatch)
+        heard = len(engine_events)
+
+        controller_outage.probe_answered()
+        _release(starts)
+
+        assert asked == ["start:held"]
+        assert _read(session, held.id).state_code == SessionState.HELD
+        assert _held_for(starts, session, held.id) == (HeldReason.SLOT, 1)
+        assert _moves(engine_events[heard:]) == [WorkMoved(project.id, held.id)]
+
+    def test_an_item_the_slot_held_hears_the_outage_take_its_place(
+        self,
+        container: ServiceContainer,
+        fake: _Recording,
+        supervise: Supervise,
+        session: DbSession,
+        project: Project,
+        person: User,
+        controller_outage: ControllerOutage,
+        engine_events: list[EngineEvent],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        starts = _services(container, supervise, work_max=1, project_max=1)[0]
+        _occupying(session, _project_named(session, person, "site"), 1)
+        held = _held(starts, session, project)
+        clear_after_commit_callbacks()
+        asked = _release_asked(starts, monkeypatch)
+        heard = len(engine_events)
+
+        controller_outage.call_unanswered()
+        _release(starts)
+
+        assert asked == ["start:held"]
+        assert _read(session, held.id).state_code == SessionState.HELD
+        status = work_status(session, [held.id], unreachable=True, slots=starts._slots)
+        assert status[held.id].held_reason == HeldReason.CONTROLLER_UNREACHABLE
+        assert _moves(engine_events[heard:]) == [WorkMoved(project.id, held.id)]
+
+    def test_an_item_its_projects_slot_holds_hears_the_count_of_every_project_fill(
+        self,
+        slotted: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        _occupying(session, project, 1)
+        held = _held(slotted, session, project)
+        assert _held_for(slotted, session, held.id) == (HeldReason.SLOT, 1)
+        clear_after_commit_callbacks()
+        opened = _opened(slotted)
+        heard = len(engine_events)
+
+        site = _project_named(session, person, "site")
+        slotted.start_work(
+            session, site.id, REPO, title="Renaming", brief=BRIEF, cwd=CWD
+        )
+        assert opened in after_commit_module._callbacks.get()
+        clear_after_commit_callbacks()
+        _release(slotted)
+
+        assert _held_for(slotted, session, held.id) == (HeldReason.SLOT, 2)
+        assert WorkMoved(project.id, held.id) in _moves(engine_events[heard:])
+
+    def test_an_item_the_slot_keeps_held_hears_its_count_once_a_work_item_ends(
+        self,
+        container: ServiceContainer,
+        fake: _Recording,
+        supervise: Supervise,
+        session: DbSession,
+        project: Project,
+        person: User,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        starts = _services(container, supervise, work_max=2, project_max=1)[0]
+        _occupying(session, project, 1)
+        running = _running(starts, session, _project_named(session, person, "site"))
+        held = _held(starts, session, project)
+        assert _held_for(starts, session, held.id) == (HeldReason.SLOT, 2)
+        clear_after_commit_callbacks()
+        heard = len(engine_events)
+
+        _turn_ends(starts, fake, running, "success")
+        _release(starts)
+
+        assert _read(session, held.id).state_code == SessionState.HELD
+        assert _held_for(starts, session, held.id) == (HeldReason.SLOT, 1)
+        assert WorkMoved(project.id, held.id) in _moves(engine_events[heard:])
 
 
 class TestSlotLoop:

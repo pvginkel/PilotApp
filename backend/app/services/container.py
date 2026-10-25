@@ -115,8 +115,8 @@ class ServiceContainer(containers.DeclarativeContainer):
     # §13.4): every call of the client's, and the fleet stream, turn it.
     controller_outage = providers.Singleton(ControllerOutage)
 
-    # The slot, the gate's fourth condition (design 2 §13.5): the relay and
-    # the start raise its open event at a work item's end.
+    # The slot, the gate's fourth condition (design 2 §13.5): the start raises
+    # its event at a work item's start, the relay and the start at its end.
     work_slots = providers.Singleton(
         WorkSlots,
         work_max=app_config.provided.work_parallelism_max,

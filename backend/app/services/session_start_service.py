@@ -21,12 +21,14 @@ controller during the start leaves the Session `failed` with its `error` and a
 `server` record saying so, its brief no longer in flight, and nothing is
 retried (F125).
 
-When the gate opens — the outage off, at the probe's success or the fleet
-stream's reconnect; a work item's end, its turn's `result`, its Stop, its
+When the gate may have moved — the outage on or off, off at the probe's
+success or the fleet stream's reconnect; a work item's start, which takes its
+slot (`WorkSlots.took`); a work item's end, its turn's `result`, its Stop, its
 failure or a stop made elsewhere, which frees its slot (`WorkSlots.left`) —
 the held Sessions it opens for move to `starting` in `created_at` order, each
 under its lock while it is still `held`, a work item whose Project has no
-slot passed over, and each loop resumes its start where the rows left it. The
+slot passed over, and each loop resumes its start where the rows left it. A
+work item it still holds has its line told again, its reason read anew. The
 probe, the controller's readiness call, runs on the scheduler's tick while the
 outage holds.
 
@@ -215,7 +217,8 @@ class SessionStartService:
         """Register the `start` job, whose loops are one per Session and one
         that moves the held Sessions on, and whose reconcile runs the start of
         every Session still `starting` and opens the gate; the probe's timer;
-        and the release, on the outage's off and on a slot's opening.
+        and the release, on every turn of the outage and every move of the
+        slot's count.
 
         Args:
             container: Gives each start transaction its database session, and
@@ -226,9 +229,9 @@ class SessionStartService:
                 its row, renames, resets or starts it, and clears and arms its
                 shutdown timer
             relay_service: Sends the brief, and relays its turn
-            controller_outage: The gate's outage, which the probe turns off;
-                its turning off opens the gate
-            work_slots: The gate's slot, which a work item's end opens
+            controller_outage: The gate's outage, which the probe turns off
+            work_slots: The gate's slot, whose count a work item's start and
+                its end move
             controller_configured: False refuses every start
         """
         self._container = container
@@ -243,7 +246,7 @@ class SessionStartService:
             START_JOB, needs_controller=True, reconcile=self._reconcile
         )
         supervisor.register_timer(PROBE_TIMER, self.run_probe, needs_controller=True)
-        controller_outage.subscribe(self._outage_moved)
+        controller_outage.subscribe(self.release_held)
         work_slots.subscribe(self.release_held)
 
     def start_work(
@@ -418,9 +421,9 @@ class SessionStartService:
                 self._resumed(db, session_id, turn)
 
     def release_held(self) -> None:
-        """Move on the held Sessions the gate is open for, on a loop of their
-        own: called once the gate may have opened. A call while that loop runs
-        has it run once more."""
+        """Move on the held Sessions the gate is open for, and tell the line of
+        each it still holds, on a loop of their own: called once the gate may
+        have moved. A call while that loop runs has it run once more."""
         self._supervisor.start_loop(
             START_JOB, self.release, key=RELEASE_KEY, again=True
         )
@@ -429,8 +432,9 @@ class SessionStartService:
         """The release loop's run: each held Session in `created_at` order,
         moved to `starting` under its lock while it is still `held` and the
         gate is open for it, a work item's slot counted under the slot's
-        lock, its loop run once that commits. Ends while the outage holds,
-        which holds every start."""
+        lock, its loop run once that commits. One the gate still holds has
+        its work item's line told again: the outage's turn or the slot's
+        count, which asked for the run, may have moved its reason."""
         with scoped_session(self._container) as db:
             held = db.scalars(
                 select(AgentSession.id)
@@ -438,7 +442,7 @@ class SessionStartService:
                 .order_by(AgentSession.created_at, AgentSession.id)
             ).all()
         for session_id in held:
-            if handle.stopping or self._outage.holds:
+            if handle.stopping:
                 return
             with scoped_session(self._container) as db:
                 self._release_one(db, session_id)
@@ -597,6 +601,7 @@ class SessionStartService:
             return
         project = db.get_one(Project, session.project_id, populate_existing=True)
         if self._held(db, project, session.kind_code) is not None:
+            self._moved(session)
             return
         session.state_code = SessionState.STARTING
         self._begin(db, session)
@@ -604,13 +609,13 @@ class SessionStartService:
         logger.info("Session %s goes on from held", session_id)
 
     def _begin(self, db: Session, session: AgentSession) -> None:
-        """The start of a `starting` Session begun, and its loop run once the
-        transaction commits. In its Environment, the phase that brings it
-        up, unless the Session has its controller session already, and its
-        shutdown timer cleared. One with no Environment yet, or with one whose
-        reset is still to make, enters its phase at the create or at the
-        rename; one in an environment Pilot did not create none, its loop
-        failing it."""
+        """The start of a `starting` Session begun through the gate, its slot
+        taken (`WorkSlots.took`), and its loop run once the transaction
+        commits. In its Environment, the phase that brings it up, unless the
+        Session has its controller session already, and its shutdown timer
+        cleared. One with no Environment yet, or with one whose reset is
+        still to make, enters its phase at the create or at the rename; one
+        in an environment Pilot did not create none, its loop failing it."""
         environment = _environment(db, session)
         if environment is not None and not _foreign(session, environment):
             if session.controller_session is None and not _unreset(
@@ -618,6 +623,7 @@ class SessionStartService:
             ):
                 self._phase(db, session.id, _bringing_up(session, environment))
             self._environments.clear_shutdown_timer(db, environment.id)
+        self._slots.took(session)
         after_commit(_LoopStart(self, session.id))
 
     def _stop(
@@ -743,10 +749,6 @@ class SessionStartService:
         self._moved(session, state=True)
         after_commit(_HeldWritten(self))
         logger.warning("Session %s is held: %s", session_id, error)
-
-    def _outage_moved(self) -> None:
-        if not self._outage.holds:
-            self.release_held()
 
     def _start_loop(self, session_id: uuid.UUID) -> None:
         # A run that held the Session still counts as live until its thread
