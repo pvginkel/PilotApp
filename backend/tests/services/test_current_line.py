@@ -50,12 +50,21 @@ def _tool_result(parent: str | None = None) -> dict[str, Any]:
     }
 
 
-def _block_start(kind: str) -> dict[str, Any]:
+def _block_start(kind: str, **block: Any) -> dict[str, Any]:
     return {
         "type": "stream_event",
-        "event": {"type": "content_block_start", "content_block": {"type": kind}},
+        "event": {
+            "type": "content_block_start",
+            "content_block": {"type": kind, **block},
+        },
         "parent_tool_use_id": None,
     }
+
+
+def _call_start(tool: str) -> dict[str, Any]:
+    """A tool call's block start, as `claude` streams it: its `name`, and its
+    input still to stream in."""
+    return _block_start("tool_use", id="toolu_example", name=tool, input={})
 
 
 TEXT_DELTA = {
@@ -188,9 +197,10 @@ class TestAfterPartial:
             "state": "thinking",
             "since": LATER.isoformat(),
         }
-        assert after_partial(writing, _block_start("tool_use"), LATER) == {
+        assert after_partial(writing, _call_start("Edit"), LATER) == {
             "state": "working",
             "since": LATER.isoformat(),
+            "step": {"tool": "Edit", "input": None},
         }
 
     def test_it_drops_the_agent_and_the_starting_words(self) -> None:
@@ -209,3 +219,60 @@ class TestAfterPartial:
 
     def test_a_block_of_another_kind_implies_nothing(self) -> None:
         assert after_partial(WORKING, _block_start("image"), LATER) is None
+
+
+class TestACallWhoseInputStreamsIn:
+    """The line between two tool calls (P-48; V16): from its block's start the
+    step is the call whose input streams in, never the previous, finished one."""
+
+    EDIT = {"tool": "Edit", "input": {"file_path": "/work/Example/plan.json"}}
+
+    def test_its_start_names_its_tool_with_no_input(self) -> None:
+        finished = after_line(WORKING, _tool_result(), AT)
+
+        line = after_partial(finished, _call_start("Edit"), LATER)
+
+        assert line == {
+            "state": "working",
+            "since": LATER.isoformat(),
+            "step": {"tool": "Edit", "input": None},
+        }
+
+    def test_its_line_fills_its_input_in_and_keeps_its_since(self) -> None:
+        streaming = after_partial(
+            after_line(WORKING, _tool_result(), AT), _call_start("Edit"), AT
+        )
+
+        line = after_line(streaming, _assistant(_call(self.EDIT)), LATER)
+
+        assert line == {"state": "working", "since": AT.isoformat(), "step": self.EDIT}
+
+    def test_a_call_of_the_tool_just_called_is_a_new_step(self) -> None:
+        """A second `Read` while the first one's `Read` is still the step."""
+        line = after_partial(WORKING, _call_start("Read"), LATER)
+
+        assert line == {
+            "state": "working",
+            "since": LATER.isoformat(),
+            "step": {"tool": "Read", "input": None},
+        }
+
+    def test_its_start_told_again_leaves_the_line_as_it_is(self) -> None:
+        streaming = after_partial(WORKING, _call_start("Edit"), AT)
+
+        assert after_partial(streaming, _call_start("Edit"), LATER) is None
+
+    def test_a_sub_agents_call_starts_working_until_its_line(self) -> None:
+        line = after_partial(WORKING, _call_start("Task"), AT)
+
+        assert line == {
+            "state": "working",
+            "since": AT.isoformat(),
+            "step": {"tool": "Task", "input": None},
+        }
+        assert after_line(line, _assistant(_call(TASK)), LATER) == {
+            "state": "waiting",
+            "since": LATER.isoformat(),
+            "step": TASK,
+            "agent": {"type": "Explore", "description": "Find the badge"},
+        }

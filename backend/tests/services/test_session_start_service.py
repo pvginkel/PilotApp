@@ -3311,6 +3311,34 @@ class TestResume:
         assert _verbs(fake, env_id) == []
         assert fake.environment(env_id).resets == 0
 
+    def test_one_stopped_by_its_environment_in_error_starts_it_again_and_continues(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        """D2 (V15): KubeCoder's way out of `error` is a start ("recover it
+        with /start"); the tree is not reset."""
+        stopped = _stopped_item(starts, fake, session, project, person)
+        env_id = _env(session, stopped.id)
+        fake.set_status(env_id, "error")
+
+        run = starts.resume(session, stopped.id)
+        clear_after_commit_callbacks()
+        _run(starts, run)
+
+        run = _read(session, run.id)
+        assert run.state_code == SessionState.RUNNING
+        assert run.environment_id == env_id
+        assert fake.environment(env_id).status == "running"
+        assert _verbs(fake, env_id) == ["start"]
+        assert fake.environment(env_id).resets == 0
+        assert run.conversation_id == "conv-1"
+        assert _turns(session, run.id)[1].message == CONTINUE
+        assert _row(session, env_id).server_started_at is not None
+
     def test_a_failed_start_with_no_environment_resumes_with_the_ended_turns_message_in_one_it_creates(
         self,
         starts: SessionStartService,

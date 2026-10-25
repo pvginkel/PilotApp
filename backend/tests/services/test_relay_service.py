@@ -1428,6 +1428,41 @@ class TestRelayWorkItem:
             moved,
         ]
 
+    def test_a_calls_block_start_names_it_until_its_line_fills_its_input_in(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        work_item: models.Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """P-48 (V16): the line between two tool calls names the one whose
+        input streams in."""
+        _send(relays, session, work_item)
+        _turn_of(fake_controller, controller_session, raw_turn("turn_tool"))
+        lines: list[Any] = []
+        moved = relays._moved
+
+        def seen(run: models.Session, **kwargs: Any) -> None:
+            lines.append(run.current_line)
+            moved(run, **kwargs)
+
+        monkeypatch.setattr(relays, "_moved", seen)
+
+        _relay(relays, work_item)
+
+        streaming, called = lines[:2]
+        assert (streaming["state"], streaming["step"]) == (
+            "working",
+            {"tool": "Read", "input": None},
+        )
+        assert called == {
+            "state": "working",
+            "since": streaming["since"],
+            "step": {"tool": "Read", "input": {"file_path": "/work/Example/README.md"}},
+        }
+
     def test_a_resume_of_its_gone_controller_session_moves_the_item(
         self,
         session: DbSession,
@@ -1977,22 +2012,43 @@ class TestEnvironmentUnderATurn:
         ).all()
         assert versions == [VersionCause.BORN, VersionCause.TURN]
 
-    def test_an_environment_in_error_is_polled_again(
+    def test_an_environment_that_settles_error_stops_the_item(
         self,
+        container: ServiceContainer,
         session: DbSession,
         relays: RelayService,
         fake_controller: _Settling,
+        project: Project,
         work_item: models.Session,
         turn: Turn,
+        engine_events: list[EngineEvent],
     ) -> None:
-        fake_controller.set_status(ENV, "error")
+        """P-46 as D2 rules it (V15): a fourth stop made elsewhere, the slot
+        open at once."""
+        fake_controller.set_status(ENV, "starting")
+        fake_controller.script = ["starting", "error"]
+        opened = _opened(relays)
+        engine_events.clear()
 
-        with pytest.raises(ExternalServiceException, match="settled error"):
-            _relay(relays, work_item)
+        _relay(relays, work_item)
 
-        assert turn.ended_at is None
-        assert work_item.state_code == SessionState.RUNNING
-        assert _servers(session, work_item) == []
+        [restarting, stop] = _servers(session, work_item)
+        assert restarting[1]["type"] == RESTARTING
+        assert [stop] == _stopped_by_its_environment(
+            work_item,
+            turn,
+            StopCause.ENVIRONMENT_ERROR,
+            f"environment {ENV} is in error",
+        )
+        work = container.timeline_service().work(work_item.id)
+        assert (work.state, work.stopped_cause, work.stopped_by) == (
+            SessionState.STOPPED,
+            StopCause.ENVIRONMENT_ERROR,
+            None,
+        )
+        assert opened.calls == 1
+        assert _row(session).stop_due_at is not None
+        assert ProjectChanged(project.id) in engine_events
 
 
 class TestInterrupt:

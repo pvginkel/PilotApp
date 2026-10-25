@@ -42,12 +42,13 @@ class HeldReason(StrEnum):
 class StopCause(StrEnum):
     """Why a work item stopped when its environment was stopped under its
     turn, a stop made elsewhere (design 2 §9.6; F71): it settled `stopped`,
-    it settled `deleting`, or the controller has it no longer. The `server`
-    record that ended the turn holds it."""
+    it settled `deleting`, the controller has it no longer, or it settled
+    `error`. The `server` record that ended the turn holds it."""
 
     ENVIRONMENT_STOPPED = "environment_stopped"
     ENVIRONMENT_DELETING = "environment_deleting"
     ENVIRONMENT_GONE = "environment_gone"
+    ENVIRONMENT_ERROR = "environment_error"
 
 
 ItemForm = Literal["prose", "work", "wait"]
@@ -260,7 +261,10 @@ class LineStepSchema(BaseModel):
 
     tool: str | None = Field(description="The call's `name`", examples=["Read"])
     input: Any = Field(
-        description="The call's `input`, as the line has it",
+        description=(
+            "The call's `input`, as the line has it; null while it streams in, "
+            "before the call's line"
+        ),
         examples=[{"file_path": "/work/Camp/plan.json"}],
     )
 
@@ -370,8 +374,8 @@ class WorkSchema(BaseModel):
         description=(
             "Why it stopped when its environment was stopped under it, a stop "
             "made elsewhere, which its stopped line and its session log's tail "
-            "say: stopped, being deleted, or gone; null when someone stopped "
-            "it, and unless `state` is `stopped` (F26.1, F69.2, F71)"
+            "say: stopped, being deleted, gone, or in error; null when someone "
+            "stopped it, and unless `state` is `stopped` (F26.1, F69.2, F71)"
         )
     )
 

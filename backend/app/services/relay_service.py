@@ -121,10 +121,13 @@ told to stop waits again until it settles."""
 
 _TURN_IN_FLIGHT = ("busy", "interrupting")
 
-_STOP_CAUSES = {
-    "stopped": StopCause.ENVIRONMENT_STOPPED,
-    "deleting": StopCause.ENVIRONMENT_DELETING,
+_STOPS: dict[str, tuple[StopCause, str]] = {
+    "stopped": (StopCause.ENVIRONMENT_STOPPED, "is stopped"),
+    "deleting": (StopCause.ENVIRONMENT_DELETING, "is deleting"),
+    "error": (StopCause.ENVIRONMENT_ERROR, "is in error"),
 }
+"""A settled status that stops a turn's Session, its Stop Cause and the words
+of its reason."""
 
 _TURN_FAILED = "The turn ended in an error"
 
@@ -595,12 +598,9 @@ class RelayService:
         """Wait until the turn's environment settles `running` (§9.6), or the
         loop is told to stop. While it reads `provisioning` or `starting`, as a
         restart reads, the running Session's line says it restarts. One that
-        settles `stopped` or `deleting`, or is gone, was stopped elsewhere: the
-        turn ends there, and the Session stops.
-
-        Raises:
-            ExternalServiceException: It settled `error`
-        """
+        settles `stopped`, `deleting` or `error`, or is gone, was stopped
+        elsewhere: the turn ends there, and the Session stops. A Resume starts
+        one in `error` again, KubeCoder's way out of it."""
         env_id = opening.env_id
         logger.info("Environment %s is not running: waiting for it to settle", env_id)
         # The first read answers at once, so the line says so from the start.
@@ -621,22 +621,16 @@ class RelayService:
             match environment.status:
                 case "running":
                     return
-                case "stopped" | "deleting":
+                case "stopped" | "deleting" | "error":
+                    cause, state = _STOPS[environment.status]
                     self._stopped_elsewhere(
-                        opening,
-                        _STOP_CAUSES[environment.status],
-                        f"environment {env_id} is {environment.status}",
+                        opening, cause, f"environment {env_id} {state}"
                     )
                     return
                 case "provisioning" | "starting":
                     self._restarting(opening)
                 case "stopping":
                     pass
-                case _:
-                    raise ExternalServiceException(
-                        f"relay a turn in environment {env_id}",
-                        f"the environment settled {environment.status}",
-                    )
 
     def _restarting(self, opening: _Opening) -> None:
         """The running Session's line, and a `server` record of the Turn in

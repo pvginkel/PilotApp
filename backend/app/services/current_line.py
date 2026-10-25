@@ -4,7 +4,8 @@ DB assertion 221).
 The keys: `state`, one of `starting`, `thinking`, `writing` (a main-thread text
 block under way), `working` (a tool call without its result yet) and `waiting`
 (a sub-agent running); `since`, when that state began, or the latest step did;
-`step`, the latest tool call's `tool` and `input`, absent before the first;
+`step`, the latest tool call's `tool` and `input`, absent before the first, its
+`input` None while it streams in, until the call's line fills it in;
 `agent`, the sub-agent's `type` and `description` while `waiting`; `text`, the
 latest `server` record's words while `starting`.
 
@@ -57,11 +58,12 @@ def after_partial(
     previous: CurrentLine | None, line: dict[str, Any], at: datetime
 ) -> CurrentLine | None:
     """The current line once the forwarded partial `line` arrived at `at`; None
-    when it leaves the state as it is."""
-    state = _implied_by_partial(line)
-    if state is None or (previous is not None and previous["state"] == state):
+    when it leaves the line as it is."""
+    state, step = _implied_by_partial(line)
+    if state is None:
         return None
-    return _rebuilt(previous, state, at, None, None)
+    current = _rebuilt(previous, state, at, step, None)
+    return None if current == previous else current
 
 
 def _rebuilt(
@@ -73,7 +75,7 @@ def _rebuilt(
 ) -> CurrentLine:
     before = previous or {}
     moved = before.get("state") != state or (
-        step is not None and step != before.get("step")
+        step is not None and not _same_call(before.get("step"), step)
     )
     current: CurrentLine = {
         "state": state,
@@ -87,6 +89,14 @@ def _rebuilt(
         if agent is not None:
             current["agent"] = agent
     return current
+
+
+def _same_call(before: dict[str, Any] | None, step: dict[str, Any]) -> bool:
+    """Whether `step` is the step `before`: the same, or the call whose input
+    streamed in, its input filled in by its line."""
+    return before is not None and (
+        before == step or (before["input"] is None and before["tool"] == step["tool"])
+    )
 
 
 def _implied_by_line(
@@ -126,20 +136,23 @@ def _implied_by_line(
     return None, None, None
 
 
-def _implied_by_partial(line: dict[str, Any]) -> LineState | None:
-    """The state a forwarded partial implies: a main-thread block's start or a
-    text delta."""
+def _implied_by_partial(
+    line: dict[str, Any],
+) -> tuple[LineState | None, dict[str, Any] | None]:
+    """The state a forwarded partial implies — a main-thread block's start or
+    a text delta — and the tool call whose input starts streaming in, with no
+    input yet."""
     event = line.get("event")
     if not isinstance(event, dict):
-        return None
+        return None, None
     if event.get("type") == "content_block_delta":
-        return "writing"
+        return "writing", None
     block = event.get("content_block")
     kind = block.get("type") if isinstance(block, dict) else None
     if kind == "text":
-        return "writing"
+        return "writing", None
     if kind in _THINKING_BLOCKS:
-        return "thinking"
-    if kind in _TOOL_BLOCKS:
-        return "working"
-    return None
+        return "thinking", None
+    if isinstance(block, dict) and kind in _TOOL_BLOCKS:
+        return "working", {"tool": block.get("name"), "input": None}
+    return None, None
