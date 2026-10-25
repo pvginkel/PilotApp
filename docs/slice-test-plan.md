@@ -190,7 +190,9 @@ and only that, before it runs again: step 1's seed recreates the database step 8
    `ENVIRONMENT_DELETE_AFTER_SECONDS=300` shorten the shutdown timer and the delete timer to fit the
    check. `CONTROLLER_CA_FILE` stays unset: the `modern-app` container's `REQUESTS_CA_BUNDLE` is the
    system bundle, which holds the homelab root. The dev seed goes in first, for the person the
-   check's projects are made by:
+   check's projects are made by, and the operator's environments of the repository, those no client
+   manages, are read with their name, status and `updatedAt`, which moves on every pod start, for
+   step 7 to read again:
 
    ```bash
    cexec modern-app sh -c 'cd backend && uv run cli load-test-data --yes-i-am-sure'
@@ -200,6 +202,9 @@ and only that, before it runs again: step 1's seed recreates the database step 8
    fi
    DB=$(sed -n 's/^DATABASE_URL=postgresql+psycopg:/postgresql:/p' tmp/fleet/env.orig 2>/dev/null | tail -1)
    echo "${DB:-postgresql://postgres:postgres@localhost:5432/pilot}" > tmp/fleet/db
+   curl -s -m 15 -G -H "Authorization: Bearer $PILOT_DEV_CONTROLLER_TOKEN" https://kubecoder-dev.home/environments --data-urlencode repo=pvginkel/KubeCoderTestRepo |
+     python3 -c 'import json, sys; sys.stdout.writelines(" ".join(str(e[k]) for k in ("envId", "name", "status", "updatedAt")) + "\n" for e in json.load(sys.stdin)["items"] if e["managedBy"] is None)' |
+     sort | tee tmp/fleet/operators-before                                             # the operator's, about twelve
    { echo; echo FLASK_ENV=testing; echo CONTROLLER_URL=https://kubecoder-dev.home
      printf 'CONTROLLER_TOKEN=%s\n' "$PILOT_DEV_CONTROLLER_TOKEN"
      echo ENVIRONMENT_STOP_AFTER_SECONDS=60; echo ENVIRONMENT_DELETE_AFTER_SECONDS=300; } >> backend/.env
@@ -403,6 +408,27 @@ and only that, before it runs again: step 1's seed recreates the database step 8
    environment` line between those and the take is the shutdown timer's stop of a free one, which
    the take allows. No `Stopped environment` line after the second turn, no `Deleted environment`
    line within the 7 minutes, or a row other than `gone`, fails this step, a finding.
+
+   The operator's environments are read again as step 1 read them, and Pilot's log, which names
+   each environment Pilot takes, creates, starts, resets, stops or deletes, searched for their ids:
+
+   ```bash
+   curl -s -m 15 -G -H "Authorization: Bearer $PILOT_DEV_CONTROLLER_TOKEN" https://kubecoder-dev.home/environments --data-urlencode repo=pvginkel/KubeCoderTestRepo |
+     python3 -c 'import json, sys; sys.stdout.writelines(" ".join(str(e[k]) for k in ("envId", "name", "status", "updatedAt")) + "\n" for e in json.load(sys.stdin)["items"] if e["managedBy"] is None)' |
+     sort > tmp/fleet/operators-after
+   python3 - <<'PY'
+   before, after = (set(open(f"tmp/fleet/operators-{when}")) for when in ("before", "after"))
+   log = open("logs/backend.log").read()
+   ids = {line.split()[0] for line in before | after}
+   print("operator's", len(before), "| changed:", sorted({line.split()[0] for line in before ^ after}))
+   print("named in Pilot's log:", sorted(i for i in ids if i in log))
+   PY
+   ```
+
+   Both lists `[]`. An id the log names fails the check, a finding: Pilot acted on an environment it
+   did not create. One changed that the log does not name was changed by someone else, the operator
+   or KubeCoder's own timers, whose pick takes only environments no client manages, and is no
+   finding.
 
 8. **The backend put back, and what the check created deleted**, whatever happened before:
    `backend/.env`'s original bytes written back and the backend restarted on them, which ends the
