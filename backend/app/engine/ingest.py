@@ -382,7 +382,8 @@ def _kind(document: Document, item: Item | None) -> dsl.DocumentKind:
 
 
 def _published(document: Document) -> str:
-    # Every document is born published.
+    # Every document but a registered one is born published, and a registered
+    # one has a file in the tree to save only once it has its text.
     assert document.published_text is not None
     return document.published_text
 

@@ -255,6 +255,7 @@ def _file(rendering: Rendering) -> TreeFile:
 
 def _tree_hash(document: Document, held: bool) -> str:
     tree_hash = document.ingested_hash if held else document.published_hash
-    # Every document is born published, and a held save has its ingest.
+    # A document with no text, a registered one before its read, has no file
+    # in the tree, and a held save has its ingest.
     assert tree_hash is not None
     return tree_hash

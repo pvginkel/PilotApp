@@ -662,7 +662,8 @@ def _block(
 
 
 def _published(document: Document) -> str:
-    # Every document is born published.
+    # Every document but a registered one is born published, and a registered
+    # one with no text has no blocks and is a review, which Done does not take.
     assert document.published_text is not None
     return document.published_text
 
