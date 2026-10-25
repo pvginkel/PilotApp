@@ -93,7 +93,7 @@
   /* A kind's icon hangs from the text's baseline, as an inline icon does, whatever the font. */
   .item-head .kind .icon { position: relative; top: calc(0.5em - 0.5cap); }
   .item.urgent .item-head .kind { color: hsl(var(--urgent-text)); }
-  .item-head .sep { opacity: 0.5; }
+  .item-head .sep { opacity: 0.75; }
   .chip.for { background: hsl(330 60% 50% / 0.12); color: hsl(330 55% 38%); }
   :root[data-theme="dark"] .chip.for { color: hsl(330 70% 78%); }
   .chip.urgent { background: hsl(var(--urgent) / 0.15); color: hsl(var(--urgent-text)); font-weight: 600; }
