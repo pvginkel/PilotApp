@@ -52,6 +52,7 @@ from app.services.testing_service import TestingService
 from app.services.testing_sync_service import TestingSyncService
 from app.services.timeline_service import TimelineService
 from app.services.turn_end_read_service import TurnEndReadService
+from app.services.write_back_service import WriteBackService
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
 from app.utils.temp_file_manager import TempFileManager
 
@@ -344,9 +345,22 @@ class ServiceContainer(containers.DeclarativeContainer):
     record_service = providers.Factory(
         RecordService,
         db=db_session,
+        engine_bus=engine_bus,
         document_service=document_service,
         view_service=view_service,
     )
+
+    # The write-back of a closed registered document to its file (F65.1);
+    # its job registers on the supervisor, and it hears the engine's bus,
+    # when built, before STARTUP.
+    write_back_service = providers.Singleton(
+        WriteBackService,
+        container=__self__,
+        supervisor=supervisor,
+        session_streams=session_stream_service,
+        engine_bus=engine_bus,
+    )
+    register_for_background_startup(lambda c: c.write_back_service())
 
     # The store's sync: the gate and the wire side of the engine (design 1 §5)
     sync_service = providers.Factory(

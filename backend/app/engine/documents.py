@@ -205,6 +205,20 @@ class DocumentService:
         self.db.flush()
         self.engine_bus.emit(ProjectChanged(project.id))
 
+    def wrote_back(self, document: Document) -> None:
+        """A closed registered document's text, the answers in it, written to
+        the file it was registered from (F65.1)."""
+        document.written_back_at = datetime.now(UTC)
+        self.db.flush()
+
+    def refuse_write_back(self, document: Document) -> None:
+        """The controller refused to write a closed registered document's text
+        to its file, for what is wrong with the file, its path or its
+        environment: it is not written again until the document's next
+        close."""
+        document.write_back_refused_at = datetime.now(UTC)
+        self.db.flush()
+
     def lock(self, document: Document) -> None:
         """Hold the document's row until the transaction ends, so that two
         writes of one document never interleave (TD §8.5), and re-read the

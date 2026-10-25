@@ -8,7 +8,9 @@ Each is a write of the caller's transaction, under the document's row lock
 its item's. A write that touches the text splices it into the published text
 and publishes it, whether or not the path's latest save is held: the tree
 keeps the agent's ingest then, and the next clean save's merge carries the
-write to the file (design 1 §5.2, §7). No write raises *modified*.
+write to the file (design 1 §5.2, §7). No write raises *modified*. A close
+of a registered document owes its text to the file it was registered from,
+written back once the transaction commits (F65.1).
 """
 
 import uuid
@@ -18,6 +20,7 @@ from sqlalchemy import ColumnElement, and_, exists, select
 from sqlalchemy.orm import Session
 
 from app.engine import dsl
+from app.engine.bus import EngineBus, WriteBackOwed
 from app.engine.documents import (
     DOCUMENT,
     OPENING,
@@ -56,10 +59,12 @@ class RecordService:
     def __init__(
         self,
         db: Session,
+        engine_bus: EngineBus,
         document_service: DocumentService,
         view_service: ViewService,
     ) -> None:
         self.db = db
+        self.engine_bus = engine_bus
         self.document_service = document_service
         self.view_service = view_service
 
@@ -121,7 +126,7 @@ class RecordService:
                 to=to,
             ),
         )
-        self._done_by_its_answer(project, item, blocks, user, at)
+        self._done_by_its_answer(project, item, document, blocks, user, at)
 
     def done_action(
         self,
@@ -159,13 +164,15 @@ class RecordService:
                 _published(document), local_id, by=user.handle, at=at, note=_value(note)
             ),
         )
-        self._done_by_its_answer(project, item, blocks, user, at)
+        self._done_by_its_answer(project, item, document, blocks, user, at)
 
     def undo(self, item: Item) -> None:
         """Undo of a done prose item while no session has consumed it, its
         Done Cause offers it (DB 164, F14.1) and its project is not finished
         (D028): its done cleared, and on a one-ask item its block's answer
-        with it, an answer of Pilot's it replaced not restored (decision 6).
+        with it, an answer of Pilot's it replaced not restored (decision 6); a
+        registered document's write-back of that close with it, so that its
+        next close writes it again (F65.1).
 
         The project's row is held shared before the document's, so that
         Finish and Reopen, which change the project's state under its row
@@ -200,6 +207,8 @@ class RecordService:
         item.done_at = None
         item.done_cause_code = None
         item.done_by_user_id = None
+        document.written_back_at = None
+        document.write_back_refused_at = None
         self.view_service.timeline_moved(project)
 
     def offers_undo(self, item: Item) -> bool:
@@ -254,7 +263,7 @@ class RecordService:
             if text != document.published_text:
                 self.document_service.publish(document, text)
         self.document_service.cut_version(document, VersionCause.DONE)
-        self._mark(project, item, cause, user, at)
+        self._mark(project, item, document, cause, user, at)
 
     def read(self, item: Item, user: User) -> None:
         """Read on a notice: the item's mark, the text untouched."""
@@ -368,7 +377,7 @@ class RecordService:
                 operation, f"a {item.kind_code} item is not marked {mark}"
             )
         _not_done(item, operation)
-        self._mark(project, item, MARKED, user, _now())
+        self._mark(project, item, document, MARKED, user, _now())
 
     def _undo_refusal(self, item: Item) -> str | None:
         """Why a prose item takes no undo now, or none."""
@@ -404,21 +413,61 @@ class RecordService:
         self,
         project: Project,
         item: Item | None,
+        document: Document,
         blocks: tuple[dsl.Block, ...],
         user: User,
         at: datetime,
     ) -> None:
         """A one-ask item, done when its one block is answered (F32.3)."""
         if item is not None and len(blocks) == 1:
-            self._mark(project, item, ANSWERED, user, at)
+            self._mark(project, item, document, ANSWERED, user, at)
 
     def _mark(
-        self, project: Project, item: Item, cause: str, user: User, at: datetime
+        self,
+        project: Project,
+        item: Item,
+        document: Document,
+        cause: str,
+        user: User,
+        at: datetime,
     ) -> None:
         item.done_at = at
         item.done_cause_code = cause
         item.done_by_user_id = user.id
         self.view_service.timeline_moved(project)
+        if owes_write_back(item, document):
+            # A registered document is its Session's.
+            assert item.created_by_session_id is not None
+            self.engine_bus.emit(WriteBackOwed(item.created_by_session_id))
+
+
+def owes_write_back(item: Item, document: Document) -> bool:
+    """Whether the document is a registered one whose text, the answers in it,
+    is owed to the file it was registered from (F65.1): closed by a person or
+    by Pilot, Finish's close owing none (review 4); with a text, which one
+    whose read failed has not (ruling D1); and neither written back nor
+    refused since that close."""
+    return (
+        document.source_path is not None
+        and document.published_text is not None
+        and item.done_at is not None
+        and item.done_cause_code != FINISHED
+        and document.written_back_at is None
+        and document.write_back_refused_at is None
+    )
+
+
+def write_back_owed() -> ColumnElement[bool]:
+    """`owes_write_back` as a query's condition on a Document joined to its
+    Item."""
+    return and_(
+        Document.source_path.is_not(None),
+        Document.published_text.is_not(None),
+        Item.done_at.is_not(None),
+        Item.done_cause_code != FINISHED,
+        Document.written_back_at.is_(None),
+        Document.write_back_refused_at.is_(None),
+    )
 
 
 def _open_in(project: Project) -> ColumnElement[bool]:

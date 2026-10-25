@@ -16,8 +16,9 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.database import scoped_session
-from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved
+from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved, WriteBackOwed
 from app.engine.paths import sha256_hex
+from app.engine.record import owes_write_back, write_back_owed
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.extensions import db
 from app.models import (
@@ -1710,6 +1711,234 @@ class TestRecordServiceFailedRead:
 
         assert _done(failed) == (None, None, None)
         assert document.published_text is None
+
+
+REGISTERED_PATH = "/work/Example/refinement.md"
+
+
+def _registered(
+    session: DbSession,
+    container: ServiceContainer,
+    project: Project,
+    project_session: models.Session,
+    text: str,
+    path: str = REGISTERED_PATH,
+) -> tuple[Item, Document]:
+    """A document `project_session` registered, read at the end of its run."""
+    documents = container.document_service()
+    item = documents.register(project, project_session, path).item
+    document = session.get_one(Document, item.id)
+    documents.publish_read(document, text, project_session.id)
+    return item, document
+
+
+def _owed_events(events: list[EngineEvent]) -> list[EngineEvent]:
+    return [event for event in events if isinstance(event, WriteBackOwed)]
+
+
+class TestRecordServiceWriteBackOwed:
+    """A close of a registered document owes its text, the answers in it, to
+    its file once it commits (F65.1); Finish's close owes none (review 4)."""
+
+    @pytest.mark.parametrize(
+        ("text", "close"),
+        [
+            pytest.param(RECOMMENDED, "done", id="done"),
+            pytest.param(DECISION, "answer", id="the-answer-that-closes-it"),
+            pytest.param(ACTION, "done_action", id="the-done-that-closes-it"),
+            pytest.param(NOTICE, "reviewed", id="reviewed"),
+        ],
+    )
+    def test_a_close_owes_its_write_back_once_it_commits(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        project_session: models.Session,
+        person: User,
+        text: str,
+        close: str,
+    ) -> None:
+        item, document = _registered(session, container, project, project_session, text)
+        records = container.record_service()
+
+        with scoped_session(container):
+            if close == "answer":
+                records.answer(document, "D1", person, "Tunnel")
+            elif close == "done_action":
+                records.done_action(document, "A1", person)
+            else:
+                getattr(records, close)(item, person)
+            assert _owed_events(engine_events) == []
+
+        assert item.done_at is not None
+        assert owes_write_back(item, document)
+        assert _owed_events(engine_events) == [WriteBackOwed(project_session.id)]
+
+    def test_an_answer_that_leaves_it_open_owes_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        item, document = _registered(
+            session, container, project, project_session, TWO_ASKS
+        )
+
+        with scoped_session(container):
+            container.record_service().answer(document, "D1", person, "Dome")
+
+        assert not owes_write_back(item, document)
+        assert _owed_events(engine_events) == []
+
+    def test_finishs_close_owes_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        item, document = _registered(
+            session, container, project, project_session, DECISION
+        )
+
+        with scoped_session(container):
+            container.record_service().close_unanswered(project, person, FINISH)
+
+        assert item.done_cause_code == "finished"
+        assert not owes_write_back(item, document)
+        assert _owed_events(engine_events) == []
+
+    def test_a_document_whose_read_failed_owes_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        documents = container.document_service()
+        item = documents.register(project, project_session, REGISTERED_PATH).item
+        document = session.get_one(Document, item.id)
+        documents.fail_read(document)
+
+        with scoped_session(container):
+            container.record_service().reviewed(item, person)
+
+        assert item.done_at is not None
+        assert not owes_write_back(item, document)
+        assert _owed_events(engine_events) == []
+
+    def test_a_document_pilot_added_owes_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        item, document = _bear(
+            session,
+            container,
+            project,
+            project_session,
+            "decision",
+            "Which tent?",
+            DECISION,
+        )
+
+        with scoped_session(container):
+            container.record_service().answer(document, "D1", person, "Tunnel")
+
+        assert item.done_at is not None
+        assert not owes_write_back(item, document)
+        assert _owed_events(engine_events) == []
+
+    @pytest.mark.parametrize("outcome", ["wrote_back", "refuse_write_back"])
+    def test_undo_clears_its_write_back_and_its_next_close_owes_it_again(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        project_session: models.Session,
+        person: User,
+        outcome: str,
+    ) -> None:
+        item, document = _registered(
+            session, container, project, project_session, DECISION
+        )
+        records = container.record_service()
+        records.answer(document, "D1", person, "Tunnel")
+        getattr(container.document_service(), outcome)(document)
+        assert not owes_write_back(item, document)
+
+        records.undo(item)
+
+        assert (document.written_back_at, document.write_back_refused_at) == (
+            None,
+            None,
+        )
+        assert not owes_write_back(item, document)
+        with scoped_session(container):
+            records.answer(document, "D1", person, "Dome")
+        assert owes_write_back(item, document)
+        assert _owed_events(engine_events) == [WriteBackOwed(project_session.id)]
+
+    def test_the_querys_condition_names_the_documents_owed(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        records = container.record_service()
+        documents = container.document_service()
+        made: list[tuple[Item, Document]] = []
+        for number in range(5):
+            made.append(
+                _registered(
+                    session,
+                    container,
+                    project,
+                    project_session,
+                    DECISION,
+                    f"/work/Example/doc-{number}.md",
+                )
+            )
+        (owed, _), (_, written), (_, refused) = made[:3]
+        for _, document in made[:3]:
+            records.answer(document, "D1", person, "Tunnel")
+        documents.wrote_back(written)
+        documents.refuse_write_back(refused)
+        # The fourth stays open; Finish closes it, and the fifth with it.
+        records.answer(made[4][1], "D1", person, "Dome")
+        records.undo(made[4][0])
+        records.close_unanswered(project, person, FINISH)
+
+        named = session.scalars(
+            select(Document.id)
+            .join(Item, Item.id == Document.id)
+            .where(write_back_owed())
+        ).all()
+
+        assert named == [owed.id]
+        assert [owes_write_back(item, document) for item, document in made] == [
+            True,
+            False,
+            False,
+            False,
+            False,
+        ]
 
 
 class TestRecordServiceCloseUnanswered:

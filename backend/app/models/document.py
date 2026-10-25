@@ -59,6 +59,14 @@ class Document(db.Model):  # type: ignore[name-defined]
             " OR (source_path IS NOT NULL AND published_text IS NULL)",
             name="ck_documents_read_failed",
         ),
+        # A refused write-back is of a registered document's text, in place
+        # of its being written back (F65.1).
+        CheckConstraint(
+            "write_back_refused_at IS NULL"
+            " OR (source_path IS NOT NULL AND published_text IS NOT NULL"
+            " AND written_back_at IS NULL)",
+            name="ck_documents_write_back_refused",
+        ),
         CheckConstraint(
             "(ingested_text IS NULL) = (ingested_hash IS NULL)"
             " AND (ingested_text IS NULL) = (ingested_at IS NULL)"
@@ -117,6 +125,9 @@ class Document(db.Model):  # type: ignore[name-defined]
     source_path: Mapped[str | None] = mapped_column(Text)
     read_failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     written_back_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    write_back_refused_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     project_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("projects.id"))
     role_code: Mapped[DocumentRole | None] = mapped_column(DOCUMENT_ROLE)
 

@@ -72,6 +72,15 @@ class WorkMoved(EngineEvent):
 
 
 @dataclass(frozen=True)
+class WriteBackOwed(EngineEvent):
+    """A document the Session `session_id` registered was closed, by a person
+    or by Pilot: its text, the answers in it, is owed to the file it was
+    registered from (F65.1). Finish's close owes none (review 4)."""
+
+    session_id: uuid.UUID
+
+
+@dataclass(frozen=True)
 class ManifestChanged(EngineEvent):
     """The set of syncing projects changed (design 1 §5.4, decision 24): the
     manifest lists other folders."""

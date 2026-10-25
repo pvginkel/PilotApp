@@ -1065,6 +1065,72 @@ class TestDocumentServiceFailRead:
             documents.fail_read(document)
 
 
+class TestDocumentServiceWriteBack:
+    """A closed registered document's write-back to its file: written, or
+    refused (F65.1)."""
+
+    @pytest.fixture
+    def registered(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> Document:
+        """A document `project_session` registered, read at its run's end."""
+        documents = container.document_service()
+        item = documents.register(project, project_session, REGISTERED_PATH).item
+        document = session.get_one(Document, item.id)
+        documents.publish_read(document, QUESTION, project_session.id)
+        return document
+
+    def test_wrote_back_says_when(
+        self, container: ServiceContainer, registered: Document
+    ) -> None:
+        before = datetime.now(UTC)
+
+        container.document_service().wrote_back(registered)
+
+        assert registered.written_back_at is not None
+        assert before <= registered.written_back_at <= datetime.now(UTC)
+        assert registered.write_back_refused_at is None
+
+    def test_refuse_write_back_says_when(
+        self, container: ServiceContainer, registered: Document
+    ) -> None:
+        before = datetime.now(UTC)
+
+        container.document_service().refuse_write_back(registered)
+
+        assert registered.write_back_refused_at is not None
+        assert before <= registered.write_back_refused_at <= datetime.now(UTC)
+        assert registered.written_back_at is None
+
+    def test_a_document_written_back_has_no_refused_write_back(
+        self, container: ServiceContainer, registered: Document
+    ) -> None:
+        documents = container.document_service()
+        documents.wrote_back(registered)
+
+        with pytest.raises(IntegrityError, match="ck_documents_write_back_refused"):
+            documents.refuse_write_back(registered)
+
+    def test_a_document_with_no_text_has_no_refused_write_back(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        documents = container.document_service()
+        item = documents.register(project, project_session, REGISTERED_PATH).item
+        document = session.get_one(Document, item.id)
+        documents.fail_read(document)
+
+        with pytest.raises(IntegrityError, match="ck_documents_write_back_refused"):
+            documents.refuse_write_back(document)
+
+
 class TestDocumentServicePublish:
     def test_publish_sets_the_published_text_and_cuts_no_version(
         self, session: DbSession, container: ServiceContainer, project: Project
