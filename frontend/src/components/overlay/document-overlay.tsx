@@ -10,7 +10,9 @@
  * (F28.4). Opened at a block, it goes to the block once it draws it (F33). Its attachments stand
  * between the lead and the text, each opening, at its address under the document's, in place of
  * the document, with an arrow back to it (F28.3, F28.5). A read that fails, or finds no document
- * of the project, reads "The document did not load" (F113).
+ * of the project, reads "The document did not load" (F113), and so does a registered document
+ * with no text — before its file is read at its run's end, or after that read failed — under its
+ * head, its foot Reviewed once that read was made (F85.1, ruling D1).
  */
 
 import type { ReactNode } from 'react';
@@ -48,19 +50,22 @@ export function DocumentOverlay({ projectId, project, documentId, block, attachm
   const close = () => void navigate({ to: '/projects/$projectId', params: { projectId } });
   const { data, error } = useItemDocument(documentId);
   // An address may name an item of another project, or the opening, which has no text.
-  const item = data !== undefined && data.project_id === projectId && data.body !== null ? data : undefined;
-  const failed = error !== null || (data !== undefined && item === undefined);
+  const own = data !== undefined && data.project_id === projectId ? data : undefined;
+  const item = own !== undefined && own.body !== null ? own : undefined;
+  const textless = own !== undefined && own.body === null && own.file_name !== null ? own : undefined;
+  const headed = item ?? textless;
+  const failed = error !== null || (data !== undefined && headed === undefined);
   if (attachment !== null) {
-    const shown = item && attachmentIn(item, attachment);
+    const shown = headed && attachmentIn(headed, attachment);
     return (
       <Overlay
         showing={`attachment ${attachment}`}
         back={<Back projectId={projectId} documentId={documentId} />}
-        titles={item && shown && <AttachmentTitles item={item} attachment={shown} />}
+        titles={headed && shown && <AttachmentTitles item={headed} attachment={shown} />}
         foot={null}
         onClose={close}
       >
-        {failed || (item !== undefined && shown === undefined) ? <DidNotLoad /> : shown && <AttachmentBody attachment={shown} />}
+        {failed || (headed !== undefined && shown === undefined) ? <DidNotLoad /> : shown && <AttachmentBody attachment={shown} />}
       </Overlay>
     );
   }
@@ -68,11 +73,11 @@ export function DocumentOverlay({ projectId, project, documentId, block, attachm
     <Overlay
       showing={documentId}
       at={block === null ? null : { item: documentId, block }}
-      titles={item && <Titles item={item} project={project} />}
-      foot={item && footOf(item, handle, close)}
+      titles={headed && <Titles item={headed} project={project} />}
+      foot={headed && footOf(headed, handle, close)}
       onClose={close}
     >
-      {failed ? <DidNotLoad /> : item && <Body item={item} />}
+      {failed || textless !== undefined ? <DidNotLoad /> : item && <Body item={item} />}
     </Overlay>
   );
 }
@@ -150,7 +155,10 @@ function asDone(item: ItemDocument): boolean {
   return item.done?.cause === 'marked' || item.done?.cause === 'settled';
 }
 
-/** What stands in the foot: how it was done, or what marks it done; for a one-ask item or a notice, nothing. */
+/**
+ * What stands in the foot: how it was done, or what marks it done; for a one-ask item, a notice
+ * or a registered document awaiting its read, nothing.
+ */
 function footOf(item: ItemDocument, myHandle: string, onSent: () => void): ReactNode {
   if (item.done !== null) {
     const { at, by } = item.done;
@@ -163,6 +171,7 @@ function footOf(item: ItemDocument, myHandle: string, onSent: () => void): React
     );
   }
   if (item.kind === 'review') {
+    if (item.awaiting_read) return null;
     return (
       <>
         <span className="grow" />

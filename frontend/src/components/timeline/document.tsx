@@ -13,7 +13,9 @@
  * its count chips (F24.2), its segment bar, or for a text with no block "N min read", its
  * attachments, Open, which reads Continue while the document reads *Unsent*, and on a review
  * Reviewed (F25.2); Pilot's dots end it while Pilot writes. Open opens the overlay at the document's address, and a segment opens
- * it at its block's (F33, F97).
+ * it at its block's (F33, F97). A registered document has no text until its file is read at its
+ * run's end, nor after a read that failed: a review whose card titles it by its file's name, and
+ * which takes no Reviewed until that read is made (F85.1, ruling D1).
  */
 
 import { useContext, useState } from 'react';
@@ -84,16 +86,18 @@ export function DocumentCard({ item }: { item: TimelineItem }) {
           </p>
         )}
         <CountChips counts={countsOf(item)} />
-        <div className="progress">
-          {blocks.length > 0 ? (
-            <GoToContext.Provider value={openAt}>
-              <SegmentBar item={item} />
-            </GoToContext.Provider>
-          ) : (
-            // The API counts the words of every item it gives a text.
-            <span data-testid="timeline.item.read-time">{item.read_minutes!} min read</span>
-          )}
-        </div>
+        {item.body !== null && (
+          <div className="progress">
+            {blocks.length > 0 ? (
+              <GoToContext.Provider value={openAt}>
+                <SegmentBar item={item} />
+              </GoToContext.Provider>
+            ) : (
+              // The API counts the words of every item it gives a text.
+              <span data-testid="timeline.item.read-time">{item.read_minutes!} min read</span>
+            )}
+          </div>
+        )}
         <Attachments item={item} />
         <div className="item-actions">
           <Link
@@ -105,7 +109,7 @@ export function DocumentCard({ item }: { item: TimelineItem }) {
             <FileText className="icon" aria-hidden="true" />
             {isUnsent(item) ? 'Continue' : 'Open'}
           </Link>
-          {item.kind === 'review' && <Reviewed item={item} />}
+          {item.kind === 'review' && !item.awaiting_read && <Reviewed item={item} />}
         </div>
       </div>
       {item.writing && <PilotWriting />}

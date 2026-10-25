@@ -52,6 +52,10 @@ type ServerEvent =
   | { type: 'session-gone'; reason: string }
   /** The environment stopped under the Turn, a stop made elsewhere (F71, F69.2): the Turn's last record. */
   | { type: 'environment-stopped'; cause: StopCause; reason: string }
+  /** A document the session registered, its file not read at its run's end (ruling D1): it keeps no text. */
+  | { type: 'read-failed'; item: string; path: string; reason: string }
+  /** A document the session registered, closed, its file not written back (F65.1). */
+  | { type: 'write-back-refused'; item: string; path: string; reason: string }
   /** A `pilot-store` call changed the record (F41), so the client links without reading its result. */
   | { type: 'effect'; toolUseId: string; effect: Effect }
   /** The chat closed (F130.1). */

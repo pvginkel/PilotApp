@@ -8,7 +8,9 @@
  * unknown are left out, and so is a block whose text is empty.
  *
  * A record outside any Turn — the server's lines while the session comes up, a failed start —
- * falls in the Turn in flight, else in the next: the one numbered after the last. A Turn ends at
+ * falls in the Turn in flight, else in the next: the one numbered after the last. The server's word
+ * on a file the session registered — its read at the run's end failed, its write-back refused —
+ * is written after the run's last Turn ended, and stands at that Turn's end. A Turn ends at
  * its `result`, at a failed send or start, at the environment stopped under it, or, ended with no
  * record of it, where a later Turn's records begin; a call or a sub-agent still running then was
  * stopped with it.
@@ -51,7 +53,9 @@ export type Step =
   | { kind: 'text'; seq: number; text: string }
   | { kind: 'thinking'; seq: number; text: string; durationMs?: number }
   | { kind: 'tool'; seq: number; call: ToolCallView }
-  | { kind: 'error'; seq: number; text: string };
+  | { kind: 'error'; seq: number; text: string }
+  /** The server's word on a file the session registered. */
+  | { kind: 'notice'; seq: number; text: string };
 
 type TurnState = 'running' | 'done' | 'interrupted' | 'failed';
 
@@ -161,6 +165,10 @@ export function buildChatView(chatId: string, records: readonly ChatRecord[], { 
       turn = null;
       continue;
     }
+    if (r.kind === 'server' && (r.payload.type === 'read-failed' || r.payload.type === 'write-back-refused')) {
+      (turn ?? open(r)).steps.push({ kind: 'notice', seq: r.seq, text: fileNotice(r.payload) });
+      continue;
+    }
     const t = open(r);
     t.lastSeq = r.seq;
     t.lastAt = r.at;
@@ -243,6 +251,15 @@ export function buildChatView(chatId: string, records: readonly ChatRecord[], { 
   const latest = items.at(-1);
   if (!running && latest?.kind === 'turn' && latest.turn.state === 'running') end(latest.turn, 'done', latest.turn.lastAt);
   return items;
+}
+
+type FileEvent = Extract<ServerRecord['payload'], { type: 'read-failed' | 'write-back-refused' }>;
+
+/** What the server says of a registered document's file it could not read or write back: its path and the reason. */
+function fileNotice(event: FileEvent): string {
+  return event.type === 'read-failed'
+    ? `Could not read ${event.path} because ${event.reason}`
+    : `Could not write ${event.path} back because ${event.reason}`;
 }
 
 /** The steps a reply shows: all but its thinking, which the cue shows while it runs (ruling 2). */

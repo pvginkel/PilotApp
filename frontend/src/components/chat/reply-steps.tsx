@@ -188,6 +188,13 @@ export function ReplySteps({
               </StepLine>
             );
             break;
+          case 'notice':
+            body = (
+              <StepLine icon={<CircleAlert className="size-3.5" aria-hidden />} tone="error" className="whitespace-normal [&>span]:whitespace-normal">
+                {s.text}
+              </StepLine>
+            );
+            break;
         }
         return (
           <div

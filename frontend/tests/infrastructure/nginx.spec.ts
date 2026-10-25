@@ -129,6 +129,20 @@ test.describe('The production nginx', () => {
     }
   });
 
+  test('forwards no path under /tools/, the worker’s tool routes, to the backend, whatever its extension', () => {
+    const paths = [
+      '/tools/pilot-work/documents',
+      '/tools/pilot-work/attachments',
+      ...['js', 'css', 'png', 'jpg', 'jpeg', 'gif', 'ico', 'svg', 'json', 'JSON', 'html', 'txt'].map(
+        extension => `/tools/pilot-work/documents.${extension}`
+      ),
+    ];
+
+    for (const path of paths) {
+      expect(values(location(path), 'proxy_pass'), path).toEqual([]);
+    }
+  });
+
   test('has the browser revalidate every file of the root', () => {
     const files = readdirSync(resolve(frontendRoot, 'public'));
 

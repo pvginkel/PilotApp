@@ -5,7 +5,8 @@
  * (`Projects.environment()`); a spec drives them and their headless sessions through the fake's
  * verbs, POST /api/testing/controller/fake/<verb>, which take no sign-in. Pilot's headless sessions
  * in an environment are `claude-1`, `claude-2`, … in the order Pilot creates them there. The lines a
- * turn plays are the backend suite's invented ones (`rawTurn()`).
+ * turn plays are the backend suite's invented ones (`rawTurn()`). A process in an environment writes,
+ * deletes and reads its files as the controller's file endpoints serve them.
  *
  * The controller unreachable is a state the backend holds, which the gold bar reads (GET
  * /api/conditions): `outage()` returns once the backend reads it as asked. The fake's verbs that
@@ -122,6 +123,25 @@ export class Controller {
     const restarts = await this.conditions.fleetRestarts();
     await this.verb('drop-streams', {});
     if (!this.unanswered) await this.conditions.reconnected(restarts);
+  }
+
+  /** A process in the environment writes `content` as the file at `path`, whatever its status. */
+  async putFile(envId: string, path: string, content: string): Promise<void> {
+    await this.verb('put-file', { env_id: envId, path, content });
+  }
+
+  /** A process in the environment deletes the file at `path`. */
+  async removeFile(envId: string, path: string): Promise<void> {
+    await this.verb('remove-file', { env_id: envId, path });
+  }
+
+  /** The text of the file at `path` in the environment; null when there is none. */
+  async fileText(envId: string, path: string): Promise<string | null> {
+    const response = await this.page.request.post(`${this.backendUrl}/api/testing/controller/fake/file-text`, {
+      data: { env_id: envId, path },
+    });
+    expect([200, 204], await response.text()).toContain(response.status());
+    return response.status() === 204 ? null : ((await response.json()) as string);
   }
 
   /** The pod's containers restart: its sessions are gone, and the environment reads `starting` until `setStatus(envId, 'running')`. */

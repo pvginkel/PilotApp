@@ -1,0 +1,245 @@
+/**
+ * A document a work item's session registers (F85.1, F65): on the timeline from its registration,
+ * a review titled by its file's name, with no text and no close until the turn that ends its run
+ * has read it (review 7), then published as written, its title its text's, live. A read that
+ * fails keeps its file's name and no text: it opens to "The document did not load", closes with
+ * Reviewed, and its work item's session log says why (ruling D1). Its close is written back to
+ * its file, and the close that leaves none of the run's documents open continues the conversation
+ * as a new work item after the answered ones, from when Undo is gone from every document of the
+ * run (review 1); a write-back the controller refuses is in the run's session log, live, and fails
+ * that continuation's start with its reason (F125).
+ */
+
+import { test, expect } from '../support/fixtures';
+import type { Controller } from '../support/controller';
+import { makeUnique } from '../support/helpers';
+import type { People } from '../support/people';
+import type { Projects } from '../support/projects';
+import { documentAddress } from '../support/page-objects/overlay-page';
+
+const TITLE = 'Surveying the camp';
+
+// An invented line in `claude`'s shape (backend/tests/fixtures/raw/), naming its conversation, as
+// every line `claude` prints does, so that the continuation carries it on.
+const CONVERSATION = '7d2e4b91-3c5a-4f8e-b6d0-1a9c8e5f2b43';
+const text = (id: string, words: string) =>
+  JSON.stringify({
+    type: 'assistant',
+    message: { id: `msg_${id}`, content: [{ type: 'text', text: words }] },
+    parent_tool_use_id: null,
+    session_id: CONVERSATION,
+  });
+
+const SURVEY_PATH = '/work/Example/survey.md';
+const SURVEY = '# The survey\n\nNine of ten want the lake.\n';
+const PITCH_PATH = '/work/Example/pitch.md';
+const PITCH = '# Where do we pitch?\n\nThe lake or the hill.\n\n```question id=Q1\n```\n';
+
+interface Fixtures {
+  people: People;
+  projects: Projects;
+}
+
+/** A work item running in the environment its start created, in a project of the signed-in person's. */
+async function running({ people, projects }: Fixtures) {
+  const me = await people.signIn();
+  const project = await projects.make({ name: makeUnique('Registered'), members: [me.handle!] });
+  const work = await projects.startWork(project, { title: TITLE, brief: 'Survey the camp.', cwd: '/work/Example' });
+  await expect.poll(async () => (await projects.work(project, work)).state).toBe('running');
+  const { id: environment } = await projects.environment(project, work);
+  return { project, work, environment };
+}
+
+/** The session writes a file in its environment and registers it; answers the document's id. */
+async function registered(controller: Controller, projects: Projects, environment: string, work: string, path: string, content: string) {
+  await controller.putFile(environment, path, content);
+  return projects.register(work, path);
+}
+
+/** The work item's turn ends, and its run with it. */
+async function endRun(controller: Controller, environment: string) {
+  await controller.play(environment, 'claude-1', [text('wrote', 'The survey is written and registered.')]);
+  await controller.finish(environment, 'claude-1');
+}
+
+/** A `server` record the server writes of a registered document's file: the document, its path and the reason. */
+interface FileEvent {
+  type: 'read-failed' | 'write-back-refused';
+  item: string;
+  path: string;
+  reason: string;
+}
+
+/** The session's one `server` record of the type. */
+async function fileEvent(projects: Projects, sessionId: string, type: FileEvent['type']): Promise<FileEvent> {
+  const { records } = await projects.records(sessionId);
+  const found = records
+    .flatMap((record) => (record.kind === 'server' ? [record.payload as FileEvent] : []))
+    .filter((event) => event.type === type);
+  expect(found).toHaveLength(1);
+  return found[0];
+}
+
+/** The work item the run's documents continue in: the project's other one. */
+async function continuationOf(projects: Projects, project: string, work: string): Promise<string> {
+  const others = async () => (await projects.timeline(project)).items.filter((item) => item.kind === 'work' && item.id !== work);
+  await expect.poll(async () => (await others()).length).toBe(1);
+  return (await others())[0].id;
+}
+
+/** Returns once the continuation's session runs: its message sent on the run's conversation. */
+async function continued(projects: Projects, project: string, continuation: string): Promise<void> {
+  await expect.poll(async () => (await projects.work(project, continuation)).state).toBe('running');
+}
+
+test.describe('A registered document', () => {
+  test('shows its file’s name and takes no close, on its line or in the overlay, until its run’s end reads it, then its text’s title, live', async ({
+    people,
+    projects,
+    controller,
+    timeline,
+    overlay,
+    deploymentSse,
+  }) => {
+    const { project, work, environment } = await running({ people, projects });
+    const survey = await registered(controller, projects, environment, work, SURVEY_PATH, SURVEY);
+    const item = timeline.item(survey);
+
+    await overlay.open(project, survey);
+    await expect(overlay.title).toHaveText('survey.md');
+    await expect(overlay.failed).toHaveText('The document did not load.');
+    await expect(overlay.reviewed).toHaveCount(0);
+    await expect(overlay.send).toHaveCount(0);
+
+    await timeline.open(project);
+    await deploymentSse.ensureConnected();
+    await expect(item.root).toHaveAttribute('data-state', 'open');
+    await expect(item.title).toHaveText('survey.md');
+    await expect(item.card.open).toBeVisible();
+    await expect(item.card.reviewed).toHaveCount(0);
+    await expect(item.card.readTime).toHaveCount(0);
+
+    await endRun(controller, environment);
+    await expect(item.title).toHaveText('The survey');
+    await expect(item.card.readTime).toHaveText('1 min read');
+    await expect(item.card.reviewed).toBeVisible();
+    await expect(item.root).toHaveAttribute('data-state', 'open');
+  });
+
+  test('whose read at its run’s end fails keeps its file’s name and no text, opens to “The document did not load”, closes with Reviewed, and its session log says why', async ({
+    people,
+    projects,
+    controller,
+    timeline,
+    overlay,
+    sessionLog,
+    page,
+  }) => {
+    const { project, work, environment } = await running({ people, projects });
+    const survey = await registered(controller, projects, environment, work, SURVEY_PATH, SURVEY);
+    // The file is moved after it was registered.
+    await controller.removeFile(environment, SURVEY_PATH);
+    await endRun(controller, environment);
+    await expect.poll(async () => (await projects.item(project, survey)).awaiting_read).toBe(false);
+    const failure = await fileEvent(projects, work, 'read-failed');
+    expect(failure).toMatchObject({ item: survey, path: SURVEY_PATH });
+
+    await sessionLog.open(project, work);
+    await expect(sessionLog.notices).toHaveText([`Could not read ${SURVEY_PATH} because ${failure.reason}`]);
+
+    await timeline.open(project);
+    const item = timeline.item(survey);
+    await expect(item.title).toHaveText('survey.md');
+    await expect(item.card.readTime).toHaveCount(0);
+    await expect(item.card.summary).toHaveCount(0);
+    await item.card.open.click();
+    await expect(page).toHaveURL(documentAddress(project, survey));
+    await expect(overlay.title).toHaveText('survey.md');
+    await expect(overlay.failed).toHaveText('The document did not load.');
+    await expect(overlay.reviewed).toBeVisible();
+    await overlay.close.click();
+
+    await item.card.reviewed.click();
+    await expect(item.root).toHaveAttribute('data-state', 'done');
+    await expect(item.lineTitle).toHaveText('survey.md');
+    // A failed read is closed as the run's documents are: its close continues the conversation.
+    await continued(projects, project, await continuationOf(projects, project, work));
+  });
+
+  test('closed is written back to its file, and the last of its run’s to close continues the conversation as a new work item after them, Undo gone from every one of them', async ({
+    people,
+    projects,
+    controller,
+    timeline,
+    deploymentSse,
+  }) => {
+    const { project, work, environment } = await running({ people, projects });
+    const survey = await registered(controller, projects, environment, work, SURVEY_PATH, SURVEY);
+    const pitch = await registered(controller, projects, environment, work, PITCH_PATH, PITCH);
+    await endRun(controller, environment);
+    await expect.poll(async () => (await projects.item(project, pitch)).title).toBe('Where do we pitch?');
+    await timeline.open(project);
+    await deploymentSse.ensureConnected();
+    const surveyItem = timeline.item(survey);
+    const pitchItem = timeline.item(pitch);
+
+    // Undo stands while another document of the run is open, and its close writes it back again.
+    await surveyItem.card.reviewed.click();
+    await expect(surveyItem.root).toHaveAttribute('data-state', 'done');
+    await surveyItem.undo.click();
+    await expect(surveyItem.root).toHaveAttribute('data-state', 'open');
+    await surveyItem.card.reviewed.click();
+    await expect(surveyItem.root).toHaveAttribute('data-state', 'done');
+    await expect(surveyItem.undo).toBeVisible();
+
+    await pitchItem.block.answerField.fill('The lake');
+    await pitchItem.block.answerSend.click();
+    await expect(pitchItem.root).toHaveAttribute('data-state', 'done');
+    const continuation = await continuationOf(projects, project, work);
+    const continuationItem = timeline.item(continuation);
+    await expect(continuationItem.title).toHaveText(TITLE);
+    expect(await timeline.items.evaluateAll((items) => items.map((each) => each.getAttribute('data-item-id')))).toEqual([
+      work,
+      survey,
+      pitch,
+      continuation,
+    ]);
+    await expect(surveyItem.undo).toHaveCount(0);
+    await expect(pitchItem.undo).toHaveCount(0);
+
+    await continued(projects, project, continuation);
+    expect(await controller.fileText(environment, SURVEY_PATH)).toBe(SURVEY);
+    expect(await controller.fileText(environment, PITCH_PATH)).toContain('answer: The lake');
+  });
+
+  test('whose write-back the controller refuses says why in its session log, live, and fails the continuation’s start with the reason', async ({
+    people,
+    projects,
+    controller,
+    timeline,
+    sessionLog,
+  }) => {
+    const { project, work, environment } = await running({ people, projects });
+    const survey = await registered(controller, projects, environment, work, SURVEY_PATH, SURVEY);
+    await endRun(controller, environment);
+    await expect.poll(async () => (await projects.item(project, survey)).title).toBe('The survey');
+    // Its path is a folder by the time it is closed.
+    await controller.removeFile(environment, SURVEY_PATH);
+    await controller.putFile(environment, `${SURVEY_PATH}/notes.md`, 'A note.\n');
+
+    await sessionLog.open(project, work);
+    await expect(sessionLog.notices).toHaveCount(0);
+    await projects.reviewed(survey);
+    await expect(sessionLog.notices).toHaveCount(1);
+    const refusal = await fileEvent(projects, work, 'write-back-refused');
+    expect(refusal).toMatchObject({ item: survey, path: SURVEY_PATH });
+    await expect(sessionLog.notices).toHaveText([`Could not write ${SURVEY_PATH} back because ${refusal.reason}`]);
+
+    const continuation = await continuationOf(projects, project, work);
+    await expect.poll(async () => (await projects.work(project, continuation)).state).toBe('failed');
+    await timeline.open(project);
+    await expect(timeline.item(continuation).work.line).toHaveText(
+      `Failed · Cannot write ${SURVEY_PATH} back because ${refusal.reason}`,
+    );
+  });
+});

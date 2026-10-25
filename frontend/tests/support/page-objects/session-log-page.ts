@@ -5,8 +5,9 @@ import { waitTestEvent } from '../helpers';
 /**
  * A work item's session log in the overlay (F69), at its own address over its project's timeline:
  * its head with "Session log", the item's title, the environment's link and the session's id; its
- * body with a reply per turn — text, a run of calls, a sub-agent's card, the phantom, a failure —
- * each ended one closing on its time; and its tail, the working cue or how it ended.
+ * body with a reply per turn — text, a run of calls, a sub-agent's card, the phantom, a failure, the
+ * server's word on a file the session registered — each ended one closing on its time; and its
+ * tail, the working cue or how it ended.
  */
 export class SessionLogPage {
   readonly overlay: Locator;
@@ -24,6 +25,7 @@ export class SessionLogPage {
   readonly agents: Locator;
   readonly phantom: Locator;
   readonly failures: Locator;
+  readonly notices: Locator;
   readonly cue: Locator;
   readonly tail: Locator;
   readonly failed: Locator;
@@ -44,6 +46,7 @@ export class SessionLogPage {
     this.agents = this.log.getByTestId('chat.agent');
     this.phantom = this.log.getByTestId('chat.phantom');
     this.failures = this.log.getByTestId('chat.failure');
+    this.notices = this.log.getByTestId('chat.notice');
     this.cue = this.log.getByTestId('session-log.cue');
     this.tail = this.log.getByTestId('session-log.tail');
     this.failed = this.overlay.getByTestId('overlay.failed');

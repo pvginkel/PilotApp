@@ -10,7 +10,8 @@
  * are answered through the items API. A work item is placed by repository and its session started
  * in an environment of Pilot's own its start takes or creates in the worker's fake controller
  * (/api/testing/projects/<id>/work; `controller.ts` drives the fake), and read as the timeline and
- * the session log read it.
+ * the session log read it; a file its session wrote in that environment is registered as its
+ * worker's `register_document` registers it (/api/testing/items/<id>/registrations).
  */
 
 import { expect, type Page } from '@playwright/test';
@@ -135,6 +136,12 @@ export class Projects {
     expect(response.status(), await response.text()).toBe(204);
   }
 
+  /** The signed-in person marks a review Reviewed. */
+  async reviewed(itemId: string): Promise<void> {
+    const response = await this.page.request.post(`${this.backendUrl}/api/items/${itemId}/reviewed`);
+    expect(response.status(), await response.text()).toBe(204);
+  }
+
   /** The signed-in person undoes an item's answer or mark. */
   async undo(itemId: string): Promise<void> {
     const response = await this.page.request.post(`${this.backendUrl}/api/items/${itemId}/undo`);
@@ -156,6 +163,19 @@ export class Projects {
   async startWork(projectId: string, spec: Omit<WorkSpec, 'repo'>): Promise<string> {
     const response = await this.page.request.post(`${this.backendUrl}/api/testing/projects/${projectId}/work`, {
       data: { ...spec, repo: this.repo },
+    });
+    expect(response.status(), await response.text()).toBe(201);
+    return ((await response.json()) as { id: string }).id;
+  }
+
+  /**
+   * The document a work item's session wrote at `path` in its environment, registered as its worker
+   * registers it: read and parsed now, read again once the turn that ends its run commits. Answers
+   * its id.
+   */
+  async register(workId: string, path: string): Promise<string> {
+    const response = await this.page.request.post(`${this.backendUrl}/api/testing/items/${workId}/registrations`, {
+      data: { path },
     });
     expect(response.status(), await response.text()).toBe(201);
     return ((await response.json()) as { id: string }).id;
