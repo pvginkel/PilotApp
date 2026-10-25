@@ -27,6 +27,7 @@ from app.services.session_start_service import NOT_PILOTS, SessionStartService
 from app.services.session_stream_service import STREAM_VIEWS
 from app.services.sse_connection_manager import SSEConnection, SSEConnectionManager
 from app.services.start_gate import WorkSlots
+from app.services.turn_end_read_service import TurnEndReadService
 from app.utils.after_commit import clear_after_commit_callbacks
 from tests.support.supervisor import Supervise, metric_value
 
@@ -565,6 +566,11 @@ def _starts(
             environment_service=environments,
             work_slots=slots,
             pilot_server=container.pilot_server(),
+            turn_end_reads=TurnEndReadService(
+                container=container,
+                supervisor=supervisor,
+                session_streams=container.session_stream_service(),
+            ),
         ),
         controller_outage=container.controller_outage(),
         work_slots=slots,

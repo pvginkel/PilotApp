@@ -53,6 +53,12 @@ class Document(db.Model):  # type: ignore[name-defined]
             "(source_environment_id IS NULL) = (source_path IS NULL)",
             name="ck_documents_source",
         ),
+        # A failed read leaves a registered document with no text (ruling D1).
+        CheckConstraint(
+            "read_failed_at IS NULL"
+            " OR (source_path IS NOT NULL AND published_text IS NULL)",
+            name="ck_documents_read_failed",
+        ),
         CheckConstraint(
             "(ingested_text IS NULL) = (ingested_hash IS NULL)"
             " AND (ingested_text IS NULL) = (ingested_at IS NULL)"
@@ -109,6 +115,7 @@ class Document(db.Model):  # type: ignore[name-defined]
         ForeignKey("environments.id")
     )
     source_path: Mapped[str | None] = mapped_column(Text)
+    read_failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     written_back_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     project_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("projects.id"))
     role_code: Mapped[DocumentRole | None] = mapped_column(DOCUMENT_ROLE)

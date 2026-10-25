@@ -23,11 +23,11 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.engine.attachments import AttachService, Copy
-from app.engine.documents import DocumentService
+from app.engine.documents import DocumentService, Registration
 from app.engine.ingest import Ingested, IngestService
 from app.engine.paths import tree_path
 from app.engine.plan import PlanService
-from app.engine.record import RecordService
+from app.engine.record import WORK, RecordService
 from app.engine.tree import TreeService
 from app.engine.views import utc_time
 from app.exceptions import (
@@ -61,6 +61,7 @@ from app.models.reference import (
 from app.schemas.testing_record import InventedFileSchema, InventedProjectCreateSchema
 from app.services.auth_service import AuthContext
 from app.services.people_service import PeopleService
+from app.services.pilot_work_service import PilotWorkService, Worker
 
 SLUG = "recipe-box"
 """The open project's slug; the draft beside it has none."""
@@ -355,6 +356,7 @@ class TestDataService:
         ingest_service: IngestService,
         tree_service: TreeService,
         attach_service: AttachService,
+        pilot_work_service: PilotWorkService,
     ) -> None:
         self.db = db
         self.document_service = document_service
@@ -364,6 +366,7 @@ class TestDataService:
         self.ingest_service = ingest_service
         self.tree_service = tree_service
         self.attach_service = attach_service
+        self.pilot_work_service = pilot_work_service
 
     def load_all(self) -> dict[str, int]:
         """Seed the record into an empty database, in the caller's
@@ -766,6 +769,34 @@ class TestDataService:
             raise RecordNotFoundException("Project", str(project_id))
         session = self._session_of(project, f"end a turn of project {project.id}")
         self.document_service.turn_ended(session)
+
+    def register_document(self, item_id: uuid.UUID, path: str) -> Registration:
+        """The document the work item's session wrote at `path` in its
+        environment, registered as its worker registers it (F85.1, ruling
+        D1): the file read through the controller and parsed now, its text
+        read at the end of its run.
+
+        Raises:
+            RecordNotFoundException: no work item has the id.
+            InvalidOperationException: its start has given its session no
+                environment yet, or the file cannot be registered, as
+                `PilotWorkService.register_document` refuses it.
+            ExternalServiceException: the controller did not answer, or
+                refused for a reason of its own.
+        """
+        item = self.db.get(Item, item_id)
+        if item is None or item.kind_code != WORK:
+            raise RecordNotFoundException("Work item", str(item_id))
+        session = self.db.get_one(AgentSession, item.id)
+        if session.environment_id is None:
+            raise InvalidOperationException(
+                f"register document {path}",
+                f"work item {item.id} has no environment yet",
+            )
+        return self.pilot_work_service.register_document(
+            Worker(session.id, session.project_id, session.environment_id, item.id),
+            path,
+        )
 
     def attach(
         self, item_id: uuid.UUID, files: Sequence[InventedFileSchema]

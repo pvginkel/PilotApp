@@ -35,6 +35,7 @@ from app.services.relay_watchdog import WATCHDOG_TIMER, RelayWatchdog
 from app.services.session_record_service import read_records
 from app.services.start_gate import WorkSlots
 from app.services.supervisor import TIMER_RUNS_TOTAL, LoopHandle, Supervisor
+from app.services.turn_end_read_service import TurnEndReadService
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
 from tests.support.fake_controller import ServedFakeController, client_of, raw_turn
 from tests.support.supervisor import (
@@ -120,6 +121,11 @@ def _watch(
         environment_service=environments,
         work_slots=WorkSlots(work_max=3, project_max=3),
         pilot_server=container.pilot_server(),
+        turn_end_reads=TurnEndReadService(
+            container=container,
+            supervisor=supervisor,
+            session_streams=container.session_stream_service(),
+        ),
     )
     RelayWatchdog(supervisor=supervisor, fleet_consumer=fleet)
     return relays, coordinator

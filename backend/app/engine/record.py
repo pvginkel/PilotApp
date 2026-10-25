@@ -454,10 +454,13 @@ def _not_done(item: Item | None, operation: str) -> None:
 
 def _blocks(item: Item | None, document: Document) -> tuple[dsl.Block, ...]:
     """The published text's blocks; none in the opening, whose text the
-    record never reads (DB decision 2)."""
-    if item is not None and item.kind_code == OPENING:
+    record never reads (DB decision 2), nor in a registered document whose
+    read failed, which has no text (ruling D1)."""
+    if (item is not None and item.kind_code == OPENING) or (
+        document.published_text is None
+    ):
         return ()
-    return dsl.parse(_published(document)).blocks
+    return dsl.parse(document.published_text).blocks
 
 
 def _block(

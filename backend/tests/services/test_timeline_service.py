@@ -1069,6 +1069,34 @@ class TestTimeline:
         assert [line[key] for key in facts] == [None] * 5
         assert (line["done"], line["concept"], line["writing"]) == (None, False, False)
 
+    def test_a_registered_document_whose_read_failed_has_no_text_and_awaits_nothing(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        # Ruling D1: its line keeps its file's name, and Reviewed closes it.
+        project = _make(container)
+        run = _run(session, project, environment)
+        documents = container.document_service()
+        item = documents.register(project, run, "/work/Camp/docs/refinement.md").item
+        documents.fail_read(session.get_one(Document, item.id))
+
+        _opening, line = _items(container, project)
+
+        assert (line["kind"], line["title"], line["file_name"]) == (
+            "review",
+            None,
+            "refinement.md",
+        )
+        assert (line["awaiting_read"], line["body"], line["done"]) == (
+            False,
+            None,
+            None,
+        )
+        read = _read(container, item)
+        assert (read["body"], read["awaiting_read"]) == (None, False)
+
     def test_no_item_but_a_registered_document_awaiting_its_read_awaits_it(
         self,
         container: ServiceContainer,

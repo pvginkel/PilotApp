@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
 
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, and_, func, select
 from sqlalchemy.orm import Session
 
 from app.engine import dsl
@@ -183,6 +183,27 @@ class DocumentService:
             self.view_service.timeline_moved(project)
         if item is not None and text != published:
             self.engine_bus.emit(ProjectChanged(project.id))
+
+    def publish_read(
+        self, document: Document, text: str, session_id: uuid.UUID
+    ) -> None:
+        """A registered document's file as the run that registered it left it,
+        read at the run's end and published as written (TD §4.4, ruling D1):
+        its kind, title, summary and blocks from its text (DB decision 2), its
+        file in the tree, and its first Version `registered`, of the Session
+        `session_id` that registered it. Refused for a text with a fault, as
+        `publish` refuses one."""
+        self.publish(document, text)
+        self.cut_version(document, VersionCause.REGISTERED, session_id)
+
+    def fail_read(self, document: Document) -> None:
+        """The read of a registered document's file at the end of its run
+        failed (ruling D1): it keeps no text, and takes its closes from now,
+        Reviewed as any document with no block."""
+        project, _ = self.owner(document)
+        document.read_failed_at = datetime.now(UTC)
+        self.db.flush()
+        self.engine_bus.emit(ProjectChanged(project.id))
 
     def lock(self, document: Document) -> None:
         """Hold the document's row until the transaction ends, so that two
@@ -501,12 +522,24 @@ def _kind(item: Item, blocks: tuple[dsl.Block, ...]) -> str:
 
 def awaits_read(item: Item, document: Document) -> bool:
     """Whether the document is a registered one still awaiting its read at the
-    end of the turn that registered it: open, with no text. It takes no close
-    until then (review 7)."""
+    end of the run that registered it: open, with no text, its read not
+    failed. It takes no close until then (review 7)."""
     return (
         document.source_path is not None
         and document.published_text is None
+        and document.read_failed_at is None
         and item.done_at is None
+    )
+
+
+def awaiting_read() -> ColumnElement[bool]:
+    """`awaits_read` as a query's condition on a Document joined to its
+    Item."""
+    return and_(
+        Document.source_path.is_not(None),
+        Document.published_text.is_(None),
+        Document.read_failed_at.is_(None),
+        Item.done_at.is_(None),
     )
 
 

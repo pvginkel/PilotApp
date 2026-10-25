@@ -4,7 +4,8 @@ standing, with members, a plan, their opening and open items, the items a
 project's session adds, an agent's saves of them and of the project's draft
 and handbook, the files it attaches, Pilot's Done, and the end of its turn;
 and a work item placed by repository, started in an environment of Pilot's
-own the stage's own controller creates.
+own the stage's own controller creates, and the documents its session
+registers there.
 Nothing in the UI creates a project before the definition chat (F46), nor
 places a work item, which the brain adds (F66).
 
@@ -37,6 +38,7 @@ from app.schemas.testing_record import (
     InventedPersonSchema,
     InventedProjectCreateSchema,
     InventedProjectSchema,
+    InventedRegistrationCreateSchema,
     InventedSaveCreateSchema,
     InventedSaveSchema,
     InventedWorkCreateSchema,
@@ -410,6 +412,45 @@ def create_attachments(
     return InventedAttachmentsSchema(
         batch=attachments[0].batch, ids=[attachment.id for attachment in attachments]
     ).model_dump(mode="json"), 201
+
+
+@testing_record_bp.route("/items/<uuid:item_id>/registrations", methods=["POST"])
+@api.validate(
+    json=InventedRegistrationCreateSchema,
+    resp=SpectreeResponse(
+        HTTP_200=InventedItemSchema,
+        HTTP_201=InventedItemSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+        HTTP_502=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def create_registration(
+    item_id: uuid.UUID,
+    test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
+) -> Any:
+    """Register the document the work item's session wrote at `path` in its
+    environment, as its worker's `register_document` does (F85.1, ruling D1):
+    the file read through the stage's controller and parsed now, its text
+    read once the turn that ends its run commits, published or its read
+    failed.
+
+    Returns:
+        200: The document its run registered from the path already
+        201: The document, minted
+        400: The body is invalid, or the stage is prd
+        404: No work item has the id
+        409: Its session has no environment yet, or the file cannot be
+            registered, nothing minted: the reason
+        502: The controller did not answer, or refused for a reason of its own
+    """
+    data = InventedRegistrationCreateSchema.model_validate(request.get_json())
+    registration = test_data_service.register_document(item_id, data.path)
+    return InventedItemSchema(id=registration.item.id).model_dump(mode="json"), (
+        201 if registration.minted else 200
+    )
 
 
 def _saved(ingested: Ingested) -> dict[str, Any]:

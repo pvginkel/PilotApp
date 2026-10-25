@@ -1633,6 +1633,85 @@ class TestRecordServiceAwaitingRead:
         assert session.get_one(Document, item.id).published_text is None
 
 
+class TestRecordServiceFailedRead:
+    """A registered document whose read failed has no text and no block, and
+    closes with Reviewed, as any document with none (ruling D1)."""
+
+    @pytest.fixture
+    def failed(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> Item:
+        documents = container.document_service()
+        item = documents.register(
+            project, project_session, "/work/Example/refinement.md"
+        ).item
+        documents.fail_read(session.get_one(Document, item.id))
+        return item
+
+    def test_reviewed_closes_it_and_undo_reopens_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        person: User,
+        failed: Item,
+    ) -> None:
+        records = container.record_service()
+
+        records.reviewed(failed, person)
+
+        assert _done(failed)[1:] == ("marked", person.id)
+        assert records.offers_undo(failed)
+        records.undo(failed)
+        assert _done(failed) == (None, None, None)
+        assert session.get_one(Document, failed.id).published_text is None
+
+    @pytest.mark.parametrize(
+        ("close", "cause"),
+        [
+            ("read", "a review item is not marked Read"),
+            ("done", "a review item is not done by Done"),
+        ],
+    )
+    def test_a_close_its_kind_does_not_take_is_refused(
+        self,
+        container: ServiceContainer,
+        person: User,
+        failed: Item,
+        close: str,
+        cause: str,
+    ) -> None:
+        with pytest.raises(InvalidOperationException) as refused:
+            getattr(container.record_service(), close)(failed, person)
+
+        assert refused.value.cause == cause
+        assert _done(failed) == (None, None, None)
+
+    @pytest.mark.parametrize("close", ["answer", "done_action"])
+    def test_it_has_no_block_to_answer(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        person: User,
+        failed: Item,
+        close: str,
+    ) -> None:
+        document = session.get_one(Document, failed.id)
+        records = container.record_service()
+
+        with pytest.raises(RecordNotFoundException):
+            if close == "answer":
+                records.answer(document, "D1", person, "Dome")
+            else:
+                records.done_action(document, "A1", person)
+
+        assert _done(failed) == (None, None, None)
+        assert document.published_text is None
+
+
 class TestRecordServiceCloseUnanswered:
     def test_every_open_item_but_the_opening_is_done_unanswered(
         self,

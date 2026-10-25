@@ -16,8 +16,9 @@ together. The fleet consumer writes none of them (§13.1).
 
 An environment of Pilot's own is free while it is neither gone nor deleting and
 no Session there is `running`, `starting` or `held`, nor `stopped` or `failed`,
-a work item that may resume (DB 240, as slice 020's refinement D1 rules it):
-derived wherever it is read, no column. A start takes a free one of its Work's
+a work item that may resume (DB 240, as slice 020's refinement D1 rules it),
+nor is a document a run registered there still open: derived wherever it is
+read, no column. A start takes a free one of its Work's
 repository, renamed after the taking Project. A start on a new conversation
 runs in a tree made anew: a created one as it is, any other reset, its reset's
 `202` taking the claim as a start's does. The delete timer's tick clears
@@ -37,7 +38,7 @@ from sqlalchemy.orm import InstrumentedAttribute, Session
 
 from app.core_exceptions import ExternalServiceException
 from app.database import scoped_session
-from app.models import Environment
+from app.models import Document, Environment, Item
 from app.models import Session as AgentSession
 from app.models.reference import SessionState
 from app.services.controller_client import (
@@ -709,18 +710,26 @@ def _labelled(
         suffix += 1
 
 
-def _bound(env_id: InstrumentedAttribute[str] | str) -> Exists:
-    """Whether a Session holds the environment (refinement D1)."""
-    return exists().where(
-        AgentSession.environment_id == env_id,
-        AgentSession.state_code.in_(_BINDING_STATES),
+def _bound(env_id: InstrumentedAttribute[str] | str) -> ColumnElement[bool]:
+    """Whether a Session holds the environment (refinement D1), or a document
+    a work item's run registered there is still open, the conversation to go
+    on there once each is closed (DB 240; design 2 §13.5)."""
+    return or_(
+        exists().where(
+            AgentSession.environment_id == env_id,
+            AgentSession.state_code.in_(_BINDING_STATES),
+        ),
+        exists().where(
+            Document.source_environment_id == env_id,
+            Item.id == Document.id,
+            Item.done_at.is_(None),
+        ),
     )
 
 
 def _freedom() -> tuple[ColumnElement[bool], ...]:
     """The conditions of an Environment row that is free: Pilot's own,
-    neither gone nor deleting, and no Session holding it (DB 240,
-    refinement D1)."""
+    neither gone nor deleting, and not bound (DB 240, refinement D1)."""
     return (
         Environment.server_created_at.is_not(None),
         Environment.last_state.not_in(_LEAVING),

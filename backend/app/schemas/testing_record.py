@@ -158,6 +158,17 @@ class InventedItemSchema(BaseModel):
     id: uuid.UUID = Field(description="The item's id")
 
 
+class InventedRegistrationCreateSchema(BaseModel):
+    """A document a work item's session wrote in its environment, which it
+    registers as its worker does."""
+
+    path: str = Field(
+        min_length=1,
+        description="The file's absolute path in the session's environment",
+        examples=["/work/Example/docs/refinement.md"],
+    )
+
+
 class InventedWorkCreateSchema(BaseModel):
     """A work item placed by repository and started, as Pilot starts one, in
     an environment of Pilot's own the stage's controller creates from it."""

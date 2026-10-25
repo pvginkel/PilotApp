@@ -23,7 +23,7 @@ from werkzeug.wrappers import Request, Response
 
 from app.core_exceptions import ExternalServiceException
 from app.database import scoped_session
-from app.models import Environment, Project, User
+from app.models import Document, Environment, Item, Project, User
 from app.models import Session as AgentSession
 from app.models.reference import SessionState, UserKind
 from app.services import environment_service
@@ -487,6 +487,28 @@ def _own(
     return row
 
 
+def _registered(
+    db: Session,
+    container: ServiceContainer,
+    project: Project,
+    run: AgentSession,
+    read: str,
+) -> Item:
+    """A document `run` registered in its environment: `awaiting` its read,
+    its read `published`, or its read `failed` (ruling D1)."""
+    documents = container.document_service()
+    item = documents.register(project, run, "/work/Example/notes.md").item
+    document = db.get_one(Document, item.id)
+    if read == "published":
+        documents.publish_read(document, "# Notes\n\nThe lake.\n", run.id)
+    elif read == "failed":
+        documents.fail_read(document)
+    return item
+
+
+_READS = ["awaiting", "published", "failed"]
+
+
 def _taken(service: EnvironmentService, db: Session) -> str | None:
     taken = service.take(db, REPO)
     return None if taken is None else taken.id
@@ -624,6 +646,68 @@ class TestTake:
     ) -> None:
         _own(session)
         _agent_session(session, project, state)
+
+        assert _taken(environments, session) == ENV
+
+    @pytest.mark.parametrize("read", _READS)
+    def test_one_where_a_document_a_run_registered_is_open_is_never_taken(
+        self,
+        environments: EnvironmentService,
+        session: Session,
+        container: ServiceContainer,
+        project: Project,
+        read: str,
+    ) -> None:
+        # Its conversation goes on there once each is closed (DB 240, §13.5).
+        _own(session)
+        run = _agent_session(session, project, SessionState.IDLE)
+        _registered(session, container, project, run, read)
+
+        assert _taken(environments, session) is None
+
+    def test_one_whose_registered_documents_are_closed_is_free(
+        self,
+        environments: EnvironmentService,
+        session: Session,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+    ) -> None:
+        _own(session)
+        run = _agent_session(session, project, SessionState.IDLE)
+        item = _registered(session, container, project, run, "failed")
+        container.record_service().reviewed(item, person)
+
+        assert _taken(environments, session) == ENV
+
+    def test_finishs_close_of_the_open_documents_frees_it(
+        self,
+        environments: EnvironmentService,
+        session: Session,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+    ) -> None:
+        # Review 4: no document of the run open and no resume to come.
+        _own(session)
+        run = _agent_session(session, project, SessionState.IDLE)
+        _registered(session, container, project, run, "awaiting")
+        _registered(session, container, project, run, "published")
+        container.record_service().close_unanswered(project, person, datetime.now(UTC))
+
+        assert _taken(environments, session) == ENV
+
+    def test_a_document_registered_elsewhere_binds_it_not(
+        self,
+        environments: EnvironmentService,
+        session: Session,
+        container: ServiceContainer,
+        project: Project,
+    ) -> None:
+        _own(session)
+        _own(session, "env-b", repo="example/Other")
+        run = _agent_session(session, project, SessionState.IDLE, "env-b")
+        _registered(session, container, project, run, "awaiting")
 
         assert _taken(environments, session) == ENV
 
@@ -1496,6 +1580,24 @@ class TestShutdownTimer:
         ]
         assert _claim(_row(session)) == _NO_CLAIM
 
+    def test_one_bound_by_an_open_registered_document_is_stopped(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+        container: ServiceContainer,
+        project: Project,
+    ) -> None:
+        # F65.1: it waits stopped for its documents' answers.
+        fake_controller.add_environment(ENV, status="running")
+        _environment(session, pod=_pod(fake_controller), due=_overdue())
+        run = _agent_session(session, project, SessionState.IDLE)
+        _registered(session, container, project, run, "published")
+
+        environments.run_shutdown_timer(session)
+
+        assert fake_controller.environment(ENV).status == "stopped"
+
     @pytest.mark.parametrize("pilots_200", [False, True])
     def test_a_bring_up_someone_stopped_and_started_again_is_never_stopped(
         self,
@@ -2013,6 +2115,45 @@ class TestDeleteTimer:
         row = _row(session)
         assert row is not None and row.delete_due_at is None
         assert fake_controller.calls == []
+
+    @pytest.mark.parametrize("read", _READS)
+    def test_one_where_a_registered_document_is_open_keeps_its_name_and_no_deadline(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+        container: ServiceContainer,
+        project: Project,
+        read: str,
+    ) -> None:
+        _own(session)
+        run = _agent_session(session, project, SessionState.IDLE)
+        _registered(session, container, project, run, read)
+
+        environments.run_delete_timer(session)
+
+        row = _row(session)
+        assert row is not None and row.delete_due_at is None
+        assert fake_controller.calls == []
+
+    def test_an_overdue_one_where_a_registered_document_is_open_is_never_deleted(
+        self,
+        environments: EnvironmentService,
+        fake_controller: ServedFakeController,
+        session: Session,
+        container: ServiceContainer,
+        project: Project,
+    ) -> None:
+        fake_controller.add_environment(ENV, status="stopped")
+        _own(session, delete_due=_overdue())
+        run = _agent_session(session, project, SessionState.IDLE)
+        _registered(session, container, project, run, "published")
+
+        environments.run_delete_timer(session)
+
+        assert _deletes(fake_controller) == []
+        row = _row(session)
+        assert row is not None and row.last_state == "stopped"
 
     def test_one_the_controller_no_longer_has_is_gone(
         self,

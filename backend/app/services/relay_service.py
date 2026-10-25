@@ -88,6 +88,7 @@ from app.services.session_record_service import (
 from app.services.session_stream_service import SessionStreamService
 from app.services.start_gate import WorkSlots
 from app.services.supervisor import LoopHandle, Supervisor
+from app.services.turn_end_read_service import TurnEndReadService
 from app.services.work_status import work_moved
 from app.utils.after_commit import after_commit
 
@@ -205,6 +206,7 @@ class RelayService:
         environment_service: EnvironmentService,
         work_slots: WorkSlots,
         pilot_server: PilotServer,
+        turn_end_reads: TurnEndReadService,
     ) -> None:
         """Register the `relay` job, whose loops are one per Session, and whose
         reconcile runs the relay of every Session with a Turn in flight; and the
@@ -221,6 +223,8 @@ class RelayService:
             work_slots: Opened by a work item's run that ends under its turn
             pilot_server: Hands each re-create Pilot's MCP server, with a token
                 minted for it
+            turn_end_reads: Reads the documents a work item's run registered,
+                once the turn that ends the run commits
         """
         self._container = container
         self._supervisor = supervisor
@@ -228,6 +232,7 @@ class RelayService:
         self._environments = environment_service
         self._slots = work_slots
         self._pilot_server = pilot_server
+        self._reads = turn_end_reads
         supervisor.register_job(
             RELAY_JOB, needs_controller=True, reconcile=self._reconcile
         )
@@ -928,8 +933,9 @@ class RelayService:
         error is `failed` instead, the error the Turn's (F125), and one that
         ended neither interrupted nor in error makes the work item done
         (decision 44). A Session stopped under the turn stays as its stop left
-        it. After the commit, a work item's slot opens, and the environment's
-        shutdown timer is armed if nothing runs there.
+        it. After the commit, a work item's slot opens, the documents its done
+        run registered are read, and the environment's shutdown timer is armed
+        if nothing runs there.
 
         A later Turn in flight is a send the controller accepted once this
         turn's result was out, committed first: the Session stays `running`
@@ -1000,6 +1006,7 @@ class RelayService:
             session.state_code = SessionState.IDLE
             if work:
                 self._container.record_service().work_done(session.id, at)
+                self._reads.run_ended(db, session.id)
 
     def _moved(self, session: AgentSession, *, state: bool = False) -> None:
         work_moved(self._container.engine_bus(), session, state=state)

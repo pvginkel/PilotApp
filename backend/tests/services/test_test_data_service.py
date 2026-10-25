@@ -45,6 +45,7 @@ from app.models.reference import (
     AttachmentSource,
     DocumentRole,
     ProjectState,
+    SessionState,
     TaskStatus,
     TransitionKind,
     UserKind,
@@ -57,7 +58,9 @@ from app.schemas.testing_record import (
 )
 from app.services import test_data_service
 from app.services.container import ServiceContainer
+from app.services.controller_client import ControllerClient
 from app.startup import load_test_data_hook
+from tests.support.fake_controller import ServedFakeController
 
 
 @pytest.fixture
@@ -1500,3 +1503,88 @@ class TestAttach:
             f"big.bin is {over} bytes, over the 16777216-byte cap"
         )
         assert session.scalars(select(Attachment)).all() == []
+
+
+REGISTERED = "/work/Camp/docs/refinement.md"
+
+
+class TestRegisterDocument:
+    @pytest.fixture
+    def work_item(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> models.Session:
+        """A work item's Session running in an environment the fake holds,
+        where its worker wrote the document's file."""
+        fake_controller.add_environment(environment.id, status="running")
+        fake_controller.put_file(environment.id, REGISTERED, b"# Two sites\n")
+        run = models.Session(
+            project_id=project.id,
+            environment_id=environment.id,
+            kind_code="work",
+            cwd="/work/Camp",
+            token_hash="2" * 64,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(run)
+        session.flush()
+        container.record_service().place_work(
+            project, run, "Building the camp", repo="example/Camp"
+        )
+        return run
+
+    def test_the_work_items_session_registers_it_as_its_worker_does(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        work_item: models.Session,
+    ) -> None:
+        service = container.test_data_service()
+
+        registration = service.register_document(work_item.id, REGISTERED)
+
+        assert registration.minted
+        item = registration.item
+        assert (item.kind_code, item.created_by_session_id) == ("review", work_item.id)
+        document = session.get_one(Document, item.id)
+        assert (document.source_environment_id, document.source_path) == (
+            work_item.environment_id,
+            REGISTERED,
+        )
+        again = service.register_document(work_item.id, REGISTERED)
+        assert (again.item.id, again.minted) == (item.id, False)
+
+    def test_an_item_that_is_no_work_item_is_not_found(
+        self, container: ServiceContainer, item: Item
+    ) -> None:
+        with pytest.raises(RecordNotFoundException):
+            container.test_data_service().register_document(item.id, REGISTERED)
+
+    def test_a_work_item_with_no_environment_yet_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        work_item: models.Session,
+    ) -> None:
+        work_item.environment_id = None
+        session.flush()
+
+        with pytest.raises(InvalidOperationException) as raised:
+            container.test_data_service().register_document(work_item.id, REGISTERED)
+
+        assert raised.value.cause == f"work item {work_item.id} has no environment yet"
+
+    def test_a_file_that_cannot_be_registered_is_refused(
+        self, container: ServiceContainer, work_item: models.Session
+    ) -> None:
+        with pytest.raises(InvalidOperationException) as raised:
+            container.test_data_service().register_document(
+                work_item.id, "/work/Camp/missing.md"
+            )
+
+        assert raised.value.cause.startswith("the controller answered 404")

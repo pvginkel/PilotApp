@@ -24,7 +24,15 @@ from app.core_exceptions import ExternalServiceException
 from app.database import scoped_session
 from app.engine.bus import EngineEvent, ProjectChanged, WorkMoved
 from app.exceptions import InvalidOperationException, RecordNotFoundException
-from app.models import DocumentVersion, Environment, Item, Project, Turn, User
+from app.models import (
+    Document,
+    DocumentVersion,
+    Environment,
+    Item,
+    Project,
+    Turn,
+    User,
+)
 from app.models.reference import RecordKind, SessionState, UserKind, VersionCause
 from app.schemas.timeline import StopCause
 from app.services.container import ServiceContainer
@@ -54,6 +62,7 @@ from app.services.session_record_service import (
 from app.services.sse_connection_manager import SSEConnection
 from app.services.start_gate import WorkSlots
 from app.services.supervisor import TIMER_RUNS_TOTAL, LoopHandle
+from app.services.turn_end_read_service import READ_JOB, TurnEndReadService
 from app.utils import after_commit as after_commit_module
 from app.utils.after_commit import clear_after_commit_callbacks
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
@@ -67,6 +76,7 @@ from tests.support.supervisor import (
 )
 
 ENV = "env-a"
+NOTES = "/work/Example/notes.md"
 MCP_URL = "https://pilot-mcp.example.com/mcp"
 SUBJECT = "subject-ada"
 STOP_AFTER = timedelta(minutes=30)
@@ -99,6 +109,11 @@ def _relay_service(
         environment_service=environments,
         work_slots=WorkSlots(work_max=3, project_max=3),
         pilot_server=PilotServer(mcp_url),
+        turn_end_reads=TurnEndReadService(
+            container=container,
+            supervisor=supervisor,
+            session_streams=container.session_stream_service(),
+        ),
     )
     return relays, coordinator
 
@@ -1484,6 +1499,36 @@ class TestRelayWorkItem:
         assert _item_done(session, work_item) == (turn.ended_at, "turn_ended", None)
         assert ProjectChanged(project.id) in engine_events
 
+    @pytest.mark.parametrize(
+        ("outcome", "read"),
+        [("success", True), ("error", False), ("interrupted", False)],
+    )
+    def test_a_run_that_ended_well_has_its_documents_read_once_it_commits(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        project: Project,
+        work_item: models.Session,
+        outcome: FinishOutcome,
+        read: bool,
+    ) -> None:
+        # A stopped or failed run's documents await the end of its Resume's.
+        container.document_service().register(project, work_item, NOTES)
+        _send(relays, session, work_item)
+        _turn_of(fake_controller, controller_session, raw_turn("turn_text"), outcome)
+
+        _relay(relays, work_item)
+
+        # Its read loop waits for a STARTUP that never fires here, and a
+        # second request of it is none.
+        requested = not relays._supervisor.start_loop(
+            READ_JOB, lambda handle: None, key=str(work_item.id)
+        )
+        assert requested is read
+
     def test_each_record_that_moves_its_line_moves_the_item_alone(
         self,
         session: DbSession,
@@ -2369,6 +2414,31 @@ class TestRelayLoop:
         run_id, person_id = _committed_session(container, name)
         coordinator.fire_startup()
         return relays, name, run_id, person_id
+
+    def test_a_work_items_run_that_ends_well_has_its_documents_read(
+        self,
+        committed_app: Flask,
+        fake_controller: ServedFakeController,
+        running: tuple[RelayService, str, uuid.UUID, uuid.UUID],
+        loop_log: LogWaiter,
+    ) -> None:
+        container = committed_app.container
+        relays, name, run_id, person_id = running
+        fake_controller.put_file(ENV, NOTES, b"# Notes\n\nThe lake.\n")
+        with scoped_session(container) as db:
+            run = db.get_one(models.Session, run_id)
+            project = db.get_one(Project, run.project_id)
+            container.record_service().place_work(project, run, "Renaming the badge")
+            item_id = container.document_service().register(project, run, NOTES).item.id
+        _send_committed(container, relays, run_id, person_id)
+        loop_log.wait_for(rf"Loop relay:{run_id} started")
+
+        _turn_of(fake_controller, name, raw_turn("turn_text"))
+
+        loop_log.wait_for(rf"Loop read:{run_id} ended")
+        with scoped_session(container) as db:
+            document = db.get_one(Document, item_id)
+            assert document.published_text == "# Notes\n\nThe lake.\n"
 
     def test_a_send_starts_the_relay_which_records_the_turn_as_it_comes(
         self,

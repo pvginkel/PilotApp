@@ -875,6 +875,25 @@
         "title": "InventedProjectSchema",
         "type": "object"
       },
+      "InventedRegistrationCreateSchema.6d6b324": {
+        "description": "A document a work item's session wrote in its environment, which it\nregisters as its worker does.",
+        "properties": {
+          "path": {
+            "description": "The file's absolute path in the session's environment",
+            "examples": [
+              "/work/Example/docs/refinement.md"
+            ],
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "InventedRegistrationCreateSchema",
+        "type": "object"
+      },
       "InventedSaveCreateSchema.6d6b324": {
         "description": "An agent's save of an item's file, as the store's sync puts it.",
         "properties": {
@@ -9565,6 +9584,104 @@
           }
         ],
         "summary": "Mark a document Done as Pilot, by the project's session, as its `mark` does a document it settled or deferred whole: the text as it stands fixed in a `done` Version, the item done by Pilot.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/items/{item_id}/registrations": {
+      "post": {
+        "description": "Returns:     200: The document its run registered from the path already     201: The document, minted     400: The body is invalid, or the stage is prd     404: No work item has the id     409: Its session has no environment yet, or the file cannot be         registered, nothing minted: the reason     502: The controller did not answer, or refused for a reason of its own",
+        "operationId": "post__api_testing_items_{item_id}_registrations",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventedRegistrationCreateSchema.6d6b324"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventedItemSchema.6d6b324"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventedItemSchema.6d6b324"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Register the document the work item's session wrote at `path` in its environment, as its worker's `register_document` does (F85.1, ruling D1): the file read through the stage's controller and parsed now, its text read once the turn that ends its run commits, published or its read failed.",
         "tags": [],
         "x-required-role": "editor"
       }

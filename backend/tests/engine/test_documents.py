@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session as DbSession
 from app import models
 from app.database import scoped_session
 from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved
-from app.engine.documents import DocumentService, awaits_read
+from app.engine.documents import DocumentService, awaiting_read, awaits_read
 from app.engine.paths import sha256_hex
 from app.exceptions import InvalidOperationException
 from app.extensions import db
@@ -891,6 +891,178 @@ class TestAwaitsRead:
 
         assert not awaits_read(own, session.get_one(Document, own.id))
         assert not awaits_read(registered, registered_document)
+
+    def test_a_document_whose_read_failed_awaits_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        documents = container.document_service()
+        item = documents.register(project, project_session, REGISTERED_PATH).item
+        document = session.get_one(Document, item.id)
+
+        documents.fail_read(document)
+
+        assert not awaits_read(item, document)
+
+
+class TestAwaitingRead:
+    def test_the_condition_holds_for_the_documents_the_predicate_does(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        documents = container.document_service()
+        awaiting = documents.register(project, project_session, REGISTERED_PATH).item
+        failed = documents.register(project, project_session, "/work/E/f.md").item
+        documents.fail_read(session.get_one(Document, failed.id))
+        read = documents.register(project, project_session, "/work/E/r.md").item
+        documents.publish_read(
+            session.get_one(Document, read.id), QUESTION, project_session.id
+        )
+        closed = documents.register(project, project_session, "/work/E/c.md").item
+        closed.done_at = datetime.now(UTC)
+        closed.done_cause_code = "finished"
+        closed.done_by_user_id = person.id
+        own = documents.bear_item(project, "notice", "The palette", project_session)
+        session.flush()
+
+        matching = session.scalars(
+            select(Item.id)
+            .join(Document, Document.id == Item.id)
+            .where(awaiting_read())
+        ).all()
+
+        assert matching == [awaiting.id]
+        assert [
+            awaits_read(item, session.get_one(Document, item.id))
+            for item in (awaiting, failed, read, closed, own)
+        ] == [True, False, False, False, False]
+
+
+class TestDocumentServicePublishRead:
+    @pytest.mark.usefixtures("build_task")
+    def test_the_file_is_published_as_written_its_first_version_registered(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        documents = container.document_service()
+        item = documents.register(project, project_session, REGISTERED_PATH).item
+        document = session.get_one(Document, item.id)
+
+        documents.publish_read(document, ONE_DECISION, project_session.id)
+
+        assert document.published_text == ONE_DECISION
+        assert document.summary == "Two nights at the lake."
+        assert (
+            item.kind_code,
+            item.title,
+            item.plan_task_id,
+            item.urgent,
+            item.for_user_id,
+        ) == ("decision", "Which tent for the trip?", "build", True, person.id)
+        assert [block.local_id for block in _blocks(session, document.id)] == ["D1"]
+        [version] = _versions(session, document)
+        assert (
+            version.number,
+            version.cause_code,
+            version.text,
+            version.session_id,
+        ) == (1, VersionCause.REGISTERED, ONE_DECISION, project_session.id)
+        assert not awaits_read(item, document)
+
+    def test_it_gives_the_document_its_file_in_the_tree_live(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        with scoped_session(container) as session:
+            documents = container.document_service()
+            item = documents.register(project, project_session, REGISTERED_PATH).item
+        engine_events.clear()
+
+        with scoped_session(container) as session:
+            documents.publish_read(
+                session.get_one(Document, item.id), QUESTION, project_session.id
+            )
+
+        path = f"draft-{project.number}/inbox/1-refinement.md"
+        assert TreeHashMoved(path, sha256_hex(QUESTION)) in engine_events
+        assert ProjectChanged(project.id) in engine_events
+        assert container.tree_service().read(path).content == QUESTION.encode()
+
+    def test_a_text_with_a_fault_is_refused_and_nothing_written(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        documents = container.document_service()
+        item = documents.register(project, project_session, REGISTERED_PATH).item
+        document = session.get_one(Document, item.id)
+
+        with pytest.raises(InvalidOperationException):
+            documents.publish_read(document, BROKEN, project_session.id)
+
+        assert document.published_text is None
+        assert _versions(session, document) == []
+        assert awaits_read(item, document)
+
+
+class TestDocumentServiceFailRead:
+    def test_the_document_keeps_no_text_and_says_so_live(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        with scoped_session(container) as session:
+            documents = container.document_service()
+            item = documents.register(project, project_session, REGISTERED_PATH).item
+        engine_events.clear()
+        before = datetime.now(UTC)
+
+        with scoped_session(container) as session:
+            document = session.get_one(Document, item.id)
+            documents.fail_read(document)
+
+        assert document.read_failed_at is not None
+        assert before <= document.read_failed_at <= datetime.now(UTC)
+        assert (document.published_text, document.source_path) == (
+            None,
+            REGISTERED_PATH,
+        )
+        assert _versions(session, document) == []
+        # Its file is nowhere: the tree and timeline.json are unmoved.
+        assert engine_events == [ProjectChanged(project.id)]
+
+    def test_a_document_with_a_text_has_no_failed_read(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        documents = container.document_service()
+        item = documents.register(project, project_session, REGISTERED_PATH).item
+        document = session.get_one(Document, item.id)
+        documents.publish_read(document, QUESTION, project_session.id)
+
+        with pytest.raises(IntegrityError, match="ck_documents_read_failed"):
+            documents.fail_read(document)
 
 
 class TestDocumentServicePublish:

@@ -64,6 +64,7 @@ from app.services.session_start_service import (
 from app.services.start_gate import WorkSlots
 from app.services.supervisor import LoopHandle
 from app.services.timeline_service import work_status
+from app.services.turn_end_read_service import TurnEndReadService
 from app.utils import after_commit as after_commit_module
 from app.utils.after_commit import clear_after_commit_callbacks
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
@@ -259,6 +260,11 @@ def _services(
         environment_service=environments,
         work_slots=slots,
         pilot_server=pilot_server,
+        turn_end_reads=TurnEndReadService(
+            container=container,
+            supervisor=supervisor,
+            session_streams=container.session_stream_service(),
+        ),
     )
     starts = SessionStartService(
         container=container,

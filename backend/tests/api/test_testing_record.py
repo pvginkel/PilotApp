@@ -42,6 +42,7 @@ from app.services.relay_service import RelayService
 from app.services.session_start_service import SessionStartService
 from app.services.start_gate import WorkSlots
 from app.services.supervisor import LoopHandle
+from app.services.turn_end_read_service import TurnEndReadService
 from app.utils.after_commit import clear_after_commit_callbacks
 from tests.support.fake_controller import ServedFakeController
 from tests.support.supervisor import Supervise
@@ -85,6 +86,10 @@ def _done_path(item_id: uuid.UUID | str) -> str:
 
 def _work_path(project_id: uuid.UUID | str) -> str:
     return f"{PROJECTS}/{project_id}/work"
+
+
+def _registrations_path(item_id: uuid.UUID | str) -> str:
+    return f"/api/testing/items/{item_id}/registrations"
 
 
 WORK_REPO = "example/Camp"
@@ -1174,6 +1179,11 @@ def _starts(
             environment_service=environments,
             work_slots=slots,
             pilot_server=container.pilot_server(),
+            turn_end_reads=TurnEndReadService(
+                container=container,
+                supervisor=supervisor,
+                session_streams=container.session_stream_service(),
+            ),
         ),
         controller_outage=container.controller_outage(),
         work_slots=slots,
@@ -1468,7 +1478,125 @@ ENDPOINTS = [
     (_document_saves_path(NO_ROW, "handbook"), {"text": "Hi"}),
     (_done_path(NO_ROW), {}),
     (_work_path(NO_ROW), WORK),
+    (_registrations_path(NO_ROW), {"path": "/work/Camp/notes.md"}),
 ]
+
+
+REGISTERED = "/work/Camp/docs/refinement.md"
+
+
+@pytest.mark.usefixtures("person")
+class TestCreateRegistration:
+    @pytest.fixture
+    def work_item(
+        self,
+        session: Session,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> models.Session:
+        """A work item's Session running in an environment the fake holds,
+        where its worker wrote the document's file."""
+        fake_controller.add_environment(environment.id, status="running")
+        fake_controller.put_file(
+            environment.id, REGISTERED, b"# Two sites\n\n```question id=Q1\n```\n"
+        )
+        run = models.Session(
+            project_id=project.id,
+            environment_id=environment.id,
+            kind_code="work",
+            cwd="/work/Camp",
+            token_hash="2" * 64,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(run)
+        session.flush()
+        container.record_service().place_work(
+            project, run, "Building the camp", repo=WORK_REPO
+        )
+        return run
+
+    def test_it_registers_the_file_as_the_sessions_worker_does(
+        self, client: FlaskClient, session: Session, work_item: models.Session
+    ) -> None:
+        response = client.post(
+            _registrations_path(work_item.id), json={"path": REGISTERED}
+        )
+
+        assert response.status_code == 201
+        item_id = uuid.UUID(response.get_json()["id"])
+        document = session.get_one(Document, item_id)
+        assert (
+            document.source_environment_id,
+            document.source_path,
+            document.published_text,
+        ) == (work_item.environment_id, REGISTERED, None)
+        assert session.get_one(Item, item_id).created_by_session_id == work_item.id
+        again = client.post(
+            _registrations_path(work_item.id), json={"path": REGISTERED}
+        )
+        assert (again.status_code, again.get_json()) == (200, {"id": str(item_id)})
+
+    def test_an_item_that_is_no_work_item_is_not_found(
+        self, client: FlaskClient, item: Item
+    ) -> None:
+        for item_id in (item.id, uuid.uuid4()):
+            response = client.post(
+                _registrations_path(item_id), json={"path": REGISTERED}
+            )
+
+            assert response.status_code == 404
+
+    def test_a_work_item_whose_start_gave_it_no_environment_conflicts(
+        self, client: FlaskClient, session: Session, work_item: models.Session
+    ) -> None:
+        work_item.environment_id = None
+        session.flush()
+
+        response = client.post(
+            _registrations_path(work_item.id), json={"path": REGISTERED}
+        )
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            f"Cannot register document {REGISTERED} because work item"
+            f" {work_item.id} has no environment yet"
+        )
+
+    def test_a_file_that_cannot_be_registered_conflicts_with_the_reason(
+        self, client: FlaskClient, work_item: models.Session
+    ) -> None:
+        path = "/work/Camp/docs/missing.md"
+
+        response = client.post(_registrations_path(work_item.id), json={"path": path})
+
+        assert response.status_code == 409
+        assert response.get_json()["error"].startswith(
+            f"Cannot register document {path} because the controller answered 404"
+        )
+
+    def test_an_empty_path_is_invalid(
+        self, client: FlaskClient, work_item: models.Session
+    ) -> None:
+        response = client.post(_registrations_path(work_item.id), json={"path": ""})
+
+        assert response.status_code == 400
+
+    def test_a_controller_that_does_not_answer_is_502(
+        self,
+        client: FlaskClient,
+        fake_controller: ServedFakeController,
+        work_item: models.Session,
+    ) -> None:
+        fake_controller.outage()
+
+        response = client.post(
+            _registrations_path(work_item.id), json={"path": REGISTERED}
+        )
+
+        assert response.status_code == 502
 
 
 @pytest.mark.usefixtures("person")

@@ -51,6 +51,7 @@ from app.services.test_data_service import TestDataService
 from app.services.testing_service import TestingService
 from app.services.testing_sync_service import TestingSyncService
 from app.services.timeline_service import TimelineService
+from app.services.turn_end_read_service import TurnEndReadService
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
 from app.utils.temp_file_manager import TempFileManager
 
@@ -233,6 +234,16 @@ class ServiceContainer(containers.DeclarativeContainer):
         SessionRecordService, db=db_session, session_streams=session_stream_service
     )
 
+    # The turn-end read of the documents a work item's run registered (TD
+    # §4.4); its job registers on the supervisor when built, before STARTUP.
+    turn_end_read_service = providers.Singleton(
+        TurnEndReadService,
+        container=__self__,
+        supervisor=supervisor,
+        session_streams=session_stream_service,
+    )
+    register_for_background_startup(lambda c: c.turn_end_read_service())
+
     # The send and the relay (design 2 §9); the relay's job registers on the
     # supervisor when built, before STARTUP.
     relay_service = providers.Singleton(
@@ -243,6 +254,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         environment_service=environment_service,
         work_slots=work_slots,
         pilot_server=pilot_server,
+        turn_end_reads=turn_end_read_service,
     )
     register_for_background_startup(lambda c: c.relay_service())
     # The relays' watchdog, on the fleet stream (design 2 §9.3); its timer
@@ -435,6 +447,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         ingest_service=ingest_service,
         tree_service=tree_service,
         attach_service=attach_service,
+        pilot_work_service=pilot_work_service,
     )
 
 
