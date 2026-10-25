@@ -896,6 +896,8 @@ POD=$(cexec iac kubectl -n pilot-dev get pods -l app.kubernetes.io/name=pilot -o
    ```
 
    The UI shows the signed-in person, so a check reads what it checks, never a page's text whole.
+   A failed call's error carries Playwright's call log, the request's `cookie` header in it, so a
+   script prints the first line of an error's message alone, never the error whole.
    When the phase ends, `rm -rf tmp/dev-session tmp/dev-ui`: the cookies are a live session.
 
    **The dev stage's store**, `pvginkel-pilotprojects-d75970` on `kubecoder-dev`
