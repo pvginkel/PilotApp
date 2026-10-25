@@ -16,6 +16,7 @@ COPY *.py /app/
 COPY alembic.ini /app/
 COPY alembic /app/alembic
 COPY app /app/app
+COPY pilot_mcp /app/pilot_mcp
 
 # The runtime image (DockerImages, modern-app-backend) carries tini, netcat and
 # the shared libraries: libmagic, the image codecs and libpq.
@@ -34,4 +35,6 @@ ENV PATH="/app/.venv/bin:${PATH}" \
 
 ENTRYPOINT ["tini", "--"]
 
+# The API. Pilot's MCP server is the image's second entry point:
+# `python -m pilot_mcp`.
 CMD ["python","run.py"]
