@@ -191,8 +191,10 @@ and only that, before it runs again: step 1's seed recreates the database step 8
    check. `CONTROLLER_CA_FILE` stays unset: the `modern-app` container's `REQUESTS_CA_BUNDLE` is the
    system bundle, which holds the homelab root. The dev seed goes in first, for the person the
    check's projects are made by, and the operator's environments of the repository, those no client
-   manages, are read with their name, status and `updatedAt`, which moves on every pod start, for
-   step 7 to read again:
+   manages, are read with their name, status and `updatedAt` for step 7 to read again. `updatedAt`
+   is the later of `createdAt` and its pod's start, so a stopped environment reads its `createdAt`:
+   the comparison sees a rename, a delete or one left running, and a start or a reset followed by a
+   stop shows in Pilot's log alone:
 
    ```bash
    cexec modern-app sh -c 'cd backend && uv run cli load-test-data --yes-i-am-sure'

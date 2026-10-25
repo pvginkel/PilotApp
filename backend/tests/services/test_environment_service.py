@@ -2177,9 +2177,11 @@ class TestDeleteTimer:
 def _before_the_next_lock(
     monkeypatch: pytest.MonkeyPatch, run: Callable[[], None]
 ) -> None:
-    """Run `run` once, in a transaction of its own, just before the next
-    Environment row lock that skips a locked row: after that transaction read
-    the row it is about to lock."""
+    """Run `run` once just before the next Environment row lock that skips a
+    locked row, after the caller read the row it is about to lock. `run` shares
+    the caller's Session, `container.db_session` being context-local, and a
+    `scoped_session` in it commits that Session on its exit: the lock and its
+    re-read then run in a new transaction, which sees what `run` wrote."""
     try_lock = environment_service._try_lock
     pending = [run]
 

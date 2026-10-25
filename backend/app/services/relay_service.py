@@ -375,15 +375,15 @@ class RelayService:
         A controller session that is gone is resumed, and an environment that
         is not running is waited for until it settles; then the run carries on
         with the Session as its rows have it. An environment stopped
-        elsewhere, or gone, ends the turn and stops the Session. A stream the
-        watchdog closes (`Supervisor.interrupt_loop`) is reopened. A Session
-        stopped under its turn is never sent it: the turn is relayed when the
-        controller has it, and ends with no `result` when the controller never
-        got it or its controller session is gone.
+        elsewhere, in error, or gone, ends the turn and stops the Session. A
+        stream the watchdog closes (`Supervisor.interrupt_loop`) is reopened. A
+        Session stopped under its turn is never sent it: the turn is relayed
+        when the controller has it, and ends with no `result` when the
+        controller never got it or its controller session is gone.
 
         Raises:
-            ExternalServiceException: The controller failed, the stream dropped
-                before the turn's `result`, or the environment settled `error`
+            ExternalServiceException: The controller failed, or the stream
+                dropped before the turn's `result`
         """
         while not handle.stopping:
             with scoped_session(self._container) as db:
