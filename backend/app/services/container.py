@@ -342,12 +342,15 @@ class ServiceContainer(containers.DeclarativeContainer):
         document_service=document_service,
         plan_service=plan_service,
     )
+    # The session start places a run's continuation once its documents are
+    # closed (decision 44); built at the call, as a background service.
     record_service = providers.Factory(
         RecordService,
         db=db_session,
         engine_bus=engine_bus,
         document_service=document_service,
         view_service=view_service,
+        continuations=session_start_service.provider,
     )
 
     # The write-back of a closed registered document to its file (F65.1);

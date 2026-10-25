@@ -155,6 +155,14 @@ def _registered(
     return item
 
 
+def _kept_open(
+    db: DbSession, container: ServiceContainer, project: Project, run: models.Session
+) -> Item:
+    """Another document the run registered, left open: no continuation takes
+    the answers of the run's documents, and their Undo stays (review 1)."""
+    return _registered(db, container, project, run, REVIEW, OTHER)
+
+
 def _answer(
     db: DbSession, container: ServiceContainer, item: Item, person: User, answer: str
 ) -> None:
@@ -385,6 +393,7 @@ class TestWriteBackServiceWriteBack:
         run: models.Session,
     ) -> None:
         item = _registered(session, container, project, run)
+        _kept_open(session, container, project, run)
         _answer(session, container, item, person, "The hill")
         _write_back(write_backs, run.id)
         container.record_service().undo(item)
@@ -495,6 +504,7 @@ class TestWriteBackServiceRefused:
         run: models.Session,
     ) -> None:
         item = _registered(session, container, project, run)
+        _kept_open(session, container, project, run)
         _answer(session, container, item, person, "The hill")
         fake_controller.remove_file(ENV, PATH)
         fake_controller.put_file(ENV, f"{PATH}/notes.md", b"Notes.\n")
@@ -682,11 +692,12 @@ class TestWriteBackServiceRefusals:
 
 
 def _committed_rows(
-    app: Flask, fake: ServedFakeController
+    app: Flask, fake: ServedFakeController, *, kept_open: bool = False
 ) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID]:
     """A project, a work item's Session in the fake's environment whose run
-    ended, and the document it registered there, read, committed: their ids
-    and the person's."""
+    ended, and the document it registered there, read, committed, with
+    another left open when `kept_open` (`_kept_open`): their ids and the
+    person's."""
     fake.add_environment(ENV, status="running")
     fake.put_file(ENV, PATH, DECISION.encode())
     container = app.container
@@ -705,6 +716,8 @@ def _committed_rows(
         db.flush()
         run = _run(db, container, project)
         item = _registered(db, container, project, run)
+        if kept_open:
+            _kept_open(db, container, project, run)
         return project.id, run.id, item.id, person.id
 
 
@@ -835,7 +848,9 @@ class TestWriteBackServiceLoop:
         fake = _WriteWatched(keepalive_seconds=0.2)
         try:
             client_of(container, fake)
-            _, run_id, item_id, person_id = _committed_rows(committed_app, fake)
+            _, run_id, item_id, person_id = _committed_rows(
+                committed_app, fake, kept_open=True
+            )
             write_backs, _ = _service(container, supervise)
             _close_committed(container, item_id, person_id, "The hill")
 
@@ -869,7 +884,9 @@ class TestWriteBackServiceLoop:
         fake = _WriteWatched(keepalive_seconds=0.2)
         try:
             client_of(container, fake)
-            _, run_id, item_id, person_id = _committed_rows(committed_app, fake)
+            _, run_id, item_id, person_id = _committed_rows(
+                committed_app, fake, kept_open=True
+            )
             write_backs, _ = _service(container, supervise)
             _close_committed(container, item_id, person_id, "The hill")
 

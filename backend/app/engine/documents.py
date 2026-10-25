@@ -215,7 +215,7 @@ class DocumentService:
         """The controller refused to write a closed registered document's text
         to its file, for what is wrong with the file, its path or its
         environment: it is not written again until the document's next
-        close."""
+        close, or the Resume of the continuation that carries it."""
         document.write_back_refused_at = datetime.now(UTC)
         self.db.flush()
 

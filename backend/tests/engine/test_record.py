@@ -1,6 +1,7 @@
 """The record's own writes: a person's answer, Done on an action, undo, Done
 on a document, Read and Reviewed (design 1 §6.4, F32.4); a work item's place
-and its done at its turn's end (DB Work, decision 44)."""
+and its done at its turn's end (DB Work, decision 44); the close that continues
+a run whose documents are all closed (decision 44; reviews 1 and 3)."""
 
 import json
 import uuid
@@ -18,7 +19,7 @@ from app import models
 from app.database import scoped_session
 from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved, WriteBackOwed
 from app.engine.paths import sha256_hex
-from app.engine.record import owes_write_back, write_back_owed
+from app.engine.record import owes_write_back, resume_message, write_back_owed
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.extensions import db
 from app.models import (
@@ -29,18 +30,25 @@ from app.models import (
     Item,
     PlanTask,
     Project,
+    Turn,
     User,
     Work,
 )
 from app.models.reference import (
     AnswerChannel,
+    ProjectState,
     SessionState,
     TaskStatus,
+    TransitionKind,
     UserKind,
     VersionCause,
 )
+from app.services.auth_service import AuthContext
 from app.services.container import ServiceContainer
+from app.utils.after_commit import clear_after_commit_callbacks
 from tests.support.fake_sidecar import FakeSidecar
+from tests.support.locks import in_thread, lock_waits
+from tests.support.supervisor import wait_until
 
 DECISION = """---
 title: Which tent?
@@ -1941,6 +1949,360 @@ class TestRecordServiceWriteBackOwed:
         ]
 
 
+SURVEY_PATH = "/work/Example/survey.md"
+CONTINUED = (
+    "Your documents were answered and written back in place: {paths}."
+    " Read the answers and continue."
+)
+
+
+def _ended_run(
+    container: ServiceContainer, project: Project, run: models.Session
+) -> models.Session:
+    """`run` placed as a work item whose run ended on its conversation, its
+    work item done at its turn's end (decision 44)."""
+    run.conversation_id = "conv-1"
+    run.state_code = SessionState.IDLE
+    records = container.record_service()
+    records.place_work(project, run, "Refining the camp", repo="example/Example")
+    records.work_done(run.id, datetime.now(UTC))
+    return run
+
+
+def _continuations(session: DbSession, project: Project) -> list[Work]:
+    """The project's work items that continue a run (decision 44)."""
+    return list(
+        session.scalars(
+            select(Work)
+            .where(Work.project_id == project.id, Work.trigger_item_id.is_not(None))
+            .execution_options(populate_existing=True)
+        )
+    )
+
+
+def _first_message(session: DbSession, work: Work) -> str:
+    (turn,) = session.scalars(select(Turn).where(Turn.session_id == work.id))
+    return turn.message
+
+
+class TestRecordServiceRelease:
+    """The close that leaves no document of a work item's ended run open
+    continues its conversation as a new work item in its transaction, every
+    document of the run consumed by it, its Undo gone (decision 44; review 1;
+    V11, V13)."""
+
+    def test_the_last_close_continues_the_run_and_consumes_its_documents(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        run = _ended_run(container, project, project_session)
+        decision, document = _registered(session, container, project, run, DECISION)
+        survey, _ = _registered(session, container, project, run, NOTICE, SURVEY_PATH)
+        records = container.record_service()
+        records.answer(document, "D1", person, "Tunnel")
+        assert _continuations(session, project) == []
+        assert records.offers_undo(decision)
+
+        records.reviewed(survey, person)
+
+        (work,) = _continuations(session, project)
+        item = session.get_one(Item, work.id)
+        continuation = session.get_one(models.Session, work.id)
+        assert (item.kind_code, item.title, item.seq) == (
+            "work",
+            "Refining the camp",
+            survey.seq + 1,
+        )
+        assert item.created_by_session_id == continuation.id
+        assert item.done_at is None
+        assert (work.trigger_item_id, work.trigger_code, work.repo) == (
+            survey.id,
+            None,
+            "example/Example",
+        )
+        assert (
+            continuation.kind_code,
+            continuation.environment_id,
+            continuation.conversation_id,
+            continuation.cwd,
+        ) == ("work", run.environment_id, "conv-1", run.cwd)
+        assert _first_message(session, work) == CONTINUED.format(
+            paths=f"{REGISTERED_PATH}, {SURVEY_PATH}"
+        )
+        for each in (decision, survey):
+            assert each.consumed_session_id == continuation.id
+            assert each.consumed_at is not None
+            assert not records.offers_undo(each)
+        with pytest.raises(InvalidOperationException) as refused:
+            records.undo(decision)
+        assert refused.value.cause == "a session has taken the item's answers"
+
+    @pytest.mark.parametrize(
+        ("text", "close"),
+        [
+            pytest.param(RECOMMENDED, "done", id="done"),
+            pytest.param(DECISION, "answer", id="the-answer-that-closes-it"),
+            pytest.param(ACTION, "done_action", id="the-done-that-closes-it"),
+            pytest.param(NOTICE, "reviewed", id="reviewed"),
+        ],
+    )
+    def test_each_close_of_the_last_document_continues_the_run(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+        text: str,
+        close: str,
+    ) -> None:
+        run = _ended_run(container, project, project_session)
+        item, document = _registered(session, container, project, run, text)
+        records = container.record_service()
+
+        if close == "answer":
+            records.answer(document, "D1", person, "Tunnel")
+        elif close == "done_action":
+            records.done_action(document, "A1", person)
+        else:
+            getattr(records, close)(item, person)
+
+        (work,) = _continuations(session, project)
+        assert work.trigger_item_id == item.id
+        assert item.consumed_session_id == work.id
+
+    def test_a_document_whose_read_failed_is_named_could_not_be_read(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        run = _ended_run(container, project, project_session)
+        _, document = _registered(session, container, project, run, DECISION)
+        documents = container.document_service()
+        unread = documents.register(project, run, SURVEY_PATH).item
+        documents.fail_read(session.get_one(Document, unread.id))
+        records = container.record_service()
+        records.answer(document, "D1", person, "Tunnel")
+
+        records.reviewed(unread, person)
+
+        (work,) = _continuations(session, project)
+        assert _first_message(session, work) == (
+            CONTINUED.format(paths=REGISTERED_PATH)
+            + f"\nCould not be read: {SURVEY_PATH}."
+        )
+        assert unread.consumed_session_id == work.id
+
+    def test_with_every_read_failed_its_message_names_them_alone(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        run = _ended_run(container, project, project_session)
+        documents = container.document_service()
+        unread = documents.register(project, run, SURVEY_PATH).item
+        documents.fail_read(session.get_one(Document, unread.id))
+
+        container.record_service().reviewed(unread, person)
+
+        (work,) = _continuations(session, project)
+        assert _first_message(session, work) == f"Could not be read: {SURVEY_PATH}."
+
+    def test_an_answer_that_leaves_the_last_document_open_continues_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        run = _ended_run(container, project, project_session)
+        item, document = _registered(session, container, project, run, TWO_ASKS)
+
+        container.record_service().answer(document, "D1", person, "Dome")
+
+        assert _continuations(session, project) == []
+        assert item.consumed_at is None
+
+    def test_a_run_not_ended_continues_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        container.record_service().place_work(
+            project, project_session, "Refining the camp", repo="example/Example"
+        )
+        item, document = _registered(
+            session, container, project, project_session, DECISION
+        )
+
+        container.record_service().answer(document, "D1", person, "Tunnel")
+
+        assert item.done_at is not None
+        assert _continuations(session, project) == []
+        assert item.consumed_at is None
+
+    def test_finishs_close_continues_nothing_nor_does_a_later_close(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        # Review 4: Finish's close ends the round trip.
+        run = _ended_run(container, project, project_session)
+        decision, document = _registered(session, container, project, run, DECISION)
+        survey, _ = _registered(session, container, project, run, NOTICE, SURVEY_PATH)
+        records = container.record_service()
+        records.answer(document, "D1", person, "Tunnel")
+
+        records.close_unanswered(project, person, FINISH)
+        records.undo(decision)
+        records.answer(document, "D1", person, "Dome")
+
+        assert survey.done_cause_code == "finished"
+        assert _continuations(session, project) == []
+        assert (decision.consumed_at, survey.consumed_at) == (None, None)
+
+    def test_the_consumption_moves_the_project_once_it_commits(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        run = _ended_run(container, project, project_session)
+        item, _ = _registered(session, container, project, run, NOTICE)
+        clear_after_commit_callbacks()
+
+        with scoped_session(container):
+            container.record_service().reviewed(item, person)
+            assert engine_events == []
+
+        assert item.consumed_at is not None
+        assert ProjectChanged(project.id) in engine_events
+
+    def test_in_an_archived_project_the_last_close_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        run = _ended_run(container, project, project_session)
+        item, _ = _registered(session, container, project, run, NOTICE)
+        project.archived = True
+        session.flush()
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.record_service().reviewed(item, person)
+
+        assert refused.value.operation == "continue Refining the camp"
+        assert refused.value.cause == "its project is archived"
+
+
+class TestRecordServiceRetryWriteBacks:
+    """A Resume of a continuation owes again the write-backs the controller
+    refused of the documents it carries (F125)."""
+
+    def test_the_refused_write_backs_it_carries_are_owed_again(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        run = _ended_run(container, project, project_session)
+        item, document = _registered(session, container, project, run, NOTICE)
+        # Another run's document, refused: no continuation carries it.
+        other = models.Session(
+            project_id=project.id,
+            environment_id=run.environment_id,
+            kind_code="work",
+            cwd="/work/Example",
+            token_hash="2" * 64,
+            state_code=SessionState.IDLE,
+        )
+        session.add(other)
+        session.flush()
+        _, elsewhere = _registered(session, container, project, other, NOTICE)
+        records = container.record_service()
+        records.reviewed(item, person)
+        records.reviewed(session.get_one(Item, elsewhere.id), person)
+        documents = container.document_service()
+        documents.refuse_write_back(document)
+        documents.refuse_write_back(elsewhere)
+        (work,) = _continuations(session, project)
+        clear_after_commit_callbacks()
+
+        with scoped_session(container):
+            records.retry_write_backs(work.id)
+
+        assert document.write_back_refused_at is None
+        assert owes_write_back(item, document)
+        assert elsewhere.write_back_refused_at is not None
+        assert _owed_events(engine_events) == [WriteBackOwed(run.id)]
+
+    def test_with_none_refused_it_changes_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        run = _ended_run(container, project, project_session)
+        item, document = _registered(session, container, project, run, NOTICE)
+        container.record_service().reviewed(item, person)
+        container.document_service().wrote_back(document)
+        (work,) = _continuations(session, project)
+        clear_after_commit_callbacks()
+
+        with scoped_session(container):
+            container.record_service().retry_write_backs(work.id)
+
+        assert document.written_back_at is not None
+        assert _owed_events(engine_events) == []
+
+
+class TestResumeMessage:
+    def test_it_names_the_documents_written_back_then_those_not_read(self) -> None:
+        assert resume_message(["/work/a.md", "/work/b.md"], ["/work/c.md"]) == (
+            "Your documents were answered and written back in place: /work/a.md,"
+            " /work/b.md. Read the answers and continue.\n"
+            "Could not be read: /work/c.md."
+        )
+
+    def test_each_line_only_when_it_names_one(self) -> None:
+        assert resume_message(["/work/a.md"], []) == (
+            "Your documents were answered and written back in place: /work/a.md."
+            " Read the answers and continue."
+        )
+        assert resume_message([], ["/work/c.md", "/work/d.md"]) == (
+            "Could not be read: /work/c.md, /work/d.md."
+        )
+
+
 class TestRecordServiceCloseUnanswered:
     def test_every_open_item_but_the_opening_is_done_unanswered(
         self,
@@ -2473,6 +2835,266 @@ class TestRecordServiceRowLock:
                 session.get_one(Item, item_id).done_at
                 for item_id in (decision_id, notice_id)
             ] == [None, None]
+
+
+ADA = AuthContext(
+    subject="subject-ada", email=None, name="Ada Example", roles={"editor"}
+)
+"""The person `_committed_run` commits, signed in."""
+
+
+def _committed_run(
+    app: Flask, documents: int
+) -> tuple[uuid.UUID, uuid.UUID, list[uuid.UUID]]:
+    """An open project whose work item's run ended, with `documents`
+    decisions it registered, each read at its end, committed: the person's
+    id, the project's and the documents'."""
+    container = app.container
+    with scoped_session(container) as session:
+        person = User(
+            kind_code=UserKind.PERSON,
+            subject="subject-ada",
+            handle="ada",
+            name="Ada Example",
+            avatar_slot=1,
+        )
+        session.add(person)
+        session.flush()
+        project = Project(
+            created_by_user_id=person.id, state_code=ProjectState.OPEN, slug="camp"
+        )
+        session.add(project)
+        session.add(Environment(id=ENVIRONMENT_ID, name="Example-1", exempt=False))
+        session.flush()
+        run = models.Session(
+            project_id=project.id,
+            environment_id=ENVIRONMENT_ID,
+            kind_code="work",
+            cwd="/work/Example",
+            token_hash="1" * 64,
+            state_code=SessionState.IDLE,
+        )
+        session.add(run)
+        session.flush()
+        _ended_run(container, project, run)
+        items = [
+            _registered(
+                session, container, project, run, DECISION, f"/work/Example/{n}.md"
+            )[0].id
+            for n in range(documents)
+        ]
+        return person.id, project.id, items
+
+
+def _answered(
+    container: ServiceContainer, person_id: uuid.UUID, item_id: uuid.UUID
+) -> bool:
+    """The person's answer that closes the decision, committed; False when
+    Finish closed it first."""
+    with scoped_session(container) as session:
+        try:
+            container.record_service().answer(
+                session.get_one(Document, item_id),
+                "D1",
+                session.get_one(User, person_id),
+                "Tunnel",
+            )
+        except InvalidOperationException as refused:
+            assert refused.cause == "the item is done"
+            return False
+        return True
+
+
+def _undone(container: ServiceContainer, item_id: uuid.UUID) -> bool:
+    """The Undo of the item, committed; False when a continuation consumed
+    it first."""
+    with scoped_session(container) as session:
+        try:
+            container.record_service().undo(session.get_one(Item, item_id))
+        except InvalidOperationException as refused:
+            assert refused.cause == "a session has taken the item's answers"
+            return False
+        return True
+
+
+def _committed_continuations(container: ServiceContainer) -> list[Work]:
+    with scoped_session(container) as session:
+        return list(
+            session.scalars(select(Work).where(Work.trigger_item_id.is_not(None)))
+        )
+
+
+class TestRecordServiceReleaseLocks:
+    """A close of a registered document takes its project's row first, in
+    the start's lock order, so it serialises with Finish, an Undo and another
+    close (review 3; V22)."""
+
+    @pytest.mark.parametrize(
+        "held",
+        [
+            pytest.param("FOR SHARE", id="an-undos"),
+            pytest.param("FOR NO KEY UPDATE", id="finishs"),
+            pytest.param("FOR UPDATE", id="another-closes"),
+        ],
+    )
+    def test_it_waits_for_the_projects_row_before_it_locks_the_documents(
+        self, committed_app: Flask, held: str
+    ) -> None:
+        person_id, project_id, (item_id,) = _committed_run(committed_app, 1)
+        container = committed_app.container
+        with committed_app.app_context():
+            engine = db.engine
+
+        with engine.connect() as holder:
+            holder.execute(
+                sql(f"SELECT id FROM projects WHERE id = :id {held}"),
+                {"id": project_id},
+            )
+            close = in_thread(lambda: _answered(container, person_id, item_id))
+            wait_until(lambda: lock_waits(container) == 1, "the close waiting")
+            with engine.connect() as other:
+                other.execute(
+                    sql("SELECT id FROM documents WHERE id = :id FOR UPDATE NOWAIT"),
+                    {"id": item_id},
+                )
+                other.rollback()
+            holder.rollback()
+
+        assert close.result()
+        (work,) = _committed_continuations(container)
+        with scoped_session(container) as session:
+            assert session.get_one(Item, item_id).consumed_session_id == work.id
+
+    def test_a_document_pilot_added_closes_under_an_undos_hold(
+        self, committed_app: Flask
+    ) -> None:
+        person_id, decision_id, _ = _committed_items(committed_app)
+        container = committed_app.container
+        with scoped_session(container) as session:
+            project_id = session.get_one(Item, decision_id).project_id
+        with committed_app.app_context():
+            engine = db.engine
+
+        with engine.connect() as holder:
+            holder.execute(
+                sql("SELECT id FROM projects WHERE id = :id FOR SHARE"),
+                {"id": project_id},
+            )
+            with scoped_session(container) as session:
+                session.execute(sql("SET LOCAL lock_timeout = '200ms'"))
+                container.record_service().answer(
+                    session.get_one(Document, decision_id),
+                    "D1",
+                    session.get_one(User, person_id),
+                    "Tunnel",
+                )
+            holder.rollback()
+
+        with scoped_session(container) as session:
+            assert session.get_one(Item, decision_id).done_at is not None
+
+    def test_two_closes_of_the_runs_last_documents_place_one_continuation(
+        self, committed_app: Flask
+    ) -> None:
+        person_id, project_id, items = _committed_run(committed_app, 2)
+        container = committed_app.container
+        with committed_app.app_context():
+            engine = db.engine
+
+        with engine.connect() as holder:
+            holder.execute(
+                sql("SELECT id FROM projects WHERE id = :id FOR SHARE"),
+                {"id": project_id},
+            )
+            closes = [
+                in_thread(
+                    lambda item_id=item_id: _answered(container, person_id, item_id)
+                )
+                for item_id in items
+            ]
+            wait_until(lambda: lock_waits(container) == 2, "both closes waiting")
+            holder.rollback()
+
+        assert [close.result() for close in closes] == [True, True]
+        (work,) = _committed_continuations(container)
+        with scoped_session(container) as session:
+            assert [
+                session.get_one(Item, item_id).consumed_session_id for item_id in items
+            ] == [work.id, work.id]
+
+    def test_the_last_close_and_finish_at_once_neither_deadlock_nor_continue_both(
+        self, committed_app: Flask
+    ) -> None:
+        person_id, project_id, (item_id,) = _committed_run(committed_app, 1)
+        container = committed_app.container
+        with committed_app.app_context():
+            engine = db.engine
+
+        def finish() -> None:
+            with scoped_session(container):
+                container.project_service().transition(
+                    ADA, project_id, TransitionKind.FINISHED
+                )
+
+        with engine.connect() as holder:
+            holder.execute(
+                sql("SELECT id FROM projects WHERE id = :id FOR SHARE"),
+                {"id": project_id},
+            )
+            close = in_thread(lambda: _answered(container, person_id, item_id))
+            finished = in_thread(finish)
+            wait_until(lambda: lock_waits(container) == 2, "both waiting")
+            holder.rollback()
+
+        answered = close.result()
+        finished.result()
+        continuations = _committed_continuations(container)
+        with scoped_session(container) as session:
+            item = session.get_one(Item, item_id)
+            if answered:
+                # The close went first: Finish stopped its continuation and
+                # closed its work item.
+                (work,) = continuations
+                assert item.consumed_session_id == work.id
+                assert (
+                    session.get_one(models.Session, work.id).state_code
+                    == SessionState.STOPPED
+                )
+                assert session.get_one(Item, work.id).done_cause_code == "finished"
+            else:
+                assert continuations == []
+                assert item.done_cause_code == "finished"
+
+    def test_an_undo_and_the_last_close_at_once_never_continue_a_reopened_run(
+        self, committed_app: Flask
+    ) -> None:
+        person_id, project_id, (first, last) = _committed_run(committed_app, 2)
+        container = committed_app.container
+        assert _answered(container, person_id, first)
+        with committed_app.app_context():
+            engine = db.engine
+
+        with engine.connect() as holder:
+            holder.execute(
+                sql("SELECT id FROM projects WHERE id = :id FOR NO KEY UPDATE"),
+                {"id": project_id},
+            )
+            undo = in_thread(lambda: _undone(container, first))
+            close = in_thread(lambda: _answered(container, person_id, last))
+            wait_until(lambda: lock_waits(container) == 2, "both waiting")
+            holder.rollback()
+
+        undone = undo.result()
+        assert close.result()
+        continuations = _committed_continuations(container)
+        with scoped_session(container) as session:
+            reopened = session.get_one(Item, first)
+            if undone:
+                assert continuations == []
+                assert reopened.done_at is None
+            else:
+                (work,) = continuations
+                assert reopened.consumed_session_id == work.id
 
 
 def _work_session(

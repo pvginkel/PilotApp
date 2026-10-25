@@ -4,23 +4,29 @@ open items (F5.1); and a work item's place and its done at its turn's end
 (DB Work, decision 44).
 
 Each is a write of the caller's transaction, under the document's row lock
-(TD §8.5); a work item's, which has no document, under its project's row or
-its item's. A write that touches the text splices it into the published text
-and publishes it, whether or not the path's latest save is held: the tree
-keeps the agent's ingest then, and the next clean save's merge carries the
-write to the file (design 1 §5.2, §7). No write raises *modified*. A close
-of a registered document owes its text to the file it was registered from,
-written back once the transaction commits (F65.1).
+(TD §8.5), a registered document's close under its project's row first; a
+work item's, which has no document, under its project's row or its item's. A
+write that touches the text splices it into the published text and publishes
+it, whether or not the path's latest save is held: the tree keeps the agent's
+ingest then, and the next clean save's merge carries the write to the file
+(design 1 §5.2, §7). No write raises *modified*. A close of a registered
+document owes its text to the file it was registered from, written back once
+the transaction commits (F65.1). The close that leaves no document of a work
+item's ended run open continues its conversation in the same transaction
+(decision 44, review 1): the session start places the continuation, and every
+document of the run is consumed by it, its Undo gone.
 """
 
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
+from typing import Protocol
 
 from sqlalchemy import ColumnElement, and_, exists, select
 from sqlalchemy.orm import Session
 
 from app.engine import dsl
-from app.engine.bus import EngineBus, WriteBackOwed
+from app.engine.bus import EngineBus, ProjectChanged, WriteBackOwed
 from app.engine.documents import (
     DOCUMENT,
     OPENING,
@@ -54,6 +60,33 @@ SETTLED = "settled"
 TURN_ENDED = "turn_ended"
 FINISHED = "finished"
 
+WRITTEN_BACK = (
+    "Your documents were answered and written back in place: {paths}."
+    " Read the answers and continue."
+)
+"""The continuation's message naming the run's documents written back, verbatim
+(the rulings)."""
+
+UNREAD = "Could not be read: {paths}."
+"""Its line naming the run's documents whose turn-end read failed (ruling D1)."""
+
+
+class Continuations(Protocol):
+    """Places a work item's continuation through the gate: the session start."""
+
+    def continue_run(
+        self,
+        db: Session,
+        project: Project,
+        run_id: uuid.UUID,
+        released: Item,
+        message: str,
+    ) -> AgentSession:
+        """The conversation of the work item `run_id` continued as a new work
+        item, its trigger the Item `released`, its first Turn `message`, in
+        the caller's transaction, which holds the project's row."""
+        ...
+
 
 class RecordService:
     def __init__(
@@ -62,11 +95,13 @@ class RecordService:
         engine_bus: EngineBus,
         document_service: DocumentService,
         view_service: ViewService,
+        continuations: Callable[[], Continuations],
     ) -> None:
         self.db = db
         self.engine_bus = engine_bus
         self.document_service = document_service
         self.view_service = view_service
+        self.continuations = continuations
 
     def answer(
         self,
@@ -84,7 +119,7 @@ class RecordService:
         with `to`, a task in the plan or `plan` (decision 47). It replaces the
         block's answer, Pilot's included, while the item is not done (F32.2);
         the answer to a one-ask item is its done (DB 163)."""
-        project, item = self._locked(document)
+        project, item = self._closing(document)
         operation = f"answer block {local_id} of {tree_path(project, document.path)}"
         _not_awaiting_read(item, document, operation)
         _a_person(user, operation, "Pilot answers in the file, `by: agent`")
@@ -140,7 +175,7 @@ class RecordService:
         `user` pasted back (FM §4). An action with options is answered with
         one of them instead. Done on a one-ask item's action is its done (DB
         163)."""
-        project, item = self._locked(document)
+        project, item = self._closing(document)
         operation = (
             f"mark action {local_id} of {tree_path(project, document.path)} done"
         )
@@ -211,6 +246,29 @@ class RecordService:
         document.write_back_refused_at = None
         self.view_service.timeline_moved(project)
 
+    def retry_write_backs(self, continuation_id: uuid.UUID) -> None:
+        """A Resume of the continuation `continuation_id`, in the caller's
+        transaction: each document it carries whose write-back the controller
+        refused owes it again, under the document's row lock, so that its
+        start writes it before it sends (F125)."""
+        refused = self.db.execute(
+            select(Document, Item.created_by_session_id)
+            .join(Item, Item.id == Document.id)
+            .where(
+                Item.consumed_session_id == continuation_id,
+                Document.write_back_refused_at.is_not(None),
+            )
+            .order_by(Document.id)
+            .with_for_update(of=Document)
+            .execution_options(populate_existing=True)
+        ).all()
+        for document, run_id in refused:
+            # A registered document is its Session's.
+            assert run_id is not None
+            document.write_back_refused_at = None
+            self.engine_bus.emit(WriteBackOwed(run_id))
+        self.db.flush()
+
     def offers_undo(self, item: Item) -> bool:
         """Whether `undo` takes the item now, as it stands."""
         return (
@@ -230,7 +288,7 @@ class RecordService:
                 f"a {item.kind_code} item is not done by Done",
             )
         document = self.db.get_one(Document, item.id)
-        project, _ = self._locked(document)
+        project, _ = self._closing(document)
         operation = f"mark {tree_path(project, document.path)} done"
         _not_awaiting_read(item, document, operation)
         if item.kind_code != DOCUMENT:
@@ -310,13 +368,16 @@ class RecordService:
         plan_task_id: str | None = None,
         *,
         repo: str | None = None,
+        trigger_item_id: uuid.UUID | None = None,
     ) -> Work:
         """A work item of `session`, one identity with it (DB Work, decision
         3): its Item of kind `work` at the project's next place on the
         timeline, on the plan's task `plan_task_id` when given, created by its
         own Session, and its Work under the switch's setting as it stands
         (F54.7), placed by the repository `repo` its environment is made from
-        (F61.1), none for a job.
+        (F61.1), none for a job; a run that continues a conversation after
+        Done has the Item `trigger_item_id` whose close released it (decision
+        44).
 
         Raises:
             RecordNotFoundException: the project's plan has no task
@@ -341,6 +402,7 @@ class RecordService:
             project_id=project.id,
             session_kind_code=session.kind_code,
             repo=repo,
+            trigger_item_id=trigger_item_id,
             autopilot=project.autopilot,
         )
         self.db.add(work)
@@ -368,7 +430,7 @@ class RecordService:
                 f"a {item.kind_code} item is not marked {mark}",
             )
         document = self.db.get_one(Document, item.id)
-        project, _ = self._locked(document)
+        project, _ = self._closing(document)
         operation = f"mark {tree_path(project, document.path)} {mark}"
         _not_awaiting_read(item, document, operation)
         _a_person(user, operation, "Pilot marks done only a document it settled whole")
@@ -395,6 +457,20 @@ class RecordService:
     def _locked(self, document: Document) -> tuple[Project, Item | None]:
         self.document_service.lock(document)
         return self.document_service.owner(document)
+
+    def _closing(self, document: Document) -> tuple[Project, Item | None]:
+        """`_locked`, for a write that may close the document. A registered
+        document's close may continue its run (`_release`): the project's row
+        is locked first, exclusively, as the start that places the
+        continuation locks it, before the document's (the start's lock order;
+        review 3). So the close serialises with Finish, with an Undo, and with
+        the close of another document of the run."""
+        if document.source_path is not None:
+            project, _ = self.document_service.owner(document)
+            self.db.execute(
+                select(Project.id).where(Project.id == project.id).with_for_update()
+            )
+        return self._locked(document)
 
     def _in_the_plan(self, project: Project, task_id: str) -> bool:
         return bool(
@@ -439,6 +515,70 @@ class RecordService:
             # A registered document is its Session's.
             assert item.created_by_session_id is not None
             self.engine_bus.emit(WriteBackOwed(item.created_by_session_id))
+        if document.source_path is not None:
+            self._release(project, item)
+
+    def _release(self, project: Project, item: Item) -> None:
+        """The close of the registered document `item`, under the project's
+        row (`_closing`): once its run has ended, its work item done at its
+        turn's end, and none of the documents it registered is open, nor any
+        closed by Finish, which continues nothing (review 4), the run's
+        conversation continues as a new work item, released by `item`
+        (`Continuations`), and every document of the run is consumed by it:
+        no Undo from now (review 1)."""
+        run_id = item.created_by_session_id
+        # A registered document is its Session's.
+        assert run_id is not None
+        run = self.db.get(Item, run_id, populate_existing=True)
+        if run is None or run.done_cause_code != TURN_ENDED:
+            return
+        registered = self.db.execute(
+            select(Item, Document)
+            .join(Document, Document.id == Item.id)
+            .where(
+                Item.created_by_session_id == run_id,
+                Document.source_path.is_not(None),
+            )
+            .order_by(Item.seq)
+            .execution_options(populate_existing=True)
+        ).all()
+        if any(
+            each.done_at is None or each.done_cause_code == FINISHED
+            for each, _ in registered
+        ):
+            return
+        written: list[str] = []
+        unread: list[str] = []
+        for _, document in registered:
+            # The query takes registered documents alone.
+            assert document.source_path is not None
+            # A closed registered document was read: one with no text failed
+            # its read (review 7).
+            if document.published_text is not None:
+                written.append(document.source_path)
+            else:
+                unread.append(document.source_path)
+        continuation = self.continuations().continue_run(
+            self.db, project, run_id, item, resume_message(written, unread)
+        )
+        at = datetime.now(UTC)
+        for each, _ in registered:
+            each.consumed_at = at
+            each.consumed_session_id = continuation.id
+        self.db.flush()
+        self.engine_bus.emit(ProjectChanged(project.id))
+
+
+def resume_message(written: list[str], unread: list[str]) -> str:
+    """The continuation's first message (the rulings): the paths of the run's
+    documents written back, then those whose turn-end read failed, each line
+    only when it names one."""
+    lines = []
+    if written:
+        lines.append(WRITTEN_BACK.format(paths=", ".join(written)))
+    if unread:
+        lines.append(UNREAD.format(paths=", ".join(unread)))
+    return "\n".join(lines)
 
 
 def owes_write_back(item: Item, document: Document) -> bool:

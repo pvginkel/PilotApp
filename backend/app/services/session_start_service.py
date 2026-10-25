@@ -61,6 +61,15 @@ headless session of its own, in its environment reset, or in one taken or
 created when it has none or that one is gone or deleting. A work item placed
 before slice 020, in an environment Pilot did not create, is never started
 there (F143.1; review A2).
+
+The close that leaves no document of a work item's ended run open continues its
+conversation (`continue_run`; decision 44, F26.7): a new work item placed in the
+close's transaction, its Session in the run's environment from then on, never
+reset, through the gate as any start. Before its environment is brought up,
+its start writes back what the documents it carries still owe (F65.1), and a
+write-back the controller refused fails it with the controller's reason
+(F125); its Resume owes those again, and sends the continuation's message, not
+"continue", while no Turn of its Session has gone out.
 """
 
 import hashlib
@@ -78,7 +87,7 @@ from sqlalchemy.orm import Session
 from app.core_exceptions import ExternalServiceException
 from app.database import scoped_session
 from app.exceptions import InvalidOperationException, RecordNotFoundException
-from app.models import Environment, Item, Project, Turn, User, Work
+from app.models import Document, Environment, Item, Project, Turn, User, Work
 from app.models import Session as AgentSession
 from app.models.reference import ProjectState, RecordKind, SessionState
 from app.services.controller_client import (
@@ -94,11 +103,16 @@ from app.services.current_line import while_starting
 from app.services.environment_service import EnvironmentService
 from app.services.pilot_server import PilotServer
 from app.services.relay_service import CONTINUE, SESSION_GONE, RelayService
-from app.services.session_record_service import SessionRecordService
+from app.services.session_record_service import (
+    SessionRecordService,
+    read_records,
+    stream_position,
+)
 from app.services.session_stream_service import SessionStreamService
 from app.services.start_gate import WORK_KIND, Held, WorkSlots, held_reason
 from app.services.supervisor import LoopHandle, Supervisor
 from app.services.work_status import work_moved
+from app.services.write_back_service import WRITE_BACK_REFUSED
 from app.utils.after_commit import after_commit
 
 if TYPE_CHECKING:
@@ -146,6 +160,17 @@ _RESUME_REFUSALS = {
 
 _DONE_STATUSES = ("ended", "error")
 """A headless session's terminal statuses: it takes no turn."""
+
+_RECORD_PAGE = 32
+"""The `server` records one read of a Session's takes, newest first."""
+
+_WAITED_OUT = (
+    ControllerProblemType.CONFLICT,
+    ControllerProblemType.ENVIRONMENT_UNREADABLE,
+)
+"""The controller's refusals of a write-back for its own work on the tree or
+its share unreadable: a continuation's start waits them out, its loop running
+again after its backoff."""
 
 
 @dataclass(frozen=True)
@@ -308,7 +333,7 @@ class SessionStartService:
             project_id=project_id,
             kind_code=WORK_KIND,
             cwd=cwd,
-            token_hash=hashlib.sha256(secrets.token_urlsafe(32).encode()).hexdigest(),
+            token_hash=_unheld_token_hash(),
             state_code=SessionState.STARTING if held is None else SessionState.HELD,
             turns=1,
             turn_started_at=now,
@@ -327,6 +352,82 @@ class SessionStartService:
             logger.info("Session %s is held at its start: %s", session.id, held.reason)
         return work
 
+    def continue_run(
+        self,
+        db: Session,
+        project: Project,
+        run_id: uuid.UUID,
+        released: Item,
+        message: str,
+    ) -> AgentSession:
+        """The conversation of the work item `run_id`, its run ended and every
+        document it registered closed, continued as a new work item (decision
+        44, F26.7), in the caller's transaction, which holds the project's row
+        exclusively: titled as the run, at the project's next place, after
+        the answered items, its trigger the Item `released` whose close
+        released it, and no Work Trigger. Its Session is in the run's
+        environment from its placement on, held or not, so the environment is
+        never free between the two (DB 240, §13.5), and continues the run's
+        conversation, never reset (DB 241), on the run's cwd, agent, model and
+        effort, its first Turn `message`; its Work keeps the run's repository.
+        It passes the gate as `start_work`'s does: `held` while the gate is
+        closed for it, else `starting`, its start run once this commits. No
+        controller call is made.
+
+        Returns:
+            The continuation's Session
+
+        Raises:
+            InvalidOperationException: The project is archived
+        """
+        refusal = _closed(project)
+        if refusal is not None:
+            raise InvalidOperationException(
+                f"continue {_work_named(db, run_id)}", refusal
+            )
+        run = db.get_one(AgentSession, run_id)
+        title = db.get_one(Item, run_id).title
+        # A work item is titled at its placement.
+        assert title is not None
+        held = self._held(db, project, WORK_KIND)
+        now = datetime.now(UTC)
+        session = AgentSession(
+            project_id=project.id,
+            environment_id=run.environment_id,
+            kind_code=WORK_KIND,
+            conversation_id=run.conversation_id,
+            cwd=run.cwd,
+            agent=run.agent,
+            model=run.model,
+            reasoning_effort=run.reasoning_effort,
+            token_hash=_unheld_token_hash(),
+            state_code=SessionState.STARTING if held is None else SessionState.HELD,
+            turns=1,
+            turn_started_at=now,
+        )
+        db.add(session)
+        db.flush()
+        db.add(Turn(session_id=session.id, seq=1, message=message, started_at=now))
+        db.flush()
+        self._container.record_service().place_work(
+            project,
+            session,
+            title,
+            repo=db.get_one(Work, run_id).repo,
+            trigger_item_id=released.id,
+        )
+        if held is None:
+            self._begin(db, session)
+        else:
+            after_commit(_HeldWritten(self))
+        logger.info(
+            "Session %s continues session %s%s",
+            session.id,
+            run_id,
+            "" if held is None else f", held: {held.reason}",
+        )
+        return session
+
     def run(self, session_id: uuid.UUID, handle: LoopHandle) -> None:
         """The start loop's run, from where the Session's rows left its start:
         the environment brought up and the headless session created while the
@@ -339,7 +440,9 @@ class SessionStartService:
         session that is gone, or whose environment is not running, is given up
         first, a `server` record saying so, and the start goes on from the
         environment. Returns at once for a Session no longer `starting`, and
-        between the phases when the loop is told to stop. A run a Stop and then
+        between the phases when the loop is told to stop. A continuation's
+        start writes back what the documents it carries owe before it brings
+        its environment up (`_written_back`). A run a Stop and then
         a Resume overtook, its Session `starting` the Resume's Turn, goes no
         further than its bring-up: it creates and records no controller
         session, sends nothing and fails nothing, and the run the Resume asks
@@ -389,6 +492,8 @@ class SessionStartService:
                 if pending is None:
                     return
         if pending.controller_session is None:
+            if not self._written_back(session_id, turn_id, handle):
+                return
             try:
                 if not self._bring_up(session_id, pending) or handle.stopping:
                     return
@@ -509,11 +614,14 @@ class SessionStartService:
         """A work item's Resume, stopped or failed, in the caller's
         transaction (F67.2): a server-own Turn, "continue", or the ended
         Turn's message while the Session has no conversation (R15's rule, so
-        a failed start's carries its brief), and the Session through the gate
-        (§13.4): `held` while it is closed, else `starting`, its loop sending
-        the Turn once this commits. The item stays one item (F26.7); its
-        Session's `error` is cleared. With no conversation it is a fresh start
-        (`_fresh`).
+        a failed start's carries its brief, or while no Turn of the Session
+        has gone out, so a continuation's carries its message), and the
+        Session through the gate (§13.4): `held` while it is closed, else
+        `starting`, its loop sending the Turn once this commits. The item
+        stays one item (F26.7); its Session's `error` is cleared, and a
+        write-back the controller refused of a document it carries is owed
+        again (`RecordService.retry_write_backs`). With no conversation it is
+        a fresh start (`_fresh`).
 
         The project's row is read under a share lock, so a Resume and a
         Finish or an Archive never interleave, and the slot is counted under
@@ -557,7 +665,11 @@ class SessionStartService:
         turn = Turn(
             session_id=session_id,
             seq=ended.seq + 1,
-            message=ended.message if session.conversation_id is None else CONTINUE,
+            message=(
+                ended.message
+                if session.conversation_id is None or not _went_out(db, session_id)
+                else CONTINUE
+            ),
             started_at=now,
         )
         db.add(turn)
@@ -567,6 +679,7 @@ class SessionStartService:
         session.turn_ended_at = None
         session.error = None
         session.current_line = None
+        self._container.record_service().retry_write_backs(session_id)
         held = self._held(db, project, session.kind_code)
         if session.conversation_id is None:
             self._fresh(db, session)
@@ -771,6 +884,53 @@ class SessionStartService:
         self._supervisor.start_loop(
             START_JOB, partial(self.run, session_id), key=str(session_id), again=True
         )
+
+    def _written_back(
+        self, session_id: uuid.UUID, turn_id: int, handle: LoopHandle
+    ) -> bool:
+        """Every write-back owed for the documents the Session carries, a
+        continuation's, made before its environment is brought up, which the
+        controller refuses a write during (F65.1): each landed, or refused for
+        the file, its path or its environment (`WriteBackService`). One
+        refused so, before this run or by it, fails the start with the
+        controller's reason (F125); a call the controller does not answer
+        returns the Session to `held`, and any other failure fails it.
+        Returns whether the start goes on: False once it is held or failed, or
+        the loop is told to stop.
+
+        Raises:
+            ControllerProblem: The controller refused a write for its own work
+                on the tree (`409 conflict`) or its share unreadable (`503`):
+                the loop runs again after its backoff, the Session `starting`
+        """
+        with scoped_session(self._container) as db:
+            runs = _carried(db, session_id)
+        if not runs:
+            return True
+        try:
+            for run_id in runs:
+                self._container.write_back_service().write_back(run_id, handle)
+        except ControllerUnreachable as error:
+            with scoped_session(self._container) as db:
+                self._hold(db, session_id, error)
+            return False
+        except ExternalServiceException as error:
+            if (
+                isinstance(error, ControllerProblem)
+                and error.problem_type in _WAITED_OUT
+            ):
+                raise
+            with scoped_session(self._container) as db:
+                self._fail(db, session_id, turn_id, str(error), recorded=False)
+            return False
+        if handle.stopping:
+            return False
+        with scoped_session(self._container) as db:
+            refused = _refused_write_backs(db, session_id)
+            if refused is not None:
+                self._fail(db, session_id, turn_id, refused, recorded=False)
+                return False
+        return True
 
     def _bring_up(self, session_id: uuid.UUID, pending: _Pending) -> bool:
         """The Session's environment brought up as its rows have it, and its
@@ -1085,6 +1245,86 @@ def _latest_turn(db: Session, session_id: uuid.UUID) -> Turn:
         .limit(1)
         .execution_options(populate_existing=True)
     ).one()
+
+
+def _went_out(db: Session, session_id: uuid.UUID) -> bool:
+    """Whether a Turn of the Session has gone out: its controller session ran
+    it, the relay recording its stream."""
+    return stream_position(db, session_id) is not None
+
+
+def _carried(db: Session, session_id: uuid.UUID) -> list[uuid.UUID]:
+    """The Sessions whose registered documents the Session carries, a
+    continuation: the run it continues."""
+    runs = []
+    for run_id in db.scalars(
+        select(Item.created_by_session_id)
+        .join(Document, Document.id == Item.id)
+        .where(
+            Item.consumed_session_id == session_id,
+            Document.source_path.is_not(None),
+        )
+        .distinct()
+        .order_by(Item.created_by_session_id)
+    ):
+        # A registered document is its Session's.
+        assert run_id is not None
+        runs.append(run_id)
+    return runs
+
+
+def _refused_write_backs(db: Session, session_id: uuid.UUID) -> str | None:
+    """Why the controller refused the write-back of each document the Session
+    carries that it refused, in the order registered, as the `server` record
+    of the registering Session says; None when it refused none."""
+    refused = db.execute(
+        select(Item.id, Item.created_by_session_id, Document.source_path)
+        .join(Document, Document.id == Item.id)
+        .where(
+            Item.consumed_session_id == session_id,
+            Document.write_back_refused_at.is_not(None),
+        )
+        .order_by(Item.seq)
+    ).all()
+    reasons = []
+    for item_id, run_id, path in refused:
+        # A registered document is its Session's.
+        assert run_id is not None
+        reason = _refusal_recorded(db, run_id, item_id)
+        reasons.append(f"Cannot write {path} back because {reason}")
+    return "; ".join(reasons) if reasons else None
+
+
+def _refusal_recorded(db: Session, run_id: uuid.UUID, item_id: uuid.UUID) -> str:
+    """The reason of the Session's latest `write-back-refused` record of the
+    Item, read newest first a page at a time."""
+    before = None
+    while True:
+        page = read_records(
+            db,
+            run_id,
+            before=before,
+            kind=RecordKind.SERVER,
+            limit=_RECORD_PAGE,
+            newest_first=True,
+        )
+        for stored in page:
+            payload = stored.record.payload
+            if payload.get("type") == WRITE_BACK_REFUSED and payload.get("item") == str(
+                item_id
+            ):
+                reason: str = payload["reason"]
+                return reason
+        # A refused write-back writes its record in the refusal's transaction
+        # (`WriteBackService`).
+        assert len(page) == _RECORD_PAGE
+        before = page[-1].record.seq
+
+
+def _unheld_token_hash() -> str:
+    """The hash of a token no one holds: a Session's from its placement until
+    its create mints the one its controller session carries (`run`)."""
+    return hashlib.sha256(secrets.token_urlsafe(32).encode()).hexdigest()
 
 
 def _standing(db: Session, project_id: uuid.UUID, *, births: bool) -> Project:

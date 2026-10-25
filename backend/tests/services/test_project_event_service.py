@@ -6,6 +6,7 @@ status moves, as one event carrying it. Read off test connections' queues."""
 import json
 import uuid
 from collections.abc import Callable, Iterator
+from datetime import UTC, datetime
 from queue import Empty
 from typing import Any
 
@@ -186,6 +187,39 @@ class TestProjectEventService:
             )
 
         assert frames(tab) == [changed(project.id)]
+
+    def test_a_continuation_taking_the_answers_is_heard_on_another_connection(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        connect: Connect,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        # Slice 005's I1: the Undo a person's other browser shows goes once a
+        # continuation consumes the run's documents (review 1).
+        ben = container.test_data_service().person("ben", "Ben Example")
+        project_session.conversation_id = "conv-1"
+        project_session.state_code = SessionState.IDLE
+        records = container.record_service()
+        records.place_work(project, project_session, "Refining the camp")
+        records.work_done(project_session.id, datetime.now(UTC))
+        documents = container.document_service()
+        item = documents.register(project, project_session, "/work/Example/a.md").item
+        documents.publish_read(
+            session.get_one(Document, item.id), DECISION, project_session.id
+        )
+        clear_after_commit_callbacks()
+        bens_tab = connect("ben-1", ben.subject)
+
+        with scoped_session(container):
+            records.answer(session.get_one(Document, item.id), "D1", person, "Dome")
+            assert frames(bens_tab) == []
+
+        assert item.consumed_at is not None
+        assert not records.offers_undo(item)
+        assert changed(project.id) in frames(bens_tab)
 
     def test_each_project_changed_is_named(
         self,

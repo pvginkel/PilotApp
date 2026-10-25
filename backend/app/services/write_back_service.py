@@ -13,12 +13,12 @@ the Document's, in the start's lock order, unless the document no longer owes
 the text written: an Undo reopened it, or another process wrote it first. A
 write the controller refuses for what is wrong with the file, its path or its
 environment — the environment gone, outside `/work`, a folder or under a file
-now, over 16 MiB — is not made again until the document's next close:
-`write_back_refused_at` says so, and a `server` record in no Turn of the
-Session's log names its path and the controller's answer. A write the
-controller does not answer, or refuses for a reason of its own — its own work
-on the tree (`409 conflict`), its share unreadable (`503`) — raises, and the
-loop runs again after its backoff.
+now, over 16 MiB — is not made again until the document's next close, or the
+Resume of the continuation that carries it: `write_back_refused_at` says so,
+and a `server` record in no Turn of the Session's log names its path and the
+controller's answer. A write the controller does not answer, or refuses for a
+reason of its own — its own work on the tree (`409 conflict`), its share
+unreadable (`503`) — raises, and the loop runs again after its backoff.
 
 At STARTUP the job's reconcile runs the writes every Session owes, from the
 rows.

@@ -736,6 +736,7 @@ class TestResumeSession:
         client: FlaskClient,
         container: ServiceContainer,
         session: DbSession,
+        records: SessionRecordService,
         person: User,
         project: Project,
         project_session: models.Session,
@@ -744,6 +745,17 @@ class TestResumeSession:
             container, session, project, project_session, SessionState.STOPPED
         )
         _in_pilots_own(session, run).conversation_id = "conv-1"
+        # The brief went out: its stream is recorded.
+        records.append(
+            run.id,
+            RecordKind.CLAUDE,
+            payload={"type": "system", "session_id": "conv-1"},
+            turn_id=session.scalars(
+                select(Turn.id).where(Turn.session_id == run.id)
+            ).one(),
+            raw_offset=64,
+            controller_session="pilot-1",
+        )
         session.flush()
         sign_in(client, SUBJECT)
 

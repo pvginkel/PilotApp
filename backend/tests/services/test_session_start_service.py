@@ -2,7 +2,9 @@
 Pilot's own its start takes free or creates (design 2 §13.2, §13.5, §7.1;
 F88.1, F125, F143.1; decision 38; DB 240; V05, V15, V19), and the work item it
 is (DB Work, decision 3); the gate every start passes, the held start and its
-release (§13.4, §8.2; F141.5; DB 229, 230; V16, V24).
+release (§13.4, §8.2; F141.5; DB 229, 230; V16, V24); the conversation of a run
+whose documents are all closed continued as a new work item (decision 44;
+F26.7, F65; DB 241).
 
 The start's write and its loop's run are on the test's session: the run is
 called as its loop calls it. `TestStartLoop` and `TestHeldLoop` run the loops
@@ -15,6 +17,7 @@ import uuid
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import quote
 
 import pytest
 import requests
@@ -30,7 +33,7 @@ from app import models
 from app.database import scoped_session
 from app.engine.bus import EngineEvent, ProjectChanged, WorkMoved
 from app.exceptions import InvalidOperationException, RecordNotFoundException
-from app.models import Environment, Item, PlanTask, Project, Turn, User, Work
+from app.models import Document, Environment, Item, PlanTask, Project, Turn, User, Work
 from app.models.reference import (
     ProjectState,
     RecordKind,
@@ -42,7 +45,12 @@ from app.models.reference import (
 from app.schemas.timeline import HeldReason
 from app.services.auth_service import AuthContext
 from app.services.container import ServiceContainer
-from app.services.controller_client import EnvironmentStatus, HeadlessCreateRequest
+from app.services.controller_client import (
+    ControllerProblem,
+    ControllerProblemType,
+    EnvironmentStatus,
+    HeadlessCreateRequest,
+)
 from app.services.controller_outage import ControllerOutage
 from app.services.environment_service import EnvironmentService
 from app.services.fake_controller import (
@@ -65,6 +73,7 @@ from app.services.start_gate import WorkSlots
 from app.services.supervisor import LoopHandle
 from app.services.timeline_service import work_status
 from app.services.turn_end_read_service import TurnEndReadService
+from app.services.write_back_service import WRITE_BACK_REFUSED
 from app.utils import after_commit as after_commit_module
 from app.utils.after_commit import clear_after_commit_callbacks
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
@@ -103,7 +112,8 @@ class _Recording(ServedFakeController):
     made, and each headless create's body, refusing every send with `502
     worker-unreachable` while `refuse_sends` is set, and answering the next
     reset, made, with an ingress's `502` while `lose_reset` is set, as a
-    reset whose `202` was lost leaves it. `during_provision`,
+    reset whose `202` was lost leaves it, and each send's message.
+    `during_provision`,
     `during_rename`, `during_start`, `during_settle`, `during_create`,
     `during_snapshot` and `during_send`, when set, run once, as an
     environment's create, its rename, its start, its `wait`, a headless
@@ -115,6 +125,7 @@ class _Recording(ServedFakeController):
         self.environment_bodies: list[dict[str, Any]] = []
         self.created: list[str] = []
         self.create_bodies: list[dict[str, Any]] = []
+        self.sent: list[str] = []
         self.refuse_sends = False
         self.lose_reset = False
         self.during_provision: Callable[[], None] | None = None
@@ -174,6 +185,7 @@ class _Recording(ServedFakeController):
         return super()._create_session(request, env_id)
 
     def _send(self, request: Request, env_id: str, name: str) -> Response:
+        self.sent.append((request.get_json(silent=True) or {}).get("message"))
         if self.refuse_sends:
             raise FakeControllerProblem(
                 502, "worker-unreachable", f"the worker of {env_id} does not answer"
@@ -4896,3 +4908,482 @@ class TestNoCallUnderAProjectsLock:
         assert (_committed_env(container, run_id) == FREE) is free
         assert any("/reset" in call for call in probing.calls) is free
         assert probing.locked == []
+
+
+RUN_ENV = "camp-run"
+CONVERSATION = "conv-run"
+REFINEMENT = "/work/Example/docs/refinement.md"
+SURVEY = "/work/Example/docs/survey.md"
+REFINEMENT_TEXT = """# Two sites for the camp
+
+```decision id=D1
+options:
+  - The lake
+  - The hill
+```
+"""
+SURVEY_TEXT = "# The survey\n\nNine of ten want the lake.\n"
+CONTINUED = (
+    "Your documents were answered and written back in place:"
+    f" {REFINEMENT}, {SURVEY}. Read the answers and continue."
+)
+
+
+@pytest.fixture
+def continues(
+    container: ServiceContainer, starts: SessionStartService
+) -> SessionStartService:
+    """`starts`, the start the record's closes continue a run through."""
+    container.session_start_service.override(providers.Object(starts))
+    return starts
+
+
+def _ended_run(
+    db: DbSession, container: ServiceContainer, fake: _Recording, project: Project
+) -> models.Session:
+    """A work item's run in an environment of Pilot's own, stopped by its
+    timer, its claim ended, its turn ended on its conversation and its work
+    item done (decision 44)."""
+    fake.add_environment(RUN_ENV, name=SLUG, repo=REPO, status="stopped")
+    db.add(
+        Environment(
+            id=RUN_ENV,
+            name=SLUG,
+            exempt=False,
+            last_state="stopped",
+            server_created_at=datetime.now(UTC) - timedelta(days=1),
+            repo=REPO,
+        )
+    )
+    db.flush()
+    run = models.Session(
+        project_id=project.id,
+        environment_id=RUN_ENV,
+        kind_code="work",
+        controller_session="pilot-run",
+        conversation_id=CONVERSATION,
+        cwd=CWD,
+        agent="writer",
+        model="opus",
+        reasoning_effort="high",
+        token_hash=uuid.uuid4().hex,
+        state_code=SessionState.IDLE,
+        turns=1,
+    )
+    db.add(run)
+    db.flush()
+    records = container.record_service()
+    records.place_work(project, run, "Refining the camp", repo=REPO)
+    records.work_done(run.id, datetime.now(UTC))
+    return run
+
+
+def _read_at_its_end(
+    db: DbSession,
+    container: ServiceContainer,
+    fake: _Recording,
+    project: Project,
+    run: models.Session,
+    path: str,
+    text: str,
+) -> Item:
+    """A document the run wrote and registered, read at its end as written."""
+    fake.put_file(RUN_ENV, path, text.encode())
+    documents = container.document_service()
+    item = documents.register(project, run, path).item
+    documents.publish_read(db.get_one(Document, item.id), text, run.id)
+    return item
+
+
+def _answered_and_reviewed(
+    db: DbSession,
+    container: ServiceContainer,
+    fake: _Recording,
+    project: Project,
+    person: User,
+) -> tuple[models.Session, Item, Item]:
+    """A run's two documents closed, its decision answered and its survey
+    reviewed last: the run and its documents."""
+    run = _ended_run(db, container, fake, project)
+    refinement = _read_at_its_end(
+        db, container, fake, project, run, REFINEMENT, REFINEMENT_TEXT
+    )
+    survey = _read_at_its_end(db, container, fake, project, run, SURVEY, SURVEY_TEXT)
+    records = container.record_service()
+    records.answer(db.get_one(Document, refinement.id), "D1", person, "The lake")
+    records.reviewed(survey, person)
+    clear_after_commit_callbacks()
+    return run, refinement, survey
+
+
+def _continuation(db: DbSession, run: models.Session) -> models.Session:
+    """The Session of the work item that continues the run."""
+    work = db.scalars(
+        select(Work)
+        .join(Item, Item.id == Work.trigger_item_id)
+        .where(Item.created_by_session_id == run.id)
+    ).one()
+    return _read(db, work.id)
+
+
+def _document(db: DbSession, item: Item) -> Document:
+    return db.get_one(Document, item.id, populate_existing=True)
+
+
+def _put(path: str) -> str:
+    return f"PUT /environments/{RUN_ENV}/file?path={quote(path, safe='')}"
+
+
+def _a_folder_at(fake: _Recording, path: str) -> None:
+    """The file at `path` made a folder: a write there is refused."""
+    fake.remove_file(RUN_ENV, path)
+    fake.put_file(RUN_ENV, f"{path}/notes.md", b"Notes.\n")
+
+
+@pytest.mark.usefixtures("continues")
+class TestContinueRun:
+    """The close that leaves no document of a work item's ended run open
+    places its continuation through the gate, in its transaction (decision
+    44; F26.7; review 1; DB 240, 241; V09, V11, V12)."""
+
+    def test_the_last_close_places_it_in_the_runs_environment_on_its_conversation(
+        self,
+        container: ServiceContainer,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        run, refinement, survey = _answered_and_reviewed(
+            session, container, fake, project, person
+        )
+
+        continuation = _continuation(session, run)
+        assert continuation.state_code == SessionState.STARTING
+        assert (
+            continuation.environment_id,
+            continuation.conversation_id,
+            continuation.controller_session,
+            continuation.cwd,
+            continuation.agent,
+            continuation.model,
+            continuation.reasoning_effort,
+        ) == (RUN_ENV, CONVERSATION, None, CWD, "writer", "opus", "high")
+        assert len(continuation.token_hash) == 64
+        assert continuation.token_hash != run.token_hash
+        (turn,) = _turns(session, continuation.id)
+        assert (turn.seq, turn.message, turn.author_user_id, turn.ended_at) == (
+            1,
+            CONTINUED,
+            None,
+            None,
+        )
+        work = session.get_one(Work, continuation.id)
+        assert (work.trigger_item_id, work.trigger_code, work.repo) == (
+            survey.id,
+            None,
+            REPO,
+        )
+        item = session.get_one(Item, continuation.id)
+        assert (item.kind_code, item.title, item.seq) == (
+            "work",
+            "Refining the camp",
+            survey.seq + 1,
+        )
+        # Its environment is the run's, never reset: started, not prepared.
+        assert _server(session, continuation.id) == [(None, STARTING_ENV)]
+        assert [refinement.consumed_session_id, survey.consumed_session_id] == [
+            continuation.id,
+            continuation.id,
+        ]
+        assert fake.calls == []
+
+    @pytest.mark.parametrize(
+        ("closed_by", "reason"),
+        [
+            ("pause", HeldReason.PAUSED),
+            ("outage", HeldReason.CONTROLLER_UNREACHABLE),
+            ("slot", HeldReason.SLOT),
+        ],
+    )
+    def test_through_a_closed_gate_it_is_held_and_keeps_the_environment_bound(
+        self,
+        container: ServiceContainer,
+        supervise: Supervise,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+        controller_outage: ControllerOutage,
+        closed_by: str,
+        reason: HeldReason,
+    ) -> None:
+        starts, environments, _ = _services(container, supervise, work_max=1)
+        container.session_start_service.override(providers.Object(starts))
+        if closed_by == "pause":
+            project.paused = True
+        elif closed_by == "outage":
+            controller_outage.call_unanswered()
+        else:
+            # Another work item runs: the slot of one is full.
+            session.add(
+                models.Session(
+                    project_id=project.id,
+                    kind_code="work",
+                    cwd=CWD,
+                    token_hash=uuid.uuid4().hex,
+                    state_code=SessionState.RUNNING,
+                )
+            )
+        session.flush()
+
+        run, _, _ = _answered_and_reviewed(session, container, fake, project, person)
+
+        continuation = _continuation(session, run)
+        assert continuation.state_code == SessionState.HELD
+        assert continuation.environment_id == RUN_ENV
+        assert _server(session, continuation.id) == []
+        status = work_status(
+            session,
+            [continuation.id],
+            unreachable=controller_outage.holds,
+            slots=starts._slots,
+        )[continuation.id]
+        assert status.held_reason == reason
+        # Bound by the held continuation from the close on (DB 240).
+        assert environments.take(session, REPO) is None
+        assert fake.calls == []
+
+
+@pytest.mark.usefixtures("continues")
+class TestRunContinuation:
+    """A continuation's start writes back what the documents it carries owe
+    before it brings the run's environment up, never resets it, and sends its
+    message on the run's conversation; a write-back the controller refused
+    fails it, and its Resume tries again (F65.1, F89, F125; DB 241; V10,
+    V11)."""
+
+    def test_it_writes_the_documents_back_then_starts_the_environment_and_sends_its_message(
+        self,
+        starts: SessionStartService,
+        container: ServiceContainer,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        run, refinement, survey = _answered_and_reviewed(
+            session, container, fake, project, person
+        )
+        continuation = _continuation(session, run)
+
+        _run(starts, continuation)
+
+        assert _read(session, continuation.id).state_code == SessionState.RUNNING
+        calls = _calls_on(fake, RUN_ENV)
+        assert calls[:3] == [
+            _put(REFINEMENT),
+            _put(SURVEY),
+            f"POST /environments/{RUN_ENV}/start",
+        ]
+        assert _verbs(fake, RUN_ENV) == ["start"]
+        assert fake.environment(RUN_ENV).resets == 0
+        written = fake.file_text(RUN_ENV, REFINEMENT)
+        assert written is not None and "answer: The lake" in written
+        assert fake.file_text(RUN_ENV, SURVEY) == SURVEY_TEXT
+        assert _document(session, refinement).written_back_at is not None
+        assert _document(session, survey).written_back_at is not None
+        (body,) = fake.create_bodies
+        assert (
+            body["cwd"],
+            body["resume"],
+            body["agent"],
+            body["model"],
+            body["reasoningEffort"],
+        ) == (CWD, CONVERSATION, "writer", "opus", "high")
+        assert fake.sent == [CONTINUED]
+
+    def test_a_write_back_the_controller_refuses_fails_the_start_with_its_reason(
+        self,
+        starts: SessionStartService,
+        container: ServiceContainer,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        run, refinement, survey = _answered_and_reviewed(
+            session, container, fake, project, person
+        )
+        _a_folder_at(fake, REFINEMENT)
+        continuation = _continuation(session, run)
+
+        _run(starts, continuation)
+
+        (refused,) = [
+            payload
+            for _, payload in _server(session, run.id)
+            if payload["type"] == WRITE_BACK_REFUSED
+        ]
+        assert refused["item"] == str(refinement.id)
+        assert refused["reason"].startswith("the controller answered 409 not-a-file")
+        reason = f"Cannot write {REFINEMENT} back because {refused['reason']}"
+        _assert_failed(session, continuation.id, reason)
+        assert _server(session, continuation.id)[-1] == (
+            None,
+            {"type": START_FAILED, "reason": reason},
+        )
+        assert _document(session, survey).written_back_at is not None
+        assert _verbs(fake, RUN_ENV) == []
+        assert fake.create_bodies == []
+        assert fake.sent == []
+
+    def test_one_the_write_backs_loop_met_refused_first_fails_it_too(
+        self,
+        starts: SessionStartService,
+        container: ServiceContainer,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        run, refinement, _ = _answered_and_reviewed(
+            session, container, fake, project, person
+        )
+        _a_folder_at(fake, REFINEMENT)
+        container.write_back_service().write_back(
+            run.id, LoopHandle(f"write-back:{run.id}")
+        )
+        assert _document(session, refinement).write_back_refused_at is not None
+        fake.calls.clear()
+        continuation = _continuation(session, run)
+
+        _run(starts, continuation)
+
+        failed = _assert_failed(session, continuation.id)
+        assert failed.error is not None
+        assert failed.error.startswith(
+            f"Cannot write {REFINEMENT} back because the controller answered 409"
+            " not-a-file"
+        )
+        assert _calls_on(fake, RUN_ENV) == []
+
+    def test_its_resume_writes_it_again_and_sends_its_message_not_continue(
+        self,
+        starts: SessionStartService,
+        container: ServiceContainer,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        run, refinement, _ = _answered_and_reviewed(
+            session, container, fake, project, person
+        )
+        _a_folder_at(fake, REFINEMENT)
+        continuation = _continuation(session, run)
+        _run(starts, continuation)
+        fake.remove_file(RUN_ENV, f"{REFINEMENT}/notes.md")
+
+        resumed = starts.resume(session, continuation.id)
+
+        assert resumed.state_code == SessionState.STARTING
+        _, again = _turns(session, continuation.id)
+        assert (again.seq, again.message) == (2, CONTINUED)
+        assert _document(session, refinement).write_back_refused_at is None
+        clear_after_commit_callbacks()
+        fake.calls.clear()
+
+        _run(starts, resumed)
+
+        assert _read(session, continuation.id).state_code == SessionState.RUNNING
+        assert _calls_on(fake, RUN_ENV)[:2] == [
+            _put(REFINEMENT),
+            f"POST /environments/{RUN_ENV}/start",
+        ]
+        written = fake.file_text(RUN_ENV, REFINEMENT)
+        assert written is not None and "answer: The lake" in written
+        assert fake.sent == [CONTINUED]
+
+    def test_a_resume_once_its_message_went_out_sends_continue(
+        self,
+        starts: SessionStartService,
+        container: ServiceContainer,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        run, _, _ = _answered_and_reviewed(session, container, fake, project, person)
+        continuation = _continuation(session, run)
+        _run(starts, continuation)
+        clear_after_commit_callbacks()
+        starts.stop(session, continuation.id, person)
+        clear_after_commit_callbacks()
+        _turn_ends(starts, fake, _read(session, continuation.id), "interrupted")
+
+        starts.resume(session, continuation.id)
+
+        assert [turn.message for turn in _turns(session, continuation.id)] == [
+            CONTINUED,
+            CONTINUE,
+        ]
+
+    def test_a_write_back_the_controller_does_not_answer_holds_the_start(
+        self,
+        starts: SessionStartService,
+        container: ServiceContainer,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        run, refinement, _ = _answered_and_reviewed(
+            session, container, fake, project, person
+        )
+        continuation = _continuation(session, run)
+        fake.outage()
+
+        _run(starts, continuation)
+
+        assert _read(session, continuation.id).state_code == SessionState.HELD
+        assert controller_outage.holds
+        assert _document(session, refinement).written_back_at is None
+        assert fake.create_bodies == []
+
+    @pytest.mark.parametrize(
+        ("busy", "problem"),
+        [
+            ("bringing-up", ControllerProblemType.CONFLICT),
+            ("unreadable", ControllerProblemType.ENVIRONMENT_UNREADABLE),
+        ],
+    )
+    def test_a_write_back_refused_for_the_controllers_own_reason_is_waited_out(
+        self,
+        starts: SessionStartService,
+        container: ServiceContainer,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+        busy: str,
+        problem: ControllerProblemType,
+    ) -> None:
+        run, refinement, _ = _answered_and_reviewed(
+            session, container, fake, project, person
+        )
+        continuation = _continuation(session, run)
+        if busy == "bringing-up":
+            fake.set_status(RUN_ENV, "starting")
+        else:
+            fake.unreadable(RUN_ENV)
+
+        with pytest.raises(ControllerProblem) as raised:
+            _run(starts, continuation)
+
+        assert raised.value.problem_type is problem
+        assert _read(session, continuation.id).state_code == SessionState.STARTING
+        refused = _document(session, refinement)
+        assert (refused.written_back_at, refused.write_back_refused_at) == (None, None)
+        assert _verbs(fake, RUN_ENV) == []
