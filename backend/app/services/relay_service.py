@@ -521,11 +521,12 @@ class RelayService:
     def _resume(self, opening: _Opening, problem: ControllerProblem) -> None:
         """The relay's resume of a controller session that is gone (§9.6): it
         is re-created, and a server-own Turn, which the run sends next, carries
-        the Session on: "continue", or the ended Turn's message while the
-        Session has no conversation, which the new session would not know. An
-        environment the create does not find is gone, and stops the Session.
-        Nothing is done when another process resumed it first, or the Session
-        has moved on."""
+        the Session on: "continue", or the ended Turn's message while no Turn
+        of the Session went out — it has no conversation yet, or a
+        continuation's from its placement — which the new session would not
+        know. An environment the create does not find is gone, and stops the
+        Session. Nothing is done when another process resumed it first, or the
+        Session has moved on."""
         with scoped_session(self._container) as db:
             session = self._records(db).lock_session(opening.session_id)
             if (
@@ -547,7 +548,12 @@ class RelayService:
                     str(missing),
                 )
                 return
-            message = opening.message if session.conversation_id is None else CONTINUE
+            message = (
+                opening.message
+                if session.conversation_id is None
+                or stream_position(db, session.id) is None
+                else CONTINUE
+            )
             turn = self._new_turn(db, session.id, message, None)
             session.state_code = SessionState.RUNNING
             session.current_line = at_send(None, turn.started_at)

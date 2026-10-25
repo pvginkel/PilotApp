@@ -3026,6 +3026,43 @@ class TestEnvironmentRestartUnderARun:
         assert (again.message, again.author_user_id) == (brief.message, None)
         assert brief.message == "Rename the badge"
 
+    def test_a_continuations_restart_before_its_first_line_resumes_with_its_message(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        supervise: Supervise,
+        relay_log: LogWaiter,
+    ) -> None:
+        container = committed_app.container
+        relays, coordinator = _relay_service(container, supervise)
+        name = _headless(fake_controller, committed_controller_client)
+        run_id, person_id = _committed_session(container, name)
+        # A continuation carries on the run's conversation from its placement.
+        conversation = "5b0e7c2a-9d41-4f36-8a1e-3c7d6f2b9e10"
+        with scoped_session(container) as db:
+            db.get_one(models.Session, run_id).conversation_id = conversation
+        coordinator.fire_startup()
+        _send_committed(container, relays, run_id, person_id)
+
+        fake_controller.restart(ENV)
+
+        relay_log.wait_for(
+            rf"Environment {ENV} is not running: waiting for it to settle"
+        )
+        fake_controller.set_status(ENV, "running")
+        relay_log.wait_for(rf"Session {run_id} lost controller session {name}; .*")
+        wait_until(
+            lambda: fake_controller.session(ENV, "claude-2").status == "busy",
+            "its message sent again",
+        )
+        assert fake_controller.session(ENV, "claude-2").session_id == conversation
+        _turn_of(fake_controller, "claude-2", raw_turn("turn_text"))
+        _idle(container, run_id)
+        brief, again = _committed_turns(container, run_id)
+        assert (again.message, again.author_user_id) == (brief.message, None)
+        assert brief.message == "Rename the badge"
+
     def test_an_environment_stopped_under_a_run_stops_it(
         self,
         committed_app: Flask,

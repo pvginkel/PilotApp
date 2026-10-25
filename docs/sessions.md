@@ -244,8 +244,9 @@ record `{"type": "session-gone", "reason": <error>}` in no Turn, every Turn in f
 `result`, and `controller_session` the new name. The log says `Session <id> lost controller session
 <name>; resumed as <name> in environment <id>`. The relay carries the turn on with a Turn of the
 server's own, with no author, which its next round sends: `continue`, or, while the Session has no
-conversation, the ended Turn's message again, which the new session would not otherwise know
-(D037). A send that met the `404` sends its own message instead. A create that fails writes nothing
+conversation, or no Turn of it has gone out, as a continuation's from its placement, the ended
+Turn's message again, which the new session would not otherwise know (D037), as Resume picks it
+(below). A send that met the `404` sends its own message instead. A create that fails writes nothing
 of the resume: the relay is run again with backoff, and a send writes its Turn as failed. In the
 relay, a create answered `404` is the environment gone, a stop made elsewhere (below).
 
