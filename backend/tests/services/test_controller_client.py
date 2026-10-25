@@ -1664,6 +1664,28 @@ class TestControllerClient:
             f"the answer came without its {CONTENT_SHA256_HEADER}"
         )
 
+    def test_list_folder_files_names_a_linked_folders_files_through_the_folder(
+        self, health_service: HealthService
+    ) -> None:
+        # The controller lists a folder under its resolved path: the folder
+        # here is a link to /work/Example/real.
+        body = json.dumps(
+            {
+                "files": [
+                    {"path": "/work/Example/real/b.md", "isDirectory": False},
+                    {"path": "/work/Example/real/a.md", "isDirectory": False},
+                ],
+                "limitHit": False,
+            }
+        )
+        with _scripted(
+            "200 OK", [("Content-Type", "application/json")], [body.encode()]
+        ) as url:
+            client = ControllerClient(url, "t", health_service, ControllerOutage())
+            files = client.list_folder_files(ENV, "/work/Example/docs")
+
+        assert files == ["/work/Example/docs/a.md", "/work/Example/docs/b.md"]
+
     def test_an_answer_that_does_not_parse_is_a_failing_upstream(
         self, health_service: HealthService
     ) -> None:
