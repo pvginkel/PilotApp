@@ -247,7 +247,7 @@ already emitted in the transaction is delivered once.
 
 ## Testing it
 
-The engine's tests are in `backend/tests/engine/`, the block DSL's in `backend/tests/engine/dsl/`
+The engine's tests are in `backend/tests/engine/`, the block DSL's in its package's `tests/`
 with the corpus ([`block-dsl.md`](block-dsl.md)). Two fixtures of `backend/tests/conftest.py`
 serve them: `engine_events`, every event the bus delivers during the test, and `fake_sidecar`, the
 store's sidecar played against the sync routes ([`sync.md`](sync.md)): `save()` writes a file and

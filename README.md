@@ -31,9 +31,11 @@ recorded and streamed live ([`docs/sessions.md`](docs/sessions.md)); and Pilot's
 handed to every session it creates ([`docs/mcp.md`](docs/mcp.md)), through which a work item's
 session registers the documents it wrote and attaches what backs them: each read onto the timeline
 once the run ends, written back to its file once answered, and the conversation continued as a new
-work item once none is open ([`docs/round-trip.md`](docs/round-trip.md)). Each stage follows its
-own KubeCoder's fleet stream; only the dev stage starts anything, through its testing routes. It
-is built on the ModernAppTemplate stack (Flask on PostgreSQL, React + Vite, Playwright), which CI
-builds and Argo CD deploys: every green build to the dev stage at
-`https://pilot-dev.home`, and production at `https://pilot.ginbov.nl` when the operator promotes it
-([`docs/deployment.md`](docs/deployment.md)).
+work item once none is open ([`docs/round-trip.md`](docs/round-trip.md)). The brain's own
+repository holds its map, its rules, its four skills' frames, and `pilot.py`, the script it edits a
+project's folder with, on the block DSL's own package ([`docs/block-dsl.md`](docs/block-dsl.md));
+the skills' bodies are still to come. Each stage follows its own KubeCoder's fleet stream; only
+the dev stage starts anything, through its testing routes. It is built on the ModernAppTemplate
+stack (Flask on PostgreSQL, React + Vite, Playwright), which CI builds and Argo CD deploys: every
+green build to the dev stage at `https://pilot-dev.home`, and production at
+`https://pilot.ginbov.nl` when the operator promotes it ([`docs/deployment.md`](docs/deployment.md)).

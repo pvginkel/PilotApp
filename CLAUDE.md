@@ -24,8 +24,10 @@ phase ticks it ([`docs/slice-doc-plan.md`](docs/slice-doc-plan.md) §6), and an 
 - **Root** — the `run-suite` orchestrator (`tools/suite_runner/`, CI's single entry point), the
   shared `Procfile.dev` dev stack and its `scripts/dev.py` launcher, the `Jenkinsfile`, and the
   `Jenkinsfile.architecture` that publishes the hand-authored model in `docs/architecture/`.
-- **`backend/`** — the Flask API (Python, uv), on PostgreSQL, and `pilot_mcp/`, Pilot's MCP server,
-  the image's second entry point (`python -m pilot_mcp`).
+- **`backend/`** — the Flask API (Python, uv), on PostgreSQL; `pilot_mcp/`, Pilot's MCP server,
+  the image's second entry point (`python -m pilot_mcp`); and `packages/pilot-dsl/`, the block DSL,
+  a package the backend takes by path and PilotProjects pins from git
+  ([`docs/block-dsl.md`](docs/block-dsl.md)).
 - **`frontend/`** — the React + Vite SPA (TypeScript, pnpm) with TanStack Router/Query, an
   OpenAPI-generated client, and a Playwright E2E suite that boots the backend per worker.
 - **`sidecar/`** — `pilot-sync`, the store environment's sync sidecar (Go), app-owned.
@@ -48,7 +50,8 @@ Other repos the work touches, checked out beside this one:
   repo and a working tree shared by parallel sessions: commit there separately, and stage files by
   name, never `git add -A`.
 - **`../PilotDeploy`**: the deploy chart and its per-stage values.
-- **`../PilotProjects`**: the store environment's repo, the brain's skills and no data.
+- **`../PilotProjects`**: the store environment's repo: the brain's map, skills and scripts, and no
+  data.
 
 ## Template ownership
 

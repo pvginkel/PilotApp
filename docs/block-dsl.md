@@ -1,11 +1,11 @@
 # The block DSL
 
 A document is Markdown the agent writes, and the asks in it are fenced blocks the record reads. This
-page is the grammar as the engine reads and writes it. Its library is `app.engine.dsl`
-(`backend/app/engine/dsl/`): `parse()`, `validate()`, `body()` and `words()` in `reader.py`; the
-splice, the merge and `with_title()` in `writer.py`. The library is pure: it takes text and returns
-text, and imports nothing but the standard library, PyYAML and the app's exceptions, so what it
-validates against comes in as values (`Facts`).
+page is the grammar as the engine reads and writes it. Its library is the package `pilot-dsl`,
+imported as `pilot_dsl` (`backend/packages/pilot-dsl/`, [below](#the-package)): `parse()`,
+`validate()`, `body()` and `words()` in `reader.py`; the splice, the merge and `with_title()` in
+`writer.py`. The library is pure: it takes text and returns text, and imports nothing but the
+standard library and PyYAML, so what it validates against comes in as values (`Facts`).
 
 ````markdown
 ---
@@ -34,7 +34,8 @@ at: 2026-10-12T09:40:00Z
 `---` first line with no closing `---` opens no front matter. The keys the record reads:
 
 - `title`;
-- `summary`, the item's line on the timeline;
+- `summary`, shown on the item's card and as the lead of its overlay ([`timeline.md`](timeline.md),
+  [`documents.md`](documents.md));
 - `step`, the id of a task of the project's plan, a removed task included;
 - `urgent`, `true` or `false`;
 - `for`, a handle;
@@ -161,6 +162,11 @@ The faults against the record, which `validate()` finds with the `Facts` the eng
 - a save Pilot makes of an item with no title: ``the item has no title: give it `title` in the
   front matter or a first heading``.
 
+A caller that cannot know the handles or the removed tasks passes none for them (`Facts.handles`,
+`Facts.removed_task_ids`), as the store's script does ([below](#the-package)): the rules that rest
+on them, `for` and `by` naming no handle and `step` naming no task, are then skipped, and every
+other rule judges as it does with them.
+
 Never a fault: anything in the prose, an answer matching no option, an answer without `by`, `step`
 naming a removed task, and a code block in a fence of any other kind.
 
@@ -223,9 +229,33 @@ block's faulty definition in the save still holds the save.
 
 ## The corpus
 
-`backend/tests/fixtures/dsl/` pins the grammar, one case per rule. `accepted/`, `held/`,
-`never-a-fault/` and `normalised/` hold a `<case>.md` beside a `<case>.json`: its rule, the facts
-it changes from `facts.json`, and the parse and faults expected. `splice/` holds a text, the write
-and the text expected; `merge/` the published text, the save, and the text and faults expected.
-`TestConformanceCorpus` in `backend/tests/engine/dsl/test_reader.py` and `test_writer.py` runs them.
-The folder's `.gitattributes` keeps every file's bytes as committed, CRLF included.
+`backend/packages/pilot-dsl/tests/corpus/` pins the grammar, one case per rule. `accepted/`,
+`held/`, `never-a-fault/` and `normalised/` hold a `<case>.md` beside a `<case>.json`: its rule, the
+facts it changes from `facts.json`, and the parse and faults expected. `splice/` holds a text, the
+write and the text expected; `merge/` the published text, the save, and the text and faults
+expected. `TestConformanceCorpus` in the package's `tests/test_reader.py` and `test_writer.py` runs
+them. The folder's `.gitattributes` keeps every file's bytes as committed, CRLF included.
+
+## The package
+
+`backend/packages/pilot-dsl/` is a Python package of its own: its `pyproject.toml`, PyYAML its one
+dependency, the source in `src/pilot_dsl/`, and its tests and the corpus in `tests/`. The backend
+depends on it by path, editable (`[tool.uv.sources]` in `backend/pyproject.toml`), and the
+backend's pytest runs the package's tests with its own, so `kc project test` and CI run them. The
+image copies `packages/` in before its `uv sync` and leaves the package's tests out
+(`backend/.dockerignore`). A splice the text cannot take, its block gone, raises the package's
+`WriteRefused`, "Cannot <operation> because <cause>"; the engine answers it as its own
+`InvalidOperationException`, with the same message.
+
+Two consumers outside this repository follow the grammar. The brain's editing script,
+`tools/pilot.py` in `pvginkel/PilotProjects`, reads a project's documents and splices their answer
+lines with this package, never through the API (D050). It takes the package from GitHub at the
+PilotApp commit its `pyproject.toml` names and its `uv.lock` pins. Before it writes a document, it
+runs `validate()` with the facts the store's tree carries: the plan's live tasks, the confirmation
+reasons from `reference.json` and the file's own `to`s; no handles, no removed tasks and no other
+project's slug. The rules resting on those are left to `pilot-sync`'s check after the write,
+against the server's whole record ([`sync.md`](sync.md)) (D063). And AIWorkflow's
+`/dev:document-format`, the `dev` plugin's skill for an agent that writes a document Pilot reads,
+gives the grammar in its own words. So a change to the grammar here is followed in both:
+PilotProjects' pin is moved by hand, the commit in its `pyproject.toml` and then `uv lock`, and the
+skill is brought in line.

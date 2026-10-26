@@ -60,10 +60,11 @@ from its item's id and its local id. Every surface addresses by them.
 
 ## The surfaces are contracts
 
-Pilot's MCP tools, the sidecar protocol and the REST endpoints are what other code is written
-against: the brain's skills in `pvginkel/PilotProjects`, the sessions Pilot injects its tools into,
-the Go sidecar and the UI. A running session keeps the tool definitions it loaded when it started.
-So a change to any of them is deliberate:
+Pilot's MCP tools, the sidecar protocol, the REST endpoints and the block DSL's package,
+`pilot-dsl`, are what other code is written against: the brain's skills and scripts in
+`pvginkel/PilotProjects`, the sessions Pilot injects its tools into, the Go sidecar and the UI. A
+running session keeps the tool definitions it loaded when it started. So a change to any of them is
+deliberate:
 
 - A test pins each surface, so a change to it is a visible diff in the slice that makes it, never a
   side effect.

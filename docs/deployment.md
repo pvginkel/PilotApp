@@ -186,7 +186,11 @@ controller onto the catalog entry, and production's reaches KubeCoder's producti
 KubeCoder's own promotion, `KubeCoder/Promote-PRD`. PilotProjects' files, the service list and the
 hook among them, reach a store's checkout when the stopped environment is reset
 (`POST /environments/<id>/reset` on the stage's controller), which clones it again from the repo
-and empties the sidecar's data, its shadow with it.
+and empties the sidecar's data, its shadow with it; a restart does not pull it. The brain's
+scripts run in the catalog's `python` tool container, which PilotProjects' `.kubecoder/config.yaml`
+lists beside the service, and the store's pod start syncs their environment: the block DSL they
+run on is `pilot-dsl` at the PilotApp commit PilotProjects pins, fetched from GitHub, whatever the
+stage's server runs ([`block-dsl.md`](block-dsl.md#the-package)).
 
 ## The database
 

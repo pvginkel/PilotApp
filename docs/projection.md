@@ -5,9 +5,9 @@ sessions read and write. The record renders it, the engine takes the agent's sav
 into the record ([`engine.md`](engine.md)), and `pilot-sync`, the store's sidecar, keeps the files
 on disk in step with the record ([`sync.md`](sync.md)). This page is the tree as built
 (`backend/app/engine/paths.py`, `tree.py`, `views.py` and `plan.py`): what each path holds, and the
-shapes of its three JSON files, which the brain's skills are written against. Tests pin each shape
-(`TestViewService` in `backend/tests/engine/test_views.py`, `TestPlanServiceRender` in
-`test_plan.py`), so a change to one is a visible diff.
+shapes of its three JSON files, which the brain's skills and its script, `pilot.py`, are written
+against. Tests pin each shape (`TestViewService` in `backend/tests/engine/test_views.py`,
+`TestPlanServiceRender` in `test_plan.py`), so a change to one is a visible diff.
 
 ## The paths
 

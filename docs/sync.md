@@ -217,7 +217,8 @@ shadow does not hold goes up, and the rendering the server answers is written 04
 
 ## The local check
 
-The sidecar serves the store's hook (below) on `127.0.0.1:<PILOT_SYNC_LOCAL_PORT>`, in `text/plain`:
+The sidecar serves the store's hook and `pilot.py` (below) on
+`127.0.0.1:<PILOT_SYNC_LOCAL_PORT>`, in `text/plain`:
 
 - `GET /healthz`: `200`, `ok`.
 - `GET /check?path=<absolute path>`: the check of a file of the tree after an edit. When the file
@@ -247,6 +248,12 @@ both stages' sidecars serve, with a 3 s cap, and hands a non-empty answer to the
 result's `additionalContext`. An empty answer, an error status, a refused connection or the cap
 adds nothing, and it exits 0 every time, so it never stops a turn. PilotProjects' `kc project test`
 runs it against a stand-in for the sidecar.
+
+**`pilot.py`**, PilotProjects' `tools/pilot.py`, the brain's editing script, asks the same check of
+each file a verb of it wrote, at the same port with a 5 s cap, and prints the answer. It exits 1
+where a Save Error names a file it wrote, 3 where an answer is `not yet checked`, an error status or
+none, and 0 otherwise; its `check <path>` asks it alone, for a file written by hand
+([`block-dsl.md`](block-dsl.md)).
 
 ## The image
 
