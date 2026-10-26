@@ -68,6 +68,7 @@ from app.services.auth_service import AuthContext
 from app.services.people_service import PeopleService
 from app.services.pilot_store_service import JOB, Brain, PilotStoreService
 from app.services.pilot_work_service import PilotWorkService, Worker
+from app.services.session_scope import STORE_REPO
 
 SLUG = "recipe-box"
 """The open project's slug; the draft beside it has none."""
@@ -349,9 +350,6 @@ ALBUM_TASKS = [
 
 NOTICE_TEXT = "# {title}\n"
 """An open item a spec asks for: a notice, open until read."""
-
-STORE_CWD = "/work/PilotProjects"
-"""A job's working folder, the store repo's root (design 3 §12)."""
 
 PASS_BRIEF = "An invented pre-ruling pass, made for a test."
 """The one Turn of the job's Session a spec's pass asks the writer in."""
@@ -855,7 +853,7 @@ class TestDataService:
         session = AgentSession(
             project_id=item.project_id,
             kind_code=JOB,
-            cwd=STORE_CWD,
+            cwd=STORE_REPO,
             token_hash=hashlib.sha256(uuid.uuid4().bytes).hexdigest(),
             state_code=SessionState.RUNNING,
             turns=1,

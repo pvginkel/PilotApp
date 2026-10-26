@@ -149,11 +149,13 @@ PARTIALS_FORWARDED_TOTAL = Counter(
 
 @dataclass(frozen=True)
 class Words:
-    """A person's message: whose it is, and their words verbatim with their
-    quote tags (DB Turn `words`)."""
+    """A person's message: whose it is, their words verbatim with their quote
+    tags (DB Turn `words`), and the Item or the Block its quote tag names."""
 
     author_user_id: uuid.UUID
     text: str
+    quote_item_id: uuid.UUID | None = None
+    quote_block_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -268,8 +270,11 @@ class RelayService:
         fails before the `202` writes the Turn ended with its `error`, and a
         `server` record saying so (F125).
 
-        A controller session that is gone (`404`) is resumed first, and the
-        message sent to the one that replaces it (§9.6). A send refused because
+        A controller session that is gone (`404`) is re-created first (§9.6),
+        and the Turn written in flight as on a `202`: the Session's relay sends
+        it to the new session once the caller's transaction commits, which
+        commits that session's token's hash with it, so its first tool call is
+        admitted. A send refused because
         the controller has a turn in flight writes nothing; while the record
         has a Turn in flight, it starts the Session's relay when this process
         runs none (refinement D2).
@@ -483,9 +488,11 @@ class RelayService:
     def _deliver_resuming(
         self, db: Session, session: AgentSession, message: str
     ) -> None:
-        """Send `message`; a controller session that is gone is resumed first
-        (§9.6). A session busy with a turn has the send refused, and the
-        Session's relay started if this process runs none."""
+        """Send `message`; a controller session that is gone is re-created
+        under the Session's lock, and the message left to the relay, unless
+        another process re-created it first, whose session it goes to (§9.6).
+        A session busy with a turn has the send refused, and the Session's
+        relay started if this process runs none."""
         try:
             self._deliver(session, message)
         except ControllerProblem as problem:
@@ -505,7 +512,8 @@ class RelayService:
                     session = self._records(db).lock_session(session.id)
                     if session.controller_session == gone:
                         self._recreate(db, session, problem)
-                    self._deliver(session, message)
+                    else:
+                        self._deliver(session, message)
                 case _:
                     raise
 
@@ -750,28 +758,31 @@ class RelayService:
         message: str,
         words: Words | None,
     ) -> Turn:
-        self._records(db).lock_session(session_id)
+        records = self._records(db)
+        records.lock_session(session_id)
         last = db.scalar(
             select(func.max(Turn.seq)).where(Turn.session_id == session_id)
         )
         turn = Turn(
             session_id=session_id,
             seq=(last or 0) + 1,
-            author_user_id=None if words is None else words.author_user_id,
             message=message,
-            words=None if words is None else words.text,
             started_at=datetime.now(UTC),
         )
+        if words is not None:
+            turn.author_user_id = words.author_user_id
+            turn.words = words.text
+            turn.quote_item_id = words.quote_item_id
+            turn.quote_block_id = words.quote_block_id
         db.add(turn)
         db.flush()
+        if words is not None:
+            records.append(session_id, RecordKind.SEND, turn_id=turn.id)
         return turn
 
     def _accepted(self, db: Session, turn: Turn) -> None:
-        records = self._records(db)
-        session = records.lock_session(turn.session_id)
+        session = self._records(db).lock_session(turn.session_id)
         turn.started_at = datetime.now(UTC)
-        if turn.author_user_id is not None:
-            records.append(session.id, RecordKind.SEND, turn_id=turn.id)
         moved_state = session.state_code != SessionState.RUNNING
         session.state_code = SessionState.RUNNING
         session.current_line = at_send(session.current_line, turn.started_at)
@@ -785,8 +796,6 @@ class RelayService:
         session = records.lock_session(turn.session_id)
         turn.ended_at = datetime.now(UTC)
         turn.error = str(error)
-        if turn.author_user_id is not None:
-            records.append(session.id, RecordKind.SEND, turn_id=turn.id)
         records.append(
             session.id,
             RecordKind.SERVER,

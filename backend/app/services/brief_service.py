@@ -1,0 +1,184 @@
+"""The brief a brain session's first Turn carries (design 3 §5): one frame,
+the server's, Markdown, in one order (§5.2), and a renderer per kind (§5.3).
+
+A line that does not hold is left out, never written as "none", so that a
+brief reads as the facts of its session. It carries what the tree does not
+hold and names what it does: nothing of the handbook, which every skill but
+`create` reads itself (D058).
+"""
+
+from collections.abc import Sequence
+from datetime import datetime
+
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from app.engine.plan import PlanService
+from app.engine.views import utc_time
+from app.models import (
+    Chat,
+    PlanNote,
+    PlanTask,
+    Project,
+    ProjectMember,
+    ProjectTransition,
+    User,
+)
+from app.models.reference import TransitionKind
+from app.services.session_scope import project_folder
+
+CHAT_SKILL = "/chat"
+
+NOTES_HEADING = (
+    "Open plan notes, by summary (the content and the blocks a read away in"
+    " plan.json; `pilot.py plan note list`):"
+)
+
+HOMELESS_HEADING = (
+    "Deferrals without a home (a note names none of these blocks — write one,"
+    " or answer the block anew in a new item):"
+)
+
+type Group = Sequence[str | None]
+"""Lines of a brief kept together; one that does not hold is None."""
+
+
+class BriefService:
+    """Composes the briefs of the brain's sessions from the record."""
+
+    def __init__(self, db: Session, plan_service: PlanService) -> None:
+        self.db = db
+        self.plan_service = plan_service
+
+    def project_chat(
+        self, project: Project, person: User, words: str, at: datetime
+    ) -> str:
+        """The first Turn of a project's chat (§5.3), sent at `at`: `/chat`,
+        the switch, the pause while the project is paused, every open plan
+        note by summary and the deferrals without a home, the latest closed
+        chat, then `person`'s `words` verbatim, which it ends with (DB
+        assertion 251)."""
+        return _frame(
+            CHAT_SKILL,
+            "the project's chat",
+            project,
+            at,
+            [_switch(project), self._pause(project)],
+            self._notes(project),
+            [self._earlier_chats(project)],
+            [
+                f"The message, from {person.handle} ({self._standing(project, person)}):",
+                words,
+            ],
+        )
+
+    def _pause(self, project: Project) -> str | None:
+        if not project.paused:
+            return None
+        since = self.db.scalar(
+            select(func.max(ProjectTransition.at)).where(
+                ProjectTransition.project_id == project.id,
+                ProjectTransition.kind_code == TransitionKind.PAUSED,
+            )
+        )
+        # A project is paused by its `paused` transition alone.
+        assert since is not None
+        return (
+            f"The project is paused since {utc_time(since)}: anything you start"
+            " is held until it resumes — say so."
+        )
+
+    def _notes(self, project: Project) -> list[str]:
+        """The open plan notes, by summary (F57.4), the tasks' in the plan's
+        order and then the plan's own; then the deferrals without a home, as
+        the hook's check prints them (F79.3; DB 214)."""
+        lines: list[str] = []
+        for note, task_title in self.db.execute(
+            select(PlanNote, PlanTask.title)
+            .outerjoin(
+                PlanTask,
+                (PlanTask.project_id == PlanNote.project_id)
+                & (PlanTask.task_id == PlanNote.plan_task_id),
+            )
+            .where(PlanNote.project_id == project.id, PlanNote.deleted_at.is_(None))
+            .order_by(
+                PlanNote.plan_task_id.is_(None),
+                PlanTask.position.nulls_last(),
+                PlanNote.id,
+            )
+        ):
+            on = (
+                "the plan"
+                if note.plan_task_id is None
+                else f'{note.plan_task_id} "{task_title}"'
+            )
+            lines.append(f"- {on} · {note.note_id}: {note.summary}")
+        if lines:
+            lines.insert(0, NOTES_HEADING)
+        homeless = self.plan_service.homeless_deferrals(project)
+        if homeless:
+            lines.append(HOMELESS_HEADING)
+            lines.extend(
+                f"- {deferral.block} in {deferral.document}"
+                f" ({deferral.title or ''}), to: {deferral.to}"
+                for deferral in homeless
+            )
+        return lines
+
+    def _earlier_chats(self, project: Project) -> str | None:
+        closed = self.db.scalar(
+            select(func.max(Chat.closed_at)).where(Chat.project_id == project.id)
+        )
+        if closed is None:
+            return None
+        return (
+            "Earlier chats of this project are in chat.md; the latest closed"
+            f" {utc_time(closed)}."
+        )
+
+    def _standing(self, project: Project, person: User) -> str:
+        member = self.db.scalar(
+            select(ProjectMember.id).where(
+                ProjectMember.project_id == project.id,
+                ProjectMember.user_id == person.id,
+                ProjectMember.left_at.is_(None),
+            )
+        )
+        return "not a member" if member is None else "member"
+
+
+def _frame(
+    skill: str, kind: str, project: Project, at: datetime, *groups: Group
+) -> str:
+    """§5.2's frame: the skill line alone, so that Claude Code loads the skill
+    and hands it the rest; the kind, the project and the stamp in one line;
+    then each group that holds a line, a blank line between two."""
+    head = " · ".join(
+        part
+        for part in (
+            "Pilot's brief",
+            kind,
+            None if project.name is None else f'project "{project.name}"',
+            project_folder(project),
+            utc_time(at),
+        )
+        if part is not None
+    )
+    blocks = [skill, head]
+    for group in groups:
+        lines = [line for line in group if line is not None]
+        if lines:
+            blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
+def _switch(project: Project) -> str:
+    """The state the session is briefed under, which it keeps (F54.7)."""
+    if project.autopilot:
+        return (
+            "Auto pilot: on — the granted column holds for this session"
+            " (rules/grants.md)."
+        )
+    return (
+        "Auto pilot: off — the granted column asks for this session (rules/grants.md)."
+    )

@@ -189,6 +189,33 @@ class TestAppSettings:
         with pytest.raises(ValidationError, match=name):
             AppEnvironment.model_validate({name: 0})
 
+    def test_the_brain_runs_on_opus_at_xhigh_by_default(self) -> None:
+        settings = AppSettings.load(AppEnvironment(_env_file=None))
+
+        assert (settings.brain_model, settings.brain_reasoning_effort) == (
+            "opus",
+            "xhigh",
+        )
+
+    def test_load_reads_the_brains_model_and_effort_from_the_environment(
+        self,
+    ) -> None:
+        settings = AppSettings.load(
+            AppEnvironment(
+                _env_file=None, BRAIN_MODEL="sonnet", BRAIN_REASONING_EFFORT="high"
+            )
+        )
+
+        assert (settings.brain_model, settings.brain_reasoning_effort) == (
+            "sonnet",
+            "high",
+        )
+
+    @pytest.mark.parametrize("name", ["BRAIN_MODEL", "BRAIN_REASONING_EFFORT"])
+    def test_load_refuses_an_empty_model_or_effort(self, name: str) -> None:
+        with pytest.raises(ValidationError, match=name):
+            AppEnvironment.model_validate({name: ""})
+
     def test_the_controller_token_is_hidden_in_the_log(self) -> None:
         settings = AppSettings(
             controller_url="https://controller.example", controller_token="a-token"
@@ -221,6 +248,8 @@ class TestAppSettings:
             "environment_delete_after_seconds": repr(604800.0),
             "work_parallelism_max": "3",
             "project_parallelism_max": "3",
+            "brain_model": repr("opus"),
+            "brain_reasoning_effort": repr("xhigh"),
         }
 
     def test_the_link_settings_are_unset_by_default(self) -> None:
@@ -310,4 +339,6 @@ class TestAppSettings:
             "environment_delete_after_seconds": repr(604800.0),
             "work_parallelism_max": "3",
             "project_parallelism_max": "3",
+            "brain_model": repr("opus"),
+            "brain_reasoning_effort": repr("xhigh"),
         }

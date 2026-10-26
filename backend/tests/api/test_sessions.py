@@ -29,6 +29,7 @@ from app.services.sse_connection_manager import SSEConnection, SSEConnectionMana
 from app.services.start_gate import WorkSlots
 from app.services.turn_end_read_service import TurnEndReadService
 from app.utils.after_commit import clear_after_commit_callbacks
+from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
 from tests.support.supervisor import Supervise, metric_value
 
 LOCAL_ADMIN = "local-user"
@@ -577,6 +578,7 @@ def _starts(
         work_slots=slots,
         pilot_server=container.pilot_server(),
         controller_configured=controller_configured,
+        store_environment_id=STORE_ENVIRONMENT_ID,
     )
 
 

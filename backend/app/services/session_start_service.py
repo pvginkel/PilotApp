@@ -1,6 +1,7 @@
 """The session start: a work item's Session brought up end to end, from its
 rows to its brief's send (design 2 §13.2, §13.4, §13.5, §7.1; F88.1, F125,
-F141.5, F143.1; decision 38).
+F141.5, F143.1; decision 38), and a brain session's, a chat's, in the store
+(design 3 §12; F50, F81).
 
 `start_work` places a work item by repository, `owner/Name`, in the caller's
 transaction: its Item, its Work, which keeps the repository, its Session, with
@@ -17,6 +18,15 @@ hash is the Session's from the commit that makes the create's controller
 session its own, before any Turn goes to that session. Each phase the
 start enters is a `server` record in no Turn (DB assertion 220), and each such
 record rebuilds the current line in its transaction.
+
+A brain session's start, its rows written by its caller (`start_brain`), passes
+the gate as a work item's does, never held for the pause and taking no slot.
+Its environment is the store (`STORE_ENVIRONMENT_ID`): its row made on Pilot's
+first touch, then started (`EnvironmentService.start`); the store is exempt, so
+no timer of Pilot's stops it. Its create is boxed (`scoped_create`), and a
+`422` while its project's folder is not yet on disk is made again for a bounded
+time (`FOLDER_WAIT_SECONDS`), then fails the start with the controller's title
+(TD §4.2; F125).
 
 A start that meets a call the controller does not answer goes back to `held`
 with its rows as they stand, the outage on (DB 230). Every other failure of the
@@ -72,9 +82,8 @@ write-back the controller refused fails it with the controller's reason
 "continue", while no Turn of its Session has gone out.
 """
 
-import hashlib
 import logging
-import secrets
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -96,11 +105,13 @@ from app.services.controller_client import (
     ControllerProblem,
     ControllerProblemType,
     ControllerUnreachable,
+    HeadlessCreateRequest,
+    SessionSnapshot,
 )
 from app.services.controller_outage import ControllerOutage
 from app.services.current_line import while_starting
 from app.services.environment_service import EnvironmentService
-from app.services.pilot_server import PilotServer
+from app.services.pilot_server import PilotServer, unheld_token_hash
 from app.services.relay_service import CONTINUE, SESSION_GONE, RelayService
 from app.services.session_record_service import (
     SessionRecordService,
@@ -136,6 +147,14 @@ START_FAILED = "start-failed"
 CREATING = "Creating the session…"
 
 NOT_PILOTS = "its environment is not Pilot's"
+
+FOLDER_WAIT_SECONDS = 60.0
+"""How long a boxed create refused `422` is made again from its first refusal:
+`pilot-sync` writes a project's folder a moment after the record changes (TD
+§4.2)."""
+
+FOLDER_RETRY_SECONDS = 2.0
+"""The wait between two of those creates."""
 
 STOPPABLE = (SessionState.RUNNING, SessionState.STARTING, SessionState.HELD)
 """The states a Stop ends a Session in: a turn in flight, a start under way or
@@ -212,6 +231,8 @@ class _Pending:
     foreign: bool
     """The Session is a work item's in an environment Pilot did not create:
     placed before slice 020, it is never started there."""
+    brain: bool
+    """The Session is a chat's or a job's: it runs in the store."""
     controller_session: str | None
     create: ScopedCreate
     turn_id: int
@@ -243,6 +264,9 @@ class SessionStartService:
         work_slots: WorkSlots,
         pilot_server: PilotServer,
         controller_configured: bool,
+        store_environment_id: str,
+        folder_wait_seconds: float = FOLDER_WAIT_SECONDS,
+        folder_retry_seconds: float = FOLDER_RETRY_SECONDS,
     ) -> None:
         """Register the `start` job, whose loops are one per Session and one
         that moves the held Sessions on, and whose reconcile runs the start of
@@ -265,6 +289,11 @@ class SessionStartService:
             pilot_server: Hands each headless create Pilot's MCP server, with
                 a token minted for it
             controller_configured: False refuses every start
+            store_environment_id: The store's environment, where every brain
+                session runs; empty refuses a brain session's start
+            folder_wait_seconds: How long a boxed create refused `422` is made
+                again from its first refusal
+            folder_retry_seconds: The wait between two of those creates
         """
         self._container = container
         self._supervisor = supervisor
@@ -275,6 +304,9 @@ class SessionStartService:
         self._slots = work_slots
         self._pilot_server = pilot_server
         self._controller_configured = controller_configured
+        self._store = store_environment_id
+        self._folder_wait = folder_wait_seconds
+        self._folder_retry = folder_retry_seconds
         supervisor.register_job(
             START_JOB, needs_controller=True, reconcile=self._reconcile
         )
@@ -333,7 +365,7 @@ class SessionStartService:
             project_id=project_id,
             kind_code=WORK_KIND,
             cwd=cwd,
-            token_hash=_unheld_token_hash(),
+            token_hash=unheld_token_hash(),
             state_code=SessionState.STARTING if held is None else SessionState.HELD,
             turns=1,
             turn_started_at=now,
@@ -351,6 +383,39 @@ class SessionStartService:
             after_commit(_HeldWritten(self))
             logger.info("Session %s is held at its start: %s", session.id, held.reason)
         return work
+
+    def start_brain(
+        self, db: Session, project: Project, session: AgentSession, operation: str
+    ) -> None:
+        """A brain Session's start through the gate (§13.4), in the caller's
+        transaction, which holds the project's row and wrote the Session's
+        Turn to send: `held` while the gate is closed for it, else `starting`,
+        its start run once this commits. A Chat's is never held for the pause
+        and takes no slot. No controller call is made.
+
+        Raises:
+            InvalidOperationException: No controller or no store environment
+                is configured
+        """
+        if not self._controller_configured:
+            raise InvalidOperationException(operation, "no controller is configured")
+        if not self._store:
+            raise InvalidOperationException(
+                operation, "no store environment is configured"
+            )
+        held = self._held(db, project, session.kind_code)
+        if held is None:
+            session.state_code = SessionState.STARTING
+            self._begin(db, session)
+        else:
+            session.state_code = SessionState.HELD
+            after_commit(_HeldWritten(self))
+        self._moved(session, state=True)
+        logger.info(
+            "Session %s starts%s",
+            session.id,
+            "" if held is None else f", held: {held.reason}",
+        )
 
     def continue_run(
         self,
@@ -406,7 +471,7 @@ class SessionStartService:
             agent=run.agent,
             model=run.model,
             reasoning_effort=run.reasoning_effort,
-            token_hash=_unheld_token_hash(),
+            token_hash=unheld_token_hash(),
             state_code=SessionState.STARTING if held is None else SessionState.HELD,
             turns=1,
             turn_started_at=now,
@@ -458,9 +523,11 @@ class SessionStartService:
         to the controller's reaper, as it is for a Session stopped while it
         was created. A call the controller does not answer
         returns the Session to `held`; any other failure fails it (F125), a
-        refused create among them.
+        refused create among them, a boxed one refused `422` once its
+        folder's wait has passed (`_create_session`).
 
-        The bring-up: a Session with no Environment takes a free one of
+        The bring-up: a brain Session with no Environment takes the store
+        and starts it (`_in_store`); a work item's takes a free one of
         Pilot's own (`_take`), or has one created (`_create`) and its bring-up
         awaited; one whose environment's reset is still to make has it
         renamed after its Project (`_named`) and reset; one whose environment
@@ -509,13 +576,13 @@ class SessionStartService:
                 if pending is None:
                     return
                 injected = self._pilot_server.inject(pending.create)
-                created = (
-                    self._client().create_headless_session(
-                        pending.environment, injected.request
+                created = None
+                if pending.controller_session is None:
+                    created = self._create_session(
+                        session_id, pending.environment, injected.request, handle
                     )
-                    if pending.controller_session is None
-                    else None
-                )
+                    if created is None:
+                        return
             except ControllerUnreachable as error:
                 with scoped_session(self._container) as db:
                     self._hold(db, session_id, error)
@@ -749,8 +816,9 @@ class SessionStartService:
         commits. In its Environment, the phase that brings it up, unless the
         Session has its controller session already, and its shutdown timer
         cleared. One with no Environment yet, or with one whose reset is
-        still to make, enters its phase at the create or at the rename; one
-        in an environment Pilot did not create none, its loop failing it."""
+        still to make, enters its phase at the create, at the rename or as it
+        takes the store; one in an environment Pilot did not create none, its
+        loop failing it."""
         environment = _environment(db, session)
         if environment is not None and not _foreign(session, environment):
             if session.controller_session is None and not _unreset(
@@ -941,9 +1009,10 @@ class SessionStartService:
 
     def _bring_up(self, session_id: uuid.UUID, pending: _Pending) -> bool:
         """The Session's environment brought up as its rows have it, and its
-        settle awaited (`run`). Returns False when the Session moved on
-        before it took an environment, one this run's create made for it
-        stopped at once and left free, or before its reset.
+        settle awaited (`run`); a brain session's with none is the store
+        (`_in_store`). Returns False when the Session moved on before it took
+        an environment, one this run's create made for it stopped at once and
+        left free, or before its reset.
 
         Raises:
             ControllerProblem: The controller refused the create, the rename
@@ -955,6 +1024,8 @@ class SessionStartService:
             ExternalServiceException: The controller failed otherwise
         """
         if pending.env_id is None:
+            if pending.brain:
+                return self._in_store(session_id)
             taking = self._take(session_id)
             if taking is None:
                 return False
@@ -975,6 +1046,81 @@ class SessionStartService:
         else:
             self._environments.start(pending.env_id)
         return True
+
+    def _in_store(self, session_id: uuid.UUID) -> bool:
+        """A brain Session's environment, the store (design 3 §12; F81): its
+        row made on Pilot's first touch (`ensure_environment`), the Session's
+        under its lock while it is still `starting` with none, with the phase
+        that starts it; then started, and its settle awaited
+        (`EnvironmentService.start`). The store is exempt, so no timer of
+        Pilot's stops it. Returns False when the Session moved on first.
+
+        Raises:
+            ControllerProblem: The controller has no such environment
+            EnvironmentStartFailed: It refused the start, or the store settled
+                other than `running`
+            ControllerUnreachable: The controller did not answer a call
+            ExternalServiceException: The controller failed otherwise
+        """
+        with scoped_session(self._container) as db:
+            self._environments.ensure_environment(db, self._store)
+        with scoped_session(self._container) as db:
+            session = self._records(db).lock_session(session_id)
+            if (
+                session.state_code != SessionState.STARTING
+                or session.environment_id is not None
+            ):
+                return False
+            session.environment_id = self._store
+            self._phase(
+                db,
+                session_id,
+                _bringing_up(session, db.get_one(Environment, self._store)),
+            )
+        self._environments.start(self._store)
+        return True
+
+    def _create_session(
+        self,
+        session_id: uuid.UUID,
+        env_id: str,
+        request: HeadlessCreateRequest,
+        handle: LoopHandle,
+    ) -> SessionSnapshot | None:
+        """The headless create. A boxed one with a folder to write, refused
+        `422` — its folder not yet on disk, as `pilot-sync` writes it a
+        moment after the record changes (TD §4.2) — is made again every
+        `folder_retry_seconds` until `folder_wait_seconds` have passed since
+        its first refusal (F50, F125). None when the loop is told to stop
+        meanwhile.
+
+        Raises:
+            ControllerProblem: The controller refused it otherwise, or still
+                `422` past the wait
+            ControllerUnreachable: The controller did not answer
+            ExternalServiceException: The controller failed otherwise
+        """
+        client = self._client()
+        refused_at: float | None = None
+        while True:
+            try:
+                return client.create_headless_session(env_id, request)
+            except ControllerProblem as problem:
+                if (
+                    problem.problem_type is not ControllerProblemType.VALIDATION_ERROR
+                    or not request.sandbox_writable_dirs
+                ):
+                    raise
+                now = time.perf_counter()
+                if refused_at is None:
+                    refused_at = now
+                    logger.info(
+                        "Session %s waits for its folder: %s", session_id, problem
+                    )
+                elif now - refused_at >= self._folder_wait:
+                    raise
+            if handle.wait(self._folder_retry):
+                return None
 
     def _take(self, session_id: uuid.UUID) -> _Pending | None:
         """Under the Session's lock, while it is `starting` with no
@@ -1182,6 +1328,7 @@ def _pending(db: Session, session_id: uuid.UUID) -> _Pending | None:
         and environment.started_pod_at is None,
         unreset=environment is not None and _unreset(session, environment),
         foreign=_foreign(session, environment),
+        brain=session.kind_code != WORK_KIND,
         controller_session=session.controller_session,
         create=scoped_create(db, session),
         turn_id=turn.id,
@@ -1320,12 +1467,6 @@ def _refusal_recorded(db: Session, run_id: uuid.UUID, item_id: uuid.UUID) -> str
         # (`WriteBackService`).
         assert len(page) == _RECORD_PAGE
         before = page[-1].record.seq
-
-
-def _unheld_token_hash() -> str:
-    """The hash of a token no one holds: a Session's from its placement until
-    its create mints the one its controller session carries (`run`)."""
-    return hashlib.sha256(secrets.token_urlsafe(32).encode()).hexdigest()
 
 
 def _standing(db: Session, project_id: uuid.UUID, *, births: bool) -> Project:

@@ -33,7 +33,13 @@ from app.models import (
     Turn,
     User,
 )
-from app.models.reference import RecordKind, SessionState, UserKind, VersionCause
+from app.models.reference import (
+    ProjectState,
+    RecordKind,
+    SessionState,
+    UserKind,
+    VersionCause,
+)
 from app.schemas.timeline import StopCause
 from app.services.container import ServiceContainer
 from app.services.controller_client import (
@@ -371,6 +377,26 @@ class TestSend:
             words,
         )
 
+    def test_a_persons_turn_keeps_the_quote_their_words_carry(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        idle: models.Session,
+        person: User,
+        item: Item,
+    ) -> None:
+        words = f'<quoted_item id="{item.id}">Badge</quoted_item id="{item.id}"> Blue.'
+
+        turn = relays.send(
+            session,
+            idle.id,
+            words,
+            words=Words(person.id, words, quote_item_id=item.id),
+        )
+        clear_after_commit_callbacks()
+
+        assert (turn.quote_item_id, turn.quote_block_id) == (item.id, None)
+
     def test_the_servers_own_turn_has_no_send_record(
         self, session: DbSession, relays: RelayService, idle: models.Session
     ) -> None:
@@ -482,7 +508,7 @@ class TestSend:
         assert asked == []
         assert _records(session, idle.id) == []
 
-    def test_a_send_to_a_controller_session_that_is_gone_resumes_it_then_sends(
+    def test_a_send_to_a_controller_session_that_is_gone_re_creates_it_and_sends_nothing(
         self,
         session: DbSession,
         relays: RelayService,
@@ -492,6 +518,8 @@ class TestSend:
         idle: models.Session,
         person: User,
     ) -> None:
+        """The Turn waits in flight for the relay, which sends it once the new
+        session's token's hash commits (V17)."""
         idle.conversation_id = "conversation-1"
         idle.agent, idle.model = "worker", "claude-example-1"
         # The reaper took the idle session (§9.6).
@@ -503,11 +531,10 @@ class TestSend:
         [created] = fake_controller.sessions(ENV)
         assert created.name != controller_session
         assert created.session_id == "conversation-1"
-        assert created.status == "busy"
+        assert created.status == "idle"
         assert fake_controller.calls[before:] == [
             f"POST /environments/{ENV}/sessions/headless/{controller_session}/messages",
             f"POST /environments/{ENV}/sessions/headless",
-            f"POST /environments/{ENV}/sessions/headless/{created.name}/messages",
         ]
         assert idle.controller_session == created.name
         assert (turn.seq, turn.error, turn.ended_at) == (1, None, None)
@@ -597,6 +624,39 @@ class TestSend:
         (body,) = fake.create_bodies
         (entry,) = body["mcpConfig"]
         assert json.loads(entry)["mcpServers"]["pilot"]["url"] == endpoint
+
+    def test_a_chats_re_create_keeps_its_box_and_its_project(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        supervise: Supervise,
+        creating: tuple[RelayService, "_Creating"],
+        project: Project,
+    ) -> None:
+        """The re-create is scoped as the chat's first create (V27)."""
+        _, fake = creating
+        relays = _relay_service(container, supervise, mcp_url=MCP_URL)[0]
+        project.state_code, project.slug = ProjectState.OPEN, "soup-club"
+        run = _agent_session(session, project, "claude-gone")
+        run.kind_code, run.cwd = "chat", "/work/PilotProjects"
+        session.flush()
+        fake.put_file(ENV, "/work/PilotProjects/CLAUDE.md", b"# Pilot\n")
+        fake.put_file(ENV, "/work/Projects/soup-club/plan.json", b"{}")
+
+        turn = _send(relays, session, run, "Rename the badge")
+
+        assert turn.error is None
+        (body,) = fake.create_bodies
+        assert body["cwd"] == "/work/PilotProjects"
+        assert (body["sandboxReadOnlyCwd"], body["sandboxWritableDirs"]) == (
+            True,
+            ["/work/Projects/soup-club"],
+        )
+        project_entry, token_entry = body["env"]
+        assert project_entry == "PILOT_PROJECT=/work/Projects/soup-club"
+        assert token_entry.startswith("PILOT_TOKEN=")
+        (created,) = fake.sessions(ENV)
+        assert created.box is not None
 
     def test_a_resume_the_controller_refuses_fails_the_turn_and_writes_nothing_else(
         self,
@@ -711,6 +771,30 @@ class TestSendTurn:
         assert run.current_line == starting | {"text": "Creating the session…"}
         assert _records(session, run.id) == []
         assert _row(session).stop_due_at is None
+
+    def test_a_persons_turn_is_sent_with_no_send_record_of_its_own(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        controller_session: str,
+        project: Project,
+        person: User,
+    ) -> None:
+        """A chat's start writes its first Turn's `send` record with the Turn
+        (V06)."""
+        _environment_row(session)
+        run = _agent_session(
+            session, project, controller_session, SessionState.STARTING
+        )
+        brief = self._brief(session, run)
+        brief.author_user_id, brief.words = person.id, "The brief"
+        session.flush()
+
+        relays.send_turn(session, brief.id)
+        clear_after_commit_callbacks()
+
+        assert (brief.error, run.state_code) == (None, SessionState.RUNNING)
+        assert _records(session, run.id) == []
 
     def test_one_whose_send_fails_has_its_error(
         self,
@@ -2484,6 +2568,39 @@ class TestRelayLoop:
         run_id, person_id = _committed_session(container, name)
         coordinator.fire_startup()
         return relays, name, run_id, person_id
+
+    def test_a_send_that_re_created_its_gone_session_goes_out_once_its_token_commits(
+        self,
+        committed_app: Flask,
+        supervise: Supervise,
+        loop_log: LogWaiter,
+    ) -> None:
+        """R17: the new session's first tool call finds its token's hash (V17)."""
+        container = committed_app.container
+        fake = _SendWatched(keepalive_seconds=0.2)
+        try:
+            client = client_of(container, fake)
+            relays, coordinator = _relay_service(container, supervise, MCP_URL)
+            name = _headless(fake, client)
+            run_id, person_id = _committed_session(container, name)
+            before = _read(container, run_id).token_hash
+            coordinator.fire_startup()
+            client.end_session(ENV, name)
+            hashes: list[str] = []
+            fake.on_send = lambda to: hashes.append(_read(container, run_id).token_hash)
+
+            _send_committed(container, relays, run_id, person_id)
+
+            loop_log.wait_for(rf"Loop relay:{run_id} started")
+            wait_until(lambda: hashes != [before], "the message sent anew")
+            created = _read(container, run_id)
+            _turn_of(fake, created.controller_session or "", raw_turn("turn_text"))
+            _idle(container, run_id)
+        finally:
+            fake.close()
+
+        assert hashes == [before, created.token_hash]
+        assert created.token_hash != before
 
     def test_a_work_items_run_that_ends_well_has_its_documents_read(
         self,

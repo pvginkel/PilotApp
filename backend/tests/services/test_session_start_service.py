@@ -83,6 +83,7 @@ from tests.support.fake_controller import (
     client_of,
     raw_turn,
 )
+from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
 from tests.support.locks import in_thread, lock_waits
 from tests.support.supervisor import (
     WAIT_SECONDS,
@@ -288,6 +289,7 @@ def _services(
         work_slots=slots,
         pilot_server=pilot_server,
         controller_configured=controller_configured,
+        store_environment_id=STORE_ENVIRONMENT_ID,
     )
     return starts, environments, coordinator
 
@@ -1043,6 +1045,9 @@ class TestPilotServerHanded:
         kind: str,
     ) -> None:
         fake.add_environment("store-env", name="Store", status="running")
+        # A brain session's create is boxed: its cwd and its folder on disk.
+        fake.put_file("store-env", "/work/PilotProjects/CLAUDE.md", b"# Pilot\n")
+        fake.put_file("store-env", f"/work/Projects/{SLUG}/plan.json", b"{}")
         session.add(Environment(id="store-env", name="Store", exempt=True))
         now = datetime.now(UTC)
         run = models.Session(
@@ -5480,3 +5485,373 @@ class TestRunContinuation:
         refused = _document(session, refinement)
         assert (refused.written_back_at, refused.write_back_refused_at) == (None, None)
         assert _verbs(fake, RUN_ENV) == []
+
+
+STORE_REPO = "/work/PilotProjects"
+CAMP_FOLDER = "/work/Projects/camp"
+CHATTING = "start the chat"
+
+
+def _store(fake: _Recording, status: EnvironmentStatus = "running") -> None:
+    """The store's environment in the fleet, exempt, with no tree."""
+    fake.add_environment(
+        STORE_ENVIRONMENT_ID, name="PilotProjects", status=status, exempt=True
+    )
+
+
+def _store_tree(fake: _Recording, *, folder: bool = True) -> None:
+    """The store repo's root on the store's tree, and the project's folder
+    unless `folder` is false."""
+    fake.put_file(STORE_ENVIRONMENT_ID, f"{STORE_REPO}/CLAUDE.md", b"# Pilot\n")
+    if folder:
+        fake.put_file(STORE_ENVIRONMENT_ID, f"{CAMP_FOLDER}/plan.json", b"{}")
+
+
+def _brain(
+    starts: SessionStartService, db: DbSession, project: Project
+) -> models.Session:
+    """A chat's rows as its caller writes them, its first Turn the brief, and
+    its start through the gate."""
+    run = models.Session(
+        project_id=project.id,
+        kind_code="chat",
+        cwd=STORE_REPO,
+        model="opus",
+        reasoning_effort="xhigh",
+        token_hash=uuid.uuid4().hex,
+        state_code=SessionState.STARTING,
+        turns=1,
+        turn_started_at=datetime.now(UTC),
+    )
+    db.add(run)
+    db.flush()
+    db.add(
+        models.Chat(
+            id=run.id,
+            project_id=project.id,
+            session_kind_code="chat",
+            kind_code="project",
+        )
+    )
+    db.add(Turn(session_id=run.id, seq=1, message=BRIEF, started_at=datetime.now(UTC)))
+    db.flush()
+    starts.start_brain(db, project, run, CHATTING)
+    return _read(db, run.id)
+
+
+def _env_entries(body: dict[str, Any]) -> dict[str, str]:
+    return dict(entry.partition("=")[::2] for entry in body["env"])
+
+
+class TestStartBrain:
+    """A brain session's start through the gate (§13.4; F141.4, F141.5; DB
+    229, 243; V25)."""
+
+    def test_it_is_starting_in_no_environment_its_loop_run_once_this_commits(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        run = _brain(starts, session, project)
+
+        assert run.state_code == SessionState.STARTING
+        assert (run.environment_id, run.controller_session) == (None, None)
+        assert "_LoopStart" in _callbacks()
+        assert _server(session, run.id) == []
+        assert fake.calls == []
+
+    def test_while_the_controller_is_unreachable_it_is_held(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        controller_outage.call_unanswered()
+
+        run = _brain(starts, session, project)
+
+        assert run.state_code == SessionState.HELD
+        assert "_HeldWritten" in _callbacks()
+        assert "_LoopStart" not in _callbacks()
+
+    def test_in_a_paused_project_it_is_not_held(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        project.paused = True
+        session.flush()
+
+        assert _brain(starts, session, project).state_code == SessionState.STARTING
+
+    def test_it_takes_no_slot(
+        self,
+        slotted: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        _occupying(session, project, 2)
+
+        assert _brain(slotted, session, project).state_code == SessionState.STARTING
+        assert slotted._slots.filled(session, [project.id]) == {project.id: 2}
+
+    @pytest.mark.parametrize(
+        ("configured", "store", "refusal"),
+        [
+            (False, STORE_ENVIRONMENT_ID, "no controller is configured"),
+            (True, "", "no store environment is configured"),
+        ],
+    )
+    def test_without_a_controller_or_a_store_it_is_refused(
+        self,
+        container: ServiceContainer,
+        supervise: Supervise,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        configured: bool,
+        store: str,
+        refusal: str,
+    ) -> None:
+        starts = _services(container, supervise, controller_configured=configured)[0]
+        starts._store = store
+
+        with pytest.raises(
+            InvalidOperationException, match=f"Cannot {CHATTING} because {refusal}"
+        ):
+            _brain(starts, session, project)
+
+
+@pytest.fixture
+def boxing(
+    container: ServiceContainer, fake: _Recording, supervise: Supervise
+) -> SessionStartService:
+    """The session starts handing Pilot's server, their boxed creates made
+    again every 0.05 s for 2 s."""
+    starts = _services(container, supervise, mcp_url=MCP_URL)[0]
+    starts._folder_wait, starts._folder_retry = 2.0, 0.05
+    return starts
+
+
+class TestRunBrain:
+    """A brain session's start in the store, boxed (design 3 §12; TD §4.2;
+    F50, F81, F125; R16; V02, V13, V16, V25)."""
+
+    def test_it_takes_the_store_starts_it_and_sends_the_brief_from_a_boxed_create(
+        self,
+        boxing: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        _store(fake, "stopped")
+        _store_tree(fake)
+        run = _brain(boxing, session, project)
+
+        _run(boxing, run)
+
+        run = _read(session, run.id)
+        assert run.environment_id == STORE_ENVIRONMENT_ID
+        assert run.state_code == SessionState.RUNNING
+        assert f"POST /environments/{STORE_ENVIRONMENT_ID}/start" in fake.calls
+        store = _row(session, STORE_ENVIRONMENT_ID)
+        assert store.exempt and store.server_started_at is not None
+        assert store.stop_due_at is None
+        (body,) = fake.create_bodies
+        env = _env_entries(body)
+        assert body == {
+            "cwd": STORE_REPO,
+            "model": "opus",
+            "reasoningEffort": "xhigh",
+            "env": [
+                f"PILOT_PROJECT={CAMP_FOLDER}",
+                f"PILOT_TOKEN={env['PILOT_TOKEN']}",
+            ],
+            "mcpConfig": body["mcpConfig"],
+            "sandboxReadOnlyCwd": True,
+            "sandboxWritableDirs": [CAMP_FOLDER],
+        }
+        (entry,) = body["mcpConfig"]
+        assert json.loads(entry)["mcpServers"]["pilot"]["url"] == f"{MCP_URL}/store"
+        assert run.token_hash == token_hash(env["PILOT_TOKEN"])
+        assert fake.sent == [BRIEF]
+        assert _server(session, run.id) == [
+            (None, {"type": STARTING, "text": "Starting PilotProjects…"}),
+            (None, CREATING),
+        ]
+
+    def test_a_store_running_already_is_not_claimed(
+        self,
+        boxing: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        _store(fake)
+        _store_tree(fake)
+
+        _run(boxing, _brain(boxing, session, project))
+
+        assert _row(session, STORE_ENVIRONMENT_ID).server_started_at is None
+        assert fake.sent == [BRIEF]
+
+    def test_a_422_while_its_folder_is_not_on_disk_is_made_again_until_it_is(
+        self,
+        boxing: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        _store(fake)
+        _store_tree(fake, folder=False)
+
+        def folder_written() -> None:
+            fake.put_file(STORE_ENVIRONMENT_ID, f"{CAMP_FOLDER}/plan.json", b"{}")
+
+        def refused_once() -> None:
+            fake.during_create = folder_written
+
+        fake.during_create = refused_once
+        run = _brain(boxing, session, project)
+
+        with listening(START_LOGGER) as log:
+            _run(boxing, run)
+
+        assert len(fake.create_bodies) == 2
+        assert _read(session, run.id).state_code == SessionState.RUNNING
+        assert fake.sent == [BRIEF]
+        assert log.matching(rf"Session {run.id} waits for its folder: .*422.*")
+
+    def test_a_422_past_the_wait_fails_the_start_with_the_controllers_title(
+        self,
+        boxing: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        _store(fake)
+        _store_tree(fake, folder=False)
+        boxing._folder_wait = 0.2
+        run = _brain(boxing, session, project)
+
+        _run(boxing, run)
+
+        run = _assert_failed(session, run.id)
+        assert run.error is not None
+        assert "422 validation-error" in run.error
+        assert f'sandboxWritableDirs entry "{CAMP_FOLDER}" does not exist' in run.error
+        assert len(fake.create_bodies) > 2
+        assert _server(session, run.id)[-1] == (
+            None,
+            {"type": START_FAILED, "reason": run.error},
+        )
+        assert fake.sent == []
+
+    def test_capability_unavailable_fails_the_start_at_once(
+        self,
+        boxing: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        _store(fake)
+        _store_tree(fake)
+        fake.no_sandbox_profile(STORE_ENVIRONMENT_ID)
+        run = _brain(boxing, session, project)
+
+        _run(boxing, run)
+
+        run = _assert_failed(session, run.id)
+        assert run.error is not None and "409 capability-unavailable" in run.error
+        assert len(fake.create_bodies) == 1
+
+    def test_a_loop_told_to_stop_while_it_waits_for_the_folder_leaves_it_starting(
+        self,
+        boxing: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        _store(fake)
+        _store_tree(fake, folder=False)
+        run = _brain(boxing, session, project)
+        handle = LoopHandle(f"start:{run.id}")
+        fake.during_create = handle._request_stop
+
+        boxing.run(run.id, handle)
+
+        run = _read(session, run.id)
+        assert (run.state_code, run.controller_session) == (SessionState.STARTING, None)
+        assert len(fake.create_bodies) == 1
+
+    def test_a_store_the_controller_does_not_have_fails_the_start(
+        self,
+        boxing: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        run = _brain(boxing, session, project)
+
+        _run(boxing, run)
+
+        run = _assert_failed(session, run.id)
+        assert run.error is not None and "404 not-found" in run.error
+        assert run.environment_id is None
+
+    def test_a_start_cut_once_it_took_the_store_goes_on_from_its_rows(
+        self,
+        boxing: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        """As a restart's reconcile runs it again (§8.2)."""
+        _store(fake)
+        _store_tree(fake)
+        run = _brain(boxing, session, project)
+        cut = LoopHandle(f"start:{run.id}")
+        cut._request_stop()
+        boxing.run(run.id, cut)
+        run = _read(session, run.id)
+        assert (run.environment_id, run.controller_session) == (
+            STORE_ENVIRONMENT_ID,
+            None,
+        )
+
+        _run(boxing, run)
+
+        run = _read(session, run.id)
+        assert run.state_code == SessionState.RUNNING
+        assert len(fake.create_bodies) == 1
+        assert fake.sent == [BRIEF]
+
+    def test_a_held_chat_starts_once_the_gate_opens(
+        self,
+        boxing: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        _store(fake)
+        _store_tree(fake)
+        controller_outage.call_unanswered()
+        run = _brain(boxing, session, project)
+        clear_after_commit_callbacks()
+        controller_outage.probe_answered()
+
+        _release(boxing)
+
+        run = _read(session, run.id)
+        assert run.state_code == SessionState.STARTING
+        _run(boxing, run)
+        assert _read(session, run.id).state_code == SessionState.RUNNING
+        assert fake.sent == [BRIEF]

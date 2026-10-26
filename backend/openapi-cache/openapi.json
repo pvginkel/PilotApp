@@ -255,6 +255,74 @@
         "title": "AttachedFilesSchema",
         "type": "object"
       },
+      "ChatMessageRequestSchema.f9d9b43": {
+        "description": "A person's message to the project's brain.",
+        "properties": {
+          "words": {
+            "description": "The person's words, sent verbatim, a quote travelling inside them as a tag: `<quoted_item id=\"<item id>\">…</quoted_item id=\"…\">` or `<quoted_block id=\"<item id>/<local id>\">…</quoted_block id=\"…\">` (F38.3)",
+            "title": "Words",
+            "type": "string"
+          }
+        },
+        "required": [
+          "words"
+        ],
+        "title": "ChatMessageRequestSchema",
+        "type": "object"
+      },
+      "ChatTurnSchema.f9d9b43": {
+        "description": "The message's Turn in the project's chat.",
+        "properties": {
+          "chat": {
+            "description": "The chat's id, its session's, whose records show the message",
+            "format": "uuid",
+            "title": "Chat",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the message's send failed (F125); null unless it did",
+            "title": "Error"
+          },
+          "seq": {
+            "description": "The Turn's number in the chat's session",
+            "title": "Seq",
+            "type": "integer"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ChatTurnSchema.f9d9b43.SessionState",
+            "description": "The chat's session's state: `held` while the gate holds its start, `starting` while it comes up, `running` once the message went out, `idle` when its send failed"
+          }
+        },
+        "required": [
+          "chat",
+          "seq",
+          "state",
+          "error"
+        ],
+        "title": "ChatTurnSchema",
+        "type": "object"
+      },
+      "ChatTurnSchema.f9d9b43.SessionState": {
+        "enum": [
+          "held",
+          "starting",
+          "running",
+          "idle",
+          "stopped",
+          "ended",
+          "failed"
+        ],
+        "title": "SessionState",
+        "type": "string"
+      },
       "ConditionsSchema.6c014b4": {
         "description": "The conditions that hold now, which the gold bar shows.",
         "properties": {
@@ -8118,6 +8186,104 @@
           }
         ],
         "summary": "Read a project's head: its standing and status, its members and its plan.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/projects/{project_id}/chat/messages": {
+      "post": {
+        "description": "A send the controller fails is the turn's `error` (F125).\n\nReturns:     201: The message's turn in the chat     400: The message has no words     401: No one is signed in     403: The caller lacks the editor role     404: No project has the id     409: The caller has not chosen a handle; the project is a draft,         finished or archived; the chat is starting or a turn of it is in         flight; or no controller or store environment is configured",
+        "operationId": "post__api_projects_{project_id}_chat_messages",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatMessageRequestSchema.f9d9b43"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatTurnSchema.f9d9b43"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Send Pilot a message in the project, as the signed-in person, the words verbatim: a turn of the project's open chat, its send made now; or, with none open, or with its start failed, the chat started with it, its first turn the chat's brief and the words, which goes out once its session is up in the store, held while the controller is unreachable.",
         "tags": [],
         "x-required-role": "editor"
       }

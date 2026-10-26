@@ -19,6 +19,8 @@ from app.engine.views import ViewService
 from app.exceptions import ConfigurationError
 from app.services.attachment_service import AttachmentService
 from app.services.auth_service import AuthService
+from app.services.brief_service import BriefService
+from app.services.chat_service import ChatService
 from app.services.condition_service import ConditionService
 from app.services.controller_client import ControllerClient
 from app.services.controller_outage import ControllerOutage
@@ -282,6 +284,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         controller_configured=providers.Callable(
             lambda url: url is not None, app_config.provided.controller_url
         ),
+        store_environment_id=app_config.provided.store_environment_id,
     )
     register_for_background_startup(lambda c: c.session_start_service())
 
@@ -469,6 +472,22 @@ class ServiceContainer(containers.DeclarativeContainer):
         project_service=project_service,
         session_start_service=session_start_service,
         effect_service=effect_service,
+    )
+
+    # A person's message to a project's brain: its chat, started in the store
+    # with its brief when none is open (design 3 §5.3, §12)
+    brief_service = providers.Factory(
+        BriefService, db=db_session, plan_service=plan_service
+    )
+    chat_service = providers.Factory(
+        ChatService,
+        db=db_session,
+        relay_service=relay_service,
+        session_start_service=session_start_service,
+        brief_service=brief_service,
+        session_record_service=session_record_service,
+        brain_model=app_config.provided.brain_model,
+        brain_reasoning_effort=app_config.provided.brain_reasoning_effort,
     )
 
     # The invented record: the dev stack's seed, loaded by `cli

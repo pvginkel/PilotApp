@@ -124,6 +124,19 @@ class AppEnvironment(BaseSettings):
             "holds its work items' starts; unset, WORK_PARALLELISM_MAX (F143.4)"
         ),
     )
+    BRAIN_MODEL: str = Field(
+        default="opus",
+        min_length=1,
+        description="The model of every brain session, the chat's and every job's (F139)",
+    )
+    BRAIN_REASONING_EFFORT: str = Field(
+        default="xhigh",
+        min_length=1,
+        description=(
+            "The reasoning effort of every brain session, the chat's and every "
+            "job's (F139)"
+        ),
+    )
 
 
 class AppSettings(BaseModel):
@@ -219,6 +232,13 @@ class AppSettings(BaseModel):
     """The work items running or starting in one Project at which the gate
     holds its work items' starts (design 2 §13.5; F143.4)."""
 
+    brain_model: str = "opus"
+    """The model every brain session is created on, the chat's and every
+    job's alike (design 3 §12; F139)."""
+
+    brain_reasoning_effort: str = "xhigh"
+    """The reasoning effort every brain session is created with (F139)."""
+
     def dump_for_logging(self) -> dict[str, str]:
         """Every setting, for the boot log, with the Sensitive ones as ``***``."""
         return dump_config_for_logging(self)
@@ -253,4 +273,6 @@ class AppSettings(BaseModel):
                 if env.PROJECT_PARALLELISM_MAX is None
                 else env.PROJECT_PARALLELISM_MAX
             ),
+            brain_model=env.BRAIN_MODEL,
+            brain_reasoning_effort=env.BRAIN_REASONING_EFFORT,
         )

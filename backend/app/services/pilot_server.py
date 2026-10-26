@@ -48,6 +48,12 @@ def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+def unheld_token_hash() -> str:
+    """The hash of a token no one holds: a Session's from its placement until
+    its create mints the one its controller session carries."""
+    return token_hash(secrets.token_urlsafe(32))
+
+
 def bearer_session(
     db: Session, authorization: str | None, surface: Surface
 ) -> tuple[AgentSession, Surface]:
