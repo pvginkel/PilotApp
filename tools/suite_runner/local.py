@@ -27,6 +27,10 @@ the frontend's pnpm store before the install and uploads it after a miss,
 keyed on frontend/pnpm-lock.yaml. scripts/build-cache-get.sh and -put.sh are
 copies of the Jenkins chart's (HomelabAppsDeploy, jenkins/chart/scripts/).
 
+Playwright's worker count is --workers, or PLAYWRIGHT_WORKERS, which CI sets
+where the library's fixed run-suite flags leave it no --workers; with neither,
+the Playwright config's.
+
 Output modes:
   simple  — progress indicators, captured output, a summary and test_results.md
             with each suite's passed/failed/skipped counts (default)
@@ -116,8 +120,10 @@ examples:
                         help="Max failures before stopping (pytest --maxfail / playwright --max-failures)")
     parser.add_argument("--retries", type=int, default=None,
                         help="Playwright retry count for failed tests (default: Playwright config)")
-    parser.add_argument("--workers", type=int, default=None,
-                        help="Playwright parallel worker count (default: Playwright config)")
+    parser.add_argument("--workers", type=int,
+                        default=os.environ.get("PLAYWRIGHT_WORKERS"),
+                        help="Playwright parallel worker count (default: PLAYWRIGHT_WORKERS when "
+                             "set, as CI sets it, else Playwright config)")
     parser.add_argument("--output-mode", choices=["simple", "full"], default="simple",
                         help="Output mode: simple (progress, a summary with each suite's "
                              "counts, test_results.md) or full (streamed output, and "
