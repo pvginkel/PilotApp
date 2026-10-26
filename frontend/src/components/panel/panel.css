@@ -56,8 +56,9 @@
   .ptab:hover { color: hsl(var(--foreground)); }
   .ptab.on { border-bottom-color: hsl(var(--primary)); color: hsl(var(--foreground)); }
   .panel-body { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
-  /* The Chat tab scrolls its transcript alone (chat-tab.tsx). */
-  .panel-body.chat { display: flex; flex-direction: column; overflow: hidden; }
+  /* The Chat tab scrolls its transcript alone (chat-tab.tsx), with its own gutter: the composer
+     under it spans the panel. */
+  .panel-body.chat { display: flex; flex-direction: column; overflow: hidden; scrollbar-gutter: auto; }
 
   /* The Documents tab. */
   .docs { padding: 4px 8px 16px; }

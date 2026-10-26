@@ -12,7 +12,7 @@
  * <time>", and the next message starts a new chat below it; "The chat before · <day>" at the top
  * loads that chat above what is in view and leaves the view where it is (F130.1). Nothing stands in
  * it while its read is under way, and "The chat did not load." where it fails (F113). On a phone it
- * is the same column (F98.3).
+ * is the same column, the composer under it (F98.3; the composer's own specs: composer.spec.ts).
  */
 
 import { test, expect } from '../support/fixtures';
@@ -416,5 +416,10 @@ test.describe('The Chat tab on a phone', () => {
     expect(message.x + message.width).toBeGreaterThan(390 - 40);
     expect(message.x).toBeGreaterThan(390 * 0.09);
     expect(reply.x).toBeLessThan(32);
+    // The composer under it, across the column at the screen's foot.
+    const composer = (await chat.composer.boundingBox())!;
+    expect(composer.x).toBe(0);
+    expect(composer.width).toBeCloseTo(390, 0);
+    expect(composer.y + composer.height).toBeCloseTo(side.y + side.height, 0);
   });
 });

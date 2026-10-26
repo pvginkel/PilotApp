@@ -4,9 +4,10 @@
  * per backend, running and exempt, its tree holding the store repo, every chat session's cwd, and
  * the project's folder, which the fake requires of a boxed create (TD §4.2). A message is sent as a
  * person sends it (POST /api/projects/<id>/chat/messages): by the signed-in person, or by another
- * person on a connection of their own (`other()`). A chat's start creates its headless session in
- * the store, `claude-<n>` in the order the backend creates them there; `start()` names it, and the
- * spec plays its turns through `controller` once it is working.
+ * person on a connection of their own (`other()`); or through the composer, after `opening()`. A
+ * chat's start creates its headless session in the store, `claude-<n>` in the order the backend
+ * creates them there; `start()` and `opening()` name it, and the spec plays its turns through
+ * `controller` once it is working.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -95,18 +96,29 @@ export class Chats {
    * session's name in the store, once the session works on its first turn.
    */
   async start(projectId: string, words: string, by?: OtherPerson): Promise<Started> {
+    const opened = await this.opening(projectId);
+    const sent = await (by === undefined ? this.send(projectId, words) : by.send(projectId, words));
+    return { chat: sent.chat, session: await opened() };
+  }
+
+  /**
+   * The store, ready for the project's chat, and a wait for the session the next message opens there,
+   * sent through the API or the composer: answers its name once it works on its first turn.
+   */
+  async opening(projectId: string): Promise<() => Promise<string>> {
     await this.ready(projectId);
     const before = new Set(await this.controller.sessions(this.store));
-    const sent = await (by === undefined ? this.send(projectId, words) : by.send(projectId, words));
-    let session = '';
-    await expect
-      .poll(async () => {
-        session = (await this.controller.sessions(this.store)).find((name) => !before.has(name)) ?? '';
-        return session;
-      })
-      .not.toBe('');
-    await this.working(session);
-    return { chat: sent.chat, session };
+    return async () => {
+      let session = '';
+      await expect
+        .poll(async () => {
+          session = (await this.controller.sessions(this.store)).find((name) => !before.has(name)) ?? '';
+          return session;
+        })
+        .not.toBe('');
+      await this.working(session);
+      return session;
+    };
   }
 
   /** Returns once the store's session works on a turn: the message sent to it. */

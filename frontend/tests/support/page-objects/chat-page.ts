@@ -1,5 +1,5 @@
 import type { Locator, Page } from '@playwright/test';
-import type { UiStateTestEvent } from '@/lib/test/test-events';
+import type { FormTestEvent, UiStateTestEvent } from '@/lib/test/test-events';
 import { waitTestEvent } from '../helpers';
 
 /**
@@ -7,7 +7,9 @@ import { waitTestEvent } from '../helpers';
  * chats shown with each person's message — its quotes, words, the name of another person, the time
  * and the avatar — and Pilot's reply to it, its steps, the phantom, the cue, a failure and its end;
  * the date dividers, the line where a chat closed, "The chat before · <day>" at the top, the empty
- * state, and the line in its place where the tab's read failed.
+ * state, and the line in its place where the tab's read failed; and under the transcript the
+ * composer (F44): its field, Send or Stop in its place, and why an archived project's takes no
+ * message.
  */
 export class ChatPage {
   readonly tab: Locator;
@@ -31,6 +33,11 @@ export class ChatPage {
   readonly failed: Locator;
   /** Everything in the transcript, in its order: dividers, messages, replies, the button and the lines. */
   readonly lines: Locator;
+  readonly composer: Locator;
+  readonly field: Locator;
+  readonly send: Locator;
+  readonly stop: Locator;
+  readonly archived: Locator;
 
   constructor(private readonly page: Page) {
     const panel = page.getByTestId('panel');
@@ -54,6 +61,16 @@ export class ChatPage {
     this.empty = this.root.getByTestId('chat.empty');
     this.failed = this.root.getByTestId('panel.chat.failed');
     this.lines = this.root.getByTestId('chat').locator(':scope > *');
+    this.composer = this.root.getByTestId('chat.composer');
+    this.field = this.composer.getByTestId('chat.composer.field');
+    this.send = this.composer.getByTestId('chat.composer.send');
+    this.stop = this.composer.getByTestId('chat.composer.stop');
+    this.archived = this.composer.getByTestId('chat.composer.archived');
+  }
+
+  /** The server's next answer taking the composer's `send` or `stop`, as the browser has it. */
+  acted(act: 'send' | 'stop'): Promise<FormTestEvent> {
+    return waitTestEvent<FormTestEvent>(this.page, 'form', (event) => event.formId === `chat.${act}` && event.phase === 'success');
   }
 
   /** The next read of the tab's list of chats, done. */

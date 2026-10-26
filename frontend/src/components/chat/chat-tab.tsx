@@ -7,7 +7,8 @@
  * is read again on `project_changed`, which a chat's open and close and each move of its session
  * raise. Nothing stands in it while the list's read is under way, and "The chat did not load." while
  * its latest read failed (F113). Sticky scroll keeps a streaming reply in view while the reader is at
- * the bottom; only their own scrolling lets go. On a phone it is the same column (decision 12).
+ * the bottom; only their own scrolling lets go, and their message sent from the composer under it
+ * goes back to the bottom. On a phone it is the same column (decision 12).
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -19,6 +20,7 @@ import type { components } from '@/lib/api/generated/types';
 import { day } from '@/lib/chat/format';
 import { ChatEmptyState } from './chat-empty-state';
 import { ChatSection } from './chat-section';
+import { Composer } from './composer';
 import { chatPeople } from './people';
 
 type Member = components['schemas']['ProjectHeadSchema.e86ccd6.MemberSchema'];
@@ -37,7 +39,7 @@ export function ChatTab({ projectId, members }: { projectId: string; members: re
   if (from === null && chats !== null) setFrom(Math.max(0, chats.length - 1));
   const container = useRef<HTMLDivElement>(null);
   const wrapper = useRef<HTMLDivElement>(null);
-  const { unstick } = useStickyBottom(container, wrapper, 'chat');
+  const { stick, unstick } = useStickyBottom(container, wrapper, 'chat');
   // While the chat before loads above, the line at the top of the view keeps its place, until the
   // reader scrolls: a chat's records land after the click, and its growth moves what is below.
   const anchor = useRef<{ element: Element; top: number } | null>(null);
@@ -77,6 +79,11 @@ export function ChatTab({ projectId, members }: { projectId: string; members: re
     setFrom(from! - 1);
   };
 
+  const sent = () => {
+    anchor.current = null;
+    stick();
+  };
+
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="panel.chat">
       {/* The browser's own scroll anchoring off: it would move the view a second time. */}
@@ -111,6 +118,7 @@ export function ChatTab({ projectId, members }: { projectId: string; members: re
           )}
         </div>
       </div>
+      <Composer projectId={projectId} answering={chats?.at(-1)?.answering ?? false} onSent={sent} />
     </div>
   );
 }
