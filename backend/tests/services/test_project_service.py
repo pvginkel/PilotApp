@@ -1198,10 +1198,46 @@ class TestTransition:
         else:
             assert read_records(session, chat.id, limit=10) == []
 
+    @pytest.mark.parametrize("state", [SessionState.IDLE, SessionState.RUNNING])
+    def test_archive_closes_the_open_chat_archived_after_stopping_it(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        environment: Environment,
+        state: SessionState,
+    ) -> None:
+        """An idle chat's close is its last record now; a running one's turn
+        is stopped, its close's record left to the turn's end (F128.1; DB
+        decision 60, assertion 245)."""
+        made = _make(container, name="Camp")
+        chat = _chat(container, session, made, environment, state)
+
+        container.project_service().transition(ADA, made.id, TransitionKind.ARCHIVED)
+
+        ((_, at, _),) = [
+            transition
+            for transition in _transitions(session, made)
+            if transition[0] is TransitionKind.ARCHIVED
+        ]
+        row = session.get_one(Chat, chat.id, populate_existing=True)
+        assert (row.closed_at, row.close_cause_code) == (at, CloseCause.ARCHIVED)
+        if state is SessionState.IDLE:
+            assert chat.state_code is SessionState.IDLE
+            assert _last_record(session, chat) == (
+                RecordKind.SERVER,
+                {"type": CLOSED, "cause": "archived"},
+            )
+        else:
+            assert (chat.state_code, chat.stopped_by_user_id) == (
+                SessionState.STOPPED,
+                person.id,
+            )
+            assert read_records(session, chat.id, limit=10) == []
+
     @pytest.mark.parametrize(
         ("spec", "kind"),
         [
-            ({"state": "open"}, TransitionKind.ARCHIVED),
             ({"state": "open"}, TransitionKind.PAUSED),
             ({"state": "open"}, TransitionKind.AUTOPILOT_ON),
             ({"state": "open", "archived": True}, TransitionKind.BROUGHT_BACK),

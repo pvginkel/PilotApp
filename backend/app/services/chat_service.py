@@ -19,14 +19,18 @@ the commit, so no close or stop interleaves with it (`ChatCloseService`,
 `SessionStartService.stop_project`): one that finds the chat closed meanwhile
 starts the project's next chat, and one that finds its project archived is
 refused. Its words are
-sent as they are, unless the project's handbook changed since the chat's
-previous Turn: then the server's `<store_notification>` saying so goes before
-them, counted (D052).
+sent as they are, unless the chat's previous Turn with an author has another
+author: then the line naming the person goes before them, as the brief names
+the first (DB decision 61); and unless the project's handbook changed since
+the chat's previous Turn: then the server's `<store_notification>` saying so
+goes before both, counted (D052).
 
 A finished project's chat reads only: a message starts it as in an open
 project, its create boxed with nothing to write and no surface
 (`scoped_create`), its brief the finished project's. A draft's chat, the
-definition chat, and an archived project's take no message.
+definition chat, takes no message, nor does an archived project, whose open
+chat Archive closed (`ChatCloseService`): the refusal guards a send racing
+the archive.
 """
 
 import re
@@ -59,8 +63,13 @@ from app.services.start_gate import CHAT_KIND
 
 QUOTE_TAG = re.compile(
     r'<quoted_(item|block) id="([^"]+)">[\s\S]*?</quoted_\1 id="\2">'
+    r'|<quoted_path path="(handbook\.md|project\.md|attachments/[1-9][0-9]*/[^"/]+)'
+    r'">[\s\S]*?</quoted_path path="\3">'
 )
-"""A quote tag (F38.3; DB decision 29), the closing tag repeating the id."""
+"""A quote tag (F38.3; DB decisions 29, 62), the closing tag repeating the
+attribute: an item's or a block's by id, or a file's by its path in the
+project's folder, the handbook's, the project document's or an attachment's;
+a path tag naming any other path is no quote."""
 
 STORE_NOTIFICATION = (
     "<store_notification>\n"
@@ -136,15 +145,23 @@ class ChatService:
         if session is not None and not _unbriefed(session):
             locked = self._still_open(project, session.id)
             if locked is not None:
-                return self._send(project, locked, quoted)
+                return self._send(project, locked, person, quoted)
         return self._start(project_id, person, quoted, operation)
 
-    def _send(self, project: Project, session: AgentSession, words: Words) -> Turn:
-        """`words` sent to the chat's Session as a turn of it, after the
-        server's notice when the handbook changed since its previous Turn
-        (D052; DB assertion 251), the notice counted once it went out."""
+    def _send(
+        self, project: Project, session: AgentSession, person: User, words: Words
+    ) -> Turn:
+        """`person`'s `words` sent to the chat's Session as a turn of it,
+        after the line naming them when the chat's previous Turn with an
+        author has another author (DB decision 61), and first the server's
+        notice when the handbook changed since its previous Turn (D052; DB
+        assertion 251), the notice counted once it went out."""
         changed = self._handbook_changed(project, session)
-        message = f"{STORE_NOTIFICATION}\n\n{words.text}" if changed else words.text
+        message = words.text
+        if self._previous_author(session) != person.id:
+            message = f"{self.brief_service.message_from(project, person)}\n{message}"
+        if changed:
+            message = f"{STORE_NOTIFICATION}\n\n{message}"
         turn = self.relay_service.send(self.db, session.id, message, words=words)
         if changed and turn.error is None:
             HANDBOOK_CHANGED_TOTAL.labels(project=str(project.id)).inc()
@@ -171,6 +188,16 @@ class ChatService:
             return session
         savepoint.rollback()
         return None
+
+    def _previous_author(self, session: AgentSession) -> uuid.UUID | None:
+        """The author of the chat's latest Turn with one; a server Turn has
+        none."""
+        return self.db.scalars(
+            select(Turn.author_user_id)
+            .where(Turn.session_id == session.id, Turn.author_user_id.is_not(None))
+            .order_by(Turn.seq.desc())
+            .limit(1)
+        ).one_or_none()
 
     def _handbook_changed(self, project: Project, session: AgentSession) -> bool:
         """Whether the project's handbook was published after the chat's
@@ -287,11 +314,12 @@ class ChatService:
 
     def _quote(self, project: Project, person: User, words: str) -> Words:
         """`person`'s `words`, quoting the Item or the Block of the project
-        their first quote tag names (DB 159); none when it names neither."""
+        their first quote tag names (DB 159); none when it names neither, a
+        file's by its path among them (DB decision 62)."""
         tag = QUOTE_TAG.search(words)
         item_id = block_id = None
-        if tag is not None:
-            kind, ref = tag.groups()
+        if tag is not None and tag[1] is not None:
+            kind, ref = tag[1], tag[2]
             if kind == "item":
                 quoted = _uuid(ref)
                 if quoted is not None:
@@ -339,7 +367,8 @@ def _uuid(text: str) -> uuid.UUID | None:
 
 def _refuse_message(project: Project, operation: str) -> None:
     """Refuse a message to a draft's chat, which is the definition chat's, and
-    to an archived project's, started or open (F128.5; DB 245).
+    to an archived project's, a send racing the archive among them (F128.5;
+    DB 245).
 
     Raises:
         InvalidOperationException: The project is a draft or archived

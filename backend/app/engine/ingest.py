@@ -243,7 +243,7 @@ class IngestService:
         tree_hash = self.tree_service.hash(project, document)
 
         text, faults = _decoded(content)
-        self._store(document, text, session)
+        taken = self._store(document, text, session)
         self._clear(path)
         kind = _kind(document, item)
         if kind is dsl.DocumentKind.OPENING:
@@ -275,6 +275,9 @@ class IngestService:
         if item is not None and held != held_before:
             # The item shows as a concept while its save is held (F78).
             self.engine_bus.emit(ProjectChanged(project.id))
+        if taken:
+            # Pilot's dots show on the document its session writes (F35).
+            self.engine_bus.emit(ProjectChanged(project.id))
         return Ingested(
             kind=PathKind.DOCUMENT,
             content=_unless(tree_text.encode(), content),
@@ -285,17 +288,20 @@ class IngestService:
         )
 
     @staticmethod
-    def _store(document: Document, text: str, session: AgentSession | None) -> None:
+    def _store(document: Document, text: str, session: AgentSession | None) -> bool:
         """The save as the document's ingest, and its session as the one
-        writing it (design 1 §7)."""
+        writing it (design 1 §7); whether that session took the document
+        with it."""
         now = datetime.now(UTC)
         document.ingested_text = text
         document.ingested_hash = sha256_hex(text)
         document.ingested_at = now
         document.ingested_session_id = None if session is None else session.id
-        if session is not None and document.writing_session_id != session.id:
-            document.writing_session_id = session.id
-            document.writing_since = now
+        if session is None or document.writing_session_id == session.id:
+            return False
+        document.writing_session_id = session.id
+        document.writing_since = now
+        return True
 
     def _clear(self, path: str) -> None:
         """The path's `parse` Save Errors, in every Environment, go: the save

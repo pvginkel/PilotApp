@@ -1167,8 +1167,39 @@ class TestDocumentServicePublish:
         assert engine_events == [
             TreeHashMoved(
                 f"draft-{project.number}/project.md", sha256_hex("Some prose.\n")
-            )
+            ),
+            ProjectChanged(project.id),
         ]
+
+    def test_the_handbooks_changed_text_changes_its_project(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+    ) -> None:
+        """An open handbook shows Pilot's new text with no reload, as an
+        item's overlay does."""
+        documents = container.document_service()
+        handbook = documents.bear_handbook(project, "# Handbook\n")
+        with scoped_session(container):
+            pass
+        engine_events.clear()
+
+        with scoped_session(container):
+            documents.publish(handbook, "# Handbook\n\n- Salt last.\n")
+        changed = list(engine_events)
+        engine_events.clear()
+        with scoped_session(container):
+            documents.publish(handbook, "# Handbook\n\n- Salt last.\n")
+
+        assert changed == [
+            TreeHashMoved(
+                f"draft-{project.number}/handbook.md",
+                sha256_hex("# Handbook\n\n- Salt last.\n"),
+            ),
+            ProjectChanged(project.id),
+        ]
+        assert engine_events == []
 
     def test_a_publish_of_the_same_text_moves_nothing(
         self,
@@ -1217,7 +1248,7 @@ class TestDocumentServicePublish:
             documents.publish(draft, "Some prose.\n")
 
         assert draft.published_text == "Some prose.\n"
-        assert engine_events == []
+        assert engine_events == [ProjectChanged(project.id)]
 
     def test_a_held_items_publish_changes_its_project_alone(
         self,
@@ -1813,6 +1844,54 @@ def _save(
 
 
 class TestDocumentServiceTurnEnded:
+    def test_a_turn_end_that_lets_a_document_go_changes_its_project(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+    ) -> None:
+        """Pilot's dots go from the open screens at the turn's end, whatever
+        the Session's state, a stopped one's included (F35)."""
+        documents = container.document_service()
+        with scoped_session(container):
+            documents.bear_handbook(project, "# Handbook\n")
+        folder = f"draft-{project.number}"
+        _save(
+            container,
+            environment,
+            f"{folder}/handbook.md",
+            "# Handbook\n",
+            project_session,
+        )
+        project_session.state_code = SessionState.STOPPED
+        with scoped_session(container):
+            pass
+        engine_events.clear()
+
+        with scoped_session(container):
+            documents.turn_ended(project_session)
+
+        assert engine_events == [ProjectChanged(project.id)]
+
+    def test_a_turn_end_with_no_document_written_changes_nothing(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        documents = container.document_service()
+        with scoped_session(container):
+            documents.bear_handbook(project, "# Handbook\n")
+        engine_events.clear()
+
+        with scoped_session(container):
+            documents.turn_ended(project_session)
+
+        assert engine_events == []
+
     def test_a_turn_end_clears_the_writing_and_versions_what_moved(
         self,
         session: DbSession,

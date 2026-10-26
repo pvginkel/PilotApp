@@ -687,7 +687,7 @@
                 "type": "null"
               }
             ],
-            "description": "Why the chat closed: `timeout` after its last turn, `created` at Create project, `finished` at Finish, `reopened` at Reopen; null while it is open"
+            "description": "Why the chat closed: `timeout` after its last turn, `created` at Create project, `finished` at Finish, `reopened` at Reopen, `archived` at Archive; null while it is open"
           },
           "closed_at": {
             "anyOf": [
@@ -734,7 +734,8 @@
           "timeout",
           "created",
           "finished",
-          "reopened"
+          "reopened",
+          "archived"
         ],
         "title": "CloseCause",
         "type": "string"
@@ -743,7 +744,7 @@
         "description": "A person's message to the project's brain.",
         "properties": {
           "words": {
-            "description": "The person's words, sent verbatim, a quote travelling inside them as a tag: `<quoted_item id=\"<item id>\">…</quoted_item id=\"…\">` or `<quoted_block id=\"<item id>/<local id>\">…</quoted_block id=\"…\">` (F38.3)",
+            "description": "The person's words, sent verbatim, a quote travelling inside them as a tag: `<quoted_item id=\"<item id>\">…</quoted_item id=\"…\">`, `<quoted_block id=\"<item id>/<local id>\">…</quoted_block id=\"…\">` or `<quoted_path path=\"<path>\">…</quoted_path path=\"…\">`, the path the handbook's, `handbook.md`, the project document's, `project.md`, or an attachment's, `attachments/<batch>/<filename>`, in the project's folder; the title between the tags (F38.3)",
             "title": "Words",
             "type": "string"
           }
@@ -11655,7 +11656,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "End the turn of the project's session as the relay does for its documents: Pilot's writing flag cleared on each it was saving, and a `turn` Version cut of each whose text moved. No live event follows.",
+        "summary": "End the turn of the project's session as the relay does for its documents: Pilot's writing flag cleared on each it was saving, told to the browsers, and a `turn` Version cut of each whose text moved.",
         "tags": [],
         "x-required-role": "editor"
       }

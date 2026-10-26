@@ -1417,6 +1417,28 @@ class TestIngestServiceEvents:
 
         assert engine_events == [DocumentModified(project.id, path)]
 
+    def test_the_save_that_takes_a_document_changes_its_project(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+    ) -> None:
+        """Pilot's dots show from the save that makes its session the
+        document's writer, whatever the save changed (F35)."""
+        _bear_draft(container, project, DRAFT)
+        engine_events.clear()
+        path = f"draft-{project.number}/project.md"
+
+        _ingest(container, path, DRAFT, environment, session=project_session)
+        taken = list(engine_events)
+        engine_events.clear()
+        _ingest(container, path, DRAFT, environment, session=project_session)
+
+        assert taken == [DocumentModified(project.id, path), ProjectChanged(project.id)]
+        assert engine_events == [DocumentModified(project.id, path)]
+
     def test_a_read_only_save_raises_nothing(
         self,
         container: ServiceContainer,

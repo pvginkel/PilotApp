@@ -248,8 +248,8 @@ def create_turn_end(
     test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
 ) -> tuple[str, int]:
     """End the turn of the project's session as the relay does for its
-    documents: Pilot's writing flag cleared on each it was saving, and a
-    `turn` Version cut of each whose text moved. No live event follows.
+    documents: Pilot's writing flag cleared on each it was saving, told to the
+    browsers, and a `turn` Version cut of each whose text moved.
 
     Returns:
         204: The turn has ended

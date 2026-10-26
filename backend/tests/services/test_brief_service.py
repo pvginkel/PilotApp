@@ -290,6 +290,36 @@ class TestProjectChat:
         )
 
 
+class TestMessageFrom:
+    def test_it_names_the_person_and_whether_they_are_a_member(
+        self, session: DbSession, briefs: BriefService, opened: Project, person: User
+    ) -> None:
+        stranger = briefs.message_from(opened, person)
+        session.add(
+            ProjectMember(project_id=opened.id, user_id=person.id, joined_at=AT)
+        )
+        session.flush()
+
+        assert (stranger, briefs.message_from(opened, person)) == (
+            "The message, from ada (not a member):",
+            "The message, from ada (member):",
+        )
+
+    def test_a_member_who_left_is_not_one(
+        self, session: DbSession, briefs: BriefService, opened: Project, person: User
+    ) -> None:
+        session.add(
+            ProjectMember(
+                project_id=opened.id, user_id=person.id, joined_at=AT, left_at=AT
+            )
+        )
+        session.flush()
+
+        assert briefs.message_from(opened, person) == (
+            "The message, from ada (not a member):"
+        )
+
+
 FINISH = (
     "This project is finished (2026-10-25T18:00:00Z): you read only — no"
     " `pilot-store`, nothing under `/work` you can write. Answer from the tree,"

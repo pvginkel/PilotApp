@@ -1,19 +1,20 @@
-"""A project chat's close (F130, F5.5; DB decision 57, assertion 244; design 2
-§13): at Finish, `finished`, and at Reopen, `reopened`, in the transition's
-transaction; and `chat_close_timeout` after its last turn ended with no turn in
-flight, `timeout`, on the scheduler's tick. A closed chat is never sent to
-again: the next message starts a chat of its own (`ChatService`).
+"""A project chat's close (F130, F5.5, F128.1; DB decisions 57, 60, assertions
+244, 245; design 2 §13): at Finish, `finished`, at Reopen, `reopened`, and at
+Archive, `archived`, in the transition's transaction; and `chat_close_timeout`
+after its last turn ended with no turn in flight, `timeout`, on the
+scheduler's tick. A closed chat is never sent to again: the next message
+starts a chat of its own (`ChatService`).
 
 The close's `server` record, `{"type": "closed", "cause": <cause>}`, is the
 chat's last (F130.1). The close writes it when no Turn of the chat's Session is
-in flight; else the end of that Turn writes it (`turn_ended`) — a turn Finish
-stopped, or Reopen in a finished project's chat, whose relay records the
-interrupt's end after the transition commits.
+in flight; else the end of that Turn writes it (`turn_ended`) — a turn the
+transition stopped, whose relay records the interrupt's end after the
+transition commits.
 
 The tick ends the chat's controller session, under its Session's lock, before
 it closes the chat, its Session then `ended`; a controller that does not
-answer leaves the chat open for the next tick. Finish and Reopen call no
-controller: a chat they close keeps its controller session, idle or
+answer leaves the chat open for the next tick. Finish, Reopen and Archive call
+no controller: a chat they close keeps its controller session, idle or
 interrupted, and nothing sends to it again. The definition chat never closes
 by timeout (F130.2).
 """
@@ -59,7 +60,8 @@ its environment gone, or not running, which no headless session outlives."""
 
 
 class ChatCloseService:
-    """Closes the project chats: at Finish and Reopen, and on the timer."""
+    """Closes the project chats: at Finish, Reopen and Archive, and on the
+    timer."""
 
     def __init__(
         self,
@@ -87,8 +89,8 @@ class ChatCloseService:
     def close_open(
         self, db: Session, project: Project, cause: CloseCause, at: datetime
     ) -> None:
-        """The project's open chat closed with `cause` at `at`, Finish's or
-        Reopen's (F5.5), in the caller's transaction, which holds the
+        """The project's open chat closed with `cause` at `at`, Finish's,
+        Reopen's or Archive's (F5.5, F128.1), in the caller's transaction, which holds the
         project's row and has stopped the project's sessions, the chat's
         among them: its Session locked after that row, before any Item."""
         chat = db.scalars(

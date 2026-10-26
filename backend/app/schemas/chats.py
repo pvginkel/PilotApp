@@ -15,9 +15,12 @@ class ChatMessageRequestSchema(BaseModel):
     words: str = Field(
         description=(
             "The person's words, sent verbatim, a quote travelling inside them "
-            'as a tag: `<quoted_item id="<item id>">…</quoted_item id="…">` or '
+            'as a tag: `<quoted_item id="<item id>">…</quoted_item id="…">`, '
             '`<quoted_block id="<item id>/<local id>">…</quoted_block id="…">` '
-            "(F38.3)"
+            'or `<quoted_path path="<path>">…</quoted_path path="…">`, the path '
+            "the handbook's, `handbook.md`, the project document's, `project.md`, "
+            "or an attachment's, `attachments/<batch>/<filename>`, in the "
+            "project's folder; the title between the tags (F38.3)"
         )
     )
 
@@ -67,8 +70,8 @@ class ChatSchema(BaseModel):
     close_cause: CloseCause | None = Field(
         description=(
             "Why the chat closed: `timeout` after its last turn, `created` at "
-            "Create project, `finished` at Finish, `reopened` at Reopen; null "
-            "while it is open"
+            "Create project, `finished` at Finish, `reopened` at Reopen, "
+            "`archived` at Archive; null while it is open"
         )
     )
 

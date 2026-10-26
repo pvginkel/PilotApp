@@ -164,9 +164,11 @@ ARCHIVED_REFUSAL = "it is archived, and an archived project takes Bring back alo
 _CLOSES = {
     TransitionKind.FINISHED: CloseCause.FINISHED,
     TransitionKind.REOPENED: CloseCause.REOPENED,
+    TransitionKind.ARCHIVED: CloseCause.ARCHIVED,
 }
 """The transitions that close the project's open chat, with their causes: a
-chat's box is fixed at its create (DB decision 57)."""
+chat's box is fixed at its create (DB decision 57), and no chat is open while
+its project is archived (DB decision 60)."""
 
 _STOPS = (TransitionKind.FINISHED, TransitionKind.ARCHIVED, TransitionKind.REOPENED)
 """The transitions that stop the project's running, starting and held
@@ -322,16 +324,17 @@ class ProjectService:
         project is paused (DB 171), stops every session of the project that
         runs, starts or is held, and closes the open items unanswered (F5.1).
         Archive stops them too (F128.1), and nothing of either starts after
-        it. Finish and Reopen close the project's open chat, `finished` and
-        `reopened`, Reopen stopping a turn of the finished project's chat
-        first, so that the next message starts a chat under the project's new
-        state (F5.5; DB decision 57). A finished project's auto pilot is off
-        and it is not paused, so Reopen leaves both so (F6). Archive keeps the
-        pause, and Bring back returns it (F141.2). A pause and a resume move the
-        reason on the project's held work items' lines, and once a resume
-        commits the gate opens for its held starts (F141.5). Archive and Bring
-        back raise the `manifest` event once committed: the project's folder
-        leaves the store's tree or comes back to it (F128.4).
+        it. Finish, Reopen and Archive close the project's open chat,
+        `finished`, `reopened` and `archived`, after its sessions are stopped,
+        so that the next message starts a chat under the project's new state
+        (F5.5; DB decisions 57, 60): Bring back starts none. A finished
+        project's auto pilot is off and it is not paused, so Reopen leaves
+        both so (F6). Archive keeps the pause, and Bring back returns it
+        (F141.2). A pause and a resume move the reason on the project's held
+        work items' lines, and once a resume commits the gate opens for its
+        held starts (F141.5). Archive and Bring back raise the `manifest`
+        event once committed: the project's folder leaves the store's tree or
+        comes back to it (F128.4).
 
         Raises:
             RecordNotFoundException: no project has the id.

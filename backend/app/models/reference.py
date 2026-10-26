@@ -117,6 +117,7 @@ class CloseCause(StrEnum):
     CREATED = "created"
     FINISHED = "finished"
     REOPENED = "reopened"
+    ARCHIVED = "archived"
 
 
 class EffectKind(StrEnum):

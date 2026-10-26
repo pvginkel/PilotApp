@@ -768,10 +768,9 @@ class TestDataService:
 
     def end_turn(self, project_id: uuid.UUID) -> None:
         """The turn of the project's session ended, as the relay ends it for
-        the documents: the writing columns of those it was saving cleared, a
-        `turn` Version cut of each whose published text moved since its last
-        Version (design 1 §7). Nothing announces it live, as nothing does at
-        a relayed turn's end.
+        the documents: the writing columns of those it was saving cleared and
+        told to the browsers, a `turn` Version cut of each whose published
+        text moved since its last Version (design 1 §7).
 
         Raises:
             RecordNotFoundException: no project has the id.

@@ -160,9 +160,11 @@ class DocumentService:
 
     def publish(self, document: Document, text: str) -> None:
         """Publish `text` as the document's truth and rebuild every cache read
-        from it, in the transaction. Refused for a text with a fault: only a
-        parseable text is published (F78). The opening's is never parsed. A
-        registered document's first text gives it its file in the tree."""
+        from it, in the transaction, a text that changed told to the browsers,
+        an item's, the handbook's or the project document's. Refused for a
+        text with a fault: only a parseable text is published (F78). The
+        opening's is never parsed. A registered document's first text gives it
+        its file in the tree."""
         project, item = self.owner(document)
         parsed = self._read(project, item, document, text)
         tree_hash = (
@@ -181,7 +183,7 @@ class DocumentService:
             )
         if self._shown(project, item, document) != shown:
             self.view_service.timeline_moved(project)
-        if item is not None and text != published:
+        if text != published:
             self.engine_bus.emit(ProjectChanged(project.id))
 
     def publish_read(
@@ -264,9 +266,10 @@ class DocumentService:
 
     def turn_ended(self, session: AgentSession) -> list[str]:
         """Turn ended for `session` (design 1 §7): the writing columns of the
-        documents it was writing cleared, a `turn` Version cut of each whose
-        published hash moved since its last Version (DB 172), and the paths
-        of those whose latest save is held returned, from the tree's root."""
+        documents it was writing cleared, told to the browsers whatever the
+        Session's state (F35), a `turn` Version cut of each whose published
+        hash moved since its last Version (DB 172), and the paths of those
+        whose latest save is held returned, from the tree's root."""
         documents = self.db.scalars(
             select(Document)
             .where(Document.writing_session_id == session.id)
@@ -287,6 +290,7 @@ class DocumentService:
             if document.published_hash != last:
                 self.cut_version(document, VersionCause.TURN, session.id)
             project, _ = self.owner(document)
+            self.engine_bus.emit(ProjectChanged(project.id))
             if self.tree_service.held(project, document):
                 held.append(tree_path(project, document.path))
         self.db.flush()

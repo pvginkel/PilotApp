@@ -143,6 +143,30 @@ class TestSendChatMessage:
         assert (turn.author_user_id, turn.words) == (person.id, "What next?")
         assert turn.message.endswith("\nWhat next?")
 
+    def test_a_message_quoting_a_file_by_its_path_keeps_it_in_its_words_201(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        starts: None,
+        opened: Project,
+    ) -> None:
+        words = (
+            '<quoted_path path="handbook.md">The handbook</quoted_path path='
+            '"handbook.md"> Salt last?'
+        )
+        _sign_in(client)
+
+        response = client.post(_messages(opened.id), json={"words": words})
+
+        assert response.status_code == 201, response.get_json()
+        turn = session.scalars(select(Turn)).one()
+        assert (turn.words, turn.quote_item_id, turn.quote_block_id) == (
+            words,
+            None,
+            None,
+        )
+        assert turn.message.endswith(f"\n{words}")
+
     @pytest.mark.parametrize("payload", [{"words": "  \n"}, {"words": ""}, {}])
     def test_a_message_without_words_is_400(
         self,
@@ -314,6 +338,35 @@ class TestListChats:
             "read_at": None,
             "unread": True,
         }
+
+    def test_the_chat_archive_closed_reads_archived(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        person: User,
+    ) -> None:
+        chat = open_chat(session, opened)
+        container.project_service().transition_as(
+            person, opened.id, TransitionKind.ARCHIVED
+        )
+        closed_at = session.get_one(Chat, chat.id).closed_at
+        assert closed_at is not None
+        _sign_in(client)
+
+        response = client.get(_chats(opened.id))
+
+        assert response.status_code == 200
+        assert response.get_json()["chats"] == [
+            {
+                "id": str(chat.id),
+                "kind": "project",
+                "opened_at": _stamp(chat.created_at),
+                "closed_at": _stamp(closed_at),
+                "close_cause": "archived",
+            }
+        ]
 
     def test_after_the_caller_read_it_nothing_is_unread(
         self,

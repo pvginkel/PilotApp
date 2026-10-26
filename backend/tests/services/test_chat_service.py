@@ -1,8 +1,10 @@
 """A person's message to a project's brain: the project's chat started in the
 store, briefed, or a turn of the chat open; a finished project's chat reading
-only, the chat the project's state closed, and the handbook's notice (design 3
-§5.1, §5.3; F38.3, F130, F5.5, F128.5; D052; DB assertions 159, 229, 243, 244,
-245, 251; V02, V05, V06, V12, V13, V16, V25, V27, V28)."""
+only, the chat the project's state closed, the handbook's notice, and the line
+naming a later message's author (design 3
+§5.1, §5.3; F38.3, F130, F5.5, F128.1, F128.5; D052; DB decisions 60, 61, 62,
+assertions 159, 229, 243, 244, 245, 251; V02, V05, V06, V12, V13, V16, V25,
+V27, V28)."""
 
 import json
 import threading
@@ -27,6 +29,7 @@ from app.models import (
     Environment,
     Item,
     Project,
+    ProjectMember,
     ProjectTransition,
     Turn,
     User,
@@ -450,8 +453,8 @@ class TestSendStartsTheChat:
         person: User,
         cut: str,
     ) -> None:
-        """Archive stops the start before its brief went out, wherever it was;
-        after Bring back the next message reaches the brain, briefed."""
+        """A stop of the start before its brief went out, wherever it was,
+        leaves the chat open: the next message reaches the brain, briefed."""
         first = _send(chats, opened, person, "One")
         clear_after_commit_callbacks()
         run = _read(session, first.session_id)
@@ -463,9 +466,7 @@ class TestSendStartsTheChat:
         if cut == "created":
             run.controller_session, run.token_hash = "claude-0", "a" * 64
         session.flush()
-        projects = container.project_service()
-        projects.transition_as(person, opened.id, TransitionKind.ARCHIVED)
-        projects.transition_as(person, opened.id, TransitionKind.BROUGHT_BACK)
+        services[0].stop_project(session, opened, person, datetime.now(UTC))
         clear_after_commit_callbacks()
         assert _read(session, first.session_id).state_code == SessionState.STOPPED
 
@@ -766,6 +767,59 @@ class TestQuote:
 
         assert (turn.quote_item_id, turn.quote_block_id) == (None, None)
 
+    @pytest.mark.parametrize(
+        "path", ["handbook.md", "project.md", "attachments/2/menu.pdf"]
+    )
+    def test_a_tag_naming_a_file_of_the_projects_folder_quotes_no_item_or_block(
+        self,
+        chats: ChatService,
+        opened: Project,
+        person: User,
+        decision: Item,
+        path: str,
+    ) -> None:
+        """The file's tag stays in the words alone, and is the first quote
+        tag (DB decision 62)."""
+        words = (
+            f'<quoted_path path="{path}">Menu</quoted_path path="{path}"> or'
+            f" {_quoting('item', str(decision.id))}"
+        )
+
+        turn = _send(chats, opened, person, words)
+
+        assert (turn.quote_item_id, turn.quote_block_id, turn.words) == (
+            None,
+            None,
+            words,
+        )
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "notes.md",
+            "items/1-which-stock.md",
+            "../handbook.md",
+            "attachments/0/menu.pdf",
+            "attachments/2/menus/menu.pdf",
+        ],
+    )
+    def test_a_tag_naming_any_other_path_is_no_quote(
+        self,
+        chats: ChatService,
+        opened: Project,
+        person: User,
+        decision: Item,
+        path: str,
+    ) -> None:
+        words = (
+            f'<quoted_path path="{path}">Notes</quoted_path path="{path}"> or'
+            f" {_quoting('item', str(decision.id))}"
+        )
+
+        turn = _send(chats, opened, person, words)
+
+        assert (turn.quote_item_id, turn.quote_block_id) == (decision.id, None)
+
 
 class TestRefusals:
     @pytest.mark.parametrize(
@@ -1009,7 +1063,7 @@ class TestTheProjectsStateClosesItsChat:
             {"type": CLOSED, "cause": "reopened"},
         )
 
-    def test_archive_leaves_the_chat_open_and_takes_no_message(
+    def test_archive_closes_the_chat_and_after_bring_back_a_message_starts_one(
         self,
         session: DbSession,
         container: ServiceContainer,
@@ -1019,15 +1073,29 @@ class TestTheProjectsStateClosesItsChat:
         opened: Project,
         person: User,
     ) -> None:
+        """Archive closes the chat open then, `archived`; the archived project
+        takes no message; Bring back starts no chat, and the next message
+        starts one, briefed (F128.1, F128.5; DB decision 60)."""
         run = _idle_chat(services, chats, session, fake, opened, person)
         _transition(container, opened, person, TransitionKind.ARCHIVED)
 
+        assert _closed(session, run.id) is CloseCause.ARCHIVED
+        assert _last(session, run.id) == (
+            RecordKind.SERVER,
+            {"type": CLOSED, "cause": "archived"},
+        )
         with pytest.raises(InvalidOperationException, match="its project is archived"):
             _send(chats, opened, person, "Two")
-
-        assert _closed(session, run.id) is None
         _transition(container, opened, person, TransitionKind.BROUGHT_BACK)
-        assert _send(chats, opened, person, "Two").session_id == run.id
+        assert [chat.id for chat in _chat_rows(session, opened)] == [run.id]
+
+        turn = _send(chats, opened, person, "Two")
+
+        assert turn.session_id != run.id
+        assert turn.message == container.brief_service().project_chat(
+            opened, person, "Two", turn.started_at
+        )
+        assert fake.sent == []
 
 
 class TestHandbookNotice:
@@ -1135,6 +1203,144 @@ class TestHandbookNotice:
         assert metric_value(HANDBOOK_CHANGED_TOTAL, project=str(opened.id)) == counted
 
 
+@pytest.fixture
+def bea(session: DbSession, opened: Project) -> User:
+    """A second person, a member of `opened`."""
+    user = User(
+        kind_code=UserKind.PERSON,
+        subject="subject-bea",
+        handle="bea",
+        name="Bea Example",
+        avatar_slot=2,
+    )
+    session.add(user)
+    session.flush()
+    session.add(
+        ProjectMember(
+            project_id=opened.id, user_id=user.id, joined_at=datetime.now(UTC)
+        )
+    )
+    session.flush()
+    return user
+
+
+def _turn_ended(
+    services: tuple[SessionStartService, RelayService],
+    fake: _Sent,
+    run: models.Session,
+) -> None:
+    """The chat's turn in flight ended, as its relay ends it."""
+    assert run.controller_session is not None
+    fake.finish(STORE_ENVIRONMENT_ID, run.controller_session, "success", "Done.")
+    services[1].relay(run.id, LoopHandle(f"relay:{run.id}"))
+    clear_after_commit_callbacks()
+
+
+class TestNamedMessage:
+    """A person's message after another person's names its author, as the
+    brief names the first (design 3 §5.3; DB decision 61, assertion 251)."""
+
+    def test_a_message_after_another_persons_names_its_author_before_its_words(
+        self,
+        session: DbSession,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+        bea: User,
+    ) -> None:
+        run = _idle_chat(services, chats, session, fake, opened, person)
+
+        turn = _send(chats, opened, bea, "Two")
+
+        assert (turn.message, turn.words, turn.author_user_id) == (
+            "The message, from bea (member):\nTwo",
+            "Two",
+            bea.id,
+        )
+        assert fake.sent == [turn.message]
+        assert _sends(session, run.id) == [(1, "One"), (2, "Two")]
+
+    def test_each_change_of_author_is_named_and_a_repeat_is_not(
+        self,
+        session: DbSession,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+        bea: User,
+    ) -> None:
+        run = _idle_chat(services, chats, session, fake, opened, person)
+        _send(chats, opened, bea, "Two")
+        clear_after_commit_callbacks()
+        _turn_ended(services, fake, run)
+
+        named = _send(chats, opened, person, "Three")
+        clear_after_commit_callbacks()
+        _turn_ended(services, fake, run)
+        repeated = _send(chats, opened, person, "Four")
+
+        assert (named.message, repeated.message) == (
+            "The message, from ada (not a member):\nThree",
+            "Four",
+        )
+
+    def test_a_server_turn_between_names_no_one(
+        self,
+        session: DbSession,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+        bea: User,
+    ) -> None:
+        """The previous Turn with an author is the one compared: the server's
+        own, a follow-up or a "continue", has none."""
+        run = _idle_chat(services, chats, session, fake, opened, person)
+        _send(chats, opened, bea, "Two")
+        clear_after_commit_callbacks()
+        _turn_ended(services, fake, run)
+        now = datetime.now(UTC)
+        session.add(
+            Turn(
+                session_id=run.id,
+                seq=3,
+                message="continue",
+                started_at=now,
+                ended_at=now,
+            )
+        )
+        session.flush()
+
+        turn = _send(chats, opened, bea, "Three")
+
+        assert (turn.seq, turn.message) == (4, "Three")
+
+    def test_the_handbooks_notice_goes_before_the_naming_line(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+        bea: User,
+    ) -> None:
+        _idle_chat(services, chats, session, fake, opened, person)
+        container.document_service().bear_handbook(opened, "# Handbook\n")
+
+        turn = _send(chats, opened, bea, "Two")
+
+        assert (turn.message, turn.words) == (
+            f"{STORE_NOTIFICATION}\n\nThe message, from bea (member):\nTwo",
+            "Two",
+        )
+
+
 def _committed(
     container: ServiceContainer, state: ProjectState = ProjectState.OPEN
 ) -> tuple[uuid.UUID, uuid.UUID]:
@@ -1239,7 +1445,13 @@ def _committed_idle_chat(
         )
         db.add(
             Turn(
-                session_id=run.id, seq=1, message="/chat", started_at=now, ended_at=now
+                session_id=run.id,
+                seq=1,
+                author_user_id=person_id,
+                message="/chat",
+                words="One",
+                started_at=now,
+                ended_at=now,
             )
         )
         return person_id, project_id, run.id
@@ -1334,7 +1546,7 @@ class TestATransitionMeetingAMessage:
         [
             (TransitionKind.FINISHED, ProjectState.OPEN, CloseCause.FINISHED),
             (TransitionKind.REOPENED, ProjectState.FINISHED, CloseCause.REOPENED),
-            (TransitionKind.ARCHIVED, ProjectState.OPEN, None),
+            (TransitionKind.ARCHIVED, ProjectState.OPEN, CloseCause.ARCHIVED),
         ],
     )
     def test_it_stops_the_turn_a_send_in_flight_started(
@@ -1343,7 +1555,7 @@ class TestATransitionMeetingAMessage:
         supervise: Supervise,
         kind: TransitionKind,
         state: ProjectState,
-        cause: CloseCause | None,
+        cause: CloseCause,
     ) -> None:
         """The transition's stop waits on the chat's Session, which the send
         holds across the controller's call, and stops the turn it started."""
@@ -1393,8 +1605,8 @@ class TestATransitionMeetingAMessage:
         self, committed_app: Flask, supervise: Supervise
     ) -> None:
         """The send waits on the chat's Session, which Archive's stop holds;
-        once Archive commits it finds the project archived and sends
-        nothing."""
+        once Archive commits it finds the chat closed and the project archived
+        and sends nothing."""
         container = committed_app.container
         fake = _Sent(keepalive_seconds=0.2)
         try:
@@ -1433,6 +1645,9 @@ class TestATransitionMeetingAMessage:
             assert fake.sent == []
             with scoped_session(container) as db:
                 assert _read(db, chat_id).state_code == SessionState.IDLE
-                assert db.get_one(Chat, chat_id).closed_at is None
+                assert db.get_one(Chat, chat_id).close_cause_code is (
+                    CloseCause.ARCHIVED
+                )
+                assert db.scalars(select(Chat.id)).all() == [chat_id]
         finally:
             fake.close()

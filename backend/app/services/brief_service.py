@@ -71,10 +71,7 @@ class BriefService:
         chat, then `person`'s `words` verbatim, which it ends with (DB
         assertion 251). A finished project's has the finish line in place of
         the switch and no notes (F5.5)."""
-        message = [
-            f"The message, from {person.handle} ({self._standing(project, person)}):",
-            words,
-        ]
+        message = [self.message_from(project, person), words]
         if project.state_code is ProjectState.FINISHED:
             return _frame(
                 CHAT_SKILL,
@@ -95,6 +92,13 @@ class BriefService:
             [self._earlier_chats(project)],
             message,
         )
+
+    def message_from(self, project: Project, person: User) -> str:
+        """The line before `person`'s words naming them and whether they are
+        a member of the project: the brief's, and a later Turn's whose
+        chat's previous Turn with an author has another author (§5.3; DB
+        decision 61, assertion 251)."""
+        return f"The message, from {person.handle} ({self._standing(project, person)}):"
 
     def follow_up(self, held: Sequence[str]) -> str:
         """The server's turn after a brain session's turn that ended with its

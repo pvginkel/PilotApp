@@ -2124,6 +2124,41 @@ class TestStoppedUnderTheTurn:
         assert _item_done(session, work_item) == (None, None, None)
         assert ProjectChanged(project.id) not in engine_events
 
+    def test_its_turns_end_lets_its_documents_go_told_to_the_browsers(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        project: Project,
+        work_item: models.Session,
+        person: User,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        """Pilot's dots go from the open screens at the turn's end, though
+        the stopped Session moves no state (F35)."""
+        draft = container.document_service().bear_draft(project, "# Badges\n")
+        container.ingest_service().ingest(
+            f"draft-{project.number}/project.md",
+            b"# Badge colours\n",
+            None,
+            _row(session),
+            work_item,
+        )
+        _send(relays, session, work_item)
+        _stopped(work_item, person)
+        _turn_of(
+            fake_controller, controller_session, raw_turn("turn_tool"), "interrupted"
+        )
+        engine_events.clear()
+
+        _relay(relays, work_item)
+
+        assert draft.writing_session_id is None
+        assert work_item.state_code == SessionState.STOPPED
+        assert ProjectChanged(project.id) in engine_events
+
     def test_an_interrupted_turn_with_no_stop_is_stopped_by_no_one(
         self,
         session: DbSession,
