@@ -15,8 +15,10 @@ While its start is under way or held, a message is refused, as one is while a
 turn runs, which the controller refuses.
 
 A message to the open chat holds its Session's lock from before its send to
-the commit, so no close interleaves with it (`ChatCloseService`): one that
-finds the chat closed meanwhile starts the project's next chat. Its words are
+the commit, so no close or stop interleaves with it (`ChatCloseService`,
+`SessionStartService.stop_project`): one that finds the chat closed meanwhile
+starts the project's next chat, and one that finds its project archived is
+refused. Its words are
 sent as they are, unless the project's handbook changed since the chat's
 previous Turn: then the server's `<store_notification>` saying so goes before
 them, counted (D052).
@@ -129,7 +131,7 @@ class ChatService:
         quoted = self._quote(project, person, words)
         session = self._open_chat(project.id)
         if session is not None and not _unbriefed(session):
-            locked = self._still_open(session.id)
+            locked = self._still_open(project, session.id)
             if locked is not None:
                 return self._send(project, locked, quoted)
         return self._start(project_id, person, quoted, operation)
@@ -145,17 +147,23 @@ class ChatService:
             HANDBOOK_CHANGED_TOTAL.labels(project=str(project.id)).inc()
         return turn
 
-    def _still_open(self, session_id: uuid.UUID) -> AgentSession | None:
+    def _still_open(
+        self, project: Project, session_id: uuid.UUID
+    ) -> AgentSession | None:
         """The open chat's Session, locked until the transaction ends while
-        its chat is still open and its start went out, so that no close
-        interleaves with its send. None when it closed, or its start fell
-        through, meanwhile: the lock let go with the savepoint that took it,
-        since a start locks the project's row first (the start's lock
-        order)."""
+        its chat is still open, its start went out and its project is not
+        archived, so that no close or stop interleaves with its send. None
+        when it closed, its start fell through or its project was archived
+        meanwhile: the lock let go with the savepoint that took it, since a
+        start locks the project's row first (the start's lock order). A
+        transition that stops the project's sessions holds that lock to its
+        commit (`SessionStartService.stop_project`), so `project` is read
+        under it."""
         savepoint = self.db.begin_nested()
         session = self.records.lock_session(session_id)
         chat = self.db.get_one(Chat, session_id, populate_existing=True)
-        if chat.closed_at is None and not _unbriefed(session):
+        self.db.get_one(Project, project.id, populate_existing=True)
+        if chat.closed_at is None and not project.archived and not _unbriefed(session):
             savepoint.commit()
             return session
         savepoint.rollback()

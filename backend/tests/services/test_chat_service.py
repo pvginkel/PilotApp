@@ -1105,8 +1105,10 @@ class TestHandbookNotice:
         assert metric_value(HANDBOOK_CHANGED_TOTAL, project=str(opened.id)) == counted
 
 
-def _committed(container: ServiceContainer) -> tuple[uuid.UUID, uuid.UUID]:
-    """A person and an open project, committed; their ids."""
+def _committed(
+    container: ServiceContainer, state: ProjectState = ProjectState.OPEN
+) -> tuple[uuid.UUID, uuid.UUID]:
+    """A person and a project in `state`, committed; their ids."""
     with scoped_session(container) as db:
         person = User(
             kind_code=UserKind.PERSON,
@@ -1119,7 +1121,7 @@ def _committed(container: ServiceContainer) -> tuple[uuid.UUID, uuid.UUID]:
         db.flush()
         project = Project(
             created_by_user_id=person.id,
-            state_code=ProjectState.OPEN,
+            state_code=state,
             slug="soup-club",
             name="Soup club",
         )
@@ -1166,11 +1168,13 @@ class TestTwoMessages:
 
 
 def _committed_idle_chat(
-    container: ServiceContainer, fake: _Sent
+    container: ServiceContainer,
+    fake: _Sent,
+    state: ProjectState = ProjectState.OPEN,
 ) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
-    """A person, an open project and its idle chat on a headless session in
-    the store, committed; their ids."""
-    person_id, project_id = _committed(container)
+    """A person, a project in `state` and its idle chat on a headless session
+    in the store, committed; their ids."""
+    person_id, project_id = _committed(container, state)
     name = (
         client_of(container, fake)
         .create_headless_session(STORE_ENVIRONMENT_ID, HeadlessCreateRequest())
@@ -1277,5 +1281,128 @@ class TestAMessageMeetingFinish:
                 assert turn.message.startswith(
                     "/chat\n\nPilot's brief · a finished project's chat ·"
                 )
+        finally:
+            fake.close()
+
+
+class _SendHeld(_Sent):
+    """The fake, holding each send until `release` is set."""
+
+    def __init__(self, keepalive_seconds: float) -> None:
+        super().__init__(keepalive_seconds)
+        self.sending, self.release = threading.Event(), threading.Event()
+
+    def _send(self, request: Request, env_id: str, name: str) -> Response:
+        self.sending.set()
+        assert self.release.wait(WAIT_SECONDS)
+        return super()._send(request, env_id, name)
+
+
+class TestATransitionMeetingAMessage:
+    @pytest.mark.parametrize(
+        ("kind", "state", "cause"),
+        [
+            (TransitionKind.FINISHED, ProjectState.OPEN, CloseCause.FINISHED),
+            (TransitionKind.REOPENED, ProjectState.FINISHED, CloseCause.REOPENED),
+            (TransitionKind.ARCHIVED, ProjectState.OPEN, None),
+        ],
+    )
+    def test_it_stops_the_turn_a_send_in_flight_started(
+        self,
+        committed_app: Flask,
+        supervise: Supervise,
+        kind: TransitionKind,
+        state: ProjectState,
+        cause: CloseCause | None,
+    ) -> None:
+        """The transition's stop waits on the chat's Session, which the send
+        holds across the controller's call, and stops the turn it started."""
+        container = committed_app.container
+        fake = _SendHeld(keepalive_seconds=0.2)
+        try:
+            fake.add_environment(
+                STORE_ENVIRONMENT_ID, name="PilotProjects", status="running"
+            )
+            person_id, project_id, chat_id = _committed_idle_chat(
+                container, fake, state
+            )
+            services = _starts(container, supervise)
+
+            def send() -> uuid.UUID:
+                with scoped_session(container) as db:
+                    return (
+                        _chats(container, *services)
+                        .send(project_id, db.get_one(User, person_id), "Two")
+                        .session_id
+                    )
+
+            def transition() -> None:
+                with scoped_session(container) as db:
+                    container.project_service().transition_as(
+                        db.get_one(User, person_id), project_id, kind
+                    )
+
+            sending = in_thread(send)
+            assert fake.sending.wait(WAIT_SECONDS)
+            transitioning = in_thread(transition)
+            wait_until(lambda: lock_waits(container) == 1, "the transition waiting")
+            fake.release.set()
+
+            assert sending.result() == chat_id
+            transitioning.result()
+            assert fake.sent == ["Two"]
+            with scoped_session(container) as db:
+                run = _read(db, chat_id)
+                assert run.state_code == SessionState.STOPPED
+                assert run.stopped_by_user_id == person_id
+                assert db.get_one(Chat, chat_id).close_cause_code is cause
+        finally:
+            fake.close()
+
+    def test_a_message_meeting_archive_is_refused(
+        self, committed_app: Flask, supervise: Supervise
+    ) -> None:
+        """The send waits on the chat's Session, which Archive's stop holds;
+        once Archive commits it finds the project archived and sends
+        nothing."""
+        container = committed_app.container
+        fake = _Sent(keepalive_seconds=0.2)
+        try:
+            fake.add_environment(
+                STORE_ENVIRONMENT_ID, name="PilotProjects", status="running"
+            )
+            person_id, project_id, chat_id = _committed_idle_chat(container, fake)
+            services = _starts(container, supervise)
+            archived, archive_ends = threading.Event(), threading.Event()
+
+            def archive() -> None:
+                with scoped_session(container) as db:
+                    container.project_service().transition_as(
+                        db.get_one(User, person_id), project_id, TransitionKind.ARCHIVED
+                    )
+                    archived.set()
+                    assert archive_ends.wait(WAIT_SECONDS)
+
+            def send() -> None:
+                with scoped_session(container) as db:
+                    _chats(container, *services).send(
+                        project_id, db.get_one(User, person_id), "Two"
+                    )
+
+            archiving = in_thread(archive)
+            assert archived.wait(WAIT_SECONDS)
+            sending = in_thread(send)
+            wait_until(lambda: lock_waits(container) == 1, "the send waiting")
+            archive_ends.set()
+            archiving.result()
+
+            with pytest.raises(
+                InvalidOperationException, match="its project is archived"
+            ):
+                sending.result()
+            assert fake.sent == []
+            with scoped_session(container) as db:
+                assert _read(db, chat_id).state_code == SessionState.IDLE
+                assert db.get_one(Chat, chat_id).closed_at is None
         finally:
             fake.close()

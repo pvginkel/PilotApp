@@ -96,7 +96,16 @@ from sqlalchemy.orm import Session
 from app.core_exceptions import ExternalServiceException
 from app.database import scoped_session
 from app.exceptions import InvalidOperationException, RecordNotFoundException
-from app.models import Document, Environment, Item, Project, Turn, User, Work
+from app.models import (
+    Chat,
+    Document,
+    Environment,
+    Item,
+    Project,
+    Turn,
+    User,
+    Work,
+)
 from app.models import Session as AgentSession
 from app.models.reference import ProjectState, RecordKind, SessionState
 from app.services.controller_client import (
@@ -687,7 +696,17 @@ class SessionStartService:
         Finish's and Archive's (F5.1, F128.1), and Reopen's of a finished
         project's chat (F5.5). It calls no controller in the
         transaction. The caller holds the project's row; the Sessions are
-        locked before any Item, which a turn's end locks after its Session."""
+        locked before any Item, which a turn's end locks after its Session.
+        The open chat's Session is locked first, whatever its state: a
+        message's send moves it to `running` under that lock alone, not the
+        project's row (`ChatService.send`)."""
+        chat_id = db.scalar(
+            select(Chat.id).where(
+                Chat.project_id == project.id, Chat.closed_at.is_(None)
+            )
+        )
+        if chat_id is not None:
+            self._records(db).lock_session(chat_id)
         for session in db.scalars(
             select(AgentSession)
             .where(
