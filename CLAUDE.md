@@ -145,7 +145,9 @@ built or planned differently — a wrong citation, a stale cross-reference, a ty
 describes a part already built otherwise than it was built — is made in the design record directly,
 committed with a message that says what it corrects, with no proposal and no row. A plain error
 anyone corrects; a passage the build departed from without a ruling is corrected on the operator's
-word, which a close-out report asks for. In doubt, it is a proposal.
+word, which a close-out report asks for. A standing page states its rule and never a live
+snapshot — a count of what is open, "none since <date>" — and a clause of that kind, met anywhere
+in the record, is dropped as a correction, never refreshed. In doubt, it is a proposal.
 
 **Every other decision is a row in the spec repo's `decisions.md`**, whose head has the rules: a
 ruling made inside a slice's triage, planning or run (the slice's doc phase lands it), one on an
@@ -157,6 +159,8 @@ item of `understanding.md` §5, one taken in a session of its own. A decision ta
 Code changes go through the `dev` plugin's slice workflow (`/dev:triage` → `/dev:plan-slice` →
 `/dev:run-slice`), which the operator drives. The project's half of that contract is `.aiworkflowrc`
 and `.kubecoder/project.yaml`; nothing the pipeline reads by machine belongs in this file.
+A finding against the workflow itself — a loop's read-back, a document the plugin writes, a
+skill's wording — is `pvginkel/AIWorkflow`'s to fix, never a Pilot slice.
 
 Issue tracking follows the host convention: this project is **`PilotApp`** on the tracker, key
 **`P`**.
