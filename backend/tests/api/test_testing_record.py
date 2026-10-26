@@ -51,6 +51,7 @@ from app.services.start_gate import WorkSlots
 from app.services.supervisor import LoopHandle
 from app.services.turn_end_read_service import TurnEndReadService
 from app.utils.after_commit import clear_after_commit_callbacks
+from tests.support.chats import ChatWriter, open_chat
 from tests.support.fake_controller import ServedFakeController
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
 from tests.support.supervisor import Supervise
@@ -106,6 +107,10 @@ def _worker_attachments_path(item_id: uuid.UUID | str) -> str:
 
 def _writer_questions_path(item_id: uuid.UUID | str) -> str:
     return f"/api/testing/items/{item_id}/writer-questions"
+
+
+def _chat_answers_path(project_id: uuid.UUID | str) -> str:
+    return f"/api/testing/projects/{project_id}/chat/answers"
 
 
 WORK_REPO = "example/Camp"
@@ -1890,6 +1895,156 @@ class TestCreateWriterQuestions:
         self, client: FlaskClient, document: Item, body: dict[str, Any]
     ) -> None:
         response = client.post(_writer_questions_path(document.id), json=body)
+
+        assert response.status_code == 400
+
+
+CHAT_DECISION = """```decision id=D1
+options:
+  - Dome
+  - Tunnel
+```
+"""
+
+
+@pytest.mark.usefixtures("person")
+class TestCreateChatAnswer:
+    @pytest.fixture
+    def placed(
+        self, client: FlaskClient, session: Session, environment: Environment
+    ) -> tuple[str, str]:
+        """A project with a decision on its timeline, and the item's id."""
+        project_id = _make(client, environment_id=environment.id)
+        return project_id, _place(client, project_id, "decision", CHAT_DECISION)
+
+    def _chat(
+        self,
+        session: Session,
+        container: ServiceContainer,
+        project_id: str,
+        person: User,
+        *,
+        running: bool = True,
+    ) -> models.Session:
+        """The project's chat open, a message of `person`'s in flight while
+        `running`, committed so that a refused call's rollback keeps it."""
+        chat = open_chat(session, session.get_one(Project, uuid.UUID(project_id)))
+        ChatWriter(session, container.session_record_service(), chat).message(
+            person, "The dome."
+        )
+        if running:
+            chat.state_code = SessionState.RUNNING
+        session.commit()
+        return chat
+
+    def test_the_answer_is_recorded_through_the_chat_its_effect_the_place_in_the_chat_goes_to(
+        self,
+        client: FlaskClient,
+        session: Session,
+        container: ServiceContainer,
+        person: User,
+        placed: tuple[str, str],
+    ) -> None:
+        project_id, item_id = placed
+        chat = self._chat(session, container, project_id, person)
+
+        response = client.post(
+            _chat_answers_path(project_id),
+            json={
+                "block": f"{item_id}/D1",
+                "value": "Dome",
+                "for": "ada",
+                "note": "The dome, it stands up in five minutes.",
+                "tool_use_id": "toolu_01",
+            },
+        )
+
+        assert response.status_code == 201
+        assert response.get_json() == {"effect": "Answered · D1 · Which tent?"}
+        [record] = [
+            stored.record
+            for stored in read_records(session, chat.id, limit=10)
+            if stored.record.kind_code == "server"
+        ]
+        assert record.payload["toolUseId"] == "toolu_01"
+        [block] = [
+            part["block"]
+            for part in _timeline_item(client, project_id, item_id)["body"]
+            if part["type"] == "block"
+        ]
+        assert (block["answer"], block["via"], block["note"]) == (
+            "Dome",
+            "chat",
+            "The dome, it stands up in five minutes.",
+        )
+        assert block["in_chat"] == {"chat": str(chat.id), "seq": record.seq}
+
+    def test_an_unknown_project_block_or_person_is_not_found(
+        self,
+        client: FlaskClient,
+        session: Session,
+        container: ServiceContainer,
+        person: User,
+        placed: tuple[str, str],
+    ) -> None:
+        project_id, item_id = placed
+        self._chat(session, container, project_id, person)
+        body = {"block": f"{item_id}/D1", "value": "Dome", "for": "ada"}
+
+        unknown = client.post(_chat_answers_path(uuid.uuid4()), json=body)
+        no_block = client.post(
+            _chat_answers_path(project_id), json={**body, "block": f"{item_id}/D9"}
+        )
+        nobody = client.post(
+            _chat_answers_path(project_id), json={**body, "for": "zed"}
+        )
+
+        assert (unknown.status_code, no_block.status_code, nobody.status_code) == (
+            404,
+            404,
+            404,
+        )
+
+    def test_a_project_with_no_chat_open_or_none_in_flight_conflicts(
+        self,
+        client: FlaskClient,
+        session: Session,
+        container: ServiceContainer,
+        person: User,
+        placed: tuple[str, str],
+    ) -> None:
+        project_id, item_id = placed
+        body = {"block": f"{item_id}/D1", "value": "Dome", "for": "ada"}
+
+        closed = client.post(_chat_answers_path(project_id), json=body)
+        self._chat(session, container, project_id, person, running=False)
+        idle = client.post(_chat_answers_path(project_id), json=body)
+
+        assert (closed.status_code, idle.status_code) == (409, 409)
+        assert closed.get_json()["error"].endswith(
+            "because the project has no chat open"
+        )
+        assert idle.get_json()["error"].endswith(
+            "because its chat has no turn in flight"
+        )
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"block": "D1", "value": "Dome", "for": "ada"},
+            {"block": "{item}/D1", "value": "", "for": "ada"},
+            {"block": "{item}/D1", "value": "Dome"},
+            {"block": "{item}/D1", "value": "Dome", "for": "ada", "by": "ada"},
+        ],
+        ids=["not-a-blocks-id", "no-answer", "no-person", "an-unknown-field"],
+    )
+    def test_a_body_that_is_not_an_answer_is_invalid(
+        self, client: FlaskClient, placed: tuple[str, str], body: dict[str, Any]
+    ) -> None:
+        project_id, item_id = placed
+        body = {**body, "block": body["block"].replace("{item}", item_id)}
+
+        response = client.post(_chat_answers_path(project_id), json=body)
 
         assert response.status_code == 400
 

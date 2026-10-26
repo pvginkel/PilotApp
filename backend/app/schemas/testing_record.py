@@ -1,7 +1,8 @@
 """Schemas for the testing endpoints that make the record's states the UI
 cannot make: people, environments, projects, their items, their work items,
 an agent's saves of them, the files hung on them, a worker's registrations and
-attachments, and the pre-ruling pass's questions to a writer."""
+attachments, the pre-ruling pass's questions to a writer, and an answer the
+brain records in the chat."""
 
 import base64
 import binascii
@@ -17,6 +18,7 @@ from pydantic import (
 )
 
 from app.models.reference import ProjectState, TaskStatus
+from app.schemas.pilot_store import AnswerRequestSchema
 
 OPENING_WORDS = "An invented project, started for a test."
 """The opening of a project made without words of its own."""
@@ -179,6 +181,13 @@ class InventedRegistrationCreateSchema(BaseModel):
         description="The file's absolute path in the session's environment",
         examples=["/work/Example/docs/refinement.md"],
     )
+    tool_use_id: str | None = _tool_use_id()
+
+
+class InventedChatAnswerCreateSchema(AnswerRequestSchema):
+    """A person's answer to a block, given in the chat, which the project's
+    brain records for them as its `answer` call does."""
+
     tool_use_id: str | None = _tool_use_id()
 
 

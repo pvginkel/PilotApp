@@ -39,6 +39,7 @@ from app.exceptions import (
 from app.models import (
     Attachment,
     Block,
+    Chat,
     Document,
     Environment,
     Item,
@@ -65,6 +66,7 @@ from app.schemas.testing_record import (
     InventedWriterQuestionSchema,
 )
 from app.services.auth_service import AuthContext
+from app.services.effect_service import EffectLine
 from app.services.people_service import PeopleService
 from app.services.pilot_store_service import JOB, Brain, PilotStoreService
 from app.services.pilot_work_service import PilotWorkService, Worker
@@ -875,6 +877,52 @@ class TestDataService:
         session.turn_ended_at = now
         self.db.flush()
         return asked
+
+    def answer_in_chat(
+        self,
+        project_id: uuid.UUID,
+        block_id: str,
+        value: str,
+        person: str,
+        *,
+        note: str | None,
+        to: str | None,
+        tool_use_id: str | None,
+    ) -> EffectLine:
+        """The answer `value` of the person whose handle is `person` to the
+        block `block_id`, `<item id>/<local id>`, recorded through the
+        project's open chat as its brain's `answer` records it (F42.1,
+        F86.2), with `note` and, for `deferred`, `to`: the call
+        `tool_use_id`'s effect in the chat's Turn in flight, the place *In the
+        chat* goes to (F42.3).
+
+        Raises:
+            RecordNotFoundException: no project has the id, the block is not
+                of it, or no person has the handle.
+            InvalidOperationException: the project has no chat open, its chat
+                has no turn in flight, or the record refuses the answer.
+        """
+        if self.db.get(Project, project_id) is None:
+            raise RecordNotFoundException("Project", str(project_id))
+        operation = f"answer block {block_id} in the chat of project {project_id}"
+        chat = self.db.scalars(
+            select(AgentSession)
+            .join(Chat, Chat.id == AgentSession.id)
+            .where(Chat.project_id == project_id, Chat.closed_at.is_(None))
+        ).one_or_none()
+        if chat is None:
+            raise InvalidOperationException(operation, "the project has no chat open")
+        if chat.state_code != SessionState.RUNNING:
+            raise InvalidOperationException(operation, "its chat has no turn in flight")
+        return self.pilot_store_service.answer(
+            Brain(chat.id, project_id, chat.kind_code),
+            block_id,
+            value,
+            person,
+            note=note,
+            to=to,
+            tool_use_id=tool_use_id,
+        )
 
     def attach(
         self, item_id: uuid.UUID, files: Sequence[InventedFileSchema]

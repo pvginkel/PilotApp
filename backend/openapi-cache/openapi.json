@@ -1217,6 +1217,93 @@
         "title": "InventedAttachmentsSchema",
         "type": "object"
       },
+      "InventedChatAnswerCreateSchema.6d6b324": {
+        "additionalProperties": false,
+        "description": "A person's answer to a block, given in the chat, which the project's\nbrain records for them as its `answer` call does.",
+        "properties": {
+          "block": {
+            "description": "The block's id, `<item id>/<local id>` (TD §4.9)",
+            "examples": [
+              "0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15/D1"
+            ],
+            "title": "Block",
+            "type": "string"
+          },
+          "for": {
+            "description": "The handle of the person whose answer it is",
+            "examples": [
+              "ada"
+            ],
+            "minLength": 1,
+            "title": "For",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Their words, as they gave them",
+            "examples": [
+              "The dome, it stands up in five minutes."
+            ],
+            "title": "Note"
+          },
+          "to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "With `deferred`: the plan's task the block returns at, or `plan`",
+            "examples": [
+              "pitch"
+            ],
+            "title": "To"
+          },
+          "tool_use_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The id Claude Code gives the call, which its effect's record names; none for a call whose client sent none",
+            "examples": [
+              "toolu_01"
+            ],
+            "title": "Tool Use Id"
+          },
+          "value": {
+            "description": "The answer: an option's label, `Agree`, `Yes`, `No`, free words, or `deferred` with `to`",
+            "examples": [
+              "Dome"
+            ],
+            "minLength": 1,
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "block",
+          "value",
+          "for"
+        ],
+        "title": "InventedChatAnswerCreateSchema",
+        "type": "object"
+      },
       "InventedEnvironmentSchema.6d6b324": {
         "description": "An environment of the record, by its KubeCoder id and its name.",
         "properties": {
@@ -11637,6 +11724,84 @@
           }
         ],
         "summary": "Make a project in the standing given, made now by its first member.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/projects/{project_id}/chat/answers": {
+      "post": {
+        "description": "Returns:     201: The call's effect line     400: The body is not a block's id, an answer, a handle, and an         optional note, task and call id, or the stage is prd     404: No project has the id, the block is not of it, or no person has         the handle     409: The project has no chat open, its chat has no turn in flight, or         the record refuses the answer: the reason",
+        "operationId": "post__api_testing_projects_{project_id}_chat_answers",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventedChatAnswerCreateSchema.6d6b324"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordedSchema.4ff8b5e"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Record a person's answer to a block through the project's open chat, as its brain's `answer` records it (F42.1, F86.2): the effect of the call `tool_use_id` names in the chat's turn in flight, the place *In the chat* goes to (F42.3).",
         "tags": [],
         "x-required-role": "editor"
       }

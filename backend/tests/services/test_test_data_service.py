@@ -30,6 +30,7 @@ from app.models import (
     Block,
     Document,
     DocumentVersion,
+    Effect,
     Environment,
     Item,
     ItemAttachment,
@@ -64,6 +65,7 @@ from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerClient
 from app.services.session_record_service import read_records
 from app.startup import load_test_data_hook
+from tests.support.chats import ChatWriter, open_chat
 from tests.support.fake_controller import ServedFakeController
 
 
@@ -1796,3 +1798,94 @@ class TestAskWriter:
             )
 
         assert raised.value.cause == "block Q1 is answered"
+
+
+class TestAnswerInChat:
+    def _chat(
+        self, container: ServiceContainer, camp: Project, person: User
+    ) -> tuple[models.Session, ChatWriter]:
+        """The project's chat open, a message of `person`'s in flight."""
+        session = container.db_session()
+        chat = open_chat(session, camp)
+        writer = ChatWriter(session, container.session_record_service(), chat)
+        writer.message(person, "The dome.")
+        chat.state_code = SessionState.RUNNING
+        session.flush()
+        return chat, writer
+
+    def test_the_answer_is_recorded_through_the_chat_its_effect_in_the_turn_in_flight(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        camp: Project,
+        person: User,
+    ) -> None:
+        item = container.test_data_service().item(
+            camp.id, "decision", "Which tent?", DECISION_TEXT
+        )
+        chat, writer = self._chat(container, camp, person)
+
+        line = container.test_data_service().answer_in_chat(
+            camp.id,
+            f"{item.id}/D1",
+            "Dome",
+            "ada",
+            note="It stands up in five minutes.",
+            to=None,
+            tool_use_id="toolu_01",
+        )
+
+        assert (line.verb, line.label, line.block_id) == (
+            "Answered",
+            "D1 · Which tent?",
+            f"{item.id}/D1",
+        )
+        block = _block(session, item, "D1")
+        assert block.via_code == AnswerChannel.CHAT
+        [effect] = session.scalars(select(Effect).where(Effect.block_id == block.id))
+        assert writer.turn is not None
+        assert effect.turn_id == writer.turn.id
+        [record] = [
+            stored.record
+            for stored in read_records(session, chat.id, limit=10)
+            if stored.record.kind_code == "server"
+        ]
+        assert (effect.record_id, record.payload["toolUseId"]) == (
+            record.id,
+            "toolu_01",
+        )
+
+    def test_an_unknown_project_is_not_found(self, container: ServiceContainer) -> None:
+        with pytest.raises(RecordNotFoundException):
+            container.test_data_service().answer_in_chat(
+                uuid.uuid4(),
+                "x/D1",
+                "Dome",
+                "ada",
+                note=None,
+                to=None,
+                tool_use_id=None,
+            )
+
+    def test_a_project_with_no_chat_open_is_refused(
+        self, container: ServiceContainer, camp: Project
+    ) -> None:
+        with pytest.raises(InvalidOperationException) as raised:
+            container.test_data_service().answer_in_chat(
+                camp.id, "x/D1", "Dome", "ada", note=None, to=None, tool_use_id=None
+            )
+
+        assert raised.value.cause == "the project has no chat open"
+
+    def test_a_chat_with_no_turn_in_flight_is_refused(
+        self, container: ServiceContainer, camp: Project, person: User
+    ) -> None:
+        chat, _ = self._chat(container, camp, person)
+        chat.state_code = SessionState.IDLE
+
+        with pytest.raises(InvalidOperationException) as raised:
+            container.test_data_service().answer_in_chat(
+                camp.id, "x/D1", "Dome", "ada", note=None, to=None, tool_use_id=None
+            )
+
+        assert raised.value.cause == "its chat has no turn in flight"

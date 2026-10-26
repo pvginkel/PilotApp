@@ -5,8 +5,9 @@ project's session adds, an agent's saves of them and of the project's draft
 and handbook, the files it attaches, Pilot's Done, and the end of its turn;
 and a work item placed by repository, started in an environment of Pilot's
 own the stage's own controller creates, and the documents and the material its
-session registers and attaches there, each with its effect; and a pre-ruling
-pass's questions to a registered document's writer.
+session registers and attaches there, each with its effect; a pre-ruling
+pass's questions to a registered document's writer; and a person's answer the
+brain records through the project's open chat, with its effect.
 Nothing in the UI creates a project before the definition chat (F46), nor
 places a work item, which the brain adds (F66).
 
@@ -28,9 +29,11 @@ from app.engine.ingest import Ingested
 from app.exceptions import RouteNotAvailableException
 from app.models.reference import DocumentRole
 from app.schemas.common import ApiErrorResponseSchema
+from app.schemas.pilot_store import RecordedSchema
 from app.schemas.testing_record import (
     InventedAttachmentsCreateSchema,
     InventedAttachmentsSchema,
+    InventedChatAnswerCreateSchema,
     InventedEnvironmentSchema,
     InventedFaultSchema,
     InventedItemCreateSchema,
@@ -530,6 +533,50 @@ def create_writer_questions(
     data = InventedWriterQuestionsCreateSchema.model_validate(request.get_json())
     blocks = test_data_service.ask_writer(item_id, data.questions)
     return InventedWriterQuestionsSchema(blocks=blocks).model_dump(mode="json"), 201
+
+
+@testing_record_bp.route("/projects/<uuid:project_id>/chat/answers", methods=["POST"])
+@api.validate(
+    json=InventedChatAnswerCreateSchema,
+    resp=SpectreeResponse(
+        HTTP_201=RecordedSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def create_chat_answer(
+    project_id: uuid.UUID,
+    test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
+) -> Any:
+    """Record a person's answer to a block through the project's open chat,
+    as its brain's `answer` records it (F42.1, F86.2): the effect of the call
+    `tool_use_id` names in the chat's turn in flight, the place *In the chat*
+    goes to (F42.3).
+
+    Returns:
+        201: The call's effect line
+        400: The body is not a block's id, an answer, a handle, and an
+            optional note, task and call id, or the stage is prd
+        404: No project has the id, the block is not of it, or no person has
+            the handle
+        409: The project has no chat open, its chat has no turn in flight, or
+            the record refuses the answer: the reason
+    """
+    data = InventedChatAnswerCreateSchema.model_validate(request.get_json())
+    line = test_data_service.answer_in_chat(
+        project_id,
+        data.block,
+        data.value,
+        data.for_,
+        note=data.note,
+        to=data.to,
+        tool_use_id=data.tool_use_id,
+    )
+    return RecordedSchema(effect=f"{line.verb} · {line.label}").model_dump(
+        mode="json"
+    ), 201
 
 
 def _saved(ingested: Ingested) -> dict[str, Any]:
