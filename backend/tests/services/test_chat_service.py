@@ -383,6 +383,94 @@ class TestSendStartsTheChat:
         assert _sends(session, run.id) == [(1, "One"), (2, "Two")]
         assert "_LoopStart" in _callbacks()
 
+    @pytest.mark.parametrize("cut", ["held", "in the store", "created"])
+    def test_a_chat_whose_start_was_stopped_starts_afresh_in_the_same_chat(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+        cut: str,
+    ) -> None:
+        """Archive stops the start before its brief went out, wherever it was;
+        after Bring back the next message reaches the brain, briefed."""
+        first = _send(chats, opened, person, "One")
+        clear_after_commit_callbacks()
+        run = _read(session, first.session_id)
+        if cut != "held":
+            container.environment_service().ensure_environment(
+                session, STORE_ENVIRONMENT_ID
+            )
+            run.environment_id = STORE_ENVIRONMENT_ID
+        if cut == "created":
+            run.controller_session, run.token_hash = "claude-0", "a" * 64
+        session.flush()
+        projects = container.project_service()
+        projects.transition_as(person, opened.id, TransitionKind.ARCHIVED)
+        projects.transition_as(person, opened.id, TransitionKind.BROUGHT_BACK)
+        clear_after_commit_callbacks()
+        assert _read(session, first.session_id).state_code == SessionState.STOPPED
+
+        second = _send(chats, opened, person, "Two")
+
+        assert (second.session_id, second.seq, second.error) == (
+            first.session_id,
+            2,
+            None,
+        )
+        assert second.message == container.brief_service().project_chat(
+            opened, person, "Two", second.started_at
+        )
+        assert len(_chat_rows(session, opened)) == 1
+        clear_after_commit_callbacks()
+        run = _up(services, session, first.session_id)
+        assert (run.state_code, run.environment_id) == (
+            SessionState.RUNNING,
+            STORE_ENVIRONMENT_ID,
+        )
+        assert run.controller_session != "claude-0"
+        assert fake.sent == [second.message]
+        assert _sends(session, run.id) == [(1, "One"), (2, "Two")]
+
+    def test_a_stopped_chat_with_its_conversation_is_sent_its_words_alone(
+        self,
+        session: DbSession,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+    ) -> None:
+        run = _idle_chat(services, chats, session, fake, opened, person)
+        run.state_code, run.conversation_id = SessionState.STOPPED, "conversation-1"
+        session.flush()
+
+        turn = _send(chats, opened, person, "Two")
+
+        assert (turn.session_id, turn.seq, turn.message) == (run.id, 2, "Two")
+        assert fake.sent == ["Two"]
+
+    def test_a_stopped_turn_still_ending_with_no_conversation_is_refused(
+        self,
+        session: DbSession,
+        chats: ChatService,
+        opened: Project,
+        person: User,
+    ) -> None:
+        first = _send(chats, opened, person, "One")
+        _read(session, first.session_id).state_code = SessionState.STOPPED
+        session.flush()
+
+        with pytest.raises(
+            InvalidOperationException, match="a turn of its chat is in flight"
+        ):
+            _send(chats, opened, person, "Two")
+
+        assert len(session.scalars(select(Turn)).all()) == 1
+
     @pytest.mark.parametrize("state", [SessionState.HELD, SessionState.STARTING])
     def test_a_message_while_its_start_is_under_way_is_refused(
         self,

@@ -8,10 +8,11 @@ up, it goes through the relay's send (`RelayService.send`), which resumes a
 controller session that is gone. With none open it starts one: a Chat
 `project`, its Session a `chat` one in the store, its first Turn the brief
 (`BriefService.project_chat`) followed by the words, through the gate
-(`SessionStartService.start_brain`). A chat whose start failed starts afresh,
-briefed, in the same chat: a project has one chat open at a time, and no Close
-Cause is a failure. While its start is under way or held, a message is
-refused, as one is while a turn runs, which the controller refuses.
+(`SessionStartService.start_brain`). A chat whose start failed, or was
+stopped before its brief went out, starts afresh, briefed, in the same chat: a
+project has one chat open at a time, and no Close Cause is a failure or a stop.
+While its start is under way or held, a message is refused, as one is while a
+turn runs, which the controller refuses.
 
 A draft's, a finished project's and an archived project's chat take no
 message.
@@ -42,9 +43,7 @@ QUOTE_TAG = re.compile(
 )
 """A quote tag (F38.3; DB decision 29), the closing tag repeating the id."""
 
-_STARTS = (SessionState.HELD, SessionState.STARTING, SessionState.FAILED)
-"""The states of a chat's Session a message does not send to: its start held
-or under way, or failed, which a message starts afresh."""
+_IN_FLIGHT = "a turn of its chat is in flight"
 
 
 class ChatService:
@@ -97,7 +96,7 @@ class ChatService:
         _refuse_closed(project, operation)
         quoted = self._quote(project, person, words)
         session = self._open_chat(project.id)
-        if session is not None and session.state_code not in _STARTS:
+        if session is not None and not _unbriefed(session):
             return self.relay_service.send(self.db, session.id, words, words=quoted)
         return self._start(project_id, person, quoted, operation)
 
@@ -105,9 +104,9 @@ class ChatService:
         self, project_id: uuid.UUID, person: User, words: Words, operation: str
     ) -> Turn:
         """The project's chat started with `words`: a new one, or the open
-        one whose start failed, afresh in a headless session of its own. The
-        open chat's Session is locked after the project's row (the start's
-        lock order)."""
+        one whose start failed or was stopped before its brief went out,
+        afresh in a headless session of its own. The open chat's Session is
+        locked after the project's row (the start's lock order)."""
         project = self._locked(project_id)
         _refuse_closed(project, operation)
         session = self._open_chat(project.id)
@@ -116,15 +115,15 @@ class ChatService:
         else:
             session = self.records.lock_session(session.id)
             match session.state_code:
-                case SessionState.FAILED:
-                    session.controller_session = None
-                    session.error = None
                 case SessionState.HELD | SessionState.STARTING:
                     raise InvalidOperationException(operation, "its chat is starting")
+                case SessionState.STOPPED if session.turn_ended_at is None:
+                    raise InvalidOperationException(operation, _IN_FLIGHT)
+                case _ if _unbriefed(session):
+                    session.controller_session = None
+                    session.error = None
                 case _:
-                    raise InvalidOperationException(
-                        operation, "a turn of its chat is in flight"
-                    )
+                    raise InvalidOperationException(operation, _IN_FLIGHT)
         now = datetime.now(UTC)
         last = self.db.scalar(
             select(func.max(Turn.seq)).where(Turn.session_id == session.id)
@@ -224,6 +223,19 @@ class ChatService:
                         )
                     )
         return Words(person.id, words, quote_item_id=item_id, quote_block_id=block_id)
+
+
+def _unbriefed(session: AgentSession) -> bool:
+    """A chat's Session a message is not sent to (`_start`): its start held or
+    under way, failed, or stopped with no conversation for a turn to
+    continue."""
+    match session.state_code:
+        case SessionState.HELD | SessionState.STARTING | SessionState.FAILED:
+            return True
+        case SessionState.STOPPED:
+            return session.conversation_id is None
+        case _:
+            return False
 
 
 def _uuid(text: str) -> uuid.UUID | None:
