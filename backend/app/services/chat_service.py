@@ -55,8 +55,8 @@ from app.models.reference import (
 from app.services.brief_service import BriefService
 from app.services.pilot_server import unheld_token_hash
 from app.services.project_service import project_name
-from app.services.relay_service import RelayService, Words
-from app.services.session_record_service import SessionRecordService
+from app.services.relay_service import SEND_FAILED, RelayService, Words
+from app.services.session_record_service import SessionRecordService, read_records
 from app.services.session_scope import STORE_REPO
 from app.services.session_start_service import SessionStartService
 from app.services.start_gate import CHAT_KIND
@@ -153,9 +153,10 @@ class ChatService:
     ) -> Turn:
         """`person`'s `words` sent to the chat's Session as a turn of it,
         after the line naming them when the chat's previous Turn with an
-        author has another author (DB decision 61), and first the server's
-        notice when the handbook changed since its previous Turn (D052; DB
-        assertion 251), the notice counted once it went out."""
+        author that reached the brain has another author (DB decision 61),
+        and first the server's notice when the handbook changed since its
+        previous Turn (D052; DB assertion 251), the notice counted once it
+        went out."""
         changed = self._handbook_changed(project, session)
         message = words.text
         if self._previous_author(session) != person.id:
@@ -190,14 +191,25 @@ class ChatService:
         return None
 
     def _previous_author(self, session: AgentSession) -> uuid.UUID | None:
-        """The author of the chat's latest Turn with one; a server Turn has
-        none."""
-        return self.db.scalars(
-            select(Turn.author_user_id)
+        """The author of the chat's latest Turn with one that reached the
+        brain: a server Turn has none, and one whose send failed (F125) never
+        went out."""
+        authored = self.db.execute(
+            select(Turn.id, Turn.author_user_id, Turn.error)
             .where(Turn.session_id == session.id, Turn.author_user_id.is_not(None))
             .order_by(Turn.seq.desc())
-            .limit(1)
-        ).one_or_none()
+        ).all()
+        for turn_id, author, error in authored:
+            if error is None or not read_records(
+                self.db,
+                session.id,
+                turn_id=turn_id,
+                kind=RecordKind.SERVER,
+                payload_type=SEND_FAILED,
+                limit=1,
+            ):
+                return author
+        return None
 
     def _handbook_changed(self, project: Project, session: AgentSession) -> bool:
         """Whether the project's handbook was published after the chat's

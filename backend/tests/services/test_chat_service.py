@@ -1319,6 +1319,55 @@ class TestNamedMessage:
 
         assert (turn.seq, turn.message) == (4, "Three")
 
+    def test_a_retry_after_a_failed_send_is_named_again(
+        self,
+        session: DbSession,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+        bea: User,
+    ) -> None:
+        """A Turn whose send failed never reached the brain, so its naming
+        line names no one: the retry names its author again."""
+        _idle_chat(services, chats, session, fake, opened, person)
+        fake.unreachable(STORE_ENVIRONMENT_ID)
+        failed = _send(chats, opened, bea, "Approve the red badge")
+        assert failed.error is not None
+        fake.unreachable(STORE_ENVIRONMENT_ID, on=False)
+
+        retried = _send(chats, opened, bea, "Approve the red badge")
+
+        assert retried.error is None
+        assert retried.message == (
+            "The message, from bea (member):\nApprove the red badge"
+        )
+
+    def test_a_turn_that_failed_after_its_send_went_out_is_not_named_again(
+        self,
+        session: DbSession,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+        bea: User,
+    ) -> None:
+        """A Turn that failed in the brain reached it, naming line and all."""
+        run = _idle_chat(services, chats, session, fake, opened, person)
+        _send(chats, opened, bea, "Two")
+        clear_after_commit_callbacks()
+        assert run.controller_session is not None
+        fake.finish(STORE_ENVIRONMENT_ID, run.controller_session, "error", "Broke.")
+        services[1].relay(run.id, LoopHandle(f"relay:{run.id}"))
+        clear_after_commit_callbacks()
+        assert session.scalars(
+            select(Turn.error).where(Turn.session_id == run.id, Turn.seq == 2)
+        ).one()
+
+        assert _send(chats, opened, bea, "Three").message == "Three"
+
     def test_the_handbooks_notice_goes_before_the_naming_line(
         self,
         session: DbSession,
