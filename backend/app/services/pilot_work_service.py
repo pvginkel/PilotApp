@@ -1,10 +1,12 @@
 """`pilot-work`, a worker session's tools (TD §4.5, F85): the bearer its
 Session was created with resolved to the Session, `register_document`
-(ruling D1) and `attach_file`."""
+(ruling D1) and `attach_file`, each call that changed the record writing its
+Effects (F41)."""
 
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -24,19 +26,25 @@ from app.exceptions import (
     InvalidOperationException,
     RecordNotFoundException,
 )
-from app.models import Attachment, Item, Project, SessionKind, Work
+from app.models import Attachment, Document, Item, Project, SessionKind, Work
 from app.models import Session as AgentSession
+from app.models.reference import EffectKind
 from app.services.controller_client import (
     ControllerClient,
     ControllerProblem,
     ControllerProblemType,
 )
+from app.services.effect_service import Change, EffectLine, EffectService
 from app.services.pilot_server import token_hash
 
 PILOT_WORK = "pilot-work"
 """The surface of a work item's Session (`session_kinds.surface`)."""
 
 _BEARER = "Bearer "
+
+REGISTERED = "Registered"
+ATTACHED = "Attached"
+"""The verbs of the two tools' effect lines (F41)."""
 
 _UNREADABLE_FILE = (
     ControllerProblemType.NOT_FOUND,
@@ -70,12 +78,14 @@ class PilotWorkService:
         document_service: DocumentService,
         ingest_service: IngestService,
         attach_service: AttachService,
+        effect_service: EffectService,
     ) -> None:
         self.db = db
         self.controller_client = controller_client
         self.document_service = document_service
         self.ingest_service = ingest_service
         self.attach_service = attach_service
+        self.effect_service = effect_service
 
     def admit(self, authorization: str | None) -> Worker:
         """The work item's Session whose bearer `authorization` carries.
@@ -118,11 +128,14 @@ class PilotWorkService:
             work_item_id=work_id,
         )
 
-    def register_document(self, worker: Worker, path: str) -> Registration:
+    def register_document(
+        self, worker: Worker, path: str, tool_use_id: str | None
+    ) -> Registration:
         """The document the worker wrote at `path` in its environment,
         registered (F85.1, ruling D1): the file read now and parsed as the
         worker's turn left it, then the item its run registered from the path
-        already, else one minted, its text read at the turn's end.
+        already, else one minted, its text read at the turn's end. A minted
+        one is the call `tool_use_id`'s effect, "Registered · inbox/<n>".
 
         Raises:
             InvalidOperationException: the file cannot be registered, nothing
@@ -145,18 +158,32 @@ class PilotWorkService:
             raise InvalidOperationException(
                 operation, f"its text holds faults: {listed(version.faults)}"
             )
-        return self.document_service.register(
+        registration = self.document_service.register(
             project, self.db.get_one(AgentSession, worker.session_id), path
         )
+        if registration.minted:
+            item = registration.item
+            # A registered document has no title until its text is read: its
+            # line names its place, the folder and its number.
+            place = PurePosixPath(self.db.get_one(Document, item.id).path).parent
+            self.effect_service.record(
+                worker.session_id,
+                tool_use_id,
+                EffectLine(REGISTERED, f"{place}/{item.seq}", item_id=item.id),
+                [Change(EffectKind.REGISTERED, item_id=item.id)],
+            )
+        return registration
 
     def attach_file(
-        self, worker: Worker, path: str, to: uuid.UUID | None
+        self, worker: Worker, path: str, to: uuid.UUID | None, tool_use_id: str | None
     ) -> list[Attachment]:
         """The file or the folder at `path` in the worker's environment,
         copied into the record now and hung on the item `to` names, else on
         the worker's own work item (F85.2, F36.1): a file one attachment, a
         folder one per file under it, named by its path relative to the
-        folder, in path order; all of one batch, each with its source.
+        folder, in path order; all of one batch, each with its source. The
+        call `tool_use_id`'s effect is one line for its files, "Attached ·
+        <title>", or "Attached · <folder>, <n> files".
 
         Raises:
             RecordNotFoundException: `to` names no item of the worker's
@@ -173,9 +200,23 @@ class PilotWorkService:
         if item is None or item.project_id != worker.project_id:
             raise RecordNotFoundException("Item", str(to))
         copies = self._copies(worker.environment_id, path, f"attach {path}")
-        return self.attach_service.attach(
+        attachments = self.attach_service.attach(
             item, self.db.get_one(AgentSession, worker.session_id), copies
         )
+        if len(attachments) == 1:
+            label = attachments[0].title
+        else:
+            label = f"{_name(path)}, {len(attachments)} files"
+        self.effect_service.record(
+            worker.session_id,
+            tool_use_id,
+            EffectLine(ATTACHED, label, item_id=item.id),
+            [
+                Change(EffectKind.ATTACHED, attachment_id=attachment.id)
+                for attachment in attachments
+            ],
+        )
+        return attachments
 
     def _copies(self, environment_id: str, path: str, operation: str) -> list[Copy]:
         """The file at `path`, else every file under the folder at `path`,
@@ -188,7 +229,7 @@ class PilotWorkService:
                 _refuse(operation, problem)
                 raise
             return self._folder(client, environment_id, path, operation, problem)
-        return [copied(path.rstrip("/").rsplit("/", 1)[-1], path, content.data)]
+        return [copied(_name(path), path, content.data)]
 
     def _folder(
         self,
@@ -232,6 +273,11 @@ class PilotWorkService:
                 )
             copies.append(copied(file.removeprefix(folder), file, content.data))
         return copies
+
+
+def _name(path: str) -> str:
+    """The file's or the folder's name at `path`."""
+    return path.rstrip("/").rsplit("/", 1)[-1]
 
 
 def _refuse(operation: str, problem: ControllerProblem) -> None:

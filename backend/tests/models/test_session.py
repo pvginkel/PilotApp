@@ -1,5 +1,7 @@
-"""Session, Turn and Session Record: what a row must hold."""
+"""Session, Turn, Session Record, Effect and Writer Question: what a row must
+hold."""
 
+import hashlib
 from datetime import UTC, datetime
 
 import pytest
@@ -7,8 +9,10 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session as DbSession
 
 from app.models import (
+    Attachment,
     Block,
     Document,
+    Effect,
     Environment,
     Item,
     Project,
@@ -16,8 +20,15 @@ from app.models import (
     SessionRecord,
     Turn,
     User,
+    WriterQuestion,
 )
-from app.models.reference import BlockKind, RecordKind, SessionState
+from app.models.reference import (
+    AttachmentSource,
+    BlockKind,
+    EffectKind,
+    RecordKind,
+    SessionState,
+)
 from tests.support.database import violated_constraint
 
 SENT_AT = datetime(2026, 10, 19, 9, 30, tzinfo=UTC)
@@ -178,6 +189,7 @@ class TestTurn:
             project_session,
             author_user_id=person.id,
             message=message,
+            words=message,
             quote_item_id=item.id,
         )
         session.add(sent)
@@ -186,6 +198,56 @@ class TestTurn:
         assert sent.id is not None
         assert sent.ended_at is None
         assert sent.error is None
+
+    def test_a_persons_words_are_kept_beside_what_was_sent(
+        self, session: DbSession, project_session: Session, person: User
+    ) -> None:
+        """A chat's first Turn sends its brief before the words (DB 251)."""
+        words = "Blue, please."
+        sent = _turn(
+            project_session,
+            author_user_id=person.id,
+            message=f"The chat's brief.\n\n{words}",
+            words=words,
+        )
+        session.add(sent)
+        session.flush()
+        session.expire(sent)
+
+        assert (sent.message, sent.words) == (f"The chat's brief.\n\n{words}", words)
+
+    @pytest.mark.parametrize(
+        ("authored", "words"),
+        [
+            pytest.param(True, None, id="a-persons-without-words"),
+            pytest.param(False, "Blue, please.", id="the-servers-with-words"),
+        ],
+    )
+    def test_a_turn_has_words_exactly_when_a_person_wrote_it(
+        self,
+        session: DbSession,
+        project_session: Session,
+        person: User,
+        authored: bool,
+        words: str | None,
+    ) -> None:
+        session.add(
+            _turn(
+                project_session,
+                author_user_id=person.id if authored else None,
+                words=words,
+            )
+        )
+
+        assert violated_constraint(session) == "ck_turns_words"
+
+    def test_the_servers_own_turn_quotes_nothing(
+        self, session: DbSession, project_session: Session, item: Item
+    ) -> None:
+        """A quote is read from a person's words (DB 159, 251)."""
+        session.add(_turn(project_session, quote_item_id=item.id))
+
+        assert violated_constraint(session) == "ck_turns_words"
 
     def test_a_seq_is_one_turn_of_its_session(
         self, session: DbSession, project_session: Session, turn: Turn
@@ -205,6 +267,7 @@ class TestTurn:
         self,
         session: DbSession,
         project_session: Session,
+        person: User,
         item: Item,
         draft_document: Document,
     ) -> None:
@@ -212,18 +275,33 @@ class TestTurn:
         session.add(block)
         session.flush()
         session.add(
-            _turn(project_session, quote_item_id=item.id, quote_block_id=block.id)
+            _turn(
+                project_session,
+                author_user_id=person.id,
+                words="Fix the client for v4.",
+                quote_item_id=item.id,
+                quote_block_id=block.id,
+            )
         )
 
         assert violated_constraint(session) == "ck_turns_quote"
 
     def test_a_removed_draft_block_leaves_the_turn_quoting_none(
-        self, session: DbSession, project_session: Session, draft_document: Document
+        self,
+        session: DbSession,
+        project_session: Session,
+        person: User,
+        draft_document: Document,
     ) -> None:
         block = _block(draft_document)
         session.add(block)
         session.flush()
-        quoting = _turn(project_session, quote_block_id=block.id)
+        quoting = _turn(
+            project_session,
+            author_user_id=person.id,
+            words="Fix the client for v4.",
+            quote_block_id=block.id,
+        )
         session.add(quoting)
         session.flush()
 
@@ -232,7 +310,7 @@ class TestTurn:
         session.expire(quoting)
 
         assert quoting.quote_block_id is None
-        assert quoting.message == "Fix the client for v4."
+        assert quoting.words == "Fix the client for v4."
 
 
 class TestSessionRecord:
@@ -408,7 +486,12 @@ class TestSessionRecord:
     def test_a_persons_message_is_placed_by_a_send_without_payload(
         self, session: DbSession, project_session: Session, person: User
     ) -> None:
-        sent = _turn(project_session, author_user_id=person.id, message="Go with v4.")
+        sent = _turn(
+            project_session,
+            author_user_id=person.id,
+            message="Go with v4.",
+            words="Go with v4.",
+        )
         session.add(sent)
         session.flush()
         record = _record(
@@ -469,3 +552,218 @@ class TestSessionRecord:
         )
 
         assert violated_constraint(session) == "uq_session_records_send_turn_id"
+
+
+@pytest.fixture
+def placing(session: DbSession, project_session: Session, turn: Turn) -> SessionRecord:
+    """The `server` record of ``turn`` that places a call's Effects."""
+    record = _record(
+        project_session,
+        turn_id=turn.id,
+        payload={"type": "effect", "toolUseId": "toolu_01", "effect": {}},
+    )
+    session.add(record)
+    session.flush()
+    return record
+
+
+def _effect(turn: Turn, record: SessionRecord, **overrides: object) -> Effect:
+    values: dict[str, object] = {
+        "turn_id": turn.id,
+        "record_id": record.id,
+        "kind_code": EffectKind.FINISHED,
+    }
+    values.update(overrides)
+    return Effect(**values)
+
+
+def _attachment(
+    session: DbSession, project: Project, filename: str = "palette.md"
+) -> Attachment:
+    content = b"# Palette\n"
+    attachment = Attachment(
+        project_id=project.id,
+        batch=1,
+        title="Palette",
+        filename=filename,
+        content_type="text/markdown",
+        size=len(content),
+        sha256=hashlib.sha256(content).hexdigest(),
+        content=content,
+        source_code=AttachmentSource.DRAFT,
+        copied_at=SENT_AT,
+    )
+    session.add(attachment)
+    session.flush()
+    return attachment
+
+
+class TestEffect:
+    @pytest.mark.parametrize(
+        ("kind", "names"),
+        [
+            (EffectKind.ADDED, "item"),
+            (EffectKind.MARKED, "item"),
+            (EffectKind.STOPPED, "item"),
+            (EffectKind.REGISTERED, "item"),
+            (EffectKind.ANSWERED, "block"),
+            (EffectKind.ATTACHED, "attachment"),
+            (EffectKind.FINISHED, None),
+        ],
+    )
+    def test_each_kind_names_what_it_changed(
+        self,
+        session: DbSession,
+        project: Project,
+        turn: Turn,
+        placing: SessionRecord,
+        item: Item,
+        draft_document: Document,
+        kind: EffectKind,
+        names: str | None,
+    ) -> None:
+        block = _block(draft_document)
+        session.add(block)
+        session.flush()
+        named = {
+            "item": {"item_id": item.id},
+            "block": {"block_id": block.id},
+            "attachment": {"attachment_id": _attachment(session, project).id},
+            None: {},
+        }[names]
+        effect = _effect(turn, placing, kind_code=kind, **named)
+        session.add(effect)
+        session.flush()
+        session.refresh(effect)
+
+        assert effect.kind_code == kind
+        assert effect.at is not None
+
+    @pytest.mark.parametrize(
+        ("kind", "names"),
+        [
+            pytest.param(EffectKind.ADDED, (), id="added-naming-nothing"),
+            pytest.param(EffectKind.REGISTERED, ("block",), id="registered-a-block"),
+            pytest.param(
+                EffectKind.MARKED, ("item", "attachment"), id="marked-and-attached"
+            ),
+            pytest.param(EffectKind.ANSWERED, ("item",), id="answered-an-item"),
+            pytest.param(EffectKind.ATTACHED, (), id="attached-naming-nothing"),
+            pytest.param(EffectKind.ATTACHED, ("item",), id="attached-an-item"),
+            pytest.param(EffectKind.FINISHED, ("block",), id="finished-a-block"),
+            pytest.param(EffectKind.FINISHED, ("item",), id="finished-an-item"),
+        ],
+    )
+    def test_what_it_names_follows_its_kind(
+        self,
+        session: DbSession,
+        project: Project,
+        turn: Turn,
+        placing: SessionRecord,
+        item: Item,
+        draft_document: Document,
+        kind: EffectKind,
+        names: tuple[str, ...],
+    ) -> None:
+        """DB assertion 160."""
+        block = _block(draft_document)
+        session.add(block)
+        session.flush()
+        named: dict[str, object] = {}
+        if "item" in names:
+            named["item_id"] = item.id
+        if "block" in names:
+            named["block_id"] = block.id
+        if "attachment" in names:
+            named["attachment_id"] = _attachment(session, project).id
+        session.add(_effect(turn, placing, kind_code=kind, **named))
+
+        assert violated_constraint(session) == "ck_effects_names"
+
+    def test_one_record_places_every_effect_of_a_call(
+        self,
+        session: DbSession,
+        project: Project,
+        turn: Turn,
+        placing: SessionRecord,
+    ) -> None:
+        """A folder attached: an Effect per file, one record (DB 216)."""
+        effects = [
+            _effect(
+                turn,
+                placing,
+                kind_code=EffectKind.ATTACHED,
+                attachment_id=_attachment(session, project, filename).id,
+            )
+            for filename in ("palette.md", "notes.md")
+        ]
+        session.add_all(effects)
+        session.flush()
+
+        assert {effect.record_id for effect in effects} == {placing.id}
+
+    def test_a_removed_draft_block_leaves_its_answer_s_effect(
+        self,
+        session: DbSession,
+        turn: Turn,
+        placing: SessionRecord,
+        draft_document: Document,
+    ) -> None:
+        """The agent removes a draft Block with its answers (F47.4); the
+        Effect of the answer stays, its record keeping the line."""
+        block = _block(draft_document)
+        session.add(block)
+        session.flush()
+        answered = _effect(
+            turn, placing, kind_code=EffectKind.ANSWERED, block_id=block.id
+        )
+        session.add(answered)
+        session.flush()
+
+        session.delete(block)
+        session.flush()
+        session.expire(answered)
+
+        assert (answered.kind_code, answered.block_id) == (EffectKind.ANSWERED, None)
+
+
+class TestWriterQuestion:
+    def test_a_question_is_written_with_its_stamp(
+        self, session: DbSession, turn: Turn, draft_document: Document
+    ) -> None:
+        block = _block(draft_document)
+        session.add(block)
+        session.flush()
+        question = WriterQuestion(
+            turn_id=turn.id,
+            block_id=block.id,
+            question="Which OpenBao path does 'the key' go to?",
+        )
+        session.add(question)
+        session.flush()
+        session.refresh(question)
+
+        assert question.question == "Which OpenBao path does 'the key' go to?"
+        assert question.asked_at is not None
+
+    def test_a_block_is_asked_about_once(
+        self,
+        session: DbSession,
+        project_session: Session,
+        turn: Turn,
+        draft_document: Document,
+    ) -> None:
+        """One question per Block in version 1 (DB assertion 250), even
+        from a later Turn."""
+        block = _block(draft_document)
+        later = _turn(project_session, seq=2)
+        session.add_all([block, later])
+        session.flush()
+        session.add_all(
+            [
+                WriterQuestion(turn_id=turn.id, block_id=block.id, question="Which?"),
+                WriterQuestion(turn_id=later.id, block_id=block.id, question="And?"),
+            ]
+        )
+
+        assert violated_constraint(session) == "uq_writer_questions_block_id"

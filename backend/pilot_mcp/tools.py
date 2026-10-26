@@ -3,7 +3,8 @@
 A tool's docstring is the description the worker reads, and each parameter's
 is in its annotation: they are the surface, not commentary
 (`tests/pilot_mcp/test_server.py` pins them). The bearer a call carries is the
-API's to resolve; a tool passes it on as it came.
+API's to resolve; a tool passes it on as it came, with the tool-use id Claude
+Code sends in the call's `_meta`, which the call's effect names.
 """
 
 import uuid
@@ -18,6 +19,10 @@ from pilot_mcp.api import AttachedFiles, PilotWorkApi, RegisteredDocument
 
 Call = Context[ServerSession, object, Request]
 
+TOOL_USE_ID_META = "claudecode/toolUseId"
+"""The `_meta` key of the tool-use id Claude Code sends with every
+`tools/call`."""
+
 
 def _authorization(ctx: Call) -> str:
     request = ctx.request_context.request
@@ -25,6 +30,14 @@ def _authorization(ctx: Call) -> str:
     # (`server.py`) admitted it only with an `Authorization` header.
     assert request is not None
     return request.headers["authorization"]
+
+
+def _tool_use_id(ctx: Call) -> str | None:
+    """The tool-use id the call's `_meta` carries; None from a client that
+    sends none."""
+    meta = ctx.request_context.meta
+    value = None if meta is None else (meta.model_extra or {}).get(TOOL_USE_ID_META)
+    return value if isinstance(value, str) else None
 
 
 def register_tools(mcp: FastMCP, api: PilotWorkApi) -> None:
@@ -56,7 +69,7 @@ def register_tools(mcp: FastMCP, api: PilotWorkApi) -> None:
         answered, Pilot writes each back in place, the answers in it, and
         continues this conversation as a new work item with a message naming
         the files; registering a revised file then makes a new document."""
-        return await api.register_document(_authorization(ctx), path)
+        return await api.register_document(_authorization(ctx), _tool_use_id(ctx), path)
 
     @mcp.tool()
     async def attach_file(
@@ -95,4 +108,4 @@ def register_tools(mcp: FastMCP, api: PilotWorkApi) -> None:
         `{ids}`, the attachments' ids, a folder's in its files' path order.
         Once you have registered your documents and attached what backs them,
         end your turn; never wait for the answers."""
-        return await api.attach_file(_authorization(ctx), path, to)
+        return await api.attach_file(_authorization(ctx), _tool_use_id(ctx), path, to)

@@ -23,8 +23,10 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.extensions import db
 from app.models.reference import (
+    EFFECT_KIND,
     RECORD_KIND,
     SESSION_STATE,
+    EffectKind,
     RecordKind,
     SessionState,
 )
@@ -93,8 +95,10 @@ class Turn(db.Model):  # type: ignore[name-defined]
     """One message sent to a Session and the reply it produced, from the send
     to the turn's end; the server's own turns have no author.
 
+    `message` is what was sent; `words` a person's own, verbatim with their
+    quote tags, which `message` ends with (DB assertion 251).
     `quote_item_id` and `quote_block_id` are read from the quote tag in
-    `message` at the send (DB §7.4); the tag stays when the agent removes a
+    `words` at the send (DB §7.4); the tag stays when the agent removes a
     quoted draft Block, and `quote_block_id` is then cleared.
     """
 
@@ -109,6 +113,14 @@ class Turn(db.Model):  # type: ignore[name-defined]
         CheckConstraint(
             "quote_item_id IS NULL OR quote_block_id IS NULL", name="ck_turns_quote"
         ),
+        # A person's Turn has their words, the server's none, and a quote is
+        # read from the words (DB assertions 159, 251).
+        CheckConstraint(
+            "(author_user_id IS NULL) = (words IS NULL)"
+            " AND (words IS NOT NULL"
+            " OR (quote_item_id IS NULL AND quote_block_id IS NULL))",
+            name="ck_turns_words",
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
@@ -116,6 +128,7 @@ class Turn(db.Model):  # type: ignore[name-defined]
     seq: Mapped[int] = mapped_column(Integer)
     author_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
     message: Mapped[str] = mapped_column(Text)
+    words: Mapped[str | None] = mapped_column(Text)
     quote_item_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("items.id"))
     quote_block_id: Mapped[int | None] = mapped_column(
         ForeignKey("blocks.id", ondelete="SET NULL")
@@ -184,5 +197,67 @@ class SessionRecord(db.Model):  # type: ignore[name-defined]
     raw_offset: Mapped[int | None] = mapped_column(BigInteger)
     controller_session: Mapped[str | None] = mapped_column(Text)
     at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class Effect(db.Model):  # type: ignore[name-defined]
+    """One change to the record a session's tool call made during a Turn,
+    placed in its Session's list by the `server` record written with it.
+
+    `record_id` is a `server` record of the Turn `turn_id` (DB assertion
+    216), which no key holds: the writer places the Effect.
+    """
+
+    __tablename__ = "effects"
+    __table_args__ = (
+        Index("ix_effects_turn_id", "turn_id"),
+        # "In the chat" on a Block goes to its latest Effect's record (F42.3).
+        Index("ix_effects_block_id", "block_id"),
+        # What an Effect names follows its kind (DB assertion 160). An
+        # `answered` Effect's Block is cleared when the agent removes it from
+        # the draft, as a Turn's quote is.
+        CheckConstraint(
+            "(kind_code IN ('added', 'marked', 'stopped', 'registered'))"
+            " = (item_id IS NOT NULL)"
+            " AND (kind_code = 'attached') = (attachment_id IS NOT NULL)"
+            " AND (kind_code = 'answered' OR block_id IS NULL)",
+            name="ck_effects_names",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    turn_id: Mapped[int] = mapped_column(ForeignKey("turns.id"))
+    record_id: Mapped[int] = mapped_column(ForeignKey("session_records.id"))
+    kind_code: Mapped[EffectKind] = mapped_column(EFFECT_KIND)
+    item_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("items.id"))
+    block_id: Mapped[int | None] = mapped_column(
+        ForeignKey("blocks.id", ondelete="SET NULL")
+    )
+    attachment_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("attachments.id")
+    )
+    at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class WriterQuestion(db.Model):  # type: ignore[name-defined]
+    """One question the pre-ruling pass put to a registered document's writer
+    about one Block of it, in the pass's Turn (DB decision 59)."""
+
+    __tablename__ = "writer_questions"
+    __table_args__ = (
+        # The clarification run batches a pass's questions by its Turn.
+        Index("ix_writer_questions_turn_id", "turn_id"),
+        # One question per Block in version 1 (DB assertion 250).
+        Index("uq_writer_questions_block_id", "block_id", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    turn_id: Mapped[int] = mapped_column(ForeignKey("turns.id"))
+    block_id: Mapped[int] = mapped_column(ForeignKey("blocks.id"))
+    question: Mapped[str] = mapped_column(Text)
+    asked_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

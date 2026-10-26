@@ -148,6 +148,15 @@ PARTIALS_FORWARDED_TOTAL = Counter(
 
 
 @dataclass(frozen=True)
+class Words:
+    """A person's message: whose it is, and their words verbatim with their
+    quote tags (DB Turn `words`)."""
+
+    author_user_id: uuid.UUID
+    text: str
+
+
+@dataclass(frozen=True)
 class _Opening:
     """The turn in flight a relay's run opens the stream for."""
 
@@ -246,10 +255,11 @@ class RelayService:
         session_id: uuid.UUID,
         message: str,
         *,
-        author_user_id: uuid.UUID | None = None,
+        words: Words | None = None,
     ) -> Turn:
-        """Send the Session a new Turn, a person's message when it has an
-        author, and relay it once the caller's transaction commits (§9.6).
+        """Send the Session a new Turn, `message`, and relay it once the
+        caller's transaction commits (§9.6). A person's message carries their
+        `words`, which `message` ends with (DB assertion 251).
 
         The controller's send goes first. On its `202`, under the Session's
         lock: the Turn, its `send` record when a person wrote it, the Session
@@ -276,10 +286,10 @@ class RelayService:
         try:
             self._deliver_resuming(db, session, message)
         except ExternalServiceException as error:
-            turn = self._new_turn(db, session_id, message, author_user_id)
+            turn = self._new_turn(db, session_id, message, words)
             self._failed(db, turn, error)
             return turn
-        turn = self._new_turn(db, session_id, message, author_user_id)
+        turn = self._new_turn(db, session_id, message, words)
         self._accepted(db, turn)
         return turn
 
@@ -745,7 +755,7 @@ class RelayService:
         db: Session,
         session_id: uuid.UUID,
         message: str,
-        author_user_id: uuid.UUID | None,
+        words: Words | None,
     ) -> Turn:
         self._records(db).lock_session(session_id)
         last = db.scalar(
@@ -754,8 +764,9 @@ class RelayService:
         turn = Turn(
             session_id=session_id,
             seq=(last or 0) + 1,
-            author_user_id=author_user_id,
+            author_user_id=None if words is None else words.author_user_id,
             message=message,
+            words=None if words is None else words.text,
             started_at=datetime.now(UTC),
         )
         db.add(turn)

@@ -568,7 +568,8 @@ class TestSendRecords:
             session_id=project_session.id,
             seq=1,
             author_user_id=person.id,
-            message="Please look at the badge.",
+            message="The chat's brief.\n\nPlease look at the badge.",
+            words="Please look at the badge.",
             started_at=datetime.now(UTC),
         )
         session.add(turn)

@@ -1,6 +1,6 @@
 """The MCP process's client of `pilot-work`'s routes (`app/api/pilot_work.py`):
 one call per tool, under the bearer the tool's caller presented, which the API
-resolves to its Session.
+resolves to its Session, with the call's tool-use id where it has one.
 
 An answer outside 2xx is a `ToolError` carrying the API's `error`, its reason
 whole, or the answer's status where it is not the API's envelope; an API that
@@ -15,6 +15,10 @@ from mcp.server.fastmcp.exceptions import ToolError
 from pydantic import BaseModel, Field
 
 ROUTES = "/tools/pilot-work"
+
+TOOL_USE_ID_HEADER = "Tool-Use-Id"
+"""The header the routes read a call's tool-use id from
+(`app/services/effect_service.py`)."""
 
 _TIMEOUT = httpx.Timeout(300.0, connect=5.0)
 
@@ -49,24 +53,37 @@ class PilotWorkApi:
         await self._http.aclose()
 
     async def register_document(
-        self, authorization: str, path: str
+        self, authorization: str, tool_use_id: str | None, path: str
     ) -> RegisteredDocument:
-        answer = await self._post("documents", authorization, {"path": path})
+        answer = await self._post(
+            "documents", authorization, tool_use_id, {"path": path}
+        )
         return RegisteredDocument.model_validate(answer)
 
     async def attach_file(
-        self, authorization: str, path: str, to: uuid.UUID | None
+        self,
+        authorization: str,
+        tool_use_id: str | None,
+        path: str,
+        to: uuid.UUID | None,
     ) -> AttachedFiles:
         body = {"path": path} if to is None else {"path": path, "to": str(to)}
-        answer = await self._post("attachments", authorization, body)
+        answer = await self._post("attachments", authorization, tool_use_id, body)
         return AttachedFiles.model_validate(answer)
 
-    async def _post(self, route: str, authorization: str, body: dict[str, str]) -> Any:
+    async def _post(
+        self,
+        route: str,
+        authorization: str,
+        tool_use_id: str | None,
+        body: dict[str, str],
+    ) -> Any:
+        headers = {"Authorization": authorization}
+        if tool_use_id is not None:
+            headers[TOOL_USE_ID_HEADER] = tool_use_id
         try:
             response = await self._http.post(
-                f"{ROUTES}/{route}",
-                json=body,
-                headers={"Authorization": authorization},
+                f"{ROUTES}/{route}", json=body, headers=headers
             )
         except httpx.RequestError as exc:
             raise ToolError(

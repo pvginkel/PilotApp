@@ -5,6 +5,7 @@ whole."""
 
 import json
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import func, select
@@ -12,9 +13,11 @@ from sqlalchemy.orm import Session as DbSession
 from starlette.applications import Starlette
 
 from app import models
-from app.models import Attachment, Document, Environment, Item, ItemAttachment
+from app.models import Attachment, Document, Environment, Item, ItemAttachment, Turn
 from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerClient
+from app.services.session_record_service import read_records
+from pilot_mcp.tools import TOOL_USE_ID_META
 from tests.support.fake_controller import ServedFakeController
 from tests.support.pilot_mcp import (
     API_URL,
@@ -325,3 +328,60 @@ class TestAttachFile:
 
         assert error_text(result).startswith("Error executing tool attach_file: ")
         assert routes.calls == []
+
+
+@pytest.mark.anyio
+class TestTheToolUseId:
+    """Claude Code sends each call's tool-use id in its `_meta`; the tool
+    passes it to its route, whose effect's record names it."""
+
+    async def test_the_calls_tool_use_id_reaches_its_effect(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        session: DbSession,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        environment: Environment,
+        worker: models.Session,
+    ) -> None:
+        session.add(
+            Turn(
+                session_id=worker.id,
+                seq=1,
+                message="Refine the camp.",
+                started_at=datetime.now(UTC),
+            )
+        )
+        session.commit()
+        _file(fake_controller, environment)
+
+        result = await call(
+            mcp_app,
+            "register_document",
+            {"path": PATH},
+            meta={TOOL_USE_ID_META: "toolu_01ABC"},
+        )
+
+        assert not result.isError
+        [(request, _)] = routes.calls
+        assert request.headers["tool-use-id"] == "toolu_01ABC"
+        [record] = read_records(session, worker.id, limit=10)
+        assert record.record.payload["toolUseId"] == "toolu_01ABC"
+
+    async def test_a_call_without_one_sends_none(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        environment: Environment,
+        worker: models.Session,
+    ) -> None:
+        _file(fake_controller, environment)
+
+        result = await call(mcp_app, "attach_file", {"path": PATH})
+
+        assert not result.isError
+        [(request, _)] = routes.calls
+        assert "tool-use-id" not in request.headers

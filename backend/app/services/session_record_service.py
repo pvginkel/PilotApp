@@ -54,8 +54,8 @@ class StoredRecord:
     """The number of the record's Turn."""
     author: str | None
     """A `send`'s author, by handle."""
-    message: str | None
-    """A `send`'s words."""
+    words: str | None
+    """A `send`'s words, its Turn's (DB assertion 219)."""
 
 
 @dataclass(frozen=True)
@@ -95,7 +95,7 @@ def read_records(
             SessionRecord,
             Turn.seq,
             case((is_send, User.handle)),
-            case((is_send, Turn.message)),
+            case((is_send, Turn.words)),
         )
         .outerjoin(Turn, Turn.id == SessionRecord.turn_id)
         .outerjoin(User, User.id == Turn.author_user_id)
@@ -104,8 +104,8 @@ def read_records(
         .limit(limit)
     )
     return [
-        StoredRecord(record, turn, author, message)
-        for record, turn, author, message in db.execute(statement).tuples()
+        StoredRecord(record, turn, author, words)
+        for record, turn, author, words in db.execute(statement).tuples()
     ]
 
 
@@ -151,7 +151,7 @@ def to_record_schema(stored: StoredRecord) -> SessionRecordSchema:
             return ServerRecordSchema.model_validate(base | {"payload": record.payload})
         case RecordKind.SEND:
             return SendRecordSchema.model_validate(
-                base | {"author": stored.author, "message": stored.message}
+                base | {"author": stored.author, "message": stored.words}
             )
 
 

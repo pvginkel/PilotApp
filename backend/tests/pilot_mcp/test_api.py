@@ -27,7 +27,7 @@ class TestPilotWorkApi:
         api = PilotWorkApi(str(McpSettings().api_url), transport=routes)
 
         with pytest.raises(ToolError):
-            await api.attach_file(BEARER["Authorization"], "/work/missing", None)
+            await api.attach_file(BEARER["Authorization"], None, "/work/missing", None)
         await api.aclose()
 
         [(request, _)] = routes.calls
@@ -40,7 +40,7 @@ class TestPilotWorkApi:
         api = PilotWorkApi(url)
 
         with pytest.raises(ToolError) as refused:
-            await api.register_document(BEARER["Authorization"], "/work/a.md")
+            await api.register_document(BEARER["Authorization"], None, "/work/a.md")
         await api.aclose()
 
         assert str(refused.value) == (
@@ -67,7 +67,7 @@ class TestPilotWorkApi:
         api = PilotWorkApi(API_URL, transport=transport)
 
         with pytest.raises(ToolError) as refused:
-            await api.register_document(BEARER["Authorization"], "/work/a.md")
+            await api.register_document(BEARER["Authorization"], None, "/work/a.md")
         await api.aclose()
 
         assert str(refused.value) == (

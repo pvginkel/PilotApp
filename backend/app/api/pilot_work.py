@@ -4,7 +4,9 @@ makes for a worker session's tools, under the session's bearer.
 Registered on the app, not on `api_bp`, so the OIDC gate never sees them, and
 outside `/api/`, the one prefix the site's nginx forwards, so that only the
 pod's loopback reaches them, as it reaches `/metrics` (review 2). Every call
-passes the gate below first.
+passes the gate below first, and carries the tool call's id in the
+`Tool-Use-Id` header where Claude Code gave one, which its effect's record
+names.
 """
 
 from typing import Any
@@ -21,6 +23,7 @@ from app.schemas.pilot_work import (
     RegisteredDocumentSchema,
 )
 from app.services.container import ServiceContainer
+from app.services.effect_service import TOOL_USE_ID_HEADER
 from app.services.pilot_work_service import PilotWorkService
 from app.utils.auth import public
 from app.utils.spectree_config import api
@@ -71,7 +74,9 @@ def register_document(
         502: The controller did not answer, or refused for a reason of its own
     """
     body = RegisterDocumentRequestSchema.model_validate(request.get_json())
-    registration = pilot_work_service.register_document(g.worker, body.path)
+    registration = pilot_work_service.register_document(
+        g.worker, body.path, request.headers.get(TOOL_USE_ID_HEADER)
+    )
     answer = RegisteredDocumentSchema(id=registration.item.id)
     return answer.model_dump(mode="json"), 201 if registration.minted else 200
 
@@ -109,6 +114,8 @@ def attach_file(
         502: The controller did not answer, or refused for a reason of its own
     """
     body = AttachFileRequestSchema.model_validate(request.get_json())
-    attachments = pilot_work_service.attach_file(g.worker, body.path, body.to)
+    attachments = pilot_work_service.attach_file(
+        g.worker, body.path, body.to, request.headers.get(TOOL_USE_ID_HEADER)
+    )
     answer = AttachedFilesSchema(ids=[attachment.id for attachment in attachments])
     return answer.model_dump(mode="json"), 201

@@ -115,6 +115,8 @@ class ChatKind(StrEnum):
 class CloseCause(StrEnum):
     TIMEOUT = "timeout"
     CREATED = "created"
+    FINISHED = "finished"
+    REOPENED = "reopened"
 
 
 class EffectKind(StrEnum):

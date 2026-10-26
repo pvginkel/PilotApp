@@ -107,7 +107,8 @@ class TestGetSessionRecords:
             session_id=project_session.id,
             seq=1,
             author_user_id=person.id,
-            message="What next?",
+            message="The chat's brief.\n\nWhat next?",
+            words="What next?",
             started_at=datetime.now(UTC),
         )
         session.add(turn)

@@ -1,8 +1,10 @@
 """`pilot-work`: a bearer resolved to its work item's Session,
 `register_document` (TD §4.5, F84, F85.1, ruling D1) and `attach_file`
-(F85.2, F36.1), against the fake controller."""
+(F85.2, F36.1), each call's Effects (R18, F41), against the fake controller."""
 
 import uuid
+from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 from dependency_injector import providers
@@ -20,12 +22,14 @@ from app.exceptions import (
 from app.models import (
     Attachment,
     Document,
+    Effect,
     Environment,
     Item,
     ItemAttachment,
     Project,
+    Turn,
 )
-from app.models.reference import SessionState
+from app.models.reference import EffectKind, RecordKind, SessionState
 from app.services.container import ServiceContainer
 from app.services.controller_client import (
     FILE_SIZE_CAP,
@@ -37,6 +41,7 @@ from app.services.controller_client import (
 )
 from app.services.pilot_server import token_hash
 from app.services.pilot_work_service import Worker
+from app.services.session_record_service import read_records
 from tests.support.fake_controller import ServedFakeController
 
 TOKEN = "worker-token"
@@ -175,7 +180,7 @@ class TestPilotWorkServiceRegisterDocument:
         fake_controller.put_file(environment.id, PATH, TEXT.encode())
 
         registration = container.pilot_work_service().register_document(
-            _worker(run), PATH
+            _worker(run), PATH, None
         )
 
         item = registration.item
@@ -212,10 +217,10 @@ class TestPilotWorkServiceRegisterDocument:
         fake_controller.add_environment(environment.id)
         fake_controller.put_file(environment.id, PATH, TEXT.encode())
         pilot_work = container.pilot_work_service()
-        first = pilot_work.register_document(_worker(run), PATH)
+        first = pilot_work.register_document(_worker(run), PATH, None)
         fake_controller.put_file(environment.id, PATH, b"# Refinement\n")
 
-        again = pilot_work.register_document(_worker(run), PATH)
+        again = pilot_work.register_document(_worker(run), PATH, None)
 
         assert (again.item.id, again.minted) == (first.item.id, False)
         assert _items(session) == 2
@@ -235,7 +240,7 @@ class TestPilotWorkServiceRegisterDocument:
         fake_controller.put_file("example-env-2", PATH, TEXT.encode())
 
         with pytest.raises(InvalidOperationException) as refused:
-            container.pilot_work_service().register_document(_worker(run), PATH)
+            container.pilot_work_service().register_document(_worker(run), PATH, None)
 
         assert refused.value.cause == (
             f"the controller answered 404 not-found: no such file or directory: {PATH!r}"
@@ -299,7 +304,7 @@ class TestPilotWorkServiceRegisterDocument:
         )
 
         with pytest.raises(InvalidOperationException) as refused:
-            container.pilot_work_service().register_document(_worker(run), path)
+            container.pilot_work_service().register_document(_worker(run), path, None)
 
         assert refused.value.operation == f"register document {path}"
         assert refused.value.cause == cause
@@ -320,7 +325,7 @@ class TestPilotWorkServiceRegisterDocument:
         fake_controller.put_file(environment.id, PATH, broken.encode("latin-1"))
 
         with pytest.raises(InvalidOperationException) as refused:
-            container.pilot_work_service().register_document(_worker(run), PATH)
+            container.pilot_work_service().register_document(_worker(run), PATH, None)
 
         assert refused.value.cause == (
             "its text holds faults: line 2: front matter: `for: nobody` names no"
@@ -344,7 +349,7 @@ class TestPilotWorkServiceRegisterDocument:
         fake_controller.unreadable(environment.id)
 
         with pytest.raises(ControllerProblem) as failed:
-            container.pilot_work_service().register_document(_worker(run), PATH)
+            container.pilot_work_service().register_document(_worker(run), PATH, None)
 
         assert failed.value.problem_type is ControllerProblemType.ENVIRONMENT_UNREADABLE
         assert _items(session) == 1
@@ -364,7 +369,7 @@ class TestPilotWorkServiceRegisterDocument:
         fake_controller.outage()
 
         with pytest.raises(ControllerUnreachable):
-            container.pilot_work_service().register_document(_worker(run), PATH)
+            container.pilot_work_service().register_document(_worker(run), PATH, None)
 
         assert _items(session) == 1
 
@@ -429,7 +434,7 @@ class TestPilotWorkServiceAttachFile:
         fake_controller.put_file(environment.id, PATH, TEXT.encode())
 
         [attachment] = container.pilot_work_service().attach_file(
-            _worker(run), PATH, None
+            _worker(run), PATH, None, None
         )
 
         assert (
@@ -459,7 +464,7 @@ class TestPilotWorkServiceAttachFile:
         fake_controller.put_file(environment.id, PATH, TEXT.encode())
 
         attachments = container.pilot_work_service().attach_file(
-            _worker(run), f"{FOLDER}/", None
+            _worker(run), f"{FOLDER}/", None, None
         )
 
         source = environment.id
@@ -488,9 +493,9 @@ class TestPilotWorkServiceAttachFile:
         fake_controller.put_file(environment.id, PATH, TEXT.encode())
         fake_controller.put_file(environment.id, f"{FOLDER}/a.md", b"# A\n")
         pilot_work = container.pilot_work_service()
-        document = pilot_work.register_document(_worker(run), PATH).item
+        document = pilot_work.register_document(_worker(run), PATH, None).item
 
-        [attachment] = pilot_work.attach_file(_worker(run), FOLDER, document.id)
+        [attachment] = pilot_work.attach_file(_worker(run), FOLDER, document.id, None)
 
         assert attachment.title == "A"
         assert _attached(session, document) == [
@@ -521,7 +526,7 @@ class TestPilotWorkServiceAttachFile:
 
         for to in (elsewhere.id, uuid.uuid4()):
             with pytest.raises(RecordNotFoundException) as refused:
-                pilot_work.attach_file(_worker(run), PATH, to)
+                pilot_work.attach_file(_worker(run), PATH, to, None)
 
             assert refused.value.message == f"Item {to} was not found"
         assert _attachments(session) == 0
@@ -573,7 +578,7 @@ class TestPilotWorkServiceAttachFile:
         )
 
         with pytest.raises(InvalidOperationException) as refused:
-            container.pilot_work_service().attach_file(_worker(run), path, None)
+            container.pilot_work_service().attach_file(_worker(run), path, None, None)
 
         assert refused.value.operation == f"attach {path}"
         assert refused.value.cause == cause
@@ -618,7 +623,7 @@ class TestPilotWorkServiceAttachFile:
         )
 
         with pytest.raises(InvalidOperationException) as refused:
-            container.pilot_work_service().attach_file(_worker(run), PATH, None)
+            container.pilot_work_service().attach_file(_worker(run), PATH, None, None)
 
         assert refused.value.operation == f"attach {PATH}"
         assert refused.value.cause == problem.cause
@@ -643,7 +648,7 @@ class TestPilotWorkServiceAttachFile:
             fake_controller.put_file(environment.id, f"{FOLDER}/{number}.md", b"x")
 
         with pytest.raises(InvalidOperationException) as refused:
-            container.pilot_work_service().attach_file(_worker(run), FOLDER, None)
+            container.pilot_work_service().attach_file(_worker(run), FOLDER, None, None)
 
         assert refused.value.cause == (
             f"the folder holds {MAX_CALL_FILES + 1} files, over the"
@@ -669,7 +674,7 @@ class TestPilotWorkServiceAttachFile:
         fake_controller.put_file(environment.id, f"{FOLDER}/last.bin", b"x")
 
         with pytest.raises(InvalidOperationException) as refused:
-            container.pilot_work_service().attach_file(_worker(run), FOLDER, None)
+            container.pilot_work_service().attach_file(_worker(run), FOLDER, None, None)
 
         assert refused.value.cause == (
             f"the folder's files are over the {MAX_CALL_SIZE}-byte cap of one call"
@@ -691,7 +696,7 @@ class TestPilotWorkServiceAttachFile:
         fake_controller.unreadable(environment.id)
 
         with pytest.raises(ControllerProblem) as failed:
-            container.pilot_work_service().attach_file(_worker(run), PATH, None)
+            container.pilot_work_service().attach_file(_worker(run), PATH, None, None)
 
         assert failed.value.problem_type is ControllerProblemType.ENVIRONMENT_UNREADABLE
         assert _attachments(session) == 0
@@ -711,6 +716,249 @@ class TestPilotWorkServiceAttachFile:
         fake_controller.outage()
 
         with pytest.raises(ControllerUnreachable):
-            container.pilot_work_service().attach_file(_worker(run), PATH, None)
+            container.pilot_work_service().attach_file(_worker(run), PATH, None, None)
 
         assert _attachments(session) == 0
+
+
+TOOL_USE_ID = "toolu_01ABC"
+
+
+def _turn_in_flight(session: DbSession, run: models.Session) -> Turn:
+    """The worker's turn, its brief sent and not ended."""
+    turn = Turn(
+        session_id=run.id,
+        seq=1,
+        message="Refine the camp.",
+        started_at=datetime.now(UTC),
+    )
+    session.add(turn)
+    session.flush()
+    return turn
+
+
+def _effect_records(session: DbSession, run: models.Session) -> list[Any]:
+    """The payloads of the Session's records, every one an effect's here."""
+    return [
+        stored.record.payload for stored in read_records(session, run.id, limit=100)
+    ]
+
+
+def _effects(session: DbSession) -> list[tuple[int, int, EffectKind, uuid.UUID | None]]:
+    return [
+        (effect.turn_id, effect.record_id, effect.kind_code, effect.item_id)
+        for effect in session.scalars(select(Effect).order_by(Effect.id))
+    ]
+
+
+class TestPilotWorkServiceEffects:
+    """Each call that changed the record writes its Effects, placed by one
+    `server` record of the worker's turn (R18, F41)."""
+
+    def test_a_registration_is_registered_naming_its_place(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        turn = _turn_in_flight(session, run)
+        fake_controller.add_environment(environment.id)
+        fake_controller.put_file(environment.id, PATH, TEXT.encode())
+
+        item = (
+            container.pilot_work_service()
+            .register_document(_worker(run), PATH, TOOL_USE_ID)
+            .item
+        )
+
+        [record] = read_records(session, run.id, limit=10)
+        assert (record.record.kind_code, record.turn) == (RecordKind.SERVER, 1)
+        assert record.record.payload == {
+            "type": "effect",
+            "toolUseId": TOOL_USE_ID,
+            "effect": {
+                "verb": "Registered",
+                "label": "inbox/2",
+                "itemId": str(item.id),
+            },
+        }
+        assert _effects(session) == [
+            (turn.id, record.record.id, EffectKind.REGISTERED, item.id)
+        ]
+
+    def test_the_path_registered_again_changes_nothing_and_records_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        _turn_in_flight(session, run)
+        fake_controller.add_environment(environment.id)
+        fake_controller.put_file(environment.id, PATH, TEXT.encode())
+        pilot_work = container.pilot_work_service()
+        pilot_work.register_document(_worker(run), PATH, TOOL_USE_ID)
+
+        pilot_work.register_document(_worker(run), PATH, "toolu_02")
+
+        assert [payload["toolUseId"] for payload in _effect_records(session, run)] == [
+            TOOL_USE_ID
+        ]
+        assert len(_effects(session)) == 1
+
+    def test_a_refused_registration_records_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        _turn_in_flight(session, run)
+        fake_controller.add_environment(environment.id)
+        fake_controller.put_file(environment.id, PATH, b"```question id=Q1\n")
+
+        with pytest.raises(InvalidOperationException):
+            container.pilot_work_service().register_document(
+                _worker(run), PATH, TOOL_USE_ID
+            )
+
+        assert _effect_records(session, run) == []
+        assert _effects(session) == []
+
+    def test_a_file_attached_is_attached_by_its_title_on_its_item(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        turn = _turn_in_flight(session, run)
+        fake_controller.add_environment(environment.id)
+        fake_controller.put_file(
+            environment.id, PATH, b"---\ntitle: Diagnosis of the 401s\n---\n"
+        )
+
+        [attachment] = container.pilot_work_service().attach_file(
+            _worker(run), PATH, None, TOOL_USE_ID
+        )
+
+        [record] = read_records(session, run.id, limit=10)
+        assert record.record.payload == {
+            "type": "effect",
+            "toolUseId": TOOL_USE_ID,
+            "effect": {
+                "verb": "Attached",
+                "label": "Diagnosis of the 401s",
+                "itemId": str(run.id),
+            },
+        }
+        [effect] = session.scalars(select(Effect)).all()
+        assert (
+            effect.turn_id,
+            effect.record_id,
+            effect.kind_code,
+            effect.attachment_id,
+        ) == (turn.id, record.record.id, EffectKind.ATTACHED, attachment.id)
+
+    def test_a_folder_attached_is_one_line_for_an_effect_per_file(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        _turn_in_flight(session, run)
+        fake_controller.add_environment(environment.id)
+        for name in ("summary.md", "data/answers.json", "data/raw/b.csv"):
+            fake_controller.put_file(environment.id, f"{FOLDER}/{name}", b"x")
+        fake_controller.put_file(environment.id, PATH, TEXT.encode())
+        pilot_work = container.pilot_work_service()
+        document = pilot_work.register_document(_worker(run), PATH, "toolu_01").item
+
+        attachments = pilot_work.attach_file(
+            _worker(run), f"{FOLDER}/", document.id, "toolu_02"
+        )
+
+        registered, attached = read_records(session, run.id, limit=10)
+        assert attached.record.payload == {
+            "type": "effect",
+            "toolUseId": "toolu_02",
+            "effect": {
+                "verb": "Attached",
+                "label": "survey, 3 files",
+                "itemId": str(document.id),
+            },
+        }
+        assert [
+            (effect.record_id, effect.kind_code, effect.attachment_id)
+            for effect in session.scalars(
+                select(Effect)
+                .where(Effect.record_id == attached.record.id)
+                .order_by(Effect.id)
+            )
+        ] == [
+            (attached.record.id, EffectKind.ATTACHED, attachment.id)
+            for attachment in attachments
+        ]
+        assert registered.record.payload["effect"]["verb"] == "Registered"
+
+    def test_a_refused_attachment_records_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        _turn_in_flight(session, run)
+        fake_controller.add_environment(environment.id)
+
+        with pytest.raises(InvalidOperationException):
+            container.pilot_work_service().attach_file(
+                _worker(run), "/work/Example/missing.md", None, TOOL_USE_ID
+            )
+
+        assert _effect_records(session, run) == []
+        assert _effects(session) == []
+
+    def test_a_call_outside_a_turn_changes_the_record_and_records_no_effect(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """pilot-work still admits a bearer outside its turn (P-60): the
+        call stands, with no Turn to record its Effects under."""
+        run = _session(session, container, project, environment)
+        fake_controller.add_environment(environment.id)
+        fake_controller.put_file(environment.id, PATH, TEXT.encode())
+        pilot_work = container.pilot_work_service()
+
+        registration = pilot_work.register_document(_worker(run), PATH, TOOL_USE_ID)
+        [attachment] = pilot_work.attach_file(_worker(run), PATH, None, TOOL_USE_ID)
+
+        assert registration.minted
+        assert attachment.id is not None
+        assert _effect_records(session, run) == []
+        assert _effects(session) == []

@@ -3,6 +3,7 @@ makes for a worker session's tools, under the session's bearer, outside `/api/`
 (review 2), pinned as the surface they are."""
 
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 from flask import Flask
@@ -18,11 +19,13 @@ from app.models import (
     Item,
     ItemAttachment,
     Project,
+    Turn,
 )
 from app.models.reference import SessionState
 from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerClient
 from app.services.pilot_server import token_hash
+from app.services.session_record_service import read_records
 from tests.support.fake_controller import ServedFakeController, client_of
 
 DOCUMENTS = "/tools/pilot-work/documents"
@@ -438,3 +441,72 @@ class TestAttachFile:
 
         assert response.status_code == 502
         assert "503 environment-unreadable" in response.get_json()["error"]
+
+
+class TestTheToolUseId:
+    """The `Tool-Use-Id` header Pilot's MCP server passes names the call in
+    its effect's record (F41)."""
+
+    def _turn_in_flight(self, session: DbSession, run: models.Session) -> None:
+        session.add(
+            Turn(
+                session_id=run.id,
+                seq=1,
+                message="Refine the camp.",
+                started_at=datetime.now(UTC),
+            )
+        )
+        session.flush()
+
+    def test_a_registration_names_its_call(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        self._turn_in_flight(session, run)
+        _file(fake_controller, environment)
+
+        response = client.post(
+            DOCUMENTS,
+            json={"path": PATH},
+            headers=_bearer() | {"Tool-Use-Id": "toolu_01ABC"},
+        )
+
+        assert response.status_code == 201
+        [record] = read_records(session, run.id, limit=10)
+        assert record.record.payload == {
+            "type": "effect",
+            "toolUseId": "toolu_01ABC",
+            "effect": {
+                "verb": "Registered",
+                "label": "inbox/2",
+                "itemId": response.get_json()["id"],
+            },
+        }
+
+    def test_an_attachment_without_the_header_names_no_call(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        self._turn_in_flight(session, run)
+        _file(fake_controller, environment)
+
+        response = client.post(ATTACHMENTS, json={"path": PATH}, headers=_bearer())
+
+        assert response.status_code == 201
+        [record] = read_records(session, run.id, limit=10)
+        assert record.record.payload["toolUseId"] is None
+        assert record.record.payload["effect"]["verb"] == "Attached"

@@ -116,9 +116,12 @@ async def call(
     tool: str,
     arguments: dict[str, Any],
     headers: dict[str, str] = BEARER,
+    meta: dict[str, Any] | None = None,
 ) -> CallToolResult:
+    """One `tools/call`, with `meta` as its `_meta`, as Claude Code sends its
+    tool-use id."""
     async with mcp_session(app, headers) as (session, _):
-        return await session.call_tool(tool, arguments)
+        return await session.call_tool(tool, arguments, meta=meta)
 
 
 def error_text(result: CallToolResult) -> str:

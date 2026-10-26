@@ -796,6 +796,7 @@ class TestDataService:
         return self.pilot_work_service.register_document(
             Worker(session.id, session.project_id, session.environment_id, item.id),
             path,
+            None,
         )
 
     def attach(

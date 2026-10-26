@@ -50,11 +50,13 @@ def records(container: ServiceContainer) -> SessionRecordService:
 
 
 def _turn(db: DbSession, run: models.Session, seq: int, author: User | None) -> Turn:
+    """Turn `seq`; a person's sends the server's text before their words."""
     turn = Turn(
         session_id=run.id,
         seq=seq,
         author_user_id=None if author is None else author.id,
-        message=f"Message {seq}",
+        message=f"Message {seq}" if author is None else f"Brief.\n\nWords {seq}",
+        words=None if author is None else f"Words {seq}",
         started_at=datetime.now(UTC),
     )
     db.add(turn)
@@ -220,9 +222,10 @@ class TestReadRecords:
 
         server, send, claude = read_records(session, project_session.id, limit=10)
 
-        assert (server.turn, server.author, server.message) == (None, None, None)
-        assert (send.turn, send.author, send.message) == (2, "ada", "Message 2")
-        assert (claude.turn, claude.author, claude.message) == (2, None, None)
+        assert (server.turn, server.author, server.words) == (None, None, None)
+        # The words alone, never what was sent before them (DB assertion 219).
+        assert (send.turn, send.author, send.words) == (2, "ada", "Words 2")
+        assert (claude.turn, claude.author, claude.words) == (2, None, None)
         assert claude.record.raw_offset == 120
         assert claude.record.controller_session == "pilot-1"
 

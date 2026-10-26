@@ -22,6 +22,7 @@ from app.services.auth_service import AuthService
 from app.services.condition_service import ConditionService
 from app.services.controller_client import ControllerClient
 from app.services.controller_outage import ControllerOutage
+from app.services.effect_service import EffectService
 from app.services.environment_service import EnvironmentService
 from app.services.fake_controller import FakeController
 from app.services.fleet_consumer import FleetConsumer
@@ -388,6 +389,11 @@ class ServiceContainer(containers.DeclarativeContainer):
         tree_service=tree_service,
     )
 
+    # A tool call's Effects, placed by a record of its Turn (F41)
+    effect_service = providers.Factory(
+        EffectService, db=db_session, session_record_service=session_record_service
+    )
+
     # A worker session's tools, under its bearer (TD §4.5, F85); the client is
     # built at the call, so the service is built without a controller
     pilot_work_service = providers.Factory(
@@ -397,6 +403,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         document_service=document_service,
         ingest_service=ingest_service,
         attach_service=attach_service,
+        effect_service=effect_service,
     )
 
     # The signed-in person on the record (F137), and what links in text (F93)

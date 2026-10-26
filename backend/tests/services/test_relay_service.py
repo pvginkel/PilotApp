@@ -53,6 +53,7 @@ from app.services.relay_service import (
     SEND_FAILED,
     SESSION_GONE,
     RelayService,
+    Words,
 )
 from app.services.session_record_service import (
     RECORDS_WRITTEN_TOTAL,
@@ -240,7 +241,7 @@ def _send(
     author: User | None = None,
 ) -> Turn:
     turn = relays.send(
-        db, run.id, message, author_user_id=None if author is None else author.id
+        db, run.id, message, words=None if author is None else Words(author.id, message)
     )
     clear_after_commit_callbacks()
     return turn
@@ -324,7 +325,7 @@ class TestSend:
         assert turn.started_at >= before
         assert (turn.ended_at, turn.error) == (None, None)
         [send] = _records(session, idle.id)
-        assert (send.record.kind_code, send.turn, send.author, send.message) == (
+        assert (send.record.kind_code, send.turn, send.author, send.words) == (
             RecordKind.SEND,
             1,
             "ada",
@@ -338,6 +339,37 @@ class TestSend:
             "since": turn.started_at.isoformat(),
         }
         assert _row(session).stop_due_at is None
+
+    def test_a_persons_send_record_shows_their_words_alone(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        idle: models.Session,
+        person: User,
+    ) -> None:
+        """What was sent may hold the server's text before the words (DB
+        assertions 219, 251)."""
+        words = '<quoted_block id="a/D1">Which?</quoted_block id="a/D1"> Blue.'
+
+        turn = relays.send(
+            session,
+            idle.id,
+            f"The chat's brief.\n\n{words}",
+            words=Words(person.id, words),
+        )
+        clear_after_commit_callbacks()
+
+        assert (turn.author_user_id, turn.message, turn.words) == (
+            person.id,
+            f"The chat's brief.\n\n{words}",
+            words,
+        )
+        [send] = _records(session, idle.id)
+        assert (send.record.kind_code, send.author, send.words) == (
+            RecordKind.SEND,
+            "ada",
+            words,
+        )
 
     def test_the_servers_own_turn_has_no_send_record(
         self, session: DbSession, relays: RelayService, idle: models.Session
@@ -405,7 +437,12 @@ class TestSend:
         fake_controller.busy(ENV, controller_session)
 
         with pytest.raises(InvalidOperationException, match="a turn is in flight"):
-            relays.send(session, idle.id, "Rename the badge", author_user_id=person.id)
+            relays.send(
+                session,
+                idle.id,
+                "Rename the badge",
+                words=Words(person.id, "Rename the badge"),
+            )
 
         assert (
             session.scalars(select(Turn).where(Turn.session_id == idle.id)).all() == []
@@ -435,7 +472,12 @@ class TestSend:
         fake_controller.busy(ENV, controller_session)
 
         with pytest.raises(InvalidOperationException, match="a turn is in flight"):
-            relays.send(session, idle.id, "Rename the badge", author_user_id=person.id)
+            relays.send(
+                session,
+                idle.id,
+                "Rename the badge",
+                words=Words(person.id, "Rename the badge"),
+            )
 
         assert asked == []
         assert _records(session, idle.id) == []
@@ -2373,7 +2415,9 @@ def _send_committed(
     author_id: uuid.UUID,
 ) -> None:
     with scoped_session(container) as db:
-        turn = relays.send(db, run_id, "Rename the badge", author_user_id=author_id)
+        turn = relays.send(
+            db, run_id, "Rename the badge", words=Words(author_id, "Rename the badge")
+        )
         assert turn.error is None
 
 
@@ -2761,7 +2805,9 @@ class TestRestartRecovery:
 
         with scoped_session(container) as db:
             with pytest.raises(InvalidOperationException):
-                relays.send(db, run_id, "And the logo", author_user_id=person_id)
+                relays.send(
+                    db, run_id, "And the logo", words=Words(person_id, "And the logo")
+                )
 
         loop_log.wait_for(rf"Loop relay:{run_id} started")
         lines = raw_turn("turn_text")
