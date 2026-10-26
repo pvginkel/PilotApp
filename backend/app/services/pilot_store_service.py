@@ -24,7 +24,12 @@ from prometheus_client import Counter
 from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
-from app.engine.attachments import AttachService, Copy
+from app.engine.attachments import (
+    MAX_CALL_FILES,
+    MAX_CALL_SIZE,
+    AttachService,
+    Copy,
+)
 from app.engine.documents import DocumentService, listed
 from app.engine.ingest import IngestService
 from app.engine.record import RecordService
@@ -200,7 +205,7 @@ class PilotStoreService:
         """`item` added to the brain's project, with the attachments it
         carries hung on it in their order (F86.1, F36.5): one already made by
         its id, outside material copied in as `attach_file` copies it, a batch
-        per source. The call `tool_use_id`'s effect is "Added · <kind> · <title>",
+        per source, every source's files under the caps of one call. The call `tool_use_id`'s effect is "Added · <kind> · <title>",
         its Effects the item's and one per attachment hung.
 
         A prose item is minted with its file, born with its title and its
@@ -218,8 +223,8 @@ class PilotStoreService:
             InvalidOperationException: a wait, which Pilot does not take yet;
                 a field the item's kind does not take, or one it needs,
                 missing; a prose text that holds faults, each with its line;
-                material that cannot be copied, nothing attached; the start a
-                work item takes refused.
+                material that cannot be copied or over the caps of one call,
+                nothing attached; the start a work item takes refused.
             ExternalServiceException: the controller did not answer, or
                 refused for a reason of its own.
         """
@@ -228,12 +233,7 @@ class PilotStoreService:
         refusal = _shape_refusal(item.kind, given)
         if refusal is not None:
             raise InvalidOperationException(operation, refusal)
-        carried = [
-            self._attachment(brain, ref)
-            if _is_id(ref)
-            else self._outside(ref, operation)
-            for ref in item.attachments
-        ]
+        carried = self._carried(brain, item.attachments, operation)
         project = self._project(brain)
         session = self.db.get_one(AgentSession, brain.session_id)
         path: str | None = None
@@ -614,6 +614,35 @@ class PilotStoreService:
         if task is None:
             raise RecordNotFoundException("Plan task", f"{project.id}/{task_id}")
         return task
+
+    def _carried(
+        self, brain: Brain, refs: Sequence[str], operation: str
+    ) -> list[Attachment | _Outside]:
+        """What `add_item` hangs on its item, in the call's order: each
+        attachment made, and each source's material read, its sources' files
+        under the caps of one call together, as one attach call's are."""
+        carried: list[Attachment | _Outside] = []
+        files = size = 0
+        for ref in refs:
+            if _is_id(ref):
+                carried.append(self._attachment(brain, ref))
+                continue
+            outside = self._outside(ref, operation)
+            files += len(outside.copies)
+            size += sum(len(copy.content) for copy in outside.copies)
+            if files > MAX_CALL_FILES:
+                raise InvalidOperationException(
+                    operation,
+                    f"its material is {files} files, over the {MAX_CALL_FILES}"
+                    "-file cap of one call",
+                )
+            if size > MAX_CALL_SIZE:
+                raise InvalidOperationException(
+                    operation,
+                    f"its material is over the {MAX_CALL_SIZE}-byte cap of one call",
+                )
+            carried.append(outside)
+        return carried
 
     def _attachment(self, brain: Brain, attachment_id: str) -> Attachment:
         attachment = self.db.get(Attachment, uuid.UUID(attachment_id))

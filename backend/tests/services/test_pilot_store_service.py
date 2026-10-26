@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.database import scoped_session
-from app.engine.attachments import copied
+from app.engine.attachments import MAX_CALL_FILES, MAX_CALL_SIZE, copied
 from app.engine.bus import EngineEvent, ProjectChanged
 from app.exceptions import (
     AuthenticationException,
@@ -50,7 +50,7 @@ from app.models.reference import (
 from app.schemas.pilot_store import AddItemRequestSchema
 from app.schemas.timeline import HeldReason
 from app.services.container import ServiceContainer
-from app.services.controller_client import ControllerClient
+from app.services.controller_client import FILE_SIZE_CAP, ControllerClient
 from app.services.controller_outage import ControllerOutage
 from app.services.pilot_server import token_hash
 from app.services.pilot_store_service import (
@@ -1811,6 +1811,79 @@ class TestPilotStoreServiceAddItemAttachments:
             f" not-found: no such file or directory: '{DESIGN}/gone.md'"
         )
         assert session.scalars(select(Item)).all() == []
+        assert session.scalars(select(Attachment)).all() == []
+
+
+class TestPilotStoreServiceAddItemCaps:
+    def test_sources_over_the_calls_cap_of_files_together_are_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        fake_controller.add_environment(ELSEWHERE)
+        for number in range(MAX_CALL_FILES):
+            fake_controller.put_file(ELSEWHERE, f"{DESIGN}/{number}.md", b"x")
+        fake_controller.put_file(ELSEWHERE, "/work/Elsewhere/one.md", b"x")
+        run = _brain(session, project, environment)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _service(container).add_item(
+                _admitted(run),
+                _added(
+                    kind="notice",
+                    markdown=NOTICE,
+                    attachments=[
+                        f"{ELSEWHERE}:{DESIGN}",
+                        f"{ELSEWHERE}:/work/Elsewhere/one.md",
+                    ],
+                ),
+                TOOL_USE_ID,
+            )
+
+        assert refused.value.cause == (
+            f"its material is {MAX_CALL_FILES + 1} files, over the"
+            f" {MAX_CALL_FILES}-file cap of one call"
+        )
+        assert session.scalars(select(Item)).all() == []
+
+    def test_sources_over_the_calls_cap_of_bytes_together_are_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        fake_controller.add_environment(ELSEWHERE)
+        for number in range(MAX_CALL_SIZE // FILE_SIZE_CAP):
+            fake_controller.put_file(
+                ELSEWHERE, f"{DESIGN}/{number}.bin", bytes(FILE_SIZE_CAP)
+            )
+        fake_controller.put_file(ELSEWHERE, "/work/Elsewhere/one.md", b"x")
+        run = _brain(session, project, environment)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _service(container).add_item(
+                _admitted(run),
+                _added(
+                    kind="notice",
+                    markdown=NOTICE,
+                    attachments=[
+                        f"{ELSEWHERE}:{DESIGN}",
+                        f"{ELSEWHERE}:/work/Elsewhere/one.md",
+                    ],
+                ),
+                TOOL_USE_ID,
+            )
+
+        assert refused.value.cause == (
+            f"its material is over the {MAX_CALL_SIZE}-byte cap of one call"
+        )
         assert session.scalars(select(Attachment)).all() == []
 
 
