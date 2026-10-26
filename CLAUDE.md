@@ -8,7 +8,8 @@ talks to Pilot's brain, a headless Claude Code session in a store environment.
 **Its first screens are in**: the handle step, the project list, a project's head and its timeline,
 its work items, its documents in the overlay and the side panel, on the record's schema, the engine
 behind it (`backend/app/engine/`), the sync of the store's tree, the server's jobs on the KubeCoder
-controller, and Pilot's MCP server with the worker's round trip. Every green build of `main` deploys
+controller, Pilot's MCP server with the worker's round trip, and the project's chat behind the
+API, with the brain's tools. Every green build of `main` deploys
 itself to the dev stage at `https://pilot-dev.home`, and production at `https://pilot.ginbov.nl`
 runs what the operator promotes from there ([`docs/deployment.md`](docs/deployment.md)). Version 1
 is built from the design record in `../PilotAppSpecs/design/` (start at its README), along the steps
@@ -190,6 +191,8 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
   environments on demand and Pilot's own, with its fake; the sessions, the gate and its slot, their
   records, relay and live stream, Stop and Resume; a work item's status, its line and its session
   log.
-- [`docs/mcp.md`](docs/mcp.md), [`docs/round-trip.md`](docs/round-trip.md): Pilot's MCP server,
-  handed to every session it creates, and the worker's tools; a registered document's read at the
-  run's end, its write-back and the run's continuation.
+- [`docs/mcp.md`](docs/mcp.md), [`docs/round-trip.md`](docs/round-trip.md),
+  [`docs/chats.md`](docs/chats.md): Pilot's MCP server, handed to every session it creates, the
+  worker's tools and the brain's; a registered document's read at the run's end, its write-back and
+  the run's continuation; a project's chat, its start in the store, its brief, its close and
+  `chat.md`.

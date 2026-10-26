@@ -6,8 +6,9 @@ and as the screens show it: its status, its live event, its line and its actions
 and its session log. What the server does to start it through the gate, stop it and resume it is
 [`sessions.md`](sessions.md)'s, and the timeline it stands on [`timeline.md`](timeline.md)'s.
 
-The record's testing route `POST /api/testing/projects/<id>/work` places one by repository, on every
-stage but `prd` ([`projects.md`](projects.md)). The app places one itself as a run's continuation:
+The brain places one with `add_item`, started on add by its repository ([`mcp.md`](mcp.md)), and the
+record's testing route `POST /api/testing/projects/<id>/work` places one so, on every stage but
+`prd` ([`projects.md`](projects.md)). The app places one itself as a run's continuation:
 the close that leaves none of the documents a work item's run registered open places the work item
 that continues its conversation, titled as the run, on its plan task while the plan still has it,
 after the answered items ([`round-trip.md`](round-trip.md)).
@@ -109,11 +110,16 @@ An address that names no work item of the project reads "The session log did not
 - **Its body**: the session's records rendered as the chat renders a reply, one reply per turn
   (`ReplyBody`), bare in the log's column, 6px in from either side (D002): the text as Markdown, the
   runs of tool calls with their summaries, a sub-agent's card with its own steps, the phantom of the
-  text block under way, a failed turn's error, and the server's word on a document the session
-  registered, as a notice: "Could not read <path> because <reason>" for a read that failed at its
-  run's end, "Could not write <path> back because <reason>" for a write-back the controller
-  refused ([`round-trip.md`](round-trip.md)). An earlier turn ends on its time, with " ·
-  Stopped" after an interrupted one and " · Failed" after a failed one.
+  text block under way, a failed turn's error, each effect of the session's calls, and the
+  server's word on a document the session registered, as a notice: "Could not read <path> because
+  <reason>" for a read that failed at its run's end, "Could not write <path> back because
+  <reason>" for a write-back the controller refused ([`round-trip.md`](round-trip.md)). A call that changed the record is its effect line
+  in its own place, never inside a run of calls, a check before `<verb> · <label>`, "Registered ·
+  inbox/3" or "Attached · <title>" ([`mcp.md`](mcp.md)) (`EffectLine`,
+  `components/chat/tool-call.tsx`); its click goes to its block's address, else its item's
+  ([`timeline.md`](timeline.md)). An
+  earlier turn ends on its time, with " · Stopped" after an interrupted one and " · Failed" after a
+  failed one.
 - **Its tail**: while the item is held, starts or runs, the working cue: the held reason, what the
   turn in flight is doing, or "Starting" and "Waiting for Pilot" before its first record. Otherwise
   how it ended (`sessionLogTail()`): "Stopped by you · <time>", "Stopped by <name> · <time>", the
@@ -136,7 +142,12 @@ at its environment stopped under it, or, where it ended with no record, where a 
 begin. A `read-failed` or `write-back-refused` record is written after the run's last Turn ended,
 and stands at that Turn's end; a call or a sub-agent still running then was stopped with it, and
 draws with no spinner. A Stop of a held or a starting item ends its Turn with no record. An
-`isError` result shows its text as the failure, or "The turn failed." where it has none.
+`isError` result shows its text as the failure, or "The turn failed." where it has none. An effect
+stands on the call whose tool-use id it names, whether its record was written before or after the
+call's `assistant` line: one whose call's line has not come yet waits for it, so a streamed log
+shows it on its own first and then on its call, and one whose call no record shows, with no
+tool-use id, is a step of its own in its record's place (`buildChatView`,
+`frontend/src/lib/chat/view.ts`).
 
 **The chat's view code** is the chat mockup's, carried over for the session log and shared with
 the chat to come: `frontend/src/lib/chat/` (the records on the API's record types, `claude`'s lines,
@@ -182,7 +193,12 @@ waits for the environment its start took or created and answers its `{id, name}`
 project's slug (`slugOf(project)`, the testing route's), `-2` for a second at once;
 `projects.work(project, item)` reads its `work`, `projects.records(session,
 after?)` its records, and `projects.stop(id)` and `projects.resume(id)` call the routes as the
-signed-in person. The `timeline` page object's `item(id).work` reads the open item (`environment`,
+signed-in person; `projects.register(work, path, toolUseId?)` and `projects.workerAttach(work, path,
+{to?, toolUseId?})` make its worker's calls, each its effect while its turn is in flight, and
+`projects.askWriter(document, [{block, question}])` the pass's question
+([`projects.md`](projects.md)). The `sessionLog` fixture's `steps` reads a reply's steps in order
+and `effects` the effects standing on their own. The `timeline` page object's `item(id).work`
+reads the open item (`environment`,
 `running`, `line`, whose `data-state` is the Session's state, `cue`, `step`, `sessionLog`, `stop`,
 `resume`, `stopConfirm`), and the `sessionLog` fixture the log (`sessionLogAddress()`). A spec
 placing an item in a project while a work item's start there still writes waits for that item to

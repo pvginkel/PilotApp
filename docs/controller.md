@@ -29,7 +29,7 @@ against `CONTROLLER_CA_FILE` when that is set, and against requests' own trust o
 | `read_file(env_id, path)` | `GET /environments/<id>/file?path=<path>`: a `FileContent(data, sha256)`, the raw bytes and their `KubeCoder-Content-Sha256` |
 | `write_file(env_id, path, data)` | `PUT /environments/<id>/file?path=<path>`, the raw body, `204`: the file overwritten whole, or created with the folders it needs, and the SHA-256 of what was written; it sends no `expectedSha256` |
 | `list_folder_files(env_id, path)` | `GET /environments/<id>/files?path=…&offset=…&limit=1000`, page by page and folder by folder: every file under the folder, its subfolders' included, in path order, each named through the folder as given, so a link under it is followed as a read follows it |
-| `create_headless_session(env_id, HeadlessCreateRequest)` | `POST /environments/<id>/sessions/headless`; a field left None is not sent |
+| `create_headless_session(env_id, HeadlessCreateRequest)` | `POST /environments/<id>/sessions/headless`; a field left None is not sent, its box among them (below) |
 | `send_message(env_id, name, message)` | `POST /environments/<id>/sessions/headless/<name>/messages`, `202`: the session is busy with the turn |
 | `interrupt(env_id, name)` | `POST /environments/<id>/sessions/headless/<name>/interrupt` |
 | `end_session(env_id, name)` | `DELETE /environments/<id>/sessions/<name>`; ending one already gone does nothing |
@@ -39,6 +39,16 @@ against `CONTROLLER_CA_FILE` when that is set, and against requests' own trust o
 | `open_response_stream(env_id, name, offset, wait_ms=None)` | `GET /environments/<id>/sessions/headless/<name>/response?format=raw&offset=<n>` |
 | `open_fleet_stream()` | `GET /stream` |
 | `probe()` | `GET /readyz`, `200`: the gate's probe (below), with a 2 s timeout |
+
+**The box.** A headless create is boxed when it sets `sandbox` true, `sandbox_read_only_cwd`, or a
+non-empty `sandbox_writable_dirs` (sent as `sandbox`, `sandboxReadOnlyCwd`, `sandboxWritableDirs`;
+false and an empty list are no box). Every turn of a boxed session runs in a kernel-enforced write
+scope: `$HOME`, `/tmp`, the cwd, unless `sandbox_read_only_cwd` makes it a read-only root, and each
+listed folder, an absolute path of an existing folder, are writable, and every other mount is
+read-only; a write outside it fails. The box is built again at each turn's
+spawn, so a turn one of whose folders is gone since the create fails there ("spawn failed: sandbox:
+scope root <root>: …"), and never runs unboxed. The brain's sessions are boxed
+([`sessions.md`](sessions.md)); a work item's are not.
 
 `ControllerEnvironment` holds what Pilot reads of an environment: `env_id`, `name`, `managed_by`
 (the client a managed create recorded), `repo`, `status`, `pod` (`started_at`, its `startedAt`, none when unreported; `restart_count`,
@@ -50,7 +60,10 @@ another.
 **Failures.** An answer of `404 not-found`, `409 conflict`, `409 name-conflict` (a name the
 fleet holds already: KubeCoder's names are unique across it), `409 session-busy`, `409
 admission-blocked` (the node at its cap), `403 namespace-not-whitelisted` (a repository whose owner
-the controller does not take), `422 validation-error` or `502 worker-unreachable`, as problem+json
+the controller does not take), `422 validation-error` (a boxed create's too: a listed folder that
+is no absolute path of an existing folder, a cwd that does not exist, or a read-only cwd that is
+itself a writable root), `409 capability-unavailable` (a boxed create on a pod composed without the
+sandbox profile, until the environment is restarted) or `502 worker-unreachable`, as problem+json
 of that type, raises `ControllerProblem`, whose `problem_type` its callers switch on; so do the file
 routes' `503 environment-unreadable` (the controller cannot read the environment off its share, its
 "try again"), `403 path-outside-work`, `409 not-a-file` (a folder given to `read_file`, a FIFO or a
@@ -148,8 +161,10 @@ runs there. The claim ends with its deadline: `_end_claim` clears `server_starte
 
 - `ensure_environment(db, env_id)` makes the Environment row from the controller's own report on
   Pilot's first touch of the environment, in the caller's transaction, and leaves a row that exists
-  as it is. `start` makes its row through it, and the sync's gate the store's
-  ([`sync.md`](sync.md)); the controller's `404` raises `ControllerProblem` `not-found`.
+  as it is. `start` makes its row through it, the sync's gate and a brain session's start the
+  store's ([`sync.md`](sync.md), [`chats.md`](chats.md)), and `pilot-store`'s copy of outside
+  material its source's ([`mcp.md`](mcp.md)); the controller's `404` raises `ControllerProblem`
+  `not-found`.
 - `start(env_id) -> ControllerEnvironment` brings the environment up and waits until it settles.
   The `start` goes without `wait`, since only then does its answer say whether this call
   scheduled the bring-up: on `202` it commits `server_started_at`, `started_pod_at` none until it
@@ -164,7 +179,8 @@ runs there. The claim ends with its deadline: `_end_claim` clears `server_starte
   `error`, `stopped` or `deleting`, raises `EnvironmentStartFailed`; one still settling when the
   wait ran out raises `ExternalServiceException`; a call the controller does not answer raises
   `ControllerUnreachable`. Each of its writes is a transaction of its own. It is safe to repeat: a
-  start resumed from its rows calls it as it is.
+  start resumed from its rows calls it as it is. A brain session's start calls it on the store, which
+  is exempt, so the store is started on demand and no timer of Pilot's stops it.
 
 **The shutdown timer.** `stop_due_at` is when Pilot stops an environment it started.
 
@@ -293,6 +309,18 @@ there while a file is under it; a write takes no `expectedSha256` (`422`), and i
 conflict` while the environment reads `provisioning`, `starting` or `deleting`; a reset clears the
 tree, a stop keeps it.
 
+A boxed create keeps the worker's rules in its order: its fields' types, then the profile, `409
+capability-unavailable` "sandboxing is not enabled for this environment: …" on an environment its
+verb `no_sandbox_profile` marks, which no restart clears; then its cwd and each listed folder,
+`422 validation-error` "invalid sandbox scope: …" for one that is no absolute path, is not a folder
+on the environment's tree or does not exist there; then a read-only cwd that is also a listed
+folder. Its tree being `/work` alone, the fake checks no `$HOME` or `/tmp` root, and resolves no
+link. So a boxed create needs its cwd on the tree, a file under it, as well as each listed folder.
+A send to a boxed session one of whose roots is no longer a folder there is answered `202` and its
+turn resolves at once, in error, its result "spawn failed: sandbox: scope root <root>: lstat
+<root>: no such file or directory", with no conversation id minted. A session's `box` holds its
+roots, none unboxed, and its `create_body` the create's fields as sent.
+
 - **Under pytest**, the fixture `fake_controller` serves it on a free port of 127.0.0.1
   (`ServedFakeController`, `backend/tests/support/fake_controller.py`; over HTTPS with
   `tls=invent_ca(dir)`, from `backend/tests/support/tls.py`), and `controller_client` (or
@@ -322,6 +350,8 @@ werkzeug's server, or an ingress's `502` page, `ingress`, and every open stream 
 answers again), `capped` (with an `env_id`, that environment's start and reset are `409
 admission-blocked`; with none, the node's cap, every create too; never an exempt one's),
 `not_whitelisted` (a create of a repository of that owner is `403 namespace-not-whitelisted`),
+`no_sandbox_profile` (with `env_id`, `on`: that environment's boxed creates are `409
+capability-unavailable` until `on=False`),
 `unprojectable`, `busy`, `play` (the lines `claude` prints, answered with their offsets), `finish`
 (the turn's outcome: `success`, `error`, `interrupted`, `spawn-failure` or `ended`), `write_log`,
 `publish_state`, `publish_sessions`, `drop_streams`, `put_file` (a process in the environment

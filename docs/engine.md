@@ -11,11 +11,11 @@ commits.
 | Service | Does |
 |---|---|
 | `DocumentService` (`documents.py`) | the births, a worker's registration and its read, `publish()`, the document's row lock, versions, the turn's end |
-| `IngestService` (`ingest.py`) | an agent's save of a path of the tree |
+| `IngestService` (`ingest.py`) | an agent's save of a path of the tree; the faults of a text Pilot's own item is to be born with |
 | `RecordService` (`record.py`) | a person's answer, Done, undo, Read, Reviewed; Finish's close; a work item placed and done; a run's continuation released |
 | `PlanService` (`plan.py`) | `plan.json`, rendered and saved; the deferrals without a home |
 | `TreeService` (`tree.py`) | what a path names, the bytes it must hold, its tree hash; the manifest |
-| `ViewService` (`views.py`) | `reference.json` and `timeline.json` |
+| `ViewService` (`views.py`) | `reference.json`, `timeline.json` and `chat.md` ([`chats.md`](chats.md)) |
 | `AttachmentStore` (`attachments.py`) | an attachment's bytes, kept, read and deleted ([`documents.md`](documents.md)) |
 | `AttachService` (`attachments.py`) | files a session copied from its environment, hung on an item as one batch ([`mcp.md`](mcp.md)) |
 | `EngineBus` (`bus.py`) | the events, one bus per process |
@@ -35,7 +35,11 @@ version 1 cut, cause `born`; a worker's is registered (below):
   kind but the opening, which `session` added; its version is of that session. It takes the next
   `seq` under the project's row lock, and its path from the title. The title is written first into
   the text's front matter, one opened at the top where the text has none, unless the front matter
-  gives a `title` already (`dsl.with_title`), so the text carries its title from birth.
+  gives a `title` already (`dsl.with_title`), so the text carries its title from birth. The
+  brain's `add_item` bears one ([`mcp.md`](mcp.md)) once `IngestService.born_faults(project, text)`
+  finds no fault in its text, which it reads as a save of it is read, the title rule and the
+  record's facts included, with one fault more: a block whose `by` names a person, since a born text
+  has no published one to hold that person's answer.
 - `bear_opening(project, title, user, text)`: the opening, the words of the person who started the
   project, taken as written. The record reads nothing from its text: it has no blocks, and its kind,
   title and caches stay as it was born.
@@ -223,7 +227,9 @@ writing, cuts a `turn` version of each whose published text changed since its la
 returns the paths, from the tree's root and sorted, of those whose latest save is still held. It
 emits nothing. The relay calls it in the transaction that ends a turn on the controller's `result`
 frame, and in the one that ends a turn its environment was stopped under
-([`sessions.md`](sessions.md)), and drops the paths it returns. It reads no file: the documents a
+([`sessions.md`](sessions.md)). The paths it returns at the `result` of a brain session's turn
+that leaves the Session `idle` are the server's follow-up turn ([`chats.md`](chats.md)); every other
+turn's end drops them. It reads no file: the documents a
 work item's run registered are read once the transaction that makes the work item done commits
 ([`round-trip.md`](round-trip.md)).
 
@@ -236,12 +242,12 @@ already emitted in the transaction is delivered once.
 
 | Event | Emitted |
 |---|---|
-| `TreeHashMoved(path, hash)` | when a path's tree hash moved: a birth, a publish, a save, an attachment hung; `timeline.json` when what it shows moved, a done mark or its undo and a project's transition included; `plan.json` when a save moved its rendering |
+| `TreeHashMoved(path, hash)` | when a path's tree hash moved: a birth, a publish, a save, an attachment hung; `timeline.json` when what it shows moved, a done mark or its undo and a project's transition included; `plan.json` when a save moved its rendering; `chat.md` when a record it shows is written, and at a chat's open and close |
 | `DocumentModified(project_id, path)` | on every save of a document, held or published; the record's own writes raise none |
 | `ErrorsRaised(project_id, path)` | on every held save |
 | `ErrorsResolved(project_id, path)` | on a clean save after a held one, and when a held `plan.json` is written down |
 | `ManifestChanged()` | when the set of syncing projects changed: a project archived or brought back ([`projects.md`](projects.md)), and the sync's testing endpoint |
-| `ProjectChanged(project_id)` | when what the project's timeline, head or tab shows moved: with every `TreeHashMoved` of its `timeline.json`; on a publish that changes an item's published text, a record write on a held item included; on a save that holds an item or ends its hold; on a save of `plan.json` that moved its rendering; on a pause, a resume, a join and a leave ([`projects.md`](projects.md)); on every move of one of its Sessions' state; on a registered document's failed read, and on a continuation released, which takes Undo from its run's documents ([`round-trip.md`](round-trip.md)). `ProjectEventService` sends it to the browsers ([`timeline.md`](timeline.md)) |
+| `ProjectChanged(project_id)` | when what the project's timeline, head or tab shows moved: with every `TreeHashMoved` of its `timeline.json`; on a publish that changes an item's published text, a record write on a held item included; on a save that holds an item or ends its hold; on a save of `plan.json` that moved its rendering; on a pause, a resume, a join and a leave ([`projects.md`](projects.md)); on every move of one of its Sessions' state; on a chat's open and close ([`chats.md`](chats.md)); on a registered document's failed read, and on a continuation released, which takes Undo from its run's documents ([`round-trip.md`](round-trip.md)). `ProjectEventService` sends it to the browsers ([`timeline.md`](timeline.md)) |
 | `WriteBackOwed(session_id)` | on a close that owes a registered document's text to its file, and on a Resume that owes a refused one again; the write-back service hears it ([`round-trip.md`](round-trip.md)) |
 | `WorkMoved(project_id, work_id)` | when what a work item's line shows of its Session moved: its state, its current line, its start or its error ([`work.md`](work.md)). `ProjectEventService` sends it with the work item's status |
 

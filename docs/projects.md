@@ -50,8 +50,8 @@ project's cache it changes (`state_code`, `archived`, `autopilot` or `paused`) i
 
 | `kind` | Allowed on | Also |
 |---|---|---|
-| `finished` | an open project | every session of the project running, starting or held stopped, as Stop stops one ([`sessions.md`](sessions.md)); while auto pilot is on, `autopilot_off`, and while it is paused, `resumed`, each at the same instant, by the same person; then every open item but the opening closed unanswered |
-| `reopened` | a finished project | auto pilot stays off and the project is not paused: a finished project's never are |
+| `finished` | an open project | every session of the project running, starting or held stopped, as Stop stops one ([`sessions.md`](sessions.md)), and its open chat closed, `finished` ([`chats.md`](chats.md)); while auto pilot is on, `autopilot_off`, and while it is paused, `resumed`, each at the same instant, by the same person; then every open item but the opening closed unanswered |
+| `reopened` | a finished project | every session of the project running, starting or held stopped, which in a finished project is its read-only chat's alone, and its open chat closed, `reopened`, so that the next message starts one that writes (D068); auto pilot stays off and the project is not paused: a finished project's never are |
 | `archived` | a draft, an open or a finished project | every session of the project running, starting or held stopped; auto pilot and the pause are kept, so Bring back returns the project as it was |
 | `brought_back` | an archived project | |
 | `autopilot_on` | an open project with auto pilot off | |
@@ -67,8 +67,10 @@ pause Recipe box because it is paused already". An unknown project is a `404`.
 
 Finish's close is the engine's `RecordService.close_unanswered` ([`engine.md`](engine.md)): each
 open item but the opening is marked done at the transition's instant, by the person who finished,
-with the done cause `finished`, which offers no undo; the project's sessions are stopped before
-it. Nothing of the project but a Chat's session starts once it is finished or archived.
+with the done cause `finished`, which offers no undo; the project's sessions are stopped and its
+chat closed before it. Once a project is finished nothing of it starts but its chat, which reads
+only; once it is archived nothing does, its chat included ([`chats.md`](chats.md)). Pilot finishes
+a project through `finish` the same way, as Pilot ([`mcp.md`](mcp.md)).
 
 **`POST /api/projects/<id>/membership`** joins the project as the caller (`201`), and **`DELETE`**
 on the same path leaves it (`200`), each answering the head. Joining opens a `project_members`
@@ -255,24 +257,38 @@ answers only in testing mode ([`sign-in.md`](sign-in.md)).
   segment (empty, `.`, `..`, or holding a slash or NUL) or is named twice, content that is not
   base64, and a file over 16 MiB are a `400`; an unknown item a `404`; a project with no session a
   `409`.
-- `POST /api/testing/items/<id>/registrations` `{path}` registers the document the work item
-  `<id>`'s session wrote at `path` in its environment, as its worker's `register_document` does
-  ([`mcp.md`](mcp.md)): the file read through the stage's controller and parsed now, and read again
-  once the turn that ends its run commits ([`round-trip.md`](round-trip.md)). It answers `201`
-  `{id}` for the document minted, `200` for the one its run registered from the path already; an
-  unknown work item is a `404`, a session with no environment yet or a file that cannot be
-  registered a `409` with the reason, and the controller's own failure a `502`.
+- `POST /api/testing/items/<id>/registrations` `{path, tool_use_id?}` registers the document the
+  work item `<id>`'s session wrote at `path` in its environment, as its worker's
+  `register_document` does ([`mcp.md`](mcp.md)): the file read through the stage's controller and
+  parsed now, and read again once the turn that ends its run commits
+  ([`round-trip.md`](round-trip.md)). It answers `201` `{id}` for the document minted, `200` for
+  the one its run registered from the path already; an unknown work item is a `404`, a session with
+  no environment yet or a file that cannot be registered a `409` with the reason, and the
+  controller's own failure a `502`. A minted one is the effect of the call `tool_use_id` names,
+  while the session has a turn in flight.
+- `POST /api/testing/items/<id>/worker-attachments` `{path, to?, tool_use_id?}` attaches the file or
+  the folder the work item `<id>`'s session wrote at `path`, as its worker's `attach_file` does: one
+  batch, hung on the item `to` names, else on the work item, the effect of the call `tool_use_id`
+  names while its turn is in flight. It answers `201` `{ids}`; an unknown work item or a `to` of no
+  item of its project is a `404`, a session with no environment yet or a file that cannot be copied
+  a `409`, and the controller's own failure a `502`.
+- `POST /api/testing/items/<id>/writer-questions` `{questions: [{block, question}]}` asks the writer
+  of the registered document `<id>` about its blocks, by their local ids, as the pre-ruling pass's
+  `ask_writer` does, in one turn of a job's session of its project placed for it and ended once
+  they are asked, nothing started. It answers `201` `{blocks}`, the blocks its writer is asked
+  about; an unknown item or block is a `404`, and an item that is no registered document or is
+  done, or a block answered or asked about already, a `409`.
 
 A project past the draft, born with its opening, an item placed, a work item placed, an item's save
 posted, Pilot's Done and attachments hung each raise `project_changed` through the engine, so an
 open screen follows them ([`timeline.md`](timeline.md)); a turn's end raises none, and a save of the
 handbook none either. The frontend suite's `projects` fixture (`frontend/tests/support/projects.ts`)
 wraps them (`make`, `makeWithSession`, `place`, `save`, `saveProjectDocument`, `endTurn`,
-`doneByPilot`, `attach`, `register`, `list`, `head`, `transition`, the item writes of
-[`timeline.md`](timeline.md), and the work item's of [`work.md`](work.md)), and the page objects
-`projectList` and `projectHead` drive the screens: `projectList.statusIcon(name)` reads a tab's
-icon, its status and its glyphs, and `projectList.written(id, kind)` waits for its pause or resume
-to be written; `projectHead.autopilotWarning` is the triangle. The status and the pause are pinned
-in `tests/projects/project-status.spec.ts`. Each Playwright worker's database is a
-clone of the dev seed ([`record.md`](record.md)), so every spec's list holds the seed's projects
-beside its own.
+`doneByPilot`, `attach`, `register`, `workerAttach`, `askWriter`, `list`, `head`, `transition`, the
+item writes of [`timeline.md`](timeline.md), and the work item's of [`work.md`](work.md)), and the
+page objects `projectList` and `projectHead` drive the screens: `projectList.statusIcon(name)` reads
+a tab's icon, its status and its glyphs, and `projectList.written(id, kind)` waits for its pause or
+resume to be written; `projectHead.autopilotWarning` is the triangle. The status and the pause are
+pinned in `tests/projects/project-status.spec.ts`. Each Playwright worker's database is a clone of
+the dev seed ([`record.md`](record.md)), so every spec's list holds the seed's projects beside its
+own.

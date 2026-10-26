@@ -19,6 +19,7 @@ the job, never its work.
 | `write-back:<session id>` | a loop of the job `write-back` | writes a run's closed registered documents back to their files ([`round-trip.md`](round-trip.md)) |
 | `environment-shutdown` | a timer | stops the idle environments Pilot started ([`controller.md`](controller.md)) |
 | `environment-delete` | a timer | clears the name of a free environment of Pilot's own, and deletes one that stays free ([`controller.md`](controller.md)) |
+| `chat-close` | a timer | closes the project chats that have stood quiet past their timeout ([`chats.md`](chats.md)) |
 | `relay-watchdog` | a timer | restarts a relay the fleet stream shows stuck or stopped ([`sessions.md`](sessions.md)) |
 | `controller-probe` | a timer | while the controller is unreachable, asks whether it answers ([`controller.md`](controller.md)) |
 
@@ -55,9 +56,9 @@ a registration after STARTUP raises `InvalidOperationException`.
   returns. `interrupt_loop(job, key=None) -> bool` closes what a live loop's run holds without
   stopping the loop, and is True when it closed something.
 - **A timer**: `register_timer(timer, run, *, needs_controller)`. The scheduler runs the timers in
-  registration order (`environment-shutdown`, `environment-delete`, `relay-watchdog`, then
-  `controller-probe`), the first round at STARTUP, then each round `SCHEDULER_TICK_SECONDS` after
-  the last ended. Each run has a database session of its own; one that raises is logged and
+  registration order (`environment-shutdown`, `environment-delete`, `chat-close`, `relay-watchdog`,
+  then `controller-probe`), the first round at STARTUP, then each round `SCHEDULER_TICK_SECONDS`
+  after the last ended. Each run has a database session of its own; one that raises is logged and
   counted, and the rest of the round runs.
 
 The suite and the CLI never fire STARTUP, so there a requested loop never runs. A test that needs
@@ -79,7 +80,8 @@ the next process resumes from the rows. The pod's timing around it is in
 During a roll the old and the new backend overlap, each running every job. That is safe because each
 write a job makes is conditional on rows it reads under their lock: a relay, a start, the release of
 a held one and a send under the Session row's, the shutdown and delete timers and a start's take
-under the Environment row's, skipping one another process holds, and a read's or a write-back's take
+under the Environment row's and the chat-close timer under a chat's Session's, skipping one another
+process holds, and a read's or a write-back's take
 under the Project's, the Session's and the Document's rows, re-checked there. The watchdog restarts
 only this process's relays.
 

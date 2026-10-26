@@ -103,17 +103,34 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   its Session through the one project. A `work`-kind Session may stand with no `work` row, as the
   seed's idle session and a testing project's do.
 - `turns`: a message sent to a session and the reply it produced, numbered by `seq` from 1 within
-  the session: its `message`, its `author_user_id` (none for the server's own, such as a start's
-  brief), the item or the block it quotes (one at most; a quoted block's removal clears the key),
-  `started_at`, `ended_at`, and the `error` of a turn that failed.
+  the session: its `message`, what was sent; its `author_user_id` (none for the server's own, such
+  as a start's brief) and its `words`, the person's own, verbatim with their quote tags, which a
+  Turn has exactly when it has an author, its `message` ending with them; the item or the block it
+  quotes (one at most, only on a Turn with words; a quoted block's removal clears the key;
+  `ck_turns_words`), `started_at`, `ended_at`, and the `error` of a turn that failed.
+- `chats`: a project's chat, sharing its id with its Session, one of kind `chat` of the same project
+  (`session_kind_code`, held `chat`): its kind, `definition` or `project`, and its close,
+  `closed_at` and `close_cause_code` (`timeout`, `created`, `finished`, `reopened`) set together
+  (`ck_chats_close`). A project has one chat open at a time (`uq_chats_open`)
+  ([`chats.md`](chats.md)).
+- `chat_reads`: a person's place in a project's chat, one per user and project, `read_at`.
+- `effects`: a change a session's tool call made to the record, of the Turn the call ran in and
+  placed by that Turn's `server` record (`record_id`), with `at`: its kind (`added`, `answered`,
+  `marked`, `stopped`, `finished`, `attached`, `registered`) and what it changed, an item for
+  `added`, `marked`, `stopped` and `registered`, an attachment for `attached`, a block for
+  `answered`, set null when the merge deletes a draft block, and nothing for `finished`
+  (`ck_effects_names`) ([`mcp.md`](mcp.md)).
+- `writer_questions`: the pre-ruling pass's question to a registered document's writer about one of
+  its blocks: the pass's Turn, the Block, the `question` verbatim and `asked_at`; one per block
+  (`uq_writer_questions_block_id`).
 - `session_records`: every session's list, chat and work alike, in one table, numbered by `seq`
   from 1 within its session without a gap, which its writer holds under the session's row lock:
   `kind_code` (`claude`, `result`, `send`, `server`), the `payload`, its turn (`turn_id`, a turn of
   its own session), and `at`. A `claude` or `result` record is a line or the end of the controller
   session's raw stream: it falls in a turn and carries its `controller_session` and `raw_offset`,
   which no other kind has. A `claude` payload is never a `stream_event` line. A `send` has no
-  payload, its words and author being its turn's, and a turn has one at most; every other kind
-  has a payload.
+  payload, its words and author being its turn's (`words`, `author_user_id`), and a turn has one at
+  most; every other kind has a payload.
 
 ## The reference values
 

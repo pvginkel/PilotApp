@@ -22,6 +22,7 @@ At the tree's root are `reference.json` and a folder per project that is not arc
 | `inbox/<seq>-<slug>.md` | a worker's registered document, once its file was read | is ingested |
 | `plan.json` | the plan, rendered from its rows | is parsed back into the rows |
 | `timeline.json` | the timeline, rendered from the rows | stores nothing |
+| `chat.md` | the project's chats, rendered from their records ([`chats.md`](chats.md)) | stores nothing |
 | `attachments/<batch>/<filename>` | an attachment's copy, its `filename` holding slashes where it came in a folder | stores nothing |
 
 `reference.json` is read-only too. A save that stores nothing is answered with the file as the

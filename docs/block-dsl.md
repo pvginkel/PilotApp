@@ -3,9 +3,10 @@
 A document is Markdown the agent writes, and the asks in it are fenced blocks the record reads. This
 page is the grammar as the engine reads and writes it. Its library is the package `pilot-dsl`,
 imported as `pilot_dsl` (`backend/packages/pilot-dsl/`, [below](#the-package)): `parse()`,
-`validate()`, `body()` and `words()` in `reader.py`; the splice, the merge and `with_title()` in
-`writer.py`. The library is pure: it takes text and returns text, and imports nothing but the
-standard library and PyYAML, so what it validates against comes in as values (`Facts`).
+`validate()`, `body()` and `words()` in `reader.py`; the splice, the merge, `with_title()` and
+`with_facts()` in `writer.py`. The library is pure: it takes text and returns text, and imports
+nothing but the standard library and PyYAML, so what it validates against comes in as values
+(`Facts`).
 
 ````markdown
 ---
@@ -52,7 +53,10 @@ alone, none while the text gives none; the draft's is the project's name. Every 
 an item, of its own or of a registered document, must give a title one of the two ways, whatever
 its shape; the draft, the handbook, the opening, and a registered document as its worker's turn
 left it are outside the rule. Pilot's own item is born with the title it was added with written
-first into its front matter, unless that gives a `title` already (`with_title()`).
+first into its front matter, unless that gives a `title` already (`with_title()`), and with the
+facts it was added with, `step`, `urgent: true`, `for` and `summary`, each written where the front
+matter gives none of its own, in place of a key that gives none, else after its last line
+(`with_facts()`).
 
 **The body as shown.** `body(text)` splits a text without a fault the way a screen draws it: its
 prose parts and its blocks in order, the front matter and the heading that is the title left out.

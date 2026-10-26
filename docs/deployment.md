@@ -113,13 +113,18 @@ objects into each stage's namespace:
   `python -m pilot_mcp`, port 3502) and `ui` (the SPA's nginx, port 3500, which proxies `/api/` to
   the backend and nothing else of it). `migrate` and `backend` run with the stage's `STAGE` and
   with `HOMELAB_INTERNAL` true in both stages.
-  `mcp` calls the backend's worker routes, `/tools/pilot-work/`, over the pod's loopback
-  (`PILOT_MCP_API_URL` `http://localhost:3501`, and `PILOT_MCP_PORT` 3502, its only settings); it
-  reads no database, Secret or `FLASK_ENV`. Its readiness and liveness are `/health/readyz` and
-  `/health/healthz` on its port, which ask for no bearer, and its preStop waits the 15 s that `ui`'s
-  does. The backend's `MCP_SERVER_URL` is `https://<mcp.host>/mcp`, `mcp.host` the stage's in the
-  values, the address every session it creates is handed; the backend refuses to start without it,
-  and `migrate` gets none.
+  `mcp` calls the backend's tools' routes, `/tools/pilot-work/` and `/tools/pilot-store/`, over the
+  pod's loopback (`PILOT_MCP_API_URL` `http://localhost:3501`, and `PILOT_MCP_PORT` 3502, its only
+  settings); it reads no database, Secret or `FLASK_ENV`. Its readiness and liveness are
+  `/health/readyz` and `/health/healthz` on its port, which ask for no bearer, and its preStop waits
+  the 15 s that `ui`'s does. The backend's `MCP_SERVER_URL` is `https://<mcp.host>/mcp`, `mcp.host` the stage's in the
+  values, the address a work item's session is handed, and a brain session
+  `https://<mcp.host>/mcp/store` ([`mcp.md`](mcp.md)); the backend refuses to start without it, and
+  `migrate` gets none.
+  The brain's settings ([`chats.md`](chats.md)) come from `brain` in the values, each required, so
+  that a stage without the block fails its render: `model` as `BRAIN_MODEL`, `reasoningEffort` as
+  `BRAIN_REASONING_EFFORT` and `chatCloseTimeout` as `CHAT_CLOSE_TIMEOUT`, `opus`, `xhigh` and 3300
+  on both stages, the backend's own defaults. `migrate` sets none of them.
   The backend serves the store's sync routes, `/api/sync/` ([`sync.md`](sync.md)), to the stage's
   store environment alone ([below](#the-store-environments)): `store.environmentId` in the values
   as `STORE_ENVIRONMENT_ID`, and the store's bearer as `SYNC_TOKEN`, from the Secret `pilot-sync`.
@@ -138,13 +143,14 @@ objects into each stage's namespace:
   `chart/files/homelab-root.crt` into the ConfigMap `homelab-root-ca` and mounts it read-only at
   `/etc/ssl/homelab`. `migrate` sets none of the three. The backend refuses to start without the
   URL and the token; with them it holds the controller's fleet stream open and keeps the
-  Environment rows current. Only the dev stage creates, starts, sends to, stops and deletes an
-  environment: the record's testing route `POST /api/testing/projects/<id>/work`, which `prd`
-  refuses, places a work item by repository, whose start takes or creates an environment of
-  Pilot's own on `kubecoder-dev` and starts its session there; the shutdown timer then stops that
-  environment, and the delete timer deletes it once it has stood free for 7 days
-  ([`work.md`](work.md), [`sessions.md`](sessions.md), [`controller.md`](controller.md)).
-  Production places no work item, so nothing starts there. On either stage a controller that does
+  Environment rows current. A session starts only in a project: the record's testing route
+  `POST /api/testing/projects/<id>/work`, which `prd` refuses, places a work item by repository on
+  the dev stage, whose start takes or creates an environment of Pilot's own on `kubecoder-dev` and
+  starts its session there; the shutdown timer then stops that environment, and the delete timer
+  deletes it once it has stood free for 7 days ([`work.md`](work.md), [`sessions.md`](sessions.md),
+  [`controller.md`](controller.md)). A message to a project's chat starts the stage's store where it
+  is stopped, and the chat's session there ([`chats.md`](chats.md)). Production has no project, so
+  nothing starts there. On either stage a controller that does
   not answer shows as the gold bar's line over the project list ([`ui.md`](ui.md)); `kubecoder-dev`
   is on the dev cluster, which is often powered off, and the dev stage's bar then says so.
 - **Service `pilot`**, port 80 to the UI, its annotation `nginx.webathome.org/server-name` the
@@ -157,7 +163,7 @@ objects into each stage's namespace:
   `pilot-dev-mcp.home` or `pilot-mcp.home`, with `is-public: "false"` and `enable-ssl: "yes"` on
   both stages: the front door serves it as an internal site over HTTPS from the homelab step-ca, and
   the homelab DNS publishes the name. The session's bearer is the whole of its authentication, so it
-  is never public. Neither stage's site reaches the worker routes: the UI's nginx proxies `/api/`
+  is never public. Neither stage's site reaches the tools' routes: the UI's nginx proxies `/api/`
   alone, and `/tools/` is outside it.
 - The secrets below.
 
@@ -169,7 +175,10 @@ dev stage's is `pvginkel-pilotprojects-d75970` on `kubecoder-dev`, production's
 `pvginkel-pilotprojects-8b0225` on KubeCoder's production fleet, each named by
 `store.environmentId` in `config/<stage>/values.yaml`. Nothing PilotDeploy renders runs
 `pilot-sync`, the third image: KubeCoder composes it into the store's pod from its catalog entry,
-which is KubeCoderDeploy's.
+which is KubeCoderDeploy's. The brain's sessions there are boxed ([`sessions.md`](sessions.md)),
+which needs the store's pod composed with KubeCoder's sandbox profile: one started before its fleet
+had the profile answers a boxed create `409 capability-unavailable` until it is restarted
+([`controller.md`](controller.md)).
 
 **The image floats per stage and is pinned nowhere** (D029). Each build tags it `dev-<n>` and
 `dev-latest`, and a promotion tags it `prd-<n>` with the two pinned images and then moves

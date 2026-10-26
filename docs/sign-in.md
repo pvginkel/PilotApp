@@ -34,8 +34,8 @@ chooses theirs at their first sign-in, before the app opens, and is on Pilot's r
   open after its token expires.
 - **Two surfaces are not a person's, and sit outside the API blueprint**, where the OIDC gate never
   sees them: the store's sync routes, behind the store's bearer ([`sync.md`](sync.md)), and the
-  worker's routes, `/tools/pilot-work/`, behind the bearer Pilot minted for the session that calls
-  ([`mcp.md`](mcp.md)), which no site reaches.
+  tools' routes, the worker's `/tools/pilot-work/` and the brain's `/tools/pilot-store/`, behind the
+  bearer Pilot minted for the session that calls ([`mcp.md`](mcp.md)), which no site reaches.
 
 On a `rejected` event the UI stops reconnecting and asks `/api/auth/self`, which refreshes an
 expired token: on `200` it opens a new stream, on `401` it goes to the login page, and on anything

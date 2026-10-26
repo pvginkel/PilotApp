@@ -906,7 +906,11 @@ POD=$(cexec iac kubectl -n pilot-dev get pods -l app.kubernetes.io/name=pilot -o
    Pilot's dev credential. A reset, of a stopped store, clones PilotProjects' `main` again and
    empties the sidecar's data, so a push to PilotProjects reaches the store that way. A session
    there whose working directory is `/work/PilotProjects` gets the hook ([`sync.md`](sync.md)).
-   Production's store is never touched:
+   The dev stage's chats run there: a message to a project's chat on `pilot-dev`, `POST
+   /api/projects/<id>/chat/messages` as the signed-in person, starts the store where it is stopped
+   and the chat's session in it, boxed and briefed, its records read as any session's
+   ([`chats.md`](chats.md)); a check of the chat after a PilotProjects change resets the store
+   first, so the chat runs the skill as pushed. Production's store is never touched:
 
    ```bash
    STORE=pvginkel-pilotprojects-d75970

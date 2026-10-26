@@ -49,7 +49,8 @@ file must hold ([`projection.md`](projection.md)). Every route answers the gate'
 | `GET /api/sync/events` | | the change stream, below |
 | `POST /api/sync/check` | `{"path", "hash", "wait_seconds"}` | the check, below |
 
-The put is the engine's ingest of the save, its Save Errors under the store's Environment: `204`
+The put is the engine's ingest of the save, its Save Errors under the store's Environment, by no
+session: nothing tells it which of the project's sessions wrote the file. `204`
 for a save the merge left as it was and for a held one, `200` with the merged text, the canonical
 `plan.json` or a read-only path's rendering. Either answer carries `X-Pilot-Hash`, the hash of what
 the file holds once answered, and `X-Pilot-Faults`, the count of Save Errors the save raised on the
@@ -83,8 +84,8 @@ with a queue of its own (`backend/app/services/sync_stream_service.py`).
 
 The manifest is every path the store syncs (`TreeService.manifest()`): `reference.json` at the
 tree's root and every path of every project that is not archived — its documents,
-`timeline.json`, `plan.json` and its attachments — each with its tree hash and whether it is
-read-only. `reference.json`, `timeline.json` and the attachments are.
+`timeline.json`, `chat.md`, `plan.json` and its attachments — each with its tree hash and whether
+it is read-only. `reference.json`, `timeline.json`, `chat.md` and the attachments are.
 
 `POST /api/sync/manifest` takes the hash of every file on disk, `tree`, and of every path as the
 sidecar last synced it, `shadow`, each a map of path to hash. It answers `{"manifest", "send_up",

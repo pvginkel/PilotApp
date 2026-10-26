@@ -5,39 +5,43 @@ of the KubeCoder fleet, through the controller ([`controller.md`](controller.md)
 sent to it is a Turn. Everything the session does is a list of Session Records that the server
 appends to as the controller's raw response stream comes in, numbered from 1; a browser reads the
 list by REST from any record number and follows it live on its SSE connection. This page is the
-sessions as built: the start through the gate, the send, the relay, Stop and Resume, an
-environment restarted or stopped under a turn, the current line, the records and their stream, and
-the recovery after a restart. A work item is a Session on the timeline, and what its line and its
-session log show is [`work.md`](work.md)'s. The tables are in [`record.md`](record.md), and the
-threads the loops run on in [`jobs.md`](jobs.md).
+sessions as built: the start through the gate, what a create is handed, the send, the relay, Stop
+and Resume, an environment restarted or stopped under a turn, the current line, the records and
+their stream, and the recovery after a restart. A work item is a Session on the timeline, and what
+its line and its session log show is [`work.md`](work.md)'s; a project's chat is a Session of the
+brain's in the store, and what a message to it does is [`chats.md`](chats.md)'s. The tables are in
+[`record.md`](record.md), and the threads the loops run on in [`jobs.md`](jobs.md).
 
 | Service | Does |
 |---|---|
-| `SessionStartService` (`session_start_service.py`) | a work item placed by repository, or a run's continuation, its Session written `held` or `starting` through the gate and brought up by its start loop in an environment of Pilot's own; Stop and Resume |
+| `SessionStartService` (`session_start_service.py`) | a work item placed by repository, or a run's continuation, its Session written `held` or `starting` through the gate and brought up by its start loop in an environment of Pilot's own; a brain session's start, brought up in the store; Stop and Resume |
 | `start_gate.py` | `held_reason`, the gate every start passes, and `WorkSlots`, its slot |
+| `session_scope.py` | `scoped_create`, what each create of a Session is handed |
 | `RelayService` (`relay_service.py`) | the send of a Turn, the relay of each turn into the records, and the interrupt of a turn stopped under it |
 | `SessionRecordService` (`session_record_service.py`) | the records' one writer and the one read function |
 | `SessionStreamService` (`session_stream_service.py`) | the hub: a Session's live frames on the browsers' connections |
 | `RelayWatchdog` (`relay_watchdog.py`) | the relays' restart when the fleet stream shows a turn stuck or its environment stopped |
 | `current_line.py` | what a turn in flight is doing, rebuilt from its records |
 
-All are in `backend/app/services/`. The record's testing route places a work item (below), and the
-close that leaves none of a run's registered documents open places the run's continuation
-([`round-trip.md`](round-trip.md)); nothing else in the app places one yet. A person's Resume
-carries a stopped or failed work item on, and Stop, Finish and Archive stop one.
+All are in `backend/app/services/`. The brain's `add_item` places a work item ([`mcp.md`](mcp.md)),
+and so does the record's testing route (below); the close that leaves none of a run's registered
+documents open places the run's continuation ([`round-trip.md`](round-trip.md)). A person's Resume
+carries a stopped or failed work item on, and Stop, the brain's `stop_work`, Finish and Archive
+stop one.
 
 ## The session start
 
-`start_work(db, project_id, repo, *, title, brief, cwd, plan_task_id=None) -> Work` places a work
-item by repository, `owner/Name`, and writes its Session's start, in the caller's transaction:
+`start_work(db, project_id, repo, *, title, brief, cwd, plan_task_id=None, agent=None, model=None,
+reasoning_effort=None) -> Work` places a work item by repository, `owner/Name`, and writes its
+Session's start, in the caller's transaction:
 
 - its Item and its Work, through the engine's `place_work` ([`engine.md`](engine.md)): the Item,
   kind `work`, at the project's next `seq`, titled `title`, on the plan's task `plan_task_id` when
   given, created by its own Session; the Work, its `repo` the repository and its `autopilot` the
   project's switch as it stands. The Item, the Work and the Session share one id;
-- the Session, kind `work`, with its `cwd`, no Environment until its start provides one, and
-  `token_hash` the sha256 of a token no one holds, until its create mints the one its controller
-  session carries (below);
+- the Session, kind `work`, with its `cwd`, `agent`, `model` and `reasoning_effort`, none of them
+  defaulted by the server, no Environment until its start provides one, and `token_hash` the sha256
+  of a token no one holds, until its create mints the one its controller session carries (below);
 - Turn 1, the brief, with no author.
 
 The repository and `cwd` are taken as the placement gives them: the server maps and checks
@@ -99,17 +103,37 @@ runs the start from the rows, its environment first:
   settle is awaited, never a second scheduled.
 - **Any other**: started ([`controller.md`](controller.md)).
 
+A brain session's environment is the store, `STORE_ENVIRONMENT_ID`, never one of Pilot's own: its
+loop writes it under the Session's lock with "Starting <name>…", the store's row made from the
+controller's report where Pilot has none yet, then starts the store and awaits its settle
+([`chats.md`](chats.md)).
+
 A continuation's start first writes back what the documents it carries still owe, before its
 environment is brought up ([`round-trip.md`](round-trip.md)). Then it writes `{"type": "starting",
-"text": "Creating the session…"}`, creates the headless session with the Session's `cwd`, `agent`,
-`model`, `reasoning_effort` and `conversation_id` as `resume`, Pilot's MCP server handed to it with
-a token minted for this create ([`mcp.md`](mcp.md)), records its name as `controller_session` with
+"text": "Creating the session…"}`, creates the headless session as its scope gives it (below),
+Pilot's MCP server handed to it with a token minted for this create ([`mcp.md`](mcp.md)), records
+its name as `controller_session` with
 `started_at` and the token's sha256 as `token_hash` in one transaction, and sends its latest Turn
 (`send_turn`, below), whose `202` starts the relay. A run told to stop after the environment's
 bring-up or after the create returns and leaves the Session `starting`, for the next process's
 reconcile. One that finds its Session no longer `starting` to send the Turn it began with, stopped
 meanwhile, or stopped and resumed, goes no further and sends nothing: a Resume's start is its own
 run's.
+
+**The scope.** What a create is handed is derived in one place from the Session's columns, its
+kind and its Project, for every create of it alike, the start loop's and the relay's of a gone
+controller session (D067): `scoped_create(db, session)`. No column holds it. Its request carries the
+Session's `cwd`, `agent`, `model`, `reasoning_effort` and `conversation_id` as `resume`, and its
+surface is its kind's ([`record.md`](record.md)): `pilot-work` for a work item. A brain session, a
+chat's or a job's, whose kind's surface is `pilot-store`, is boxed: `sandboxReadOnlyCwd`, its cwd
+the store repo's root, read-only; `sandboxWritableDirs` its project's folder,
+`/work/Projects/<folder>`, the one folder under `/work` it writes; and `PILOT_PROJECT=<that
+folder>` in its `env`, which the brain's `pilot.py` reads. While its Project is finished it is
+boxed with no folder writable and no surface, so it is handed no server, its `PILOT_PROJECT` kept
+([`chats.md`](chats.md)). The Project's state is read afresh at each create; a chat closes whenever
+the state it was opened under moves, so no create of an open chat crosses states. The controller
+builds the box at every turn's spawn: a folder of it gone since the create fails the turn, which
+never runs unboxed ([`controller.md`](controller.md)).
 
 A work item in an environment Pilot did not create, which only the dev stage's database holds,
 placed there by the environment's id, is never started there: its start fails with "its
@@ -134,8 +158,11 @@ says `Session <id> is held: <error>`.
 **A start that fails.** Every other `ExternalServiceException` of the start fails the Session: a
 refusal of the environment's create (`409 admission-blocked` at the node's cap, `403
 namespace-not-whitelisted`, `422 validation-error`), of its rename, its stop, its reset or its
-start, the environment settling other than `stopped` after its stop or other than `running` after
-its bring-up, a wait running out, a `5xx` the controller answers with its own problem+json. In one
+start, of the headless session's create (a boxed one's `422 validation-error` for a folder not on
+disk, which a create with a folder to write first meets again for 60 s, [`chats.md`](chats.md), or
+`409 capability-unavailable`), the environment settling other than `stopped` after its stop or
+other than `running` after its bring-up, a wait running out, a `5xx` the controller answers with its
+own problem+json. In one
 transaction: the `server` record `{"type": "start-failed", "reason": <error>}` in no Turn, the Turn
 it sends ended, the Session `failed` with `error`, its current line cleared, its slot given back,
 and its environment, when it has one, handed to the shutdown timer: armed, so that an environment
@@ -161,11 +188,13 @@ environment its caller names.
 
 ## The send
 
-`RelayService.send(db, session_id, message, *, author_user_id=None) -> Turn` sends the Session a new
-Turn, a person's message when it has an author, in the caller's transaction. The controller's send
-goes first, and on its `202`, under the Session row's lock:
+`RelayService.send(db, session_id, message, *, words=None) -> Turn` sends the Session a new Turn,
+`message`, in the caller's transaction; a person's message carries `words`, its author and their
+words verbatim, which `message` ends with ([`chats.md`](chats.md)). The controller's send goes
+first, and on its `202`, under the Session row's lock:
 
-- the Turn, numbered after the Session's last, and its `send` record when it has an author;
+- the Turn, numbered after the Session's last, with its author and `words` when it has them, and
+  its `send` record then;
 - the Session `running`, its current line kept when it has one, as the session start's, and else
   `thinking` from the send, and its `turns`, `turn_started_at` and `turn_ended_at` refreshed as the
   latest Turn's;
@@ -174,9 +203,12 @@ goes first, and on its `202`, under the Session row's lock:
 
 A send the controller fails before its `202` writes the Turn ended, with `error` the failure's
 text, its `send` record when it has an author, and a `server` record `{"type": "send-failed",
-"reason": <error>}` in the Turn; the Session's state stays as it was. Two answers are not failures:
-a controller session that is gone (`404`) is resumed first (below) and the message sent to the one
-that replaces it; and `409 session-busy`, a turn in flight at the controller, raises
+"reason": <error>}` in the Turn; the Session's state stays as it was. Two answers are not failures.
+A controller session that is gone (`404`) is created again first, under the Session's lock (below),
+and the Turn written in flight as on a `202`, unsent: the relay sends it to the new session once the
+caller's transaction commits, which commits that session's token's hash with it, so that its first
+tool call is admitted; where another process created it again first, the message goes to that one.
+And `409 session-busy`, a turn in flight at the controller, raises
 `InvalidOperationException` "a turn is in flight" and writes nothing (D034). While the record has a
 Turn in flight, that refusal also starts the Session's relay if this process runs none; with none in
 flight it starts no relay, and a lost turn's lines land under the next Turn, as a drop's do. A
@@ -211,7 +243,9 @@ otherwise, and takes each frame in order:
   `result` record, its payload the frame's data and its offset the stream's last raw frame's; the
   Turn ended, with `error` the result's text (or "The turn ended in an error") when the frame says
   `isError`; with no later Turn in flight, the Session's state (below), no current line and its
-  turn caches refreshed; and the engine's `turn_ended(session)` ([`engine.md`](engine.md)). Once it
+  turn caches refreshed; the engine's `turn_ended(session)` ([`engine.md`](engine.md)), and a brain
+  session's follow-up turn on the saves it returns still held; and a closed chat's close record,
+  where the close came while the turn was in flight ([`chats.md`](chats.md)). Once it
   commits, the environment's shutdown timer is armed if nothing else runs there, and, when the
   turn made a work item done, the documents its run registered are read
   ([`round-trip.md`](round-trip.md)). A `result` whose
@@ -223,7 +257,10 @@ item's Session `failed` when its turn ended in error, the error its Turn's (D036
 a work item done, as the engine's `work_done` makes it: cause `turn_ended`, by no one, at the turn's
 end, which a Finish that closed it first leaves as Finish closed it. A Session with no work item
 whose turn ended in error is `idle`, the error its Turn's. A Session stopped under the turn keeps
-its stop, and its work item is not done. A work item's turn that ends gives its slot back.
+its stop, and its work item is not done. A work item's turn that ends gives its slot back. A brain
+session left `idle` with a save of its own still held stays `running` with the server's follow-up
+turn, written in flight in that transaction, which the relay sends once it commits; one follow-up
+per turn (D065, [`chats.md`](chats.md)).
 
 A send the controller accepted once the previous turn's `result` was out can commit before that
 turn's end does. That turn's end then keeps the Session `running`, its current line the next Turn's
@@ -238,16 +275,17 @@ backoff, reopening at the last committed offset.
 **Resuming a controller session that is gone.** A `404` on the stream or the send is the
 controller session gone, as a pod restart leaves it. Under the Session's lock, and only while the
 Session still has that controller session: a headless session is created in the same
-environment with the Session's options, `resume` its `conversation_id` and a token minted for it,
-whose hash is the Session's from then; then the `server`
+environment as its scope gives it (above), `resume` its `conversation_id` and a token minted for
+it, whose hash is the Session's from then; then the `server`
 record `{"type": "session-gone", "reason": <error>}` in no Turn, every Turn in flight ended with no
 `result`, and `controller_session` the new name. The log says `Session <id> lost controller session
 <name>; resumed as <name> in environment <id>`. The relay carries the turn on with a Turn of the
 server's own, with no author, which its next round sends: `continue`, or, while the Session has no
 conversation, or no Turn of it has gone out, as a continuation's from its placement, the ended
 Turn's message again, which the new session would not otherwise know (D037), as Resume picks it
-(below). A send that met the `404` sends its own message instead. A create that fails writes nothing
-of the resume: the relay is run again with backoff, and a send writes its Turn as failed. In the
+(below). A send that met the `404` has its own Turn sent instead (above). A create that fails
+writes nothing of the resume: the relay is run again with backoff, and a send writes its Turn as
+failed. In the
 relay, a create answered `404` is the environment gone, a stop made elsewhere (below).
 
 ## An environment restarted or stopped under the turn
@@ -324,9 +362,13 @@ turn has ended", "its session has ended"), for one in an environment Pilot did n
 environment is not Pilot's"), for one whose stopped turn is still ending, until the interrupt's
 `result` is recorded, and in a finished or an archived project.
 
-**Finish and Archive** stop every Session of the project running, starting or held, a Chat's
-among them, as Stop stops one, by the person, at the transition's instant, before Finish's close
-(`stop_project`, [`projects.md`](projects.md)).
+**Finish, Archive and Reopen** stop every Session of the project running, starting or held, a
+Chat's among them, as Stop stops one, by the person, at the transition's instant, before Finish's
+close and before the chat's close at Finish and Reopen (`stop_project`,
+[`projects.md`](projects.md)); in a finished project, Reopen's stop meets its read-only chat alone (D068). The project's open chat's
+Session is locked first, whatever its state, since a message's send moves it under that lock alone
+([`chats.md`](chats.md)). The brain's `stop_work` stops a work item as Stop does, by Pilot
+([`mcp.md`](mcp.md)).
 
 ## The current line
 
@@ -361,8 +403,8 @@ A record is one of four kinds:
 |---|---|---|
 | `claude` | a line of the raw response stream, as `claude` printed it, with its controller session and the raw offset after it | the turn it came in |
 | `result` | the worker's `result` frame, `{turn, result, isError, interrupted}` as sent, with its controller session and offset | the turn it ended |
-| `send` | a person's message, in its place among the lines; its words and author are the Turn's | the Turn it sent |
-| `server` | the server's own line, a JSON object whose `type` says which: `starting`, `start-failed`, `send-failed`, `session-gone`, `restarting`, `environment-stopped`; on the Session that registered a document, `read-failed` and `write-back-refused` ([`round-trip.md`](round-trip.md)) | a `send-failed`, `restarting` or `environment-stopped` its Turn's; the others none |
+| `send` | a person's message, in its place among the lines; its words are the Turn's `words`, and its author the Turn's | the Turn it sent |
+| `server` | the server's own line, a JSON object whose `type` says which: `starting`, `start-failed`, `send-failed`, `session-gone`, `restarting`, `environment-stopped`; `effect`, a tool call's ([`mcp.md`](mcp.md)); on a chat's Session, `closed`, its last ([`chats.md`](chats.md)); on the Session that registered a document, `read-failed` and `write-back-refused` ([`round-trip.md`](round-trip.md)) | a `send-failed`, `restarting`, `environment-stopped` or `effect` its Turn's; the others none |
 
 **The writer.** `SessionRecordService.append(session_id, kind, *, payload, turn_id, raw_offset,
 controller_session)` is the only one: in the caller's transaction it locks the Session row, reads
@@ -371,8 +413,9 @@ The lock is held until the transaction ends, so a caller commits one record per 
 transaction that ends a Session's stream (`ended` or `failed`) without writing a record registers
 `after_commit(session_stream_service.waker(id))`, or the open views never receive `end`.
 
-**The one read.** `read_records(db, session_id, *, after=0, before=None, kind=None, limit,
-newest_first=False)` is the only query of `session_records` in the server. `TestTheOneRead`
+**The one read.** `read_records(db, session_id, *, after=0, before=None, kind=None,
+payload_type=None, limit, newest_first=False)`, `payload_type` the payload's `type` to filter on, is
+the only query of `session_records` in the server. `TestTheOneRead`
 (`backend/tests/services/test_session_record_service.py`) holds the code to it and to the one
 writer: it fails on code in `app/` outside the read function that names `SessionRecord`, other than
 in an annotation, or the table in a string, and on a `SessionRecord(...)` made outside `append`.
@@ -401,7 +444,7 @@ gets both ways is the same `seq`. The routes are behind the API's `editor` gate,
 A record has one shape on the pages and in the live frames: `seq`, `at`, `turn` (its Turn's
 number, null outside one) and `kind`; then a `claude` record's `payload` (the line's JSON, or its
 text) and `raw_offset`, a `result` or `server` record's `payload`, a `send` record's `author` (a
-handle) and `message`.
+handle) and `message`, the Turn's `words`.
 
 The live frames travel as the SSE event `session`, `{session, frame, data}`, on the channel
 `session:<id>`:

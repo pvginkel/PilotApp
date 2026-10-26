@@ -50,6 +50,8 @@ is finished, else null. `items` are every item, by `seq`, each with:
   content_type, size, batch, copied_at, source}`, `batch` the project's attach call it came in,
   from 1, and `source` where it was copied from, `<environment>:<path>`, null for the draft's copy.
   Its bytes are streamed apart ([`documents.md`](documents.md));
+- `asked_writer_about`: the local ids of the blocks Pilot asked a registered document's writer
+  about, in the document's order (`ask_writer`, [`mcp.md`](mcp.md)); empty on every other item;
 - `work`, a work item's status, its Session as its line shows it, null for every other kind
   ([`work.md`](work.md)).
 
@@ -132,6 +134,10 @@ draw no line. A project with none reads "Nothing yet".
   after a one-ask item's or a notice's text, at a confirmation card's end, in the opening's bubble,
   after an inline document's text and on a card. A chip opens the attachment in the overlay
   ([`documents.md`](documents.md)).
+- **Pilot asked the writer.** An open registered document whose writer Pilot asked about its
+  blocks says so with Pilot's avatar, "Pilot asked the writer about D2 and D4", the blocks by their
+  local ids (`writer-asked.tsx`): inline under its title, on a card under its summary, on a one-ask
+  item under its title, and on a confirmation under its controls. A done line shows nothing of it.
 - **Pilot writing.** While a session's turn saves an item's text (`writing`), Pilot's avatar and
   three dots, one at a time brightening, end the open item, every kind but the opening. The turn's
   end clears the flag with no live event, so the dots go on the screen's next read.
@@ -297,6 +303,7 @@ has the testing endpoints they call). A text with one block makes its item that 
 spec's document carries two blocks or more. The `timeline` page object
 (`tests/support/page-objects/timeline-page.ts`) opens a project's timeline (`open`), or an
 address (`openAt`), and reads its items, blocks, segments, cards, settled lines, attachments,
-banners and done lines; `slowNetwork`
+banners and done lines, and an item's line that Pilot asked its writer (`item(id).writerAsked`,
+pinned in `frontend/tests/work/registered.spec.ts`); `slowNetwork`
 (`tests/support/network.ts`) holds a write on its way, to see what shows while it saves. A spec
 asserting a live update waits for the stream first (`deploymentSse.ensureConnected()`).
