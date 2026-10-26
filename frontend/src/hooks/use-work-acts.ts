@@ -4,7 +4,8 @@
  * The answer, the item's session as it stands, goes into its project's timeline as read; then
  * every screen reads again. A refusal is the query client's toast, the API's words. Their form
  * events are `timeline.stop`'s and `timeline.resume`'s, sent whether or not the item's actions
- * are still drawn when the answer comes.
+ * are still drawn when the answer comes. An act answers the item's session as it stands, or none
+ * where it was refused.
  */
 
 import { useParams } from '@tanstack/react-router';
@@ -14,7 +15,8 @@ import { usePostSessionsResumeBySessionId, usePostSessionsStopBySessionId } from
 import type { components } from '@/lib/api/generated/types';
 import { trackFormError, trackFormSubmit, trackFormSuccess } from '@/lib/test/form-instrumentation';
 
-type State = components['schemas']['TimelineSchema.1fdd8ae.WorkSchema']['state'];
+type Work = components['schemas']['TimelineSchema.1fdd8ae.WorkSchema'];
+type State = Work['state'];
 
 /** The states Stop is offered in, and Resume. */
 export const STOPPABLE: readonly State[] = ['running', 'starting', 'held'];
@@ -26,14 +28,18 @@ function useAct(mutation: Mutation, form: string, itemId: string, from: readonly
   const queryClient = useQueryClient();
   const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
   const fields = { item: itemId };
-  const act = () => {
+  const act = (): Promise<Work | null> => {
     trackFormSubmit(form, fields);
-    void mutation.mutateAsync({ path: { session_id: itemId } }).then(
+    return mutation.mutateAsync({ path: { session_id: itemId } }).then(
       (work) => {
         trackFormSuccess(form, fields);
         moveWork(queryClient, projectId, itemId, work, from);
+        return work;
       },
-      () => trackFormError(form, fields),
+      () => {
+        trackFormError(form, fields);
+        return null;
+      },
     );
   };
   return { act, pending: mutation.isPending };

@@ -4,10 +4,9 @@
  * read only, no foot; *Empty* before the first save, Pilot's dots while a turn saves it (F35), and
  * "The document did not load" for a read that fails (F113). The handbook's button stands in the
  * head's icon group, left of the notes button (F2.3, F2.7); a draft has none, nor a handbook
- * (F129.2). A save shows on the overlay's next read: the project document's live where it renames
- * the project, the handbook's on the project's next live event, and either's once a stream that went
- * down comes back up. On a phone it is the whole screen (F98.3), and switching projects closes it
- * (F1.6).
+ * (F129.2). A save shows live as it lands, Pilot's dots with it until the turn ends, the project
+ * document's renaming the project, and once a stream that went down comes back up. On a phone it
+ * is the whole screen (F98.3), and switching projects closes it (F1.6).
  */
 
 import { randomUUID } from 'node:crypto';
@@ -100,24 +99,6 @@ test.describe('The handbook', () => {
     await expect(page).toHaveURL(handbookAddress(id));
   });
 
-  test('open, reads a save again on the project’s next live event, which the save itself does not send', async ({
-    people,
-    projects,
-    overlay,
-    deploymentSse,
-  }) => {
-    const me = await people.signIn();
-    const id = await projects.makeWithSession({ name: makeUnique('Live'), members: [me.handle!] });
-    await overlay.openProjectDocument(id, 'handbook');
-    await deploymentSse.ensureConnected();
-    await expect(overlay.empty).toBeVisible();
-
-    await projects.saveProjectDocument(id, 'handbook', HANDBOOK);
-    await projects.place(id, { kind: 'notice', title: 'We leave on Friday', text: '# We leave on Friday\n' });
-    await expect(overlay.document).toContainText('How the trip is planned.');
-    await expect(overlay.empty).toHaveCount(0);
-  });
-
   test('a draft has none: no button in its head, and the handbook’s address reads “The document did not load”', async ({
     page,
     people,
@@ -203,6 +184,34 @@ test.describe('The project document', () => {
   });
 });
 
+test.describe('Live', () => {
+  for (const role of ['handbook', 'draft'] as const) {
+    test(`the ${role === 'handbook' ? 'handbook' : 'project document'} open in the overlay shows a save as it lands, Pilot’s dots with it, gone when the turn ends`, async ({
+      people,
+      projects,
+      overlay,
+      deploymentSse,
+    }) => {
+      const me = await people.signIn();
+      const name = makeUnique('Live');
+      const id = await projects.makeWithSession({ name, members: [me.handle!] });
+      await overlay.openProjectDocument(id, role);
+      await deploymentSse.ensureConnected();
+      await expect(overlay.empty).toBeVisible();
+      await expect(overlay.writing).toHaveCount(0);
+
+      await projects.saveProjectDocument(id, role, role === 'handbook' ? HANDBOOK : `# ${name}\n\nHow the trip is planned.\n`);
+      await expect(overlay.document).toContainText('How the trip is planned.');
+      await expect(overlay.empty).toHaveCount(0);
+      await expect(overlay.writing).toBeVisible();
+
+      await projects.endTurn(id);
+      await expect(overlay.writing).toHaveCount(0);
+      await expect(overlay.document).toContainText('How the trip is planned.');
+    });
+  }
+});
+
 test.describe('A stream that comes back up', () => {
   for (const role of ['handbook', 'draft'] as const) {
     test(`reads again the ${role === 'handbook' ? 'handbook' : 'project document'} open in the overlay, saved while the stream was down`, async ({
@@ -231,7 +240,7 @@ test.describe('A stream that comes back up', () => {
       await toastHelper.expectErrorToast(/refresh the page/i);
       expect((await deploymentSse.getStatus()).isConnected).toBe(false);
 
-      // Neither save sends an event: a handbook's never does, and this one keeps the project's name.
+      // The save's event reaches no one: the stream is down.
       await projects.saveProjectDocument(id, role, role === 'handbook' ? HANDBOOK : `# ${name}\n\nHow the trip is planned.\n`);
       await deploymentSse.connect();
       await expect(overlay.document).toContainText('How the trip is planned.');

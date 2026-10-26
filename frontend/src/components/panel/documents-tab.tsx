@@ -3,7 +3,9 @@
  * attachments, newest first, each with its title and its item and stamp, the files attached in one
  * call together under their folder (F37.1); then the timeline's documents and reviews, newest
  * first, each with its state, Open, *Unsent* (D026) or Done, and its stamp (F37.2). Each opens in
- * the overlay at its address.
+ * the overlay at its address. The project document's row is named "Project document" until its
+ * title is read; under the headings stands nothing while the tab's read is under way, and "None
+ * yet." under a list read empty; a failed read says so in the lists' place (F113).
  */
 
 import type { ReactNode } from 'react';
@@ -11,17 +13,17 @@ import { Link } from '@tanstack/react-router';
 import { BookOpen, FileText, Folder, Paperclip } from 'lucide-react';
 import { Time } from '@/components/shared/time';
 import { isUnsent } from '@/components/timeline/document-state';
-import type { Batch } from '@/hooks/use-panel';
+import type { Batch, PanelRead } from '@/hooks/use-panel';
 import { titleOf, type Attachment, type TimelineItem } from '@/hooks/use-timeline';
 
 interface DocumentsTabProps {
   projectId: string;
-  documents: { projectDocument: string | null; batches: Batch[]; documents: TimelineItem[] };
+  documents: { projectDocument: string | null; lists: PanelRead };
   /** A row was opened in the overlay. */
   onOpen: () => void;
 }
 
-export function DocumentsTab({ projectId, documents: { projectDocument, batches, documents }, onOpen }: DocumentsTabProps) {
+export function DocumentsTab({ projectId, documents: { projectDocument, lists }, onOpen }: DocumentsTabProps) {
   return (
     <div className="docs" data-testid="panel.documents">
       <ul>
@@ -39,41 +41,63 @@ export function DocumentsTab({ projectId, documents: { projectDocument, batches,
           </Link>
         </li>
       </ul>
-      <h3>Attachments</h3>
-      {batches.length > 0 ? (
-        <ul data-testid="panel.attachments">
-          {batches.map((batch) =>
-            batch.attachments.length === 1 ? (
-              <li key={batch.batch}>
-                <AttachmentRow projectId={projectId} item={batch.item} attachment={batch.attachments[0]} onOpen={onOpen}>
-                  {titleOf(batch.item)} · <Time at={batch.attachments[0].copied_at} format="stamp" />
-                </AttachmentRow>
-              </li>
-            ) : (
-              <BatchRows key={batch.batch} projectId={projectId} batch={batch} onOpen={onOpen} />
-            ),
-          )}
-        </ul>
-      ) : (
-        <p className="none" data-testid="panel.attachments.none">
-          None yet. A session attaches reader’s material here: a design, a survey, a log.
+      {lists === 'failed' ? (
+        <p className="none failed" data-testid="panel.documents.failed">
+          The documents did not load.
         </p>
-      )}
-      <h3>In the timeline</h3>
-      {documents.length > 0 ? (
-        <ul data-testid="panel.timeline-documents">
-          {documents.map((item) => (
-            <li key={item.id}>
-              <DocumentRow projectId={projectId} item={item} onOpen={onOpen} />
-            </li>
-          ))}
-        </ul>
       ) : (
-        <p className="none" data-testid="panel.timeline-documents.none">
-          None yet.
-        </p>
+        <>
+          <h3>Attachments</h3>
+          {lists !== 'pending' && <Attachments projectId={projectId} batches={lists.batches} onOpen={onOpen} />}
+          <h3>In the timeline</h3>
+          {lists !== 'pending' && <TimelineDocuments projectId={projectId} documents={lists.documents} onOpen={onOpen} />}
+        </>
       )}
     </div>
+  );
+}
+
+function Attachments({ projectId, batches, onOpen }: { projectId: string; batches: Batch[]; onOpen: () => void }) {
+  if (batches.length === 0) {
+    return (
+      <p className="none" data-testid="panel.attachments.none">
+        None yet. A session attaches reader’s material here: a design, a survey, a log.
+      </p>
+    );
+  }
+  return (
+    <ul data-testid="panel.attachments">
+      {batches.map((batch) =>
+        batch.attachments.length === 1 ? (
+          <li key={batch.batch}>
+            <AttachmentRow projectId={projectId} item={batch.item} attachment={batch.attachments[0]} onOpen={onOpen}>
+              {titleOf(batch.item)} · <Time at={batch.attachments[0].copied_at} format="stamp" />
+            </AttachmentRow>
+          </li>
+        ) : (
+          <BatchRows key={batch.batch} projectId={projectId} batch={batch} onOpen={onOpen} />
+        ),
+      )}
+    </ul>
+  );
+}
+
+function TimelineDocuments({ projectId, documents, onOpen }: { projectId: string; documents: TimelineItem[]; onOpen: () => void }) {
+  if (documents.length === 0) {
+    return (
+      <p className="none" data-testid="panel.timeline-documents.none">
+        None yet.
+      </p>
+    );
+  }
+  return (
+    <ul data-testid="panel.timeline-documents">
+      {documents.map((item) => (
+        <li key={item.id}>
+          <DocumentRow projectId={projectId} item={item} onOpen={onOpen} />
+        </li>
+      ))}
+    </ul>
   );
 }
 

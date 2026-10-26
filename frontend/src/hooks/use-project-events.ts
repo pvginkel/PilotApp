@@ -2,10 +2,12 @@
  * The screens kept live (F80.2). The server's `project_changed` names a project whose timeline,
  * head or tab moved, and what the screens show of it is read again: its timeline, its head, a
  * document of it in the overlay, its handbook and its project document, and the project lists'
- * tabs; a handbook's save sends none, and the project document's one only where it renames the
- * project. An event reaches only the browsers whose stream the sending process holds, so each
- * time the stream comes up everything they show is read again (design 2 §6.2). Nothing waits for
- * the stream: the screens are read without it (SSE-4).
+ * tabs. A save of any of the project's documents, the handbook and the project document included,
+ * sends one where it changes the text or makes its turn the document's writer, and a turn's end
+ * sends one for each document it lets go: Pilot's dots come and go live (F35). An event reaches
+ * only the browsers whose stream the sending process holds, so each time the stream comes up
+ * everything they show is read again (design 2 §6.2). Nothing waits for the stream: the screens
+ * are read without it (SSE-4).
  *
  * The server's `work_moved` carries a work item's session as it moves (F26.2, F80.2): it replaces
  * the item's in its project's timeline as read, with no read of its own, and so in the session log

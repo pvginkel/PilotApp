@@ -13,7 +13,7 @@ interface PanelRow {
  * The side panel (F38.1): its head with the Documents tab, the tab's count and the close cross;
  * the Documents tab (F37) with the project document, the attachments, a batch of several under its
  * folder, and the timeline's documents and reviews, each a row with its title and the line under
- * it, and "None yet" where a list is empty.
+ * it, "None yet" where a list is empty, and the line in the lists' place where the tab's read failed.
  */
 export class PanelPage {
   readonly root: Locator;
@@ -22,6 +22,8 @@ export class PanelPage {
   readonly count: Locator;
   readonly close: Locator;
   readonly body: Locator;
+  /** The lists' headings. */
+  readonly headings: Locator;
   readonly projectDocument: PanelRow;
   /** Every attachment's row, a batch's files included, in their order. */
   readonly attachments: Locator;
@@ -30,6 +32,8 @@ export class PanelPage {
   /** The timeline's documents and reviews, in their order. */
   readonly documents: Locator;
   readonly noDocuments: Locator;
+  /** What stands in the lists' place where the tab's read failed. */
+  readonly failed: Locator;
 
   constructor(private readonly page: Page) {
     this.root = page.getByTestId('panel');
@@ -38,12 +42,14 @@ export class PanelPage {
     this.count = this.head.getByTestId('panel.tab.documents.count');
     this.close = this.head.getByTestId('panel.close');
     this.body = this.root.getByTestId('panel.body');
+    this.headings = this.body.locator('h3');
     this.projectDocument = rowOf(this.body.getByTestId('panel.project-document'));
     this.attachments = this.body.getByTestId('panel.attachment');
     this.noAttachments = this.body.getByTestId('panel.attachments.none');
     this.batches = this.body.getByTestId('panel.batch');
     this.documents = this.body.getByTestId('panel.document');
     this.noDocuments = this.body.getByTestId('panel.timeline-documents.none');
+    this.failed = this.body.getByTestId('panel.documents.failed');
   }
 
   attachment(attachmentId: string): PanelRow {

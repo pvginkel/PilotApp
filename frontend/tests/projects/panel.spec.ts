@@ -8,12 +8,16 @@
  * window 1200 px wide or more. On a wide window it stands beside the timeline and the overlay
  * beside it, and Esc never closes it (F98.1); below that it lies over the timeline, it and the
  * overlay the one opened last on top and the first Esc closes, and going to an item closes it
- * (F98.2); on a phone it is the whole screen (F98.3).
+ * (F98.2); on a phone it is the whole screen (F98.3). The tab's lists wait on its read, the
+ * timeline's and the project document's: nothing under the headings while it is on its way, the
+ * project document's row "Project document" until its title is read, and "The documents did not
+ * load" in the lists' place where the read fails (F113).
  */
 
 import { randomUUID } from 'node:crypto';
 import { test, expect } from '../support/fixtures';
-import { makeUnique, waitForUiState } from '../support/helpers';
+import { expectConsoleError, makeUnique, waitForUiState } from '../support/helpers';
+import { slowNetwork } from '../support/network';
 import { documentAddress, projectDocumentAddress } from '../support/page-objects/overlay-page';
 import { isOnTop } from '../support/page-objects/panel-page';
 import { addressOf, attachmentAddress } from '../support/page-objects/timeline-page';
@@ -248,6 +252,80 @@ test.describe('The side panel on a wide window', () => {
     await page.goto(`/projects/${randomUUID()}`);
     await waitForUiState(page, 'project.head', 'ready');
     await expect(panel.root).toHaveCount(0);
+  });
+});
+
+test.describe('The Documents tab’s read', () => {
+  // Below 1200 px the panel starts closed: the timeline is read before the tab opens, and the
+  // project document's read, which the tab alone makes, goes out as it opens.
+  test.use({ viewport: { width: 1100, height: 800 } });
+
+  test('draws nothing under its headings while it is on its way, the project document’s row named “Project document” until its title is read; then “None yet.” under each list read empty', async ({
+    page,
+    people,
+    projects,
+    projectHead,
+    timeline,
+    panel,
+  }) => {
+    const me = await people.signIn();
+    const name = makeUnique('Pending');
+    const id = await projects.makeWithSession({ name, members: [me.handle!] });
+    await timeline.open(id);
+    await expect(panel.root).toHaveCount(0);
+
+    const restore = await slowNetwork(page, 1_000);
+    const read = panel.read();
+    await projectHead.documentsButton.click();
+    await expect(panel.headings).toHaveText(['Attachments', 'In the timeline']);
+    await expect(panel.projectDocument.title).toHaveText('Project document');
+    await expect(panel.projectDocument.sub).toHaveText('Project document');
+    await expect(panel.noAttachments).toHaveCount(0);
+    await expect(panel.noDocuments).toHaveCount(0);
+    await expect(panel.failed).toHaveCount(0);
+
+    await read;
+    await restore();
+    await expect(panel.projectDocument.title).toHaveText(name);
+    await expect(panel.noAttachments).toHaveText('None yet. A session attaches reader’s material here: a design, a survey, a log.');
+    await expect(panel.noDocuments).toHaveText('None yet.');
+    await expect(panel.failed).toHaveCount(0);
+  });
+
+  test('says “The documents did not load” in the lists’ place where it fails, the row named “Project document”, and draws the lists once a later read lands', async ({
+    page,
+    auth,
+    people,
+    projects,
+    projectHead,
+    timeline,
+    panel,
+  }) => {
+    const me = await people.signIn();
+    const name = makeUnique('Failed');
+    const id = await projects.makeWithSession({ name, members: [me.handle!] });
+    await projects.place(id, { kind: 'document', title: 'Packing', text: 'We pack light.\n' });
+    await timeline.open(id);
+    await expect(panel.root).toHaveCount(0);
+
+    // The browser's session now lacks the editor role, and the API refuses the tab's read.
+    await expectConsoleError(page, /403/);
+    await auth.createSession({ name: 'Test Person', roles: [] });
+    await projectHead.documentsButton.click();
+    await expect(panel.failed).toHaveText('The documents did not load.');
+    await expect(panel.headings).toHaveCount(0);
+    await expect(panel.documents).toHaveCount(0);
+    await expect(panel.noAttachments).toHaveCount(0);
+    await expect(panel.projectDocument.title).toHaveText('Project document');
+    await expect(panel.count).toHaveCount(0);
+
+    await people.firstSignIn();
+    await timeline.refocus();
+    await expect(panel.failed).toHaveCount(0);
+    await expect(panel.projectDocument.title).toHaveText(name);
+    await expect(panel.headings).toHaveText(['Attachments', 'In the timeline']);
+    await expect(panel.documents.getByTestId('panel.row.title')).toHaveText(['Packing']);
+    await expect(panel.count).toHaveText('1');
   });
 });
 

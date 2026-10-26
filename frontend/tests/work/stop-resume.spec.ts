@@ -4,11 +4,14 @@
  * session where it is, the item "Stopped · <time>" and waiting on you, Resume in Stop's place.
  * Resume, on a stopped item, a failed start or a turn ended in error, carries it on in the same
  * item through the gate, held while the project is paused, disabled while it is archived; a held
- * start stopped starts no more. A refusal shows as the API words it.
+ * start stopped starts no more. A refusal shows as the API words it. Once this browser's Stop or
+ * Resume lands, the keyboard focus on the button that went is on Resume, or on Stop; one made
+ * elsewhere, or a focus moved meanwhile, moves no focus.
  */
 
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
+import { slowNetwork } from '../support/network';
 import type { People } from '../support/people';
 import type { Projects } from '../support/projects';
 
@@ -100,6 +103,7 @@ test.describe('Stop', () => {
     await expect(item.stopConfirm.root).toHaveCount(0);
     await expect(item.stop).toHaveCount(0);
     await expect(item.resume).toHaveText('Resume');
+    await expect(item.resume).toBeFocused();
     await expect(item.sessionLog).toBeVisible();
     await expect(projectList.badge(name)).toHaveText('1');
 
@@ -107,6 +111,7 @@ test.describe('Stop', () => {
     await item.resume.click();
     await expect(item.resume).toHaveCount(0);
     await expect(item.stop).toBeVisible();
+    await expect(item.stop).toBeFocused();
     await expect(item.cue).toBeVisible();
     await expect.poll(async () => (await projects.work(project, work)).state).toBe('running');
     await expect(item.running).toBeVisible();
@@ -181,6 +186,55 @@ test.describe('Stop', () => {
     await projects.transition(project, 'resumed');
     await expect.poll(async () => (await projects.work(project, work)).state).toBe('running');
     await expect(item.running).toBeVisible();
+  });
+});
+
+test.describe('The keyboard focus', () => {
+  test('stays where the person moved it while this browser’s Stop and Resume were on their way', async ({
+    page,
+    people,
+    projects,
+    projectHead,
+    timeline,
+  }) => {
+    const { project } = await setUp({ people, projects });
+    const work = await startIn(projects, project);
+    await timeline.open(project);
+    const item = timeline.item(work).work;
+
+    const restore = await slowNetwork(page, 1_000);
+    await item.stop.click();
+    await item.stopConfirm.yes.click();
+    await projectHead.documentsButton.focus();
+    await expect(item.resume).toBeVisible();
+    await expect(projectHead.documentsButton).toBeFocused();
+
+    await restore();
+    await turnEnded(projects, work);
+    await item.resume.press('Enter');
+    await expect(item.stop).toBeFocused();
+  });
+
+  test('moves nowhere when a Stop or a Resume made elsewhere swaps the two', async ({ page, people, projects, timeline, deploymentSse }) => {
+    const { project } = await setUp({ people, projects });
+    const work = await startIn(projects, project);
+    await timeline.open(project);
+    await deploymentSse.ensureConnected();
+    const item = timeline.item(work).work;
+    const onNothing = () => page.evaluate(() => document.activeElement === document.body);
+
+    await item.stop.focus();
+    await projects.stop(work);
+    await expect(item.resume).toBeVisible();
+    await expect(item.resume).not.toBeFocused();
+    expect(await onNothing()).toBe(true);
+
+    await turnEnded(projects, work);
+    await item.resume.focus();
+    await projects.resume(work);
+    await expect(item.stop).toBeVisible();
+    await expect(item.stop).not.toBeFocused();
+    expect(await onNothing()).toBe(true);
   });
 });
 

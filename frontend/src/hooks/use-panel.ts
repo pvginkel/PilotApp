@@ -5,7 +5,8 @@
  * the overlay beside it (F98.1). Below one the two lie over each other, the one opened last on top,
  * and Esc closes that one first; with no overlay open Esc leaves the panel alone; going to an item
  * closes the panel (F98.2). Its Documents tab lists the project document, the attachments, a batch
- * of several together, and the timeline's documents and reviews, newest first (F37).
+ * of several together, and the timeline's documents and reviews, newest first (F37), from the
+ * project's timeline and its project document, read as one.
  */
 
 import { useEffect, useState, useSyncExternalStore } from 'react';
@@ -88,14 +89,23 @@ export interface Batch {
   attachments: Attachment[];
 }
 
-interface PanelDocuments {
-  /** The project document's title: its text's, once read; none where its text gives none. */
-  projectDocument: string | null;
-  /** Newest first, each batch's files in their order. */
+/** The tab's lists, newest first. */
+export interface PanelLists {
+  /** Each batch's files in their order. */
   batches: Batch[];
-  /** The timeline's documents and reviews, newest first. */
+  /** The timeline's documents and reviews. */
   documents: TimelineItem[];
-  /** What the tab carries on its name: the attachments and the timeline's documents (F37.3). */
+}
+
+/** The tab's read, its timeline's and its project document's together: its lists once both landed. */
+export type PanelRead = PanelLists | 'pending' | 'failed';
+
+interface PanelDocuments {
+  /** The project document's title: its text's, once read; none until then, and where its text gives none. */
+  projectDocument: string | null;
+  /** `pending` while either read has nothing yet, `failed` while either's latest read failed (F113). */
+  lists: PanelRead;
+  /** What the tab carries on its name: the attachments and the timeline's documents, once read (F37.3). */
   count: number;
 }
 
@@ -106,7 +116,10 @@ export function usePanelDocuments(projectId: string): PanelDocuments {
     isLoading: timeline.isLoading || draft.isLoading,
     error: timeline.error ?? draft.error,
   });
-  const items = timeline.data?.items ?? [];
+  const projectDocument = draft.data?.title ?? null;
+  if (timeline.error !== null || draft.error !== null) return { projectDocument, lists: 'failed', count: 0 };
+  if (timeline.data === undefined || draft.data === undefined) return { projectDocument, lists: 'pending', count: 0 };
+  const { items } = timeline.data;
   const batches = items
     .flatMap((item) => {
       const byBatch = new Map<number, Batch>();
@@ -120,9 +133,8 @@ export function usePanelDocuments(projectId: string): PanelDocuments {
     .sort((one, other) => other.batch - one.batch);
   const documents = items.filter((item) => item.kind === 'document' || item.kind === 'review').reverse();
   return {
-    projectDocument: draft.data?.title ?? null,
-    batches,
-    documents,
+    projectDocument,
+    lists: { batches, documents },
     count: batches.reduce((count, batch) => count + batch.attachments.length, 0) + documents.length,
   };
 }

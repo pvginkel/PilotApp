@@ -9,10 +9,12 @@
  * (F125). Its Session log opens the session's records in the overlay (F26.3, F69). Stop, while it
  * runs, starts or is held, asks first in its actions' place, Esc dismissing the question; Resume,
  * once it stopped or failed, carries it on (F67), disabled while the project is archived, as its
- * head's switch is (D012).
+ * head's switch is (D012). Once this browser's Stop or Resume swaps the two, the keyboard focus on
+ * the button that went goes to the other's resting button, Resume or Stop; a swap another
+ * browser's act made moves no focus.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, useParams } from '@tanstack/react-router';
 import { CircleAlert, Play, ScrollText, Square } from 'lucide-react';
 import { WorkingCue } from '@/components/chat/working-cue';
@@ -32,9 +34,17 @@ type Work = components['schemas']['TimelineSchema.1fdd8ae.WorkSchema'];
 /** How often "running N min" is counted again, in milliseconds. */
 const TICK = 15_000;
 
+type Actions = 'stop' | 'resume';
+
+/** The actions a session's state offers: Stop, Resume, or neither. */
+const actionsOf = (state: Work['state']): Actions | null =>
+  STOPPABLE.includes(state) ? 'stop' : RESUMABLE.includes(state) ? 'resume' : null;
+
 export function WorkItem({ item }: { item: TimelineItem }) {
   // The API gives every work item its session.
   const work = item.work!;
+  const actions = actionsOf(work.state);
+  const handoff = useHandoff(actions);
   return (
     <div className="item-body">
       <ItemHead item={item}>
@@ -49,10 +59,10 @@ export function WorkItem({ item }: { item: TimelineItem }) {
         <LinkedText text={titleOf(item)} />
       </div>
       <Line work={work} />
-      {STOPPABLE.includes(work.state) ? (
-        <StopActions item={item} />
-      ) : RESUMABLE.includes(work.state) ? (
-        <ResumeActions item={item} />
+      {actions === 'stop' ? (
+        <StopActions item={item} handoff={handoff} />
+      ) : actions === 'resume' ? (
+        <ResumeActions item={item} handoff={handoff} />
       ) : (
         <div className="item-actions">
           <SessionLog item={item} />
@@ -62,14 +72,51 @@ export function WorkItem({ item }: { item: TimelineItem }) {
   );
 }
 
+interface Handoff {
+  /** The ref of the actions' resting button, Stop's or Resume's. */
+  button: (element: HTMLButtonElement | null) => void;
+  /** This browser's act starts from `from`, to swap the actions for the `to` ones. */
+  start: (from: HTMLElement, to: Actions) => void;
+  /** The act's answer: the item's session as it stands, or none where it was refused. */
+  land: (work: Work | null) => void;
+}
+
+/**
+ * The focus across a swap of the actions: onto the shown ones' resting button where this browser's
+ * act made the swap, from the button that had the focus then, and nothing has the focus since. Every
+ * swap ends the act's wait, as does an answer that leads to no swap.
+ */
+function useHandoff(shown: Actions | null): Handoff {
+  const button = useRef<HTMLButtonElement | null>(null);
+  const awaited = useRef<Actions | null>(null);
+  const setButton = useCallback((element: HTMLButtonElement | null) => {
+    button.current = element;
+  }, []);
+  useLayoutEffect(() => {
+    const to = awaited.current;
+    awaited.current = null;
+    const focused = document.activeElement;
+    if (to !== null && to === shown && (focused === null || focused === document.body)) button.current?.focus();
+  }, [shown]);
+  return {
+    button: setButton,
+    start: (from, to) => {
+      awaited.current = document.activeElement === from ? to : null;
+    },
+    land: (work) => {
+      if (work === null || actionsOf(work.state) !== awaited.current) awaited.current = null;
+    },
+  };
+}
+
 /**
  * Session log and Stop, which asks first in the actions' place, as the mockup asks; Cancel takes
  * the focus, so that Enter pressed again cancels, and gives it back to Stop.
  */
-function StopActions({ item }: { item: TimelineItem }) {
+function StopActions({ item, handoff }: { item: TimelineItem; handoff: Handoff }) {
   const { act, pending } = useStop(item.id);
   const [asking, setAsking] = useState(false);
-  const stopButton = useRef<HTMLButtonElement>(null);
+  const stopButton = useRef<HTMLButtonElement | null>(null);
   const cancelButton = useRef<HTMLButtonElement>(null);
   const asked = useRef(false);
   const cancel = () => {
@@ -88,7 +135,16 @@ function StopActions({ item }: { item: TimelineItem }) {
         <span className="confirm-text" data-testid="timeline.work.stop-confirm.text">
           Stop the session? Its turn ends where it is; Resume sends it on.
         </span>
-        <button type="button" className="btn btn-sm btn-danger" disabled={pending} onClick={act} data-testid="timeline.work.stop-confirm.yes">
+        <button
+          type="button"
+          className="btn btn-sm btn-danger"
+          disabled={pending}
+          onClick={(event) => {
+            handoff.start(event.currentTarget, 'resume');
+            void act().then(handoff.land);
+          }}
+          data-testid="timeline.work.stop-confirm.yes"
+        >
           <Square className="icon" aria-hidden="true" />
           Stop it
         </button>
@@ -108,7 +164,16 @@ function StopActions({ item }: { item: TimelineItem }) {
   return (
     <div className="item-actions">
       <SessionLog item={item} />
-      <button ref={stopButton} type="button" className="btn btn-sm" onClick={() => setAsking(true)} data-testid="timeline.work.stop">
+      <button
+        ref={(element) => {
+          stopButton.current = element;
+          handoff.button(element);
+        }}
+        type="button"
+        className="btn btn-sm"
+        onClick={() => setAsking(true)}
+        data-testid="timeline.work.stop"
+      >
         <Square className="icon" aria-hidden="true" />
         Stop
       </button>
@@ -117,17 +182,21 @@ function StopActions({ item }: { item: TimelineItem }) {
 }
 
 /** Resume, before Session log; disabled while the project is archived, which the API refuses until Bring back. */
-function ResumeActions({ item }: { item: TimelineItem }) {
+function ResumeActions({ item, handoff }: { item: TimelineItem; handoff: Handoff }) {
   const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
   const { act, pending } = useResume(item.id);
   const archived = useArchived(projectId);
   return (
     <div className="item-actions">
       <button
+        ref={(element) => handoff.button(element)}
         type="button"
         className="btn btn-sm btn-primary"
         disabled={pending || archived}
-        onClick={act}
+        onClick={(event) => {
+          handoff.start(event.currentTarget, 'stop');
+          void act().then(handoff.land);
+        }}
         data-testid="timeline.work.resume"
       >
         <Play className="icon" aria-hidden="true" />
