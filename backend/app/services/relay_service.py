@@ -1127,7 +1127,7 @@ def _with_turn_in_flight(
 def _follows_up(session: AgentSession, turn: Turn) -> bool:
     """Whether a brain session's turn `turn`, ended with a save of its own
     still held, gets the follow-up turn: it left the Session `idle`, and is
-    no follow-up itself (one per turn, ruling D1)."""
+    no follow-up itself (one per turn, D065)."""
     return (
         session.kind_code != WORK_KIND
         and session.state_code == SessionState.IDLE
