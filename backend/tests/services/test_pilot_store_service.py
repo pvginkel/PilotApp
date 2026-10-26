@@ -1,5 +1,5 @@
 """`pilot-store`, the brain's tools (TD §4.5, F86): the gate that admits a
-chat's or a job's Session while its turn runs, and the five tools that act on
+chat's or a job's Session while its turn runs, and the seven tools that act on
 its project, each call that changed the record writing its Effect (F41) and
 `ask_writer` its Writer Question (DB decision 59)."""
 
@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.database import scoped_session
+from app.engine.attachments import copied
 from app.engine.bus import EngineEvent, ProjectChanged
 from app.exceptions import (
     AuthenticationException,
@@ -21,15 +22,19 @@ from app.exceptions import (
     RecordNotFoundException,
 )
 from app.models import (
+    Attachment,
     Block,
     Document,
     Effect,
     Environment,
     Item,
+    ItemAttachment,
+    PlanTask,
     Project,
     ProjectTransition,
     Turn,
     User,
+    Work,
     WriterQuestion,
 )
 from app.models.reference import (
@@ -38,10 +43,15 @@ from app.models.reference import (
     ProjectState,
     RecordKind,
     SessionState,
+    TaskStatus,
     TransitionKind,
     UserKind,
 )
+from app.schemas.pilot_store import AddItemRequestSchema
+from app.schemas.timeline import HeldReason
 from app.services.container import ServiceContainer
+from app.services.controller_client import ControllerClient
+from app.services.controller_outage import ControllerOutage
 from app.services.pilot_server import token_hash
 from app.services.pilot_store_service import (
     PASS_QUESTIONS_TOTAL,
@@ -49,8 +59,12 @@ from app.services.pilot_store_service import (
     PilotStoreService,
 )
 from app.services.session_record_service import read_records
+from app.services.session_start_service import SessionStartService
+from app.services.start_gate import Held
 from app.utils.after_commit import clear_after_commit_callbacks
-from tests.support.supervisor import metric_value
+from tests.support.fake_controller import ServedFakeController
+from tests.support.starts import configured_starts
+from tests.support.supervisor import Supervise, metric_value
 
 TOKEN = "brain-token"
 
@@ -231,6 +245,16 @@ def _work(
     db.add(Turn(session_id=run.id, seq=1, message="Pitch it.", started_at=now))
     container.record_service().place_work(project, run, "Pitching the tent")
     return run
+
+
+def _plan_task(project: Project, task_id: str) -> PlanTask:
+    return PlanTask(
+        project_id=project.id,
+        task_id=task_id,
+        position=1,
+        title="The camp",
+        status_code=TaskStatus.PENDING,
+    )
 
 
 def _other_project(db: DbSession, person: User) -> Project:
@@ -1178,3 +1202,770 @@ class TestPilotStoreServiceAskWriter:
             f"Cannot call pilot-store because session {job.id} has no turn running"
         )
         assert list(session.scalars(select(WriterQuestion))) == []
+
+
+ELSEWHERE = "example-elsewhere"
+"""An environment of the fleet Pilot has not touched."""
+
+DESIGN = "/work/Elsewhere/design"
+
+REPO = "example/Example"
+
+BRIEF = "Rename the badge."
+
+
+def _added(**fields: Any) -> AddItemRequestSchema:
+    return AddItemRequestSchema.model_validate(fields)
+
+
+def _document_text(db: DbSession, item: Item) -> str | None:
+    return db.get_one(Document, item.id).published_text
+
+
+def _attachments(db: DbSession, item: Item) -> list[Attachment]:
+    return list(
+        db.scalars(
+            select(Attachment)
+            .join(ItemAttachment, ItemAttachment.attachment_id == Attachment.id)
+            .where(ItemAttachment.item_id == item.id)
+            .order_by(ItemAttachment.position)
+        )
+    )
+
+
+def _elsewhere(fake_controller: ServedFakeController) -> None:
+    """The environment elsewhere, holding a design folder of two files."""
+    fake_controller.add_environment(ELSEWHERE, name="Elsewhere-1")
+    fake_controller.put_file(ELSEWHERE, f"{DESIGN}/README.md", b"# The design\n")
+    fake_controller.put_file(ELSEWHERE, f"{DESIGN}/data/model.md", b"The model.\n")
+
+
+@pytest.fixture
+def starts(container: ServiceContainer, supervise: Supervise) -> SessionStartService:
+    """The start on a controller, its loops never run, on a slot of one work
+    item per project."""
+    return configured_starts(container, supervise, project_max=1)
+
+
+def _starting(
+    container: ServiceContainer, starts: SessionStartService
+) -> PilotStoreService:
+    """The service on `starts`, its work items' start written and never run."""
+    service: PilotStoreService = container.pilot_store_service(
+        session_start_service=starts
+    )
+    return service
+
+
+class TestPilotStoreServiceAddProse:
+    def test_a_prose_item_is_born_with_its_title_and_facts_its_path_answered(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        session.add(_plan_task(project, "keys"))
+        run = _brain(session, project, environment)
+
+        added = _service(container).add_item(
+            _admitted(run),
+            _added(
+                kind="action",
+                title="Put the v4 key into OpenBao",
+                step="keys",
+                urgent=True,
+                summary="The importer needs it.",
+                **{"for": "ada"},
+            ),
+            TOOL_USE_ID,
+        )
+        clear_after_commit_callbacks()
+
+        item = added.item
+        assert added.path == (
+            f"/work/Projects/draft-{project.number}/items/1-put-the-v4-key-into-openbao.md"
+        )
+        assert (added.state, added.held) == (None, None)
+        assert _document_text(session, item) == (
+            "---\n"
+            "title: Put the v4 key into OpenBao\n"
+            "step: keys\n"
+            "urgent: true\n"
+            "for: ada\n"
+            "summary: The importer needs it.\n"
+            "---\n"
+        )
+        assert (
+            item.kind_code,
+            item.title,
+            item.plan_task_id,
+            item.urgent,
+            item.for_user_id,
+            item.created_by_session_id,
+        ) == ("action", "Put the v4 key into OpenBao", "keys", True, person.id, run.id)
+        assert (added.line.verb, added.line.label) == (
+            "Added",
+            "Action · Put the v4 key into OpenBao",
+        )
+        assert _effect_record(session, run) == {
+            "type": "effect",
+            "toolUseId": TOOL_USE_ID,
+            "effect": {
+                "verb": "Added",
+                "label": "Action · Put the v4 key into OpenBao",
+                "itemId": str(item.id),
+            },
+        }
+        [effect] = _effects(session)
+        assert (effect.kind_code, effect.item_id) == (EffectKind.ADDED, item.id)
+
+    def test_its_markdowns_own_title_stands_and_its_blocks_give_its_kind(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, project, environment)
+
+        added = _service(container).add_item(
+            _admitted(run),
+            _added(kind="document", title="Tent", markdown=DECISION),
+            TOOL_USE_ID,
+        )
+        clear_after_commit_callbacks()
+
+        assert _document_text(session, added.item) == DECISION
+        assert (added.item.kind_code, added.item.title) == ("decision", "Which tent?")
+        assert added.path is not None and added.path.endswith("/items/1-tent.md")
+        assert added.line.label == "Decision · Which tent?"
+
+    def test_markdown_with_no_front_matter_title_takes_the_calls(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, project, environment)
+
+        added = _service(container).add_item(
+            _admitted(run),
+            _added(kind="notice", title="The lake", markdown="It is open.\n"),
+            TOOL_USE_ID,
+        )
+        clear_after_commit_callbacks()
+
+        assert _document_text(session, added.item) == (
+            "---\ntitle: The lake\n---\nIt is open.\n"
+        )
+
+    def test_markdown_titled_by_its_first_heading_alone_is_born_with_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, project, environment)
+
+        added = _service(container).add_item(
+            _admitted(run), _added(kind="notice", markdown=NOTICE), TOOL_USE_ID
+        )
+        clear_after_commit_callbacks()
+
+        assert _document_text(session, added.item) == (
+            "---\ntitle: The lake is open\n---\n# The lake is open\n"
+        )
+        assert added.item.title == "The lake is open"
+
+    @pytest.mark.parametrize(
+        ("fields", "faults"),
+        [
+            pytest.param(
+                {"markdown": "It is open.\n"},
+                "the item has no title: give it `title` in the front matter or a"
+                " first heading",
+                id="no-title",
+            ),
+            pytest.param(
+                {"title": "Camp", "markdown": "```decision id=D1\noptions: [\n```\n"},
+                "line 5: block D1: the body is not a YAML mapping: while parsing a"
+                " flow node, expected the node content, but found '<stream end>'",
+                id="does-not-parse",
+            ),
+            pytest.param(
+                {"title": "Camp", "step": "nowhere", "for": "zed"},
+                "line 3: front matter: `step: nowhere` names no task of the"
+                " project; line 4: front matter: `for: zed` names no handle",
+                id="against-the-record",
+            ),
+        ],
+    )
+    def test_a_text_with_a_fault_is_refused_with_each_and_nothing_minted(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        fields: dict[str, str],
+        faults: str,
+    ) -> None:
+        run = _brain(session, project, environment)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _service(container).add_item(
+                _admitted(run), _added(kind="notice", **fields), TOOL_USE_ID
+            )
+
+        assert refused.value.message == (
+            f"Cannot add a notice item because its text holds faults: {faults}"
+        )
+        assert session.scalars(select(Item)).all() == []
+        assert _effects(session) == []
+
+    @pytest.mark.parametrize(
+        ("fields", "cause"),
+        [
+            pytest.param(
+                {"kind": "question"},
+                "it has no title: give `title`, or `markdown` that gives one",
+                id="no-title-or-markdown",
+            ),
+            pytest.param(
+                {
+                    "kind": "question",
+                    "title": "Which lake?",
+                    "repo": REPO,
+                    "brief": BRIEF,
+                },
+                "a question item takes no `repo`, `brief`",
+                id="work-fields",
+            ),
+            pytest.param(
+                {"kind": "card_wait", "title": "MD-8 done"},
+                "Pilot takes no waits yet",
+                id="card-wait",
+            ),
+            pytest.param(
+                {"kind": "timed_wait", "title": "Tomorrow"},
+                "Pilot takes no waits yet",
+                id="timed-wait",
+            ),
+        ],
+    )
+    def test_an_item_its_kind_does_not_take_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        fields: dict[str, str],
+        cause: str,
+    ) -> None:
+        run = _brain(session, project, environment)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _service(container).add_item(_admitted(run), _added(**fields), TOOL_USE_ID)
+
+        assert refused.value.message == (
+            f"Cannot add a {fields['kind']} item because {cause}"
+        )
+        assert session.scalars(select(Item)).all() == []
+
+
+class TestPilotStoreServiceAddWork:
+    def test_a_work_item_is_started_on_add_its_brief_followed_by_pilots_trailer(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        opened = _opened(session, project)
+        opened.autopilot = True
+        session.add(_plan_task(opened, "badge"))
+        container.document_service().bear_handbook(opened, "Badges are round.\n")
+        run = _brain(session, opened, environment)
+
+        added = _starting(container, starts).add_item(
+            _admitted(run),
+            _added(
+                kind="work",
+                title="Renaming the badge",
+                repo=REPO,
+                cwd="/work/Example",
+                brief=BRIEF,
+                step="badge",
+                agent="reviewer",
+                model="sonnet",
+                reasoning_effort="high",
+            ),
+            TOOL_USE_ID,
+        )
+        clear_after_commit_callbacks()
+
+        work = session.get_one(Work, added.item.id)
+        started = session.get_one(models.Session, added.item.id)
+        assert (added.path, added.state, added.held) == (None, "starting", None)
+        assert (added.item.kind_code, added.item.title, added.item.plan_task_id) == (
+            "work",
+            "Renaming the badge",
+            "badge",
+        )
+        assert (work.repo, work.autopilot) == (REPO, True)
+        assert (
+            started.state_code,
+            started.cwd,
+            started.agent,
+            started.model,
+            started.reasoning_effort,
+        ) == (SessionState.STARTING, "/work/Example", "reviewer", "sonnet", "high")
+        [turn] = session.scalars(select(Turn).where(Turn.session_id == started.id))
+        assert turn.message == (
+            "Rename the badge.\n\n"
+            "From Pilot:\n"
+            '- This work item serves plan task badge "The camp": write `step: badge`'
+            " into the front matter of every document you register.\n"
+            "- Auto pilot is on: the grants above hold for this session.\n"
+            "- The project's handbook:\n"
+            "Badges are round.\n"
+        )
+        assert added.line.label == "Work · Renaming the badge"
+        [effect] = _effects(session)
+        assert (effect.kind_code, effect.item_id) == (EffectKind.ADDED, added.item.id)
+
+    @pytest.mark.parametrize(
+        ("paused", "reason"),
+        [(True, HeldReason.PAUSED), (False, HeldReason.CONTROLLER_UNREACHABLE)],
+    )
+    def test_a_start_the_gate_holds_answers_held_and_why(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        controller_outage: ControllerOutage,
+        project: Project,
+        environment: Environment,
+        paused: bool,
+        reason: HeldReason,
+    ) -> None:
+        project.paused = paused
+        session.flush()
+        if not paused:
+            controller_outage.call_unanswered()
+        run = _brain(session, project, environment)
+
+        added = _starting(container, starts).add_item(
+            _admitted(run),
+            _added(
+                kind="work",
+                title="Renaming the badge",
+                repo=REPO,
+                cwd="/work/Example",
+                brief=BRIEF,
+            ),
+            TOOL_USE_ID,
+        )
+        clear_after_commit_callbacks()
+
+        assert (added.state, added.held) == ("held", Held(reason))
+        assert session.get_one(models.Session, added.item.id).state_code == (
+            SessionState.HELD
+        )
+
+    def test_a_start_held_for_the_slot_answers_its_count(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, project, environment)
+        service = _starting(container, starts)
+        work = _added(
+            kind="work",
+            title="Renaming the badge",
+            repo=REPO,
+            cwd="/work/Example",
+            brief=BRIEF,
+        )
+        service.add_item(_admitted(run), work, TOOL_USE_ID)
+
+        added = service.add_item(_admitted(run), work, TOOL_USE_ID)
+        clear_after_commit_callbacks()
+
+        assert (added.state, added.held) == ("held", Held(HeldReason.SLOT, 1))
+
+    @pytest.mark.parametrize(
+        ("fields", "cause"),
+        [
+            pytest.param(
+                {"title": "Renaming the badge", "repo": REPO},
+                "a work item needs `cwd`, `brief`",
+                id="missing",
+            ),
+            pytest.param(
+                {
+                    "title": "Renaming the badge",
+                    "repo": REPO,
+                    "cwd": "/work/Example",
+                    "brief": BRIEF,
+                    "markdown": "Rename it.\n",
+                    "urgent": True,
+                },
+                "a work item takes no `markdown`, `urgent`",
+                id="prose-fields",
+            ),
+        ],
+    )
+    def test_a_work_item_short_of_what_it_needs_or_with_prose_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        project: Project,
+        environment: Environment,
+        fields: dict[str, Any],
+        cause: str,
+    ) -> None:
+        run = _brain(session, project, environment)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _starting(container, starts).add_item(
+                _admitted(run), _added(kind="work", **fields), TOOL_USE_ID
+            )
+
+        assert refused.value.message == f"Cannot add a work item because {cause}"
+        assert session.scalars(select(Item)).all() == []
+
+    def test_a_task_not_in_the_plan_is_not_found_and_nothing_started(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, project, environment)
+
+        with pytest.raises(RecordNotFoundException) as refused:
+            _starting(container, starts).add_item(
+                _admitted(run),
+                _added(
+                    kind="work",
+                    title="Renaming the badge",
+                    repo=REPO,
+                    cwd="/work/Example",
+                    brief=BRIEF,
+                    step="nowhere",
+                ),
+                TOOL_USE_ID,
+            )
+
+        assert refused.value.message == f"Plan task {project.id}/nowhere was not found"
+        assert session.scalars(select(Item)).all() == []
+
+    def test_a_finished_project_refuses_the_start(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _opened(session, project).state_code = ProjectState.FINISHED
+        session.flush()
+        run = _brain(session, project, environment)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _starting(container, starts).add_item(
+                _admitted(run),
+                _added(
+                    kind="work",
+                    title="Renaming the badge",
+                    repo=REPO,
+                    cwd="/work/Example",
+                    brief=BRIEF,
+                ),
+                TOOL_USE_ID,
+            )
+
+        assert refused.value.message == (
+            f"Cannot place a work item of {REPO} because its project is finished"
+        )
+        assert _effects(session) == []
+
+
+class TestPilotStoreServiceAddItemAttachments:
+    def test_attachments_made_and_outside_material_hang_in_their_order(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _elsewhere(fake_controller)
+        run = _brain(session, project, environment)
+        sketch = _bear(container, project, run, "notice", "Sketches", NOTICE)
+        [made] = container.attach_service().attach(
+            sketch,
+            run,
+            [copied("sketch.md", "/work/PilotProjects/sketch.md", b"# Sketch\n")],
+            environment_id=environment.id,
+        )
+
+        added = _service(container).add_item(
+            _admitted(run),
+            _added(
+                kind="decision",
+                markdown=DECISION,
+                attachments=[f"{ELSEWHERE}:{DESIGN}/README.md", str(made.id)],
+            ),
+            TOOL_USE_ID,
+        )
+        clear_after_commit_callbacks()
+
+        copy, again = _attachments(session, added.item)
+        assert again.id == made.id
+        assert (
+            copy.title,
+            copy.filename,
+            copy.source_environment_id,
+            copy.source_path,
+            copy.created_by_session_id,
+        ) == ("The design", "README.md", ELSEWHERE, f"{DESIGN}/README.md", run.id)
+        assert session.get(Environment, ELSEWHERE) is not None
+        assert [
+            (e.kind_code, e.item_id, e.attachment_id) for e in _effects(session)
+        ] == [
+            (EffectKind.ADDED, added.item.id, None),
+            (EffectKind.ATTACHED, None, copy.id),
+            (EffectKind.ATTACHED, None, made.id),
+        ]
+        assert added.line.label == "Decision · Which tent?"
+
+    def test_an_attachment_of_another_project_is_not_found_and_nothing_minted(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        other = _other_project(session, person)
+        theirs_run = _brain(session, other, environment, token="their-token")
+        notice = _bear(container, other, theirs_run, "notice", "Theirs", NOTICE)
+        [theirs] = container.attach_service().attach(
+            notice,
+            theirs_run,
+            [copied("a.md", "/work/PilotProjects/a.md", b"A")],
+            environment_id=environment.id,
+        )
+        run = _brain(session, project, environment)
+
+        with pytest.raises(RecordNotFoundException) as refused:
+            _service(container).add_item(
+                _admitted(run),
+                _added(kind="notice", markdown=NOTICE, attachments=[str(theirs.id)]),
+                TOOL_USE_ID,
+            )
+
+        assert refused.value.message == f"Attachment {theirs.id} was not found"
+        assert (
+            session.scalars(select(Item).where(Item.project_id == project.id)).all()
+            == []
+        )
+
+    def test_material_that_cannot_be_copied_is_refused_and_nothing_minted(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _elsewhere(fake_controller)
+        run = _brain(session, project, environment)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _service(container).add_item(
+                _admitted(run),
+                _added(
+                    kind="notice",
+                    markdown=NOTICE,
+                    attachments=[f"{ELSEWHERE}:{DESIGN}/gone.md"],
+                ),
+                TOOL_USE_ID,
+            )
+
+        assert refused.value.message == (
+            "Cannot add a notice item because the controller answered 404"
+            f" not-found: no such file or directory: '{DESIGN}/gone.md'"
+        )
+        assert session.scalars(select(Item)).all() == []
+        assert session.scalars(select(Attachment)).all() == []
+
+
+class TestPilotStoreServiceAttachFile:
+    def test_a_file_is_copied_from_its_environment_and_hung_on_to(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _elsewhere(fake_controller)
+        run = _brain(session, project, environment)
+        item = _bear(container, project, run, "decision", "Which tent?", DECISION)
+
+        attached = _service(container).attach_file(
+            _admitted(run), f"{ELSEWHERE}:{DESIGN}/README.md", item.id, TOOL_USE_ID
+        )
+        clear_after_commit_callbacks()
+
+        [attachment] = attached.attachments
+        assert _attachments(session, item) == [attachment]
+        assert (
+            attachment.title,
+            attachment.source_environment_id,
+            attachment.source_path,
+            attachment.created_by_session_id,
+        ) == ("The design", ELSEWHERE, f"{DESIGN}/README.md", run.id)
+        assert session.get_one(Environment, ELSEWHERE).name == "Elsewhere-1"
+        assert (attached.line.verb, attached.line.label) == ("Attached", "The design")
+        assert _effect_record(session, run)["effect"] == {
+            "verb": "Attached",
+            "label": "The design",
+            "itemId": str(item.id),
+        }
+        [effect] = _effects(session)
+        assert (effect.kind_code, effect.attachment_id) == (
+            EffectKind.ATTACHED,
+            attachment.id,
+        )
+
+    def test_a_folder_is_one_batch_one_attachment_per_file(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _elsewhere(fake_controller)
+        run = _brain(session, project, environment)
+        item = _bear(container, project, run, "decision", "Which tent?", DECISION)
+
+        attached = _service(container).attach_file(
+            _admitted(run), f"{ELSEWHERE}:{DESIGN}", item.id, TOOL_USE_ID
+        )
+        clear_after_commit_callbacks()
+
+        assert [
+            (attachment.batch, attachment.filename)
+            for attachment in attached.attachments
+        ] == [(1, "README.md"), (1, "data/model.md")]
+        assert attached.line.label == "design, 2 files"
+        assert len(_effects(session)) == 2
+
+    def test_without_to_it_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, project, environment)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _service(container).attach_file(
+                _admitted(run), f"{ELSEWHERE}:{DESIGN}", None, TOOL_USE_ID
+            )
+
+        assert refused.value.message == (
+            f"Cannot attach {ELSEWHERE}:{DESIGN} because it names no item to hang"
+            " on: give `to`"
+        )
+
+    def test_a_to_of_another_project_is_not_found(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        other = _other_project(session, person)
+        theirs = _bear(
+            container,
+            other,
+            _brain(session, other, environment, token="their-token"),
+            "notice",
+            "Theirs",
+            NOTICE,
+        )
+        run = _brain(session, project, environment)
+
+        with pytest.raises(RecordNotFoundException) as refused:
+            _service(container).attach_file(
+                _admitted(run), f"{ELSEWHERE}:{DESIGN}", theirs.id, TOOL_USE_ID
+            )
+
+        assert refused.value.message == f"Item {theirs.id} was not found"
+
+    def test_an_environment_the_controller_does_not_have_is_not_found(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, project, environment)
+        item = _bear(container, project, run, "notice", "The lake", NOTICE)
+
+        with pytest.raises(RecordNotFoundException) as refused:
+            _service(container).attach_file(
+                _admitted(run), f"{ELSEWHERE}:{DESIGN}", item.id, TOOL_USE_ID
+            )
+
+        assert refused.value.message == f"Environment {ELSEWHERE} was not found"
+        assert session.get(Environment, ELSEWHERE) is None
+
+    def test_a_file_the_controller_refuses_is_refused_and_nothing_attached(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _elsewhere(fake_controller)
+        run = _brain(session, project, environment)
+        item = _bear(container, project, run, "notice", "The lake", NOTICE)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _service(container).attach_file(
+                _admitted(run), f"{ELSEWHERE}:/etc/passwd", item.id, TOOL_USE_ID
+            )
+
+        assert refused.value.message == (
+            f"Cannot attach {ELSEWHERE}:/etc/passwd because the controller answered"
+            " 403 path-outside-work: the path is outside the environment's /work;"
+            " '/etc/passwd' leaves /work; only absolute paths under /work are"
+            " reachable"
+        )
+        assert session.scalars(select(Attachment)).all() == []
+        assert _effects(session) == []

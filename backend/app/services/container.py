@@ -463,6 +463,9 @@ class ServiceContainer(containers.DeclarativeContainer):
         session_start_service=session_start_service,
     )
     # The brain's tools, under its session's bearer (TD §4.5, F86)
+    brief_service = providers.Factory(
+        BriefService, db=db_session, plan_service=plan_service
+    )
     pilot_store_service = providers.Factory(
         PilotStoreService,
         db=db_session,
@@ -472,13 +475,15 @@ class ServiceContainer(containers.DeclarativeContainer):
         project_service=project_service,
         session_start_service=session_start_service,
         effect_service=effect_service,
+        ingest_service=ingest_service,
+        attach_service=attach_service,
+        brief_service=brief_service,
+        environment_service=environment_service,
+        controller_client=controller_client.provider,
     )
 
     # A person's message to a project's brain: its chat, started in the store
     # with its brief when none is open (design 3 §5.3, §12)
-    brief_service = providers.Factory(
-        BriefService, db=db_session, plan_service=plan_service
-    )
     chat_service = providers.Factory(
         ChatService,
         db=db_session,

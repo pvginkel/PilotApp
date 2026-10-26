@@ -1,10 +1,12 @@
 """The brief a brain session's first Turn carries (design 3 §5): one frame,
-the server's, Markdown, in one order (§5.2), and a renderer per kind (§5.3).
+the server's, Markdown, in one order (§5.2), and a renderer per kind (§5.3);
+and the server's trailer on the brief the brain writes a worker (§5.4).
 
 A line that does not hold is left out, never written as "none", so that a
-brief reads as the facts of its session. It carries what the tree does not
-hold and names what it does: nothing of the handbook, which every skill but
-`create` reads itself (D058).
+brief reads as the facts of its session. A brain's carries what the tree does
+not hold and names what it does: nothing of the handbook, which every skill
+but `create` reads itself (D058). A worker's carries the handbook verbatim,
+the worker having no tree (F129.5).
 """
 
 from collections.abc import Sequence
@@ -17,6 +19,7 @@ from app.engine.plan import PlanService
 from app.engine.views import utc_time
 from app.models import (
     Chat,
+    Document,
     PlanNote,
     PlanTask,
     Project,
@@ -24,7 +27,7 @@ from app.models import (
     ProjectTransition,
     User,
 )
-from app.models.reference import TransitionKind
+from app.models.reference import DocumentRole, TransitionKind
 from app.services.session_scope import project_folder
 
 CHAT_SKILL = "/chat"
@@ -33,6 +36,8 @@ NOTES_HEADING = (
     "Open plan notes, by summary (the content and the blocks a read away in"
     " plan.json; `pilot.py plan note list`):"
 )
+
+TRAILER_HEADING = "From Pilot:"
 
 HOMELESS_HEADING = (
     "Deferrals without a home (a note names none of these blocks — write one,"
@@ -71,6 +76,34 @@ class BriefService:
                 words,
             ],
         )
+
+    def work_item(self, project: Project, brief: str, task: PlanTask | None) -> str:
+        """A work item's first Turn (§5.4): `brief`, the brain's own text, then
+        the server's trailer under one heading — the plan's task `task` it
+        serves, the switch it is briefed under (F54.7) and the project's
+        handbook verbatim (F129.5), each line that holds."""
+        lines = [TRAILER_HEADING]
+        if task is not None:
+            lines.append(
+                f'- This work item serves plan task {task.task_id} "{task.title}":'
+                f" write `step: {task.task_id}` into the front matter of every"
+                " document you register."
+            )
+        lines.append(
+            "- Auto pilot is on: the grants above hold for this session."
+            if project.autopilot
+            else "- Auto pilot is off: the grants above ask the operator first for"
+            " this session."
+        )
+        handbook = self.db.scalar(
+            select(Document.published_text).where(
+                Document.project_id == project.id,
+                Document.role_code == DocumentRole.HANDBOOK,
+            )
+        )
+        if handbook is not None and handbook.strip():
+            lines.extend(["- The project's handbook:", handbook])
+        return f"{brief.rstrip()}\n\n" + "\n".join(lines)
 
     def _pause(self, project: Project) -> str | None:
         if not project.paused:

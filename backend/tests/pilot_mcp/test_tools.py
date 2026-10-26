@@ -726,6 +726,147 @@ class TestAskWriter:
         )
 
 
+ELSEWHERE = "example-elsewhere"
+
+NOTES = "/work/Elsewhere/notes.md"
+
+
+@pytest.mark.anyio
+class TestAddItem:
+    async def test_a_prose_item_is_added_through_its_route_with_what_it_was_given(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        session: DbSession,
+        brain: models.Session,
+    ) -> None:
+        result = await call(
+            mcp_app,
+            "add_item",
+            {"item": {"kind": "notice", "title": "The lake", "for": "ada"}},
+            meta={TOOL_USE_ID_META: "toolu_07"},
+            path=STORE_PATH,
+        )
+
+        assert not result.isError
+        [(request, answer)] = routes.calls
+        assert (request.method, str(request.url)) == (
+            "POST",
+            f"{API_URL}/tools/pilot-store/items",
+        )
+        assert json.loads(request.content) == {
+            "kind": "notice",
+            "title": "The lake",
+            "for": "ada",
+        }
+        assert request.headers["tool-use-id"] == "toolu_07"
+        assert answer.status_code == 201
+        assert result.structuredContent == answer.json()
+        [item] = session.scalars(select(Item)).all()
+        assert answer.json()["id"] == str(item.id)
+        assert answer.json()["effect"] == "Added · Notice · The lake"
+
+    async def test_a_wait_is_the_routes_refusal(
+        self, mcp_app: Starlette, routes: ApiRoutes, brain: models.Session
+    ) -> None:
+        result = await call(
+            mcp_app,
+            "add_item",
+            {"item": {"kind": "timed_wait", "title": "Tomorrow"}},
+            path=STORE_PATH,
+        )
+
+        assert error_text(result) == _refusal(routes, "add_item")
+        assert error_text(result) == (
+            "Error executing tool add_item: Cannot add a timed_wait item because"
+            " Pilot takes no waits yet"
+        )
+
+    @pytest.mark.parametrize(
+        "item",
+        [
+            {"kind": "opening", "title": "Camp"},
+            {"kind": "notice", "title": "Camp", "cards": ["MD-8"]},
+            {"kind": "notice", "title": "Camp", "attachments": ["camp.md"]},
+            {"kind": "work", "repo": "Example"},
+        ],
+    )
+    async def test_an_item_outside_its_shape_is_refused_without_calling_the_api(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        brain: models.Session,
+        item: dict[str, object],
+    ) -> None:
+        result = await call(mcp_app, "add_item", {"item": item}, path=STORE_PATH)
+
+        assert result.isError
+        assert routes.calls == []
+
+
+@pytest.mark.anyio
+class TestAttachOutsideMaterial:
+    async def test_the_material_is_copied_through_its_route(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        brain: models.Session,
+    ) -> None:
+        fake_controller.add_environment(ELSEWHERE)
+        fake_controller.put_file(ELSEWHERE, NOTES, b"# Camp notes\n")
+        item = _decision(session, container, brain)
+
+        result = await call(
+            mcp_app,
+            "attach_file",
+            {"source": f"{ELSEWHERE}:{NOTES}", "to": str(item.id)},
+            path=STORE_PATH,
+        )
+
+        assert not result.isError
+        [(request, answer)] = routes.calls
+        assert str(request.url) == f"{API_URL}/tools/pilot-store/attachments"
+        assert json.loads(request.content) == {
+            "source": f"{ELSEWHERE}:{NOTES}",
+            "to": str(item.id),
+        }
+        assert answer.status_code == 201
+        assert result.structuredContent == answer.json()
+        [attachment] = session.scalars(select(Attachment)).all()
+        assert answer.json() == {
+            "ids": [str(attachment.id)],
+            "effect": "Attached · Camp notes",
+        }
+
+    async def test_without_to_none_is_sent_and_it_is_the_routes_refusal(
+        self, mcp_app: Starlette, routes: ApiRoutes, brain: models.Session
+    ) -> None:
+        result = await call(
+            mcp_app, "attach_file", {"source": f"{ELSEWHERE}:{NOTES}"}, path=STORE_PATH
+        )
+
+        [(request, _)] = routes.calls
+        assert json.loads(request.content) == {"source": f"{ELSEWHERE}:{NOTES}"}
+        assert error_text(result) == _refusal(routes, "attach_file")
+
+    @pytest.mark.parametrize("source", [NOTES, f"{ELSEWHERE}:notes.md", ""])
+    async def test_a_source_that_is_no_source_is_refused_without_calling_the_api(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        brain: models.Session,
+        source: str,
+    ) -> None:
+        result = await call(mcp_app, "attach_file", {"source": source}, path=STORE_PATH)
+
+        assert result.isError
+        assert routes.calls == []
+
+
 @pytest.mark.anyio
 class TestTheStoresBearer:
     async def test_a_work_items_bearer_is_the_routes_refusal(

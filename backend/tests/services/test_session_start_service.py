@@ -69,7 +69,7 @@ from app.services.session_start_service import (
     STARTING,
     SessionStartService,
 )
-from app.services.start_gate import WorkSlots
+from app.services.start_gate import Held, WorkSlots
 from app.services.supervisor import LoopHandle
 from app.services.timeline_service import work_status
 from app.services.turn_end_read_service import TurnEndReadService
@@ -493,6 +493,33 @@ class TestStartWork:
         assert _server(session, run.id) == []
         assert run.current_line is None
         assert fake.calls == []
+
+    def test_its_agent_model_and_effort_are_taken_as_placed(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        work = starts.start_work(
+            session,
+            project.id,
+            REPO,
+            title="Renaming the badge",
+            brief=BRIEF,
+            cwd=CWD,
+            agent="reviewer",
+            model="sonnet",
+            reasoning_effort="high",
+        )
+        clear_after_commit_callbacks()
+
+        run = _read(session, work.id)
+        assert (run.agent, run.model, run.reasoning_effort) == (
+            "reviewer",
+            "sonnet",
+            "high",
+        )
 
     def test_its_repository_and_working_directory_are_taken_as_placed(
         self,
@@ -2121,6 +2148,63 @@ class TestStartThroughTheGate:
         assert status.current_line is None
         # Held before its start provides one, it has none (DB 107).
         assert status.environment is None
+
+
+class TestHeld:
+    @pytest.mark.parametrize(
+        ("paused", "reason"),
+        [(True, HeldReason.PAUSED), (False, HeldReason.CONTROLLER_UNREACHABLE)],
+    )
+    def test_a_held_session_is_held_for_the_gates_reason(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        controller_outage: ControllerOutage,
+        paused: bool,
+        reason: HeldReason,
+    ) -> None:
+        project.paused = paused
+        session.flush()
+        if not paused:
+            controller_outage.call_unanswered()
+
+        run = _start(starts, session, project)
+
+        assert starts.held(session, project, run) == Held(reason)
+
+    def test_a_slot_held_session_is_held_for_the_slot_with_its_count(
+        self,
+        container: ServiceContainer,
+        supervise: Supervise,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        starts = _services(container, supervise, project_max=1)[0]
+        _start(starts, session, project)
+
+        run = _start(starts, session, project)
+
+        assert starts.held(session, project, run) == Held(HeldReason.SLOT, 1)
+
+    def test_a_starting_session_and_one_the_gate_holds_no_longer_are_held_for_nothing(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        starting = _start(starts, session, project)
+        project.paused = True
+        session.flush()
+        held = _start(starts, session, project)
+        project.paused = False
+        session.flush()
+
+        assert starts.held(session, project, starting) is None
+        assert starts.held(session, project, held) is None
 
 
 class TestRunHeld:

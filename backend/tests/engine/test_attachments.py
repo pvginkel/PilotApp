@@ -2,6 +2,7 @@
 copied in, and the copies hung on an item as one batch (F36, DB decision
 39)."""
 
+import functools
 import hashlib
 import json
 from datetime import UTC, datetime
@@ -193,6 +194,7 @@ class TestAttachService:
             item,
             project_session,
             [Copy("Notes", "notes.md", "text/markdown", _CONTENT, "/work/A/notes.md")],
+            environment_id=environment.id,
         )
 
         now = session.scalar(select(func.now()))
@@ -230,6 +232,7 @@ class TestAttachService:
         project: Project,
         item: Item,
         project_session: models.Session,
+        environment: Environment,
     ) -> None:
         other = Item(
             project_id=project.id,
@@ -240,7 +243,9 @@ class TestAttachService:
         )
         session.add(other)
         session.flush()
-        attach = container.attach_service().attach
+        attach = functools.partial(
+            container.attach_service().attach, environment_id=environment.id
+        )
 
         attach(item, project_session, [_file("a.md"), _file("b/c.md")])
         attach(item, project_session, [_file("a.md")])
@@ -259,9 +264,13 @@ class TestAttachService:
         project: Project,
         item: Item,
         project_session: models.Session,
+        environment: Environment,
     ) -> None:
         attachments = container.attach_service().attach(
-            item, project_session, [_file("a.md", b"A"), _file("survey/b.md", b"B")]
+            item,
+            project_session,
+            [_file("a.md", b"A"), _file("survey/b.md", b"B")],
+            environment_id=environment.id,
         )
 
         folder = f"draft-{project.number}"
@@ -286,10 +295,14 @@ class TestAttachService:
         project: Project,
         item: Item,
         project_session: models.Session,
+        environment: Environment,
     ) -> None:
         with scoped_session(container):
             attachments = container.attach_service().attach(
-                item, project_session, [_file("a.md", b"A"), _file("b.md", b"B")]
+                item,
+                project_session,
+                [_file("a.md", b"A"), _file("b.md", b"B")],
+                environment_id=environment.id,
             )
             assert engine_events == []
 
@@ -310,12 +323,16 @@ class TestAttachService:
         session: DbSession,
         item: Item,
         project_session: models.Session,
+        environment: Environment,
     ) -> None:
         over = MAX_SIZE + 1
 
         with pytest.raises(ValidationException) as raised:
             container.attach_service().attach(
-                item, project_session, [_file("a.md"), _file("big.bin", bytes(over))]
+                item,
+                project_session,
+                [_file("a.md"), _file("big.bin", bytes(over))],
+                environment_id=environment.id,
             )
 
         assert raised.value.message == (
@@ -328,9 +345,112 @@ class TestAttachService:
         container: ServiceContainer,
         item: Item,
         project_session: models.Session,
+        environment: Environment,
     ) -> None:
         [attachment] = container.attach_service().attach(
-            item, project_session, [_file("big.bin", bytes(MAX_SIZE))]
+            item,
+            project_session,
+            [_file("big.bin", bytes(MAX_SIZE))],
+            environment_id=environment.id,
         )
 
         assert attachment.size == MAX_SIZE
+
+    def test_copies_from_an_environment_the_session_names_keep_it_as_their_source(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        item: Item,
+        project_session: models.Session,
+    ) -> None:
+        elsewhere = Environment(
+            id="example-elsewhere", name="Elsewhere-1", exempt=False
+        )
+        session.add(elsewhere)
+        session.flush()
+
+        [attachment] = container.attach_service().attach(
+            item, project_session, [_file("a.md")], environment_id=elsewhere.id
+        )
+
+        assert (
+            attachment.source_environment_id,
+            attachment.created_by_session_id,
+        ) == (elsewhere.id, project_session.id)
+
+
+class TestAttachServiceHang:
+    def test_attachments_made_are_hung_after_the_items_own_in_their_order(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        project: Project,
+        item: Item,
+        project_session: models.Session,
+        environment: Environment,
+    ) -> None:
+        service = container.attach_service()
+        other = Item(
+            project_id=project.id,
+            seq=2,
+            kind_code="notice",
+            title="Tents",
+            created_by_session_id=project_session.id,
+        )
+        session.add(other)
+        session.flush()
+        _, first, second = service.attach(
+            item,
+            project_session,
+            [_file("a.md"), _file("b.md"), _file("c.md")],
+            environment_id=environment.id,
+        )
+        service.attach(
+            other, project_session, [_file("d.md")], environment_id=environment.id
+        )
+
+        service.hang(other, [second, first])
+
+        assert _hung(session, other) == [
+            (1, 2, "d.md"),
+            (2, 1, "c.md"),
+            (3, 1, "b.md"),
+        ]
+        assert _hung(session, item) == [(1, 1, "a.md"), (2, 1, "b.md"), (3, 1, "c.md")]
+
+    def test_the_timeline_lists_them_once_it_commits(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        item: Item,
+        project_session: models.Session,
+        environment: Environment,
+    ) -> None:
+        with scoped_session(container):
+            [attachment] = container.attach_service().attach(
+                item, project_session, [_file("a.md")], environment_id=environment.id
+            )
+        engine_events.clear()
+        other = Item(
+            project_id=project.id,
+            seq=2,
+            kind_code="notice",
+            title="Tents",
+            created_by_session_id=project_session.id,
+        )
+
+        with scoped_session(container) as db:
+            db.add(other)
+            db.flush()
+            container.attach_service().hang(other, [attachment])
+            assert engine_events == []
+
+        folder = f"draft-{project.number}"
+        assert engine_events == [
+            TreeHashMoved(
+                f"{folder}/timeline.json",
+                container.view_service().timeline(project).hash,
+            ),
+            ProjectChanged(project.id),
+        ]

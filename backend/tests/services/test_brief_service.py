@@ -1,5 +1,6 @@
-"""The brief a brain session's first Turn carries, per kind, against invented
-records (design 3 §5.2, §5.3; D058; DB assertion 251; V12, V13)."""
+"""The brief a brain session's first Turn carries, per kind, and the server's
+trailer on a worker's, against invented records (design 3 §5.2 to §5.4; D058;
+F129.5; DB assertion 251; V12, V13, V21)."""
 
 import json
 from datetime import UTC, datetime
@@ -8,8 +9,22 @@ import pytest
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
-from app.models import Chat, Item, Project, ProjectMember, ProjectTransition, User
-from app.models.reference import ChatKind, CloseCause, ProjectState, TransitionKind
+from app.models import (
+    Chat,
+    Item,
+    PlanTask,
+    Project,
+    ProjectMember,
+    ProjectTransition,
+    User,
+)
+from app.models.reference import (
+    ChatKind,
+    CloseCause,
+    ProjectState,
+    TaskStatus,
+    TransitionKind,
+)
 from app.services.brief_service import BriefService
 from app.services.container import ServiceContainer
 
@@ -266,4 +281,68 @@ class TestProjectChat:
 
         assert briefs.project_chat(opened, person, words, AT).endswith(
             f"(not a member):\n{words}"
+        )
+
+
+def _task(db: DbSession, project: Project) -> PlanTask:
+    task = PlanTask(
+        project_id=project.id,
+        task_id="t3",
+        position=1,
+        title="Plan slice 003",
+        status_code=TaskStatus.PENDING,
+    )
+    db.add(task)
+    db.flush()
+    return task
+
+
+class TestWorkItem:
+    def test_the_brief_is_followed_by_the_trailer_every_line_that_holds(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+    ) -> None:
+        opened.autopilot = True
+        container.document_service().bear_handbook(
+            opened, "# Soup club\n\nThe stock is the club's own.\n"
+        )
+
+        assert briefs.work_item(
+            opened, "Plan the stock.\n\n", _task(session, opened)
+        ) == (
+            "Plan the stock.\n\n"
+            "From Pilot:\n"
+            '- This work item serves plan task t3 "Plan slice 003": write `step: t3`'
+            " into the front matter of every document you register.\n"
+            "- Auto pilot is on: the grants above hold for this session.\n"
+            "- The project's handbook:\n"
+            "# Soup club\n\nThe stock is the club's own.\n"
+        )
+
+    def test_with_no_task_and_auto_pilot_off_the_switch_stands_alone(
+        self, briefs: BriefService, opened: Project
+    ) -> None:
+        assert briefs.work_item(opened, "Rename the badge.", None) == (
+            "Rename the badge.\n\n"
+            "From Pilot:\n"
+            "- Auto pilot is off: the grants above ask the operator first for this"
+            " session."
+        )
+
+    @pytest.mark.parametrize("handbook", ["", "\n  \n"])
+    def test_a_blank_handbook_is_left_out(
+        self,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        handbook: str,
+    ) -> None:
+        container.document_service().bear_handbook(opened, handbook)
+
+        assert briefs.work_item(opened, "Rename the badge.", None).endswith(
+            "- Auto pilot is off: the grants above ask the operator first for this"
+            " session."
         )

@@ -324,13 +324,17 @@ class SessionStartService:
         brief: str,
         cwd: str,
         plan_task_id: str | None = None,
+        agent: str | None = None,
+        model: str | None = None,
+        reasoning_effort: str | None = None,
     ) -> Work:
         """Place a work item titled `title` on the project's timeline, by the
         repository `repo`, on the plan's task `plan_task_id` when given, and
         write its `work` Session's start, in the caller's transaction: its
         Item, its Work, which keeps `repo`, and its Session one id (DB Work,
-        decision 3), its first Turn the brief. The repository and `cwd` are
-        taken as the placement gives them (F61.1). The Session has no
+        decision 3), its first Turn the brief. The repository, `cwd`, and the
+        agent, model and effort where given are taken as the placement gives
+        them (F61.1). The Session has no
         Environment until its start provides one (DB 107), and the hash of a
         token no one holds until its create mints the one its controller
         session carries (`run`). It passes the gate (§13.4): `held` while
@@ -365,6 +369,9 @@ class SessionStartService:
             project_id=project_id,
             kind_code=WORK_KIND,
             cwd=cwd,
+            agent=agent,
+            model=model,
+            reasoning_effort=reasoning_effort,
             token_hash=unheld_token_hash(),
             state_code=SessionState.STARTING if held is None else SessionState.HELD,
             turns=1,
@@ -383,6 +390,14 @@ class SessionStartService:
             after_commit(_HeldWritten(self))
             logger.info("Session %s is held at its start: %s", session.id, held.reason)
         return work
+
+    def held(self, db: Session, project: Project, session: AgentSession) -> Held | None:
+        """Why the gate holds the Session of `project` now, read as a screen
+        reads it (decision 53); None for a Session that is not `held`, or one
+        the gate holds no longer."""
+        if session.state_code is not SessionState.HELD:
+            return None
+        return self._held(db, project, session.kind_code)
 
     def start_brain(
         self, db: Session, project: Project, session: AgentSession, operation: str

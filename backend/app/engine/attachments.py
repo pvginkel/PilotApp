@@ -116,12 +116,18 @@ class AttachService:
         self.view_service = view_service
 
     def attach(
-        self, item: Item, session: AgentSession, copies: Sequence[Copy]
+        self,
+        item: Item,
+        session: AgentSession,
+        copies: Sequence[Copy],
+        *,
+        environment_id: str,
     ) -> list[Attachment]:
-        """`copies`, files `session` copied from its environment now, kept as
-        one batch, the project's next, and hung on `item` after its own
-        attachments, in their order; their tree paths and the timeline moved
-        once the transaction commits.
+        """`copies`, files `session` copied now from the environment
+        `environment_id`, its own or one it names, kept as one batch, the
+        project's next, and hung on `item` after its own attachments, in their
+        order; their tree paths and the timeline moved once the transaction
+        commits.
 
         Raises:
             ValidationException: a copy is over 16 MiB, nothing kept.
@@ -146,14 +152,7 @@ class AttachService:
             )
             or 0
         )
-        position = (
-            self.db.scalar(
-                select(func.max(ItemAttachment.position)).where(
-                    ItemAttachment.item_id == item.id
-                )
-            )
-            or 0
-        )
+        position = self._last_position(item)
         attachments: list[Attachment] = []
         for copy in copies:
             attachment = Attachment(
@@ -163,7 +162,7 @@ class AttachService:
                 filename=copy.filename,
                 content_type=copy.content_type,
                 source_code=AttachmentSource.FILE,
-                source_environment_id=session.environment_id,
+                source_environment_id=environment_id,
                 source_path=copy.source_path,
                 copied_at=now,
                 created_by_session_id=session.id,
@@ -187,3 +186,36 @@ class AttachService:
         self.db.flush()
         self.view_service.timeline_moved(project)
         return attachments
+
+    def hang(self, item: Item, attachments: Sequence[Attachment]) -> None:
+        """`attachments`, already in the record, hung on `item` after its own
+        attachments, in their order; the timeline moved once the transaction
+        commits. None may hang on it already."""
+        project = self.db.scalars(
+            select(Project).where(Project.id == item.project_id).with_for_update()
+        ).one()
+        now = self.db.scalar(select(func.now()))
+        assert now is not None
+        position = self._last_position(item)
+        for attachment in attachments:
+            position += 1
+            self.db.add(
+                ItemAttachment(
+                    item_id=item.id,
+                    attachment_id=attachment.id,
+                    position=position,
+                    attached_at=now,
+                )
+            )
+        self.db.flush()
+        self.view_service.timeline_moved(project)
+
+    def _last_position(self, item: Item) -> int:
+        return (
+            self.db.scalar(
+                select(func.max(ItemAttachment.position)).where(
+                    ItemAttachment.item_id == item.id
+                )
+            )
+            or 0
+        )

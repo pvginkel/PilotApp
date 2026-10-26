@@ -48,7 +48,8 @@ STORE_INSTRUCTIONS = (
     " beyond the files of the project's folder: each acts on that project alone,"
     " and only while your turn runs. An `item` is an item's id and a `block` a"
     " block's, `<item id>/<local id>`: the item's id as `timeline.json` gives it,"
-    " the block's local id as its fence does. A call the record refuses changes"
+    " the block's local id as its fence does; `add_item` alone takes the item"
+    " itself, in `timeline.json`'s shape. A call the record refuses changes"
     " nothing and answers the reason."
 )
 

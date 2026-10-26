@@ -9,11 +9,11 @@ does not answer is one naming that.
 """
 
 import uuid
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 import httpx
 from mcp.server.fastmcp.exceptions import ToolError
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 TOOL_USE_ID_HEADER = "Tool-Use-Id"
 """The header the routes read a call's tool-use id from
@@ -22,6 +22,131 @@ TOOL_USE_ID_HEADER = "Tool-Use-Id"
 _TIMEOUT = httpx.Timeout(300.0, connect=5.0)
 
 Mark = Literal["done", "read", "reviewed"]
+
+SOURCE = r"^[^:\s/]+:/.*$"
+"""A source, `<environment>:<path>`: an environment id has no colon, and a
+path starts with `/`."""
+
+_REPO = r"^[^/\s]+/[^/\s]+$"
+
+_ATTACHMENT = r"^([0-9A-Fa-f-]{36}|[^:\s/]+:/.*)$"
+"""An attachment's id, or a source."""
+
+
+class NewItem(BaseModel):
+    """An item to add, in `timeline.json`'s shape."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal[
+        "decision",
+        "question",
+        "action",
+        "notice",
+        "document",
+        "review",
+        "work",
+        "card_wait",
+        "timed_wait",
+    ] = Field(
+        description=(
+            "`decision`, `question`, `action`, `notice`, `document` or `review`"
+            " for a prose item, `work` for a work item; a wait, `card_wait` or"
+            " `timed_wait`, is refused: Pilot takes none yet"
+        )
+    )
+    title: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "The title it is born with in its file's front matter, where"
+            " `markdown` gives none; a prose item without `markdown` needs it, and"
+            " a work item, whose line shows it"
+        ),
+    )
+    markdown: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "A short prose item's whole text, minted with it and parsed now: its"
+            " own front-matter `title` stands, else `title` is written in"
+        ),
+    )
+    step: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "The id of the plan's task it serves: a prose item's front matter"
+            " where `markdown` gives none, a work item's brief"
+        ),
+    )
+    urgent: bool = Field(
+        default=False,
+        description=(
+            "A prose item that is urgent: `urgent: true` in its front matter where"
+            " `markdown` gives none"
+        ),
+    )
+    for_: str | None = Field(
+        default=None,
+        alias="for",
+        min_length=1,
+        description=(
+            "The handle of the person a prose item is for, in its front matter"
+            " where `markdown` gives none"
+        ),
+    )
+    summary: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "A prose item's summary, in its front matter where `markdown` gives none"
+        ),
+    )
+    attachments: list[Annotated[str, Field(pattern=_ATTACHMENT)]] = Field(
+        default_factory=list,
+        description=(
+            "What it carries, hung on it in this order: an attachment already"
+            " made, by its id, or material copied in now as `attach_file` copies"
+            " it, `<environment>:<path>`"
+        ),
+    )
+    repo: str | None = Field(
+        default=None,
+        pattern=_REPO,
+        description=(
+            "A work item's repository, `owner/Name`: Pilot makes its environment"
+            " from it"
+        ),
+    )
+    cwd: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "A work item's working directory in its environment, a checkout"
+            " under `/work`: the repository's own, `/work/<Name>`, or one its"
+            " manifest checks out beside it"
+        ),
+    )
+    brief: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "A work item's brief, its first turn, yours; Pilot appends the plan"
+            " task it serves, the switch and the project's handbook"
+        ),
+    )
+    agent: str | None = Field(
+        default=None, min_length=1, description="A work item's agent, where given"
+    )
+    model: str | None = Field(
+        default=None, min_length=1, description="A work item's model, where given"
+    )
+    reasoning_effort: str | None = Field(
+        default=None,
+        min_length=1,
+        description="A work item's reasoning effort, where given",
+    )
 
 
 class RegisteredDocument(BaseModel):
@@ -43,6 +168,48 @@ class AttachedFiles(BaseModel):
 class Recorded(BaseModel):
     """What the call changed."""
 
+    effect: str = Field(
+        description=(
+            "Its effect line, `<verb> · <what>`, as it shows where the call ran"
+        )
+    )
+
+
+class Added(BaseModel):
+    """The item added."""
+
+    id: uuid.UUID = Field(description="Its id, as `timeline.json` gives it")
+    path: str | None = Field(
+        description=(
+            "A prose item's file, its absolute path, which you fill; none for a"
+            " work item"
+        )
+    )
+    state: Literal["starting", "held"] | None = Field(
+        description=(
+            "A work item's session: `starting`, or `held` at the gate; none for"
+            " a prose item"
+        )
+    )
+    held: Literal["paused", "controller_unreachable", "slot"] | None = Field(
+        description=(
+            "Why a held work item waits: the project is paused, the controller"
+            " is unreachable, or no slot is free; none otherwise"
+        )
+    )
+    effect: str = Field(
+        description=(
+            "Its effect line, `<verb> · <what>`, as it shows where the call ran"
+        )
+    )
+
+
+class AttachedMaterial(BaseModel):
+    """The attachments the material was copied into."""
+
+    ids: list[uuid.UUID] = Field(
+        description="Their ids, one per file, a folder's in its files' path order"
+    )
     effect: str = Field(
         description=(
             "Its effect line, `<verb> · <what>`, as it shows where the call ran"
@@ -84,7 +251,7 @@ class _Routes:
         route: str,
         authorization: str,
         tool_use_id: str | None,
-        body: dict[str, str],
+        body: dict[str, Any],
     ) -> Any:
         headers = {"Authorization": authorization}
         if tool_use_id is not None:
@@ -136,6 +303,25 @@ class PilotStoreApi(_Routes):
     ) -> None:
         """`transport` answers in place of the network, in the suite."""
         super().__init__("pilot-store", base_url, transport)
+
+    async def add_item(
+        self, authorization: str, tool_use_id: str | None, item: NewItem
+    ) -> Added:
+        body = item.model_dump(by_alias=True, exclude_defaults=True, mode="json")
+        answer = await self._post("items", authorization, tool_use_id, body)
+        return Added.model_validate(answer)
+
+    async def attach_file(
+        self,
+        authorization: str,
+        tool_use_id: str | None,
+        *,
+        source: str,
+        to: uuid.UUID | None,
+    ) -> AttachedMaterial:
+        body = {"source": source} | _given(to=None if to is None else str(to))
+        answer = await self._post("attachments", authorization, tool_use_id, body)
+        return AttachedMaterial.model_validate(answer)
 
     async def answer(
         self,

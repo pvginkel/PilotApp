@@ -9,18 +9,24 @@ Question in place of one (DB decision 59).
 Every write locks the Project's row first and the Session's for its effect
 after, the order Finish takes, which locks the project's Sessions before their
 Documents. `finish` writes its effect before the transition that stops its own
-Session.
+Session. Outside material is read through the controller before the Project's
+row is locked, so no controller call is made while it is held.
 """
 
 import uuid
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
+from typing import Literal
 
+import pilot_dsl as dsl
 from prometheus_client import Counter
 from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
-from app.engine.documents import DocumentService
+from app.engine.attachments import AttachService, Copy
+from app.engine.documents import DocumentService, listed
+from app.engine.ingest import IngestService
 from app.engine.record import RecordService
 from app.engine.views import ViewService
 from app.exceptions import (
@@ -28,7 +34,20 @@ from app.exceptions import (
     InvalidOperationException,
     RecordNotFoundException,
 )
-from app.models import Block, Document, Item, Project, Turn, User, Work, WriterQuestion
+from app.models import (
+    Attachment,
+    Block,
+    Document,
+    Item,
+    ItemKind,
+    PlanTask,
+    Project,
+    Turn,
+    User,
+    Work,
+    WriterQuestion,
+)
+from app.models import Session as AgentSession
 from app.models.reference import (
     AnswerChannel,
     EffectKind,
@@ -37,16 +56,37 @@ from app.models.reference import (
     TransitionKind,
     UserKind,
 )
-from app.schemas.pilot_store import Mark
+from app.schemas.pilot_store import AddItemRequestSchema, Mark, source_parts
+from app.services.brief_service import BriefService
+from app.services.controller_client import (
+    ControllerClient,
+    ControllerProblem,
+    ControllerProblemType,
+)
 from app.services.effect_service import Change, EffectLine, EffectService
+from app.services.environment_service import EnvironmentService
 from app.services.pilot_server import bearer_session
+from app.services.pilot_work_service import ATTACHED, attached_label, material
 from app.services.project_service import ProjectService, project_name
+from app.services.session_scope import project_folder
 from app.services.session_start_service import SessionStartService
+from app.services.start_gate import Held
 from app.services.timeline_service import writer_asked
 
 JOB = "job"
 """The Session Kind of the server's jobs, the pre-ruling pass among them."""
 
+WORK = "work"
+WAITS = ("card_wait", "timed_wait")
+"""The kinds of item `add_item` is given that are not prose (TD §4.5)."""
+
+PROSE_FIELDS = ("markdown", "urgent", "for", "summary")
+WORK_FIELDS = ("repo", "cwd", "brief", "agent", "model", "reasoning_effort")
+NEEDED_FOR_WORK = ("title", "repo", "cwd", "brief")
+"""The fields of `add_item`'s item that one form takes alone, by their names
+on the wire, and those a work item needs."""
+
+ADDED = "Added"
 ANSWERED = "Answered"
 MARKED: dict[Mark, str] = {
     "done": "Marked done",
@@ -62,6 +102,38 @@ PASS_QUESTIONS_TOTAL = Counter(
     "Questions the pre-ruling pass put to a registered document's writer, by project",
     ["project"],
 )
+
+
+@dataclass(frozen=True)
+class Added:
+    """The item `add_item` added, and its effect line."""
+
+    item: Item
+    path: str | None
+    """A prose item's file, absolute; none for a work item."""
+    state: Literal["starting", "held"] | None
+    """A work item's Session as the gate left it."""
+    held: Held | None
+    """Why the gate holds a held work item's start."""
+    line: EffectLine
+
+
+@dataclass(frozen=True)
+class Attached:
+    """The attachments `attach_file` copied in, and its effect line."""
+
+    attachments: list[Attachment]
+    line: EffectLine
+
+
+@dataclass(frozen=True)
+class _Outside:
+    """Outside material read for a call: the environment it was copied from,
+    its path there, and its files."""
+
+    environment_id: str
+    path: str
+    copies: list[Copy]
 
 
 @dataclass(frozen=True)
@@ -84,6 +156,11 @@ class PilotStoreService:
         project_service: ProjectService,
         session_start_service: SessionStartService,
         effect_service: EffectService,
+        ingest_service: IngestService,
+        attach_service: AttachService,
+        brief_service: BriefService,
+        environment_service: EnvironmentService,
+        controller_client: Callable[[], ControllerClient],
     ) -> None:
         self.db = db
         self.record_service = record_service
@@ -92,6 +169,11 @@ class PilotStoreService:
         self.project_service = project_service
         self.session_start_service = session_start_service
         self.effect_service = effect_service
+        self.ingest_service = ingest_service
+        self.attach_service = attach_service
+        self.brief_service = brief_service
+        self.environment_service = environment_service
+        self.controller_client = controller_client
 
     def admit(self, authorization: str | None) -> Brain:
         """The chat's or the job's Session whose bearer `authorization`
@@ -111,6 +193,144 @@ class PilotStoreService:
         if session.state_code != SessionState.RUNNING:
             raise AuthorizationException(_no_turn(session.id))
         return Brain(session.id, session.project_id, session.kind_code)
+
+    def add_item(
+        self, brain: Brain, item: AddItemRequestSchema, tool_use_id: str | None
+    ) -> Added:
+        """`item` added to the brain's project, with the attachments it
+        carries hung on it in their order (F86.1, F36.5): one already made by
+        its id, outside material copied in as `attach_file` copies it, a batch
+        per source. The call `tool_use_id`'s effect is "Added · <kind> · <title>",
+        its Effects the item's and one per attachment hung.
+
+        A prose item is minted with its file, born with its title and its
+        facts — `step`, `urgent`, `for`, `summary` — in the front matter
+        where its Markdown gives none of its own, empty without Markdown
+        (F29.2, F86.6). A work item is started on add by its repository, as
+        every work item's start is, its brief followed by the server's trailer
+        (F66, §5.4), on the brain's placement (F61.1); its Session `held` or
+        `starting`, as the gate leaves it (F141.4).
+
+        Raises:
+            RecordNotFoundException: an attachment or the plan's task is not
+                of the brain's project, or an outside source's environment
+                is not the controller's.
+            InvalidOperationException: a wait, which Pilot does not take yet;
+                a field the item's kind does not take, or one it needs,
+                missing; a prose text that holds faults, each with its line;
+                material that cannot be copied, nothing attached; the start a
+                work item takes refused.
+            ExternalServiceException: the controller did not answer, or
+                refused for a reason of its own.
+        """
+        operation = f"add a {item.kind} item"
+        given = set(item.model_dump(by_alias=True, exclude_defaults=True))
+        refusal = _shape_refusal(item.kind, given)
+        if refusal is not None:
+            raise InvalidOperationException(operation, refusal)
+        carried = [
+            self._attachment(brain, ref)
+            if _is_id(ref)
+            else self._outside(ref, operation)
+            for ref in item.attachments
+        ]
+        project = self._project(brain)
+        session = self.db.get_one(AgentSession, brain.session_id)
+        path: str | None = None
+        state: Literal["starting", "held"] | None = None
+        held: Held | None = None
+        if item.kind == WORK:
+            added = self._work(project, item)
+            started = self.db.get_one(AgentSession, added.id)
+            # The gate leaves a work item's start `held` or `starting`.
+            state = "held" if started.state_code is SessionState.HELD else "starting"
+            held = self.session_start_service.held(self.db, project, started)
+        else:
+            added = self._prose(project, session, item, operation)
+            path = (
+                f"{project_folder(project)}/{self.db.get_one(Document, added.id).path}"
+            )
+        hung: list[Attachment] = []
+        for carrying in carried:
+            if isinstance(carrying, Attachment):
+                self.attach_service.hang(added, [carrying])
+                hung.append(carrying)
+            else:
+                hung.extend(
+                    self.attach_service.attach(
+                        added,
+                        session,
+                        carrying.copies,
+                        environment_id=carrying.environment_id,
+                    )
+                )
+        kind = self.db.get_one(ItemKind, added.kind_code)
+        line = EffectLine(
+            ADDED, f"{kind.name} · {self._title(added)}", item_id=added.id
+        )
+        self.effect_service.record(
+            brain.session_id,
+            tool_use_id,
+            line,
+            [
+                Change(EffectKind.ADDED, item_id=added.id),
+                *(
+                    Change(EffectKind.ATTACHED, attachment_id=attachment.id)
+                    for attachment in hung
+                ),
+            ],
+        )
+        return Added(added, path, state, held, line)
+
+    def attach_file(
+        self,
+        brain: Brain,
+        source: str,
+        to: uuid.UUID | None,
+        tool_use_id: str | None,
+    ) -> Attached:
+        """Outside material at `source`, `<environment>:<path>`, a file or a
+        folder, copied into the record now as one batch with its source and
+        hung on the item `to` names (F86.7, F36.6), as the worker's copy is
+        made, its caps included. The call `tool_use_id`'s effect is one line
+        for its files, "Attached · <title>", or "Attached · <folder>, <n>
+        files".
+
+        Raises:
+            RecordNotFoundException: `to` names no item of the brain's
+                project, or the source's environment is not the controller's.
+            InvalidOperationException: no `to`, which a draft's definition
+                chat alone gives; a file cannot be copied, nothing attached.
+            ExternalServiceException: the controller did not answer, or
+                refused for a reason of its own.
+        """
+        operation = f"attach {source}"
+        if to is None:
+            raise InvalidOperationException(
+                operation, "it names no item to hang on: give `to`"
+            )
+        item = self._item(brain, to)
+        outside = self._outside(source, operation)
+        self._project(brain)
+        attachments = self.attach_service.attach(
+            item,
+            self.db.get_one(AgentSession, brain.session_id),
+            outside.copies,
+            environment_id=outside.environment_id,
+        )
+        line = EffectLine(
+            ATTACHED, attached_label(outside.path, attachments), item_id=item.id
+        )
+        self.effect_service.record(
+            brain.session_id,
+            tool_use_id,
+            line,
+            [
+                Change(EffectKind.ATTACHED, attachment_id=attachment.id)
+                for attachment in attachments
+            ],
+        )
+        return Attached(attachments, line)
 
     def answer(
         self,
@@ -335,6 +555,88 @@ class PilotStoreService:
         self.view_service.timeline_moved(project)
         return writer_asked(self.db, [item.id])[item.id]
 
+    def _prose(
+        self,
+        project: Project,
+        session: AgentSession,
+        item: AddItemRequestSchema,
+        operation: str,
+    ) -> Item:
+        text = dsl.with_facts(
+            item.markdown or "",
+            step=item.step,
+            urgent=item.urgent,
+            addressee=item.for_,
+            summary=item.summary,
+        )
+        if item.title is not None:
+            text = dsl.with_title(text, item.title)
+        faults = self.ingest_service.born_faults(project, text)
+        if faults:
+            raise InvalidOperationException(
+                operation, f"its text holds faults: {listed(faults)}"
+            )
+        title = item.title if item.title is not None else dsl.parse(text).title
+        # A text the title rule passes has a title (F29.2).
+        assert title is not None
+        return self.document_service.bear_item(project, item.kind, title, session, text)
+
+    def _work(self, project: Project, item: AddItemRequestSchema) -> Item:
+        # The shape check let no work item through without these.
+        assert item.title is not None
+        assert item.repo is not None
+        assert item.cwd is not None
+        assert item.brief is not None
+        task = None if item.step is None else self._task(project, item.step)
+        work = self.session_start_service.start_work(
+            self.db,
+            project.id,
+            item.repo,
+            title=item.title,
+            brief=self.brief_service.work_item(project, item.brief, task),
+            cwd=item.cwd,
+            plan_task_id=item.step,
+            agent=item.agent,
+            model=item.model,
+            reasoning_effort=item.reasoning_effort,
+        )
+        return self.db.get_one(Item, work.id)
+
+    def _task(self, project: Project, task_id: str) -> PlanTask:
+        """The project's plan task `task_id`, not removed."""
+        task = self.db.scalars(
+            select(PlanTask).where(
+                PlanTask.project_id == project.id,
+                PlanTask.task_id == task_id,
+                PlanTask.removed_at.is_(None),
+            )
+        ).one_or_none()
+        if task is None:
+            raise RecordNotFoundException("Plan task", f"{project.id}/{task_id}")
+        return task
+
+    def _attachment(self, brain: Brain, attachment_id: str) -> Attachment:
+        attachment = self.db.get(Attachment, uuid.UUID(attachment_id))
+        if attachment is None or attachment.project_id != brain.project_id:
+            raise RecordNotFoundException("Attachment", attachment_id)
+        return attachment
+
+    def _outside(self, source: str, operation: str) -> _Outside:
+        """The material at `source`, read through the controller from its
+        environment, whose row is made on Pilot's first touch of it."""
+        environment_id, path = source_parts(source)
+        try:
+            self.environment_service.ensure_environment(self.db, environment_id)
+        except ControllerProblem as problem:
+            if problem.problem_type is not ControllerProblemType.NOT_FOUND:
+                raise
+            raise RecordNotFoundException("Environment", environment_id) from problem
+        return _Outside(
+            environment_id,
+            path,
+            material(self.controller_client(), environment_id, path, operation),
+        )
+
     def _project(self, brain: Brain) -> Project:
         """The brain's project, its row locked until the transaction ends."""
         return self.db.scalars(
@@ -384,6 +686,40 @@ class PilotStoreService:
         if turn_id is None:
             raise AuthorizationException(_no_turn(brain.session_id))
         return turn_id
+
+
+def _shape_refusal(kind: str, given: set[str]) -> str | None:
+    """Why `add_item` refuses an item of `kind` given the fields `given`, by
+    their names on the wire; None for one it takes."""
+    if kind in WAITS:
+        return "Pilot takes no waits yet"
+    alien: Sequence[str]
+    if kind == WORK:
+        alien, missing = PROSE_FIELDS, [f for f in NEEDED_FOR_WORK if f not in given]
+    else:
+        alien, missing = WORK_FIELDS, []
+        if "title" not in given and "markdown" not in given:
+            return "it has no title: give `title`, or `markdown` that gives one"
+    taken = [field for field in alien if field in given]
+    if taken:
+        return f"a {kind} item takes no {_fields(taken)}"
+    if missing:
+        return f"a work item needs {_fields(missing)}"
+    return None
+
+
+def _fields(names: Sequence[str]) -> str:
+    return ", ".join(f"`{name}`" for name in names)
+
+
+def _is_id(ref: str) -> bool:
+    """Whether an attachment `add_item` names is one already made, by its id,
+    rather than a source."""
+    try:
+        uuid.UUID(ref)
+    except ValueError:
+        return False
+    return True
 
 
 def _parts(block_id: str) -> tuple[uuid.UUID, str]:

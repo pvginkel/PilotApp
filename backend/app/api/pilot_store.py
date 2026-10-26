@@ -15,7 +15,11 @@ from spectree import Response as SpectreeResponse
 
 from app.schemas.common import ApiErrorResponseSchema
 from app.schemas.pilot_store import (
+    AddedSchema,
+    AddItemRequestSchema,
     AnswerRequestSchema,
+    AttachedSchema,
+    AttachRequestSchema,
     MarkRequestSchema,
     RecordedSchema,
     StopRequestSchema,
@@ -41,6 +45,103 @@ def admit_the_session(
     """The gate every call passes: 401 or 403 before anything is read or
     written."""
     g.brain = pilot_store_service.admit(request.headers.get("Authorization"))
+
+
+@pilot_store_bp.route("/items", methods=["POST"])
+@public
+@api.validate(
+    json=AddItemRequestSchema,
+    resp=SpectreeResponse(
+        HTTP_201=AddedSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+        HTTP_502=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def add_item(
+    pilot_store_service: PilotStoreService = Provide[
+        ServiceContainer.pilot_store_service
+    ],
+) -> Any:
+    """`add_item(item)` (F86.1, F86.6, F36.5): a prose item minted with its
+    file, or a work item started on add, with the attachments it carries.
+
+    Returns:
+        201: The item, a prose item's file, a work item's state as the gate
+            left it, and the call's effect line
+        400: The body is not an item in `timeline.json`'s shape
+        401: No bearer, or one no session has
+        403: The bearer's session is not a chat's or a job's, or has no turn
+            running
+        404: An attachment, the plan's task or a source's environment is not
+            the session's project's or the controller's
+        409: A wait, a field the kind does not take or one it needs missing,
+            a text with faults, material that cannot be copied, or a start
+            the project refuses: the reason
+        502: The controller did not answer, or refused for a reason of its own
+    """
+    body = AddItemRequestSchema.model_validate(request.get_json())
+    added = pilot_store_service.add_item(
+        g.brain, body, request.headers.get(TOOL_USE_ID_HEADER)
+    )
+    answer = AddedSchema(
+        id=added.item.id,
+        path=added.path,
+        state=added.state,
+        held=None if added.held is None else added.held.reason,
+        effect=_effect(added.line),
+    )
+    return answer.model_dump(mode="json"), 201
+
+
+@pilot_store_bp.route("/attachments", methods=["POST"])
+@public
+@api.validate(
+    json=AttachRequestSchema,
+    resp=SpectreeResponse(
+        HTTP_201=AttachedSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+        HTTP_502=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def attach_file(
+    pilot_store_service: PilotStoreService = Provide[
+        ServiceContainer.pilot_store_service
+    ],
+) -> Any:
+    """`attach_file(source, to?)` (F86.7, F36.6): outside material, a file or
+    a folder in any environment, copied into the record now with its source
+    and hung on the item `to` names.
+
+    Returns:
+        201: The attachments, one per file, and the call's effect line
+        400: The body is not a source and an optional item id
+        401: No bearer, or one no session has
+        403: The bearer's session is not a chat's or a job's, or has no turn
+            running
+        404: `to` names no item of the session's project, or the source's
+            environment is not the controller's
+        409: No `to`, or a file cannot be copied, nothing attached: the reason
+        502: The controller did not answer, or refused for a reason of its own
+    """
+    body = AttachRequestSchema.model_validate(request.get_json())
+    attached = pilot_store_service.attach_file(
+        g.brain, body.source, body.to, request.headers.get(TOOL_USE_ID_HEADER)
+    )
+    answer = AttachedSchema(
+        ids=[attachment.id for attachment in attached.attachments],
+        effect=_effect(attached.line),
+    )
+    return answer.model_dump(mode="json"), 201
 
 
 @pilot_store_bp.route("/answers", methods=["POST"])
@@ -245,4 +346,8 @@ def ask_writer(
 
 
 def _recorded(line: EffectLine) -> dict[str, Any]:
-    return RecordedSchema(effect=f"{line.verb} · {line.label}").model_dump(mode="json")
+    return RecordedSchema(effect=_effect(line)).model_dump(mode="json")
+
+
+def _effect(line: EffectLine) -> str:
+    return f"{line.verb} · {line.label}"

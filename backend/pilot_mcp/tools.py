@@ -19,9 +19,13 @@ from pydantic import Field
 from starlette.requests import Request
 
 from pilot_mcp.api import (
+    SOURCE,
+    Added,
     Asked,
     AttachedFiles,
+    AttachedMaterial,
     Mark,
+    NewItem,
     PilotStoreApi,
     PilotWorkApi,
     Recorded,
@@ -141,6 +145,66 @@ def register_work_tools(mcp: FastMCP, api: PilotWorkApi) -> None:
 
 
 def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
+    @mcp.tool()
+    async def add_item(
+        item: Annotated[
+            NewItem, Field(description="The item, in `timeline.json`'s shape")
+        ],
+        ctx: Call,
+    ) -> Added:
+        """Add an item to the project's timeline. A prose item is minted with
+        its file under the project's folder, born with `title` in its front
+        matter and `step`, `urgent`, `for` and `summary` beside it, and its
+        `path` answered for you to fill; a short one may come whole as
+        `markdown`, minted with it. A work item is started on add in an
+        environment Pilot makes from `repo`, on your placement, its first turn
+        your `brief` followed by Pilot's own lines; `state` answers whether it
+        is `starting` or `held` at the gate, and `held` why — say so to the
+        person. A wait, a field the kind does not take or one it needs
+        missing, a text with no title or with faults, an attachment or a plan
+        task not of your project, material that cannot be copied, or a start
+        the project refuses is refused with the reason, each fault with its
+        line, and nothing is added. Answers `{id, path, state, held,
+        effect}`."""
+        return await api.add_item(_authorization(ctx), _tool_use_id(ctx), item)
+
+    @mcp.tool()
+    async def attach_file(
+        source: Annotated[
+            str,
+            Field(
+                pattern=SOURCE,
+                description=(
+                    "The material's environment and its absolute path there,"
+                    " `<environment>:<path>`: a file, or a folder's every file"
+                    " under it"
+                ),
+            ),
+        ],
+        ctx: Call,
+        to: Annotated[
+            uuid.UUID | None,
+            Field(
+                description="The id of the item it hangs on, an item of your project"
+            ),
+        ] = None,
+    ) -> AttachedMaterial:
+        """Copy outside material into Pilot's record — a design record whole
+        or in part, a file the person points you at — from any environment
+        of the fleet, by `<environment>:<path>`: a file, or a folder and every
+        file under it, one attachment per file, all of one batch, each with
+        its source. Each is copied now; what changes there later is not seen.
+        `to` is the item it hangs on. A call that cannot copy every file it
+        names — no `to`, a `to` not of your project, an environment the
+        controller does not have, a path outside `/work`, no file there, a
+        file over 16 MiB, a folder over the cap of one call — attaches
+        nothing and answers the reason. Answers `{ids, effect}`, the
+        attachments' ids, a folder's in its files' path order, and the call's
+        effect line."""
+        return await api.attach_file(
+            _authorization(ctx), _tool_use_id(ctx), source=source, to=to
+        )
+
     @mcp.tool()
     @_taking_for
     async def answer(

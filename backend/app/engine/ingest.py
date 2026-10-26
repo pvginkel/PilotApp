@@ -144,6 +144,14 @@ class IngestService:
             tuple(_in_line_order([*faults, *dsl.validate(dsl.parse(text), facts)])),
         )
 
+    def born_faults(self, project: Project, text: str) -> tuple[dsl.Fault, ...]:
+        """`text`, the text an item of Pilot's own is to be born with in
+        `project`, read as a save of it is: every fault it holds, its own and
+        those against the record, the title rule's among them, in line order
+        (`dsl.DocumentKind.OWN_ITEM`)."""
+        facts = self._facts(project, dsl.DocumentKind.OWN_ITEM, {})
+        return tuple(dsl.validate(dsl.parse(text), facts))
+
     def write_down(self, paths: Iterable[str]) -> None:
         """The reconcile writes `paths`, from the tree's root, down from the
         record (design 1 §5.5 step 2). A held `plan.json` among them is

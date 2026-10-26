@@ -2,10 +2,12 @@
 makes for the brain's tools, under the session's bearer, outside `/api/`,
 pinned as the surface they are."""
 
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from dependency_injector import providers
 from flask import Flask
 from flask.testing import FlaskClient
 from sqlalchemy import select
@@ -13,6 +15,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.models import (
+    Attachment,
     Block,
     Document,
     Effect,
@@ -25,9 +28,17 @@ from app.models import (
 )
 from app.models.reference import AnswerChannel, ProjectState, SessionState
 from app.services.container import ServiceContainer
+from app.services.controller_client import ControllerClient
 from app.services.pilot_server import token_hash
 from app.services.session_record_service import read_records
+from app.services.session_start_service import SessionStartService
+from app.utils.after_commit import clear_after_commit_callbacks
+from tests.support.fake_controller import ServedFakeController
+from tests.support.starts import configured_starts
+from tests.support.supervisor import Supervise
 
+ITEMS = "/tools/pilot-store/items"
+ATTACHMENTS = "/tools/pilot-store/attachments"
 ANSWERS = "/tools/pilot-store/answers"
 MARKS = "/tools/pilot-store/marks"
 STOPS = "/tools/pilot-store/stops"
@@ -143,7 +154,7 @@ def _error(response: Any) -> str:
 
 
 class TestPilotStoreRoutes:
-    def test_the_surface_is_five_routes_outside_the_api(self, app: Flask) -> None:
+    def test_the_surface_is_seven_routes_outside_the_api(self, app: Flask) -> None:
         routes = sorted(
             (rule.rule, sorted(rule.methods - {"HEAD", "OPTIONS"}))
             for rule in app.url_map.iter_rules()
@@ -152,7 +163,9 @@ class TestPilotStoreRoutes:
 
         assert routes == [
             (ANSWERS, ["POST"]),
+            (ATTACHMENTS, ["POST"]),
             (FINISH, ["POST"]),
+            (ITEMS, ["POST"]),
             (MARKS, ["POST"]),
             (STOPS, ["POST"]),
             (WRITER_QUESTIONS, ["POST"]),
@@ -673,3 +686,246 @@ class TestAskWriter:
         assert _error(again).endswith(
             "because its writer was asked about block Q1 already"
         )
+
+
+ELSEWHERE = "example-elsewhere"
+
+DESIGN = "/work/Elsewhere/design"
+
+WORK = {
+    "kind": "work",
+    "title": "Renaming the badge",
+    "repo": "example/Example",
+    "cwd": "/work/Example",
+    "brief": "Rename the badge.",
+}
+
+
+@pytest.fixture
+def started(
+    container: ServiceContainer, supervise: Supervise
+) -> Iterator[SessionStartService]:
+    """The routes' start on a controller, its loops never run."""
+    starts = configured_starts(container, supervise)
+    container.session_start_service.override(providers.Object(starts))
+    try:
+        yield starts
+    finally:
+        container.session_start_service.reset_override()
+        clear_after_commit_callbacks()
+
+
+class TestAddItem:
+    def test_a_prose_item_is_201_with_its_path_and_effect_line(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, project, environment)
+
+        response = client.post(
+            ITEMS,
+            json={"kind": "notice", "title": "The lake", "for": "ada"},
+            headers={**_bearer(), "Tool-Use-Id": "toolu_01"},
+        )
+
+        assert response.status_code == 201
+        [item] = session.scalars(select(Item)).all()
+        assert response.get_json() == {
+            "id": str(item.id),
+            "path": f"/work/Projects/draft-{project.number}/items/1-the-lake.md",
+            "state": None,
+            "held": None,
+            "effect": "Added · Notice · The lake",
+        }
+        [record] = read_records(session, run.id, limit=10)
+        assert record.record.payload["toolUseId"] == "toolu_01"
+
+    def test_a_work_item_is_201_with_its_state_as_the_gate_left_it(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        started: SessionStartService,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        project.paused = True
+        _brain(session, project, environment)
+
+        response = client.post(ITEMS, json=WORK, headers=_bearer())
+
+        assert response.status_code == 201
+        [item] = session.scalars(select(Item)).all()
+        assert response.get_json() == {
+            "id": str(item.id),
+            "path": None,
+            "state": "held",
+            "held": "paused",
+            "effect": "Added · Work · Renaming the badge",
+        }
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"kind": "opening", "title": "Camp"},
+            {"kind": "notice", "title": ""},
+            {"kind": "notice", "title": "Camp", "attachments": ["camp.md"]},
+            {"kind": "notice", "title": "Camp", "attachments": ["e:/a", "e:/a"]},
+            {"kind": "work", "repo": "Example"},
+            {"kind": "notice", "title": "Camp", "cards": ["MD-8"]},
+        ],
+    )
+    def test_a_body_that_is_not_an_item_is_400(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        body: dict[str, Any],
+    ) -> None:
+        _brain(session, project, environment)
+
+        response = client.post(ITEMS, json=body, headers=_bearer())
+
+        assert response.status_code == 400
+        assert session.scalars(select(Item)).all() == []
+
+    def test_a_wait_is_409(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _brain(session, project, environment)
+
+        response = client.post(
+            ITEMS, json={"kind": "card_wait", "title": "MD-8 done"}, headers=_bearer()
+        )
+
+        assert response.status_code == 409
+        assert _error(response) == (
+            "Cannot add a card_wait item because Pilot takes no waits yet"
+        )
+
+    def test_a_text_with_a_fault_is_409_and_a_task_not_in_the_plan_404(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        started: SessionStartService,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _brain(session, project, environment)
+        # Committed, so that the first refusal's rollback keeps the session.
+        session.commit()
+
+        faulty = client.post(
+            ITEMS, json={"kind": "notice", "markdown": "Prose.\n"}, headers=_bearer()
+        )
+        stray = client.post(ITEMS, json={**WORK, "step": "nowhere"}, headers=_bearer())
+
+        assert faulty.status_code == 409
+        assert _error(faulty).startswith(
+            "Cannot add a notice item because its text holds faults: the item has no"
+            " title"
+        )
+        assert stray.status_code == 404
+        assert _error(stray) == f"Plan task {project.id}/nowhere was not found"
+
+    def test_without_a_controller_a_work_item_is_409(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _brain(session, project, environment)
+
+        response = client.post(ITEMS, json=WORK, headers=_bearer())
+
+        assert response.status_code == 409
+        assert _error(response) == (
+            "Cannot place a work item of example/Example because no controller is"
+            " configured"
+        )
+
+
+class TestAttachFile:
+    def test_the_material_is_201_with_its_ids_and_effect_line(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        fake_controller.add_environment(ELSEWHERE)
+        fake_controller.put_file(ELSEWHERE, f"{DESIGN}/README.md", b"# The design\n")
+        run = _brain(session, project, environment)
+        item = _decision(container, project, run)
+
+        response = client.post(
+            ATTACHMENTS,
+            json={"source": f"{ELSEWHERE}:{DESIGN}", "to": str(item.id)},
+            headers=_bearer(),
+        )
+
+        assert response.status_code == 201
+        [attachment] = session.scalars(select(Attachment)).all()
+        assert response.get_json() == {
+            "ids": [str(attachment.id)],
+            "effect": "Attached · The design",
+        }
+        assert attachment.source_environment_id == ELSEWHERE
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"source": "/work/Elsewhere/design"},
+            {"source": "example-elsewhere:design"},
+            {"source": f"{ELSEWHERE}:{DESIGN}", "to": "camp"},
+        ],
+    )
+    def test_a_body_that_is_not_a_source_and_an_item_is_400(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        body: dict[str, str],
+    ) -> None:
+        _brain(session, project, environment)
+
+        assert client.post(ATTACHMENTS, json=body, headers=_bearer()).status_code == 400
+
+    def test_without_to_is_409_and_an_unknown_environment_404(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, project, environment)
+        item = _decision(container, project, run)
+        # Committed, so that the first refusal's rollback keeps the session.
+        session.commit()
+
+        untargeted = client.post(
+            ATTACHMENTS, json={"source": f"{ELSEWHERE}:{DESIGN}"}, headers=_bearer()
+        )
+        unknown = client.post(
+            ATTACHMENTS,
+            json={"source": f"{ELSEWHERE}:{DESIGN}", "to": str(item.id)},
+            headers=_bearer(),
+        )
+
+        assert untargeted.status_code == 409
+        assert unknown.status_code == 404
+        assert _error(unknown) == f"Environment {ELSEWHERE} was not found"

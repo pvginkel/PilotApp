@@ -25,6 +25,316 @@
         "title": "ActionDoneRequestSchema",
         "type": "object"
       },
+      "AddItemRequestSchema.4ff8b5e": {
+        "additionalProperties": false,
+        "description": "An item to add, in `timeline.json`'s shape (TD §4.5, F86.1): a prose\nitem, with its text or to fill, or a work item to start. Which of the\nfields a kind takes the service says.",
+        "properties": {
+          "agent": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A work item's agent",
+            "title": "Agent"
+          },
+          "attachments": {
+            "description": "What it carries: attachments already made, by id, and material to copy in, `<environment>:<path>`",
+            "examples": [
+              [
+                "pvginkel-example-1a2b3c:/work/Example/docs/survey.md"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Attachments",
+            "type": "array"
+          },
+          "brief": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A work item's brief, its first turn's text",
+            "examples": [
+              "Rename the badge."
+            ],
+            "title": "Brief"
+          },
+          "cwd": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A work item's working directory",
+            "examples": [
+              "/work/Example"
+            ],
+            "title": "Cwd"
+          },
+          "for": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The handle of the person a prose item is for",
+            "examples": [
+              "ada"
+            ],
+            "title": "For"
+          },
+          "kind": {
+            "description": "The item's kind",
+            "enum": [
+              "decision",
+              "question",
+              "action",
+              "notice",
+              "document",
+              "review",
+              "work",
+              "card_wait",
+              "timed_wait"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "markdown": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A prose item's whole text, minted with it",
+            "examples": [
+              "```action id=A1\n```\n"
+            ],
+            "title": "Markdown"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A work item's model",
+            "examples": [
+              "opus"
+            ],
+            "title": "Model"
+          },
+          "reasoning_effort": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A work item's reasoning effort",
+            "examples": [
+              "high"
+            ],
+            "title": "Reasoning Effort"
+          },
+          "repo": {
+            "anyOf": [
+              {
+                "pattern": "^[^/\\s]+/[^/\\s]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The repository a work item runs in, `owner/Name`",
+            "examples": [
+              "pvginkel/Example"
+            ],
+            "title": "Repo"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The id of the plan's task it serves",
+            "examples": [
+              "pitch"
+            ],
+            "title": "Step"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A prose item's summary",
+            "examples": [
+              "The key the importer needs."
+            ],
+            "title": "Summary"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The title it is born with in its file's front matter, where its Markdown gives none; a work item's line",
+            "examples": [
+              "Put the v4 key into OpenBao"
+            ],
+            "title": "Title"
+          },
+          "urgent": {
+            "default": false,
+            "description": "A prose item that is urgent",
+            "title": "Urgent",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "AddItemRequestSchema",
+        "type": "object"
+      },
+      "AddedSchema.4ff8b5e": {
+        "description": "The item added.",
+        "properties": {
+          "effect": {
+            "description": "Its effect line, `<verb> · <what>` (F41)",
+            "examples": [
+              "Added · Action · Put the v4 key into OpenBao"
+            ],
+            "title": "Effect",
+            "type": "string"
+          },
+          "held": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AddedSchema.4ff8b5e.HeldReason"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the gate holds a held work item's start; none otherwise"
+          },
+          "id": {
+            "description": "Its id",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A prose item's file, its absolute path in the store; none for work",
+            "examples": [
+              "/work/Projects/camp/items/4-put-the-v4-key-into-openbao.md"
+            ],
+            "title": "Path"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "starting",
+                  "held"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A work item's session as the gate left it; none for prose",
+            "title": "State"
+          }
+        },
+        "required": [
+          "id",
+          "path",
+          "state",
+          "held",
+          "effect"
+        ],
+        "title": "AddedSchema",
+        "type": "object"
+      },
+      "AddedSchema.4ff8b5e.HeldReason": {
+        "description": "Why the gate holds a start (design 2 §13.4, §13.5; F26.1, F143.4): its\nproject paused, the controller unreachable, or, a work item's, no slot\nfree. Read at display, never stored (decision 53).",
+        "enum": [
+          "paused",
+          "controller_unreachable",
+          "slot"
+        ],
+        "title": "HeldReason",
+        "type": "string"
+      },
       "AnswerRequestSchema.4ff8b5e": {
         "additionalProperties": false,
         "description": "A person's answer to a block, given in the chat, to record for them.",
@@ -231,6 +541,42 @@
         "title": "AttachFileRequestSchema",
         "type": "object"
       },
+      "AttachRequestSchema.4ff8b5e": {
+        "additionalProperties": false,
+        "description": "Outside material to copy in, and the item it hangs on.",
+        "properties": {
+          "source": {
+            "description": "The material's environment and its absolute path in it, `<environment>:<path>`: a file, or a folder's every file under it",
+            "examples": [
+              "pvginkel-example-1a2b3c:/work/Example/docs/design"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "to": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The id of the item it hangs on",
+            "examples": [
+              "0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15"
+            ],
+            "title": "To"
+          }
+        },
+        "required": [
+          "source"
+        ],
+        "title": "AttachRequestSchema",
+        "type": "object"
+      },
       "AttachedFilesSchema.ce33d8b": {
         "description": "The attachments the material was copied into.",
         "properties": {
@@ -253,6 +599,34 @@
           "ids"
         ],
         "title": "AttachedFilesSchema",
+        "type": "object"
+      },
+      "AttachedSchema.4ff8b5e": {
+        "description": "The attachments the material was copied into.",
+        "properties": {
+          "effect": {
+            "description": "Its effect line, `<verb> · <what>` (F41)",
+            "examples": [
+              "Attached · design, 3 files"
+            ],
+            "title": "Effect",
+            "type": "string"
+          },
+          "ids": {
+            "description": "Their ids, one per file, a folder's in its files' path order",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids",
+          "effect"
+        ],
+        "title": "AttachedSchema",
         "type": "object"
       },
       "ChatMessageRequestSchema.f9d9b43": {
@@ -11545,6 +11919,97 @@
         "tags": []
       }
     },
+    "/tools/pilot-store/attachments": {
+      "post": {
+        "description": "Returns:     201: The attachments, one per file, and the call's effect line     400: The body is not a source and an optional item id     401: No bearer, or one no session has     403: The bearer's session is not a chat's or a job's, or has no turn         running     404: `to` names no item of the session's project, or the source's         environment is not the controller's     409: No `to`, or a file cannot be copied, nothing attached: the reason     502: The controller did not answer, or refused for a reason of its own",
+        "operationId": "post__tools_pilot-store_attachments",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachRequestSchema.4ff8b5e"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachedSchema.4ff8b5e"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          }
+        },
+        "summary": "`attach_file(source, to?)` (F86.7, F36.6): outside material, a file or a folder in any environment, copied into the record now with its source and hung on the item `to` names.",
+        "tags": []
+      }
+    },
     "/tools/pilot-store/finish": {
       "post": {
         "description": "Returns:     200: The call's effect line     401: No bearer, or one no session has     403: The bearer's session is not a chat's or a job's, or has no turn         running     409: The project is a draft, finished or archived: the reason",
@@ -11603,6 +12068,97 @@
           }
         },
         "summary": "`finish()` (F86.5, F5.4): the session's project finished by Pilot as Finish finishes it, its own turn stopped with every other once this commits.",
+        "tags": []
+      }
+    },
+    "/tools/pilot-store/items": {
+      "post": {
+        "description": "Returns:     201: The item, a prose item's file, a work item's state as the gate         left it, and the call's effect line     400: The body is not an item in `timeline.json`'s shape     401: No bearer, or one no session has     403: The bearer's session is not a chat's or a job's, or has no turn         running     404: An attachment, the plan's task or a source's environment is not         the session's project's or the controller's     409: A wait, a field the kind does not take or one it needs missing,         a text with faults, material that cannot be copied, or a start         the project refuses: the reason     502: The controller did not answer, or refused for a reason of its own",
+        "operationId": "post__tools_pilot-store_items",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddItemRequestSchema.4ff8b5e"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddedSchema.4ff8b5e"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          }
+        },
+        "summary": "`add_item(item)` (F86.1, F86.6, F36.5): a prose item minted with its file, or a work item started on add, with the attachments it carries.",
         "tags": []
       }
     },

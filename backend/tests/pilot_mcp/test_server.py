@@ -165,9 +165,248 @@ def _optional(title: str, description: str, **string: Any) -> dict[str, Any]:
     }
 
 
+def _text_field(title: str, description: str) -> dict[str, Any]:
+    return _optional(title, description, minLength=1)
+
+
+_EFFECT = {
+    "description": "Its effect line, `<verb> · <what>`, as it shows where the call ran",
+    "title": "Effect",
+    "type": "string",
+}
+
+_NEW_ITEM = {
+    "additionalProperties": False,
+    "description": "An item to add, in `timeline.json`'s shape.",
+    "properties": {
+        "kind": {
+            "description": (
+                "`decision`, `question`, `action`, `notice`, `document` or `review`"
+                " for a prose item, `work` for a work item; a wait, `card_wait` or"
+                " `timed_wait`, is refused: Pilot takes none yet"
+            ),
+            "enum": [
+                "decision",
+                "question",
+                "action",
+                "notice",
+                "document",
+                "review",
+                "work",
+                "card_wait",
+                "timed_wait",
+            ],
+            "title": "Kind",
+            "type": "string",
+        },
+        "title": _text_field(
+            "Title",
+            "The title it is born with in its file's front matter, where `markdown`"
+            " gives none; a prose item without `markdown` needs it, and a work item,"
+            " whose line shows it",
+        ),
+        "markdown": _text_field(
+            "Markdown",
+            "A short prose item's whole text, minted with it and parsed now: its own"
+            " front-matter `title` stands, else `title` is written in",
+        ),
+        "step": _text_field(
+            "Step",
+            "The id of the plan's task it serves: a prose item's front matter where"
+            " `markdown` gives none, a work item's brief",
+        ),
+        "urgent": {
+            "default": False,
+            "description": (
+                "A prose item that is urgent: `urgent: true` in its front matter where"
+                " `markdown` gives none"
+            ),
+            "title": "Urgent",
+            "type": "boolean",
+        },
+        "for": _text_field(
+            "For",
+            "The handle of the person a prose item is for, in its front matter where"
+            " `markdown` gives none",
+        ),
+        "summary": _text_field(
+            "Summary",
+            "A prose item's summary, in its front matter where `markdown` gives none",
+        ),
+        "attachments": {
+            "description": (
+                "What it carries, hung on it in this order: an attachment already"
+                " made, by its id, or material copied in now as `attach_file` copies"
+                " it, `<environment>:<path>`"
+            ),
+            "items": {
+                "pattern": r"^([0-9A-Fa-f-]{36}|[^:\s/]+:/.*)$",
+                "type": "string",
+            },
+            "title": "Attachments",
+            "type": "array",
+        },
+        "repo": _optional(
+            "Repo",
+            "A work item's repository, `owner/Name`: Pilot makes its environment from"
+            " it",
+            pattern=r"^[^/\s]+/[^/\s]+$",
+        ),
+        "cwd": _text_field(
+            "Cwd",
+            "A work item's working directory in its environment, a checkout under"
+            " `/work`: the repository's own, `/work/<Name>`, or one its manifest"
+            " checks out beside it",
+        ),
+        "brief": _text_field(
+            "Brief",
+            "A work item's brief, its first turn, yours; Pilot appends the plan task"
+            " it serves, the switch and the project's handbook",
+        ),
+        "agent": _text_field("Agent", "A work item's agent, where given"),
+        "model": _text_field("Model", "A work item's model, where given"),
+        "reasoning_effort": _text_field(
+            "Reasoning Effort", "A work item's reasoning effort, where given"
+        ),
+    },
+    "required": ["kind"],
+    "title": "NewItem",
+    "type": "object",
+}
+
 # Each tool: its parameters, its result and its description, the words as the
 # brain reads them (TD §4.5, F86).
 STORE_SURFACE = {
+    "add_item": (
+        {
+            "$defs": {"NewItem": _NEW_ITEM},
+            "properties": {
+                "item": {
+                    "$ref": "#/$defs/NewItem",
+                    "description": "The item, in `timeline.json`'s shape",
+                }
+            },
+            "required": ["item"],
+            "title": "add_itemArguments",
+            "type": "object",
+        },
+        {
+            "description": "The item added.",
+            "properties": {
+                "id": {
+                    **_UUID,
+                    "description": "Its id, as `timeline.json` gives it",
+                    "title": "Id",
+                },
+                "path": {
+                    "anyOf": [{"type": "string"}, {"type": "null"}],
+                    "description": (
+                        "A prose item's file, its absolute path, which you fill; none"
+                        " for a work item"
+                    ),
+                    "title": "Path",
+                },
+                "state": {
+                    "anyOf": [
+                        {"enum": ["starting", "held"], "type": "string"},
+                        {"type": "null"},
+                    ],
+                    "description": (
+                        "A work item's session: `starting`, or `held` at the gate;"
+                        " none for a prose item"
+                    ),
+                    "title": "State",
+                },
+                "held": {
+                    "anyOf": [
+                        {
+                            "enum": ["paused", "controller_unreachable", "slot"],
+                            "type": "string",
+                        },
+                        {"type": "null"},
+                    ],
+                    "description": (
+                        "Why a held work item waits: the project is paused, the"
+                        " controller is unreachable, or no slot is free; none"
+                        " otherwise"
+                    ),
+                    "title": "Held",
+                },
+                "effect": _EFFECT,
+            },
+            "required": ["id", "path", "state", "held", "effect"],
+            "title": "Added",
+            "type": "object",
+        },
+        "Add an item to the project's timeline. A prose item is minted with its"
+        " file under the project's folder, born with `title` in its front matter"
+        " and `step`, `urgent`, `for` and `summary` beside it, and its `path`"
+        " answered for you to fill; a short one may come whole as `markdown`,"
+        " minted with it. A work item is started on add in an environment Pilot"
+        " makes from `repo`, on your placement, its first turn your `brief`"
+        " followed by Pilot's own lines; `state` answers whether it is `starting`"
+        " or `held` at the gate, and `held` why — say so to the person. A wait, a"
+        " field the kind does not take or one it needs missing, a text with no"
+        " title or with faults, an attachment or a plan task not of your project,"
+        " material that cannot be copied, or a start the project refuses is"
+        " refused with the reason, each fault with its line, and nothing is added."
+        " Answers `{id, path, state, held, effect}`.",
+    ),
+    "attach_file": (
+        {
+            "properties": {
+                "source": {
+                    "description": (
+                        "The material's environment and its absolute path there,"
+                        " `<environment>:<path>`: a file, or a folder's every file"
+                        " under it"
+                    ),
+                    "pattern": r"^[^:\s/]+:/.*$",
+                    "title": "Source",
+                    "type": "string",
+                },
+                "to": {
+                    "anyOf": [_UUID, {"type": "null"}],
+                    "default": None,
+                    "description": (
+                        "The id of the item it hangs on, an item of your project"
+                    ),
+                    "title": "To",
+                },
+            },
+            "required": ["source"],
+            "title": "attach_fileArguments",
+            "type": "object",
+        },
+        {
+            "description": "The attachments the material was copied into.",
+            "properties": {
+                "ids": {
+                    "description": (
+                        "Their ids, one per file, a folder's in its files' path order"
+                    ),
+                    "items": _UUID,
+                    "title": "Ids",
+                    "type": "array",
+                },
+                "effect": _EFFECT,
+            },
+            "required": ["ids", "effect"],
+            "title": "AttachedMaterial",
+            "type": "object",
+        },
+        "Copy outside material into Pilot's record — a design record whole or in"
+        " part, a file the person points you at — from any environment of the"
+        " fleet, by `<environment>:<path>`: a file, or a folder and every file"
+        " under it, one attachment per file, all of one batch, each with its"
+        " source. Each is copied now; what changes there later is not seen. `to`"
+        " is the item it hangs on. A call that cannot copy every file it names —"
+        " no `to`, a `to` not of your project, an environment the controller does"
+        " not have, a path outside `/work`, no file there, a file over 16 MiB, a"
+        " folder over the cap of one call — attaches nothing and answers the"
+        " reason. Answers `{ids, effect}`, the attachments' ids, a folder's in its"
+        " files' path order, and the call's effect line.",
+    ),
     "answer": (
         {
             "properties": {
@@ -332,7 +571,8 @@ STORE_INSTRUCTIONS = (
     " beyond the files of the project's folder: each acts on that project alone,"
     " and only while your turn runs. An `item` is an item's id and a `block` a"
     " block's, `<item id>/<local id>`: the item's id as `timeline.json` gives it,"
-    " the block's local id as its fence does. A call the record refuses changes"
+    " the block's local id as its fence does; `add_item` alone takes the item"
+    " itself, in `timeline.json`'s shape. A call the record refuses changes"
     " nothing and answers the reason."
 )
 

@@ -4,7 +4,7 @@ Session was created with resolved to the Session, `register_document`
 Effects (F41)."""
 
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
@@ -49,7 +49,7 @@ _UNREADABLE_FILE = (
 
 _UNCOPYABLE_FILE = (*_UNREADABLE_FILE, ControllerProblemType.CONFLICT)
 """The controller's refusals of a copy's read or listing that name what the
-worker can fix: `CONFLICT` a link loop, in a folder or at the path."""
+session copying can fix: `CONFLICT` a link loop, in a folder or at the path."""
 
 
 @dataclass(frozen=True)
@@ -175,18 +175,19 @@ class PilotWorkService:
         item = self.db.get(Item, worker.work_item_id if to is None else to)
         if item is None or item.project_id != worker.project_id:
             raise RecordNotFoundException("Item", str(to))
-        copies = self._copies(worker.environment_id, path, f"attach {path}")
-        attachments = self.attach_service.attach(
-            item, self.db.get_one(AgentSession, worker.session_id), copies
+        copies = material(
+            self.controller_client(), worker.environment_id, path, f"attach {path}"
         )
-        if len(attachments) == 1:
-            label = attachments[0].title
-        else:
-            label = f"{_name(path)}, {len(attachments)} files"
+        attachments = self.attach_service.attach(
+            item,
+            self.db.get_one(AgentSession, worker.session_id),
+            copies,
+            environment_id=worker.environment_id,
+        )
         self.effect_service.record(
             worker.session_id,
             tool_use_id,
-            EffectLine(ATTACHED, label, item_id=item.id),
+            EffectLine(ATTACHED, attached_label(path, attachments), item_id=item.id),
             [
                 Change(EffectKind.ATTACHED, attachment_id=attachment.id)
                 for attachment in attachments
@@ -194,61 +195,79 @@ class PilotWorkService:
         )
         return attachments
 
-    def _copies(self, environment_id: str, path: str, operation: str) -> list[Copy]:
-        """The file at `path`, else every file under the folder at `path`,
-        read through the controller."""
-        client = self.controller_client()
-        try:
-            content = client.read_file(environment_id, path)
-        except ControllerProblem as problem:
-            if problem.problem_type is not ControllerProblemType.NOT_A_FILE:
-                _refuse(operation, problem)
-                raise
-            return self._folder(client, environment_id, path, operation, problem)
-        return [copied(_name(path), path, content.data)]
 
-    def _folder(
-        self,
-        client: ControllerClient,
-        environment_id: str,
-        path: str,
-        operation: str,
-        not_a_file: ControllerProblem,
-    ) -> list[Copy]:
-        try:
-            files = client.list_folder_files(environment_id, path)
-        except ControllerProblem as problem:
-            if problem.problem_type is ControllerProblemType.NOT_A_DIRECTORY:
-                # Neither a file nor a folder: a FIFO, a socket, a device.
-                raise InvalidOperationException(
-                    operation, not_a_file.cause
-                ) from not_a_file
+def material(
+    client: ControllerClient, environment_id: str, path: str, operation: str
+) -> list[Copy]:
+    """The file at `path` in the environment, else every file under the folder
+    at `path`, read through the controller as one attach call copies them
+    (F36.1, F36.6): a file one copy, a folder one per file under it, named by
+    its path relative to the folder, in path order.
+
+    Raises:
+        InvalidOperationException: a file cannot be copied: the controller
+            refused its read or the folder's listing — a path outside
+            `/work`, nothing there, neither a file nor a folder, more than 16
+            MiB, a link loop — or the call is over its cap of files or bytes.
+        ExternalServiceException: the controller did not answer, or refused
+            for a reason of its own.
+    """
+    try:
+        content = client.read_file(environment_id, path)
+    except ControllerProblem as problem:
+        if problem.problem_type is not ControllerProblemType.NOT_A_FILE:
             _refuse(operation, problem)
             raise
-        if len(files) > MAX_CALL_FILES:
+        return _folder(client, environment_id, path, operation, problem)
+    return [copied(_name(path), path, content.data)]
+
+
+def attached_label(path: str, attachments: Sequence[Attachment]) -> str:
+    """The label of an attach call's effect line: its one file's title, else
+    the folder's name and its count of files."""
+    if len(attachments) == 1:
+        return attachments[0].title
+    return f"{_name(path)}, {len(attachments)} files"
+
+
+def _folder(
+    client: ControllerClient,
+    environment_id: str,
+    path: str,
+    operation: str,
+    not_a_file: ControllerProblem,
+) -> list[Copy]:
+    try:
+        files = client.list_folder_files(environment_id, path)
+    except ControllerProblem as problem:
+        if problem.problem_type is ControllerProblemType.NOT_A_DIRECTORY:
+            # Neither a file nor a folder: a FIFO, a socket, a device.
+            raise InvalidOperationException(operation, not_a_file.cause) from not_a_file
+        _refuse(operation, problem)
+        raise
+    if len(files) > MAX_CALL_FILES:
+        raise InvalidOperationException(
+            operation,
+            f"the folder holds {len(files)} files, over the {MAX_CALL_FILES}"
+            "-file cap of one call",
+        )
+    folder = f"{path.rstrip('/')}/"
+    copies: list[Copy] = []
+    size = 0
+    for file in files:
+        try:
+            content = client.read_file(environment_id, file)
+        except ControllerProblem as problem:
+            _refuse(operation, problem)
+            raise
+        size += len(content.data)
+        if size > MAX_CALL_SIZE:
             raise InvalidOperationException(
                 operation,
-                f"the folder holds {len(files)} files, over the {MAX_CALL_FILES}"
-                "-file cap of one call",
+                f"the folder's files are over the {MAX_CALL_SIZE}-byte cap of one call",
             )
-        folder = f"{path.rstrip('/')}/"
-        copies: list[Copy] = []
-        size = 0
-        for file in files:
-            try:
-                content = client.read_file(environment_id, file)
-            except ControllerProblem as problem:
-                _refuse(operation, problem)
-                raise
-            size += len(content.data)
-            if size > MAX_CALL_SIZE:
-                raise InvalidOperationException(
-                    operation,
-                    f"the folder's files are over the {MAX_CALL_SIZE}-byte cap of"
-                    " one call",
-                )
-            copies.append(copied(file.removeprefix(folder), file, content.data))
-        return copies
+        copies.append(copied(file.removeprefix(folder), file, content.data))
+    return copies
 
 
 def _name(path: str) -> str:
@@ -257,7 +276,7 @@ def _name(path: str) -> str:
 
 
 def _refuse(operation: str, problem: ControllerProblem) -> None:
-    """Refuse the call when the controller's `problem` names what the worker
-    can fix."""
+    """Refuse the call when the controller's `problem` names what the session
+    copying can fix."""
     if problem.problem_type in _UNCOPYABLE_FILE:
         raise InvalidOperationException(operation, problem.cause) from problem

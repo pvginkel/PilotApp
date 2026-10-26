@@ -19,6 +19,7 @@ from pilot_dsl import (
     parse,
     recommendation,
     validate,
+    with_facts,
     with_title,
     write_answer,
     write_done,
@@ -616,6 +617,86 @@ class TestWithTitle:
 
         assert document.faults == ()
         assert document.title == title.strip()
+
+
+class TestWithFacts:
+    @pytest.mark.parametrize(
+        ("text", "written"),
+        [
+            pytest.param(
+                "",
+                "---\nstep: pitch\nurgent: true\nfor: ada\nsummary: The dome.\n---\n",
+                id="empty",
+            ),
+            pytest.param(
+                "Prose.\n",
+                "---\nstep: pitch\nurgent: true\nfor: ada\nsummary: The dome.\n---\n"
+                "Prose.\n",
+                id="prose",
+            ),
+            pytest.param(
+                "---\ntitle: Tent\n---\nProse.\n",
+                "---\ntitle: Tent\nstep: pitch\nurgent: true\nfor: ada\n"
+                "summary: The dome.\n---\nProse.\n",
+                id="after-the-front-matter",
+            ),
+            pytest.param(
+                "---\r\ntitle: Tent\r\n---\r\nProse.\r\n",
+                "---\r\ntitle: Tent\r\nstep: pitch\r\nurgent: true\r\nfor: ada\r\n"
+                "summary: The dome.\r\n---\r\nProse.\r\n",
+                id="crlf",
+            ),
+        ],
+    )
+    def test_each_fact_is_written_in_the_front_matter(
+        self, text: str, written: str
+    ) -> None:
+        assert (
+            with_facts(
+                text, step="pitch", urgent=True, addressee="ada", summary="The dome."
+            )
+            == written
+        )
+        assert parse(written).faults == ()
+
+    def test_a_fact_the_front_matter_gives_is_kept(self) -> None:
+        text = (
+            "---\ntitle: Tent\nstep: camp\nurgent: true\nfor: ben\n"
+            "summary: Theirs.\n---\n"
+        )
+
+        assert (
+            with_facts(
+                text, step="pitch", urgent=True, addressee="ada", summary="Ours."
+            )
+            == text
+        )
+
+    def test_a_key_that_gives_none_is_replaced_in_place(self) -> None:
+        text = "---\nstep:\ntitle: Tent\nurgent: false\nfor: ''\n---\nProse.\n"
+
+        assert with_facts(text, step="pitch", urgent=True, addressee="ada") == (
+            "---\nstep: pitch\ntitle: Tent\nurgent: true\nfor: ada\n---\nProse.\n"
+        )
+
+    def test_no_fact_given_leaves_the_text_as_it_is(self) -> None:
+        assert with_facts("Prose.\n") == "Prose.\n"
+
+    def test_the_written_facts_read_back_as_given(self) -> None:
+        summary = "Fix: the client\nin two lines"
+
+        front = parse(
+            with_facts(
+                "Prose.\n", step="t3", urgent=True, addressee="ada", summary=summary
+            )
+        ).front_matter
+
+        assert (front.step, front.urgent, front.addressee, front.summary) == (
+            "t3",
+            True,
+            "ada",
+            summary,
+        )
 
 
 class TestRecommendation:

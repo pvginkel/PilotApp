@@ -231,6 +231,49 @@ class TestIngestServiceWorkerVersion:
         )
 
 
+class TestIngestServiceBornFaults:
+    """The text an item of Pilot's own is to be born with, read as a save of
+    it is."""
+
+    def test_a_titled_clean_text_has_no_fault(
+        self, session: DbSession, container: ServiceContainer, project: Project
+    ) -> None:
+        _task(session, project, "build")
+        text = "---\ntitle: Camp notes\nstep: build\nfor: ada\n---\n\nNotes.\n"
+
+        assert container.ingest_service().born_faults(project, text) == ()
+
+    def test_every_fault_its_own_the_records_and_the_title_rules(
+        self, container: ServiceContainer, project: Project
+    ) -> None:
+        text = "---\nfor: nobody\nstep: build\n---\n\n```decision id=D1\nproposal: [\n```\n"
+
+        faults = container.ingest_service().born_faults(project, text)
+
+        own = list(dsl.parse(text).faults)
+        assert own
+        assert list(faults) == sorted(
+            [
+                dsl.Fault(2, "front matter: `for: nobody` names no handle"),
+                dsl.Fault(
+                    3, "front matter: `step: build` names no task of the project"
+                ),
+                *own,
+                dsl.Fault(
+                    None,
+                    "the item has no title: give it `title` in the front matter or"
+                    " a first heading",
+                ),
+            ],
+            key=lambda fault: (fault.line is None, fault.line or 0),
+        )
+
+    def test_a_first_heading_is_a_title(
+        self, container: ServiceContainer, project: Project
+    ) -> None:
+        assert container.ingest_service().born_faults(project, "# Camp notes\n") == ()
+
+
 class TestIngestServicePaths:
     @pytest.mark.parametrize(
         "path",

@@ -126,6 +126,50 @@ def with_title(text: str, title: str) -> str:
     return _titled(text, title, ())[0]
 
 
+def with_facts(
+    text: str,
+    *,
+    step: str | None = None,
+    urgent: bool = False,
+    addressee: str | None = None,
+    summary: str | None = None,
+) -> str:
+    """An item's facts written in the text's front matter where it gives none
+    of its own: `step`, `urgent: true`, `for: <addressee>` and `summary`, in
+    that order, each in place of a key that gives none, else after the front
+    matter's last line; one front matter opened at the top where the text has
+    none. The text as it is where it gives each fact given."""
+    front = parse(text).front_matter
+    entries = [
+        (key, value)
+        for key, value, given in (
+            ("step", step, front.step is not None),
+            ("urgent", "true" if urgent else None, front.urgent),
+            ("for", addressee, front.addressee is not None),
+            ("summary", summary, front.summary is not None),
+        )
+        if value is not None and not given
+    ]
+    if not entries:
+        return text
+    edit = _Edit(text)
+    if front.span is None:
+        edit.insert(0, ["---", *_render(entries), "---"])
+        return edit.apply()[0]
+    appended: list[str] = []
+    for key, value in entries:
+        lines = _render([(key, value)])
+        span = front.lines.get(key)
+        if span is None:
+            appended.extend(lines)
+        else:
+            edit.drop(span)
+            edit.insert(span.first - 1, lines)
+    if appended:
+        edit.insert(front.span.last - 1, appended)
+    return edit.apply()[0]
+
+
 def _titled(
     text: str, title: str, faults: Sequence[Fault]
 ) -> tuple[str, tuple[Fault, ...]]:

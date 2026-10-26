@@ -457,6 +457,7 @@ class TestDataService:
                     "/work/RecipeBox/notes/layout-sketches.md",
                 )
             ],
+            environment_id=environment.id,
         )
 
         self._save_plan(
@@ -893,6 +894,8 @@ class TestDataService:
             raise RecordNotFoundException("Item", str(item_id))
         project = self.db.get_one(Project, item.project_id)
         session = self._session_of(project, f"attach files to item {item.id}")
+        # A spec makes the project's sessions with an environment_id.
+        assert session.environment_id is not None
         return self.attach_service.attach(
             item,
             session,
@@ -906,6 +909,7 @@ class TestDataService:
                 )
                 for file in files
             ],
+            environment_id=session.environment_id,
         )
 
     def _ingest(
