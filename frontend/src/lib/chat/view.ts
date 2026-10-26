@@ -13,7 +13,9 @@
  * is written after the run's last Turn ended, and stands at that Turn's end. A Turn ends at
  * its `result`, at a failed send or start, at the environment stopped under it, or, ended with no
  * record of it, where a later Turn's records begin; a call or a sub-agent still running then was
- * stopped with it.
+ * stopped with it. An effect goes on the call that made it, whether its record is written before
+ * or after the call's line; one whose call no record shows, as where its client sent no tool-use id,
+ * stands in its own record's place.
  */
 
 import type { ChatRecord, Effect, SendRecord, ServerRecord } from './records';
@@ -55,7 +57,9 @@ export type Step =
   | { kind: 'tool'; seq: number; call: ToolCallView }
   | { kind: 'error'; seq: number; text: string }
   /** The server's word on a file the session registered. */
-  | { kind: 'notice'; seq: number; text: string };
+  | { kind: 'notice'; seq: number; text: string }
+  /** An effect whose call no record shows. */
+  | { kind: 'effect'; seq: number; effect: Effect };
 
 type TurnState = 'running' | 'done' | 'interrupted' | 'failed';
 
@@ -93,6 +97,9 @@ const textOf = (line: AssistantLine) =>
 export function buildChatView(chatId: string, records: readonly ChatRecord[], { running = true } = {}): ChatItem[] {
   const items: ChatItem[] = [];
   const calls = new Map<string, ToolCallView>();
+  const called = calledIds(records);
+  /** The effects whose call's line comes after them. */
+  const early = new Map<string, Effect[]>();
   const turnCalls = new Map<number, ToolCallView[]>();
   const turns = new Map<number, TurnView>();
   let turn: TurnView | null = null;
@@ -195,9 +202,13 @@ export function buildChatView(chatId: string, records: readonly ChatRecord[], { 
         case 'environment-stopped':
           end(t, 'interrupted', r.at);
           break;
-        case 'effect':
-          calls.get(ev.toolUseId)?.effects.push(ev.effect);
+        case 'effect': {
+          const id = ev.toolUseId;
+          if (id === null || !called.has(id)) t.steps.push({ kind: 'effect', seq: r.seq, effect: ev.effect });
+          else if (calls.has(id)) calls.get(id)!.effects.push(ev.effect);
+          else early.set(id, [...(early.get(id) ?? []), ev.effect]);
           break;
+        }
         case 'session-gone':
           break;
       }
@@ -222,7 +233,7 @@ export function buildChatView(chatId: string, records: readonly ChatRecord[], { 
         } else if (block.type === 'thinking') {
           steps.push({ kind: 'thinking', seq: r.seq, text: block.thinking, durationMs: line.thinking_duration_ms });
         } else if (block.type === 'tool_use') {
-          const call: ToolCallView = { id: block.id, name: block.name, input: block.input, effects: [] };
+          const call: ToolCallView = { id: block.id, name: block.name, input: block.input, effects: early.get(block.id) ?? [] };
           if (block.name === 'Agent' || block.name === 'Task') {
             call.agent = {
               type: typeof block.input.subagent_type === 'string' ? block.input.subagent_type : 'Sub',
@@ -251,6 +262,16 @@ export function buildChatView(chatId: string, records: readonly ChatRecord[], { 
   const latest = items.at(-1);
   if (!running && latest?.kind === 'turn' && latest.turn.state === 'running') end(latest.turn, 'done', latest.turn.lastAt);
   return items;
+}
+
+/** The ids of the tool calls the records' `assistant` lines make. */
+function calledIds(records: readonly ChatRecord[]): Set<string> {
+  const ids = new Set<string>();
+  for (const r of records) {
+    if (r.kind !== 'claude' || typeof r.payload === 'string' || !isAssistant(r.payload)) continue;
+    for (const block of r.payload.message.content) if (block.type === 'tool_use') ids.add(block.id);
+  }
+  return ids;
 }
 
 type FileEvent = Extract<ServerRecord['payload'], { type: 'read-failed' | 'write-back-refused' }>;

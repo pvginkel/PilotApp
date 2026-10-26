@@ -3,7 +3,8 @@
  * its head "Session log" over the item's title, its environment's link once its start has one, and
  * its session's id; its
  * body the session's records as the chat renders a reply — a run of calls, a sub-agent's card,
- * the phantom fading in and gone at its record — streamed while it is open; its tail the working
+ * the phantom fading in and gone at its record, each effect of a call as its line where the call
+ * ran (F41) — streamed while it is open; its tail the working
  * cue while the session is held, starts or runs, else "Stopped by you · <time>", the environment
  * stopped under it or in error, "The turn ended · <time>" or "Failed · <time>" under the error
  * (F69.2, F125).
@@ -40,6 +41,12 @@ const blockStart = () =>
   line({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }, parent_tool_use_id: null });
 const delta = (words: string) =>
   line({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: words } }, parent_tool_use_id: null });
+
+// Files the session writes in its environment, registered and attached as its worker does.
+const SURVEY_PATH = '/work/Example/survey.md';
+const SURVEY = '# The survey\n\nNine of ten want the lake.\n';
+const NOTES_PATH = '/work/Example/camp-notes.txt';
+const ROUTE_PATH = '/work/Example/route.txt';
 
 interface Fixtures {
   people: People;
@@ -117,6 +124,58 @@ test.describe('A work item’s session log', () => {
     const { done } = await projects.item(project, work);
     await expect(sessionLog.tail).toHaveText(`The turn ended · ${clock(done!.at)}`);
     await expect(sessionLog.cue).toHaveCount(0);
+  });
+
+  test('shows each effect of its session’s calls as one line where the call ran — “Registered · inbox/<n>”, “Attached · <title>” — whether its record comes before the call’s line or after it, one whose call no record shows where its record stands, and a click goes to its item', async ({
+    people,
+    projects,
+    controller,
+    sessionLog,
+    page,
+  }) => {
+    const { project, start } = await started({ people, projects });
+    const work = await start();
+    const { id: environment } = await projects.environment(project, work);
+    await controller.putFile(environment, SURVEY_PATH, SURVEY);
+    await controller.putFile(environment, NOTES_PATH, 'Bring the long pegs.\n');
+    await controller.putFile(environment, ROUTE_PATH, 'North shore, then the ridge.\n');
+    await sessionLog.open(project, work);
+
+    // The call's line, then its effect: the line is the effect from then on.
+    await controller.play(environment, 'claude-1', [
+      text('survey', 'The survey is written.'),
+      toolUse('toolu_register', 'mcp__pilot__register_document', { path: SURVEY_PATH }),
+    ]);
+    await expect(sessionLog.steps).toHaveCount(2);
+    const survey = await projects.register(work, SURVEY_PATH, 'toolu_register');
+    const registered = `Registered · inbox/${(await projects.item(project, survey)).seq}`;
+    await expect(sessionLog.steps).toHaveText(['The survey is written.', registered]);
+    await expect(sessionLog.tools).toHaveText([registered]);
+    await controller.play(environment, 'claude-1', [toolResult('toolu_register', `{"id": "${survey}"}`)]);
+
+    // The effect, then its call's line: it stands in its record's place until the line takes it.
+    await controller.play(environment, 'claude-1', [text('notes', 'The notes go on the work item.')]);
+    await expect(sessionLog.steps).toHaveCount(3);
+    await projects.workerAttach(work, NOTES_PATH, { toolUseId: 'toolu_attach' });
+    await expect(sessionLog.effects).toHaveText(['Attached · camp-notes.txt']);
+    await controller.play(environment, 'claude-1', [
+      toolUse('toolu_attach', 'mcp__pilot__attach_file', { path: NOTES_PATH }),
+      toolResult('toolu_attach', '{"ids": []}'),
+    ]);
+    await expect(sessionLog.effects).toHaveCount(0);
+    await expect(sessionLog.tools).toHaveText([registered, 'Attached · camp-notes.txt']);
+    await expect(sessionLog.steps).toHaveText(['The survey is written.', registered, 'The notes go on the work item.', 'Attached · camp-notes.txt']);
+
+    // A call whose client sent no tool-use id: its effect stands where its record does.
+    await controller.play(environment, 'claude-1', [text('route', 'The route goes on the survey.')]);
+    await expect(sessionLog.steps).toHaveCount(5);
+    await projects.workerAttach(work, ROUTE_PATH, { to: survey });
+    await expect(sessionLog.effects).toHaveText(['Attached · route.txt']);
+    await expect(sessionLog.steps.last()).toHaveText('Attached · route.txt');
+
+    await sessionLog.tools.getByRole('button', { name: registered }).click();
+    await expect(page).toHaveURL(new RegExp(`/projects/${project}/items/${survey}$`));
+    await expect(sessionLog.overlay).toHaveCount(0);
   });
 
   test('opened from a done item shows its records as they streamed and "The turn ended · <time>"; Esc closes it', async ({

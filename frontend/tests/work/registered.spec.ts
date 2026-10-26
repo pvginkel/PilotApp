@@ -7,7 +7,8 @@
  * its file, and the close that leaves none of the run's documents open continues the conversation
  * as a new work item after the answered ones, from when Undo is gone from every document of the
  * run (review 1); a write-back the controller refuses is in the run's session log, live, and fails
- * that continuation's start with its reason (F125).
+ * that continuation's start with its reason (F125). One whose writer Pilot asked about its blocks
+ * says so on the timeline, live (F86.8).
  */
 
 import { test, expect } from '../support/fixtures';
@@ -37,6 +38,16 @@ const SURVEY = '# The survey\n\nNine of ten want the lake.\n';
 const SURVEY_EDITED = '# The survey\n\nEdited after its read.\n';
 const PITCH_PATH = '/work/Example/pitch.md';
 const PITCH = '# Where do we pitch?\n\nThe lake or the hill.\n\n```question id=Q1\n```\n';
+/** A decision block of the DSL, its options as given. */
+const decision = (id: string, ...options: string[]) =>
+  ['```decision id=' + id, 'options:', ...options.map((option) => `  - ${option}`), '```', ''].join('\n');
+const KIT_PATH = '/work/Example/kit.md';
+const KIT = `# The kit\n\n${decision('D1', 'Dome', 'Tunnel')}\n${decision('D2', 'Gas', 'Wood')}\n${decision('D3', 'Two', 'Four')}\n${decision('D4', 'Rope', 'Chain')}`;
+// Over 150 words of its own, so that it leaves a card.
+const ROUTE_PATH = '/work/Example/route.md';
+const PUSH_PATH = '/work/Example/push.md';
+const PUSH = '# Push the camp list?\n\n```decision id=C1\ntype: confirmation\nproposal: Push the camp list\nbecause: auto-pilot-off\n```\n';
+const ROUTE = `# The route\n\n${'We walk the north shore to the ridge and camp below it. '.repeat(16)}\n\n${decision('D1', 'Shore', 'Ridge')}\n${decision('D2', 'Day', 'Night')}`;
 
 interface Fixtures {
   people: People;
@@ -127,6 +138,50 @@ test.describe('A registered document', () => {
     await expect(item.card.readTime).toHaveText('1 min read');
     await expect(item.card.reviewed).toBeVisible();
     await expect(item.root).toHaveAttribute('data-state', 'open');
+  });
+
+  test('whose writer Pilot asked about its blocks says so, live: “Pilot asked the writer about D2 and D4” under an inline document’s title, under a card’s summary, under a one-ask item’s title and under a confirmation’s row', async ({
+    people,
+    projects,
+    controller,
+    timeline,
+    deploymentSse,
+  }) => {
+    const { project, work, environment } = await running({ people, projects });
+    const kit = await registered(controller, projects, environment, work, KIT_PATH, KIT);
+    const route = await registered(controller, projects, environment, work, ROUTE_PATH, ROUTE);
+    const pitch = await registered(controller, projects, environment, work, PITCH_PATH, PITCH);
+    const push = await registered(controller, projects, environment, work, PUSH_PATH, PUSH);
+    await endRun(controller, environment);
+    await expect.poll(async () => (await projects.item(project, route)).awaiting_read).toBe(false);
+
+    await timeline.open(project);
+    await deploymentSse.ensureConnected();
+    const inline = timeline.item(kit);
+    const card = timeline.item(route);
+    await expect(inline.title).toHaveText('The kit');
+    await expect(inline.document).toBeVisible();
+    await expect(card.card.root).toBeVisible();
+    await expect(inline.writerAsked).toHaveCount(0);
+    await expect(card.writerAsked).toHaveCount(0);
+
+    await projects.askWriter(kit, [
+      { block: 'D4', question: 'Does “chain” mean the lock or the tow chain?' },
+      { block: 'D2', question: 'Which stove does “gas” mean?' },
+    ]);
+    await expect(inline.writerAsked).toHaveText('Pilot asked the writer about D2 and D4');
+    await expect(card.writerAsked).toHaveCount(0);
+
+    await projects.askWriter(route, [{ block: 'D1', question: 'Is the shore path open in spring?' }]);
+    await expect(card.card.root.getByTestId('timeline.item.writer-asked')).toHaveText('Pilot asked the writer about D1');
+    await expect(inline.writerAsked).toHaveText('Pilot asked the writer about D2 and D4');
+
+    await projects.askWriter(pitch, [{ block: 'Q1', question: 'Is the hill the one past the lake?' }]);
+    await projects.askWriter(push, [{ block: 'C1', question: 'Which camp list does it push?' }]);
+    await expect(timeline.item(pitch).title).toHaveText('Where do we pitch?');
+    await expect(timeline.item(pitch).writerAsked).toHaveText('Pilot asked the writer about Q1');
+    await expect(timeline.item(push).root).toHaveAttribute('data-kind', 'confirmation');
+    await expect(timeline.item(push).writerAsked).toHaveText('Pilot asked the writer about C1');
   });
 
   test('whose read at its run’s end fails keeps its file’s name and no text, opens to “The document did not load”, closes with Reviewed, and its session log says why', async ({

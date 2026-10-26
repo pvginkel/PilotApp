@@ -11,7 +11,10 @@
  * in an environment of Pilot's own its start takes or creates in the worker's fake controller
  * (/api/testing/projects/<id>/work; `controller.ts` drives the fake), and read as the timeline and
  * the session log read it; a file its session wrote in that environment is registered as its
- * worker's `register_document` registers it (/api/testing/items/<id>/registrations).
+ * worker's `register_document` registers it (/api/testing/items/<id>/registrations), and a file or
+ * a folder attached as its `attach_file` attaches it (/api/testing/items/<id>/worker-attachments),
+ * each the effect of the call a tool-use id names; a registered document's writer is asked about
+ * its blocks as the pre-ruling pass's `ask_writer` asks (/api/testing/items/<id>/writer-questions).
  */
 
 import { expect, type Page } from '@playwright/test';
@@ -28,6 +31,7 @@ type InventedFile = components['schemas']['InventedAttachmentsCreateSchema.6d6b3
 /** A file to attach, its bytes as they are. */
 export type AttachedFile = Omit<InventedFile, 'content'> & { content: string | Buffer };
 type WorkSpec = components['schemas']['InventedWorkCreateSchema.6d6b324'];
+type WriterQuestion = components['schemas']['InventedWriterQuestionsCreateSchema.6d6b324.InventedWriterQuestionSchema'];
 type Timeline = components['schemas']['TimelineSchema.1fdd8ae'];
 type TimelineItem = Timeline['items'][number];
 type Work = NonNullable<TimelineItem['work']>;
@@ -170,15 +174,37 @@ export class Projects {
 
   /**
    * The document a work item's session wrote at `path` in its environment, registered as its worker
-   * registers it: read and parsed now, read again once the turn that ends its run commits. Answers
-   * its id.
+   * registers it: read and parsed now, read again once the turn that ends its run commits; minted
+   * while the session's turn is in flight, the effect of the call `toolUseId` names, or of none.
+   * Answers its id.
    */
-  async register(workId: string, path: string): Promise<string> {
+  async register(workId: string, path: string, toolUseId?: string): Promise<string> {
     const response = await this.page.request.post(`${this.backendUrl}/api/testing/items/${workId}/registrations`, {
-      data: { path },
+      data: { path, tool_use_id: toolUseId },
     });
     expect(response.status(), await response.text()).toBe(201);
     return ((await response.json()) as { id: string }).id;
+  }
+
+  /**
+   * The file or the folder a work item's session wrote at `path` in its environment, attached as its
+   * worker attaches it, on the item `to` names, else on the work item; while the session's turn is in
+   * flight, the effect of the call `toolUseId` names, or of none. Answers the attachments' ids.
+   */
+  async workerAttach(workId: string, path: string, { to, toolUseId }: { to?: string; toolUseId?: string } = {}): Promise<string[]> {
+    const response = await this.page.request.post(`${this.backendUrl}/api/testing/items/${workId}/worker-attachments`, {
+      data: { path, to, tool_use_id: toolUseId },
+    });
+    expect(response.status(), await response.text()).toBe(201);
+    return ((await response.json()) as { ids: string[] }).ids;
+  }
+
+  /** A registered document's writer asked about its blocks, by their local ids, as the pre-ruling pass asks. */
+  async askWriter(documentId: string, questions: WriterQuestion[]): Promise<void> {
+    const response = await this.page.request.post(`${this.backendUrl}/api/testing/items/${documentId}/writer-questions`, {
+      data: { questions },
+    });
+    expect(response.status(), await response.text()).toBe(201);
   }
 
   /** The environment a work item's start took or created, once it has one, as its row stands. */

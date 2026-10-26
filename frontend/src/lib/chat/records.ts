@@ -56,18 +56,23 @@ type ServerEvent =
   | { type: 'read-failed'; item: string; path: string; reason: string }
   /** A document the session registered, closed, its file not written back (F65.1). */
   | { type: 'write-back-refused'; item: string; path: string; reason: string }
-  /** A `pilot-store` call changed the record (F41), so the client links without reading its result. */
-  | { type: 'effect'; toolUseId: string; effect: Effect }
+  /**
+   * A call changed the record (F41) — a `pilot-store` call, or a worker's `register_document` or
+   * `attach_file` — so the client links without reading its result. `toolUseId` is the call's,
+   * null where its client sent none.
+   */
+  | { type: 'effect'; toolUseId: string | null; effect: Effect }
   /** The chat closed (F130.1). */
   | { type: 'closed' };
 
 export interface Effect {
-  /** F41's verbs: "Answered", "Added", "Marked read", "Stopped", "Finished". */
+  /** F41's verbs: "Answered", "Added", "Marked read", "Stopped", "Finished", "Registered", "Attached". */
   verb: string;
-  /** What it changed: "D1 · Which search API", "Action · Store the key". */
+  /** What it changed: "D1 · Which search API", "Action · Store the key", "inbox/3". */
   label: string;
-  /** The item, and the block in it, the effect goes to. */
+  /** The item the effect goes to. */
   itemId?: string;
+  /** The block in it, by its id `<item id>/<local id>`. */
   blockId?: string;
 }
 

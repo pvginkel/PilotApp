@@ -5,7 +5,8 @@
  * empty and is the note (F22.3); the prose folded under Details, which Less folds again (F22.4).
  * The check and the cross, with No's console, are the block's controls inside a document too
  * (F22.7). The answer given, or being saved, stays coloured. On the card the row is the block, and
- * gone to at its address, it flashes (F97). Its attachments follow (F17.5), and Pilot's dots end
+ * gone to at its address, it flashes (F97). A registered one whose writer Pilot asked says so under
+ * the row (F86.8). Its attachments follow (F17.5), and Pilot's dots end
  * the card while Pilot writes it (F35).
  */
 
@@ -19,6 +20,7 @@ import { useBlockFlash } from '@/components/timeline/flash';
 import { ItemHead } from '@/components/timeline/item-head';
 import { Note } from '@/components/timeline/note';
 import { Deferral, DEFERRED } from '@/components/timeline/said';
+import { WriterAsked } from '@/components/timeline/writer-asked';
 import { PilotWriting } from '@/components/timeline/writing';
 import { useAnswer, type Answer } from '@/hooks/use-answer';
 import { blocksOf, isProse, titleOf, type Block, type TimelineItem } from '@/hooks/use-timeline';
@@ -52,6 +54,7 @@ export function Confirmation({ item }: { item: TimelineItem }) {
         <Proposal block={block} />
         {deferred ? <Deferral block={block} /> : saving === null && block.note !== null && <Note text={block.note} />}
       </ConfirmControls>
+      <WriterAsked item={item} />
       {prose.length > 0 && (
         <div className="confirm-foot">
           <button

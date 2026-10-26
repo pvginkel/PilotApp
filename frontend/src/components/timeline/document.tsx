@@ -15,7 +15,9 @@
  * Reviewed (F25.2); Pilot's dots end it while Pilot writes. Open opens the overlay at the document's address, and a segment opens
  * it at its block's (F33, F97). A registered document has no text until its file is read at its
  * run's end, nor after a read that failed: a review whose card titles it by its file's name, and
- * which takes no Reviewed until that read is made (F85.1, ruling D1).
+ * which takes no Reviewed until that read is made (F85.1, ruling D1). Where Pilot asked a registered
+ * document's writer about its blocks, its line under the title, or on a card under the summary,
+ * says so: "Pilot asked the writer about D2 and D4" (F86.8).
  */
 
 import { useContext, useState } from 'react';
@@ -31,6 +33,7 @@ import { blockKey, GoToContext } from '@/components/timeline/flash';
 import { Edited, ItemHead } from '@/components/timeline/item-head';
 import { isSettled, piecesOf, SectionsContext } from '@/components/timeline/sections';
 import { SettledLines } from '@/components/timeline/settled';
+import { WriterAsked } from '@/components/timeline/writer-asked';
 import { PilotWriting } from '@/components/timeline/writing';
 import { useReviewed, useSend } from '@/hooks/use-marks';
 import { blocksOf, isAnswered, titleOf, type Block as BlockData, type TimelineItem } from '@/hooks/use-timeline';
@@ -52,6 +55,7 @@ export function InlineDocument({ item }: { item: TimelineItem }) {
       <div className="item-title" data-testid="timeline.item.title">
         <LinkedText text={titleOf(item)} />
       </div>
+      <WriterAsked item={item} />
       <div className="inline-doc" data-testid="timeline.item.document">
         <DocumentParts item={item} />
       </div>
@@ -85,6 +89,7 @@ export function DocumentCard({ item }: { item: TimelineItem }) {
             <LinkedText text={item.summary} />
           </p>
         )}
+        <WriterAsked item={item} />
         <CountChips counts={countsOf(item)} />
         {item.body !== null && (
           <div className="progress">

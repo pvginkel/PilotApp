@@ -6,7 +6,8 @@ import { waitTestEvent } from '../helpers';
  * A project's timeline (F8): its rows, the opening, its items open and as done lines with Open and
  * Undo, an open item's block (F31) or a confirmation's card (F22), an inline document's blocks,
  * segments and *Send answers* with its dialog (F24.1, F33, F32.5), a larger document's or a
- * review's card (F24.2, F25), a section Pilot settled as its line (F31.5), an item's attachments
+ * review's card (F24.2, F25), that Pilot asked a registered document's writer (F86.8), a section
+ * Pilot settled as its line (F31.5), an item's attachments
  * and a done line's indicator of them (F17.5, F13.6), Pilot's dots (F35), the
  * urgent banners and the "N open above" chip
  * (F10.2, F11), a finished timeline's end (F5.3), and where it stands scrolled; opened at its
@@ -116,6 +117,8 @@ export class TimelinePage {
       edited: root.getByTestId('timeline.item.edited'),
       editedTime: root.getByTestId('timeline.item.edited.time'),
       unsent: root.getByTestId('timeline.item.unsent'),
+      /** "Pilot asked the writer about D2 and D4", under an inline document's title or a card's summary. */
+      writerAsked: root.getByTestId('timeline.item.writer-asked'),
       writing: root.getByTestId('timeline.writing'),
       document: root.getByTestId('timeline.item.document'),
       blocks: root.getByTestId('timeline.block'),

@@ -4,7 +4,8 @@
  * 2); the cue shows it while it runs. A run of consecutive calls is one line that opens to them,
  * its spinner and its running call's words while one runs (ruling 3). A sub-agent is a card,
  * collapsed until opened, its progress under it while it runs (ruling 4). A call that changed
- * something is its effects, in its own place, never inside a run (ruling 5).
+ * something is its effects, in its own place, never inside a run (ruling 5); an effect whose call
+ * no record shows stands in its record's place.
  */
 
 import { useState } from 'react';
@@ -14,7 +15,7 @@ import { shownSteps, type AgentView, type Step, type ToolCallView } from '@/lib/
 import { Markdown } from '@/components/shared/markdown';
 import { cn } from '@/lib/utils';
 import { StepLine } from './step-line';
-import { ToolCallLine } from './tool-call';
+import { EffectLine, ToolCallLine } from './tool-call';
 
 const fadeIn = 'animate-fade-in opacity-0';
 
@@ -194,6 +195,9 @@ export function ReplySteps({
                 {s.text}
               </StepLine>
             );
+            break;
+          case 'effect':
+            body = <EffectLine effect={s.effect} />;
             break;
         }
         return (

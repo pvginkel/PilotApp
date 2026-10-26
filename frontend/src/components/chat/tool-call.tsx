@@ -58,15 +58,14 @@ function ToolDetail({ call }: { call: ToolCallView }) {
   );
 }
 
-function EffectLine({ effect }: { effect: Effect }) {
+/** An effect's line, "<verb> · <label>", going to its block, else its item, where it names one. */
+export function EffectLine({ effect }: { effect: Effect }) {
   const { openQuote } = useChatActions();
-  const target = effect.itemId
-    ? {
-        kind: effect.blockId ? ('block' as const) : ('item' as const),
-        id: effect.blockId ? `${effect.itemId}/${effect.blockId}` : effect.itemId,
-        label: effect.label,
-      }
-    : null;
+  const target = effect.blockId
+    ? { kind: 'block' as const, id: effect.blockId, label: effect.label }
+    : effect.itemId
+      ? { kind: 'item' as const, id: effect.itemId, label: effect.label }
+      : null;
   return (
     <StepLine icon={<Check className="size-3.5" aria-hidden />} tone="success" onToggle={target ? () => openQuote(target) : undefined} link>
       {effect.verb} · {effect.label}

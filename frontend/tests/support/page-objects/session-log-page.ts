@@ -6,7 +6,8 @@ import { waitTestEvent } from '../helpers';
  * A work item's session log in the overlay (F69), at its own address over its project's timeline:
  * its head with "Session log", the item's title, the environment's link and the session's id; its
  * body with a reply per turn — text, a run of calls, a sub-agent's card, the phantom, a failure, the
- * server's word on a file the session registered — each ended one closing on its time; and its
+ * server's word on a file the session registered, a call's effects in its place and an effect whose
+ * call no record shows in its own — each ended one closing on its time; and its
  * tail, the working cue or how it ended.
  */
 export class SessionLogPage {
@@ -19,6 +20,8 @@ export class SessionLogPage {
   readonly log: Locator;
   readonly turns: Locator;
   readonly turnEnds: Locator;
+  /** The replies' steps in their order, each a text, a call or a run of them, a card, a notice or an effect. */
+  readonly steps: Locator;
   readonly texts: Locator;
   readonly tools: Locator;
   readonly runs: Locator;
@@ -26,6 +29,8 @@ export class SessionLogPage {
   readonly phantom: Locator;
   readonly failures: Locator;
   readonly notices: Locator;
+  /** The effects whose call no record shows; a call's own stand in its line's place, among `tools`. */
+  readonly effects: Locator;
   readonly cue: Locator;
   readonly tail: Locator;
   readonly failed: Locator;
@@ -40,6 +45,7 @@ export class SessionLogPage {
     this.log = this.overlay.getByTestId('session-log');
     this.turns = this.log.getByTestId('session-log.turn');
     this.turnEnds = this.log.getByTestId('session-log.turn-end');
+    this.steps = this.log.getByTestId('chat.reply').locator(':scope > *');
     this.texts = this.log.getByTestId('chat.text');
     this.tools = this.log.getByTestId('chat.tool');
     this.runs = this.log.getByTestId('chat.run');
@@ -47,6 +53,7 @@ export class SessionLogPage {
     this.phantom = this.log.getByTestId('chat.phantom');
     this.failures = this.log.getByTestId('chat.failure');
     this.notices = this.log.getByTestId('chat.notice');
+    this.effects = this.log.getByTestId('chat.effect');
     this.cue = this.log.getByTestId('session-log.cue');
     this.tail = this.log.getByTestId('session-log.tail');
     this.failed = this.overlay.getByTestId('overlay.failed');

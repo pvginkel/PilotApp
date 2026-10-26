@@ -299,6 +299,8 @@
   .chip.unsent { background: hsl(30 85% 28%); color: hsl(40 95% 74%); font-weight: 600; }
   .item-head .edited { display: inline-flex; align-items: baseline; gap: 6px; }
   .item-head .edited .avatar { align-self: center; }
+  /* That Pilot asked a registered document's writer (F86.8), Pilot's mark before the words. */
+  .writer-asked { display: flex; align-items: center; gap: 6px; font-size: 13.5px; }
 
   /* A section Pilot settled, one line until opened (F31.5): its mark, its heading, the answer, the
      note a muted line under them; each clipped to its line, consecutive ones one tight list. */

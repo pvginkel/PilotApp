@@ -4,7 +4,8 @@
  * item's block answered in its place (F19.1, F20, F21) and a notice's Read under its text (F23),
  * and Pilot's dots at its end while Pilot writes it (F35); a confirmation is a card of its own
  * (F22), a short document stands inline (F24.1), and a larger one and a review leave a card
- * (F24.2, F25.1). Its attachments follow its text (F17.5). An urgent one is tinted (F10.1), and one
+ * (F24.2, F25.1). A registered document whose writer Pilot asked says so under its title (F86.8).
+ * Its attachments follow its text (F17.5). An urgent one is tinted (F10.1), and one
  * whose latest save is held shows its last published text with a dashed border, a concept (F78). A
  * work item open is its session's (work.tsx, F26). Done, an item is its line (F13.1, F13.2), with
  * Open (F13.3), its attachments' indicator (F13.6) and Undo while the record offers it (F14.1); a
@@ -27,6 +28,7 @@ import { ItemHead } from '@/components/timeline/item-head';
 import { kindOf } from '@/components/timeline/kinds';
 import { UserAvatar } from '@/components/timeline/user-avatar';
 import { WorkItem } from '@/components/timeline/work';
+import { WriterAsked } from '@/components/timeline/writer-asked';
 import { PilotWriting } from '@/components/timeline/writing';
 import { useRead, useUndo } from '@/hooks/use-marks';
 import { blocksOf, isProse, titleOf, type BodyPart, type TimelineItem, type TimelineUser } from '@/hooks/use-timeline';
@@ -77,6 +79,7 @@ function OpenItem({ item }: { item: TimelineItem }) {
       <div className="item-title" data-testid="timeline.item.title">
         <LinkedText text={titleOf(item)} />
       </div>
+      <WriterAsked item={item} />
       {/* The API gives every prose item but the opening its text. */}
       <ItemText body={item.body!} ask={askOf(item)} />
       <Attachments item={item} />
