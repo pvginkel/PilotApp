@@ -1,13 +1,15 @@
 /**
  * The screens kept live (F80.2). The server's `project_changed` names a project whose timeline,
  * head or tab moved, and what the screens show of it is read again: its timeline, its head, a
- * document of it in the overlay, its handbook and its project document, and the project lists'
- * tabs. A save of any of the project's documents, the handbook and the project document included,
- * sends one where it changes the text or makes its turn the document's writer, and a turn's end
- * sends one for each document it lets go: Pilot's dots come and go live (F35). An event reaches
- * only the browsers whose stream the sending process holds, so each time the stream comes up
- * everything they show is read again (design 2 §6.2). Nothing waits for the stream: the screens
- * are read without it (SSE-4).
+ * document of it in the overlay, its handbook and its project document, its chats, and the project
+ * lists' tabs. A chat's open and close, and each move of its session's state, send one: the Chat
+ * tab shows a chat that opens, its close, and whether Pilot is answering (F40.3). A save of any of
+ * the project's documents, the handbook and the project document included, sends one where it
+ * changes the text or makes its turn the document's writer, and a turn's end sends one for each
+ * document it lets go: Pilot's dots come and go live (F35). An event reaches only the browsers
+ * whose stream the sending process holds, so each time the stream comes up everything they show is
+ * read again (design 2 §6.2). Nothing waits for the stream: the screens are read without it
+ * (SSE-4).
  *
  * The server's `work_moved` carries a work item's session as it moves (F26.2, F80.2): it replaces
  * the item's in its project's timeline as read, with no read of its own, and so in the session log
@@ -45,11 +47,12 @@ const TIMELINE = 'getProjectsTimelineByProjectId';
 const DOCUMENT = 'getItemsDocumentByItemId';
 const HANDBOOK = 'getProjectsHandbookByProjectId';
 const DRAFT = 'getProjectsDraftByProjectId';
+const CHATS = 'getProjectsChatsByProjectId';
 
 function readAgain(queryClient: QueryClient, projects: ReadonlySet<string>): void {
   void queryClient.invalidateQueries({ queryKey: LISTS });
   for (const project_id of projects) {
-    for (const key of [HEAD, TIMELINE, HANDBOOK, DRAFT]) {
+    for (const key of [HEAD, TIMELINE, HANDBOOK, DRAFT, CHATS]) {
       void queryClient.invalidateQueries({ queryKey: [key, { path: { project_id } }] });
     }
   }
@@ -139,6 +142,6 @@ export function useProjectEvents(): void {
     void queryClient.invalidateQueries({ queryKey: LISTS });
     void queryClient.invalidateQueries({ queryKey: [HEAD] });
     void queryClient.invalidateQueries({ queryKey: [TIMELINE] });
-    for (const key of [DOCUMENT, HANDBOOK, DRAFT]) void queryClient.invalidateQueries({ queryKey: [key] });
+    for (const key of [DOCUMENT, HANDBOOK, DRAFT, CHATS]) void queryClient.invalidateQueries({ queryKey: [key] });
   }, [isConnected, queryClient]);
 }

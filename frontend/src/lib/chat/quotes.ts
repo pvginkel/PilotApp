@@ -92,6 +92,27 @@ export function quotesToLinks(text: string): Quoted {
   return { markdown, at };
 }
 
+export type QuotePart = { type: 'text'; text: string } | { type: 'quote'; quote: QuoteRef };
+
+/** A text that is not Markdown, a person's message, as its words and its quotes in their order. */
+export function splitQuotes(text: string): QuotePart[] {
+  const parts: QuotePart[] = [];
+  let last = 0;
+  TAG.lastIndex = 0;
+  for (let match = TAG.exec(text); match !== null; match = TAG.exec(text)) {
+    const [all, kind, id, body, path, pathBody] = match;
+    if (match.index > last) parts.push({ type: 'text', text: text.slice(last, match.index) });
+    const quote: QuoteRef =
+      path === undefined
+        ? { kind: kind as 'item' | 'block', id: id!, label: labelOf(body!) }
+        : { kind: 'path', id: path, label: labelOf(pathBody!) };
+    parts.push({ type: 'quote', quote });
+    last = match.index + all.length;
+  }
+  if (last < text.length) parts.push({ type: 'text', text: text.slice(last) });
+  return parts;
+}
+
 export function parseQuoteHref(href: string): QuoteRef | null {
   if (!href.startsWith(QUOTE_SCHEME)) return null;
   const rest = href.slice(QUOTE_SCHEME.length);

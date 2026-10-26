@@ -67,7 +67,16 @@ function Project() {
         <Timeline projectId={projectId} address={goneTo} inert={overlay !== null} />
       </div>
       {panelShown && (
-        <Panel projectId={projectId} tab={panel.tab} head={head} onTab={show} onClose={close} onOpen={overlayOnTop} covered={covered} />
+        <Panel
+          projectId={projectId}
+          members={data.members}
+          tab={panel.tab}
+          head={head}
+          onTab={show}
+          onClose={close}
+          onOpen={overlayOnTop}
+          covered={covered}
+        />
       )}
       {overlaid !== null && <DocumentOverlay projectId={projectId} project={data} {...overlaid} />}
       {attached !== null && <ItemAttachmentOverlay projectId={projectId} {...attached} />}

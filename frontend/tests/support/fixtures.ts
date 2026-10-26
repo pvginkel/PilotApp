@@ -6,13 +6,17 @@
  * what links in text, `controller` drives the worker's fake controller, `shell` is the frame every
  * screen sits in, `handleStep` and `profile` the person's own pages, `projectList` the side column's
  * list, `projectHead` a project's head, `timeline` its timeline, `overlay` the overlay over it,
- * `sessionLog` a work item's session log in it, `panel` the side panel beside it. `conditions`, the worker's, reads what the gold bar reads.
+ * `sessionLog` a work item's session log in it, `panel` the side panel beside it, `chat` its Chat tab,
+ * and `chats` puts a project's chats in the store's fake environment and sends their messages.
+ * `conditions`, the worker's, reads what the gold bar reads.
  */
 
 /* eslint-disable react-hooks/rules-of-hooks */
+import { Chats } from './chats';
 import { Conditions, Controller } from './controller';
 import { infrastructureFixtures } from './fixtures-infrastructure';
 import { Links } from './links';
+import { ChatPage } from './page-objects/chat-page';
 import { HandleStepPage } from './page-objects/handle-step-page';
 import { OverlayPage } from './page-objects/overlay-page';
 import { PanelPage } from './page-objects/panel-page';
@@ -39,6 +43,8 @@ interface DomainFixtures {
   overlay: OverlayPage;
   sessionLog: SessionLogPage;
   panel: PanelPage;
+  chat: ChatPage;
+  chats: Chats;
 }
 
 interface DomainWorkerFixtures {
@@ -99,6 +105,14 @@ export const test = infrastructureFixtures.extend<DomainFixtures, DomainWorkerFi
   },
   panel: async ({ page }, use) => {
     await use(new PanelPage(page));
+  },
+  chat: async ({ page }, use) => {
+    await use(new ChatPage(page));
+  },
+  chats: async ({ page, backendUrl, controller, playwright }, use) => {
+    const chats = new Chats(page, backendUrl, controller, playwright);
+    await use(chats);
+    await chats.dispose();
   },
 });
 

@@ -56,6 +56,8 @@
   .ptab:hover { color: hsl(var(--foreground)); }
   .ptab.on { border-bottom-color: hsl(var(--primary)); color: hsl(var(--foreground)); }
   .panel-body { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
+  /* The Chat tab scrolls its transcript alone (chat-tab.tsx). */
+  .panel-body.chat { display: flex; flex-direction: column; overflow: hidden; }
 
   /* The Documents tab. */
   .docs { padding: 4px 8px 16px; }

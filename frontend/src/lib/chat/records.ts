@@ -18,6 +18,7 @@ type ClaudeRecordSchema = Schemas['SessionRecordPageSchema.01118bb.ClaudeRecordS
 type ResultRecordSchema = Schemas['SessionRecordPageSchema.01118bb.ResultRecordSchema'];
 type ServerRecordSchema = Schemas['SessionRecordPageSchema.01118bb.ServerRecordSchema'];
 type StopCause = Schemas['TimelineSchema.1fdd8ae.StopCause'];
+type CloseCause = Schemas['ChatListSchema.f9d9b43.CloseCause'];
 
 /** A person's message, written at the send: `claude` does not replay it. */
 export type SendRecord = Schemas['SessionRecordPageSchema.01118bb.SendRecordSchema'];
@@ -62,8 +63,8 @@ type ServerEvent =
    * null where its client sent none.
    */
   | { type: 'effect'; toolUseId: string | null; effect: Effect }
-  /** The chat closed (F130.1). */
-  | { type: 'closed' };
+  /** The chat closed (F130.1): after its timeout, at Create project, Finish, Reopen or Archive. */
+  | { type: 'closed'; cause: CloseCause };
 
 export interface Effect {
   /** F41's verbs: "Answered", "Added", "Marked read", "Stopped", "Finished", "Registered", "Attached". */

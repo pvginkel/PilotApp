@@ -1,0 +1,82 @@
+import type { Locator, Page } from '@playwright/test';
+import type { UiStateTestEvent } from '@/lib/test/test-events';
+import { waitTestEvent } from '../helpers';
+
+/**
+ * The side panel's Chat tab (F38, F40, F130.1): its tab in the panel's head; its transcript, the
+ * chats shown with each person's message — its quotes, words, the name of another person, the time
+ * and the avatar — and Pilot's reply to it, its steps, the phantom, the cue, a failure and its end;
+ * the date dividers, the line where a chat closed, "The chat before · <day>" at the top, the empty
+ * state, and the line in its place where the tab's read failed.
+ */
+export class ChatPage {
+  readonly tab: Locator;
+  readonly root: Locator;
+  readonly body: Locator;
+  readonly messages: Locator;
+  readonly messageTexts: Locator;
+  readonly names: Locator;
+  readonly messageEnds: Locator;
+  readonly quotes: Locator;
+  readonly replies: Locator;
+  readonly texts: Locator;
+  readonly phantom: Locator;
+  readonly cue: Locator;
+  readonly failures: Locator;
+  readonly replyEnds: Locator;
+  readonly days: Locator;
+  readonly closed: Locator;
+  readonly before: Locator;
+  readonly empty: Locator;
+  readonly failed: Locator;
+  /** Everything in the transcript, in its order: dividers, messages, replies, the button and the lines. */
+  readonly lines: Locator;
+
+  constructor(private readonly page: Page) {
+    const panel = page.getByTestId('panel');
+    this.tab = panel.getByTestId('panel.tab.chat');
+    this.root = panel.getByTestId('panel.chat');
+    this.body = this.root.getByTestId('chat.body');
+    this.messages = this.root.getByTestId('chat.person');
+    this.messageTexts = this.root.getByTestId('chat.person.text');
+    this.names = this.root.getByTestId('chat.person.name');
+    this.messageEnds = this.root.getByTestId('chat.person.end');
+    this.quotes = this.root.getByTestId('chat.quote');
+    this.replies = this.root.getByTestId('chat.pilot');
+    this.texts = this.root.getByTestId('chat.text');
+    this.phantom = this.root.getByTestId('chat.phantom');
+    this.cue = this.root.getByTestId('chat.cue');
+    this.failures = this.root.getByTestId('chat.failure');
+    this.replyEnds = this.root.getByTestId('chat.pilot.end');
+    this.days = this.root.getByTestId('chat.day');
+    this.closed = this.root.getByTestId('chat.closed');
+    this.before = this.root.getByTestId('chat.before');
+    this.empty = this.root.getByTestId('chat.empty');
+    this.failed = this.root.getByTestId('panel.chat.failed');
+    this.lines = this.root.getByTestId('chat').locator(':scope > *');
+  }
+
+  /** The next read of the tab's list of chats, done. */
+  read(): Promise<UiStateTestEvent> {
+    return waitTestEvent<UiStateTestEvent>(
+      this.page,
+      'ui_state',
+      (event) => event.scope === 'panel.chat' && event.phase === 'ready' && event.metadata?.status !== 'aborted',
+    );
+  }
+
+  /** The next time the chat's stream has read its records with its view on the browser's connection, so that what is written after it comes live. */
+  live(chatId: string): Promise<UiStateTestEvent> {
+    return waitTestEvent<UiStateTestEvent>(
+      this.page,
+      'ui_state',
+      (event) => event.scope === 'chat.section' && event.phase === 'ready' && event.metadata?.chat === chatId && event.metadata.live === true,
+    );
+  }
+
+  /** Where an element stands from the top of the transcript's view. */
+  async top(locator: Locator): Promise<number> {
+    const [box, view] = await Promise.all([locator.boundingBox(), this.body.boundingBox()]);
+    return box!.y - view!.y;
+  }
+}

@@ -2,8 +2,9 @@
  * The worker's KubeCoder controller, for a spec: the fake its backend serves itself under
  * /api/testing/controller (design 2 §12; backend-env-extensions.ts points the backend at it). The
  * environments are those Pilot's starts create in it, read from the work item
- * (`Projects.environment()`); a spec drives them and their headless sessions through the fake's
- * verbs, POST /api/testing/controller/fake/<verb>, which take no sign-in. Pilot's headless sessions
+ * (`Projects.environment()`), and the store, where chats run, which `chats.ts` adds; a spec drives
+ * them and their headless sessions through the fake's verbs, POST
+ * /api/testing/controller/fake/<verb>, which take no sign-in. Pilot's headless sessions
  * in an environment are `claude-1`, `claude-2`, … in the order Pilot creates them there. The lines a
  * turn plays are the backend suite's invented ones (`rawTurn()`). A process in an environment writes,
  * deletes and reads its files as the controller's file endpoints serve them.
@@ -20,6 +21,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, type APIRequestContext, type APIResponse, type Page, type PlaywrightWorkerArgs } from '@playwright/test';
 import type { components } from '@/lib/api/generated/types';
+import { FAKE_CONTROLLER_TOKEN } from './backend-env-extensions';
 import { makeUnique } from './helpers';
 
 type Condition = components['schemas']['ConditionsSchema.6c014b4.ConditionSchema'];
@@ -123,6 +125,25 @@ export class Controller {
     const restarts = await this.conditions.fleetRestarts();
     await this.verb('drop-streams', {});
     if (!this.unanswered) await this.conditions.reconnected(restarts);
+  }
+
+  /** The environment's sessions, as the controller lists them to Pilot: each one's name, and whether it works on a turn. */
+  async sessionViews(envId: string): Promise<{ name: string; working: boolean }[]> {
+    const response = await this.page.request.get(`${this.backendUrl}/api/testing/controller/environments/${envId}/sessions`, {
+      headers: { Authorization: `Bearer ${FAKE_CONTROLLER_TOKEN}` },
+    });
+    expect(response.status(), await response.text()).toBe(200);
+    return ((await response.json()) as { sessions: { name: string; working: boolean }[] }).sessions;
+  }
+
+  /** The names of the environment's sessions. */
+  async sessions(envId: string): Promise<string[]> {
+    return (await this.sessionViews(envId)).map((session) => session.name);
+  }
+
+  /** An environment of the fleet, not Pilot's own, running: a `state` frame announces it. */
+  async addEnvironment(envId: string, repo: string, { exempt = false } = {}): Promise<void> {
+    await this.verb('add-environment', { env_id: envId, repo, status: 'running', exempt });
   }
 
   /** A process in the environment writes `content` as the file at `path`, whatever its status. */

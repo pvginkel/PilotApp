@@ -14,11 +14,14 @@ type Self = components['schemas']['SelfResponseSchema.d1d9f70'];
 interface FirstSignIn {
   /** The token's name; null for a token that carries none. */
   name?: string | null;
+  /** The token's subject, a fresh one's by default: the same subject signs the same person in again. */
+  subject?: string;
 }
 
 interface SignIn {
   name?: string;
   handle?: string;
+  subject?: string;
 }
 
 export class People {
@@ -29,13 +32,13 @@ export class People {
   ) {}
 
   /** A fresh person signed in for the first time: no handle chosen, no slot taken. */
-  async firstSignIn({ name = 'Test Person' }: FirstSignIn = {}): Promise<void> {
-    await this.auth.createSession({ name, roles: ['editor'] });
+  async firstSignIn({ name = 'Test Person', subject }: FirstSignIn = {}): Promise<void> {
+    await this.auth.createSession({ subject, name, roles: ['editor'] });
   }
 
   /** A fresh person who has chosen their handle, as the record holds them. */
-  async signIn({ name = 'Test Person', handle = makeUnique('p', 8) }: SignIn = {}): Promise<Self> {
-    await this.firstSignIn({ name });
+  async signIn({ name = 'Test Person', handle = makeUnique('p', 8), subject }: SignIn = {}): Promise<Self> {
+    await this.firstSignIn({ name, subject });
     const response = await this.page.request.post(`${this.backendUrl}/api/people/self/handle`, {
       data: { handle },
     });

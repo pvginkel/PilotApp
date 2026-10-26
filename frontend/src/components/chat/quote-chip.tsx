@@ -1,7 +1,7 @@
 /**
- * A quote as a chip (F39.3), inside Markdown's text: its icon — an item's, a block's, the
- * handbook's, the project document's or an attachment's — and its label. Clicking it goes to what it
- * quotes.
+ * A quote (F39.3), as a line over a person's message it opens, or as a chip inside a text: its
+ * icon — an item's, a block's, the handbook's, the project document's or an attachment's — and its
+ * label. Clicking it goes to what it quotes.
  */
 
 import { FileText, MessageSquareQuote, NotebookText, Paperclip, SquareCheckBig } from 'lucide-react';
@@ -20,6 +20,24 @@ function QuoteIcon({ quote }: { quote: QuoteRef }) {
             ? FileText
             : Paperclip;
   return <Icon className="icon-cap" aria-hidden />;
+}
+
+/** Over a person's message: a quote it opens with, muted, one line. */
+export function QuoteLine({ quote }: { quote: QuoteRef }) {
+  const openQuote = useOpenQuote();
+  return (
+    <button
+      type="button"
+      onClick={() => openQuote(quote)}
+      data-testid="chat.quote"
+      data-quote={`${quote.kind} ${quote.id}`}
+      title="Show it"
+      className="mb-1 flex max-w-full items-baseline gap-1.5 text-left text-[12.5px] text-muted-foreground hover:[&>span]:underline"
+    >
+      <QuoteIcon quote={quote} />
+      <span className="truncate">{quote.label}</span>
+    </button>
+  );
 }
 
 /** Inside text: an inline chip in the primary's tint. */

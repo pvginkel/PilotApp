@@ -1,17 +1,17 @@
 /**
  * The side panel (F38.1): each project's own, open or closed and on which tab, as the person last
  * left it, kept in the browser and nothing of it on the server (F1.6, F133); until they set it,
- * open on a wide window and closed below one. On a wide window it stands beside the timeline and
- * the overlay beside it (F98.1). Below one the two lie over each other, the one opened last on top,
- * and Esc closes that one first; with no overlay open Esc leaves the panel alone; going to an item
- * closes the panel (F98.2). Its Documents tab lists the project document, the attachments, a batch
- * of several together, and the timeline's documents and reviews, newest first (F37), from the
- * project's timeline and its project document, read as one.
+ * open on a wide window and closed below one, on the Chat tab. On a wide window it stands beside the
+ * timeline and the overlay beside it (F98.1). Below one the two lie over each other, the one opened
+ * last on top, and Esc closes that one first; with no overlay open Esc leaves the panel alone; going
+ * to an item closes the panel (F98.2). Its Documents tab lists the project document, the
+ * attachments, a batch of several together, and the timeline's documents and reviews, newest first
+ * (F37), from the project's timeline and its project document, read as one.
  */
 
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { useGetProjectsDraftByProjectId, useGetProjectsTimelineByProjectId } from '@/lib/api/generated/hooks';
-import { browserState, rememberPanel, useBrowserState, type Panel, type PanelTab } from '@/lib/browser-state';
+import { browserState, PANEL_TABS, rememberPanel, useBrowserState, type Panel, type PanelTab } from '@/lib/browser-state';
 import { useEscape } from '@/lib/keys';
 import { useUiStateInstrumentation } from '@/lib/test/ui-state';
 import type { Attachment, TimelineItem } from '@/hooks/use-timeline';
@@ -52,7 +52,7 @@ interface PanelState {
 export function usePanel(projectId: string, overlay: string | null, goneTo: string | null): PanelState {
   const { panels } = useBrowserState();
   const wide = useWideWindow();
-  const panel = panels[projectId] ?? { open: wide, tab: 'documents' };
+  const panel = panels[projectId] ?? { open: wide, tab: PANEL_TABS[0] };
   // What the overlay shows, opened, is on top until the panel is opened or its tab chosen.
   const [front, setFront] = useState<Front>('overlay');
   const [shown, setShown] = useState(overlay);

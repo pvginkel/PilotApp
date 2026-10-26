@@ -6,7 +6,11 @@
  */
 
 // Invented: the bearer the backend's client sends its own fake, which checks it.
-const FAKE_CONTROLLER_TOKEN = 'playwright-fake-controller';
+export const FAKE_CONTROLLER_TOKEN = 'playwright-fake-controller';
+
+// Invented: the store's environment, where every chat's session runs, in the backend's fake
+// (tests/support/chats.ts puts it there).
+export const STORE_ENVIRONMENT = 'playwright-store';
 
 // More work items than a worker's specs start.
 const UNBOUNDED_WORK = 10_000;
@@ -22,5 +26,6 @@ export function loadAppBackendEnv(backendUrl: string): NodeJS.ProcessEnv {
     // its own: the slot across every project never closes, and one project's closes at 3.
     WORK_PARALLELISM_MAX: String(UNBOUNDED_WORK),
     PROJECT_PARALLELISM_MAX: '3',
+    STORE_ENVIRONMENT_ID: STORE_ENVIRONMENT,
   };
 }

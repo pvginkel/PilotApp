@@ -12,8 +12,8 @@ export type Theme = (typeof THEMES)[number];
 export const GROUPS = ['others', 'finished'] as const;
 export type Group = (typeof GROUPS)[number];
 
-/** The side panel's tabs (F38.1). */
-export const PANEL_TABS = ['documents'] as const;
+/** The side panel's tabs (F38.1), the first the one a panel opens on until the person picks another. */
+export const PANEL_TABS = ['chat', 'documents'] as const;
 export type PanelTab = (typeof PANEL_TABS)[number];
 
 /** A project's side panel as the person last left it: open or not, and its tab. */
@@ -53,7 +53,7 @@ function loadPanels(saved: unknown): Record<string, Panel> {
   for (const [projectId, panel] of Object.entries(saved as Record<string, unknown>)) {
     if (typeof panel !== 'object' || panel === null) continue;
     const { open, tab } = panel as Partial<Record<keyof Panel, unknown>>;
-    panels[projectId] = { open: open === true, tab: PANEL_TABS.find((each) => each === tab) ?? 'documents' };
+    panels[projectId] = { open: open === true, tab: PANEL_TABS.find((each) => each === tab) ?? PANEL_TABS[0] };
   }
   return panels;
 }

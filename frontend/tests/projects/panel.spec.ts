@@ -1,6 +1,7 @@
 /**
- * The side panel (F38.1) and its Documents tab (F37). It has the Documents tab alone, with its
- * count, and a close cross; the tab lists the project document first, then the attachments newest
+ * The side panel (F38.1) and its Documents tab (F37). It has the Chat tab, first and the one it
+ * opens on until the person picks another (tests/chat/chat-tab.spec.ts), the Documents tab with its
+ * count, and a close cross; the Documents tab lists the project document first, then the attachments newest
  * first, the files of one call under their folder, then the timeline's documents and reviews
  * newest first with Open, *Unsent* or Done and their stamp, each opening in the overlay at its
  * address. The head's Documents button toggles it (F2.3). Each project's panel is its own, open or
@@ -85,7 +86,7 @@ async function placed(people: People, projects: Projects): Promise<Placed> {
 }
 
 test.describe('The side panel on a wide window', () => {
-  test('stands open beside the timeline from the start, its head lined up with the project’s; its Documents tab, the only one, lists the project document, the attachments newest first, the files of one call under their folder, and the timeline’s documents and reviews newest first with their state and stamp, and carries the count', async ({
+  test('stands open beside the timeline from the start, on its Chat tab, its head lined up with the project’s; its Documents tab, the second, carries the count and lists the project document, the attachments newest first, the files of one call under their folder, and the timeline’s documents and reviews newest first with their state and stamp', async ({
     page,
     people,
     projects,
@@ -102,10 +103,12 @@ test.describe('The side panel on a wide window', () => {
     const attachmentOf = (item: string, id: string) => itemOf(item).attachments.find((attachment) => attachment.id === id)!;
 
     await expect(panel.root).toBeVisible();
-    await expect(panel.head.getByRole('tab')).toHaveCount(1);
-    await expect(panel.documentsTab).toContainText('Documents');
-    await expect(panel.documentsTab).toHaveAttribute('aria-selected', 'true');
+    await expect(panel.head.getByRole('tab')).toHaveText(['Chat', /^Documents/]);
+    await expect(panel.documentsTab).toHaveAttribute('aria-selected', 'false');
     await expect(panel.count).toHaveText('8');
+    await expect(projectHead.documentsButton).toHaveAttribute('aria-pressed', 'false');
+    await panel.documentsTab.click();
+    await expect(panel.documentsTab).toHaveAttribute('aria-selected', 'true');
     await expect(projectHead.documentsButton).toHaveAttribute('aria-pressed', 'true');
 
     await expect(panel.projectDocument.title).toHaveText(p.name);
@@ -153,6 +156,7 @@ test.describe('The side panel on a wide window', () => {
   }) => {
     const p = await placed(people, projects);
     await timeline.open(p.id);
+    await panel.documentsTab.click();
 
     await panel.projectDocument.root.click();
     await expect(page).toHaveURL(projectDocumentAddress(p.id));
@@ -194,7 +198,7 @@ test.describe('The side panel on a wide window', () => {
     await expect(panel.root).toBeVisible();
   });
 
-  test('the head’s Documents button, between the members and the handbook’s, toggles it, and its cross closes it; each project’s panel comes back as it was left, kept in the browser', async ({
+  test('the head’s Documents button, between the members and the handbook’s, shows its Documents tab and then toggles it, and its cross closes it; each project’s panel comes back as it was left, kept in the browser', async ({
     page,
     people,
     projects,
@@ -218,6 +222,11 @@ test.describe('The side panel on a wide window', () => {
     await expect(projectHead.documentsButton).toHaveAttribute('aria-label', 'The project’s documents');
 
     await expect(panel.count).toHaveCount(0);
+    // Open on the Chat tab, the button shows the Documents tab; on it, the button closes the panel.
+    await expect(projectHead.documentsButton).toHaveAttribute('aria-pressed', 'false');
+    await projectHead.documentsButton.click();
+    await expect(panel.documentsTab).toHaveAttribute('aria-selected', 'true');
+    await expect(projectHead.documentsButton).toHaveAttribute('aria-pressed', 'true');
     await expect(panel.noAttachments).toHaveText('None yet. A session attaches reader’s material here: a design, a survey, a log.');
     await expect(panel.noDocuments).toHaveText('None yet.');
     await expect(panel.projectDocument.title).toHaveText(oneName);
