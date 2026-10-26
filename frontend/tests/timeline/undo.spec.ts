@@ -23,7 +23,8 @@ test.describe('A notice', () => {
     await expect(item.text).toHaveText('Tie the tent down.');
     await expect(item.read).toHaveText('Read');
     await expect(item.read).toHaveClass(/\bbtn-primary\b/);
-    await expect(item.root.getByRole('button')).toHaveCount(1);
+    await expect(item.root.getByRole('button')).toHaveCount(2);
+    await expect(item.discuss).toHaveAccessibleName('Discuss');
 
     await item.read.click();
     await expect(item.root).toHaveAttribute('data-state', 'done');

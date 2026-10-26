@@ -132,6 +132,12 @@ export class Chats {
     expect(response.status(), await response.text()).toBe(200);
   }
 
+  /** The signed-in person has seen the project's chat to its end (F43). */
+  async seen(projectId: string): Promise<void> {
+    const response = await this.page.request.put(`${this.backendUrl}/api/projects/${projectId}/chat/read`);
+    expect(response.status(), await response.text()).toBe(200);
+  }
+
   /** The project's chats, as the signed-in person reads them. */
   async list(projectId: string): Promise<ChatList> {
     const response = await this.page.request.get(`${this.backendUrl}/api/projects/${projectId}/chats`);

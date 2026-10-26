@@ -94,6 +94,8 @@
   .item-head .kind .icon { position: relative; top: calc(0.5em - 0.5cap); }
   .item.urgent .item-head .kind { color: hsl(var(--urgent-text)); }
   .item-head .sep { opacity: 0.75; }
+  .item-head .grow { flex: 1; }
+  .item-head .btn { align-self: center; }
   .chip.for { background: hsl(330 60% 50% / 0.12); color: hsl(330 55% 38%); }
   :root[data-theme="dark"] .chip.for { color: hsl(330 70% 78%); }
   .chip.urgent { background: hsl(var(--urgent) / 0.15); color: hsl(var(--urgent-text)); font-weight: 600; }
@@ -180,6 +182,9 @@
   .block-head .toggle .icon { width: 12px; height: 12px; stroke-width: 2.2; }
   /* Who answered: the time, then the avatar, which keeps one place whatever comes before it. */
   .block-head .who { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; white-space: nowrap; }
+  /* Discuss centres on the label's capitals, whatever the font: its baseline is the icon's foot,
+     lowered by half the icon less half the cap height. */
+  .block-head .block-discuss { position: relative; top: calc(0.5em - 0.5cap); }
   .block-controls { padding: 6px 14px 12px; }
   .block.solo .block-controls { padding-top: 12px; }
   .block.solo .block-head + .block-controls { padding-top: 6px; }

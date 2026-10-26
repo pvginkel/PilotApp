@@ -113,6 +113,12 @@ export function splitQuotes(text: string): QuotePart[] {
   return parts;
 }
 
+/** The tag a person's message carries for a quote, its label between the tags. */
+export function quoteTag({ kind, id, label }: QuoteRef): string {
+  const attribute = kind === 'path' ? `path="${id}"` : `id="${id}"`;
+  return `<quoted_${kind} ${attribute}>${label}</quoted_${kind} ${attribute}>`;
+}
+
 export function parseQuoteHref(href: string): QuoteRef | null {
   if (!href.startsWith(QUOTE_SCHEME)) return null;
   const rest = href.slice(QUOTE_SCHEME.length);

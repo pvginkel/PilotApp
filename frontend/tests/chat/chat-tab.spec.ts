@@ -314,7 +314,8 @@ test.describe('The Chat tab’s closed chats', () => {
 });
 
 test.describe('The Chat tab’s read', () => {
-  // Below 1200 px the panel starts closed: the project is read before the tab opens.
+  // Below 1200 px the panel starts closed: the project and its chats, which the head's Discuss
+  // reads for its dot, are read before the tab opens.
   test.use({ viewport: { width: 1100, height: 800 } });
 
   test('draws nothing while it is on its way, then says what to ask where the project has no chat', async ({
@@ -322,19 +323,23 @@ test.describe('The Chat tab’s read', () => {
     people,
     projects,
     projectHead,
+    projectList,
     timeline,
-    panel,
     chat,
   }) => {
     const me = await people.signIn();
-    const project = await projects.make({ name: makeUnique('Pending'), members: [me.handle!] });
+    const name = makeUnique('Pending');
+    const project = await projects.make({ name, members: [me.handle!] });
+    const other = await projects.make({ name: makeUnique('Elsewhere'), members: [me.handle!] });
+    // The panel left open on the Chat tab, the project opens with it: the list's first read is the tab's.
     await timeline.open(project);
-    await projectHead.documentsButton.click();
-    await expect(panel.projectDocument.root).toBeVisible();
+    await projectHead.discussButton.click();
+    await expect(chat.root).toBeVisible();
+    await timeline.open(other);
 
     const restore = await slowNetwork(page, 1_000);
     const read = chat.read();
-    await chat.tab.click();
+    await projectList.tab(name).click();
     await expect(chat.root).toBeVisible();
     await expect(chat.empty).toHaveCount(0);
     await expect(chat.failed).toHaveCount(0);
@@ -363,12 +368,15 @@ test.describe('The Chat tab’s read', () => {
     const { session } = await chats.start(project, 'Is the tent packed?');
     await controller.play(chats.store, session, [text('packed', 'It is packed.')]);
     await controller.finish(chats.store, session, 'success', 'It is packed.');
+    // Seen to its end: the tab marks nothing while the list's reads fail.
+    await chats.seen(project);
     await timeline.open(project);
     await projectHead.documentsButton.click();
 
-    // The browser's session now lacks the editor role, and the API refuses the tab's read.
+    // The browser's session now lacks the editor role, and the API refuses the list's next read.
     await expectConsoleError(page, /403/);
     await auth.createSession({ subject, name: 'Test Person', roles: [] });
+    await timeline.refocus();
     await chat.tab.click();
     await expect(chat.failed).toHaveText('The chat did not load.');
     await expect(chat.messages).toHaveCount(0);

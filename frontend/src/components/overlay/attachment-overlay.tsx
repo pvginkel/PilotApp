@@ -1,7 +1,7 @@
 /**
  * An attachment in the overlay (F28.5), reader's material and never an item (F36). Its head is its
  * clip and title over "Attachment of “<item>”", with, opened from the item's document, an arrow
- * back to it, with no label. Its body goes by its type: Markdown as a read-only document, its
+ * back to it, with no label, and Discuss, quoting it by its path in the project's folder (F39.1). Its body goes by its type: Markdown as a read-only document, its
  * front matter left out and its fenced asks plain code, never blocks; a raster image inline from
  * its stream; an SVG inline only as an image, which runs no script, its text read from the stream
  * that serves it as a download; other text in a monospace block; anything else its title, its
@@ -11,6 +11,8 @@
 
 import { useNavigate } from '@tanstack/react-router';
 import { Download, Paperclip } from 'lucide-react';
+import { DiscussButton } from '@/components/chat/discuss-button';
+import { quoteOfAttachment } from '@/components/chat/discuss-quotes';
 import { DidNotLoad, Overlay } from '@/components/overlay/overlay';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Markdown } from '@/components/shared/markdown';
@@ -31,6 +33,7 @@ export function ItemAttachmentOverlay({ projectId, itemId, attachmentId }: { pro
     <Overlay
       showing={`attachment ${attachmentId}`}
       titles={item && attachment && <AttachmentTitles item={item} attachment={attachment} />}
+      discuss={attachment && <DiscussButton quote={quoteOfAttachment(attachment)} testId="overlay.discuss" />}
       foot={null}
       onClose={close}
     >

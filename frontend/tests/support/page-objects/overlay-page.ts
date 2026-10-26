@@ -31,6 +31,8 @@ export class OverlayPage {
   readonly editedTime: Locator;
   readonly maximize: Locator;
   readonly close: Locator;
+  /** The head's Discuss (F39.1). */
+  readonly discuss: Locator;
   readonly body: Locator;
   readonly summary: Locator;
   readonly document: Locator;
@@ -75,6 +77,7 @@ export class OverlayPage {
     this.editedTime = this.head.getByTestId('timeline.item.edited.time');
     this.maximize = this.root.getByTestId('overlay.maximize');
     this.close = this.root.getByTestId('overlay.close');
+    this.discuss = this.head.getByTestId('overlay.discuss');
     this.body = this.root.getByTestId('overlay.body');
     this.summary = this.root.getByTestId('overlay.summary');
     this.document = this.root.getByTestId('overlay.document');

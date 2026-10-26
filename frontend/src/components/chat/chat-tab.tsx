@@ -7,13 +7,14 @@
  * is read again on `project_changed`, which a chat's open and close and each move of its session
  * raise. Nothing stands in it while the list's read is under way, and "The chat did not load." while
  * its latest read failed (F113). Sticky scroll keeps a streaming reply in view while the reader is at
- * the bottom; only their own scrolling lets go, and their message sent from the composer under it
- * goes back to the bottom. On a phone it is the same column (decision 12).
+ * the bottom; only their own scrolling lets go, and their message sent from the composer under it,
+ * or a quote Discuss put there, goes back to the bottom. Shown at its end, and not lying under the
+ * overlay, the chat is seen (F43). On a phone it is the same column (decision 12).
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronUp } from 'lucide-react';
-import { useProjectChats } from '@/hooks/use-chats';
+import { useChatSeen, useProjectChats } from '@/hooks/use-chats';
 import { usePerson } from '@/hooks/use-self';
 import { useStickyBottom } from '@/hooks/use-sticky-bottom';
 import type { components } from '@/lib/api/generated/types';
@@ -28,7 +29,14 @@ type Member = components['schemas']['ProjectHeadSchema.e86ccd6.MemberSchema'];
 /** The reader's own input, which lets go of the line *load more* keeps in place. */
 const READER = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
 
-export function ChatTab({ projectId, members }: { projectId: string; members: readonly Member[] }) {
+interface ChatTabProps {
+  projectId: string;
+  members: readonly Member[];
+  /** It lies under the overlay and its backdrop. */
+  covered: boolean;
+}
+
+export function ChatTab({ projectId, members, covered }: ChatTabProps) {
   const read = useProjectChats(projectId);
   const person = usePerson();
   const people = useMemo(() => chatPeople(person, members), [person, members]);
@@ -39,7 +47,8 @@ export function ChatTab({ projectId, members }: { projectId: string; members: re
   if (from === null && chats !== null) setFrom(Math.max(0, chats.length - 1));
   const container = useRef<HTMLDivElement>(null);
   const wrapper = useRef<HTMLDivElement>(null);
-  const { stick, unstick } = useStickyBottom(container, wrapper, 'chat');
+  const { stick, unstick, stuck } = useStickyBottom(container, wrapper, 'chat');
+  useChatSeen(projectId, !covered && stuck && chats !== null, typeof read !== 'string' && read.unread);
   // While the chat before loads above, the line at the top of the view keeps its place, until the
   // reader scrolls: a chat's records land after the click, and its growth moves what is below.
   const anchor = useRef<{ element: Element; top: number } | null>(null);
@@ -79,10 +88,10 @@ export function ChatTab({ projectId, members }: { projectId: string; members: re
     setFrom(from! - 1);
   };
 
-  const sent = () => {
+  const toEnd = useCallback(() => {
     anchor.current = null;
     stick();
-  };
+  }, [stick]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="panel.chat">
@@ -118,7 +127,7 @@ export function ChatTab({ projectId, members }: { projectId: string; members: re
           )}
         </div>
       </div>
-      <Composer projectId={projectId} answering={chats?.at(-1)?.answering ?? false} onSent={sent} />
+      <Composer projectId={projectId} answering={chats?.at(-1)?.answering ?? false} onSent={toEnd} onDiscussed={toEnd} />
     </div>
   );
 }

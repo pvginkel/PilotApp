@@ -1,12 +1,14 @@
 /**
  * An open item's head (F12): its kind's icon and label, its time with the full stamp as tooltip, a
  * confirmation's reason line with its tooltip (F22.1), and the Urgent and "for <user>" chips (F10.1,
- * F107); after them what a document's head adds. A document Pilot changed in a turn after the text
+ * F107); after them what a document's head adds; at its end Discuss, quoting the item (F39.1). A document Pilot changed in a turn after the text
  * it was first shown with says so, *Edited <time>* beside Pilot's mark (F28.7).
  */
 
 import type { ReactNode } from 'react';
 import { TriangleAlert } from 'lucide-react';
+import { DiscussButton } from '@/components/chat/discuss-button';
+import { quoteOfItem } from '@/components/chat/discuss-quotes';
 import { Avatar } from '@/components/shared/avatar';
 import { Time } from '@/components/shared/time';
 import { kindOf } from '@/components/timeline/kinds';
@@ -85,6 +87,8 @@ export function ItemHead({ item, because = null, children }: ItemHeadProps) {
         </span>
       )}
       {children}
+      <span className="grow" />
+      <DiscussButton quote={quoteOfItem(item)} testId="timeline.item.discuss" />
     </div>
   );
 }

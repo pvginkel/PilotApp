@@ -87,6 +87,8 @@ export class TimelinePage {
     return {
       root,
       head: root.getByTestId('timeline.item.head'),
+      /** The head's Discuss, quoting the item (F39.1). */
+      discuss: root.getByTestId('timeline.item.discuss'),
       kind: root.getByTestId('timeline.item.kind'),
       time: root.getByTestId('timeline.item.time'),
       urgent: root.getByTestId('timeline.item.urgent'),
@@ -104,6 +106,7 @@ export class TimelinePage {
       note: root.getByTestId('timeline.line.note'),
       undo: root.getByTestId('timeline.line.undo'),
       open: root.getByTestId('timeline.line.open'),
+      lineDiscuss: root.getByTestId('timeline.line.discuss'),
       /** The attachments' chips, and each by its attachment's id. */
       attachments: root.getByTestId('timeline.attachment'),
       attachment: (attachmentId: string) => root.locator(`[data-testid="timeline.attachment"][data-attachment-id="${attachmentId}"]`),
@@ -243,6 +246,7 @@ export function blockParts(page: Page, root: Locator) {
   return {
     root,
     head: root.getByTestId('timeline.block.head'),
+    discuss: root.getByTestId('timeline.block.discuss'),
     kind: root.getByTestId('timeline.block.kind'),
     toggle: root.getByTestId('timeline.block.toggle'),
     answered: root.getByTestId('timeline.block.answered'),

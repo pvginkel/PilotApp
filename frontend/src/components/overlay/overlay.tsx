@@ -4,7 +4,7 @@
  * backdrop close it. Its body keeps its scroll while what it shows is read again, and starts at
  * its top for each thing it shows. A segment in it goes to its block in its body, which flashes
  * (F33), and opened at a block it goes there once its body draws it; either opens the block's
- * collapsed section (F31.5). On a phone it is the whole screen, with no maximize (F98.3). It takes
+ * collapsed section (F31.5). Its head carries Discuss, quoting what it shows (F39.1). On a phone it is the whole screen, with no maximize (F98.3). It takes
  * the focus as it opens, and again when what it shows replaces what had it, and gives it back as it
  * closes to what had it before, as a dialog does; the timeline under its backdrop takes none
  * meanwhile (the project's route).
@@ -27,6 +27,8 @@ interface OverlayProps {
   back?: ReactNode;
   /** Its head's titles: the title and the line under it. */
   titles: ReactNode;
+  /** Its head's Discuss, once what it shows is read. */
+  discuss?: ReactNode;
   foot: ReactNode;
   onClose: () => void;
   /** Its body, the scroll container, for what it shows. */
@@ -34,7 +36,7 @@ interface OverlayProps {
   children: ReactNode;
 }
 
-export function Overlay({ showing, at = null, back = null, titles, foot, onClose, bodyRef, children }: OverlayProps) {
+export function Overlay({ showing, at = null, back = null, titles, discuss = null, foot, onClose, bodyRef, children }: OverlayProps) {
   const [max, setMax] = useState(false);
   const sheet = useRef<HTMLElement>(null);
   const titlesId = useId();
@@ -101,6 +103,7 @@ export function Overlay({ showing, at = null, back = null, titles, foot, onClose
               <div id={titlesId} className="titles">
                 {titles}
               </div>
+              {discuss}
               <button
                 type="button"
                 className="btn btn-ghost btn-sm btn-icon maximize"

@@ -2,9 +2,10 @@
  * A project's head (F2): its name, ticket and repo, linked (F2.1); auto pilot's switch, its
  * warning triangle while work briefed under the other setting runs (F4.3), or the Finished chip
  * once finished (F2.6, F4.1); the step button and its plan (F2.2, F3); the members
- * (F2.5); the Documents button, toggling the side panel's Documents tab, and the handbook, opening
- * in the overlay (F2.3, F129.4); the plan's notes (F2.7); the project's menu (F2.4). A draft, which
- * has neither a handbook (F129.2) nor the panel's Documents tab, has in its head its name, the
+ * (F2.5); Discuss, toggling the side panel's Chat tab with nothing quoted and carrying the unread
+ * dot (F2.3, F39.2, F43), the Documents button, toggling its Documents tab, and the handbook,
+ * opening in the overlay (F2.3, F129.4); the plan's notes (F2.7); the project's menu (F2.4). A draft, which
+ * has neither a handbook (F129.2) nor the side panel, has in its head its name, the
  * Draft chip, its members and its menu. An archived project's reads as it was left, marked
  * archived, its switch not to be flipped (D012).
  *
@@ -15,26 +16,35 @@
 import type { Ref } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import { Archive, Files, Flag, NotebookText, TriangleAlert } from 'lucide-react';
+import { Archive, Files, Flag, MessagesSquare, NotebookText, TriangleAlert } from 'lucide-react';
 import { NotesButton } from '@/components/projects/plan-notes';
 import { StepButton } from '@/components/projects/plan-popover';
 import { ProjectMenu } from '@/components/projects/project-menu';
 import { Avatar } from '@/components/shared/avatar';
 import { LinkedText } from '@/components/shared/linked-text';
+import { useChatDot } from '@/hooks/use-chats';
 import type { ProjectHead as Project } from '@/hooks/use-projects';
 import { STOPPABLE } from '@/hooks/use-work-acts';
 import { useGetProjectsTimelineByProjectId, usePostProjectsTransitionsByProjectId } from '@/lib/api/generated/hooks';
 import { trackFormError, trackFormSubmit, trackFormSuccess } from '@/lib/test/form-instrumentation';
 import { cn } from '@/lib/utils';
 
+/** A tab of the side panel: whether it is showing, and its toggle. */
+interface Toggled {
+  shown: boolean;
+  toggle: () => void;
+}
+
 interface ProjectHeadProps {
   project: Project;
-  /** The side panel's Documents tab: whether it is showing, and its toggle. */
-  documents: { shown: boolean; toggle: () => void };
+  /** The side panel's Chat tab. */
+  chat: Toggled;
+  /** The side panel's Documents tab. */
+  documents: Toggled;
   ref?: Ref<HTMLElement>;
 }
 
-export function ProjectHead({ project, documents, ref }: ProjectHeadProps) {
+export function ProjectHead({ project, chat, documents, ref }: ProjectHeadProps) {
   const draft = project.state === 'draft';
   return (
     <header ref={ref} className="feed-head" data-testid="project.head">
@@ -71,6 +81,7 @@ export function ProjectHead({ project, documents, ref }: ProjectHeadProps) {
       <div className="head-row">
         {!draft && <StepButton progress={project.progress} tasks={project.tasks} />}
         <Members members={project.members} />
+        {!draft && <DiscussButton projectId={project.id} {...chat} />}
         {!draft && <DocumentsButton {...documents} />}
         {!draft && <HandbookButton projectId={project.id} />}
         {!draft && <NotesButton notes={project.notes} />}
@@ -80,8 +91,27 @@ export function ProjectHead({ project, documents, ref }: ProjectHeadProps) {
   );
 }
 
+/** Discuss for the whole project: the side panel's Chat tab, closing the panel where it is the tab showing; its dot while a reply is unread. */
+function DiscussButton({ projectId, shown, toggle }: Toggled & { projectId: string }) {
+  const unread = useChatDot(projectId);
+  return (
+    <button
+      type="button"
+      className={cn('btn btn-ghost btn-sm btn-icon head-icon head-discuss', shown && 'on')}
+      onClick={toggle}
+      aria-pressed={shown}
+      title="Discuss the project with Pilot"
+      aria-label={unread ? 'Discuss the project with Pilot, a reply unread' : 'Discuss the project with Pilot'}
+      data-testid="project.discuss"
+    >
+      <MessagesSquare className="icon" aria-hidden="true" />
+      {unread && <span className="unread" data-testid="project.discuss.unread" />}
+    </button>
+  );
+}
+
 /** The side panel's Documents tab, closing the panel where it is the tab showing. */
-function DocumentsButton({ shown, toggle }: { shown: boolean; toggle: () => void }) {
+function DocumentsButton({ shown, toggle }: Toggled) {
   return (
     <button
       type="button"

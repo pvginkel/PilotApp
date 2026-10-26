@@ -55,6 +55,7 @@
   }
   .ptab:hover { color: hsl(var(--foreground)); }
   .ptab.on { border-bottom-color: hsl(var(--primary)); color: hsl(var(--foreground)); }
+  .ptab .unread { position: relative; top: -0.9em; margin-left: -2px; }
   .panel-body { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
   /* The Chat tab scrolls its transcript alone (chat-tab.tsx), with its own gutter: the composer
      under it spans the panel. */

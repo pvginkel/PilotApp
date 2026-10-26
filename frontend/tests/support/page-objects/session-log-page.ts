@@ -4,7 +4,8 @@ import { waitTestEvent } from '../helpers';
 
 /**
  * A work item's session log in the overlay (F69), at its own address over its project's timeline:
- * its head with "Session log", the item's title, the environment's link and the session's id; its
+ * its head with "Session log", the item's title, the environment's link, the session's id and
+ * Discuss; its
  * body with a reply per turn — text, a run of calls, a sub-agent's card, the phantom, a failure, the
  * server's word on a file the session registered, a call's effects in its place and an effect whose
  * call no record shows in its own — each ended one closing on its time; and its
@@ -34,6 +35,7 @@ export class SessionLogPage {
   readonly cue: Locator;
   readonly tail: Locator;
   readonly failed: Locator;
+  readonly discuss: Locator;
 
   constructor(private readonly page: Page) {
     this.overlay = page.getByTestId('overlay');
@@ -57,6 +59,7 @@ export class SessionLogPage {
     this.cue = this.log.getByTestId('session-log.cue');
     this.tail = this.log.getByTestId('session-log.tail');
     this.failed = this.overlay.getByTestId('overlay.failed');
+    this.discuss = this.overlay.getByTestId('overlay.discuss');
   }
 
   /** Opens the session log at its address, once its project's timeline is read and its stream reads live on the browser's connection. */

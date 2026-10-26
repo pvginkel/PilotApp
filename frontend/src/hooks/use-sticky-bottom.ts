@@ -12,11 +12,12 @@
  * has grown the content again, when it looks just like a scroll up. DesignAssistant's hook let go
  * there. A scroll down into the bottom picks the pinning up again.
  *
- * In test mode each pin is the `ui_state` `<scope>.scroll`, `{scrollTop, reason}`, the first
- * `initial`, and each change of pinning `<scope>.sticky`, `{stuck}`.
+ * It answers whether it pins now, `stuck`. In test mode each pin is the `ui_state`
+ * `<scope>.scroll`, `{scrollTop, reason}`, the first `initial`, and each change of pinning
+ * `<scope>.sticky`, `{stuck}`.
  */
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { isTestMode } from '@/lib/config/test-mode';
 import { endUiState } from '@/lib/test/ui-state';
 
@@ -33,14 +34,16 @@ export function useStickyBottom(
   containerRef: React.RefObject<HTMLDivElement | null>,
   wrapperRef: React.RefObject<HTMLDivElement | null>,
   scope: string,
-): { stick: () => void; unstick: () => void } {
+): { stick: () => void; unstick: () => void; stuck: boolean } {
   const stickToBottomRef = useRef(true);
   const pinnedRef = useRef(false);
+  const [stuckNow, setStuckNow] = useState(true);
 
   const setStuck = useCallback(
     (stuck: boolean) => {
       if (stickToBottomRef.current === stuck) return;
       stickToBottomRef.current = stuck;
+      setStuckNow(stuck);
       if (isTestMode()) endUiState(`${scope}.sticky`, { stuck });
     },
     [scope],
@@ -131,5 +134,5 @@ export function useStickyBottom(
     };
   }, [containerRef, wrapperRef, pinToBottom, setStuck]);
 
-  return { stick, unstick };
+  return { stick, unstick, stuck: stuckNow };
 }

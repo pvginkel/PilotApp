@@ -1,10 +1,11 @@
 /**
- * A quote (F39.3), as a line over a person's message it opens, or as a chip inside a text: its
- * icon — an item's, a block's, the handbook's, the project document's or an attachment's — and its
- * label. Clicking it goes to what it quotes.
+ * A quote (F39.3), as a line over a person's message it opens, as a chip inside a text, or over the
+ * composer's field with its remove: its icon — an item's, a block's, the handbook's, the project
+ * document's or an attachment's — and its label. Clicking the line or the chip goes to what it
+ * quotes.
  */
 
-import { FileText, MessageSquareQuote, NotebookText, Paperclip, SquareCheckBig } from 'lucide-react';
+import { FileText, MessageSquareQuote, NotebookText, Paperclip, SquareCheckBig, X } from 'lucide-react';
 import { useOpenQuote } from '@/hooks/use-open-quote';
 import type { QuoteRef } from '@/lib/chat/quotes';
 
@@ -55,5 +56,31 @@ export function QuoteChip({ quote, label }: { quote: QuoteRef; label: React.Reac
       <QuoteIcon quote={quote} />
       <span className="truncate">{label}</span>
     </button>
+  );
+}
+
+/** Over the composer's field: the quote Discuss put there, and its remove. */
+export function ComposerQuote({ quote, onRemove }: { quote: QuoteRef; onRemove: () => void }) {
+  return (
+    <div
+      className="mb-2 flex items-baseline gap-1.5 rounded-sm border-l-[3px] border-primary bg-primary-muted/60 py-0.5 pr-0.5 pl-2.5 text-[13px] text-primary-muted-foreground"
+      data-testid="chat.composer.quote"
+      data-quote={`${quote.kind} ${quote.id}`}
+    >
+      <QuoteIcon quote={quote} />
+      <span className="min-w-0 flex-1 truncate" title={quote.label} data-testid="chat.composer.quote.label">
+        {quote.label}
+      </span>
+      <button
+        type="button"
+        onClick={onRemove}
+        title="Leave it out"
+        aria-label="Leave the quote out"
+        className="grid size-6 flex-none place-items-center self-center rounded-md hover:bg-primary-muted-strong"
+        data-testid="chat.composer.quote.remove"
+      >
+        <X className="size-3.5" aria-hidden="true" />
+      </button>
+    </div>
   );
 }

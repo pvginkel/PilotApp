@@ -1,7 +1,8 @@
 /**
  * A work item's session log in the overlay (F69), at its own address over its project's timeline,
  * by the item's id, which is its session's (F97). Its head is "Session log" over the item's title,
- * its environment's link once its start has one, and the session's id (F69.1). Its body is the session's records rendered
+ * its environment's link once its start has one, and the session's id, and Discuss, quoting the
+ * item (F69.1). Its body is the session's records rendered
  * as the chat renders a reply — the runs of calls, the sub-agents' cards, the phantom — streamed
  * from the first record while it is open (F40.3), one reply per turn, each ended one closing on
  * its time; it sticks to the end while it grows, and only the reader's own scrolling lets go
@@ -15,6 +16,8 @@
 import { useMemo, useRef, type RefObject } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { Check, CircleAlert, ScrollText, Square } from 'lucide-react';
+import { DiscussButton } from '@/components/chat/discuss-button';
+import { quoteOfItem } from '@/components/chat/discuss-quotes';
 import { ReplyBody, ReplyCue } from '@/components/chat/pilot-reply';
 import { StepLine } from '@/components/chat/step-line';
 import { WorkingCue } from '@/components/chat/working-cue';
@@ -55,6 +58,7 @@ export function SessionLogOverlay({ projectId, sessionId }: SessionLogOverlayPro
     <Overlay
       showing={`session ${sessionId}`}
       titles={item && work && <Titles item={item} work={work} />}
+      discuss={item && work && <DiscussButton quote={quoteOfItem(item)} title="Discuss: ask Pilot about this session" testId="overlay.discuss" />}
       foot={null}
       onClose={close}
       bodyRef={body}

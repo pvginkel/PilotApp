@@ -18,6 +18,8 @@
 import type { ReactNode } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { ArrowLeft, Check } from 'lucide-react';
+import { DiscussButton } from '@/components/chat/discuss-button';
+import { quoteOfAttachment, quoteOfItem } from '@/components/chat/discuss-quotes';
 import { AttachmentBody, AttachmentTitles } from '@/components/overlay/attachment-overlay';
 import { DidNotLoad, Overlay } from '@/components/overlay/overlay';
 import { LinkedText } from '@/components/shared/linked-text';
@@ -62,6 +64,7 @@ export function DocumentOverlay({ projectId, project, documentId, block, attachm
         showing={`attachment ${attachment}`}
         back={<Back projectId={projectId} documentId={documentId} />}
         titles={headed && shown && <AttachmentTitles item={headed} attachment={shown} />}
+        discuss={shown && <DiscussButton quote={quoteOfAttachment(shown)} testId="overlay.discuss" />}
         foot={null}
         onClose={close}
       >
@@ -74,6 +77,7 @@ export function DocumentOverlay({ projectId, project, documentId, block, attachm
       showing={documentId}
       at={block === null ? null : { item: documentId, block }}
       titles={headed && <Titles item={headed} project={project} />}
+      discuss={headed && <DiscussButton quote={quoteOfItem(headed)} testId="overlay.discuss" />}
       foot={headed && footOf(headed, handle, close)}
       onClose={close}
     >

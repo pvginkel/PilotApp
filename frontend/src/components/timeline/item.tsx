@@ -8,13 +8,15 @@
  * Its attachments follow its text (F17.5). An urgent one is tinted (F10.1), and one
  * whose latest save is held shows its last published text with a dashed border, a concept (F78). A
  * work item open is its session's (work.tsx, F26). Done, an item is its line (F13.1, F13.2), with
- * Open (F13.3), its attachments' indicator (F13.6) and Undo while the record offers it (F14.1); a
- * work item's is quieter, its Open the session log (F13.5, F26.6).
+ * Open (F13.3), its attachments' indicator (F13.6), Undo while the record offers it (F14.1) and
+ * Discuss (F13.4); a work item's is quieter, its Open the session log (F13.5, F26.6).
  */
 
 import type { AnimationEvent, ReactNode } from 'react';
 import { Link, useParams } from '@tanstack/react-router';
 import { Check, FileText, ScrollText, StickyNote, Undo2, X } from 'lucide-react';
+import { DiscussButton } from '@/components/chat/discuss-button';
+import { quoteOfItem } from '@/components/chat/discuss-quotes';
 import { Fold } from '@/components/shared/fold';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Markdown } from '@/components/shared/markdown';
@@ -169,7 +171,7 @@ function saidIn(item: TimelineItem): Said | null {
 
 /**
  * The same line for every kind: its icon, its title, Open, its attachments' indicator, Undo while
- * the record offers it, and when it was done; under the title the person's answer to a one-ask item with its note, the other
+ * the record offers it, Discuss, and when it was done; under the title the person's answer to a one-ask item with its note, the other
  * person's after their avatar. A confirmation's Yes leads it with a green check, its No with a red
  * cross (F22.5). It does not expand.
  */
@@ -188,6 +190,7 @@ function DoneLine({ item }: { item: TimelineItem }) {
       <Open item={item} />
       <LineAttachments item={item} />
       {done.undo && <Undo item={item} />}
+      <DiscussButton quote={quoteOfItem(item)} testId="timeline.line.discuss" />
       <Time at={done.at} format="clock" testId="timeline.line.time" />
       {said && (
         <span className="said" data-testid="timeline.line.said">

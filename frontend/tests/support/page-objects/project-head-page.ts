@@ -7,8 +7,9 @@ type Ask = Exclude<Act, 'join' | 'leave'>;
 
 /**
  * A project's head (F2), auto pilot's switch and its warning triangle (F4), the plan popover its
- * step button opens (F3), the Documents button (F2.3), the handbook's button (F129.4), the plan's
- * notes (F2.7), and the project's menu and the dialogs it opens (F2.4).
+ * step button opens (F3), Discuss and its unread dot (F2.3, F39.2, F43), the Documents button
+ * (F2.3), the handbook's button (F129.4), the plan's notes (F2.7), and the project's menu and the
+ * dialogs it opens (F2.4).
  */
 export class ProjectHeadPage {
   readonly root: Locator;
@@ -27,6 +28,8 @@ export class ProjectHeadPage {
   readonly planSteps: Locator;
   readonly members: Locator;
   readonly documentsButton: Locator;
+  readonly discussButton: Locator;
+  readonly discussDot: Locator;
   readonly handbookButton: Locator;
   readonly notesButton: Locator;
   readonly notes: Locator;
@@ -51,6 +54,8 @@ export class ProjectHeadPage {
     this.planSteps = page.getByTestId('project.plan.step');
     this.members = page.getByTestId('project.members');
     this.documentsButton = page.getByTestId('project.documents');
+    this.discussButton = page.getByTestId('project.discuss');
+    this.discussDot = this.discussButton.getByTestId('project.discuss.unread');
     this.handbookButton = page.getByTestId('project.handbook');
     this.notesButton = page.getByTestId('project.notes.button');
     this.notes = page.getByTestId('project.notes');

@@ -1,6 +1,6 @@
 /**
- * The side panel (F38.1), its shell: the tab strip, Chat first, then Documents with its count
- * (F37.3), and the close cross. On a wide window it stands beside the timeline, its head as tall as
+ * The side panel (F38.1), its shell: the tab strip, Chat first with the unread dot (F43), then
+ * Documents with its count (F37.3), and the close cross. On a wide window it stands beside the timeline, its head as tall as
  * the project's head and its tab's text on the project name's baseline, in whatever font (F98.1);
  * below one it lies over the timeline, with a head of its own height (F98.2); on a phone it is the
  * whole screen (F98.3).
@@ -10,6 +10,7 @@ import { useLayoutEffect, useRef, type RefObject } from 'react';
 import { X } from 'lucide-react';
 import { ChatTab } from '@/components/chat/chat-tab';
 import { DocumentsTab } from '@/components/panel/documents-tab';
+import { useChatDot } from '@/hooks/use-chats';
 import { usePanelDocuments, useWideWindow } from '@/hooks/use-panel';
 import type { components } from '@/lib/api/generated/types';
 import type { PanelTab } from '@/lib/browser-state';
@@ -34,6 +35,7 @@ interface PanelProps {
 
 export function Panel({ projectId, members, tab, head, onTab, onClose, onOpen, covered }: PanelProps) {
   const documents = usePanelDocuments(projectId);
+  const unread = useChatDot(projectId);
   const panelHead = useAlignedHead(head, useWideWindow());
   return (
     <aside className="panel" aria-label="The project’s chat and documents" inert={covered} data-testid="panel">
@@ -47,6 +49,7 @@ export function Panel({ projectId, members, tab, head, onTab, onClose, onOpen, c
           data-testid="panel.tab.chat"
         >
           Chat
+          {unread && <span className="unread" role="img" aria-label="Unread reply" data-testid="panel.tab.chat.unread" />}
         </button>
         <button
           type="button"
@@ -77,7 +80,7 @@ export function Panel({ projectId, members, tab, head, onTab, onClose, onOpen, c
       </div>
       <div className={cn('panel-body', tab === 'chat' && 'chat')} role="tabpanel" data-testid="panel.body">
         {tab === 'chat' ? (
-          <ChatTab projectId={projectId} members={members} />
+          <ChatTab projectId={projectId} members={members} covered={covered} />
         ) : (
           <DocumentsTab projectId={projectId} documents={documents} onOpen={onOpen} />
         )}

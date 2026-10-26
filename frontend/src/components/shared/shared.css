@@ -184,6 +184,8 @@
     color: hsl(var(--muted-foreground));
     font-size: 11.5px;
   }
+  /* The unread dot (F43): a reply of Pilot's came after the person last saw the chat to its end. */
+  .unread { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 999px; background: hsl(var(--primary)); }
 
   /* ---- Empty states (empty-state.tsx) ---------------------------------------------------- */
 

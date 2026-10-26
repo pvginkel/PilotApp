@@ -33,6 +33,8 @@
   .feed-head .head-icon + .head-icon { margin-left: -12px; }
   /* A toggle's button while what it toggles shows. */
   .feed-head .head-icon.on { background: hsl(var(--primary-muted)); color: hsl(var(--primary-muted-foreground)); }
+  .feed-head .head-discuss { position: relative; }
+  .feed-head .head-discuss .unread { position: absolute; top: 3px; right: 3px; }
 
   /* The members: avatars overlapping by 2px, each ringed in the page's colour. */
   .members { display: flex; align-self: center; }

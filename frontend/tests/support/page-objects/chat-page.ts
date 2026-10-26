@@ -8,11 +8,13 @@ import { waitTestEvent } from '../helpers';
  * and the avatar — and Pilot's reply to it, its steps, the phantom, the cue, a failure and its end;
  * the date dividers, the line where a chat closed, "The chat before · <day>" at the top, the empty
  * state, and the line in its place where the tab's read failed; and under the transcript the
- * composer (F44): its field, Send or Stop in its place, and why an archived project's takes no
- * message.
+ * composer (F44): the quote Discuss put over its field and its remove (F39.3), its field, Send or
+ * Stop in its place, and why an archived project's takes no message. The tab carries the unread dot
+ * (F43).
  */
 export class ChatPage {
   readonly tab: Locator;
+  readonly tabDot: Locator;
   readonly root: Locator;
   readonly body: Locator;
   readonly messages: Locator;
@@ -34,6 +36,10 @@ export class ChatPage {
   /** Everything in the transcript, in its order: dividers, messages, replies, the button and the lines. */
   readonly lines: Locator;
   readonly composer: Locator;
+  /** The quote over the field: its `data-quote`, its label and its remove. */
+  readonly quote: Locator;
+  readonly quoteLabel: Locator;
+  readonly quoteRemove: Locator;
   readonly field: Locator;
   readonly send: Locator;
   readonly stop: Locator;
@@ -42,6 +48,7 @@ export class ChatPage {
   constructor(private readonly page: Page) {
     const panel = page.getByTestId('panel');
     this.tab = panel.getByTestId('panel.tab.chat');
+    this.tabDot = this.tab.getByTestId('panel.tab.chat.unread');
     this.root = panel.getByTestId('panel.chat');
     this.body = this.root.getByTestId('chat.body');
     this.messages = this.root.getByTestId('chat.person');
@@ -62,14 +69,17 @@ export class ChatPage {
     this.failed = this.root.getByTestId('panel.chat.failed');
     this.lines = this.root.getByTestId('chat').locator(':scope > *');
     this.composer = this.root.getByTestId('chat.composer');
+    this.quote = this.composer.getByTestId('chat.composer.quote');
+    this.quoteLabel = this.quote.getByTestId('chat.composer.quote.label');
+    this.quoteRemove = this.quote.getByTestId('chat.composer.quote.remove');
     this.field = this.composer.getByTestId('chat.composer.field');
     this.send = this.composer.getByTestId('chat.composer.send');
     this.stop = this.composer.getByTestId('chat.composer.stop');
     this.archived = this.composer.getByTestId('chat.composer.archived');
   }
 
-  /** The server's next answer taking the composer's `send` or `stop`, as the browser has it. */
-  acted(act: 'send' | 'stop'): Promise<FormTestEvent> {
+  /** The server's next answer taking the composer's `send` or `stop`, or the chat marked seen at its end (`read`), as the browser has it. */
+  acted(act: 'send' | 'stop' | 'read'): Promise<FormTestEvent> {
     return waitTestEvent<FormTestEvent>(this.page, 'form', (event) => event.formId === `chat.${act}` && event.phase === 'success');
   }
 
@@ -89,6 +99,11 @@ export class ChatPage {
       'ui_state',
       (event) => event.scope === 'chat.section' && event.phase === 'ready' && event.metadata?.chat === chatId && event.metadata.live === true,
     );
+  }
+
+  /** The next change of the transcript's pinning to its end. */
+  sticky(stuck: boolean): Promise<UiStateTestEvent> {
+    return waitTestEvent<UiStateTestEvent>(this.page, 'ui_state', (event) => event.scope === 'chat.sticky' && event.metadata?.stuck === stuck);
   }
 
   /** Where an element stands from the top of the transcript's view. */

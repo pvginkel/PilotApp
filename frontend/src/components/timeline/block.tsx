@@ -5,7 +5,8 @@
  * not; answered, the head has a chevron where it opens, Answered, and when and by whom, Pilot's
  * mark on a block Pilot settled (F31.1, F31.3). An answer that is not a person's, and every
  * answer in a done item, reads closed: the answer only, which opens, as the chevron does, to the
- * block's controls, live while the item is not done (F31.2). A deferred block reads "Deferred to
+ * block's controls, live while the item is not done (F31.2). In a document its head ends in
+ * Discuss, quoting the block (F39.1); a one-ask item's is its head's, quoting the item. A deferred block reads "Deferred to
  * <task>", or to the project's end, its note under it; opened, its controls, nothing chosen, stand
  * under that line (F31.4). A note sits under its answer with its icon (F17.4). Gone to at its
  * address, it flashes (F97).
@@ -13,6 +14,8 @@
 
 import { useState } from 'react';
 import { Check, ChevronDown, ChevronUp } from 'lucide-react';
+import { DiscussButton } from '@/components/chat/discuss-button';
+import { quoteOfBlock } from '@/components/chat/discuss-quotes';
 import { Time } from '@/components/shared/time';
 import { ActionAnswer } from '@/components/timeline/action';
 import { ConfirmControls, Proposal } from '@/components/timeline/confirmation';
@@ -87,7 +90,15 @@ export function Block({ item, block, solo = false }: BlockProps) {
       data-closed={closed}
     >
       {(answered || !solo) && (
-        <BlockHead block={block} answered={answered} closable={closable} closed={closed} onToggle={() => setOpened(!opened)} />
+        <BlockHead
+          item={item}
+          block={block}
+          solo={solo}
+          answered={answered}
+          closable={closable}
+          closed={closed}
+          onToggle={() => setOpened(!opened)}
+        />
       )}
       <div className="block-controls">
         {deferred && <Deferral block={block} />}
@@ -98,7 +109,9 @@ export function Block({ item, block, solo = false }: BlockProps) {
 }
 
 interface BlockHeadProps {
+  item: TimelineItem;
   block: BlockData;
+  solo: boolean;
   answered: boolean;
   /** The answer reads closed until opened, and the chevron toggles it. */
   closable: boolean;
@@ -106,7 +119,7 @@ interface BlockHeadProps {
   onToggle: () => void;
 }
 
-function BlockHead({ block, answered, closable, closed, onToggle }: BlockHeadProps) {
+function BlockHead({ item, block, solo, answered, closable, closed, onToggle }: BlockHeadProps) {
   const { icon: Icon, label } = blockKindOf(block);
   const toggle = closed ? 'Show every option' : 'Show only the answer';
   return (
@@ -129,17 +142,25 @@ function BlockHead({ block, answered, closable, closed, onToggle }: BlockHeadPro
         </button>
       )}
       {answered && (
-        <>
-          <span className="chip" title="Answered" data-testid="timeline.block.answered">
-            <Check className="icon" aria-hidden="true" />
-            <span className="chip-label">Answered</span>
-          </span>
-          <span className="grow" />
-          <span className="who" data-testid="timeline.block.who">
-            {block.at !== null && <Time at={block.at} format="clock" testId="timeline.block.time" />}
-            {block.by !== null && <UserAvatar user={block.by} size="xs" />}
-          </span>
-        </>
+        <span className="chip" title="Answered" data-testid="timeline.block.answered">
+          <Check className="icon" aria-hidden="true" />
+          <span className="chip-label">Answered</span>
+        </span>
+      )}
+      <span className="grow" />
+      {answered && (
+        <span className="who" data-testid="timeline.block.who">
+          {block.at !== null && <Time at={block.at} format="clock" testId="timeline.block.time" />}
+          {block.by !== null && <UserAvatar user={block.by} size="xs" />}
+        </span>
+      )}
+      {!solo && (
+        <DiscussButton
+          quote={quoteOfBlock(item, block)}
+          title="Discuss: quote this block into the project’s chat"
+          className="block-discuss"
+          testId="timeline.block.discuss"
+        />
       )}
     </div>
   );

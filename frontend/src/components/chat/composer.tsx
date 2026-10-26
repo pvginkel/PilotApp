@@ -6,16 +6,20 @@
  * place is Stop, in every member's composer whoever sent the message, ending the turn where it is;
  * the field does not wait, so the next message can be written meanwhile. The focus stays in the
  * field after Send and after Stop. Its words are kept in the browser until sent, keyed by the
- * project (F133). In an archived project it takes no message, and says why (F128.5); the server
- * refuses one all the same.
+ * project (F133). What Discuss quoted stands over the field as a chip, with its remove, and goes out
+ * as its tag before the words (F38.3, F39.3); Discuss puts the focus in the field. In an archived
+ * project it takes no message, and says why (F128.5); the server refuses one all the same.
  */
 
-import { useRef, type MouseEvent } from 'react';
+import { useEffect, useRef, type MouseEvent } from 'react';
 import { SendHorizontal, Square } from 'lucide-react';
 import { TextField } from '@/components/shared/text-field';
 import { useSendMessage, useStopChat } from '@/hooks/use-chats';
+import { focusTaken, useDiscussed } from '@/hooks/use-discuss';
 import { useArchived } from '@/hooks/use-projects';
 import { useUnsentText } from '@/hooks/use-unsent-text';
+import { quoteTag } from '@/lib/chat/quotes';
+import { ComposerQuote } from './quote-chip';
 
 const LINES = 5;
 
@@ -28,10 +32,13 @@ interface ComposerProps {
   answering: boolean;
   /** The server took a message of this browser's. */
   onSent: () => void;
+  /** Discuss put the focus in the field. */
+  onDiscussed: () => void;
 }
 
-export function Composer({ projectId, answering, onSent }: ComposerProps) {
+export function Composer({ projectId, answering, onSent, onDiscussed }: ComposerProps) {
   const { text, change } = useUnsentText(`chat/${projectId}`);
+  const { quote, focus, drop } = useDiscussed(projectId);
   const sending = useSendMessage(projectId);
   const stopping = useStopChat(projectId);
   const archived = useArchived(projectId);
@@ -39,14 +46,27 @@ export function Composer({ projectId, answering, onSent }: ComposerProps) {
   const words = text.trim();
   const sendable = !archived && !answering && !sending.pending && words !== '';
 
+  useEffect(() => {
+    if (!focus) return;
+    focusTaken(projectId);
+    field.current!.focus();
+    onDiscussed();
+  }, [focus, projectId, onDiscussed]);
+
   const send = () => {
     field.current!.focus();
     if (!sendable) return;
-    void sending.act(words).then((took) => {
+    const sent = quote;
+    void sending.act(sent === null ? words : `${quoteTag(sent)} ${words}`).then((took) => {
       if (!took) return;
       change('');
+      if (sent !== null) drop(sent);
       onSent();
     });
+  };
+  const leaveOut = () => {
+    drop(quote!);
+    field.current!.focus();
   };
   const stopIt = () => {
     field.current!.focus();
@@ -60,6 +80,7 @@ export function Composer({ projectId, answering, onSent }: ComposerProps) {
           The project is archived: bring it back to message Pilot.
         </p>
       )}
+      {quote !== null && <ComposerQuote quote={quote} onRemove={leaveOut} />}
       <div className="field-row">
         <TextField
           ref={field}
