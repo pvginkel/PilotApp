@@ -10,7 +10,7 @@ import json
 import threading
 import uuid
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -62,6 +62,7 @@ from app.services.supervisor import LoopHandle
 from app.services.turn_end_read_service import TurnEndReadService
 from app.utils import after_commit as after_commit_module
 from app.utils.after_commit import clear_after_commit_callbacks
+from tests.support.chats import close_chat, open_chat
 from tests.support.fake_controller import ServedFakeController, client_of
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
 from tests.support.locks import in_thread, lock_waits
@@ -453,8 +454,9 @@ class TestSendStartsTheChat:
         person: User,
         cut: str,
     ) -> None:
-        """A stop of the start before its brief went out, wherever it was,
-        leaves the chat open: the next message reaches the brain, briefed."""
+        """The chat's Stop of its start before the brief went out, wherever
+        it was, leaves the chat open: the next message reaches the brain,
+        briefed."""
         first = _send(chats, opened, person, "One")
         clear_after_commit_callbacks()
         run = _read(session, first.session_id)
@@ -466,7 +468,7 @@ class TestSendStartsTheChat:
         if cut == "created":
             run.controller_session, run.token_hash = "claude-0", "a" * 64
         session.flush()
-        services[0].stop_project(session, opened, person, datetime.now(UTC))
+        chats.stop(opened.id, person)
         clear_after_commit_callbacks()
         assert _read(session, first.session_id).state_code == SessionState.STOPPED
 
@@ -638,6 +640,189 @@ class TestSendToTheOpenChat:
             words,
         )
         assert fake.sent == [words]
+
+
+def _stopped_turn_ends(
+    services: tuple[SessionStartService, RelayService],
+    db: DbSession,
+    fake: _Sent,
+    run_id: uuid.UUID,
+) -> models.Session:
+    """The stopped chat's turn in flight ended by the controller's interrupt,
+    relayed to its `result` as its loop relays it."""
+    run = _read(db, run_id)
+    assert run.controller_session is not None
+    fake.finish(STORE_ENVIRONMENT_ID, run.controller_session, "interrupted")
+    services[1].relay(run.id, LoopHandle(f"relay:{run.id}"))
+    clear_after_commit_callbacks()
+    return _read(db, run_id)
+
+
+class TestStop:
+    """The chat's Stop (F44): Pilot's answer stopped where it is, as a work
+    item's Stop stops one, by any person, whoever sent the message."""
+
+    def test_a_running_turn_is_stopped_by_another_person_interrupted_once_it_commits(
+        self,
+        session: DbSession,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+        bea: User,
+    ) -> None:
+        run = _idle_chat(services, chats, session, fake, opened, person)
+        _send(chats, opened, person, "Two")
+        clear_after_commit_callbacks()
+        before = datetime.now(UTC)
+
+        stopped = chats.stop(opened.id, bea)
+
+        assert (stopped.chat.id, stopped.state) == (run.id, SessionState.STOPPED)
+        assert stopped.chat.closed_at is None
+        run = _read(session, run.id)
+        assert (run.state_code, run.stopped_by_user_id, run.current_line) == (
+            SessionState.STOPPED,
+            bea.id,
+            None,
+        )
+        assert run.stopped_at is not None and run.stopped_at >= before
+        # The turn stays in flight for its relay; the interrupt follows the commit.
+        assert run.turn_ended_at is None
+        assert "_InterruptStart" in _callbacks()
+        assert ProjectChanged(opened.id) in _emitted()
+
+    def test_after_its_interrupted_turn_the_next_message_continues_the_conversation(
+        self,
+        session: DbSession,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+    ) -> None:
+        run = _idle_chat(services, chats, session, fake, opened, person)
+        # The conversation `claude`'s lines name; the fake's turns print none.
+        run.conversation_id = "conversation-1"
+        _send(chats, opened, person, "Two")
+        chats.stop(opened.id, person)
+        clear_after_commit_callbacks()
+        run = _stopped_turn_ends(services, session, fake, run.id)
+        assert (run.state_code, run.turn_ended_at is not None) == (
+            SessionState.STOPPED,
+            True,
+        )
+        fake.sent.clear()
+
+        turn = _send(chats, opened, person, "Three")
+
+        assert (turn.session_id, turn.seq, turn.message) == (run.id, 3, "Three")
+        assert fake.sent == ["Three"]
+        assert _read(session, run.id).state_code == SessionState.RUNNING
+
+    @pytest.mark.parametrize("state", [SessionState.HELD, SessionState.STARTING])
+    def test_a_start_held_or_under_way_ends_its_turn_unsent(
+        self,
+        session: DbSession,
+        chats: ChatService,
+        opened: Project,
+        person: User,
+        state: SessionState,
+    ) -> None:
+        first = _send(chats, opened, person, "One")
+        _read(session, first.session_id).state_code = state
+        session.flush()
+        clear_after_commit_callbacks()
+
+        chats.stop(opened.id, person)
+
+        run = _read(session, first.session_id)
+        assert run.state_code == SessionState.STOPPED
+        turn = session.get_one(Turn, first.id, populate_existing=True)
+        assert turn.ended_at == run.stopped_at == run.turn_ended_at
+        assert "_InterruptStart" not in _callbacks()
+
+    @pytest.mark.parametrize("cut", ["running", "starting"])
+    def test_a_stopped_chat_closes_on_its_timeout(
+        self,
+        session: DbSession,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+        cut: str,
+    ) -> None:
+        if cut == "running":
+            run = _idle_chat(services, chats, session, fake, opened, person)
+            _send(chats, opened, person, "Two")
+            chats.stop(opened.id, person)
+            clear_after_commit_callbacks()
+            run = _stopped_turn_ends(services, session, fake, run.id)
+        else:
+            run = _read(session, _send(chats, opened, person, "One").session_id)
+            chats.stop(opened.id, person)
+            clear_after_commit_callbacks()
+        assert run.turn_ended_at is not None
+        run.turn_ended_at -= timedelta(seconds=3301)
+        session.flush()
+
+        services[1]._closes.run_close_timer(session)
+
+        assert _closed(session, run.id) is CloseCause.TIMEOUT
+
+    def test_with_no_chat_open_nothing_is_stopped(
+        self,
+        session: DbSession,
+        chats: ChatService,
+        opened: Project,
+        person: User,
+    ) -> None:
+        close_chat(
+            session, open_chat(session, opened), datetime.now(UTC), CloseCause.TIMEOUT
+        )
+
+        with pytest.raises(
+            InvalidOperationException,
+            match="Cannot stop Pilot in Soup club because no chat is open",
+        ):
+            chats.stop(opened.id, person)
+
+    @pytest.mark.parametrize(
+        ("state", "refusal"),
+        [
+            (SessionState.IDLE, "it is not answering"),
+            (SessionState.STOPPED, "it was stopped already"),
+            (SessionState.FAILED, "its chat failed to start"),
+        ],
+    )
+    def test_a_chat_pilot_is_not_answering_in_is_refused(
+        self,
+        session: DbSession,
+        chats: ChatService,
+        opened: Project,
+        person: User,
+        state: SessionState,
+        refusal: str,
+    ) -> None:
+        run = open_chat(session, opened)
+        run.state_code = state
+        session.flush()
+
+        with pytest.raises(InvalidOperationException) as raised:
+            chats.stop(opened.id, person)
+
+        assert (
+            raised.value.message == f"Cannot stop Pilot in Soup club because {refusal}"
+        )
+        assert _read(session, run.id).stopped_at is None
+
+    def test_no_project_has_the_id(self, chats: ChatService, person: User) -> None:
+        unknown = uuid.uuid4()
+
+        with pytest.raises(RecordNotFoundException, match=str(unknown)):
+            chats.stop(unknown, person)
 
 
 def _elsewhere(db: DbSession, person: User) -> Item:

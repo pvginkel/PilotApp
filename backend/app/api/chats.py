@@ -1,7 +1,7 @@
 """A person's message to a project's brain (F38.3, F130; design 3 §5.3): a
 turn of the project's open chat, or the chat started with it in the store;
-and the project's chats as a person reads them, with their place in them
-(F40.3, F43).
+Pilot's answer in it stopped (F44); and the project's chats as a person reads
+them, with their place in them (F40.3, F43).
 
 Access is the API's `editor` gate.
 """
@@ -15,6 +15,7 @@ from spectree import Response as SpectreeResponse
 from sqlalchemy.orm import Session
 
 from app.api.caller import caller
+from app.engine.views import ListedChat
 from app.models import Session as AgentSession
 from app.schemas.chats import (
     ChatListSchema,
@@ -24,7 +25,7 @@ from app.schemas.chats import (
     ChatTurnSchema,
 )
 from app.schemas.common import ApiErrorResponseSchema
-from app.services.chat_read_service import ChatReadService
+from app.services.chat_read_service import ChatReadService, answering
 from app.services.chat_service import ChatService
 from app.services.container import ServiceContainer
 from app.services.people_service import PeopleService
@@ -81,6 +82,43 @@ def send_chat_message(
     ).model_dump(mode="json"), 201
 
 
+@chats_bp.route("/<uuid:project_id>/chat/stop", methods=["POST"])
+@api.validate(
+    resp=SpectreeResponse(
+        HTTP_200=ChatSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def stop_chat(
+    project_id: uuid.UUID,
+    chat_service: ChatService = Provide[ServiceContainer.chat_service],
+    people_service: PeopleService = Provide[ServiceContainer.people_service],
+) -> Any:
+    """Stop Pilot's answer in the project's open chat where it is, as the
+    signed-in person, whoever sent the message (F44): a turn in flight is
+    interrupted, the conversation kept for the next message, and a start held
+    or under way ends, nothing of it sent afterwards, so the next message
+    starts the chat afresh. The interrupt runs once the request commits; a
+    controller that does not answer lets the turn run out.
+
+    Returns:
+        200: The chat, Pilot no longer answering in it
+        401: No one is signed in
+        403: The caller lacks the editor role
+        404: No project has the id
+        409: The caller has not chosen a handle; no chat of the project is
+            open, or Pilot is not answering in it
+    """
+    person = people_service.require_person(
+        caller(), f"stop Pilot in project {project_id}"
+    )
+    return _chat(chat_service.stop(project_id, person)).model_dump(mode="json")
+
+
 @chats_bp.route("/<uuid:project_id>/chats", methods=["GET"])
 @api.validate(
     resp=SpectreeResponse(
@@ -110,16 +148,7 @@ def list_chats(
     """
     listed = chat_read_service.chats(project_id, people_service.find(caller()))
     return ChatListSchema(
-        chats=[
-            ChatSchema(
-                id=entry.chat.id,
-                kind=entry.chat.kind_code,
-                opened_at=entry.opened_at,
-                closed_at=entry.chat.closed_at,
-                close_cause=entry.chat.close_cause_code,
-            )
-            for entry in listed.chats
-        ],
+        chats=[_chat(entry) for entry in listed.chats],
         read_at=listed.place.read_at,
         unread=listed.place.unread,
     ).model_dump(mode="json")
@@ -157,4 +186,15 @@ def read_chat(
     place = chat_read_service.read(project_id, person)
     return ChatReadSchema(read_at=place.read_at, unread=place.unread).model_dump(
         mode="json"
+    )
+
+
+def _chat(entry: ListedChat) -> ChatSchema:
+    return ChatSchema(
+        id=entry.chat.id,
+        kind=entry.chat.kind_code,
+        opened_at=entry.opened_at,
+        closed_at=entry.chat.closed_at,
+        close_cause=entry.chat.close_cause_code,
+        answering=answering(entry),
     )

@@ -145,6 +145,26 @@ class TestReadRecords:
             read_records(session, project_session.id, after=1, before=4, limit=10)
         ) == [2, 3]
 
+    def test_it_reads_the_records_among_the_ids_given(
+        self,
+        session: DbSession,
+        records: SessionRecordService,
+        project_session: models.Session,
+    ) -> None:
+        written = [
+            records.append(project_session.id, RecordKind.SERVER, payload={"n": n})
+            for n in range(4)
+        ]
+
+        assert _seqs(
+            read_records(
+                session,
+                project_session.id,
+                ids={written[3].id, written[1].id},
+                limit=10,
+            )
+        ) == [2, 4]
+
     def test_it_reads_one_kind_of_record(
         self,
         session: DbSession,

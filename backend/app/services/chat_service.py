@@ -14,6 +14,9 @@ project has one chat open at a time, and no Close Cause is a failure or a stop.
 While its start is under way or held, a message is refused, as one is while a
 turn runs, which the controller refuses.
 
+Pilot's answer in the open chat is stopped as a work item's is, by any person,
+whoever sent its message (F44).
+
 A message to the open chat holds its Session's lock from before its send to
 the commit, so no close or stop interleaves with it (`ChatCloseService`,
 `SessionStartService.stop_project`): one that finds the chat closed meanwhile
@@ -41,7 +44,7 @@ from prometheus_client import Counter
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.engine.views import ViewService
+from app.engine.views import ListedChat, ViewService
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import Block, Chat, Document, Item, Project, Turn, User
 from app.models import Session as AgentSession
@@ -147,6 +150,37 @@ class ChatService:
             if locked is not None:
                 return self._send(project, locked, person, quoted)
         return self._start(project_id, person, quoted, operation)
+
+    def stop(self, project_id: uuid.UUID, person: User) -> ListedChat:
+        """`person`'s Stop of Pilot's answer in the project's open chat,
+        whoever sent its message, in the caller's transaction (F44), as a work
+        item's Stop (`SessionStartService.stop_chat`): a turn in flight is
+        interrupted once this commits, the conversation kept for the next
+        message; a start held or under way ends its Turn unsent, and the next
+        message starts the chat afresh, briefed. The chat closes on its
+        timeout as after any turn.
+
+        Returns:
+            The chat, its Session `stopped`
+
+        Raises:
+            RecordNotFoundException: No project has the id
+            InvalidOperationException: No chat of the project is open, or
+                Pilot is not answering in it
+        """
+        project = self.db.get(Project, project_id)
+        if project is None:
+            raise RecordNotFoundException("Project", str(project_id))
+        operation = f"stop Pilot in {project_name(project)}"
+        chat = self._open_chat(project.id)
+        if chat is None:
+            raise InvalidOperationException(operation, "no chat is open")
+        session = self.session_start_service.stop_chat(
+            self.db, chat.id, person, operation
+        )
+        return ListedChat(
+            self.db.get_one(Chat, session.id), session.created_at, session.state_code
+        )
 
     def _send(
         self, project: Project, session: AgentSession, person: User, words: Words

@@ -78,6 +78,7 @@ from app.services.write_back_service import WRITE_BACK_REFUSED
 from app.utils import after_commit as after_commit_module
 from app.utils.after_commit import clear_after_commit_callbacks
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
+from tests.support.chats import ChatWriter, open_chat
 from tests.support.fake_controller import (
     FAKE_CONTROLLER_TOKEN,
     ServedFakeController,
@@ -3553,6 +3554,102 @@ class TestStop:
     ) -> None:
         with pytest.raises(RecordNotFoundException):
             starts.stop(session, uuid.uuid4(), person)
+
+
+def _chat_in_flight(
+    container: ServiceContainer,
+    db: DbSession,
+    project: Project,
+    person: User,
+    state: SessionState,
+) -> models.Session:
+    """A chat of `project` in `state`, a message of `person`'s its Turn."""
+    run = open_chat(db, project)
+    ChatWriter(db, container.session_record_service(), run).message(person, "Hi")
+    run.state_code = state
+    db.flush()
+    clear_after_commit_callbacks()
+    return run
+
+
+class TestStopChat:
+    """The chat's Stop (F44): its Session stopped as a work item's Stop stops
+    one, refused in the chat's words when there is nothing to stop."""
+
+    def test_a_running_chat_is_stopped_its_turn_left_to_its_relay(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        run = _chat_in_flight(container, session, project, person, SessionState.RUNNING)
+
+        stopped = starts.stop_chat(session, run.id, person, "stop Pilot in Camp")
+
+        assert (
+            stopped.state_code,
+            stopped.stopped_by_user_id,
+            stopped.current_line,
+            stopped.turn_ended_at,
+        ) == (SessionState.STOPPED, person.id, None, None)
+        (turn,) = _turns(session, run.id)
+        assert turn.ended_at is None
+        # The interrupt runs once the stop commits.
+        assert "_InterruptStart" in _callbacks()
+        clear_after_commit_callbacks()
+
+    def test_a_starting_chat_ends_its_turn_unsent_and_moves_the_project(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        session: DbSession,
+        project: Project,
+        person: User,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        run = _chat_in_flight(
+            container, session, project, person, SessionState.STARTING
+        )
+        engine_events.clear()
+
+        with scoped_session(container) as db:
+            starts.stop_chat(db, run.id, person, "stop Pilot in Camp")
+
+        run = _read(session, run.id)
+        (turn,) = _turns(session, run.id)
+        assert run.state_code == SessionState.STOPPED
+        assert turn.ended_at == run.stopped_at == run.turn_ended_at
+        # A chat's Session has no work item; its state's move is the project's.
+        assert _moves(engine_events) == [ProjectChanged(project.id)]
+
+    @pytest.mark.parametrize(
+        ("state", "refusal"),
+        [
+            (SessionState.IDLE, "it is not answering"),
+            (SessionState.STOPPED, "it was stopped already"),
+            (SessionState.ENDED, "its chat's session has ended"),
+            (SessionState.FAILED, "its chat failed to start"),
+        ],
+    )
+    def test_a_chat_neither_running_starting_nor_held_is_refused(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        session: DbSession,
+        project: Project,
+        person: User,
+        state: SessionState,
+        refusal: str,
+    ) -> None:
+        run = _chat_in_flight(container, session, project, person, state)
+
+        with pytest.raises(InvalidOperationException) as raised:
+            starts.stop_chat(session, run.id, person, "stop Pilot in Camp")
+
+        assert raised.value.message == f"Cannot stop Pilot in Camp because {refusal}"
+        assert _read(session, run.id).stopped_at is None
 
 
 class TestStopProject:

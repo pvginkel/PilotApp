@@ -74,6 +74,14 @@ class ChatSchema(BaseModel):
             "`archived` at Archive; null while it is open"
         )
     )
+    answering: bool = Field(
+        description=(
+            "Whether Pilot is answering in the chat: its start held at the gate "
+            "or under way, or a turn of it running, which the chat's Stop stops; "
+            "false once that ends, however it ends, and for a closed chat. A "
+            "move of it raises `project_changed`"
+        )
+    )
 
 
 class ChatReadSchema(BaseModel):

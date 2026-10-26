@@ -22,9 +22,17 @@ from app.exceptions import RecordNotFoundException
 from app.models import ChatRead, Project, User
 from app.models.reference import RecordKind
 from app.services.session_record_service import read_records
+from app.services.session_start_service import STOPPABLE
 
 _RECORD_PAGE = 32
 """The `assistant` records one read of a chat's takes, newest first."""
+
+
+def answering(listed: ListedChat) -> bool:
+    """Whether Pilot is answering in the chat: its Session in a state the
+    chat's Stop ends (F44), its start held at the gate or under way, or a turn
+    of it running."""
+    return listed.state in STOPPABLE
 
 
 @dataclass(frozen=True)

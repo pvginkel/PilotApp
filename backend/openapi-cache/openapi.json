@@ -678,6 +678,11 @@
       "ChatListSchema.f9d9b43.ChatSchema": {
         "description": "One of a project's chats.",
         "properties": {
+          "answering": {
+            "description": "Whether Pilot is answering in the chat: its start held at the gate or under way, or a turn of it running, which the chat's Stop stops; false once that ends, however it ends, and for a closed chat. A move of it raises `project_changed`",
+            "title": "Answering",
+            "type": "boolean"
+          },
           "close_cause": {
             "anyOf": [
               {
@@ -724,7 +729,8 @@
           "kind",
           "opened_at",
           "closed_at",
-          "close_cause"
+          "close_cause",
+          "answering"
         ],
         "title": "ChatSchema",
         "type": "object"
@@ -783,6 +789,85 @@
         ],
         "title": "ChatReadSchema",
         "type": "object"
+      },
+      "ChatSchema.f9d9b43": {
+        "description": "One of a project's chats.",
+        "properties": {
+          "answering": {
+            "description": "Whether Pilot is answering in the chat: its start held at the gate or under way, or a turn of it running, which the chat's Stop stops; false once that ends, however it ends, and for a closed chat. A move of it raises `project_changed`",
+            "title": "Answering",
+            "type": "boolean"
+          },
+          "close_cause": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChatSchema.f9d9b43.CloseCause"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the chat closed: `timeout` after its last turn, `created` at Create project, `finished` at Finish, `reopened` at Reopen, `archived` at Archive; null while it is open"
+          },
+          "closed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the chat closed; null while it is open",
+            "title": "Closed At"
+          },
+          "id": {
+            "description": "The chat's id, its session's, whose records the session's records route reads",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ChatSchema.f9d9b43.ChatKind",
+            "description": "`definition`, the draft's chat, or `project`, a project's chat"
+          },
+          "opened_at": {
+            "description": "When the chat opened",
+            "format": "date-time",
+            "title": "Opened At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "opened_at",
+          "closed_at",
+          "close_cause",
+          "answering"
+        ],
+        "title": "ChatSchema",
+        "type": "object"
+      },
+      "ChatSchema.f9d9b43.ChatKind": {
+        "enum": [
+          "definition",
+          "project"
+        ],
+        "title": "ChatKind",
+        "type": "string"
+      },
+      "ChatSchema.f9d9b43.CloseCause": {
+        "enum": [
+          "timeout",
+          "created",
+          "finished",
+          "reopened",
+          "archived"
+        ],
+        "title": "CloseCause",
+        "type": "string"
       },
       "ChatTurnSchema.f9d9b43": {
         "description": "The message's Turn in the project's chat.",
@@ -2381,6 +2466,17 @@
             "title": "Id",
             "type": "string"
           },
+          "in_chat": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.ChatPlaceSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the answer was recorded in a chat (F42.3): the record of the latest `answered` effect on the block; null unless `via` is `chat` and that effect's call ran in a chat"
+          },
           "kind": {
             "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.BlockKind",
             "description": "The block's kind"
@@ -2454,11 +2550,34 @@
           "at",
           "note",
           "via",
+          "in_chat",
           "done",
           "deferral",
           "section"
         ],
         "title": "BlockSchema",
+        "type": "object"
+      },
+      "ItemDocumentSchema.1fdd8ae.ChatPlaceSchema": {
+        "description": "Where in a chat a block's answer was recorded, which *In the chat* goes\nto (F42.3).",
+        "properties": {
+          "chat": {
+            "description": "The chat's id, its session's, whose records the session's records route reads",
+            "format": "uuid",
+            "title": "Chat",
+            "type": "string"
+          },
+          "seq": {
+            "description": "The number, in the chat's records, of the `server` record placing the latest `answered` effect on the block",
+            "title": "Seq",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "chat",
+          "seq"
+        ],
+        "title": "ChatPlaceSchema",
         "type": "object"
       },
       "ItemDocumentSchema.1fdd8ae.ConfirmationReasonSchema": {
@@ -3486,6 +3605,17 @@
             "title": "Id",
             "type": "string"
           },
+          "in_chat": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectDocumentSchema.1fdd8ae.ChatPlaceSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the answer was recorded in a chat (F42.3): the record of the latest `answered` effect on the block; null unless `via` is `chat` and that effect's call ran in a chat"
+          },
           "kind": {
             "$ref": "#/components/schemas/ProjectDocumentSchema.1fdd8ae.BlockKind",
             "description": "The block's kind"
@@ -3559,11 +3689,34 @@
           "at",
           "note",
           "via",
+          "in_chat",
           "done",
           "deferral",
           "section"
         ],
         "title": "BlockSchema",
+        "type": "object"
+      },
+      "ProjectDocumentSchema.1fdd8ae.ChatPlaceSchema": {
+        "description": "Where in a chat a block's answer was recorded, which *In the chat* goes\nto (F42.3).",
+        "properties": {
+          "chat": {
+            "description": "The chat's id, its session's, whose records the session's records route reads",
+            "format": "uuid",
+            "title": "Chat",
+            "type": "string"
+          },
+          "seq": {
+            "description": "The number, in the chat's records, of the `server` record placing the latest `answered` effect on the block",
+            "title": "Seq",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "chat",
+          "seq"
+        ],
+        "title": "ChatPlaceSchema",
         "type": "object"
       },
       "ProjectDocumentSchema.1fdd8ae.ConfirmationReasonSchema": {
@@ -5901,6 +6054,17 @@
             "title": "Id",
             "type": "string"
           },
+          "in_chat": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.ChatPlaceSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the answer was recorded in a chat (F42.3): the record of the latest `answered` effect on the block; null unless `via` is `chat` and that effect's call ran in a chat"
+          },
           "kind": {
             "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.BlockKind",
             "description": "The block's kind"
@@ -5974,11 +6138,34 @@
           "at",
           "note",
           "via",
+          "in_chat",
           "done",
           "deferral",
           "section"
         ],
         "title": "BlockSchema",
+        "type": "object"
+      },
+      "TimelineSchema.1fdd8ae.ChatPlaceSchema": {
+        "description": "Where in a chat a block's answer was recorded, which *In the chat* goes\nto (F42.3).",
+        "properties": {
+          "chat": {
+            "description": "The chat's id, its session's, whose records the session's records route reads",
+            "format": "uuid",
+            "title": "Chat",
+            "type": "string"
+          },
+          "seq": {
+            "description": "The number, in the chat's records, of the `server` record placing the latest `answered` effect on the block",
+            "title": "Seq",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "chat",
+          "seq"
+        ],
+        "title": "ChatPlaceSchema",
         "type": "object"
       },
       "TimelineSchema.1fdd8ae.ConfirmationReasonSchema": {
@@ -8886,6 +9073,94 @@
           }
         ],
         "summary": "Say the signed-in person has seen the project's chat to its end now, on whichever device: their place in it, one per person and project.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/projects/{project_id}/chat/stop": {
+      "post": {
+        "description": "Returns:     200: The chat, Pilot no longer answering in it     401: No one is signed in     403: The caller lacks the editor role     404: No project has the id     409: The caller has not chosen a handle; no chat of the project is         open, or Pilot is not answering in it",
+        "operationId": "post__api_projects_{project_id}_chat_stop",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatSchema.f9d9b43"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Stop Pilot's answer in the project's open chat where it is, as the signed-in person, whoever sent the message (F44): a turn in flight is interrupted, the conversation kept for the next message, and a start held or under way ends, nothing of it sent afterwards, so the next message starts the chat afresh. The interrupt runs once the request commits; a controller that does not answer lets the turn run out.",
         "tags": [],
         "x-required-role": "editor"
       }

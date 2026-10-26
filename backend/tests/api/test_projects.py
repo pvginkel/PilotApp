@@ -558,6 +558,7 @@ class TestGetTimeline:
                                 "at": "<time>",
                                 "note": "More room.",
                                 "via": "app",
+                                "in_chat": None,
                                 "done": None,
                                 "deferral": None,
                                 "section": None,

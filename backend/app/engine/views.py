@@ -33,7 +33,7 @@ from app.models import (
     User,
 )
 from app.models import Session as AgentSession
-from app.models.reference import ChatKind, RecordKind, TaskStatus
+from app.models.reference import ChatKind, RecordKind, SessionState, TaskStatus
 from app.services.current_line import TOOL_BLOCKS
 from app.services.effect_service import EFFECT
 from app.services.people_service import AGENT_HANDLE
@@ -61,10 +61,12 @@ class Rendering:
 
 @dataclass(frozen=True)
 class ListedChat:
-    """A chat of a project, and when it opened: its Session's creation."""
+    """A chat of a project, when it opened, its Session's creation, and its
+    Session's state."""
 
     chat: Chat
     opened_at: datetime
+    state: SessionState
 
 
 @dataclass(frozen=True)
@@ -313,9 +315,9 @@ def project_chats(db: Session, project_id: uuid.UUID) -> list[ListedChat]:
     """The project's chats in their order (F40.3): the definition chat first,
     where one exists, then the project's chats in the order they opened."""
     return [
-        ListedChat(chat, opened_at)
-        for chat, opened_at in db.execute(
-            select(Chat, AgentSession.created_at)
+        ListedChat(chat, opened_at, state)
+        for chat, opened_at, state in db.execute(
+            select(Chat, AgentSession.created_at, AgentSession.state_code)
             .join(AgentSession, AgentSession.id == Chat.id)
             .where(Chat.project_id == project_id)
             .order_by(

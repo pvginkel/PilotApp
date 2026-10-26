@@ -147,6 +147,24 @@ class SectionSchema(BaseModel):
     )
 
 
+class ChatPlaceSchema(BaseModel):
+    """Where in a chat a block's answer was recorded, which *In the chat* goes
+    to (F42.3)."""
+
+    chat: uuid.UUID = Field(
+        description=(
+            "The chat's id, its session's, whose records the session's records "
+            "route reads"
+        )
+    )
+    seq: int = Field(
+        description=(
+            "The number, in the chat's records, of the `server` record placing "
+            "the latest `answered` effect on the block"
+        )
+    )
+
+
 class BlockSchema(BaseModel):
     """An ask in its item's text, with its definition and its answer (F30, F31)."""
 
@@ -181,6 +199,13 @@ class BlockSchema(BaseModel):
             "How the answer reached the record: `app` for a person's unless the "
             "text names another; null for Pilot's unless it names one, and while "
             "unanswered"
+        )
+    )
+    in_chat: ChatPlaceSchema | None = Field(
+        description=(
+            "Where the answer was recorded in a chat (F42.3): the record of the "
+            "latest `answered` effect on the block; null unless `via` is `chat` "
+            "and that effect's call ran in a chat"
         )
     )
     done: datetime | None = Field(description="When the action was marked Done")

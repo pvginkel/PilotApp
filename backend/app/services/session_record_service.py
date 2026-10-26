@@ -8,6 +8,7 @@ Session's records run from 1 without a gap in the order written (DB assertion
 """
 
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -80,21 +81,24 @@ def read_records(
     after: int = 0,
     before: int | None = None,
     turn_id: int | None = None,
+    ids: Collection[int] | None = None,
     kind: RecordKind | None = None,
     payload_type: str | None = None,
     limit: int,
     newest_first: bool = False,
 ) -> list[StoredRecord]:
     """The Session's records after the `seq` `after`, and before `before` when
-    given, of the Turn `turn_id` when given, of `kind` when given, whose
-    payload's `type` is `payload_type` when given, at most `limit`, in order,
-    or newest first."""
+    given, of the Turn `turn_id` when given, among the records `ids` when
+    given, of `kind` when given, whose payload's `type` is `payload_type`
+    when given, at most `limit`, in order, or newest first."""
     is_send = SessionRecord.kind_code == RecordKind.SEND
     bounds = [SessionRecord.session_id == session_id, SessionRecord.seq > after]
     if before is not None:
         bounds.append(SessionRecord.seq < before)
     if turn_id is not None:
         bounds.append(SessionRecord.turn_id == turn_id)
+    if ids is not None:
+        bounds.append(SessionRecord.id.in_(ids))
     if kind is not None:
         bounds.append(SessionRecord.kind_code == kind)
     if payload_type is not None:

@@ -4,7 +4,7 @@ draft or its handbook (F37.4, F129.4); and the items waiting on a person,
 which a tab's badge counts (F1.4, F94.5)."""
 
 import uuid
-from collections.abc import Collection, Iterable
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import PurePosixPath
@@ -22,9 +22,11 @@ from app.exceptions import RecordNotFoundException
 from app.models import (
     Attachment,
     Block,
+    Chat,
     ConfirmationReason,
     Document,
     DocumentVersion,
+    Effect,
     Environment,
     Item,
     ItemAttachment,
@@ -44,6 +46,7 @@ from app.models.reference import (
     AnswerChannel,
     BlockKind,
     DocumentRole,
+    EffectKind,
     ErrorKind,
     ProjectState,
     RecordKind,
@@ -57,6 +60,7 @@ from app.schemas.timeline import (
     BlockPartSchema,
     BlockSchema,
     BodyPartSchema,
+    ChatPlaceSchema,
     ConfirmationReasonSchema,
     CurrentLineSchema,
     DeferralSchema,
@@ -79,7 +83,7 @@ from app.schemas.timeline import (
 from app.services.controller_outage import ControllerOutage
 from app.services.people_service import initials
 from app.services.relay_service import ENVIRONMENT_STOPPED
-from app.services.session_record_service import last_record
+from app.services.session_record_service import last_record, read_records
 from app.services.start_gate import WORK_KIND, Held, WorkSlots, held_reason
 
 WORK = "work"
@@ -440,10 +444,14 @@ class TimelineService:
             )
         text = _published(document)
         parts = dsl.body(text)
-        reader = self._reader(project, self._users(set(), _answerers([parts])))
+        reader = self._reader(
+            project,
+            self._users(set(), _answerers([parts])),
+            self._chat_places({document.id: parts}),
+        )
         return ProjectDocumentSchema(
             title=dsl.parse(text).title,
-            body=[reader.part(part) for part in parts],
+            body=[reader.part(document.id, part) for part in parts],
             writing=document.writing_session_id is not None,
         )
 
@@ -485,6 +493,7 @@ class TimelineService:
                 },
                 _answerers(bodies.values()),
             ),
+            self._chat_places(bodies),
         )
         held = set(
             self.db.scalars(
@@ -536,7 +545,7 @@ class TimelineService:
                 body=(
                     None
                     if item.id not in bodies
-                    else [reader.part(part) for part in bodies[item.id]]
+                    else [reader.part(item.id, part) for part in bodies[item.id]]
                 ),
                 summary=None if document is None else document.summary,
                 word_count=counts.get(item.id),
@@ -579,10 +588,14 @@ class TimelineService:
         return project
 
     def _reader(
-        self, project: Project, users: dict[uuid.UUID | str, User]
+        self,
+        project: Project,
+        users: dict[uuid.UUID | str, User],
+        places: dict[tuple[uuid.UUID, str], ChatPlaceSchema],
     ) -> "_Reader":
         return _Reader(
             users=users,
+            places=places,
             tasks=dict(
                 self.db.execute(
                     select(PlanTask.task_id, PlanTask.title).where(
@@ -595,6 +608,59 @@ class TimelineService:
                 for reason in self.db.scalars(select(ConfirmationReason))
             },
         )
+
+    def _chat_places(
+        self, bodies: Mapping[uuid.UUID, Iterable[dsl.Prose | dsl.Block]]
+    ) -> dict[tuple[uuid.UUID, str], ChatPlaceSchema]:
+        """Where in a chat each block of `bodies`, by its document's id, had
+        its answer recorded, keyed by the document's id and its local id
+        (F42.3): the `server` record placing the latest `answered` Effect on
+        it. A block whose answer's channel is not chat is left out, as is one
+        whose latest such Effect's call ran in a session no chat is, a job's."""
+        answered = {
+            (document_id, part.local_id)
+            for document_id, parts in bodies.items()
+            for part in parts
+            if isinstance(part, dsl.Block) and part.via == AnswerChannel.CHAT
+        }
+        if not answered:
+            return {}
+        placed = [
+            row
+            for row in self.db.execute(
+                select(
+                    Block.document_id,
+                    Block.local_id,
+                    Effect.record_id,
+                    Chat.id.label("chat_id"),
+                )
+                .join(Effect, Effect.block_id == Block.id)
+                .join(Turn, Turn.id == Effect.turn_id)
+                .outerjoin(Chat, Chat.id == Turn.session_id)
+                .where(
+                    Block.document_id.in_({key[0] for key in answered}),
+                    Effect.kind_code == EffectKind.ANSWERED,
+                )
+                .ext(distinct_on(Block.id))
+                .order_by(Block.id, Effect.id.desc())
+            )
+            if row.chat_id is not None and (row.document_id, row.local_id) in answered
+        ]
+        # An Effect's record is a `server` record of its Turn's Session (DB 216).
+        records: dict[uuid.UUID, set[int]] = {}
+        for row in placed:
+            records.setdefault(row.chat_id, set()).add(row.record_id)
+        seqs = {
+            stored.record.id: stored.record.seq
+            for chat_id, ids in records.items()
+            for stored in read_records(self.db, chat_id, ids=ids, limit=len(ids))
+        }
+        return {
+            (row.document_id, row.local_id): ChatPlaceSchema(
+                chat=row.chat_id, seq=seqs[row.record_id]
+            )
+            for row in placed
+        }
 
     def _edited(self, document_ids: list[uuid.UUID]) -> dict[uuid.UUID, datetime]:
         """Each document's *Edited <time>* (F28.7, the planning's ruling): the
@@ -703,6 +769,7 @@ class _Reader:
     """What a timeline's items name, read once for them all."""
 
     users: dict[uuid.UUID | str, User]
+    places: dict[tuple[uuid.UUID, str], ChatPlaceSchema]
     tasks: dict[str, str]
     reasons: dict[str, ConfirmationReason]
 
@@ -711,14 +778,17 @@ class _Reader:
             return None
         return _user_schema(self.users[key])
 
-    def part(self, part: dsl.Prose | dsl.Block) -> BodyPartSchema:
+    def part(
+        self, document_id: uuid.UUID, part: dsl.Prose | dsl.Block
+    ) -> BodyPartSchema:
+        """A part of the document `document_id`'s text."""
         if isinstance(part, dsl.Prose):
             return ProsePartSchema(
                 type="prose", markdown=part.markdown, section=part.section
             )
-        return BlockPartSchema(type="block", block=self._block(part))
+        return BlockPartSchema(type="block", block=self._block(document_id, part))
 
-    def _block(self, block: dsl.Block) -> BlockSchema:
+    def _block(self, document_id: uuid.UUID, block: dsl.Block) -> BlockSchema:
         because = None if block.because is None else self.reasons[block.because]
         return BlockSchema(
             id=block.local_id,
@@ -749,6 +819,7 @@ class _Reader:
             at=block.at,
             note=block.note,
             via=None if block.via is None else AnswerChannel(block.via),
+            in_chat=self.places.get((document_id, block.local_id)),
             done=block.done,
             deferral=(
                 DeferralSchema(

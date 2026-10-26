@@ -27,14 +27,18 @@ from app.models import (
     Project,
     ProjectTransition,
     SaveError,
+    SessionRecord,
     Turn,
     User,
     Work,
     WriterQuestion,
 )
 from app.models.reference import (
+    AnswerChannel,
     AttachmentSource,
+    ChatKind,
     DocumentRole,
+    EffectKind,
     ErrorKind,
     RecordKind,
     SessionState,
@@ -52,10 +56,12 @@ from app.schemas.timeline import (
 from app.services.auth_service import AuthContext
 from app.services.container import ServiceContainer
 from app.services.controller_outage import ControllerOutage
+from app.services.effect_service import Change, EffectLine
 from app.services.relay_service import ENVIRONMENT_STOPPED
 from app.services.session_record_service import SessionRecordService
 from app.services.start_gate import WorkSlots
 from app.services.timeline_service import Badge, work_status
+from tests.support.chats import ChatWriter, open_chat
 
 SLOTS = WorkSlots(work_max=3, project_max=3)
 """The slot of the defaults: the work items these tests place leave it room."""
@@ -649,6 +655,7 @@ class TestTimeline:
                     "at": None,
                     "note": None,
                     "via": None,
+                    "in_chat": None,
                     "done": None,
                     "deferral": None,
                     "section": None,
@@ -2053,6 +2060,248 @@ to: plan
 
 _TEXT_KEYS = ("title", "summary", "body", "word_count", "read_minutes")
 """What an item document reads from its text."""
+
+
+KIT = """# Camp kit
+
+```decision id=D1
+options:
+  - Dome
+  - Tunnel
+```
+
+```decision id=D2
+options:
+  - Gas
+  - Wood
+```
+"""
+
+
+def _answered_in_chat(
+    container: ServiceContainer,
+    run: models.Session,
+    document: Document,
+    local_id: str,
+    person: User,
+    value: str,
+) -> SessionRecord:
+    """`person`'s answer `value` to the block, recorded as the brain's
+    `answer` records it in the Turn of `run` in flight: through the chat,
+    its Effect placed by a `server` record of `run`'s."""
+    container.record_service().answer(
+        document, local_id, person, value, via=AnswerChannel.CHAT, note="Said so."
+    )
+    block = (
+        container.db_session()
+        .scalars(
+            select(Block).where(
+                Block.document_id == document.id, Block.local_id == local_id
+            )
+        )
+        .one()
+    )
+    record = container.effect_service().record(
+        run.id,
+        f"toolu-{uuid.uuid4().hex}",
+        EffectLine("Answered", f"{local_id} · {value}"),
+        [Change(EffectKind.ANSWERED, block_id=block.id)],
+    )
+    assert record is not None
+    return record
+
+
+def _blocks(entry: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """The entry's blocks by their local ids."""
+    return {
+        part["block"]["id"]: part["block"]
+        for part in entry["body"]
+        if part["type"] == "block"
+    }
+
+
+@pytest.mark.usefixtures("person")
+class TestInTheChat:
+    """Where a block's answer given in the chat was recorded, which *In the
+    chat* goes to (F42.3; DB Effect)."""
+
+    def test_a_block_answered_in_the_chat_has_the_record_of_its_latest_answer(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        project = _make(container)
+        item = _bear(
+            container,
+            project,
+            _run(session, project, environment),
+            "document",
+            "Camp kit",
+            KIT,
+        )
+        chat = open_chat(session, project)
+        writer = ChatWriter(session, container.session_record_service(), chat)
+        writer.message(person, "Dome.")
+        _answered_in_chat(
+            container, chat, _document(session, item), "D1", person, "Dome"
+        )
+        writer.message(person, "Tunnel after all.")
+        latest = _answered_in_chat(
+            container, chat, _document(session, item), "D1", person, "Tunnel"
+        )
+        container.record_service().answer(_document(session, item), "D2", person, "Gas")
+
+        blocks = _blocks(_items(container, project)[1])
+
+        assert blocks["D1"]["via"] == "chat"
+        assert blocks["D1"]["in_chat"] == {"chat": str(chat.id), "seq": latest.seq}
+        assert (blocks["D2"]["via"], blocks["D2"]["in_chat"]) == ("app", None)
+
+    def test_an_answer_from_the_app_after_the_chats_has_no_place_in_it(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        project = _make(container)
+        item = _bear(
+            container,
+            project,
+            _run(session, project, environment),
+            "document",
+            "Camp kit",
+            KIT,
+        )
+        chat = open_chat(session, project)
+        ChatWriter(session, container.session_record_service(), chat).message(
+            person, "Dome."
+        )
+        _answered_in_chat(
+            container, chat, _document(session, item), "D1", person, "Dome"
+        )
+        container.record_service().answer(
+            _document(session, item), "D1", person, "Tunnel"
+        )
+
+        block = _blocks(_items(container, project)[1])["D1"]
+
+        assert (block["answer"], block["via"], block["in_chat"]) == (
+            "Tunnel",
+            "app",
+            None,
+        )
+
+    def test_an_answer_whose_latest_effect_ran_in_no_chat_has_no_place_in_it(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        project = _make(container)
+        item = _bear(
+            container,
+            project,
+            _run(session, project, environment),
+            "document",
+            "Camp kit",
+            KIT,
+        )
+        chat = open_chat(session, project)
+        ChatWriter(session, container.session_record_service(), chat).message(
+            person, "Dome."
+        )
+        _answered_in_chat(
+            container, chat, _document(session, item), "D1", person, "Dome"
+        )
+        job = models.Session(
+            project_id=project.id,
+            kind_code="job",
+            cwd="/work/PilotProjects",
+            token_hash=uuid.uuid4().hex * 2,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(job)
+        session.flush()
+        session.add(
+            Turn(
+                session_id=job.id,
+                seq=1,
+                message="Settle.",
+                started_at=datetime.now(UTC),
+            )
+        )
+        session.flush()
+        _answered_in_chat(
+            container, job, _document(session, item), "D1", person, "Tunnel"
+        )
+
+        block = _blocks(_items(container, project)[1])["D1"]
+
+        assert (block["answer"], block["via"], block["in_chat"]) == (
+            "Tunnel",
+            "chat",
+            None,
+        )
+
+    def test_the_item_document_carries_it_too(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        project = _make(
+            container,
+            tasks=[{"id": "build", "title": "Build the camp", "status": "pending"}],
+        )
+        item = _bear(
+            container,
+            project,
+            _run(session, project, environment),
+            "decision",
+            "Which tent?",
+            DECISION,
+        )
+        chat = open_chat(session, project)
+        ChatWriter(session, container.session_record_service(), chat).message(
+            person, "Tunnel."
+        )
+        record = _answered_in_chat(
+            container, chat, _document(session, item), "D1", person, "Tunnel"
+        )
+
+        (block,) = _blocks(_read(container, item)).values()
+
+        assert block["in_chat"] == {"chat": str(chat.id), "seq": record.seq}
+
+    def test_a_drafts_block_answered_in_its_definition_chat_has_its_place(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        project = _make(container, state="draft", name="Camp")
+        draft = session.scalars(
+            select(Document).where(
+                Document.project_id == project.id,
+                Document.role_code == DocumentRole.DRAFT,
+            )
+        ).one()
+        container.document_service().publish(draft, KIT)
+        chat = open_chat(session, project, kind=ChatKind.DEFINITION)
+        ChatWriter(session, container.session_record_service(), chat).message(
+            person, "Tunnel."
+        )
+        record = _answered_in_chat(container, chat, draft, "D1", person, "Tunnel")
+
+        body = container.timeline_service().project_document(
+            project.id, DocumentRole.DRAFT
+        )
+
+        blocks = _blocks(body.model_dump(mode="json"))
+        assert blocks["D1"]["in_chat"] == {"chat": str(chat.id), "seq": record.seq}
+        assert blocks["D2"]["in_chat"] is None
 
 
 def _pilot(session: DbSession) -> User:

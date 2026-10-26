@@ -177,6 +177,13 @@ _STOP_REFUSALS = {
     SessionState.FAILED: "it has failed",
 }
 
+_CHAT_STOP_REFUSALS = {
+    SessionState.IDLE: "it is not answering",
+    SessionState.STOPPED: "it was stopped already",
+    SessionState.ENDED: "its chat's session has ended",
+    SessionState.FAILED: "its chat failed to start",
+}
+
 _RESUMABLE = (SessionState.STOPPED, SessionState.FAILED)
 
 _RESUME_REFUSALS = {
@@ -685,6 +692,28 @@ class SessionStartService:
         if session.state_code not in STOPPABLE:
             raise InvalidOperationException(
                 operation, _STOP_REFUSALS[session.state_code]
+            )
+        self._stop(db, session, person, datetime.now(UTC))
+        return session
+
+    def stop_chat(
+        self, db: Session, session_id: uuid.UUID, person: User, operation: str
+    ) -> AgentSession:
+        """`person`'s Stop of Pilot's answer in a chat, whoever sent its
+        message, in the caller's transaction (F44): its Session `stopped`
+        where it is, as `_stop` writes a work item's Stop.
+
+        Returns:
+            The Session, `stopped`
+
+        Raises:
+            InvalidOperationException: The Session is neither running,
+                starting nor held at the gate, refused as `operation`
+        """
+        session = self._records(db).lock_session(session_id)
+        if session.state_code not in STOPPABLE:
+            raise InvalidOperationException(
+                operation, _CHAT_STOP_REFUSALS[session.state_code]
             )
         self._stop(db, session, person, datetime.now(UTC))
         return session

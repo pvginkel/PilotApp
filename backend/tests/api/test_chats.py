@@ -1,6 +1,7 @@
 """A person's message to a project's brain through the API (F38.3, F130,
-F5.5, F128.5; design 3 §5.3; V05, V06, V25); and the project's chats as a
-person reads them, with their place in them (F40.3, F43; V09)."""
+F5.5, F128.5; design 3 §5.3; V05, V06, V25); Pilot's answer in it stopped
+(F44); and the project's chats as a person reads them, with their place in
+them and whether Pilot is answering (F40.3, F43; V09)."""
 
 import uuid
 from collections.abc import Iterator
@@ -12,8 +13,16 @@ from flask.testing import FlaskClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
+from app import models
 from app.models import Chat, ChatRead, Project, Turn, User
-from app.models.reference import ChatKind, CloseCause, ProjectState, TransitionKind
+from app.models.reference import (
+    ChatKind,
+    CloseCause,
+    ProjectState,
+    SessionState,
+    TransitionKind,
+    UserKind,
+)
 from app.services.chat_close_service import ChatCloseService
 from app.services.container import ServiceContainer
 from app.services.environment_service import EnvironmentService
@@ -42,6 +51,10 @@ def _messages(project_id: uuid.UUID) -> str:
 
 def _chats(project_id: uuid.UUID) -> str:
     return f"/api/projects/{project_id}/chats"
+
+
+def _stop(project_id: uuid.UUID) -> str:
+    return f"/api/projects/{project_id}/chat/stop"
 
 
 def _read(project_id: uuid.UUID) -> str:
@@ -115,6 +128,21 @@ def opened(session: DbSession, project: Project) -> Project:
     project.slug, project.name = "soup-club", "Soup club"
     session.flush()
     return project
+
+
+@pytest.fixture
+def bea(session: DbSession) -> User:
+    """Another person, who sent the message."""
+    user = User(
+        kind_code=UserKind.PERSON,
+        subject="subject-bea",
+        handle="bea",
+        name="Bea Example",
+        avatar_slot=2,
+    )
+    session.add(user)
+    session.flush()
+    return user
 
 
 class TestSendChatMessage:
@@ -297,6 +325,126 @@ class TestSendChatMessage:
         assert response.status_code == 401
 
 
+def _answering(
+    db: DbSession, container: ServiceContainer, project: Project, person: User
+) -> models.Session:
+    """The project's open chat, Pilot answering a message of `person`'s."""
+    run = open_chat(db, project)
+    ChatWriter(db, container.session_record_service(), run).message(person, "Hi")
+    run.state_code = SessionState.RUNNING
+    db.flush()
+    return run
+
+
+class TestStopChat:
+    def test_it_stops_pilots_answer_by_anyone_and_answers_the_chat_200(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        starts: None,
+        opened: Project,
+        person: User,
+        bea: User,
+    ) -> None:
+        run = _answering(session, container, opened, bea)
+        _sign_in(client)
+
+        response = client.post(_stop(opened.id))
+
+        assert response.status_code == 200, response.get_json()
+        assert response.get_json() == {
+            "id": str(run.id),
+            "kind": "project",
+            "opened_at": _stamp(run.created_at),
+            "closed_at": None,
+            "close_cause": None,
+            "answering": False,
+        }
+        run = session.get_one(models.Session, run.id, populate_existing=True)
+        assert (run.state_code, run.stopped_by_user_id) == (
+            SessionState.STOPPED,
+            person.id,
+        )
+
+    def test_with_no_chat_open_it_is_409(
+        self, client: FlaskClient, starts: None, opened: Project, person: User
+    ) -> None:
+        _sign_in(client)
+
+        response = client.post(_stop(opened.id))
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            "Cannot stop Pilot in Soup club because no chat is open"
+        )
+
+    def test_a_chat_pilot_is_not_answering_in_is_409(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        starts: None,
+        opened: Project,
+        person: User,
+    ) -> None:
+        run = open_chat(session, opened)
+        _sign_in(client)
+
+        response = client.post(_stop(opened.id))
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            "Cannot stop Pilot in Soup club because it is not answering"
+        )
+        assert session.get_one(models.Session, run.id).stopped_at is None
+
+    def test_a_caller_with_no_handle_is_409(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        starts: None,
+        opened: Project,
+        person: User,
+    ) -> None:
+        run = _answering(session, container, opened, person)
+        response = client.post(
+            "/api/testing/auth/session",
+            json={"subject": "subject-ben", "roles": ["editor"]},
+        )
+        assert response.status_code == 201
+
+        response = client.post(_stop(opened.id))
+
+        assert response.status_code == 409
+        assert session.get_one(models.Session, run.id).state_code == (
+            SessionState.RUNNING
+        )
+
+    def test_no_project_has_the_id_404(
+        self, client: FlaskClient, starts: None, person: User
+    ) -> None:
+        _sign_in(client)
+        unknown = uuid.uuid4()
+
+        response = client.post(_stop(unknown))
+
+        assert response.status_code == 404
+        assert response.get_json()["error"] == f"Project {unknown} was not found"
+
+    def test_without_editor_it_is_refused(
+        self, client: FlaskClient, opened: Project
+    ) -> None:
+        _sign_in(client, roles=())
+
+        assert client.post(_stop(opened.id)).status_code == 403
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        assert oidc_client.post(_stop(uuid.uuid4())).status_code == 401
+
+
 class TestListChats:
     def test_it_answers_the_chats_in_order_and_the_callers_place(
         self,
@@ -326,6 +474,7 @@ class TestListChats:
                     "opened_at": "2026-10-12T09:00:00Z",
                     "closed_at": "2026-10-12T10:00:00Z",
                     "close_cause": "created",
+                    "answering": False,
                 },
                 {
                     "id": str(chat.id),
@@ -333,11 +482,31 @@ class TestListChats:
                     "opened_at": "2026-10-12T11:00:00Z",
                     "closed_at": None,
                     "close_cause": None,
+                    "answering": False,
                 },
             ],
             "read_at": None,
             "unread": True,
         }
+
+    def test_a_chat_pilot_answers_in_reads_answering(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        person: User,
+    ) -> None:
+        run = _answering(session, container, opened, person)
+        _sign_in(client)
+
+        response = client.get(_chats(opened.id))
+
+        assert response.status_code == 200
+        ((chat_id, answering),) = [
+            (chat["id"], chat["answering"]) for chat in response.get_json()["chats"]
+        ]
+        assert (chat_id, answering) == (str(run.id), True)
 
     def test_the_chat_archive_closed_reads_archived(
         self,
@@ -365,6 +534,7 @@ class TestListChats:
                 "opened_at": _stamp(chat.created_at),
                 "closed_at": _stamp(closed_at),
                 "close_cause": "archived",
+                "answering": False,
             }
         ]
 

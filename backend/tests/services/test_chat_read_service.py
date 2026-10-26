@@ -1,5 +1,6 @@
-"""A project's chats as a person reads them, and their place in them (F40.3,
-F43; DB Chat, Chat Read, decision 13, assertion 158; V07, V09)."""
+"""A project's chats as a person reads them, whether Pilot is answering in
+one, and their place in them (F40.3, F43, F44; DB Chat, Chat Read, decision
+13, assertion 158; V07, V09)."""
 
 import uuid
 from datetime import datetime, timedelta
@@ -10,8 +11,8 @@ from sqlalchemy.orm import Session as DbSession
 
 from app.exceptions import RecordNotFoundException
 from app.models import ChatRead, Project, User
-from app.models.reference import ChatKind, CloseCause, UserKind
-from app.services.chat_read_service import ChatReadService, ReadPlace
+from app.models.reference import ChatKind, CloseCause, SessionState, UserKind
+from app.services.chat_read_service import ChatReadService, ReadPlace, answering
 from app.services.container import ServiceContainer
 from tests.support.chats import ChatWriter, close_chat, open_chat
 
@@ -241,6 +242,30 @@ class TestChats:
     def test_an_unknown_project_is_refused(self, reads: ChatReadService) -> None:
         with pytest.raises(RecordNotFoundException):
             reads.chats(uuid.uuid4(), None)
+
+
+class TestAnswering:
+    """Whether Pilot is answering in a chat: its Session in a state the
+    chat's Stop ends (F44)."""
+
+    @pytest.mark.parametrize("state", list(SessionState))
+    def test_pilot_answers_while_the_start_is_held_or_under_way_or_a_turn_runs(
+        self,
+        session: DbSession,
+        reads: ChatReadService,
+        project: Project,
+        state: SessionState,
+    ) -> None:
+        run = open_chat(session, project)
+        run.state_code = state
+        session.flush()
+
+        (listed,) = reads.chats(project.id, None).chats
+
+        assert listed.state is state
+        assert answering(listed) is (
+            state in (SessionState.HELD, SessionState.STARTING, SessionState.RUNNING)
+        )
 
 
 class TestRead:
