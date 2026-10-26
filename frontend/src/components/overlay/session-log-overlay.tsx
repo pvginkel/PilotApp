@@ -15,7 +15,6 @@
 import { useMemo, useRef, type RefObject } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { Check, CircleAlert, ScrollText, Square } from 'lucide-react';
-import { ChatActionsContext, type ChatActions } from '@/components/chat/actions';
 import { ReplyBody, ReplyCue } from '@/components/chat/pilot-reply';
 import { StepLine } from '@/components/chat/step-line';
 import { WorkingCue } from '@/components/chat/working-cue';
@@ -63,7 +62,7 @@ export function SessionLogOverlay({ projectId, sessionId }: SessionLogOverlayPro
       {failed ? (
         <DidNotLoad what="The session log" />
       ) : (
-        item && work && <SessionLog key={sessionId} projectId={projectId} item={item} work={work} body={body} />
+        item && work && <SessionLog key={sessionId} item={item} work={work} body={body} />
       )}
     </Overlay>
   );
@@ -98,14 +97,12 @@ function Titles({ item, work }: { item: TimelineItem; work: Work }) {
 const isLive = (work: Work) => work.state === 'held' || work.state === 'starting' || work.state === 'running';
 
 interface SessionLogProps {
-  projectId: string;
   item: TimelineItem;
   work: Work;
   body: RefObject<HTMLDivElement | null>;
 }
 
-function SessionLog({ projectId, item, work, body }: SessionLogProps) {
-  const navigate = useNavigate();
+function SessionLog({ item, work, body }: SessionLogProps) {
   const { handle } = usePerson();
   const { isConnected } = useSseContext();
   const wrapper = useRef<HTMLDivElement>(null);
@@ -120,70 +117,55 @@ function SessionLog({ projectId, item, work, body }: SessionLogProps) {
     () => buildChatView(item.id, stream.records, { running: live }).flatMap((entry) => (entry.kind === 'turn' ? [entry] : [])),
     [item.id, stream.records, live],
   );
-  const actions = useMemo(
-    (): ChatActions => ({
-      openQuote: ({ kind, id }) => {
-        if (kind === 'item') {
-          void navigate({ to: '/projects/$projectId/items/$itemId', params: { projectId, itemId: id } });
-          return;
-        }
-        const [itemId, blockId] = id.split('/');
-        void navigate({ to: '/projects/$projectId/items/$itemId/blocks/$blockId', params: { projectId, itemId: itemId!, blockId: blockId! } });
-      },
-    }),
-    [navigate, projectId],
-  );
   const last = turns.at(-1)?.turn;
   const endedAt = (work.state === 'idle' ? item.done?.at : undefined) ?? last?.endedAt ?? null;
   const tail = sessionLogTail(work, handle, endedAt);
 
   return (
-    <ChatActionsContext.Provider value={actions}>
-      <div ref={wrapper} className="session-log" data-testid="session-log">
-        {turns.map(({ key, turn }) => (
-          <div key={key} className="log-turn" data-testid="session-log.turn">
-            <ReplyBody
-              turn={turn}
-              phantom={turn === last ? stream.phantom : null}
-              liveFrom={stream.liveFrom}
-              streamed={stream.streamed}
-            />
-            {turn !== last && <TurnEnd turn={turn} />}
-          </div>
-        ))}
-        {tail === null ? (
-          <div className="log-cue mx-1.5" data-testid="session-log.cue">
-            <Cue work={work} last={last} stream={stream} />
-          </div>
-        ) : (
-          <>
-            {tail.mark === 'failed' && work.error !== null && last?.failure === undefined && (
-              <StepLine icon={<CircleAlert className="size-3.5" aria-hidden />} tone="error" className="mx-1.5 whitespace-normal [&>span]:whitespace-normal">
-                {work.error}
-              </StepLine>
+    <div ref={wrapper} className="session-log" data-testid="session-log">
+      {turns.map(({ key, turn }) => (
+        <div key={key} className="log-turn" data-testid="session-log.turn">
+          <ReplyBody
+            turn={turn}
+            phantom={turn === last ? stream.phantom : null}
+            liveFrom={stream.liveFrom}
+            streamed={stream.streamed}
+          />
+          {turn !== last && <TurnEnd turn={turn} />}
+        </div>
+      ))}
+      {tail === null ? (
+        <div className="log-cue mx-1.5" data-testid="session-log.cue">
+          <Cue work={work} last={last} stream={stream} />
+        </div>
+      ) : (
+        <>
+          {tail.mark === 'failed' && work.error !== null && last?.failure === undefined && (
+            <StepLine icon={<CircleAlert className="size-3.5" aria-hidden />} tone="error" className="mx-1.5 whitespace-normal [&>span]:whitespace-normal">
+              {work.error}
+            </StepLine>
+          )}
+          <div className={cn('log-tail', tail.mark)} data-testid="session-log.tail" data-mark={tail.mark}>
+            {tail.mark === 'stopped' ? (
+              <Square className="icon" aria-hidden="true" />
+            ) : tail.mark === 'failed' ? (
+              <CircleAlert className="icon" aria-hidden="true" />
+            ) : (
+              <Check className="icon" aria-hidden="true" />
             )}
-            <div className={cn('log-tail', tail.mark)} data-testid="session-log.tail" data-mark={tail.mark}>
-              {tail.mark === 'stopped' ? (
-                <Square className="icon" aria-hidden="true" />
-              ) : tail.mark === 'failed' ? (
-                <CircleAlert className="icon" aria-hidden="true" />
-              ) : (
-                <Check className="icon" aria-hidden="true" />
+            <span>
+              {tail.text}
+              {tail.at !== null && (
+                <>
+                  {' · '}
+                  <Time at={tail.at} format="clock" />
+                </>
               )}
-              <span>
-                {tail.text}
-                {tail.at !== null && (
-                  <>
-                    {' · '}
-                    <Time at={tail.at} format="clock" />
-                  </>
-                )}
-              </span>
-            </div>
-          </>
-        )}
-      </div>
-    </ChatActionsContext.Provider>
+            </span>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 

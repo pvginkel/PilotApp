@@ -10,7 +10,7 @@
  * starts in.
  */
 
-import { cutOpenQuote, quotesToLinks, QUOTE_SCHEME } from '@/lib/chat/quotes';
+import { QUOTE_SCHEME } from '@/lib/chat/quotes';
 import type { Delta } from '@/lib/chat/stream-state';
 
 /** How long a delta fades in (`.delta-fresh` in components/shared/shared.css). */
@@ -19,25 +19,24 @@ const FADE_MS = 300;
 const FRESH_MS = FADE_MS + 100;
 
 export interface DeltaMarks {
-  /** Where each delta starts in the Markdown source, ascending. */
+  /** Where each delta starts, ascending: in the text, and in the Markdown source once placed there. */
   starts: number[];
   /** Whether each is still fading in. */
   fresh: boolean[];
 }
 
 /**
- * The deltas of the text shown (the phantom's text cut before an open quote tag), placed in the
- * Markdown source, which has each quote as a link. Fresh is measured against the latest delta,
- * not the clock, so it stays a function of the stream.
+ * The deltas of the text shown (the phantom's text cut before an open quote tag); the Markdown
+ * places them in its source, which has each quote as a link. Fresh is measured against the latest
+ * delta, not the clock, so it stays a function of the stream.
  */
 export function deltaMarks(shown: string, deltas: Delta[]): DeltaMarks {
   const latest = deltas.at(-1)?.t ?? 0;
-  const quoted = shown.includes('<quoted_');
   const starts: number[] = [];
   const fresh: boolean[] = [];
   for (const d of deltas) {
     if (d.at >= shown.length) break;
-    starts.push(quoted ? quotesToLinks(cutOpenQuote(shown.slice(0, d.at))).length : d.at);
+    starts.push(d.at);
     fresh.push(latest - d.t < FRESH_MS);
   }
   return { starts, fresh };

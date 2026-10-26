@@ -10,8 +10,8 @@ import { Bot, Check, CircleAlert, Database, FileText, Globe, ListTodo, Pencil, S
 import { summarizeTool, type ToolKind } from '@/lib/chat/tools';
 import type { Effect } from '@/lib/chat/records';
 import type { ToolCallView } from '@/lib/chat/view';
+import { useOpenQuote } from '@/hooks/use-open-quote';
 import { StepLine } from './step-line';
-import { useChatActions } from './actions';
 
 const ICONS: Record<ToolKind, typeof FileText> = {
   read: FileText,
@@ -61,7 +61,7 @@ function ToolDetail({ call }: { call: ToolCallView }) {
 
 /** An effect's line, "<verb> · <label>", going to its block, else its item, where it names one. */
 export function EffectLine({ effect }: { effect: Effect }) {
-  const { openQuote } = useChatActions();
+  const openQuote = useOpenQuote();
   const target = effect.blockId
     ? { kind: 'block' as const, id: effect.blockId, label: effect.label }
     : effect.itemId

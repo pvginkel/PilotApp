@@ -1,9 +1,10 @@
 /**
  * Markdown as every screen draws it (F29.1): GFM, inside `.prose`. Ticket ids, repos and
  * environments in its text link as they do in all of the record's words (F91, F93), except in code
- * and inside a link; every link opens in a new tab. A quote tag is a chip (F39.3), and a streamed
- * text's new deltas fade in (the chat's decision 1; delta-fade.ts). A heading's words stand
- * alone, inline, as the heading shows them.
+ * and inside a link; every link opens in a new tab. A quote tag is a chip that goes to what it
+ * quotes (F39.3), except in code, where it shows as written, and a streamed text's new deltas fade
+ * in (the chat's decision 1; delta-fade.ts). A heading's words stand alone, inline, as the heading
+ * shows them.
  */
 
 import { memo, useMemo } from 'react';
@@ -97,21 +98,28 @@ export const HeadingWords = memo(function HeadingWords({ text }: { text: string 
 interface MarkdownProps {
   text: string;
   className?: string;
-  /** A streamed text's deltas, its new text fading in. */
+  /** A streamed text's deltas, placed in the text, its new text fading in. */
   deltas?: DeltaMarks;
 }
 
 export const Markdown = memo(function Markdown({ text, className, deltas }: MarkdownProps) {
   const link = useLinker();
+  const quoted = useMemo(() => quotesToLinks(text), [text]);
   // The deltas split the text by its source positions, which the links' pieces do not keep.
   const rehypePlugins = useMemo(
-    (): Options['rehypePlugins'] => (deltas === undefined ? [[rehypeLinks, link]] : [[rehypeDeltas, deltas], [rehypeLinks, link]]),
-    [deltas, link],
+    (): Options['rehypePlugins'] =>
+      deltas === undefined
+        ? [[rehypeLinks, link]]
+        : [
+            [rehypeDeltas, { starts: deltas.starts.map(quoted.at), fresh: deltas.fresh }],
+            [rehypeLinks, link],
+          ],
+    [deltas, link, quoted],
   );
   return (
     <div className={cn('prose', className)}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins} components={components} urlTransform={urlTransform}>
-        {quotesToLinks(text)}
+        {quoted.markdown}
       </ReactMarkdown>
     </div>
   );

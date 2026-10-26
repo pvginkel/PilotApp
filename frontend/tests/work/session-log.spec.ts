@@ -3,8 +3,8 @@
  * its head "Session log" over the item's title, its environment's link once its start has one, and
  * its session's id; its
  * body the session's records as the chat renders a reply — a run of calls, a sub-agent's card,
- * the phantom fading in and gone at its record, each effect of a call as its line where the call
- * ran (F41) — streamed while it is open; its tail the working
+ * the phantom fading in and gone at its record, a quote a chip once its tag has closed, each effect
+ * of a call as its line where the call ran (F41) — streamed while it is open; its tail the working
  * cue while the session is held, starts or runs, else "Stopped by you · <time>", the environment
  * stopped under it or in error, "The turn ended · <time>" or "Failed · <time>" under the error
  * (F69.2, F125).
@@ -19,6 +19,7 @@ import { makeUnique } from '../support/helpers';
 import type { People } from '../support/people';
 import type { Projects } from '../support/projects';
 import { sessionLogAddress } from '../support/page-objects/session-log-page';
+import { attachmentAddress } from '../support/page-objects/timeline-page';
 
 const ZONE = 'Europe/Amsterdam';
 test.use({ timezoneId: ZONE });
@@ -176,6 +177,39 @@ test.describe('A work item’s session log', () => {
     await sessionLog.tools.getByRole('button', { name: registered }).click();
     await expect(page).toHaveURL(new RegExp(`/projects/${project}/items/${survey}$`));
     await expect(sessionLog.overlay).toHaveCount(0);
+  });
+
+  test('draws a quote in a reply as a chip, nothing of its tag while it streams in, and the chip goes to what it quotes: by its path, an attachment that came in a folder', async ({
+    page,
+    people,
+    projects,
+    controller,
+    sessionLog,
+    overlay,
+  }) => {
+    const { project, start } = await started({ people, projects });
+    const work = await start();
+    const { id: environment } = await projects.environment(project, work);
+    await controller.putFile(environment, '/work/Example/sketches/day1/tent.md', '# The tent\n\nThe dome is lighter.\n');
+    await controller.putFile(environment, '/work/Example/sketches/route.md', '# The route\n');
+    const ids = await projects.workerAttach(work, '/work/Example/sketches');
+    const tent = (await projects.item(project, work)).attachments.find((attachment) => attachment.filename === 'day1/tent.md')!;
+    expect(ids).toContain(tent.id);
+    const path = `attachments/${tent.batch}/day1/tent.md`;
+    const quote = `<quoted_path path="${path}">The tent</quoted_path path="${path}">`;
+    await sessionLog.open(project, work);
+
+    await controller.play(environment, 'claude-1', [blockStart(), delta(`The sketch: ${quote.slice(0, 50)}`)]);
+    await expect(sessionLog.phantom).toHaveText('The sketch:');
+    await controller.play(environment, 'claude-1', [delta(`${quote.slice(50)} shows it.`)]);
+    await expect(sessionLog.phantom.getByTestId('chat.quote')).toHaveText('The tent');
+    await controller.play(environment, 'claude-1', [text('sketch', `The sketch: ${quote} shows it.`)]);
+    await expect(sessionLog.phantom).toHaveCount(0);
+    await expect(sessionLog.texts.last()).toHaveText('The sketch: The tent shows it.');
+
+    await sessionLog.texts.last().getByTestId('chat.quote').click();
+    await expect(page).toHaveURL(attachmentAddress(project, work, tent.id));
+    await expect(overlay.attachment.prose).toContainText('The dome is lighter.');
   });
 
   test('opened from a done item shows its records as they streamed and "The turn ended · <time>"; Esc closes it', async ({
