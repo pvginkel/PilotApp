@@ -47,6 +47,7 @@ from app.models import (
     Project,
     ProjectMember,
     ProjectTransition,
+    Turn,
     User,
 )
 from app.models import Session as AgentSession
@@ -58,9 +59,14 @@ from app.models.reference import (
     TransitionKind,
     UserKind,
 )
-from app.schemas.testing_record import InventedFileSchema, InventedProjectCreateSchema
+from app.schemas.testing_record import (
+    InventedFileSchema,
+    InventedProjectCreateSchema,
+    InventedWriterQuestionSchema,
+)
 from app.services.auth_service import AuthContext
 from app.services.people_service import PeopleService
+from app.services.pilot_store_service import JOB, Brain, PilotStoreService
 from app.services.pilot_work_service import PilotWorkService, Worker
 
 SLUG = "recipe-box"
@@ -344,6 +350,12 @@ ALBUM_TASKS = [
 NOTICE_TEXT = "# {title}\n"
 """An open item a spec asks for: a notice, open until read."""
 
+STORE_CWD = "/work/PilotProjects"
+"""A job's working folder, the store repo's root (design 3 §12)."""
+
+PASS_BRIEF = "An invented pre-ruling pass, made for a test."
+"""The one Turn of the job's Session a spec's pass asks the writer in."""
+
 
 class TestDataService:
     def __init__(
@@ -357,6 +369,7 @@ class TestDataService:
         tree_service: TreeService,
         attach_service: AttachService,
         pilot_work_service: PilotWorkService,
+        pilot_store_service: PilotStoreService,
     ) -> None:
         self.db = db
         self.document_service = document_service
@@ -367,6 +380,7 @@ class TestDataService:
         self.tree_service = tree_service
         self.attach_service = attach_service
         self.pilot_work_service = pilot_work_service
+        self.pilot_store_service = pilot_store_service
 
     def load_all(self) -> dict[str, int]:
         """Seed the record into an empty database, in the caller's
@@ -770,11 +784,14 @@ class TestDataService:
         session = self._session_of(project, f"end a turn of project {project.id}")
         self.document_service.turn_ended(session)
 
-    def register_document(self, item_id: uuid.UUID, path: str) -> Registration:
+    def register_document(
+        self, item_id: uuid.UUID, path: str, tool_use_id: str | None
+    ) -> Registration:
         """The document the work item's session wrote at `path` in its
         environment, registered as its worker registers it (F85.1, ruling
         D1): the file read through the controller and parsed now, its text
-        read at the end of its run.
+        read at the end of its run; a minted one the call `tool_use_id`'s
+        effect while the session's turn is in flight.
 
         Raises:
             RecordNotFoundException: no work item has the id.
@@ -784,20 +801,82 @@ class TestDataService:
             ExternalServiceException: the controller did not answer, or
                 refused for a reason of its own.
         """
+        worker = self._worker(item_id, f"register document {path}")
+        return self.pilot_work_service.register_document(worker, path, tool_use_id)
+
+    def attach_as_worker(
+        self,
+        item_id: uuid.UUID,
+        path: str,
+        to: uuid.UUID | None,
+        tool_use_id: str | None,
+    ) -> list[Attachment]:
+        """The file or the folder the work item's session wrote at `path` in
+        its environment, attached as its worker attaches it (F85.2): copied
+        through the controller now and hung on the item `to` names, else on
+        the work item, the call `tool_use_id`'s effect while the session's
+        turn is in flight.
+
+        Raises:
+            RecordNotFoundException: no work item has the id, or `to` names no
+                item of its project.
+            InvalidOperationException: its start has given its session no
+                environment yet, or a file cannot be copied, as
+                `PilotWorkService.attach_file` refuses it.
+            ExternalServiceException: the controller did not answer, or
+                refused for a reason of its own.
+        """
+        worker = self._worker(item_id, f"attach {path}")
+        return self.pilot_work_service.attach_file(worker, path, to, tool_use_id)
+
+    def ask_writer(
+        self, item_id: uuid.UUID, questions: Sequence[InventedWriterQuestionSchema]
+    ) -> list[str]:
+        """The pre-ruling pass's `questions` to the writer of the registered
+        document, each about a block of it by its local id, asked as its
+        `ask_writer` asks them (F86.8): in the one Turn of a job's Session of
+        the item's project placed for the pass, the server's, ended once they
+        are asked, the Session idle with nothing started.
+
+        Returns:
+            The local ids of the document's blocks its writer is asked about
+
+        Raises:
+            RecordNotFoundException: no item has the id, or its document has no
+                such block.
+            InvalidOperationException: the item is no registered document or
+                is done, or a block is answered or was asked about already.
+        """
         item = self.db.get(Item, item_id)
-        if item is None or item.kind_code != WORK:
-            raise RecordNotFoundException("Work item", str(item_id))
-        session = self.db.get_one(AgentSession, item.id)
-        if session.environment_id is None:
-            raise InvalidOperationException(
-                f"register document {path}",
-                f"work item {item.id} has no environment yet",
-            )
-        return self.pilot_work_service.register_document(
-            Worker(session.id, session.project_id, session.environment_id, item.id),
-            path,
-            None,
+        if item is None:
+            raise RecordNotFoundException("Item", str(item_id))
+        now = self.db.scalar(select(func.now()))
+        assert now is not None
+        session = AgentSession(
+            project_id=item.project_id,
+            kind_code=JOB,
+            cwd=STORE_CWD,
+            token_hash=hashlib.sha256(uuid.uuid4().bytes).hexdigest(),
+            state_code=SessionState.RUNNING,
+            turns=1,
+            turn_started_at=now,
         )
+        self.db.add(session)
+        self.db.flush()
+        turn = Turn(session_id=session.id, seq=1, message=PASS_BRIEF, started_at=now)
+        self.db.add(turn)
+        self.db.flush()
+        brain = Brain(session.id, session.project_id, JOB)
+        asked: list[str] = []
+        for asking in questions:
+            asked = self.pilot_store_service.ask_writer(
+                brain, item.id, f"{item.id}/{asking.block}", asking.question
+            )
+        turn.ended_at = now
+        session.state_code = SessionState.IDLE
+        session.turn_ended_at = now
+        self.db.flush()
+        return asked
 
     def attach(
         self, item_id: uuid.UUID, files: Sequence[InventedFileSchema]
@@ -841,6 +920,18 @@ class TestDataService:
             self.db.get_one(Environment, session.environment_id),
             session,
         )
+
+    def _worker(self, item_id: uuid.UUID, operation: str) -> Worker:
+        """The work item's Session, as its bearer names it to `pilot-work`."""
+        item = self.db.get(Item, item_id)
+        if item is None or item.kind_code != WORK:
+            raise RecordNotFoundException("Work item", str(item_id))
+        session = self.db.get_one(AgentSession, item.id)
+        if session.environment_id is None:
+            raise InvalidOperationException(
+                operation, f"work item {item.id} has no environment yet"
+            )
+        return Worker(session.id, session.project_id, session.environment_id, item.id)
 
     def _session_of(self, project: Project, operation: str) -> AgentSession:
         """The project's session started last."""

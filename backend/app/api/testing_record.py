@@ -4,8 +4,9 @@ standing, with members, a plan, their opening and open items, the items a
 project's session adds, an agent's saves of them and of the project's draft
 and handbook, the files it attaches, Pilot's Done, and the end of its turn;
 and a work item placed by repository, started in an environment of Pilot's
-own the stage's own controller creates, and the documents its session
-registers there.
+own the stage's own controller creates, and the documents and the material its
+session registers and attaches there, each with its effect; and a pre-ruling
+pass's questions to a registered document's writer.
 Nothing in the UI creates a project before the definition chat (F46), nor
 places a work item, which the brain adds (F66).
 
@@ -42,6 +43,10 @@ from app.schemas.testing_record import (
     InventedSaveCreateSchema,
     InventedSaveSchema,
     InventedWorkCreateSchema,
+    InventedWorkerAttachmentCreateSchema,
+    InventedWorkerAttachmentsSchema,
+    InventedWriterQuestionsCreateSchema,
+    InventedWriterQuestionsSchema,
 )
 from app.services.container import ServiceContainer
 from app.services.session_start_service import SessionStartService
@@ -435,7 +440,8 @@ def create_registration(
     environment, as its worker's `register_document` does (F85.1, ruling D1):
     the file read through the stage's controller and parsed now, its text
     read once the turn that ends its run commits, published or its read
-    failed.
+    failed; a minted one the effect of the call `tool_use_id` names, while
+    the session's turn is in flight (F41).
 
     Returns:
         200: The document its run registered from the path already
@@ -447,10 +453,83 @@ def create_registration(
         502: The controller did not answer, or refused for a reason of its own
     """
     data = InventedRegistrationCreateSchema.model_validate(request.get_json())
-    registration = test_data_service.register_document(item_id, data.path)
+    registration = test_data_service.register_document(
+        item_id, data.path, data.tool_use_id
+    )
     return InventedItemSchema(id=registration.item.id).model_dump(mode="json"), (
         201 if registration.minted else 200
     )
+
+
+@testing_record_bp.route("/items/<uuid:item_id>/worker-attachments", methods=["POST"])
+@api.validate(
+    json=InventedWorkerAttachmentCreateSchema,
+    resp=SpectreeResponse(
+        HTTP_201=InventedWorkerAttachmentsSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+        HTTP_502=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def create_worker_attachment(
+    item_id: uuid.UUID,
+    test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
+) -> Any:
+    """Attach the file or the folder the work item's session wrote at `path`
+    in its environment, as its worker's `attach_file` does (F85.2): copied
+    through the stage's controller now, one batch, hung on the item `to`
+    names, else on the work item; the effect of the call `tool_use_id` names,
+    while the session's turn is in flight (F41).
+
+    Returns:
+        201: The attachments' ids, one per file
+        400: The body is invalid, or the stage is prd
+        404: No work item has the id, or `to` names no item of its project
+        409: Its session has no environment yet, or a file cannot be copied,
+            nothing attached: the reason
+        502: The controller did not answer, or refused for a reason of its own
+    """
+    data = InventedWorkerAttachmentCreateSchema.model_validate(request.get_json())
+    attachments = test_data_service.attach_as_worker(
+        item_id, data.path, data.to, data.tool_use_id
+    )
+    return InventedWorkerAttachmentsSchema(
+        ids=[attachment.id for attachment in attachments]
+    ).model_dump(mode="json"), 201
+
+
+@testing_record_bp.route("/items/<uuid:item_id>/writer-questions", methods=["POST"])
+@api.validate(
+    json=InventedWriterQuestionsCreateSchema,
+    resp=SpectreeResponse(
+        HTTP_201=InventedWriterQuestionsSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def create_writer_questions(
+    item_id: uuid.UUID,
+    test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
+) -> Any:
+    """Ask the writer of the registered document about its blocks, by their
+    local ids, as the pre-ruling pass's `ask_writer` asks (F86.8): in the one
+    turn of a job's session of its project placed for the pass and ended
+    once they are asked, nothing started; the document's line says so.
+
+    Returns:
+        201: The document's blocks its writer is asked about
+        400: The body is invalid, or the stage is prd
+        404: No item has the id, or its document has no such block
+        409: The item is no registered document or is done, or a block is
+            answered or was asked about already: the reason
+    """
+    data = InventedWriterQuestionsCreateSchema.model_validate(request.get_json())
+    blocks = test_data_service.ask_writer(item_id, data.questions)
+    return InventedWriterQuestionsSchema(blocks=blocks).model_dump(mode="json"), 201
 
 
 def _saved(ingested: Ingested) -> dict[str, Any]:

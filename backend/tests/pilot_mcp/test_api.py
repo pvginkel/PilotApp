@@ -1,5 +1,6 @@
-"""The MCP process's client of `pilot-work`'s routes: where it addresses them,
-an API that does not answer, and an error answer that is not its envelope."""
+"""The MCP process's clients of `pilot-work`'s and `pilot-store`'s routes:
+where they address them, an API that does not answer, and an error answer that
+is not its envelope."""
 
 import socket
 
@@ -8,7 +9,7 @@ import pytest
 from mcp.server.fastmcp.exceptions import ToolError
 
 from app import models
-from pilot_mcp.api import PilotWorkApi
+from pilot_mcp.api import PilotStoreApi, PilotWorkApi
 from pilot_mcp.config import McpSettings
 from tests.support.pilot_mcp import API_URL, BEARER, ApiRoutes
 
@@ -73,4 +74,34 @@ class TestPilotWorkApi:
         assert str(refused.value) == (
             f"Pilot's API answered {status} {httpx.codes.get_reason_phrase(status)},"
             " not its error envelope"
+        )
+
+
+@pytest.mark.anyio
+class TestPilotStoreApi:
+    async def test_the_routes_are_under_the_settings_url(
+        self, routes: ApiRoutes, worker: models.Session
+    ) -> None:
+        api = PilotStoreApi(str(McpSettings().api_url), transport=routes)
+
+        with pytest.raises(ToolError):
+            await api.finish(BEARER["Authorization"], None)
+        await api.aclose()
+
+        [(request, _)] = routes.calls
+        assert str(request.url) == "http://localhost:3501/tools/pilot-store/finish"
+
+    async def test_an_api_that_does_not_answer_is_a_tool_error_naming_it(
+        self,
+    ) -> None:
+        url = f"http://127.0.0.1:{_closed_port()}"
+        api = PilotStoreApi(url)
+
+        with pytest.raises(ToolError) as refused:
+            await api.finish(BEARER["Authorization"], None)
+        await api.aclose()
+
+        assert str(refused.value) == (
+            f"Cannot call pilot-store because Pilot's API at {url} did not answer"
+            " (ConnectError)"
         )

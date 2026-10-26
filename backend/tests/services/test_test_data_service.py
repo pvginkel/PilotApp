@@ -38,7 +38,9 @@ from app.models import (
     Project,
     ProjectMember,
     ProjectTransition,
+    Turn,
     User,
+    WriterQuestion,
 )
 from app.models.reference import (
     AnswerChannel,
@@ -55,10 +57,12 @@ from app.schemas.testing_record import (
     OPENING_WORDS,
     InventedFileSchema,
     InventedProjectCreateSchema,
+    InventedWriterQuestionSchema,
 )
 from app.services import test_data_service
 from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerClient
+from app.services.session_record_service import read_records
 from app.startup import load_test_data_hook
 from tests.support.fake_controller import ServedFakeController
 
@@ -1546,7 +1550,7 @@ class TestRegisterDocument:
     ) -> None:
         service = container.test_data_service()
 
-        registration = service.register_document(work_item.id, REGISTERED)
+        registration = service.register_document(work_item.id, REGISTERED, None)
 
         assert registration.minted
         item = registration.item
@@ -1556,14 +1560,14 @@ class TestRegisterDocument:
             work_item.environment_id,
             REGISTERED,
         )
-        again = service.register_document(work_item.id, REGISTERED)
+        again = service.register_document(work_item.id, REGISTERED, None)
         assert (again.item.id, again.minted) == (item.id, False)
 
     def test_an_item_that_is_no_work_item_is_not_found(
         self, container: ServiceContainer, item: Item
     ) -> None:
         with pytest.raises(RecordNotFoundException):
-            container.test_data_service().register_document(item.id, REGISTERED)
+            container.test_data_service().register_document(item.id, REGISTERED, None)
 
     def test_a_work_item_with_no_environment_yet_is_refused(
         self,
@@ -1575,7 +1579,9 @@ class TestRegisterDocument:
         session.flush()
 
         with pytest.raises(InvalidOperationException) as raised:
-            container.test_data_service().register_document(work_item.id, REGISTERED)
+            container.test_data_service().register_document(
+                work_item.id, REGISTERED, None
+            )
 
         assert raised.value.cause == f"work item {work_item.id} has no environment yet"
 
@@ -1584,7 +1590,209 @@ class TestRegisterDocument:
     ) -> None:
         with pytest.raises(InvalidOperationException) as raised:
             container.test_data_service().register_document(
-                work_item.id, "/work/Camp/missing.md"
+                work_item.id, "/work/Camp/missing.md", None
             )
 
         assert raised.value.cause.startswith("the controller answered 404")
+
+    def test_a_tool_use_id_names_the_effect_in_the_turn_in_flight(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        work_item: models.Session,
+    ) -> None:
+        session.add(
+            Turn(
+                session_id=work_item.id,
+                seq=1,
+                message="Build the camp.",
+                started_at=datetime.now(UTC),
+            )
+        )
+        session.flush()
+
+        container.test_data_service().register_document(
+            work_item.id, REGISTERED, "toolu_01"
+        )
+
+        [record] = read_records(session, work_item.id, limit=10)
+        assert record.record.payload["toolUseId"] == "toolu_01"
+
+
+SURVEY = "/work/Camp/docs/survey.md"
+
+
+class TestAttachAsWorker:
+    @pytest.fixture
+    def work_item(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> models.Session:
+        """A work item's Session running in an environment the fake holds,
+        its brief in flight, where its worker wrote a file."""
+        fake_controller.add_environment(environment.id, status="running")
+        fake_controller.put_file(environment.id, SURVEY, b"# Sites\n")
+        run = models.Session(
+            project_id=project.id,
+            environment_id=environment.id,
+            kind_code="work",
+            cwd="/work/Camp",
+            token_hash="2" * 64,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(run)
+        session.flush()
+        container.record_service().place_work(
+            project, run, "Building the camp", repo="example/Camp"
+        )
+        session.add(
+            Turn(
+                session_id=run.id,
+                seq=1,
+                message="Build the camp.",
+                started_at=datetime.now(UTC),
+            )
+        )
+        session.flush()
+        return run
+
+    def test_the_file_is_attached_as_the_worker_attaches_it_with_its_effect(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        work_item: models.Session,
+    ) -> None:
+        [attachment] = container.test_data_service().attach_as_worker(
+            work_item.id, SURVEY, None, "toolu_01"
+        )
+
+        assert (attachment.source_path, attachment.title) == (SURVEY, "Sites")
+        assert session.scalars(
+            select(ItemAttachment.item_id).where(
+                ItemAttachment.attachment_id == attachment.id
+            )
+        ).all() == [work_item.id]
+        [record] = read_records(session, work_item.id, limit=10)
+        assert record.record.payload == {
+            "type": "effect",
+            "toolUseId": "toolu_01",
+            "effect": {
+                "verb": "Attached",
+                "label": "Sites",
+                "itemId": str(work_item.id),
+            },
+        }
+
+    def test_an_item_that_is_no_work_item_is_not_found(
+        self, container: ServiceContainer, item: Item
+    ) -> None:
+        with pytest.raises(RecordNotFoundException):
+            container.test_data_service().attach_as_worker(item.id, SURVEY, None, None)
+
+    def test_a_work_item_with_no_environment_yet_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        work_item: models.Session,
+    ) -> None:
+        work_item.environment_id = None
+        session.flush()
+
+        with pytest.raises(InvalidOperationException) as raised:
+            container.test_data_service().attach_as_worker(
+                work_item.id, SURVEY, None, None
+            )
+
+        assert raised.value.cause == f"work item {work_item.id} has no environment yet"
+
+
+QUESTIONED = "```question id=Q1\n```\n\n```question id=Q2\n```\n"
+
+
+class TestAskWriter:
+    @pytest.fixture
+    def document(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> Item:
+        """A document a worker registered, read at its run's end."""
+        run = models.Session(
+            project_id=project.id,
+            environment_id=environment.id,
+            kind_code="work",
+            cwd="/work/Camp",
+            token_hash="2" * 64,
+            state_code=SessionState.IDLE,
+        )
+        session.add(run)
+        session.flush()
+        documents = container.document_service()
+        item = documents.register(project, run, REGISTERED).item
+        documents.publish_read(session.get_one(Document, item.id), QUESTIONED, run.id)
+        return item
+
+    def test_the_questions_are_asked_in_one_ended_turn_of_a_job_placed_for_them(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        document: Item,
+    ) -> None:
+        asked = container.test_data_service().ask_writer(
+            document.id,
+            [
+                InventedWriterQuestionSchema(block="Q2", question="Which lake?"),
+                InventedWriterQuestionSchema(block="Q1", question="Which site?"),
+            ],
+        )
+
+        assert asked == ["Q1", "Q2"]
+        [job] = session.scalars(
+            select(models.Session).where(models.Session.kind_code == "job")
+        )
+        assert (job.project_id, job.state_code, job.environment_id) == (
+            project.id,
+            SessionState.IDLE,
+            None,
+        )
+        [turn] = session.scalars(select(Turn).where(Turn.session_id == job.id))
+        assert (turn.author_user_id, turn.ended_at) == (None, turn.started_at)
+        assert [
+            (question.turn_id, question.question)
+            for question in session.scalars(
+                select(WriterQuestion).order_by(WriterQuestion.id)
+            )
+        ] == [(turn.id, "Which lake?"), (turn.id, "Which site?")]
+
+    def test_an_unknown_item_is_not_found(self, container: ServiceContainer) -> None:
+        with pytest.raises(RecordNotFoundException):
+            container.test_data_service().ask_writer(
+                uuid.uuid4(),
+                [InventedWriterQuestionSchema(block="Q1", question="Which?")],
+            )
+
+    def test_a_block_the_pass_may_not_ask_about_is_refused(
+        self,
+        container: ServiceContainer,
+        person: User,
+        document: Item,
+    ) -> None:
+        container.record_service().answer(
+            container.db_session().get_one(Document, document.id), "Q1", person, "Here"
+        )
+
+        with pytest.raises(InvalidOperationException) as raised:
+            container.test_data_service().ask_writer(
+                document.id,
+                [InventedWriterQuestionSchema(block="Q1", question="Which?")],
+            )
+
+        assert raised.value.cause == "block Q1 is answered"

@@ -1,11 +1,12 @@
 """Schemas for the testing endpoints that make the record's states the UI
 cannot make: people, environments, projects, their items, their work items,
-an agent's saves of them and the files hung on them."""
+an agent's saves of them, the files hung on them, a worker's registrations and
+attachments, and the pre-ruling pass's questions to a writer."""
 
 import base64
 import binascii
 import uuid
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -158,6 +159,17 @@ class InventedItemSchema(BaseModel):
     id: uuid.UUID = Field(description="The item's id")
 
 
+def _tool_use_id() -> Any:
+    return Field(
+        default=None,
+        description=(
+            "The id Claude Code gives the call, which its effect's record names;"
+            " none for a call whose client sent none"
+        ),
+        examples=["toolu_01"],
+    )
+
+
 class InventedRegistrationCreateSchema(BaseModel):
     """A document a work item's session wrote in its environment, which it
     registers as its worker does."""
@@ -166,6 +178,63 @@ class InventedRegistrationCreateSchema(BaseModel):
         min_length=1,
         description="The file's absolute path in the session's environment",
         examples=["/work/Example/docs/refinement.md"],
+    )
+    tool_use_id: str | None = _tool_use_id()
+
+
+class InventedWorkerAttachmentCreateSchema(BaseModel):
+    """Material a work item's session wrote in its environment, which it
+    attaches as its worker does."""
+
+    path: str = Field(
+        min_length=1,
+        description=(
+            "The file's or the folder's absolute path in the session's environment"
+        ),
+        examples=["/work/Example/docs/survey"],
+    )
+    to: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "The item it hangs on, of the session's project; without it, the work item"
+        ),
+    )
+    tool_use_id: str | None = _tool_use_id()
+
+
+class InventedWorkerAttachmentsSchema(BaseModel):
+    ids: list[uuid.UUID] = Field(
+        description="The attachments' ids, a folder's in its files' path order"
+    )
+
+
+class InventedWriterQuestionSchema(BaseModel):
+    """A question to a registered document's writer about one of its blocks."""
+
+    block: str = Field(
+        min_length=1, description="The block's local id", examples=["D2"]
+    )
+    question: str = Field(
+        min_length=1,
+        description="The question, verbatim",
+        examples=["Which cache does 'the cache' mean?"],
+    )
+
+
+class InventedWriterQuestionsCreateSchema(BaseModel):
+    """The questions a pre-ruling pass asks a registered document's writer,
+    in order."""
+
+    questions: list[InventedWriterQuestionSchema] = Field(min_length=1)
+
+
+class InventedWriterQuestionsSchema(BaseModel):
+    blocks: list[str] = Field(
+        description=(
+            "The local ids of the document's blocks its writer is asked about, in"
+            " their order"
+        ),
+        examples=[["D2", "D4"]],
     )
 
 

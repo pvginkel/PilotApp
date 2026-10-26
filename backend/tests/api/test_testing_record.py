@@ -1,14 +1,16 @@
 """/api/testing/{people,environments,projects,items}: the record's states the
 UI cannot make (TEST-6), on every stage but prd, behind the API's sign-in
 (D027): among them the handbook an open project is born with, an agent's
-saves of the project's draft and handbook, Pilot's Done, and a work item
-placed by repository, started in an environment of Pilot's own the stage's
-own controller creates."""
+saves of the project's draft and handbook, Pilot's Done, a work item placed by
+repository, started in an environment of Pilot's own the stage's own
+controller creates, its worker's registrations and attachments with their
+effects, and a pre-ruling pass's questions to a registered document's
+writer."""
 
 import base64
 import uuid
 from collections.abc import Iterator
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -27,9 +29,12 @@ from app.models import (
     DocumentVersion,
     Environment,
     Item,
+    ItemAttachment,
     Project,
+    Turn,
     User,
     Work,
+    WriterQuestion,
 )
 from app.models.reference import ProjectState, SessionState, VersionCause
 from app.schemas.testing_record import OPENING_WORDS
@@ -39,6 +44,7 @@ from app.services.controller_outage import ControllerOutage
 from app.services.environment_service import EnvironmentService
 from app.services.fake_controller import CLIENT_NAME
 from app.services.relay_service import RelayService
+from app.services.session_record_service import read_records
 from app.services.session_start_service import SessionStartService
 from app.services.start_gate import WorkSlots
 from app.services.supervisor import LoopHandle
@@ -90,6 +96,14 @@ def _work_path(project_id: uuid.UUID | str) -> str:
 
 def _registrations_path(item_id: uuid.UUID | str) -> str:
     return f"/api/testing/items/{item_id}/registrations"
+
+
+def _worker_attachments_path(item_id: uuid.UUID | str) -> str:
+    return f"/api/testing/items/{item_id}/worker-attachments"
+
+
+def _writer_questions_path(item_id: uuid.UUID | str) -> str:
+    return f"/api/testing/items/{item_id}/writer-questions"
 
 
 WORK_REPO = "example/Camp"
@@ -1479,6 +1493,11 @@ ENDPOINTS = [
     (_done_path(NO_ROW), {}),
     (_work_path(NO_ROW), WORK),
     (_registrations_path(NO_ROW), {"path": "/work/Camp/notes.md"}),
+    (_worker_attachments_path(NO_ROW), {"path": "/work/Camp/notes.md"}),
+    (
+        _writer_questions_path(NO_ROW),
+        {"questions": [{"block": "Q1", "question": "Which?"}]},
+    ),
 ]
 
 
@@ -1539,6 +1558,21 @@ class TestCreateRegistration:
         )
         assert (again.status_code, again.get_json()) == (200, {"id": str(item_id)})
 
+    def test_a_tool_use_id_names_the_effect_in_the_turn_in_flight(
+        self, client: FlaskClient, session: Session, work_item: models.Session
+    ) -> None:
+        _turn_in_flight(session, work_item)
+
+        response = client.post(
+            _registrations_path(work_item.id),
+            json={"path": REGISTERED, "tool_use_id": "toolu_01"},
+        )
+
+        assert response.status_code == 201
+        [record] = read_records(session, work_item.id, limit=10)
+        assert record.record.payload["toolUseId"] == "toolu_01"
+        assert record.record.payload["effect"]["verb"] == "Registered"
+
     def test_an_item_that_is_no_work_item_is_not_found(
         self, client: FlaskClient, item: Item
     ) -> None:
@@ -1597,6 +1631,258 @@ class TestCreateRegistration:
         )
 
         assert response.status_code == 502
+
+
+def _turn_in_flight(session: Session, run: models.Session) -> Turn:
+    """The work item's brief, sent and not ended."""
+    turn = Turn(
+        session_id=run.id,
+        seq=1,
+        message="Build the camp.",
+        started_at=datetime.now(UTC),
+    )
+    session.add(turn)
+    session.flush()
+    return turn
+
+
+SURVEY = "/work/Camp/docs/survey"
+
+
+@pytest.mark.usefixtures("person")
+class TestCreateWorkerAttachment:
+    @pytest.fixture
+    def work_item(
+        self,
+        session: Session,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> models.Session:
+        """A work item's Session running in an environment the fake holds,
+        its brief in flight, where its worker wrote a folder of two files."""
+        fake_controller.add_environment(environment.id, status="running")
+        fake_controller.put_file(environment.id, f"{SURVEY}/sites.md", b"# Sites\n")
+        fake_controller.put_file(environment.id, f"{SURVEY}/costs.csv", b"a,b\n")
+        run = models.Session(
+            project_id=project.id,
+            environment_id=environment.id,
+            kind_code="work",
+            cwd="/work/Camp",
+            token_hash="2" * 64,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(run)
+        session.flush()
+        container.record_service().place_work(
+            project, run, "Building the camp", repo=WORK_REPO
+        )
+        _turn_in_flight(session, run)
+        return run
+
+    def test_it_attaches_the_folder_as_the_sessions_worker_does_with_its_effect(
+        self, client: FlaskClient, session: Session, work_item: models.Session
+    ) -> None:
+        response = client.post(
+            _worker_attachments_path(work_item.id),
+            json={"path": SURVEY, "tool_use_id": "toolu_01"},
+        )
+
+        assert response.status_code == 201
+        ids = [uuid.UUID(id_) for id_ in response.get_json()["ids"]]
+        attachments = [session.get_one(Attachment, id_) for id_ in ids]
+        assert [attachment.filename for attachment in attachments] == [
+            "costs.csv",
+            "sites.md",
+        ]
+        assert (
+            session.scalars(
+                select(ItemAttachment.item_id).where(
+                    ItemAttachment.attachment_id.in_(ids)
+                )
+            ).all()
+            == [work_item.id] * 2
+        )
+        [record] = read_records(session, work_item.id, limit=10)
+        assert record.record.payload == {
+            "type": "effect",
+            "toolUseId": "toolu_01",
+            "effect": {
+                "verb": "Attached",
+                "label": "survey, 2 files",
+                "itemId": str(work_item.id),
+            },
+        }
+
+    def test_to_names_the_item_it_hangs_on(
+        self,
+        client: FlaskClient,
+        session: Session,
+        container: ServiceContainer,
+        project: Project,
+        work_item: models.Session,
+    ) -> None:
+        notice = container.document_service().bear_item(
+            project, "notice", "Sites", work_item, "# Sites\n"
+        )
+
+        response = client.post(
+            _worker_attachments_path(work_item.id),
+            json={"path": f"{SURVEY}/sites.md", "to": str(notice.id)},
+        )
+
+        assert response.status_code == 201
+        [id_] = response.get_json()["ids"]
+        assert session.scalars(
+            select(ItemAttachment.item_id).where(
+                ItemAttachment.attachment_id == uuid.UUID(id_)
+            )
+        ).all() == [notice.id]
+
+    def test_an_item_that_is_no_work_item_is_not_found(
+        self, client: FlaskClient, item: Item
+    ) -> None:
+        for item_id in (item.id, uuid.uuid4()):
+            response = client.post(
+                _worker_attachments_path(item_id), json={"path": SURVEY}
+            )
+
+            assert response.status_code == 404
+
+    def test_a_path_that_cannot_be_copied_conflicts_with_the_reason(
+        self, client: FlaskClient, work_item: models.Session
+    ) -> None:
+        path = "/work/Camp/docs/missing.md"
+
+        response = client.post(
+            _worker_attachments_path(work_item.id), json={"path": path}
+        )
+
+        assert response.status_code == 409
+        assert response.get_json()["error"].startswith(f"Cannot attach {path}")
+
+    def test_an_empty_path_is_invalid(
+        self, client: FlaskClient, work_item: models.Session
+    ) -> None:
+        response = client.post(
+            _worker_attachments_path(work_item.id), json={"path": ""}
+        )
+
+        assert response.status_code == 400
+
+
+QUESTIONED = "```question id=Q1\n```\n\n```question id=Q2\n```\n"
+
+
+@pytest.mark.usefixtures("person")
+class TestCreateWriterQuestions:
+    @pytest.fixture
+    def document(
+        self,
+        session: Session,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> Item:
+        """A document a worker registered, read at its run's end, committed
+        so that a refused call's rollback keeps it."""
+        run = models.Session(
+            project_id=project.id,
+            environment_id=environment.id,
+            kind_code="work",
+            cwd="/work/Camp",
+            token_hash="2" * 64,
+            state_code=SessionState.IDLE,
+        )
+        session.add(run)
+        session.flush()
+        documents = container.document_service()
+        item = documents.register(project, run, REGISTERED).item
+        documents.publish_read(session.get_one(Document, item.id), QUESTIONED, run.id)
+        session.commit()
+        return item
+
+    def test_a_passs_questions_are_asked_in_one_job_turn_and_its_line_says_so(
+        self,
+        client: FlaskClient,
+        session: Session,
+        project: Project,
+        document: Item,
+    ) -> None:
+        response = client.post(
+            _writer_questions_path(document.id),
+            json={
+                "questions": [
+                    {"block": "Q2", "question": "Which lake?"},
+                    {"block": "Q1", "question": "Which site?"},
+                ]
+            },
+        )
+
+        assert response.status_code == 201
+        assert response.get_json() == {"blocks": ["Q1", "Q2"]}
+        [job] = session.scalars(
+            select(models.Session).where(models.Session.kind_code == "job")
+        )
+        assert (job.project_id, job.state_code) == (project.id, SessionState.IDLE)
+        [turn] = session.scalars(select(Turn).where(Turn.session_id == job.id))
+        assert turn.ended_at is not None
+        assert [
+            (question.turn_id, question.question)
+            for question in session.scalars(
+                select(WriterQuestion).order_by(WriterQuestion.id)
+            )
+        ] == [(turn.id, "Which lake?"), (turn.id, "Which site?")]
+        line = _timeline_item(client, str(project.id), str(document.id))
+        assert line["asked_writer_about"] == ["Q1", "Q2"]
+
+    def test_an_unknown_item_or_block_is_not_found(
+        self, client: FlaskClient, document: Item
+    ) -> None:
+        unknown = client.post(
+            _writer_questions_path(uuid.uuid4()),
+            json={"questions": [{"block": "Q1", "question": "Which?"}]},
+        )
+        no_block = client.post(
+            _writer_questions_path(document.id),
+            json={"questions": [{"block": "Q9", "question": "Which?"}]},
+        )
+
+        assert (unknown.status_code, no_block.status_code) == (404, 404)
+
+    def test_a_block_asked_about_already_conflicts(
+        self, client: FlaskClient, session: Session, document: Item
+    ) -> None:
+        body = {"questions": [{"block": "Q1", "question": "Which?"}]}
+        assert (
+            client.post(_writer_questions_path(document.id), json=body).status_code
+            == 201
+        )
+
+        response = client.post(_writer_questions_path(document.id), json=body)
+
+        assert response.status_code == 409
+        assert response.get_json()["error"].endswith(
+            "because its writer was asked about block Q1 already"
+        )
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"questions": []},
+            {"questions": [{"block": "", "question": "Which?"}]},
+            {"questions": [{"block": "Q1", "question": ""}]},
+        ],
+        ids=["no-question", "an-empty-block", "an-empty-question"],
+    )
+    def test_a_body_that_is_not_questions_is_invalid(
+        self, client: FlaskClient, document: Item, body: dict[str, Any]
+    ) -> None:
+        response = client.post(_writer_questions_path(document.id), json=body)
+
+        assert response.status_code == 400
 
 
 @pytest.mark.usefixtures("person")

@@ -34,6 +34,7 @@ from app.services.metrics_service import MetricsService
 from app.services.oidc_client_service import OidcClientService
 from app.services.people_service import PeopleService
 from app.services.pilot_server import PilotServer
+from app.services.pilot_store_service import PilotStoreService
 from app.services.pilot_work_service import PilotWorkService
 from app.services.project_event_service import ProjectEventService
 from app.services.project_service import ProjectService
@@ -458,6 +459,17 @@ class ServiceContainer(containers.DeclarativeContainer):
         timeline_service=timeline_service,
         session_start_service=session_start_service,
     )
+    # The brain's tools, under its session's bearer (TD §4.5, F86)
+    pilot_store_service = providers.Factory(
+        PilotStoreService,
+        db=db_session,
+        record_service=record_service,
+        document_service=document_service,
+        view_service=view_service,
+        project_service=project_service,
+        session_start_service=session_start_service,
+        effect_service=effect_service,
+    )
 
     # The invented record: the dev stack's seed, loaded by `cli
     # load-test-data`, and the states a spec makes through /api/testing/
@@ -472,6 +484,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         tree_service=tree_service,
         attach_service=attach_service,
         pilot_work_service=pilot_work_service,
+        pilot_store_service=pilot_store_service,
     )
 
 

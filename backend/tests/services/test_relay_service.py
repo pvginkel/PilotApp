@@ -572,6 +572,32 @@ class TestSend:
         ]
         assert _token(body) not in json.dumps(gone)
 
+    @pytest.mark.parametrize(
+        ("kind", "endpoint"),
+        [("work", MCP_URL), ("chat", f"{MCP_URL}/store"), ("job", f"{MCP_URL}/store")],
+    )
+    def test_a_re_create_hands_the_server_of_the_sessions_kinds_surface(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        supervise: Supervise,
+        creating: tuple[RelayService, "_Creating"],
+        project: Project,
+        kind: str,
+        endpoint: str,
+    ) -> None:
+        _, fake = creating
+        relays = _relay_service(container, supervise, mcp_url=MCP_URL)[0]
+        run = _agent_session(session, project, "claude-gone")
+        run.kind_code = kind
+        session.flush()
+
+        _send(relays, session, run, "Rename the badge")
+
+        (body,) = fake.create_bodies
+        (entry,) = body["mcpConfig"]
+        assert json.loads(entry)["mcpServers"]["pilot"]["url"] == endpoint
+
     def test_a_resume_the_controller_refuses_fails_the_turn_and_writes_nothing_else(
         self,
         session: DbSession,

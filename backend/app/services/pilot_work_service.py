@@ -8,7 +8,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.engine.attachments import (
@@ -21,26 +20,20 @@ from app.engine.attachments import (
 from app.engine.documents import DocumentService, Registration, listed
 from app.engine.ingest import IngestService
 from app.exceptions import (
-    AuthenticationException,
     AuthorizationException,
     InvalidOperationException,
     RecordNotFoundException,
 )
-from app.models import Attachment, Document, Item, Project, SessionKind, Work
+from app.models import Attachment, Document, Item, Project, Work
 from app.models import Session as AgentSession
-from app.models.reference import EffectKind
+from app.models.reference import EffectKind, Surface
 from app.services.controller_client import (
     ControllerClient,
     ControllerProblem,
     ControllerProblemType,
 )
 from app.services.effect_service import Change, EffectLine, EffectService
-from app.services.pilot_server import token_hash
-
-PILOT_WORK = "pilot-work"
-"""The surface of a work item's Session (`session_kinds.surface`)."""
-
-_BEARER = "Bearer "
+from app.services.pilot_server import bearer_session
 
 REGISTERED = "Registered"
 ATTACHED = "Attached"
@@ -95,25 +88,8 @@ class PilotWorkService:
             AuthorizationException: the bearer's Session is not a work
                 item's, whose surface is `pilot-work`.
         """
-        if authorization is None or not authorization.startswith(_BEARER):
-            raise AuthenticationException(
-                "Cannot call pilot-work because the request carries no bearer"
-            )
-        found = self.db.execute(
-            select(AgentSession, SessionKind.surface, Work.id)
-            .join(SessionKind, SessionKind.code == AgentSession.kind_code)
-            .outerjoin(Work, Work.id == AgentSession.id)
-            .where(
-                AgentSession.token_hash
-                == token_hash(authorization.removeprefix(_BEARER))
-            )
-        ).one_or_none()
-        if found is None:
-            raise AuthenticationException(
-                "Cannot call pilot-work because no session has the request's bearer"
-            )
-        session, surface, work_id = found
-        if surface != PILOT_WORK or work_id is None:
+        session, surface = bearer_session(self.db, authorization, Surface.WORK)
+        if surface is not Surface.WORK or self.db.get(Work, session.id) is None:
             raise AuthorizationException(
                 f"Cannot call pilot-work because session {session.id} is a"
                 f" {session.kind_code} session, not a work item's"
@@ -125,7 +101,7 @@ class PilotWorkService:
             session_id=session.id,
             project_id=session.project_id,
             environment_id=session.environment_id,
-            work_item_id=work_id,
+            work_item_id=session.id,
         )
 
     def register_document(

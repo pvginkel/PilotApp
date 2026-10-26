@@ -321,11 +321,26 @@ class ProjectService:
                 the project's standing does not allow `kind` (DB 170).
         """
         project = self._locked(project_id)
-        operation = f"{_VERBS[kind]} {_named(project)}"
-        person = self.people_service.require_person(auth, operation)
+        person = self.people_service.require_person(auth, _operation(project, kind))
+        self._transition(project, person, kind)
+
+    def transition_as(
+        self, user: User, project_id: uuid.UUID, kind: TransitionKind
+    ) -> None:
+        """`user`'s transition of `kind`, as `transition` makes the caller's:
+        Pilot's Finish through `finish` (F5.4).
+
+        Raises:
+            RecordNotFoundException: no project has the id.
+            InvalidOperationException: the project's standing does not allow
+                `kind` (DB 170).
+        """
+        self._transition(self._locked(project_id), user, kind)
+
+    def _transition(self, project: Project, person: User, kind: TransitionKind) -> None:
         refusal = _refusal(project, kind)
         if refusal is not None:
-            raise InvalidOperationException(operation, refusal)
+            raise InvalidOperationException(_operation(project, kind), refusal)
         at = datetime.now(UTC)
         paused = project.paused
         self._write(project, person, at, kind)
@@ -358,7 +373,7 @@ class ProjectService:
                 a member, or the project is archived.
         """
         project = self._locked(project_id)
-        operation = f"join {_named(project)}"
+        operation = f"join {project_name(project)}"
         person = self.people_service.require_person(auth, operation)
         if project.archived:
             raise InvalidOperationException(operation, ARCHIVED_REFUSAL)
@@ -381,7 +396,7 @@ class ProjectService:
                 no member, or the project is archived.
         """
         project = self._locked(project_id)
-        operation = f"leave {_named(project)}"
+        operation = f"leave {project_name(project)}"
         person = self.people_service.require_person(auth, operation)
         if project.archived:
             raise InvalidOperationException(operation, ARCHIVED_REFUSAL)
@@ -570,5 +585,10 @@ def _refusal(project: Project, kind: TransitionKind) -> str | None:
     return None
 
 
-def _named(project: Project) -> str:
+def project_name(project: Project) -> str:
+    """The project as a refusal or an effect line names it."""
     return project.name or "the untitled project"
+
+
+def _operation(project: Project, kind: TransitionKind) -> str:
+    return f"{_VERBS[kind]} {project_name(project)}"

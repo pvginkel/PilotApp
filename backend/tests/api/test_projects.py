@@ -502,6 +502,7 @@ class TestGetTimeline:
                     "awaiting_read": False,
                     "edited_at": None,
                     "attachments": [],
+                    "asked_writer_about": [],
                     "work": None,
                 },
                 {
@@ -570,6 +571,7 @@ class TestGetTimeline:
                     "awaiting_read": False,
                     "edited_at": None,
                     "attachments": [],
+                    "asked_writer_about": [],
                     "work": None,
                 },
                 {
@@ -603,6 +605,7 @@ class TestGetTimeline:
                     "awaiting_read": False,
                     "edited_at": None,
                     "attachments": [],
+                    "asked_writer_about": [],
                     "work": None,
                 },
             ],

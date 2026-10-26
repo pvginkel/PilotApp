@@ -19,6 +19,7 @@ from app.models import Environment, Project
 from app.models.reference import SessionState
 from app.services.container import ServiceContainer
 from app.services.pilot_server import token_hash
+from pilot_mcp.server import WORK_PATH
 
 API_URL = "http://localhost:3501"
 
@@ -96,12 +97,12 @@ def http_client(
 
 @asynccontextmanager
 async def mcp_session(
-    app: Starlette, headers: dict[str, str] = BEARER
+    app: Starlette, headers: dict[str, str] = BEARER, path: str = WORK_PATH
 ) -> AsyncIterator[tuple[ClientSession, InitializeResult]]:
-    """An MCP client session with `app`, initialized, presenting `headers` on
-    every request."""
+    """An MCP client session with the server `app` serves at `path`,
+    initialized, presenting `headers` on every request."""
     async with http_client(app, headers) as http, app.router.lifespan_context(app):
-        async with streamable_http_client(f"{_MCP_URL}/mcp", http_client=http) as (
+        async with streamable_http_client(f"{_MCP_URL}{path}", http_client=http) as (
             read,
             write,
             _,
@@ -117,10 +118,11 @@ async def call(
     arguments: dict[str, Any],
     headers: dict[str, str] = BEARER,
     meta: dict[str, Any] | None = None,
+    path: str = WORK_PATH,
 ) -> CallToolResult:
-    """One `tools/call`, with `meta` as its `_meta`, as Claude Code sends its
-    tool-use id."""
-    async with mcp_session(app, headers) as (session, _):
+    """One `tools/call` to the server at `path`, with `meta` as its `_meta`,
+    as Claude Code sends its tool-use id."""
+    async with mcp_session(app, headers, path) as (session, _):
         return await session.call_tool(tool, arguments, meta=meta)
 
 

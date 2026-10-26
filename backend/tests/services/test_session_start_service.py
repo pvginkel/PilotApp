@@ -1033,6 +1033,39 @@ class TestPilotServerHanded:
         created = fake.session(run.environment_id, run.controller_session)
         assert created.create_body == body
 
+    @pytest.mark.parametrize("kind", ["chat", "job"])
+    def test_a_brain_sessions_create_hands_pilot_store(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        kind: str,
+    ) -> None:
+        fake.add_environment("store-env", name="Store", status="running")
+        session.add(Environment(id="store-env", name="Store", exempt=True))
+        now = datetime.now(UTC)
+        run = models.Session(
+            project_id=project.id,
+            environment_id="store-env",
+            kind_code=kind,
+            cwd="/work/PilotProjects",
+            token_hash="1" * 64,
+            state_code=SessionState.STARTING,
+            turns=1,
+            turn_started_at=now,
+        )
+        session.add(run)
+        session.flush()
+        session.add(Turn(session_id=run.id, seq=1, message=BRIEF, started_at=now))
+        session.flush()
+
+        _run(starts, run)
+
+        (body,) = fake.create_bodies
+        (entry,) = body["mcpConfig"]
+        assert json.loads(entry)["mcpServers"]["pilot"]["url"] == f"{MCP_URL}/store"
+
     def test_the_tokens_plaintext_is_in_no_row_record_or_log_line(
         self,
         starts: SessionStartService,

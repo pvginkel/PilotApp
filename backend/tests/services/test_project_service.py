@@ -884,6 +884,53 @@ class TestTransition:
         assert finished[2] == person.id
         assert _standing(made) == (ProjectState.FINISHED, False, False)
 
+    def test_transition_as_is_the_users_finish_as_the_callers_is(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        made = _make(
+            container,
+            name="Camp",
+            autopilot=True,
+            open_items=1,
+            environment_id=environment.id,
+        )
+        pilot = session.scalars(select(User).where(User.handle == "agent")).one()
+        before = _transitions(session, made)
+
+        container.project_service().transition_as(
+            pilot, made.id, TransitionKind.FINISHED
+        )
+
+        finished, autopilot_off = _transitions(session, made)[len(before) :]
+        assert (finished[0], finished[2]) == (TransitionKind.FINISHED, pilot.id)
+        assert autopilot_off == (TransitionKind.AUTOPILOT_OFF, *finished[1:])
+        assert _standing(made) == (ProjectState.FINISHED, False, False)
+        [notice] = session.scalars(
+            select(Item).where(Item.project_id == made.id, Item.kind_code == "notice")
+        )
+        assert (notice.done_cause_code, notice.done_by_user_id) == (
+            "finished",
+            pilot.id,
+        )
+
+    def test_transition_as_is_refused_as_the_callers_is(
+        self, container: ServiceContainer, session: DbSession
+    ) -> None:
+        made = _make(container, name="Camp", state="finished")
+        pilot = session.scalars(select(User).where(User.handle == "agent")).one()
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.project_service().transition_as(
+                pilot, made.id, TransitionKind.FINISHED
+            )
+
+        assert refused.value.message == (
+            "Cannot finish Camp because it is finished already"
+        )
+
     @pytest.mark.parametrize(
         ("spec", "kind", "paused"),
         [

@@ -25,6 +25,77 @@
         "title": "ActionDoneRequestSchema",
         "type": "object"
       },
+      "AnswerRequestSchema.4ff8b5e": {
+        "additionalProperties": false,
+        "description": "A person's answer to a block, given in the chat, to record for them.",
+        "properties": {
+          "block": {
+            "description": "The block's id, `<item id>/<local id>` (TD §4.9)",
+            "examples": [
+              "0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15/D1"
+            ],
+            "title": "Block",
+            "type": "string"
+          },
+          "for": {
+            "description": "The handle of the person whose answer it is",
+            "examples": [
+              "ada"
+            ],
+            "minLength": 1,
+            "title": "For",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Their words, as they gave them",
+            "examples": [
+              "The dome, it stands up in five minutes."
+            ],
+            "title": "Note"
+          },
+          "to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "With `deferred`: the plan's task the block returns at, or `plan`",
+            "examples": [
+              "pitch"
+            ],
+            "title": "To"
+          },
+          "value": {
+            "description": "The answer: an option's label, `Agree`, `Yes`, `No`, free words, or `deferred` with `to`",
+            "examples": [
+              "Dome"
+            ],
+            "minLength": 1,
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "block",
+          "value",
+          "for"
+        ],
+        "title": "AnswerRequestSchema",
+        "type": "object"
+      },
       "AnswerRequestSchema.bfdf230": {
         "additionalProperties": false,
         "description": "A person's answer to a block.",
@@ -886,6 +957,22 @@
             "minLength": 1,
             "title": "Path",
             "type": "string"
+          },
+          "tool_use_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The id Claude Code gives the call, which its effect's record names; none for a call whose client sent none",
+            "examples": [
+              "toolu_01"
+            ],
+            "title": "Tool Use Id"
           }
         },
         "required": [
@@ -1026,9 +1113,160 @@
         "title": "InventedWorkCreateSchema",
         "type": "object"
       },
+      "InventedWorkerAttachmentCreateSchema.6d6b324": {
+        "description": "Material a work item's session wrote in its environment, which it\nattaches as its worker does.",
+        "properties": {
+          "path": {
+            "description": "The file's or the folder's absolute path in the session's environment",
+            "examples": [
+              "/work/Example/docs/survey"
+            ],
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          },
+          "to": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The item it hangs on, of the session's project; without it, the work item",
+            "title": "To"
+          },
+          "tool_use_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The id Claude Code gives the call, which its effect's record names; none for a call whose client sent none",
+            "examples": [
+              "toolu_01"
+            ],
+            "title": "Tool Use Id"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "InventedWorkerAttachmentCreateSchema",
+        "type": "object"
+      },
+      "InventedWorkerAttachmentsSchema.6d6b324": {
+        "properties": {
+          "ids": {
+            "description": "The attachments' ids, a folder's in its files' path order",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "title": "InventedWorkerAttachmentsSchema",
+        "type": "object"
+      },
+      "InventedWriterQuestionsCreateSchema.6d6b324": {
+        "description": "The questions a pre-ruling pass asks a registered document's writer,\nin order.",
+        "properties": {
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/InventedWriterQuestionsCreateSchema.6d6b324.InventedWriterQuestionSchema"
+            },
+            "minItems": 1,
+            "title": "Questions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "questions"
+        ],
+        "title": "InventedWriterQuestionsCreateSchema",
+        "type": "object"
+      },
+      "InventedWriterQuestionsCreateSchema.6d6b324.InventedWriterQuestionSchema": {
+        "description": "A question to a registered document's writer about one of its blocks.",
+        "properties": {
+          "block": {
+            "description": "The block's local id",
+            "examples": [
+              "D2"
+            ],
+            "minLength": 1,
+            "title": "Block",
+            "type": "string"
+          },
+          "question": {
+            "description": "The question, verbatim",
+            "examples": [
+              "Which cache does 'the cache' mean?"
+            ],
+            "minLength": 1,
+            "title": "Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "block",
+          "question"
+        ],
+        "title": "InventedWriterQuestionSchema",
+        "type": "object"
+      },
+      "InventedWriterQuestionsSchema.6d6b324": {
+        "properties": {
+          "blocks": {
+            "description": "The local ids of the document's blocks its writer is asked about, in their order",
+            "examples": [
+              [
+                "D2",
+                "D4"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Blocks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "blocks"
+        ],
+        "title": "InventedWriterQuestionsSchema",
+        "type": "object"
+      },
       "ItemDocumentSchema.1fdd8ae": {
         "description": "An item's document read on its own, as the overlay draws it (F28): its\ntimeline entry, but that a document done by Done reads as Done fixed it\n(F13.3), its `title`, `summary`, `body`, `word_count` and `read_minutes`\nfrom the text of its `done` Version.",
         "properties": {
+          "asked_writer_about": {
+            "description": "The local ids of the blocks Pilot asked a registered document's writer about, in their order, which its line names: \"Pilot asked the writer about D2 and D4\" (F86.8); empty for every other item",
+            "examples": [
+              [
+                "D2",
+                "D4"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Asked Writer About",
+            "type": "array"
+          },
           "attachments": {
             "description": "The files hung on the item, in their order, on every kind (F17.5)",
             "items": {
@@ -1319,6 +1557,7 @@
           "awaiting_read",
           "edited_at",
           "attachments",
+          "asked_writer_about",
           "work",
           "project_id"
         ],
@@ -2409,6 +2648,54 @@
           "name"
         ],
         "title": "EnvironmentNameSchema",
+        "type": "object"
+      },
+      "MarkRequestSchema.4ff8b5e": {
+        "additionalProperties": false,
+        "description": "A mark on an item, for a person or Pilot's own.",
+        "properties": {
+          "for": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The handle of the person the mark is for; without it, Pilot's",
+            "examples": [
+              "ada"
+            ],
+            "title": "For"
+          },
+          "item": {
+            "description": "The item's id",
+            "examples": [
+              "0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15"
+            ],
+            "format": "uuid",
+            "title": "Item",
+            "type": "string"
+          },
+          "mark": {
+            "description": "Done on a document, Read on a notice, Reviewed on a review",
+            "enum": [
+              "done",
+              "read",
+              "reviewed"
+            ],
+            "title": "Mark",
+            "type": "string"
+          }
+        },
+        "required": [
+          "item",
+          "mark"
+        ],
+        "title": "MarkRequestSchema",
         "type": "object"
       },
       "ProjectDocumentSchema.1fdd8ae": {
@@ -3597,6 +3884,24 @@
         "title": "ReadinessCheckSchema",
         "type": "object"
       },
+      "RecordedSchema.4ff8b5e": {
+        "description": "What the call changed.",
+        "properties": {
+          "effect": {
+            "description": "Its effect line, `<verb> · <what>` (F41)",
+            "examples": [
+              "Answered · D1 · Which tent?"
+            ],
+            "title": "Effect",
+            "type": "string"
+          }
+        },
+        "required": [
+          "effect"
+        ],
+        "title": "RecordedSchema",
+        "type": "object"
+      },
       "RegisterDocumentRequestSchema.ce33d8b": {
         "additionalProperties": false,
         "description": "A document a worker wrote, to register.",
@@ -4023,6 +4328,26 @@
           "view"
         ],
         "title": "SessionStreamViewSchema",
+        "type": "object"
+      },
+      "StopRequestSchema.4ff8b5e": {
+        "additionalProperties": false,
+        "description": "A work item whose session to stop.",
+        "properties": {
+          "item": {
+            "description": "The work item's id",
+            "examples": [
+              "0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15"
+            ],
+            "format": "uuid",
+            "title": "Item",
+            "type": "string"
+          }
+        },
+        "required": [
+          "item"
+        ],
+        "title": "StopRequestSchema",
         "type": "object"
       },
       "SyncCheckRequestSchema.19c06e7": {
@@ -5520,6 +5845,20 @@
       "TimelineSchema.1fdd8ae.TimelineItemSchema": {
         "description": "An entry on the timeline, with what its line and its open form show.",
         "properties": {
+          "asked_writer_about": {
+            "description": "The local ids of the blocks Pilot asked a registered document's writer about, in their order, which its line names: \"Pilot asked the writer about D2 and D4\" (F86.8); empty for every other item",
+            "examples": [
+              [
+                "D2",
+                "D4"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Asked Writer About",
+            "type": "array"
+          },
           "attachments": {
             "description": "The files hung on the item, in their order, on every kind (F17.5)",
             "items": {
@@ -5804,6 +6143,7 @@
           "awaiting_read",
           "edited_at",
           "attachments",
+          "asked_writer_about",
           "work"
         ],
         "title": "TimelineItemSchema",
@@ -6571,6 +6911,69 @@
           "avatar_slot"
         ],
         "title": "UserSchema",
+        "type": "object"
+      },
+      "WriterQuestionRequestSchema.4ff8b5e": {
+        "additionalProperties": false,
+        "description": "A question to a registered document's writer about one of its blocks.",
+        "properties": {
+          "block": {
+            "description": "The block's id, `<item id>/<local id>` (TD §4.9)",
+            "examples": [
+              "0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15/D1"
+            ],
+            "title": "Block",
+            "type": "string"
+          },
+          "document": {
+            "description": "The registered document's item id",
+            "examples": [
+              "0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15"
+            ],
+            "format": "uuid",
+            "title": "Document",
+            "type": "string"
+          },
+          "question": {
+            "description": "The question, verbatim",
+            "examples": [
+              "Which cache does 'the cache' mean?"
+            ],
+            "minLength": 1,
+            "title": "Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "document",
+          "block",
+          "question"
+        ],
+        "title": "WriterQuestionRequestSchema",
+        "type": "object"
+      },
+      "WriterQuestionsSchema.4ff8b5e": {
+        "description": "The document's blocks its writer is asked about.",
+        "properties": {
+          "blocks": {
+            "description": "Their local ids, in their order in the document",
+            "examples": [
+              [
+                "D2",
+                "D4"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "title": "Blocks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "blocks"
+        ],
+        "title": "WriterQuestionsSchema",
         "type": "object"
       }
     },
@@ -9681,7 +10084,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Register the document the work item's session wrote at `path` in its environment, as its worker's `register_document` does (F85.1, ruling D1): the file read through the stage's controller and parsed now, its text read once the turn that ends its run commits, published or its read failed.",
+        "summary": "Register the document the work item's session wrote at `path` in its environment, as its worker's `register_document` does (F85.1, ruling D1): the file read through the stage's controller and parsed now, its text read once the turn that ends its run commits, published or its read failed; a minted one the effect of the call `tool_use_id` names, while the session's turn is in flight (F41).",
         "tags": [],
         "x-required-role": "editor"
       }
@@ -9760,6 +10163,172 @@
           }
         ],
         "summary": "Ingest an agent's save of the item's file, by the project's session, as the store's sync does: held on a fault, the item then shown as it was last published (F78), else merged and published.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/items/{item_id}/worker-attachments": {
+      "post": {
+        "description": "Returns:     201: The attachments' ids, one per file     400: The body is invalid, or the stage is prd     404: No work item has the id, or `to` names no item of its project     409: Its session has no environment yet, or a file cannot be copied,         nothing attached: the reason     502: The controller did not answer, or refused for a reason of its own",
+        "operationId": "post__api_testing_items_{item_id}_worker-attachments",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventedWorkerAttachmentCreateSchema.6d6b324"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventedWorkerAttachmentsSchema.6d6b324"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Attach the file or the folder the work item's session wrote at `path` in its environment, as its worker's `attach_file` does (F85.2): copied through the stage's controller now, one batch, hung on the item `to` names, else on the work item; the effect of the call `tool_use_id` names, while the session's turn is in flight (F41).",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/items/{item_id}/writer-questions": {
+      "post": {
+        "description": "Returns:     201: The document's blocks its writer is asked about     400: The body is invalid, or the stage is prd     404: No item has the id, or its document has no such block     409: The item is no registered document or is done, or a block is         answered or was asked about already: the reason",
+        "operationId": "post__api_testing_items_{item_id}_writer-questions",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventedWriterQuestionsCreateSchema.6d6b324"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventedWriterQuestionsSchema.6d6b324"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Ask the writer of the registered document about its blocks, by their local ids, as the pre-ruling pass's `ask_writer` asks (F86.8): in the one turn of a job's session of its project placed for the pass and ended once they are asked, nothing started; the document's line says so.",
         "tags": [],
         "x-required-role": "editor"
       }
@@ -10726,6 +11295,391 @@
         "parameters": [],
         "responses": {},
         "summary": "Return metrics in Prometheus text format.",
+        "tags": []
+      }
+    },
+    "/tools/pilot-store/answers": {
+      "post": {
+        "description": "Returns:     200: The call's effect line     400: The body is not a block's id, an answer, a handle, and an         optional note and task     401: No bearer, or one no session has     403: The bearer's session is not a chat's or a job's, or has no turn         running     404: The block is not of the session's project, or no person has the         handle     409: The record refuses the answer: the reason",
+        "operationId": "post__tools_pilot-store_answers",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnswerRequestSchema.4ff8b5e"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordedSchema.4ff8b5e"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "`answer(block, value, for, note?, to?)` (F86.2, F42.1): a person's answer to a block, given in the chat, recorded on their behalf through the chat.",
+        "tags": []
+      }
+    },
+    "/tools/pilot-store/finish": {
+      "post": {
+        "description": "Returns:     200: The call's effect line     401: No bearer, or one no session has     403: The bearer's session is not a chat's or a job's, or has no turn         running     409: The project is a draft, finished or archived: the reason",
+        "operationId": "post__tools_pilot-store_finish",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordedSchema.4ff8b5e"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "`finish()` (F86.5, F5.4): the session's project finished by Pilot as Finish finishes it, its own turn stopped with every other once this commits.",
+        "tags": []
+      }
+    },
+    "/tools/pilot-store/marks": {
+      "post": {
+        "description": "Returns:     200: The call's effect line     400: The body is not an item's id, a mark and an optional handle     401: No bearer, or one no session has     403: The bearer's session is not a chat's or a job's, or has no turn         running     404: The item is not of the session's project, or no person has the         handle     409: Read or Reviewed without a person, or the record refuses the         mark: the reason",
+        "operationId": "post__tools_pilot-store_marks",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkRequestSchema.4ff8b5e"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordedSchema.4ff8b5e"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "`mark(item, done | read | reviewed, for?)` (F86.3): Done, Read or Reviewed on an item for the person `for` names, else Pilot's own Done.",
+        "tags": []
+      }
+    },
+    "/tools/pilot-store/stops": {
+      "post": {
+        "description": "Returns:     200: The call's effect line     400: The body is not an item's id     401: No bearer, or one no session has     403: The bearer's session is not a chat's or a job's, or has no turn         running     404: The item is not of the session's project     409: It is no work item, or its session is neither running, starting         nor held: the reason",
+        "operationId": "post__tools_pilot-store_stops",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StopRequestSchema.4ff8b5e"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordedSchema.4ff8b5e"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "`stop_work(item)` (F86.4): a work item's session stopped by Pilot.",
+        "tags": []
+      }
+    },
+    "/tools/pilot-store/writer-questions": {
+      "post": {
+        "description": "Returns:     201: The document's blocks its writer is asked about     400: The body is not a document's id, a block's id and a question     401: No bearer, or one no session has     403: The bearer's session is not a job's, or has no turn running     404: The document is not of the session's project, or has no such         block     409: The question is blank, the item is no registered document or is         done, or the block is not of it, is answered or was asked about         already: the reason",
+        "operationId": "post__tools_pilot-store_writer-questions",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WriterQuestionRequestSchema.4ff8b5e"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WriterQuestionsSchema.4ff8b5e"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "`ask_writer(document, block, question)` (F86.8, D059): the pre-ruling pass's question to a registered document's writer about one of its blocks, recorded with the pass's turn.",
         "tags": []
       }
     },

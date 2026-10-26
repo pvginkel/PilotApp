@@ -475,6 +475,14 @@ class TimelineItemSchema(BaseModel):
     attachments: list[AttachmentSchema] = Field(
         description="The files hung on the item, in their order, on every kind (F17.5)"
     )
+    asked_writer_about: list[str] = Field(
+        description=(
+            "The local ids of the blocks Pilot asked a registered document's "
+            'writer about, in their order, which its line names: "Pilot asked the '
+            'writer about D2 and D4" (F86.8); empty for every other item'
+        ),
+        examples=[["D2", "D4"]],
+    )
     work: WorkSchema | None = Field(
         description=(
             "A work item's Session, which the SSE event `work_moved` carries as it "

@@ -66,7 +66,6 @@ from app.services.controller_client import (
     ControllerProblemType,
     ControllerUnreachable,
     EnvironmentWait,
-    HeadlessCreateRequest,
     RawFrame,
     ResultFrame,
     SessionSnapshot,
@@ -85,6 +84,7 @@ from app.services.session_record_service import (
     read_records,
     stream_position,
 )
+from app.services.session_scope import scoped_create
 from app.services.session_stream_service import SessionStreamService
 from app.services.start_gate import WorkSlots
 from app.services.supervisor import LoopHandle, Supervisor
@@ -575,9 +575,10 @@ class RelayService:
     ) -> None:
         """Under the Session's lock: a `server` record outside any Turn saying
         the controller session is gone, every Turn in flight ended with no
-        `result`, the session re-created with `resume` the Session's
-        conversation in its environment, Pilot's MCP server handed to it with
-        a token minted for it, and `controller_session` and `token_hash`
+        `result`, the session re-created as every create of it is
+        (`scoped_create`), resuming the Session's conversation in its
+        environment, Pilot's MCP server handed to it with a token minted for
+        it, and `controller_session` and `token_hash`
         overwritten (§9.6; decision 9). A `running` Session is left `idle`, for
         its caller's next Turn.
 
@@ -585,15 +586,7 @@ class RelayService:
             ExternalServiceException: The create failed, and nothing is written
         """
         gone = session.controller_session
-        injected = self._pilot_server.inject(
-            HeadlessCreateRequest(
-                cwd=session.cwd,
-                resume=session.conversation_id,
-                agent=session.agent,
-                model=session.model,
-                reasoning_effort=session.reasoning_effort,
-            )
-        )
+        injected = self._pilot_server.inject(scoped_create(db, session))
         created = self._client().create_headless_session(
             _environment_id(session), injected.request
         )

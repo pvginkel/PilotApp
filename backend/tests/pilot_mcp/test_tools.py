@@ -1,7 +1,7 @@
-"""`pilot-work`'s tools driven through a real MCP client to the API's routes
-(F85, ruling D1): each one REST call under the caller's bearer as it came,
-its answer the route's, and the route's refusal the tool's error, its reason
-whole."""
+"""`pilot-work`'s tools (F85, ruling D1) and `pilot-store`'s (F86) driven
+through a real MCP client to the API's routes: each one REST call under the
+caller's bearer as it came, its answer the route's, and the route's refusal the
+tool's error, its reason whole."""
 
 import json
 import uuid
@@ -13,10 +13,21 @@ from sqlalchemy.orm import Session as DbSession
 from starlette.applications import Starlette
 
 from app import models
-from app.models import Attachment, Document, Environment, Item, ItemAttachment, Turn
+from app.models import (
+    Attachment,
+    Block,
+    Document,
+    Environment,
+    Item,
+    ItemAttachment,
+    Turn,
+    WriterQuestion,
+)
+from app.models.reference import AnswerChannel, ProjectState, SessionState
 from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerClient
 from app.services.session_record_service import read_records
+from pilot_mcp.server import STORE_PATH
 from pilot_mcp.tools import TOOL_USE_ID_META
 from tests.support.fake_controller import ServedFakeController
 from tests.support.pilot_mcp import (
@@ -385,3 +396,389 @@ class TestTheToolUseId:
         assert not result.isError
         [(request, _)] = routes.calls
         assert "tool-use-id" not in request.headers
+
+
+DECISION = """---
+title: Which tent?
+---
+
+```decision id=D1
+options:
+  - Dome
+  - Tunnel
+recommend: Dome
+```
+"""
+
+CAMP_PLAN = """---
+title: Camp plan
+---
+
+```decision id=D1
+options:
+  - Dome
+  - Tunnel
+recommend: Dome
+```
+
+```decision id=D2
+options:
+  - Lake
+  - Forest
+recommend: Lake
+```
+"""
+
+REGISTERED = "/work/Example/docs/survey.md"
+
+REGISTERED_TEXT = """---
+title: Camp survey
+---
+
+```question id=Q1
+```
+
+```question id=Q2
+```
+"""
+
+
+def _decision(
+    session: DbSession, container: ServiceContainer, brain: models.Session
+) -> Item:
+    """A decision the brain added, committed."""
+    project = session.get_one(models.Project, brain.project_id)
+    item = container.document_service().bear_item(
+        project, "decision", "Which tent?", brain, DECISION
+    )
+    session.commit()
+    return item
+
+
+def _effect(session: DbSession, brain: models.Session) -> dict[str, object]:
+    """The payload of the brain's one record, its call's effect."""
+    [record] = read_records(session, brain.id, limit=10)
+    payload: dict[str, object] = record.record.payload
+    return payload
+
+
+@pytest.mark.anyio
+class TestAnswer:
+    async def test_the_answer_is_recorded_for_the_person_through_its_route(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        session: DbSession,
+        container: ServiceContainer,
+        person: models.User,
+        brain: models.Session,
+    ) -> None:
+        item = _decision(session, container, brain)
+
+        result = await call(
+            mcp_app,
+            "answer",
+            {
+                "block": f"{item.id}/D1",
+                "value": "Dome",
+                "for": person.handle,
+                "note": "The dome, it stands up in five minutes.",
+            },
+            meta={TOOL_USE_ID_META: "toolu_01"},
+            path=STORE_PATH,
+        )
+
+        assert not result.isError
+        assert result.structuredContent == {"effect": "Answered · D1 · Which tent?"}
+        [(request, _)] = routes.calls
+        assert str(request.url) == f"{API_URL}/tools/pilot-store/answers"
+        assert json.loads(request.content) == {
+            "block": f"{item.id}/D1",
+            "value": "Dome",
+            "for": "ada",
+            "note": "The dome, it stands up in five minutes.",
+        }
+        assert request.headers["tool-use-id"] == "toolu_01"
+        block = session.scalars(select(Block).where(Block.document_id == item.id)).one()
+        assert (block.answer, block.answered_by_user_id, block.via_code) == (
+            "Dome",
+            person.id,
+            AnswerChannel.CHAT,
+        )
+        assert _effect(session, brain)["toolUseId"] == "toolu_01"
+
+    async def test_a_block_that_is_no_blocks_id_is_refused_without_calling_the_api(
+        self, mcp_app: Starlette, routes: ApiRoutes, brain: models.Session
+    ) -> None:
+        result = await call(
+            mcp_app,
+            "answer",
+            {"block": "D1", "value": "Dome", "for": "ada"},
+            path=STORE_PATH,
+        )
+
+        assert "String should match pattern" in error_text(result)
+        assert routes.calls == []
+
+    async def test_the_routes_refusal_is_the_tools_error_its_reason_whole(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        session: DbSession,
+        container: ServiceContainer,
+        brain: models.Session,
+    ) -> None:
+        item = _decision(session, container, brain)
+
+        result = await call(
+            mcp_app,
+            "answer",
+            {"block": f"{item.id}/D1", "value": "Dome", "for": "nobody"},
+            path=STORE_PATH,
+        )
+
+        assert error_text(result) == _refusal(routes, "answer")
+        assert error_text(result) == (
+            "Error executing tool answer: Person nobody was not found"
+        )
+
+
+@pytest.mark.anyio
+class TestMark:
+    async def test_done_is_marked_for_the_person(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        session: DbSession,
+        container: ServiceContainer,
+        person: models.User,
+        brain: models.Session,
+    ) -> None:
+        project = session.get_one(models.Project, brain.project_id)
+        item = container.document_service().bear_item(
+            project, "document", "Camp plan", brain, CAMP_PLAN
+        )
+        session.commit()
+
+        result = await call(
+            mcp_app,
+            "mark",
+            {"item": str(item.id), "mark": "done", "for": person.handle},
+            path=STORE_PATH,
+        )
+
+        assert result.structuredContent == {"effect": "Marked done · Camp plan"}
+        [(request, _)] = routes.calls
+        assert json.loads(request.content) == {
+            "item": str(item.id),
+            "mark": "done",
+            "for": "ada",
+        }
+        session.refresh(item)
+        assert item.done_by_user_id == person.id
+
+    async def test_without_for_none_is_sent_and_read_is_the_routes_refusal(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        session: DbSession,
+        container: ServiceContainer,
+        brain: models.Session,
+    ) -> None:
+        item = _decision(session, container, brain)
+
+        result = await call(
+            mcp_app, "mark", {"item": str(item.id), "mark": "read"}, path=STORE_PATH
+        )
+
+        [(request, _)] = routes.calls
+        assert json.loads(request.content) == {"item": str(item.id), "mark": "read"}
+        assert error_text(result) == (
+            f"Error executing tool mark: Cannot mark item {item.id} read because"
+            " Pilot's own mark is Done, on a document it settled whole: Read and"
+            " Reviewed are a person's, named by `for`"
+        )
+
+
+@pytest.mark.anyio
+class TestStopWork:
+    async def test_a_work_items_session_is_stopped_by_pilot(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        session: DbSession,
+        container: ServiceContainer,
+        project: models.Project,
+        brain: models.Session,
+    ) -> None:
+        run = models.Session(
+            project_id=project.id,
+            kind_code="work",
+            cwd="/work/Example",
+            token_hash="2" * 64,
+            state_code=SessionState.HELD,
+            turns=1,
+            turn_started_at=datetime.now(UTC),
+        )
+        session.add(run)
+        session.flush()
+        session.add(
+            Turn(session_id=run.id, seq=1, message="Go.", started_at=datetime.now(UTC))
+        )
+        container.record_service().place_work(project, run, "Pitching the tent")
+        session.commit()
+
+        result = await call(
+            mcp_app, "stop_work", {"item": str(run.id)}, path=STORE_PATH
+        )
+
+        assert result.structuredContent == {"effect": "Stopped · Pitching the tent"}
+        [(request, _)] = routes.calls
+        assert json.loads(request.content) == {"item": str(run.id)}
+        session.refresh(run)
+        assert run.state_code == SessionState.STOPPED
+
+
+@pytest.mark.anyio
+class TestFinish:
+    async def test_the_project_is_finished_by_pilot(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        session: DbSession,
+        project: models.Project,
+        brain: models.Session,
+    ) -> None:
+        project.state_code = ProjectState.OPEN
+        project.slug = "camp"
+        project.name = "Camp"
+        session.commit()
+
+        result = await call(mcp_app, "finish", {}, path=STORE_PATH)
+
+        assert result.structuredContent == {"effect": "Finished · Camp"}
+        [(request, _)] = routes.calls
+        assert str(request.url) == f"{API_URL}/tools/pilot-store/finish"
+        session.refresh(project)
+        assert project.state_code == ProjectState.FINISHED
+
+
+@pytest.mark.anyio
+class TestAskWriter:
+    async def test_a_jobs_question_is_recorded_and_answers_the_blocks_asked(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        session: DbSession,
+        container: ServiceContainer,
+        project: models.Project,
+        environment: Environment,
+    ) -> None:
+        item = _registered_document(session, container, project, environment)
+        job = _job(session, container, project, environment)
+
+        result = await call(
+            mcp_app,
+            "ask_writer",
+            {
+                "document": str(item.id),
+                "block": f"{item.id}/Q2",
+                "question": "Which lake?",
+            },
+            path=STORE_PATH,
+        )
+
+        assert result.structuredContent == {"blocks": ["Q2"]}
+        [(request, _)] = routes.calls
+        assert str(request.url) == f"{API_URL}/tools/pilot-store/writer-questions"
+        [question] = session.scalars(select(WriterQuestion))
+        assert question.question == "Which lake?"
+        assert read_records(session, job.id, limit=10) == []
+
+    async def test_a_chats_question_is_the_routes_refusal(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        session: DbSession,
+        container: ServiceContainer,
+        project: models.Project,
+        environment: Environment,
+        brain: models.Session,
+    ) -> None:
+        item = _registered_document(session, container, project, environment)
+
+        result = await call(
+            mcp_app,
+            "ask_writer",
+            {
+                "document": str(item.id),
+                "block": f"{item.id}/Q2",
+                "question": "Which lake?",
+            },
+            path=STORE_PATH,
+        )
+
+        assert routes.calls[-1][1].status_code == 403
+        assert error_text(result) == (
+            f"Error executing tool ask_writer: Cannot ask the writer about block"
+            f" {item.id}/Q2 because session {brain.id} is a chat session: the"
+            " pre-ruling pass, a job's, asks"
+        )
+
+
+@pytest.mark.anyio
+class TestTheStoresBearer:
+    async def test_a_work_items_bearer_is_the_routes_refusal(
+        self, mcp_app: Starlette, routes: ApiRoutes, worker: models.Session
+    ) -> None:
+        result = await call(mcp_app, "finish", {}, path=STORE_PATH)
+
+        assert routes.calls[-1][1].status_code == 403
+        assert error_text(result) == (
+            "Error executing tool finish: Cannot call pilot-store because session"
+            f" {worker.id} is a work session, not a chat's or a job's"
+        )
+
+
+def _registered_document(
+    session: DbSession,
+    container: ServiceContainer,
+    project: models.Project,
+    environment: Environment,
+) -> Item:
+    """A document a worker registered, read at its run's end, committed."""
+    worker = models.Session(
+        project_id=project.id,
+        environment_id=environment.id,
+        kind_code="work",
+        cwd="/work/Example",
+        token_hash="3" * 64,
+        state_code=SessionState.IDLE,
+    )
+    session.add(worker)
+    session.flush()
+    documents = container.document_service()
+    item = documents.register(project, worker, REGISTERED).item
+    documents.publish_read(
+        session.get_one(Document, item.id), REGISTERED_TEXT, worker.id
+    )
+    session.commit()
+    return item
+
+
+def _job(
+    session: DbSession,
+    container: ServiceContainer,
+    project: models.Project,
+    environment: Environment,
+) -> models.Session:
+    """The project's job, running, whose bearer is `TOKEN`, its turn in
+    flight."""
+    job = running_session(session, container, project, environment, kind="job")
+    session.add(
+        Turn(
+            session_id=job.id, seq=1, message="Pre-rule.", started_at=datetime.now(UTC)
+        )
+    )
+    session.commit()
+    return job

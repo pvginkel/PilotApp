@@ -21,6 +21,7 @@ from app.engine.record import MARKED, NOTICE, SETTLED, RecordService
 from app.exceptions import RecordNotFoundException
 from app.models import (
     Attachment,
+    Block,
     ConfirmationReason,
     Document,
     DocumentVersion,
@@ -36,6 +37,7 @@ from app.models import (
     Turn,
     User,
     Work,
+    WriterQuestion,
 )
 from app.models import Session as AgentSession
 from app.models.reference import (
@@ -269,6 +271,23 @@ def work_status(
     }
 
 
+def writer_asked(
+    db: Session, document_ids: Collection[uuid.UUID]
+) -> dict[uuid.UUID, list[str]]:
+    """The local ids of the blocks each of the documents' writer is asked
+    about (DB Writer Question), in their order in it; a document whose writer
+    is asked nothing is left out."""
+    asked: dict[uuid.UUID, list[str]] = {}
+    for document_id, local_id in db.execute(
+        select(Block.document_id, Block.local_id)
+        .join(WriterQuestion, WriterQuestion.block_id == Block.id)
+        .where(Block.document_id.in_(document_ids))
+        .order_by(Block.document_id, Block.position)
+    ):
+        asked.setdefault(document_id, []).append(local_id)
+    return asked
+
+
 def _stop_cause(db: Session, session_id: uuid.UUID) -> StopCause | None:
     """The cause of the Session's stop when its environment was stopped under
     its turn: its last record is the `server` record that ended the turn
@@ -442,6 +461,9 @@ class TimelineService:
         counts = {item_id: dsl.words(text) for item_id, text in texts.items()}
         edited = self._edited(list(texts))
         attachments = self._attachments([item.id for item, _, _ in rows])
+        asked = writer_asked(
+            self.db, [item.id for item, document, _ in rows if document is not None]
+        )
         works = work_status(
             self.db,
             [item.id for item, _, form in rows if form == WORK],
@@ -527,6 +549,7 @@ class TimelineService:
                 awaiting_read=document is not None and awaits_read(item, document),
                 edited_at=edited.get(item.id),
                 attachments=attachments.get(item.id, []),
+                asked_writer_about=asked.get(item.id, []),
                 work=works[item.id] if form == WORK else None,
             )
             for item, document, form in rows

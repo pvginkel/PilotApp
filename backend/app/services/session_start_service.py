@@ -96,7 +96,6 @@ from app.services.controller_client import (
     ControllerProblem,
     ControllerProblemType,
     ControllerUnreachable,
-    HeadlessCreateRequest,
 )
 from app.services.controller_outage import ControllerOutage
 from app.services.current_line import while_starting
@@ -108,6 +107,7 @@ from app.services.session_record_service import (
     read_records,
     stream_position,
 )
+from app.services.session_scope import ScopedCreate, scoped_create
 from app.services.session_stream_service import SessionStreamService
 from app.services.start_gate import WORK_KIND, Held, WorkSlots, held_reason
 from app.services.supervisor import LoopHandle, Supervisor
@@ -213,7 +213,7 @@ class _Pending:
     """The Session is a work item's in an environment Pilot did not create:
     placed before slice 020, it is never started there."""
     controller_session: str | None
-    create: HeadlessCreateRequest
+    create: ScopedCreate
     turn_id: int
     """The Turn the start sends: the brief, or a Resume's."""
     resuming: bool
@@ -1183,13 +1183,7 @@ def _pending(db: Session, session_id: uuid.UUID) -> _Pending | None:
         unreset=environment is not None and _unreset(session, environment),
         foreign=_foreign(session, environment),
         controller_session=session.controller_session,
-        create=HeadlessCreateRequest(
-            cwd=session.cwd,
-            resume=session.conversation_id,
-            agent=session.agent,
-            model=session.model,
-            reasoning_effort=session.reasoning_effort,
-        ),
+        create=scoped_create(db, session),
         turn_id=turn.id,
         resuming=turn.seq > 1,
     )

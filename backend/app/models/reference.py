@@ -129,6 +129,14 @@ class EffectKind(StrEnum):
     REGISTERED = "registered"
 
 
+class Surface(StrEnum):
+    """A Session Kind's `surface`: the tools of Pilot's MCP server its
+    sessions are handed (TD §4.5)."""
+
+    WORK = "pilot-work"
+    STORE = "pilot-store"
+
+
 class TaskStatus(StrEnum):
     PENDING = "pending"
     IN_PROGRESS = "in_progress"

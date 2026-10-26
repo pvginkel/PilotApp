@@ -1,10 +1,13 @@
-"""Pilot's MCP server (F83): its tool surface pinned, as a contract the
-sessions it is handed to are written against, the bearer it requires, and the
-probes that answer without one."""
+"""Pilot's MCP server (F83): its two surfaces pinned, `pilot-work`'s and
+`pilot-store`'s, as a contract the sessions they are handed to are written
+against, the bearer it requires, and the probes that answer without one."""
+
+from typing import Any
 
 import pytest
 from starlette.applications import Starlette
 
+from pilot_mcp.server import STORE_PATH, WORK_PATH
 from tests.support.pilot_mcp import BEARER, ApiRoutes, http_client, mcp_session
 
 _PATH = {
@@ -39,7 +42,7 @@ _UUID = {"format": "uuid", "type": "string"}
 
 # Each tool: its parameters, its result and its description, the words as the
 # worker reads them (FM §5 step 1, F65.3, F85).
-SURFACE = {
+WORK_SURFACE = {
     "register_document": (
         {
             "properties": {"path": _PATH},
@@ -117,7 +120,7 @@ SURFACE = {
     ),
 }
 
-INSTRUCTIONS = (
+WORK_INSTRUCTIONS = (
     "Pilot, the project manager that started this session to do a work item of its"
     " project. Write each decision document your work produces as a file under"
     " `/work`, register it with `register_document` and attach what backs it with"
@@ -126,6 +129,217 @@ INSTRUCTIONS = (
     " operator; once every one is answered, Pilot writes the answered files back in"
     " place and continues this conversation with a message naming them."
 )
+
+_BLOCK = {
+    "description": "The block's id, `<item id>/<local id>`",
+    "pattern": r"^[0-9A-Fa-f-]{36}/\S+$",
+    "title": "Block",
+    "type": "string",
+}
+
+_ITEM = {"format": "uuid", "title": "Item", "type": "string"}
+
+_RECORDED = {
+    "description": "What the call changed.",
+    "properties": {
+        "effect": {
+            "description": (
+                "Its effect line, `<verb> · <what>`, as it shows where the call ran"
+            ),
+            "title": "Effect",
+            "type": "string",
+        }
+    },
+    "required": ["effect"],
+    "title": "Recorded",
+    "type": "object",
+}
+
+
+def _optional(title: str, description: str, **string: Any) -> dict[str, Any]:
+    return {
+        "anyOf": [{**string, "type": "string"}, {"type": "null"}],
+        "default": None,
+        "description": description,
+        "title": title,
+    }
+
+
+# Each tool: its parameters, its result and its description, the words as the
+# brain reads them (TD §4.5, F86).
+STORE_SURFACE = {
+    "answer": (
+        {
+            "properties": {
+                "block": _BLOCK,
+                "value": {
+                    "description": (
+                        "The answer: an option's label, `Agree`, `Yes`, `No`, the"
+                        " person's own words, or `deferred` with `to`"
+                    ),
+                    "minLength": 1,
+                    "title": "Value",
+                    "type": "string",
+                },
+                "for": {
+                    "description": "The handle of the person whose answer it is",
+                    "minLength": 1,
+                    "title": "For",
+                    "type": "string",
+                },
+                "note": _optional("Note", "Their words, as they gave them"),
+                "to": _optional(
+                    "To",
+                    "With `deferred`: the id of the plan's task the block returns"
+                    " at, or `plan`, the project's end",
+                ),
+            },
+            "required": ["block", "value", "for"],
+            "title": "answerArguments",
+            "type": "object",
+        },
+        _RECORDED,
+        "Record a person's answer to a block, given in the chat, on their behalf:"
+        " `for` names them by handle, `value` is the answer and `note` their words."
+        " A deferral they ask for is `deferred` with `to`. It is their answer,"
+        " through the chat, which they can undo; it replaces the block's answer,"
+        " yours included, while the item is open, and the answer to an item's one"
+        " block is its Done. A block not of your project, a `for` that names no"
+        " person, an answer the block does not take, an item that is done, or a"
+        " registered document whose file has not been read yet is refused with"
+        " the reason, and nothing is recorded. Answers `{effect}`, the call's"
+        " effect line.",
+    ),
+    "mark": (
+        {
+            "properties": {
+                "item": {**_ITEM, "description": "The item's id"},
+                "mark": {
+                    "description": (
+                        "`done` on a document, `read` on a notice, `reviewed` on"
+                        " a review"
+                    ),
+                    "enum": ["done", "read", "reviewed"],
+                    "title": "Mark",
+                    "type": "string",
+                },
+                "for": _optional(
+                    "For",
+                    "The handle of the person the mark is for; without it, your"
+                    " own `done`",
+                    minLength=1,
+                ),
+            },
+            "required": ["item", "mark"],
+            "title": "markArguments",
+            "type": "object",
+        },
+        _RECORDED,
+        "Mark an item on behalf of the person `for` names: `done` on a document,"
+        " its unanswered blocks answered with their recommendations as Done"
+        " answers them; `read` on a notice; `reviewed` on a review. Without `for`,"
+        " the mark is your own, and only `done`, on a document you settled whole,"
+        " every block of it answered. An item not of your project, a `for` that"
+        " names no person, a mark its kind does not take, an item that is done, a"
+        " document with a block neither answered nor recommended, or, without"
+        " `for`, one with a block unanswered is refused with the reason, and"
+        " nothing is marked. Answers `{effect}`, the call's effect line.",
+    ),
+    "stop_work": (
+        {
+            "properties": {"item": {**_ITEM, "description": "The work item's id"}},
+            "required": ["item"],
+            "title": "stop_workArguments",
+            "type": "object",
+        },
+        _RECORDED,
+        "Stop a work item's session that runs, is starting or is held at the gate:"
+        " a runaway session, or one a correction makes moot. A turn in flight is"
+        " interrupted and the conversation kept; the item shows it stopped by"
+        " Pilot, and a person can resume it. An item not of your project, one that"
+        " is no work item, or one whose session is not running, starting or held"
+        " is refused with the reason. Answers `{effect}`, the call's effect line.",
+    ),
+    "finish": (
+        {"properties": {}, "title": "finishArguments", "type": "object"},
+        _RECORDED,
+        "Finish the project, as the project menu's Finish does: only on the"
+        " operator's Yes to the decision you asked once the plan's last task was"
+        " done. Every open item is closed unanswered, auto pilot is switched off"
+        " and a pause lifted, and every session of the project that runs, is"
+        " starting or is held is stopped, this one's turn among them once the call"
+        " is recorded. A project that is a draft, finished or archived is refused"
+        " with the reason. Answers `{effect}`, the call's effect line.",
+    ),
+    "ask_writer": (
+        {
+            "properties": {
+                "document": {
+                    "description": "The registered document's item id",
+                    "format": "uuid",
+                    "title": "Document",
+                    "type": "string",
+                },
+                "block": {
+                    **_BLOCK,
+                    "description": (
+                        "The block's id, `<item id>/<local id>`, a block of `document`"
+                    ),
+                },
+                "question": {
+                    "description": "The question, in the words the writer is to read",
+                    "minLength": 1,
+                    "title": "Question",
+                    "type": "string",
+                },
+            },
+            "required": ["document", "block", "question"],
+            "title": "ask_writerArguments",
+            "type": "object",
+        },
+        {
+            "description": "The document's blocks its writer is asked about.",
+            "properties": {
+                "blocks": {
+                    "description": (
+                        "Their local ids, the block this call asked about among"
+                        " them, in their order in the document"
+                    ),
+                    "items": {"type": "string"},
+                    "title": "Blocks",
+                    "type": "array",
+                }
+            },
+            "required": ["blocks"],
+            "title": "Asked",
+            "type": "object",
+        },
+        "Ask the writer of a registered document about one of its blocks that you"
+        " cannot read and the record does not answer: what it asks, which option"
+        " the writer means, what a thing it names is. Only the pre-ruling pass"
+        " asks, once a block. The question is recorded on the document with your"
+        " turn, and the document's line says that Pilot asked its writer. A"
+        " document that is no registered document of your project or is done, a"
+        " block not of it, answered or asked about already, or a call from the"
+        " chat is refused with the reason, and nothing is recorded. Answers"
+        " `{blocks}`, the document's blocks its writer is asked about.",
+    ),
+}
+
+STORE_INSTRUCTIONS = (
+    "Pilot, the project manager, whose brain this session is, for the one project"
+    " `$PILOT_PROJECT` names. These tools are the one door to Pilot's record"
+    " beyond the files of the project's folder: each acts on that project alone,"
+    " and only while your turn runs. An `item` is an item's id and a `block` a"
+    " block's, `<item id>/<local id>`: the item's id as `timeline.json` gives it,"
+    " the block's local id as its fence does. A call the record refuses changes"
+    " nothing and answers the reason."
+)
+
+_SURFACES = [
+    pytest.param(WORK_PATH, WORK_SURFACE, WORK_INSTRUCTIONS, id="pilot-work"),
+    pytest.param(STORE_PATH, STORE_SURFACE, STORE_INSTRUCTIONS, id="pilot-store"),
+]
 
 _INITIALIZE = {
     "jsonrpc": "2.0",
@@ -147,10 +361,16 @@ def _words(text: str) -> str:
 
 @pytest.mark.anyio
 class TestTheSurface:
+    @pytest.mark.parametrize(("path", "pinned", "instructions"), _SURFACES)
     async def test_the_tools_are_pinned(
-        self, mcp_app: Starlette, routes: ApiRoutes
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        path: str,
+        pinned: dict[str, Any],
+        instructions: str,
     ) -> None:
-        async with mcp_session(mcp_app) as (session, _):
+        async with mcp_session(mcp_app, path=path) as (session, _):
             tools = (await session.list_tools()).tools
 
         surface = {
@@ -161,17 +381,22 @@ class TestTheSurface:
             )
             for tool in tools
         }
-        assert surface == SURFACE
+        assert surface == pinned
         assert routes.calls == []
 
+    @pytest.mark.parametrize(("path", "pinned", "instructions"), _SURFACES)
     async def test_the_server_is_pilot_with_its_instructions(
-        self, mcp_app: Starlette
+        self,
+        mcp_app: Starlette,
+        path: str,
+        pinned: dict[str, Any],
+        instructions: str,
     ) -> None:
-        async with mcp_session(mcp_app) as (_, initialized):
+        async with mcp_session(mcp_app, path=path) as (_, initialized):
             pass
 
         assert initialized.serverInfo.name == "pilot"
-        assert initialized.instructions == INSTRUCTIONS
+        assert initialized.instructions == instructions
 
 
 @pytest.mark.anyio
@@ -180,12 +405,17 @@ class TestTheBearer:
         "authorization",
         [None, "Bearer ", "Bearer   ", "bearer worker-token", "Basic worker-token"],
     )
+    @pytest.mark.parametrize("path", [WORK_PATH, STORE_PATH])
     async def test_a_request_with_no_bearer_is_refused(
-        self, mcp_app: Starlette, routes: ApiRoutes, authorization: str | None
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        authorization: str | None,
+        path: str,
     ) -> None:
         headers = {} if authorization is None else {"Authorization": authorization}
         async with http_client(mcp_app, headers) as http:
-            response = await http.post("/mcp", json=_INITIALIZE, headers=_ACCEPT)
+            response = await http.post(path, json=_INITIALIZE, headers=_ACCEPT)
 
         assert response.status_code == 401
         assert response.headers["www-authenticate"] == "Bearer"
@@ -202,14 +432,20 @@ class TestTheBearer:
         }
         assert routes.calls == []
 
+    @pytest.mark.parametrize(("path", "pinned", "instructions"), _SURFACES)
     async def test_a_bearer_is_admitted_without_its_check(
-        self, mcp_app: Starlette, routes: ApiRoutes
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        path: str,
+        pinned: dict[str, Any],
+        instructions: str,
     ) -> None:
         headers = {"Authorization": "Bearer a-token-no-session-has"}
-        async with mcp_session(mcp_app, headers) as (session, _):
+        async with mcp_session(mcp_app, headers, path) as (session, _):
             tools = (await session.list_tools()).tools
 
-        assert {tool.name for tool in tools} == set(SURFACE)
+        assert {tool.name for tool in tools} == set(pinned)
         assert routes.calls == []
 
     @pytest.mark.parametrize("path", ["/health/healthz", "/health/readyz"])

@@ -1,14 +1,30 @@
 """Pilot's MCP server as a headless create hands it to a session (TD §4.5;
 F84, V02): the token minted for the create, its hash, and the `mcpConfig`
-entry that names the server."""
+entry that names the server at its surface's endpoint; and a bearer resolved
+to its Session."""
 
 import hashlib
 import json
+from urllib.parse import urlparse
 
+import pytest
+from sqlalchemy.orm import Session as DbSession
+
+from app import models
+from app.exceptions import AuthenticationException
+from app.models import Project
+from app.models.reference import SessionState, Surface
 from app.services.controller_client import HeadlessCreateRequest
-from app.services.pilot_server import PilotServer, token_hash
+from app.services.pilot_server import PilotServer, bearer_session, token_hash
+from app.services.session_scope import ScopedCreate
+from pilot_mcp.server import STORE_PATH as SERVED_STORE_PATH
+from pilot_mcp.server import WORK_PATH as SERVED_WORK_PATH
 
 URL = "https://pilot-mcp.example.com/mcp"
+
+
+def _work(request: HeadlessCreateRequest) -> ScopedCreate:
+    return ScopedCreate(request, Surface.WORK)
 
 
 def _token(request: HeadlessCreateRequest) -> str:
@@ -34,7 +50,7 @@ class TestInject:
         self,
     ) -> None:
         injected = PilotServer(URL).inject(
-            HeadlessCreateRequest(cwd="/work/Example", resume="conversation-1")
+            _work(HeadlessCreateRequest(cwd="/work/Example", resume="conversation-1"))
         )
 
         token = _token(injected.request)
@@ -66,7 +82,7 @@ class TestInject:
             reasoning_effort="high",
         )
 
-        injected = PilotServer(URL).inject(request)
+        injected = PilotServer(URL).inject(_work(request))
 
         assert injected.request.model_dump(
             by_alias=True, exclude_none=True, exclude={"env", "mcp_config"}
@@ -84,7 +100,9 @@ class TestInject:
         self,
     ) -> None:
         injected = PilotServer(URL).inject(
-            HeadlessCreateRequest(env=["EXAMPLE=1"], mcp_config=["/work/mcp.json"])
+            _work(
+                HeadlessCreateRequest(env=["EXAMPLE=1"], mcp_config=["/work/mcp.json"])
+            )
         )
 
         token = _token(injected.request)
@@ -96,8 +114,8 @@ class TestInject:
     def test_each_create_gets_a_token_of_its_own(self) -> None:
         server = PilotServer(URL)
 
-        first = server.inject(HeadlessCreateRequest())
-        second = server.inject(HeadlessCreateRequest())
+        first = server.inject(_work(HeadlessCreateRequest()))
+        second = server.inject(_work(HeadlessCreateRequest()))
 
         assert _token(first.request) != _token(second.request)
         assert first.token_hash != second.token_hash
@@ -108,9 +126,109 @@ class TestInject:
         request = HeadlessCreateRequest(cwd="/work/Example")
         server = PilotServer(None)
 
-        first = server.inject(request)
-        second = server.inject(request)
+        first = server.inject(_work(request))
+        second = server.inject(_work(request))
 
         assert first.request == request
         assert len(first.token_hash) == 64
         assert first.token_hash != second.token_hash
+
+    @pytest.mark.parametrize(
+        ("url", "surface", "endpoint"),
+        [
+            (URL, Surface.WORK, URL),
+            (URL, Surface.STORE, f"{URL}/store"),
+            (f"{URL}/", Surface.STORE, f"{URL}/store"),
+        ],
+        ids=["pilot-work", "pilot-store", "pilot-store-under-a-slash"],
+    )
+    def test_the_server_is_named_at_its_surfaces_endpoint(
+        self, url: str, surface: Surface, endpoint: str
+    ) -> None:
+        injected = PilotServer(url).inject(
+            ScopedCreate(HeadlessCreateRequest(cwd="/work/PilotProjects"), surface)
+        )
+
+        assert injected.request.mcp_config is not None
+        (entry,) = injected.request.mcp_config
+        assert json.loads(entry)["mcpServers"] == {
+            "pilot": {
+                "type": "http",
+                "url": endpoint,
+                "headers": {"Authorization": "Bearer ${PILOT_TOKEN}"},
+            }
+        }
+
+    def test_each_surfaces_endpoint_is_the_path_the_mcp_process_serves_it_at(
+        self,
+    ) -> None:
+        server = PilotServer(f"https://pilot-mcp.example.com{SERVED_WORK_PATH}")
+
+        served = {}
+        for surface in Surface:
+            injected = server.inject(ScopedCreate(HeadlessCreateRequest(), surface))
+            assert injected.request.mcp_config is not None
+            (entry,) = injected.request.mcp_config
+            served[surface] = urlparse(json.loads(entry)["mcpServers"]["pilot"]["url"])
+
+        assert {surface: url.path for surface, url in served.items()} == {
+            Surface.WORK: SERVED_WORK_PATH,
+            Surface.STORE: SERVED_STORE_PATH,
+        }
+
+
+def _session(db: DbSession, project: Project, kind: str) -> models.Session:
+    run = models.Session(
+        project_id=project.id,
+        kind_code=kind,
+        cwd="/work/Example",
+        token_hash=token_hash(f"{kind}-token"),
+        state_code=SessionState.RUNNING,
+    )
+    db.add(run)
+    db.flush()
+    return run
+
+
+class TestBearerSession:
+    @pytest.mark.parametrize(
+        ("kind", "surface"),
+        [("work", Surface.WORK), ("chat", Surface.STORE), ("job", Surface.STORE)],
+    )
+    def test_a_bearer_names_its_session_and_its_kinds_surface(
+        self, session: DbSession, project: Project, kind: str, surface: Surface
+    ) -> None:
+        run = _session(session, project, kind)
+
+        assert bearer_session(session, f"Bearer {kind}-token", Surface.STORE) == (
+            run,
+            surface,
+        )
+
+    @pytest.mark.parametrize(
+        ("authorization", "message"),
+        [
+            (None, "Cannot call pilot-store because the request carries no bearer"),
+            (
+                "Basic chat-token",
+                "Cannot call pilot-store because the request carries no bearer",
+            ),
+            (
+                "Bearer another-token",
+                "Cannot call pilot-store because no session has the request's bearer",
+            ),
+        ],
+    )
+    def test_no_bearer_or_one_no_session_has_is_refused(
+        self,
+        session: DbSession,
+        project: Project,
+        authorization: str | None,
+        message: str,
+    ) -> None:
+        _session(session, project, "chat")
+
+        with pytest.raises(AuthenticationException) as refused:
+            bearer_session(session, authorization, Surface.STORE)
+
+        assert refused.value.message == message
