@@ -38,6 +38,7 @@ from app.models import (
 )
 from app.models.reference import ProjectState, SessionState, VersionCause
 from app.schemas.testing_record import OPENING_WORDS
+from app.services.chat_close_service import ChatCloseService
 from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerClient
 from app.services.controller_outage import ControllerOutage
@@ -1198,6 +1199,12 @@ def _starts(
                 container=container,
                 supervisor=supervisor,
                 session_streams=container.session_stream_service(),
+            ),
+            chat_closes=ChatCloseService(
+                container=container,
+                supervisor=supervisor,
+                session_streams=container.session_stream_service(),
+                close_after_seconds=3300,
             ),
         ),
         controller_outage=container.controller_outage(),

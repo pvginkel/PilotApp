@@ -1,6 +1,8 @@
 """The brief a brain session's first Turn carries (design 3 §5): one frame,
 the server's, Markdown, in one order (§5.2), and a renderer per kind (§5.3);
-and the server's trailer on the brief the brain writes a worker (§5.4).
+the server's trailer on the brief the brain writes a worker (§5.4); and the
+follow-up turn of a brain session whose turn ended with a save of its own
+still held (§5.1; F79).
 
 A line that does not hold is left out, never written as "none", so that a
 brief reads as the facts of its session. A brain's carries what the tree does
@@ -25,9 +27,11 @@ from app.models import (
     Project,
     ProjectMember,
     ProjectTransition,
+    SaveError,
+    Turn,
     User,
 )
-from app.models.reference import DocumentRole, TransitionKind
+from app.models.reference import DocumentRole, ErrorKind, ProjectState, TransitionKind
 from app.services.session_scope import project_folder
 
 CHAT_SKILL = "/chat"
@@ -38,6 +42,9 @@ NOTES_HEADING = (
 )
 
 TRAILER_HEADING = "From Pilot:"
+
+FOLLOW_UP_END = "Fix it and end your turn."
+"""The last line of the server's follow-up turn, which marks it as one."""
 
 HOMELESS_HEADING = (
     "Deferrals without a home (a note names none of these blocks — write one,"
@@ -62,7 +69,22 @@ class BriefService:
         the switch, the pause while the project is paused, every open plan
         note by summary and the deferrals without a home, the latest closed
         chat, then `person`'s `words` verbatim, which it ends with (DB
-        assertion 251)."""
+        assertion 251). A finished project's has the finish line in place of
+        the switch and no notes (F5.5)."""
+        message = [
+            f"The message, from {person.handle} ({self._standing(project, person)}):",
+            words,
+        ]
+        if project.state_code is ProjectState.FINISHED:
+            return _frame(
+                CHAT_SKILL,
+                "a finished project's chat",
+                project,
+                at,
+                [self._finish(project)],
+                [self._earlier_chats(project)],
+                message,
+            )
         return _frame(
             CHAT_SKILL,
             "the project's chat",
@@ -71,11 +93,29 @@ class BriefService:
             [_switch(project), self._pause(project)],
             self._notes(project),
             [self._earlier_chats(project)],
-            [
-                f"The message, from {person.handle} ({self._standing(project, person)}):",
-                words,
-            ],
+            message,
         )
+
+    def follow_up(self, held: Sequence[str]) -> str:
+        """The server's turn after a brain session's turn that ended with its
+        saves of `held` still held, paths from the tree's root as the engine's
+        turn end returns them (§5.1; F79): each path with its faults as the
+        hook's check prints them, then what to do."""
+        lines = []
+        for path in held:
+            faults = ", ".join(
+                f"`{_printed(path, line, message)}`"
+                for line, message in self.db.execute(
+                    select(SaveError.line, SaveError.message)
+                    .where(
+                        SaveError.path == path, SaveError.kind_code == ErrorKind.PARSE
+                    )
+                    .order_by(SaveError.id)
+                )
+            )
+            lines.append(f"Your save of `{path}` is held: {faults}.")
+        lines.append(FOLLOW_UP_END)
+        return "\n".join(lines)
 
     def work_item(self, project: Project, brief: str, task: PlanTask | None) -> str:
         """A work item's first Turn (§5.4): `brief`, the brain's own text, then
@@ -119,6 +159,22 @@ class BriefService:
         return (
             f"The project is paused since {utc_time(since)}: anything you start"
             " is held until it resumes — say so."
+        )
+
+    def _finish(self, project: Project) -> str:
+        finished = self.db.scalar(
+            select(func.max(ProjectTransition.at)).where(
+                ProjectTransition.project_id == project.id,
+                ProjectTransition.kind_code == TransitionKind.FINISHED,
+            )
+        )
+        # A project is finished by its `finished` transition alone.
+        assert finished is not None
+        return (
+            f"This project is finished ({utc_time(finished)}): you read only — no"
+            " `pilot-store`, nothing under `/work` you can write. Answer from the"
+            " tree, the records and the fleet tools; what you would change, say so"
+            " and name who can."
         )
 
     def _notes(self, project: Project) -> list[str]:
@@ -203,6 +259,16 @@ def _frame(
         if lines:
             blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
+
+
+def is_follow_up(turn: Turn) -> bool:
+    """Whether the Turn is the server's follow-up (`BriefService.follow_up`)."""
+    return turn.author_user_id is None and turn.message.endswith(FOLLOW_UP_END)
+
+
+def _printed(path: str, line: int | None, message: str) -> str:
+    """A fault as the hook's check prints it (`pilot-sync`'s `render`)."""
+    return f"{path}: {message}" if line is None else f"{path}:{line}: {message}"
 
 
 def _switch(project: Project) -> str:

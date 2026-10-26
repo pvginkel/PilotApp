@@ -19,6 +19,7 @@ from app import models
 from app.database import scoped_session
 from app.models import Environment, Project, Turn, User
 from app.models.reference import RecordKind, SessionState
+from app.services.chat_close_service import ChatCloseService
 from app.services.container import ServiceContainer
 from app.services.environment_service import EnvironmentService
 from app.services.relay_service import CONTINUE, RelayService
@@ -572,6 +573,12 @@ def _starts(
                 container=container,
                 supervisor=supervisor,
                 session_streams=container.session_stream_service(),
+            ),
+            chat_closes=ChatCloseService(
+                container=container,
+                supervisor=supervisor,
+                session_streams=container.session_stream_service(),
+                close_after_seconds=3300,
             ),
         ),
         controller_outage=container.controller_outage(),

@@ -1,5 +1,5 @@
 """A person's message to a project's brain (design 3 §5.1, §5.3; F38.3,
-F130; DB Chat, Turn, assertions 159, 229, 243, 251).
+F130, F5.5, F128.5; DB Chat, Turn, assertions 159, 229, 243, 244, 245, 251).
 
 A message is a Turn of the project's open chat, the person's words verbatim
 with their quote tags, its `send` record in its place, and the Item or the
@@ -14,21 +14,37 @@ project has one chat open at a time, and no Close Cause is a failure or a stop.
 While its start is under way or held, a message is refused, as one is while a
 turn runs, which the controller refuses.
 
-A draft's, a finished project's and an archived project's chat take no
-message.
+A message to the open chat holds its Session's lock from before its send to
+the commit, so no close interleaves with it (`ChatCloseService`): one that
+finds the chat closed meanwhile starts the project's next chat. Its words are
+sent as they are, unless the project's handbook changed since the chat's
+previous Turn: then the server's `<store_notification>` saying so goes before
+them, counted (D052).
+
+A finished project's chat reads only: a message starts it as in an open
+project, its create boxed with nothing to write and no surface
+(`scoped_create`), its brief the finished project's. A draft's chat, the
+definition chat, and an archived project's take no message.
 """
 
 import re
 import uuid
 from datetime import UTC, datetime
 
+from prometheus_client import Counter
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.exceptions import InvalidOperationException, RecordNotFoundException
-from app.models import Block, Chat, Item, Project, Turn, User
+from app.models import Block, Chat, Document, Item, Project, Turn, User
 from app.models import Session as AgentSession
-from app.models.reference import ChatKind, ProjectState, RecordKind, SessionState
+from app.models.reference import (
+    ChatKind,
+    DocumentRole,
+    ProjectState,
+    RecordKind,
+    SessionState,
+)
 from app.services.brief_service import BriefService
 from app.services.pilot_server import unheld_token_hash
 from app.services.project_service import project_name
@@ -43,7 +59,22 @@ QUOTE_TAG = re.compile(
 )
 """A quote tag (F38.3; DB decision 29), the closing tag repeating the id."""
 
+STORE_NOTIFICATION = (
+    "<store_notification>\n"
+    "The handbook (handbook.md) changed since your last turn.\n"
+    "</store_notification>"
+)
+"""The server's notice before a person's words when the handbook changed since
+the chat's previous Turn (design 3 §5.3)."""
+
 _IN_FLIGHT = "a turn of its chat is in flight"
+
+HANDBOOK_CHANGED_TOTAL = Counter(
+    "pilot_chat_handbook_changed_total",
+    "Chat turns sent with the server's notice that the project's handbook changed"
+    " since the chat's previous turn, by project",
+    ["project"],
+)
 
 
 class ChatService:
@@ -75,30 +106,77 @@ class ChatService:
         started with it.
 
         With the chat's session up, the controller's send goes first, as
-        `RelayService.send` makes it. A start makes no controller call: it is
-        written under the project's row, locked as a change of its standing
-        locks it, so two starts of the project's chat, or a start and a
-        Finish, never interleave, and runs once this commits.
+        `RelayService.send` makes it, under the chat's Session's lock. A start
+        makes no controller call: it is written under the project's row,
+        locked as a change of its standing locks it, so two starts of the
+        project's chat, or a start and a Finish, never interleave, and runs
+        once this commits.
 
         Returns:
             The Turn; one whose send failed has its `error`
 
         Raises:
             RecordNotFoundException: No project has the id
-            InvalidOperationException: The project is a draft, finished or
-                archived; its chat's start is under way, or a turn of it is in
-                flight; no controller or no store environment is configured
+            InvalidOperationException: The project is a draft or archived; its
+                chat's start is under way, or a turn of it is in flight; no
+                controller or no store environment is configured
         """
         project = self.db.get(Project, project_id, populate_existing=True)
         if project is None:
             raise RecordNotFoundException("Project", str(project_id))
         operation = f"send a message to Pilot in {project_name(project)}"
-        _refuse_closed(project, operation)
+        _refuse_message(project, operation)
         quoted = self._quote(project, person, words)
         session = self._open_chat(project.id)
         if session is not None and not _unbriefed(session):
-            return self.relay_service.send(self.db, session.id, words, words=quoted)
+            locked = self._still_open(session.id)
+            if locked is not None:
+                return self._send(project, locked, quoted)
         return self._start(project_id, person, quoted, operation)
+
+    def _send(self, project: Project, session: AgentSession, words: Words) -> Turn:
+        """`words` sent to the chat's Session as a turn of it, after the
+        server's notice when the handbook changed since its previous Turn
+        (D052; DB assertion 251), the notice counted once it went out."""
+        changed = self._handbook_changed(project, session)
+        message = f"{STORE_NOTIFICATION}\n\n{words.text}" if changed else words.text
+        turn = self.relay_service.send(self.db, session.id, message, words=words)
+        if changed and turn.error is None:
+            HANDBOOK_CHANGED_TOTAL.labels(project=str(project.id)).inc()
+        return turn
+
+    def _still_open(self, session_id: uuid.UUID) -> AgentSession | None:
+        """The open chat's Session, locked until the transaction ends while
+        its chat is still open and its start went out, so that no close
+        interleaves with its send. None when it closed, or its start fell
+        through, meanwhile: the lock let go with the savepoint that took it,
+        since a start locks the project's row first (the start's lock
+        order)."""
+        savepoint = self.db.begin_nested()
+        session = self.records.lock_session(session_id)
+        chat = self.db.get_one(Chat, session_id, populate_existing=True)
+        if chat.closed_at is None and not _unbriefed(session):
+            savepoint.commit()
+            return session
+        savepoint.rollback()
+        return None
+
+    def _handbook_changed(self, project: Project, session: AgentSession) -> bool:
+        """Whether the project's handbook was published after the chat's
+        previous Turn was sent."""
+        previous = self.db.scalars(
+            select(Turn.started_at)
+            .where(Turn.session_id == session.id)
+            .order_by(Turn.seq.desc())
+            .limit(1)
+        ).one()
+        published = self.db.scalar(
+            select(Document.published_at).where(
+                Document.project_id == project.id,
+                Document.role_code == DocumentRole.HANDBOOK,
+            )
+        )
+        return published is not None and published > previous
 
     def _start(
         self, project_id: uuid.UUID, person: User, words: Words, operation: str
@@ -108,7 +186,7 @@ class ChatService:
         afresh in a headless session of its own. The open chat's Session is
         locked after the project's row (the start's lock order)."""
         project = self._locked(project_id)
-        _refuse_closed(project, operation)
+        _refuse_message(project, operation)
         session = self._open_chat(project.id)
         if session is None:
             session = self._new_chat(project)
@@ -246,17 +324,14 @@ def _uuid(text: str) -> uuid.UUID | None:
         return None
 
 
-def _refuse_closed(project: Project, operation: str) -> None:
+def _refuse_message(project: Project, operation: str) -> None:
     """Refuse a message to a draft's chat, which is the definition chat's, and
-    to a finished or an archived project's.
+    to an archived project's, started or open (F128.5; DB 245).
 
     Raises:
-        InvalidOperationException: The project is a draft, finished or
-            archived
+        InvalidOperationException: The project is a draft or archived
     """
     if project.archived:
         raise InvalidOperationException(operation, "its project is archived")
     if project.state_code is ProjectState.DRAFT:
         raise InvalidOperationException(operation, "its project is a draft")
-    if project.state_code is ProjectState.FINISHED:
-        raise InvalidOperationException(operation, "its project is finished")

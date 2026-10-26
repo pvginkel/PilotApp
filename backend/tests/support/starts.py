@@ -2,6 +2,7 @@
 the tests that place work items through a surface of Pilot's: its loops never
 run, and its creates hand no MCP server."""
 
+from app.services.chat_close_service import ChatCloseService
 from app.services.container import ServiceContainer
 from app.services.environment_service import EnvironmentService
 from app.services.pilot_server import PilotServer
@@ -38,6 +39,12 @@ def configured_starts(
             container=container,
             supervisor=supervisor,
             session_streams=container.session_stream_service(),
+        ),
+        chat_closes=ChatCloseService(
+            container=container,
+            supervisor=supervisor,
+            session_streams=container.session_stream_service(),
+            close_after_seconds=3300,
         ),
     )
     return SessionStartService(

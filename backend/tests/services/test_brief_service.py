@@ -1,6 +1,7 @@
-"""The brief a brain session's first Turn carries, per kind, and the server's
-trailer on a worker's, against invented records (design 3 §5.2 to §5.4; D058;
-F129.5; DB assertion 251; V12, V13, V21)."""
+"""The brief a brain session's first Turn carries, per kind, the server's
+trailer on a worker's, and the follow-up turn, against invented records
+(design 3 §5.1 to §5.4; D058; F79, F129.5, F5.5; DB assertion 251; V08, V12,
+V13, V21)."""
 
 import json
 from datetime import UTC, datetime
@@ -11,22 +12,27 @@ from sqlalchemy.orm import Session as DbSession
 from app import models
 from app.models import (
     Chat,
+    Environment,
     Item,
     PlanTask,
     Project,
     ProjectMember,
     ProjectTransition,
+    SaveError,
+    Turn,
     User,
 )
 from app.models.reference import (
     ChatKind,
     CloseCause,
+    ErrorKind,
     ProjectState,
     TaskStatus,
     TransitionKind,
 )
-from app.services.brief_service import BriefService
+from app.services.brief_service import FOLLOW_UP_END, BriefService, is_follow_up
 from app.services.container import ServiceContainer
+from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
 
 AT = datetime(2026, 10, 26, 9, 30, 15, tzinfo=UTC)
 HEAD = (
@@ -282,6 +288,118 @@ class TestProjectChat:
         assert briefs.project_chat(opened, person, words, AT).endswith(
             f"(not a member):\n{words}"
         )
+
+
+FINISH = (
+    "This project is finished (2026-10-25T18:00:00Z): you read only — no"
+    " `pilot-store`, nothing under `/work` you can write. Answer from the tree,"
+    " the records and the fleet tools; what you would change, say so and name"
+    " who can."
+)
+
+
+class TestFinishedProjectChat:
+    def test_the_finish_line_stands_in_place_of_the_switch_and_no_notes(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        session.add(
+            ProjectMember(project_id=opened.id, user_id=person.id, joined_at=AT)
+        )
+        assert container.plan_service().save(opened, json.dumps(PLAN).encode()) == []
+        item = container.document_service().bear_item(
+            opened, "decision", "Soup chores", project_session, DEFERRED
+        )
+        container.record_service().done(item, person)
+        container.document_service().bear_handbook(
+            opened, "# Handbook\n\n- Salt the stock last.\n"
+        )
+        for kind, at in (
+            (TransitionKind.FINISHED, datetime(2026, 10, 20, tzinfo=UTC)),
+            (TransitionKind.REOPENED, datetime(2026, 10, 21, tzinfo=UTC)),
+            (TransitionKind.FINISHED, datetime(2026, 10, 25, 18, tzinfo=UTC)),
+        ):
+            _transition(session, opened, person, kind, at)
+        opened.state_code = ProjectState.FINISHED
+        _closed_chat(session, opened, datetime(2026, 10, 25, 18, tzinfo=UTC))
+
+        brief = briefs.project_chat(opened, person, "What was settled?", AT)
+
+        assert brief == (
+            "/chat\n\n"
+            "Pilot's brief · a finished project's chat · project \"Soup club\" ·"
+            " /work/Projects/soup-club · 2026-10-26T09:30:15Z\n\n"
+            f"{FINISH}\n\n"
+            "Earlier chats of this project are in chat.md; the latest closed"
+            " 2026-10-25T18:00:00Z.\n\n"
+            "The message, from ada (member):\n"
+            "What was settled?"
+        )
+
+
+def _fault(
+    db: DbSession,
+    path: str,
+    line: int | None,
+    message: str,
+    kind: ErrorKind = ErrorKind.PARSE,
+) -> None:
+    db.add(
+        SaveError(
+            environment_id=STORE_ENVIRONMENT_ID,
+            path=path,
+            kind_code=kind,
+            line=line,
+            message=message,
+        )
+    )
+    db.flush()
+
+
+class TestFollowUp:
+    def test_each_held_path_is_named_with_its_faults_as_the_check_prints_them(
+        self, session: DbSession, briefs: BriefService, environment: Environment
+    ) -> None:
+        item = "soup-club/items/7-soup.md"
+        handbook = "soup-club/handbook.md"
+        _fault(session, item, 12, "block D1: recommend: Rack names no option")
+        _fault(session, handbook, None, "front matter: not YAML")
+        _fault(session, item, None, "the text has no title")
+        _fault(session, item, 3, "a reverted save", ErrorKind.REVERTED)
+        _fault(session, "soup-club/items/8-other.md", 1, "not held by this turn")
+
+        follow_up = briefs.follow_up([handbook, item])
+
+        assert follow_up == (
+            f"Your save of `{handbook}` is held:"
+            f" `{handbook}: front matter: not YAML`.\n"
+            f"Your save of `{item}` is held:"
+            f" `{item}:12: block D1: recommend: Rack names no option`,"
+            f" `{item}: the text has no title`.\n"
+            "Fix it and end your turn."
+        )
+
+    def test_it_is_known_by_its_last_line_on_a_turn_with_no_author(
+        self, person: User, project_session: models.Session
+    ) -> None:
+        def turn(message: str, author: User | None = None) -> Turn:
+            return Turn(
+                session_id=project_session.id,
+                seq=2,
+                message=message,
+                author_user_id=None if author is None else author.id,
+            )
+
+        assert is_follow_up(
+            turn(f"Your save of `a.md` is held: `a.md: x`.\n{FOLLOW_UP_END}")
+        )
+        assert not is_follow_up(turn("continue"))
+        assert not is_follow_up(turn(f"Quoting you: {FOLLOW_UP_END}", person))
 
 
 def _task(db: DbSession, project: Project) -> PlanTask:

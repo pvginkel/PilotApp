@@ -133,6 +133,22 @@ class TestInject:
         assert len(first.token_hash) == 64
         assert first.token_hash != second.token_hash
 
+    def test_a_create_with_no_surface_carries_neither_and_a_token_is_still_minted(
+        self,
+    ) -> None:
+        """A finished project's brain session (F5.5): no bearer it holds
+        reaches either surface."""
+        request = HeadlessCreateRequest(
+            cwd="/work/PilotProjects",
+            sandbox_read_only_cwd=True,
+            env=["PILOT_PROJECT=/work/Projects/soup-club"],
+        )
+
+        injected = PilotServer(URL).inject(ScopedCreate(request, None))
+
+        assert injected.request == request
+        assert len(injected.token_hash) == 64
+
     @pytest.mark.parametrize(
         ("url", "surface", "endpoint"),
         [

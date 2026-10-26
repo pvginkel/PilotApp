@@ -8566,7 +8566,7 @@
     },
     "/api/projects/{project_id}/chat/messages": {
       "post": {
-        "description": "A send the controller fails is the turn's `error` (F125).\n\nReturns:     201: The message's turn in the chat     400: The message has no words     401: No one is signed in     403: The caller lacks the editor role     404: No project has the id     409: The caller has not chosen a handle; the project is a draft,         finished or archived; the chat is starting or a turn of it is in         flight; or no controller or store environment is configured",
+        "description": "A send the controller fails is the turn's `error` (F125).\n\nReturns:     201: The message's turn in the chat     400: The message has no words     401: No one is signed in     403: The caller lacks the editor role     404: No project has the id     409: The caller has not chosen a handle; the project is a draft or         archived; the chat is starting or a turn of it is in flight; or no         controller or store environment is configured",
         "operationId": "post__api_projects_{project_id}_chat_messages",
         "parameters": [
           {

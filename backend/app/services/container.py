@@ -20,6 +20,7 @@ from app.exceptions import ConfigurationError
 from app.services.attachment_service import AttachmentService
 from app.services.auth_service import AuthService
 from app.services.brief_service import BriefService
+from app.services.chat_close_service import ChatCloseService
 from app.services.chat_service import ChatService
 from app.services.condition_service import ConditionService
 from app.services.controller_client import ControllerClient
@@ -249,6 +250,16 @@ class ServiceContainer(containers.DeclarativeContainer):
     )
     register_for_background_startup(lambda c: c.turn_end_read_service())
 
+    # The project chats' close at Finish and Reopen and on the timer (F130);
+    # its timer registers on the supervisor when built, before STARTUP.
+    chat_close_service = providers.Singleton(
+        ChatCloseService,
+        container=__self__,
+        supervisor=supervisor,
+        session_streams=session_stream_service,
+        close_after_seconds=app_config.provided.chat_close_timeout_seconds,
+    )
+    register_for_background_startup(lambda c: c.chat_close_service())
     # The send and the relay (design 2 §9); the relay's job registers on the
     # supervisor when built, before STARTUP.
     relay_service = providers.Singleton(
@@ -260,6 +271,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         work_slots=work_slots,
         pilot_server=pilot_server,
         turn_end_reads=turn_end_read_service,
+        chat_closes=chat_close_service,
     )
     register_for_background_startup(lambda c: c.relay_service())
     # The relays' watchdog, on the fleet stream (design 2 §9.3); its timer
@@ -461,6 +473,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         view_service=view_service,
         timeline_service=timeline_service,
         session_start_service=session_start_service,
+        chat_close_service=chat_close_service,
     )
     # The brain's tools, under its session's bearer (TD §4.5, F86)
     brief_service = providers.Factory(

@@ -1,8 +1,10 @@
-"""What a Session's headless create is handed (TD §4.2, §4.5; F50, F84; design
-3 §12; DB decision 57, assertion 244), derived in one place from the Session's
-columns, its kind and its Project, for every create of it alike: the start
-loop's from the Session's rows and the relay's re-create of a gone controller
-session. No column holds it."""
+"""What a Session's headless create is handed (TD §4.2, §4.5; F50, F84, F5.5;
+design 3 §12; DB decision 57, assertion 244), derived in one place from the
+Session's columns, its kind and its Project, for every create of it alike: the
+start loop's from the Session's rows and the relay's re-create of a gone
+controller session. No column holds it: a Chat closes when its Project
+finishes or reopens, so the Project's state at a create is the state its chat
+was opened under."""
 
 from dataclasses import dataclass
 
@@ -11,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.engine.paths import folder
 from app.models import Project, SessionKind
 from app.models import Session as AgentSession
-from app.models.reference import Surface
+from app.models.reference import ProjectState, Surface
 from app.services.controller_client import HeadlessCreateRequest
 
 STORE_REPO = "/work/PilotProjects"
@@ -30,9 +32,10 @@ class ScopedCreate:
     """A Session's headless create, and the surface Pilot's server hands it."""
 
     request: HeadlessCreateRequest
-    surface: Surface
+    surface: Surface | None
     """Its kind's: a work item's `pilot-work`, a chat's and a job's
-    `pilot-store`, never both (F84)."""
+    `pilot-store`, never both (F84); none for a brain session of a finished
+    project, which reads only (F5.5)."""
 
 
 def project_folder(project: Project) -> str:
@@ -43,9 +46,9 @@ def project_folder(project: Project) -> str:
 def scoped_create(db: Session, session: AgentSession) -> ScopedCreate:
     """The Session's create as its rows have it: its cwd, the conversation it
     resumes, its agent, model and effort, and its kind's surface. A brain
-    session's, a chat's or a job's, is boxed (F50): its cwd read-only, its
-    project's folder the one folder it writes, and that folder its
-    `PILOT_PROJECT`."""
+    session's, a chat's or a job's, is boxed (F50), its cwd read-only and its
+    project's folder its `PILOT_PROJECT`: that folder the one it writes, or,
+    while its Project is finished, none, with no surface (F5.5)."""
     surface = Surface(db.get_one(SessionKind, session.kind_code).surface)
     request = HeadlessCreateRequest(
         cwd=session.cwd,
@@ -54,13 +57,14 @@ def scoped_create(db: Session, session: AgentSession) -> ScopedCreate:
         model=session.model,
         reasoning_effort=session.reasoning_effort,
     )
-    if surface is Surface.STORE:
-        writable = project_folder(db.get_one(Project, session.project_id))
-        request = request.model_copy(
-            update={
-                "sandbox_read_only_cwd": True,
-                "sandbox_writable_dirs": [writable],
-                "env": [f"{PROJECT_VARIABLE}={writable}"],
-            }
-        )
-    return ScopedCreate(request, surface)
+    if surface is not Surface.STORE:
+        return ScopedCreate(request, surface)
+    project = db.get_one(Project, session.project_id, populate_existing=True)
+    box = {
+        "sandbox_read_only_cwd": True,
+        "env": [f"{PROJECT_VARIABLE}={project_folder(project)}"],
+    }
+    if project.state_code is ProjectState.FINISHED:
+        return ScopedCreate(request.model_copy(update=box), None)
+    box["sandbox_writable_dirs"] = [project_folder(project)]
+    return ScopedCreate(request.model_copy(update=box), surface)

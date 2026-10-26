@@ -20,6 +20,7 @@ from app import models
 from app.database import scoped_session
 from app.models import Environment, Project, Turn, User
 from app.models.reference import RecordKind, SessionState, UserKind
+from app.services.chat_close_service import ChatCloseService
 from app.services.container import ServiceContainer
 from app.services.controller_client import (
     ControllerClient,
@@ -125,6 +126,12 @@ def _watch(
             container=container,
             supervisor=supervisor,
             session_streams=container.session_stream_service(),
+        ),
+        chat_closes=ChatCloseService(
+            container=container,
+            supervisor=supervisor,
+            session_streams=container.session_stream_service(),
+            close_after_seconds=3300,
         ),
     )
     RelayWatchdog(supervisor=supervisor, fleet_consumer=fleet)

@@ -29,6 +29,7 @@ from app.models import (
 )
 from app.models import Session as AgentSession
 from app.models.reference import (
+    CloseCause,
     ProjectState,
     SessionState,
     TaskStatus,
@@ -36,6 +37,7 @@ from app.models.reference import (
 )
 from app.schemas.projects import ProjectStatus
 from app.services.auth_service import AuthContext
+from app.services.chat_close_service import ChatCloseService
 from app.services.people_service import PeopleService
 from app.services.session_start_service import STOPPABLE, SessionStartService
 from app.services.timeline_service import (
@@ -159,6 +161,17 @@ _VERBS = {
 
 ARCHIVED_REFUSAL = "it is archived, and an archived project takes Bring back alone"
 
+_CLOSES = {
+    TransitionKind.FINISHED: CloseCause.FINISHED,
+    TransitionKind.REOPENED: CloseCause.REOPENED,
+}
+"""The transitions that close the project's open chat, with their causes: a
+chat's box is fixed at its create (DB decision 57)."""
+
+_STOPS = (TransitionKind.FINISHED, TransitionKind.ARCHIVED, TransitionKind.REOPENED)
+"""The transitions that stop the project's running, starting and held
+Sessions: in a finished project its read-only chat alone runs (F5.5)."""
+
 
 class ProjectService:
     def __init__(
@@ -170,6 +183,7 @@ class ProjectService:
         view_service: ViewService,
         timeline_service: TimelineService,
         session_start_service: SessionStartService,
+        chat_close_service: ChatCloseService,
     ) -> None:
         self.db = db
         self.engine_bus = engine_bus
@@ -178,6 +192,7 @@ class ProjectService:
         self.view_service = view_service
         self.timeline_service = timeline_service
         self.session_start_service = session_start_service
+        self.chat_close_service = chat_close_service
 
     def tabs(self, auth: AuthContext, archived: bool) -> list[ProjectTab]:
         """The archived projects, or every other, in the order they were
@@ -307,13 +322,16 @@ class ProjectService:
         project is paused (DB 171), stops every session of the project that
         runs, starts or is held, and closes the open items unanswered (F5.1).
         Archive stops them too (F128.1), and nothing of either starts after
-        it. A finished project's auto pilot is off and it is not paused, so
-        Reopen leaves both so (F6). Archive keeps the pause, and Bring back
-        returns it (F141.2). A pause and a resume move the reason on the
-        project's held work items' lines, and once a resume commits the gate
-        opens for its held starts (F141.5). Archive and Bring back raise the
-        `manifest` event once committed: the project's folder leaves the
-        store's tree or comes back to it (F128.4).
+        it. Finish and Reopen close the project's open chat, `finished` and
+        `reopened`, Reopen stopping a turn of the finished project's chat
+        first, so that the next message starts a chat under the project's new
+        state (F5.5; DB decision 57). A finished project's auto pilot is off
+        and it is not paused, so Reopen leaves both so (F6). Archive keeps the
+        pause, and Bring back returns it (F141.2). A pause and a resume move the
+        reason on the project's held work items' lines, and once a resume
+        commits the gate opens for its held starts (F141.5). Archive and Bring
+        back raise the `manifest` event once committed: the project's folder
+        leaves the store's tree or comes back to it (F128.4).
 
         Raises:
             RecordNotFoundException: no project has the id.
@@ -344,9 +362,11 @@ class ProjectService:
         at = datetime.now(UTC)
         paused = project.paused
         self._write(project, person, at, kind)
-        if kind in (TransitionKind.FINISHED, TransitionKind.ARCHIVED):
-            # Before the close, which locks the Items after their Sessions.
+        # Before the closes, which lock the Items after their Sessions.
+        if kind in _STOPS:
             self.session_start_service.stop_project(self.db, project, person, at)
+        if kind in _CLOSES:
+            self.chat_close_service.close_open(self.db, project, _CLOSES[kind], at)
         if kind is TransitionKind.FINISHED:
             if project.autopilot:
                 self._write(project, person, at, TransitionKind.AUTOPILOT_OFF)

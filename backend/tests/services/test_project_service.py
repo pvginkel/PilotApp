@@ -29,6 +29,7 @@ from app.engine.paths import TIMELINE, tree_path
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.extensions import db
 from app.models import (
+    Chat,
     Environment,
     Item,
     PlanNote,
@@ -40,7 +41,10 @@ from app.models import (
     User,
 )
 from app.models.reference import (
+    ChatKind,
+    CloseCause,
     ProjectState,
+    RecordKind,
     SessionState,
     TaskStatus,
     TransitionKind,
@@ -49,6 +53,7 @@ from app.models.reference import (
 from app.schemas.projects import ProjectStatus
 from app.schemas.testing_record import InventedProjectCreateSchema
 from app.services.auth_service import AuthContext
+from app.services.chat_close_service import CLOSED
 from app.services.container import ServiceContainer
 from app.services.project_service import (
     ARCHIVED_REFUSAL,
@@ -58,8 +63,10 @@ from app.services.project_service import (
     plan_progress,
     project_status,
 )
+from app.services.session_record_service import read_records
 from app.services.supervisor import LoopHandle
 from app.services.timeline_service import Badge
+from app.utils import after_commit as after_commit_module
 
 ADA = AuthContext(
     subject="subject-ada", email=None, name="Ada Example", roles={"editor"}
@@ -161,6 +168,40 @@ def _run(
     if kind == "work":
         container.record_service().place_work(project, run, "Build the camp")
     return run
+
+
+def _chat(
+    container: ServiceContainer,
+    session: DbSession,
+    project: Project,
+    environment: Environment,
+    state: SessionState,
+) -> models.Session:
+    """The project's open chat in `state`; a `running` one with its turn in
+    flight."""
+    run = _run(container, session, project, environment, state, "chat")
+    session.add(
+        Chat(
+            id=run.id,
+            project_id=project.id,
+            session_kind_code="chat",
+            kind_code=ChatKind.PROJECT,
+        )
+    )
+    if state is SessionState.RUNNING:
+        session.add(
+            Turn(
+                session_id=run.id, seq=1, message="/chat", started_at=datetime.now(UTC)
+            )
+        )
+        run.turns = 1
+    session.flush()
+    return run
+
+
+def _last_record(session: DbSession, run: models.Session) -> tuple[RecordKind, Any]:
+    (last,) = read_records(session, run.id, limit=1, newest_first=True)
+    return last.record.kind_code, last.record.payload
 
 
 def _wait(
@@ -1075,6 +1116,112 @@ class TestTransition:
             (run.state_code, run.stopped_at, run.stopped_by_user_id) for run in stopping
         ] == [(SessionState.STOPPED, at, person.id)] * 4
         assert idle.state_code is SessionState.IDLE
+
+    def test_finish_closes_the_open_chat_finished_its_close_its_last_record(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        made = _make(container, name="Camp")
+        chat = _chat(container, session, made, environment, SessionState.IDLE)
+
+        container.project_service().transition(ADA, made.id, TransitionKind.FINISHED)
+
+        ((_, at, _),) = [
+            transition
+            for transition in _transitions(session, made)
+            if transition[0] is TransitionKind.FINISHED
+        ]
+        row = session.get_one(Chat, chat.id, populate_existing=True)
+        assert (row.closed_at, row.close_cause_code) == (at, CloseCause.FINISHED)
+        assert chat.state_code is SessionState.IDLE
+        assert _last_record(session, chat) == (
+            RecordKind.SERVER,
+            {"type": CLOSED, "cause": "finished"},
+        )
+
+    def test_finish_closes_a_running_chat_it_stops_leaving_its_close_to_the_turns_end(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        environment: Environment,
+    ) -> None:
+        made = _make(container, name="Camp")
+        chat = _chat(container, session, made, environment, SessionState.RUNNING)
+
+        container.project_service().transition(ADA, made.id, TransitionKind.FINISHED)
+
+        row = session.get_one(Chat, chat.id, populate_existing=True)
+        assert row.close_cause_code is CloseCause.FINISHED
+        assert (chat.state_code, chat.stopped_by_user_id) == (
+            SessionState.STOPPED,
+            person.id,
+        )
+        assert read_records(session, chat.id, limit=10) == []
+        assert {type(c).__name__ for c in after_commit_module._callbacks.get()} >= {
+            "_InterruptStart"
+        }
+
+    @pytest.mark.parametrize("state", [SessionState.RUNNING, SessionState.HELD])
+    def test_reopen_stops_the_finished_projects_chat_and_closes_it_reopened(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        environment: Environment,
+        state: SessionState,
+    ) -> None:
+        made = _make(container, name="Camp", state="finished")
+        chat = _chat(container, session, made, environment, state)
+
+        container.project_service().transition(ADA, made.id, TransitionKind.REOPENED)
+
+        ((_, at, _),) = [
+            transition
+            for transition in _transitions(session, made)
+            if transition[0] is TransitionKind.REOPENED
+        ]
+        row = session.get_one(Chat, chat.id, populate_existing=True)
+        assert (row.closed_at, row.close_cause_code) == (at, CloseCause.REOPENED)
+        assert (chat.state_code, chat.stopped_at, chat.stopped_by_user_id) == (
+            SessionState.STOPPED,
+            at,
+            person.id,
+        )
+        # A held start's turn ends at the stop, so the close stands now; a
+        # running one's end writes it after the interrupt's records.
+        closed = (RecordKind.SERVER, {"type": CLOSED, "cause": "reopened"})
+        if state is SessionState.HELD:
+            assert _last_record(session, chat) == closed
+        else:
+            assert read_records(session, chat.id, limit=10) == []
+
+    @pytest.mark.parametrize(
+        ("spec", "kind"),
+        [
+            ({"state": "open"}, TransitionKind.ARCHIVED),
+            ({"state": "open"}, TransitionKind.PAUSED),
+            ({"state": "open"}, TransitionKind.AUTOPILOT_ON),
+            ({"state": "open", "archived": True}, TransitionKind.BROUGHT_BACK),
+        ],
+    )
+    def test_no_other_transition_closes_the_chat(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        spec: dict[str, Any],
+        kind: TransitionKind,
+    ) -> None:
+        made = _make(container, name="Camp", **spec)
+        chat = _chat(container, session, made, environment, SessionState.IDLE)
+
+        container.project_service().transition(ADA, made.id, kind)
+
+        assert session.get_one(Chat, chat.id, populate_existing=True).closed_at is None
+        assert read_records(session, chat.id, limit=10) == []
 
     def test_finishs_resume_opens_no_held_start_of_the_finished_project(
         self,

@@ -1,7 +1,10 @@
 """A person's message to a project's brain: the project's chat started in the
-store, briefed, or a turn of the chat open (design 3 §5.1, §5.3; F38.3, F130;
-DB assertions 159, 229, 243, 251; V02, V06, V13, V16, V25)."""
+store, briefed, or a turn of the chat open; a finished project's chat reading
+only, the chat the project's state closed, and the handbook's notice (design 3
+§5.1, §5.3; F38.3, F130, F5.5, F128.5; D052; DB assertions 159, 229, 243, 244,
+245, 251; V02, V05, V06, V12, V13, V16, V25, V27, V28)."""
 
+import json
 import threading
 import uuid
 from collections.abc import Iterator
@@ -17,17 +20,33 @@ from werkzeug.wrappers import Request, Response
 from app import models
 from app.database import scoped_session
 from app.exceptions import InvalidOperationException, RecordNotFoundException
-from app.models import Block, Chat, Item, Project, ProjectTransition, Turn, User
+from app.models import (
+    Block,
+    Chat,
+    Environment,
+    Item,
+    Project,
+    ProjectTransition,
+    Turn,
+    User,
+)
 from app.models.reference import (
     ChatKind,
+    CloseCause,
     ProjectState,
     RecordKind,
     SessionState,
     TransitionKind,
     UserKind,
 )
-from app.services.chat_service import ChatService
+from app.services.chat_close_service import CLOSED, ChatCloseService
+from app.services.chat_service import (
+    HANDBOOK_CHANGED_TOTAL,
+    STORE_NOTIFICATION,
+    ChatService,
+)
 from app.services.container import ServiceContainer
+from app.services.controller_client import HeadlessCreateRequest
 from app.services.controller_outage import ControllerOutage
 from app.services.environment_service import EnvironmentService
 from app.services.pilot_server import PilotServer
@@ -42,7 +61,7 @@ from app.utils.after_commit import clear_after_commit_callbacks
 from tests.support.fake_controller import ServedFakeController, client_of
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
 from tests.support.locks import in_thread, lock_waits
-from tests.support.supervisor import WAIT_SECONDS, Supervise, wait_until
+from tests.support.supervisor import WAIT_SECONDS, Supervise, metric_value, wait_until
 
 MCP_URL = "https://pilot-mcp.example.com/mcp"
 STORE_REPO = "/work/PilotProjects"
@@ -134,6 +153,12 @@ def _starts(
             container=container,
             supervisor=supervisor,
             session_streams=container.session_stream_service(),
+        ),
+        chat_closes=ChatCloseService(
+            container=container,
+            supervisor=supervisor,
+            session_streams=container.session_stream_service(),
+            close_after_seconds=3300,
         ),
     )
     starts = SessionStartService(
@@ -720,11 +745,14 @@ class TestRefusals:
                 {"state_code": ProjectState.DRAFT, "slug": None},
                 "its project is a draft",
             ),
-            ({"state_code": ProjectState.FINISHED}, "its project is finished"),
             ({"archived": True}, "its project is archived"),
+            (
+                {"state_code": ProjectState.FINISHED, "archived": True},
+                "its project is archived",
+            ),
         ],
     )
-    def test_a_draft_or_a_finished_or_archived_project_takes_no_message(
+    def test_a_draft_or_an_archived_project_takes_no_message(
         self,
         session: DbSession,
         chats: ChatService,
@@ -788,6 +816,295 @@ class TestRefusals:
             _send(chats, opened, person)
 
 
+def _transition(
+    container: ServiceContainer, project: Project, person: User, kind: TransitionKind
+) -> None:
+    container.project_service().transition_as(person, project.id, kind)
+    clear_after_commit_callbacks()
+
+
+def _last(db: DbSession, run_id: uuid.UUID) -> tuple[RecordKind, Any]:
+    (last,) = read_records(db, run_id, limit=1, newest_first=True)
+    return last.record.kind_code, last.record.payload
+
+
+def _closed(db: DbSession, run_id: uuid.UUID) -> CloseCause | None:
+    return db.get_one(Chat, run_id, populate_existing=True).close_cause_code
+
+
+class TestFinishedProjectChat:
+    def test_a_message_starts_it_reading_only_with_no_surface(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+    ) -> None:
+        _transition(container, opened, person, TransitionKind.FINISHED)
+
+        turn = _send(chats, opened, person, "What was settled?")
+
+        assert turn.message == container.brief_service().project_chat(
+            opened, person, "What was settled?", turn.started_at
+        )
+        assert turn.message.startswith(
+            "/chat\n\nPilot's brief · a finished project's chat ·"
+        )
+        clear_after_commit_callbacks()
+        run = _up(services, session, turn.session_id)
+        assert run.state_code == SessionState.RUNNING
+        assert fake.sent == [turn.message]
+        (created,) = fake.sessions(STORE_ENVIRONMENT_ID)
+        body = created.create_body
+        assert (body["cwd"], body["sandboxReadOnlyCwd"]) == (STORE_REPO, True)
+        assert "sandboxWritableDirs" not in body
+        assert "mcpConfig" not in body
+        assert body["env"] == [f"PILOT_PROJECT={FOLDER}"]
+        assert _sends(session, run.id) == [(1, "What was settled?")]
+
+    def test_its_create_refused_422_fails_its_start_at_once(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+    ) -> None:
+        """No folder to wait for: the store repo's root missing is no wait
+        `pilot-sync` ends (V25)."""
+        _transition(container, opened, person, TransitionKind.FINISHED)
+        fake.remove_file(STORE_ENVIRONMENT_ID, f"{STORE_REPO}/CLAUDE.md")
+        turn = _send(chats, opened, person)
+        clear_after_commit_callbacks()
+
+        run = _up(services, session, turn.session_id)
+
+        assert run.state_code == SessionState.FAILED
+        assert run.error is not None
+        assert f'the cwd "{STORE_REPO}" does not exist' in run.error
+        creates = f"POST /environments/{STORE_ENVIRONMENT_ID}/sessions/headless"
+        assert fake.calls.count(creates) == 1
+
+
+class TestTheProjectsStateClosesItsChat:
+    def test_after_finish_the_next_message_starts_a_chat_reading_only(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+    ) -> None:
+        run = _idle_chat(services, chats, session, fake, opened, person)
+        _transition(container, opened, person, TransitionKind.FINISHED)
+
+        turn = _send(chats, opened, person, "Two")
+
+        assert turn.session_id != run.id
+        assert _closed(session, run.id) is CloseCause.FINISHED
+        assert _last(session, run.id) == (
+            RecordKind.SERVER,
+            {"type": CLOSED, "cause": "finished"},
+        )
+        assert fake.sent == []
+        new = _up(services, session, turn.session_id)
+        assert new.controller_session is not None
+        body = fake.session(STORE_ENVIRONMENT_ID, new.controller_session).create_body
+        assert "sandboxWritableDirs" not in body
+        assert "mcpConfig" not in body
+
+    def test_after_reopen_the_next_message_starts_a_writable_chat(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+    ) -> None:
+        _transition(container, opened, person, TransitionKind.FINISHED)
+        run = _idle_chat(services, chats, session, fake, opened, person)
+        _transition(container, opened, person, TransitionKind.REOPENED)
+
+        turn = _send(chats, opened, person, "Two")
+
+        assert turn.session_id != run.id
+        assert _closed(session, run.id) is CloseCause.REOPENED
+        assert turn.message == container.brief_service().project_chat(
+            opened, person, "Two", turn.started_at
+        )
+        new = _up(services, session, turn.session_id)
+        assert new.controller_session is not None
+        body = fake.session(STORE_ENVIRONMENT_ID, new.controller_session).create_body
+        assert body["sandboxWritableDirs"] == [FOLDER]
+        assert json.loads(body["mcpConfig"][0])["mcpServers"]["pilot"]["url"] == (
+            f"{MCP_URL}/store"
+        )
+
+    def test_reopen_stops_a_turn_of_the_read_only_chat_its_close_after_its_end(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+    ) -> None:
+        _transition(container, opened, person, TransitionKind.FINISHED)
+        first = _send(chats, opened, person, "One")
+        clear_after_commit_callbacks()
+        run = _up(services, session, first.session_id)
+        assert run.controller_session is not None
+
+        _transition(container, opened, person, TransitionKind.REOPENED)
+
+        assert _closed(session, run.id) is CloseCause.REOPENED
+        assert _read(session, run.id).state_code == SessionState.STOPPED
+        fake.finish(STORE_ENVIRONMENT_ID, run.controller_session, "interrupted")
+        services[1].relay(run.id, LoopHandle(f"relay:{run.id}"))
+        clear_after_commit_callbacks()
+        records = _records(session, run.id)
+        assert records[-2].record.kind_code == RecordKind.RESULT
+        assert _last(session, run.id) == (
+            RecordKind.SERVER,
+            {"type": CLOSED, "cause": "reopened"},
+        )
+
+    def test_archive_leaves_the_chat_open_and_takes_no_message(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+    ) -> None:
+        run = _idle_chat(services, chats, session, fake, opened, person)
+        _transition(container, opened, person, TransitionKind.ARCHIVED)
+
+        with pytest.raises(InvalidOperationException, match="its project is archived"):
+            _send(chats, opened, person, "Two")
+
+        assert _closed(session, run.id) is None
+        _transition(container, opened, person, TransitionKind.BROUGHT_BACK)
+        assert _send(chats, opened, person, "Two").session_id == run.id
+
+
+class TestHandbookNotice:
+    def test_a_turn_after_the_handbook_changed_opens_with_the_notice(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+    ) -> None:
+        run = _idle_chat(services, chats, session, fake, opened, person)
+        container.document_service().bear_handbook(opened, "# Handbook\n")
+        counted = metric_value(HANDBOOK_CHANGED_TOTAL, project=str(opened.id))
+
+        turn = _send(chats, opened, person, "Two")
+
+        assert (turn.session_id, turn.message, turn.words) == (
+            run.id,
+            f"{STORE_NOTIFICATION}\n\nTwo",
+            "Two",
+        )
+        assert STORE_NOTIFICATION == (
+            "<store_notification>\n"
+            "The handbook (handbook.md) changed since your last turn.\n"
+            "</store_notification>"
+        )
+        assert fake.sent == [turn.message]
+        assert _sends(session, run.id) == [(1, "One"), (2, "Two")]
+        assert metric_value(HANDBOOK_CHANGED_TOTAL, project=str(opened.id)) == (
+            counted + 1
+        )
+
+    def test_a_handbook_unchanged_since_the_chats_last_turn_brings_none(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+    ) -> None:
+        container.document_service().bear_handbook(opened, "# Handbook\n")
+        _idle_chat(services, chats, session, fake, opened, person)
+        counted = metric_value(HANDBOOK_CHANGED_TOTAL, project=str(opened.id))
+
+        turn = _send(chats, opened, person, "Two")
+
+        assert turn.message == "Two"
+        assert metric_value(HANDBOOK_CHANGED_TOTAL, project=str(opened.id)) == counted
+
+    def test_the_notice_comes_once_per_change(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+    ) -> None:
+        run = _idle_chat(services, chats, session, fake, opened, person)
+        handbook = container.document_service().bear_handbook(opened, "# Handbook\n")
+        assert _send(chats, opened, person, "Two").message.startswith(
+            STORE_NOTIFICATION
+        )
+        clear_after_commit_callbacks()
+        assert run.controller_session is not None
+        fake.finish(STORE_ENVIRONMENT_ID, run.controller_session, "success", "Done.")
+        services[1].relay(run.id, LoopHandle(f"relay:{run.id}"))
+        clear_after_commit_callbacks()
+
+        assert _send(chats, opened, person, "Three").message == "Three"
+        clear_after_commit_callbacks()
+        fake.finish(STORE_ENVIRONMENT_ID, run.controller_session, "success", "Done.")
+        services[1].relay(run.id, LoopHandle(f"relay:{run.id}"))
+        clear_after_commit_callbacks()
+        container.document_service().publish(handbook, "# Handbook\n\n- Salt last.\n")
+        assert _send(chats, opened, person, "Four").message == (
+            f"{STORE_NOTIFICATION}\n\nFour"
+        )
+
+    def test_a_send_that_failed_counts_no_notice(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+    ) -> None:
+        _idle_chat(services, chats, session, fake, opened, person)
+        container.document_service().bear_handbook(opened, "# Handbook\n")
+        counted = metric_value(HANDBOOK_CHANGED_TOTAL, project=str(opened.id))
+        fake.unreachable(STORE_ENVIRONMENT_ID)
+
+        turn = _send(chats, opened, person, "Two")
+
+        assert turn.error is not None
+        assert turn.message == f"{STORE_NOTIFICATION}\n\nTwo"
+        assert metric_value(HANDBOOK_CHANGED_TOTAL, project=str(opened.id)) == counted
+
+
 def _committed(container: ServiceContainer) -> tuple[uuid.UUID, uuid.UUID]:
     """A person and an open project, committed; their ids."""
     with scoped_session(container) as db:
@@ -846,3 +1163,119 @@ class TestTwoMessages:
         with scoped_session(container) as db:
             assert db.scalars(select(Chat.id)).all() == [chat_id]
             assert db.scalars(select(Turn.words)).all() == ["One"]
+
+
+def _committed_idle_chat(
+    container: ServiceContainer, fake: _Sent
+) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
+    """A person, an open project and its idle chat on a headless session in
+    the store, committed; their ids."""
+    person_id, project_id = _committed(container)
+    name = (
+        client_of(container, fake)
+        .create_headless_session(STORE_ENVIRONMENT_ID, HeadlessCreateRequest())
+        .name
+    )
+    with scoped_session(container) as db:
+        db.add(Environment(id=STORE_ENVIRONMENT_ID, name="PilotProjects", exempt=True))
+        db.flush()
+        now = datetime.now(UTC)
+        run = models.Session(
+            project_id=project_id,
+            environment_id=STORE_ENVIRONMENT_ID,
+            kind_code="chat",
+            cwd=STORE_REPO,
+            conversation_id="conversation-1",
+            controller_session=name,
+            token_hash="a" * 64,
+            state_code=SessionState.IDLE,
+            turns=1,
+            turn_started_at=now,
+            turn_ended_at=now,
+        )
+        db.add(run)
+        db.flush()
+        db.add(
+            Chat(
+                id=run.id,
+                project_id=project_id,
+                session_kind_code="chat",
+                kind_code=ChatKind.PROJECT,
+            )
+        )
+        db.add(
+            Turn(
+                session_id=run.id, seq=1, message="/chat", started_at=now, ended_at=now
+            )
+        )
+        return person_id, project_id, run.id
+
+
+class TestAMessageMeetingFinish:
+    def test_a_message_to_the_chat_finish_closes_meanwhile_starts_the_next(
+        self, committed_app: Flask, supervise: Supervise
+    ) -> None:
+        """The send waits on the chat's Session, which Finish's close holds;
+        once Finish commits it finds the chat closed, lets its lock go and
+        starts the finished project's chat, sending nothing to the closed
+        one."""
+        container = committed_app.container
+        fake = _Sent(keepalive_seconds=0.2)
+        try:
+            fake.add_environment(
+                STORE_ENVIRONMENT_ID, name="PilotProjects", status="running"
+            )
+            person_id, project_id, chat_id = _committed_idle_chat(container, fake)
+            services = _starts(container, supervise)
+            finished, finish_ends = threading.Event(), threading.Event()
+            sent, send_ends = threading.Event(), threading.Event()
+
+            def finish() -> None:
+                with scoped_session(container) as db:
+                    container.project_service().transition_as(
+                        db.get_one(User, person_id), project_id, TransitionKind.FINISHED
+                    )
+                    finished.set()
+                    assert finish_ends.wait(WAIT_SECONDS)
+
+            def send() -> uuid.UUID:
+                with scoped_session(container) as db:
+                    turn = _chats(container, *services).send(
+                        project_id, db.get_one(User, person_id), "Two"
+                    )
+                    sent.set()
+                    assert send_ends.wait(WAIT_SECONDS)
+                    return turn.session_id
+
+            finishing = in_thread(finish)
+            assert finished.wait(WAIT_SECONDS)
+            sending = in_thread(send)
+            wait_until(lambda: lock_waits(container) == 1, "the send waiting")
+            finish_ends.set()
+            finishing.result()
+            assert sent.wait(WAIT_SECONDS)
+            # The closed chat's Session is free while the send's transaction
+            # still runs: the savepoint that locked it let it go.
+            with scoped_session(container) as db:
+                db.execute(
+                    select(models.Session.id)
+                    .where(models.Session.id == chat_id)
+                    .with_for_update(nowait=True)
+                ).one()
+            send_ends.set()
+            new_chat = sending.result()
+
+            assert new_chat != chat_id
+            assert fake.sent == []
+            with scoped_session(container) as db:
+                assert db.get_one(Chat, chat_id).close_cause_code is CloseCause.FINISHED
+                assert _last(db, chat_id) == (
+                    RecordKind.SERVER,
+                    {"type": CLOSED, "cause": "finished"},
+                )
+                turn = db.scalars(select(Turn).where(Turn.session_id == new_chat)).one()
+                assert turn.message.startswith(
+                    "/chat\n\nPilot's brief · a finished project's chat ·"
+                )
+        finally:
+            fake.close()

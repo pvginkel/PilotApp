@@ -1,5 +1,5 @@
-"""A person's message to a project's brain through the API (F38.3, F130;
-design 3 §5.3; V06, V25)."""
+"""A person's message to a project's brain through the API (F38.3, F130,
+F5.5, F128.5; design 3 §5.3; V05, V06, V25)."""
 
 import uuid
 from collections.abc import Iterator
@@ -11,7 +11,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
 from app.models import Chat, Project, Turn, User
-from app.models.reference import ProjectState
+from app.models.reference import ProjectState, TransitionKind
+from app.services.chat_close_service import ChatCloseService
 from app.services.container import ServiceContainer
 from app.services.environment_service import EnvironmentService
 from app.services.relay_service import RelayService
@@ -71,6 +72,12 @@ def starts(container: ServiceContainer, supervise: Supervise) -> Iterator[None]:
                 container=container,
                 supervisor=supervisor,
                 session_streams=container.session_stream_service(),
+            ),
+            chat_closes=ChatCloseService(
+                container=container,
+                supervisor=supervisor,
+                session_streams=container.session_stream_service(),
+                close_after_seconds=3300,
             ),
         ),
         controller_outage=container.controller_outage(),
@@ -148,7 +155,7 @@ class TestSendChatMessage:
         assert response.status_code == 404
         assert response.get_json()["error"] == f"Project {unknown} was not found"
 
-    def test_a_finished_project_takes_no_message_409(
+    def test_an_archived_project_takes_no_message_409(
         self,
         client: FlaskClient,
         session: DbSession,
@@ -156,7 +163,7 @@ class TestSendChatMessage:
         opened: Project,
         person: User,
     ) -> None:
-        opened.state_code = ProjectState.FINISHED
+        opened.archived = True
         session.flush()
         _sign_in(client)
 
@@ -165,8 +172,31 @@ class TestSendChatMessage:
         assert response.status_code == 409
         assert response.get_json()["error"] == (
             "Cannot send a message to Pilot in Soup club because its project is"
-            " finished"
+            " archived"
         )
+        assert session.scalars(select(Chat)).all() == []
+
+    def test_a_finished_projects_message_starts_its_chat_reading_only_201(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        starts: None,
+        opened: Project,
+        person: User,
+    ) -> None:
+        container.project_service().transition_as(
+            person, opened.id, TransitionKind.FINISHED
+        )
+        _sign_in(client)
+
+        response = client.post(_messages(opened.id), json={"words": "Hi"})
+
+        assert response.status_code == 201, response.get_json()
+        assert response.get_json()["state"] == "starting"
+        turn = session.scalars(select(Turn)).one()
+        assert "a finished project's chat" in turn.message
+        assert "This project is finished" in turn.message
 
     def test_a_message_while_the_chat_starts_is_409(
         self,

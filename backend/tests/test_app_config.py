@@ -216,6 +216,23 @@ class TestAppSettings:
         with pytest.raises(ValidationError, match=name):
             AppEnvironment.model_validate({name: ""})
 
+    def test_a_chat_closes_after_55_minutes_by_default(self) -> None:
+        settings = AppSettings.load(AppEnvironment(_env_file=None))
+
+        assert settings.chat_close_timeout_seconds == 55 * 60
+
+    def test_load_reads_the_chats_close_timeout_from_the_environment(self) -> None:
+        settings = AppSettings.load(
+            AppEnvironment(_env_file=None, CHAT_CLOSE_TIMEOUT=600)
+        )
+
+        assert settings.chat_close_timeout_seconds == 600
+
+    @pytest.mark.parametrize("seconds", [0, -1])
+    def test_load_refuses_a_close_timeout_not_above_zero(self, seconds: int) -> None:
+        with pytest.raises(ValidationError, match="CHAT_CLOSE_TIMEOUT"):
+            AppEnvironment.model_validate({"CHAT_CLOSE_TIMEOUT": seconds})
+
     def test_the_controller_token_is_hidden_in_the_log(self) -> None:
         settings = AppSettings(
             controller_url="https://controller.example", controller_token="a-token"
@@ -250,6 +267,7 @@ class TestAppSettings:
             "project_parallelism_max": "3",
             "brain_model": repr("opus"),
             "brain_reasoning_effort": repr("xhigh"),
+            "chat_close_timeout_seconds": repr(3300.0),
         }
 
     def test_the_link_settings_are_unset_by_default(self) -> None:
@@ -341,4 +359,5 @@ class TestAppSettings:
             "project_parallelism_max": "3",
             "brain_model": repr("opus"),
             "brain_reasoning_effort": repr("xhigh"),
+            "chat_close_timeout_seconds": repr(3300.0),
         }

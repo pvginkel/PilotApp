@@ -25,6 +25,14 @@ its state stays `stopped`, its line none. A turn the controller never got, or
 whose controller session is gone, ends there with no `result`. The interrupt
 runs on a loop of its own, `interrupt:<id>`, once the stop commits.
 
+A brain session's turn that ends with a save of its own still held (the
+engine's turn end, `DocumentService.turn_ended`) gets the Session the server's
+follow-up turn, naming each such path and its faults (F79; design 3 §5.1),
+written in flight in the turn end's transaction and sent by the relay's next
+run; a follow-up turn that itself ends so gets none. A Turn's end in a chat
+closed while it ran writes the close's record after it
+(`ChatCloseService.turn_ended`).
+
 Each run first asks the controller whether it has the turn in flight (§8.2): a
 Turn written before its send that the controller never got is sent then. A
 controller session that is gone is resumed (§9.6, F71): re-created with the
@@ -60,6 +68,8 @@ from app.models import Environment, Turn, Work
 from app.models import Session as AgentSession
 from app.models.reference import RecordKind, SessionState
 from app.schemas.timeline import StopCause
+from app.services.brief_service import is_follow_up
+from app.services.chat_close_service import ChatCloseService
 from app.services.controller_client import (
     ControllerClient,
     ControllerProblem,
@@ -86,7 +96,7 @@ from app.services.session_record_service import (
 )
 from app.services.session_scope import scoped_create
 from app.services.session_stream_service import SessionStreamService
-from app.services.start_gate import WorkSlots
+from app.services.start_gate import WORK_KIND, WorkSlots
 from app.services.supervisor import LoopHandle, Supervisor
 from app.services.turn_end_read_service import TurnEndReadService
 from app.services.work_status import work_moved
@@ -218,6 +228,7 @@ class RelayService:
         work_slots: WorkSlots,
         pilot_server: PilotServer,
         turn_end_reads: TurnEndReadService,
+        chat_closes: ChatCloseService,
     ) -> None:
         """Register the `relay` job, whose loops are one per Session, and whose
         reconcile runs the relay of every Session with a Turn in flight; and the
@@ -236,6 +247,8 @@ class RelayService:
                 minted for it
             turn_end_reads: Reads the documents a work item's run registered,
                 once the turn that ends the run commits
+            chat_closes: Writes a closed chat's close after its last turn's
+                end
         """
         self._container = container
         self._supervisor = supervisor
@@ -244,6 +257,7 @@ class RelayService:
         self._slots = work_slots
         self._pilot_server = pilot_server
         self._reads = turn_end_reads
+        self._closes = chat_closes
         supervisor.register_job(
             RELAY_JOB, needs_controller=True, reconcile=self._reconcile
         )
@@ -748,6 +762,7 @@ class RelayService:
             self._moved(session, state=True)
             self._slots.left(session, SessionState.RUNNING)
         self._container.document_service().turn_ended(session)
+        self._closes.turn_ended(db, session)
         self._environments.arm_shutdown_timer(db, _environment_id(session))
         logger.info("Session %s stopped under its turn: %s", session.id, reason)
 
@@ -847,6 +862,7 @@ class RelayService:
             _refresh_turns(db, session, turn)
             self._moved(session)
             self._container.document_service().turn_ended(session)
+            self._closes.turn_ended(db, session)
             self._environments.arm_shutdown_timer(db, _environment_id(session))
 
     def _relay_turn(self, opening: _Opening, handle: LoopHandle) -> bool:
@@ -952,9 +968,11 @@ class RelayService:
         error is `failed` instead, the error the Turn's (F125), and one that
         ended neither interrupted nor in error makes the work item done
         (decision 44). A Session stopped under the turn stays as its stop left
-        it. After the commit, a work item's slot opens, the documents its done
-        run registered are read, and the environment's shutdown timer is armed
-        if nothing runs there.
+        it. A brain session left `idle` with a save of its own still held
+        stays `running` with the follow-up turn (`_follow_up`). After the
+        commit, a work item's slot opens, the documents its done run
+        registered are read, and the environment's shutdown timer is armed if
+        nothing runs there.
 
         A later Turn in flight is a send the controller accepted once this
         turn's result was out, committed first: the Session stays `running`
@@ -997,9 +1015,12 @@ class RelayService:
                     session.current_line = None
                 else:
                     session.current_line = at_send(None, following.started_at)
+                held = self._container.document_service().turn_ended(session)
+                if held and _follows_up(session, turn):
+                    self._follow_up(db, session, held)
                 self._moved(session, state=session.state_code != before)
                 self._slots.left(session, before)
-                self._container.document_service().turn_ended(session)
+                self._closes.turn_ended(db, session)
         if not ended:
             # Another process's relay ended the turn.
             self._streams.wake(opening.session_id)
@@ -1026,6 +1047,21 @@ class RelayService:
             if work:
                 self._container.record_service().work_done(session.id, at)
                 self._reads.run_ended(db, session.id)
+
+    def _follow_up(self, db: Session, session: AgentSession, held: list[str]) -> None:
+        """Under the Session's lock, its turn ended `idle` with its saves of
+        `held` still held: the server's follow-up turn in flight, no author,
+        naming them (`BriefService.follow_up`), the Session `running` with it,
+        and its relay run again once this commits to send it (F79)."""
+        message = self._container.brief_service().follow_up(held)
+        turn = self._new_turn(db, session.id, message, None)
+        session.state_code = SessionState.RUNNING
+        session.current_line = at_send(None, turn.started_at)
+        _refresh_turns(db, session, turn)
+        after_commit(_RelayStart(self, session.id))
+        logger.info(
+            "Session %s gets the follow-up turn: %s held", session.id, ", ".join(held)
+        )
 
     def _moved(self, session: AgentSession, *, state: bool = False) -> None:
         work_moved(self._container.engine_bus(), session, state=state)
@@ -1082,6 +1118,17 @@ def _with_turn_in_flight(
             .where(AgentSession.state_code.in_(states), in_flight)
             .order_by(AgentSession.id)
         )
+    )
+
+
+def _follows_up(session: AgentSession, turn: Turn) -> bool:
+    """Whether a brain session's turn `turn`, ended with a save of its own
+    still held, gets the follow-up turn: it left the Session `idle`, and is
+    no follow-up itself (one per turn, ruling D1)."""
+    return (
+        session.kind_code != WORK_KIND
+        and session.state_code == SessionState.IDLE
+        and not is_follow_up(turn)
     )
 
 

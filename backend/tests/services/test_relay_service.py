@@ -25,6 +25,7 @@ from app.database import scoped_session
 from app.engine.bus import EngineEvent, ProjectChanged, WorkMoved
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import (
+    Chat,
     Document,
     DocumentVersion,
     Environment,
@@ -34,6 +35,8 @@ from app.models import (
     User,
 )
 from app.models.reference import (
+    ChatKind,
+    CloseCause,
     ProjectState,
     RecordKind,
     SessionState,
@@ -41,6 +44,7 @@ from app.models.reference import (
     VersionCause,
 )
 from app.schemas.timeline import StopCause
+from app.services.chat_close_service import CLOSED, ChatCloseService
 from app.services.container import ServiceContainer
 from app.services.controller_client import (
     ControllerClient,
@@ -120,6 +124,12 @@ def _relay_service(
             container=container,
             supervisor=supervisor,
             session_streams=container.session_stream_service(),
+        ),
+        chat_closes=ChatCloseService(
+            container=container,
+            supervisor=supervisor,
+            session_streams=container.session_stream_service(),
+            close_after_seconds=3300,
         ),
     )
     return relays, coordinator
@@ -657,6 +667,37 @@ class TestSend:
         assert token_entry.startswith("PILOT_TOKEN=")
         (created,) = fake.sessions(ENV)
         assert created.box is not None
+
+    def test_a_finished_projects_chat_re_created_still_reads_only(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        supervise: Supervise,
+        creating: tuple[RelayService, "_Creating"],
+        project: Project,
+    ) -> None:
+        """No folder to write and no surface, mid-conversation as at its first
+        create (F5.5; the B1 ruling; V27)."""
+        _, fake = creating
+        relays = _relay_service(container, supervise, mcp_url=MCP_URL)[0]
+        project.state_code, project.slug = ProjectState.FINISHED, "soup-club"
+        run = _agent_session(session, project, "claude-gone")
+        run.kind_code, run.cwd = "chat", "/work/PilotProjects"
+        session.flush()
+        fake.put_file(ENV, "/work/PilotProjects/CLAUDE.md", b"# Pilot\n")
+
+        turn = _send(relays, session, run, "What was settled?")
+
+        assert turn.error is None
+        (body,) = fake.create_bodies
+        assert (body["cwd"], body["sandboxReadOnlyCwd"]) == (
+            "/work/PilotProjects",
+            True,
+        )
+        assert "sandboxWritableDirs" not in body
+        assert "mcpConfig" not in body
+        assert body["env"] == ["PILOT_PROJECT=/work/Projects/soup-club"]
+        assert run.token_hash not in (None, "")
 
     def test_a_resume_the_controller_refuses_fails_the_turn_and_writes_nothing_else(
         self,
@@ -1540,6 +1581,200 @@ def _moves(events: list[EngineEvent]) -> list[EngineEvent]:
     return [event for event in events if isinstance(event, WorkMoved | ProjectChanged)]
 
 
+class _Answering(ServedFakeController):
+    """The fake, ending each turn as soon as it is sent, keeping each send's
+    message."""
+
+    def __init__(self, keepalive_seconds: float) -> None:
+        super().__init__(keepalive_seconds)
+        self.sent: list[str] = []
+
+    def _send(self, request: Request, env_id: str, name: str) -> Response:
+        response = super()._send(request, env_id, name)
+        self.sent.append((request.get_json(silent=True) or {})["message"])
+        self.finish(env_id, name, "success", "Fixed.")
+        return response
+
+
+@pytest.fixture
+def answering(
+    session: DbSession, container: ServiceContainer, supervise: Supervise
+) -> Iterator[tuple[RelayService, _Answering, str]]:
+    """The relays on `_Answering`, with the environment running and its row,
+    and an idle headless session in it; its name."""
+    fake = _Answering(keepalive_seconds=0.2)
+    client = client_of(container, fake)
+    name = _headless(fake, client)
+    _environment_row(session, due=datetime.now(UTC) + STOP_AFTER)
+    try:
+        yield _relay_service(container, supervise)[0], fake, name
+    finally:
+        fake.close()
+
+
+HELD_SAVE = b"""# Badges
+
+```decision id=D1
+options:
+  - Red
+recommend: Blue
+```
+"""
+"""A save of the draft whose block's `recommend` names no option: held."""
+
+
+def _held_save(
+    container: ServiceContainer, db: DbSession, project: Project, run: models.Session
+) -> str:
+    """The Session's save of the project's draft, held; its path from the
+    tree's root."""
+    container.document_service().bear_draft(project, "# Badges\n")
+    path = f"draft-{project.number}/project.md"
+    answer = container.ingest_service().ingest(path, HELD_SAVE, None, _row(db), run)
+    assert answer.held
+    return path
+
+
+def _turns(db: DbSession, run: models.Session) -> list[Turn]:
+    return list(
+        db.scalars(
+            select(Turn)
+            .where(Turn.session_id == run.id)
+            .order_by(Turn.seq)
+            .execution_options(populate_existing=True)
+        )
+    )
+
+
+class TestFollowUpTurn:
+    """A brain session's turn that ends with a save of its own still held
+    gets the server's follow-up turn, one per turn (F79; design 3 §5.1; the D1
+    ruling; V08)."""
+
+    @pytest.mark.parametrize("kind", ["chat", "job"])
+    def test_a_brain_turn_ending_with_its_save_held_gets_the_follow_up(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        answering: tuple[RelayService, _Answering, str],
+        project: Project,
+        kind: str,
+    ) -> None:
+        relays, fake, name = answering
+        run = _agent_session(session, project, name)
+        run.kind_code = kind
+        path = _held_save(container, session, project, run)
+        _send(relays, session, run, "Write the palette")
+
+        _relay(relays, run)
+
+        first, follow_up = _turns(session, run)
+        assert first.ended_at is not None
+        assert (follow_up.author_user_id, follow_up.words, follow_up.ended_at) == (
+            None,
+            None,
+            None,
+        )
+        assert follow_up.message == container.brief_service().follow_up([path])
+        assert follow_up.message.startswith(f"Your save of `{path}` is held: `{path}:")
+        assert (run.state_code, run.turns, run.turn_ended_at) == (
+            SessionState.RUNNING,
+            2,
+            None,
+        )
+        assert run.current_line is not None
+        assert [s.record.kind_code for s in _records(session, run.id)][-1] == (
+            RecordKind.RESULT
+        )
+
+    def test_the_relays_next_run_sends_it_and_its_own_held_end_gets_none(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        answering: tuple[RelayService, _Answering, str],
+        project: Project,
+    ) -> None:
+        relays, fake, name = answering
+        run = _agent_session(session, project, name)
+        run.kind_code = "chat"
+        path = _held_save(container, session, project, run)
+        _send(relays, session, run, "Write the palette")
+        _relay(relays, run)
+        # The brain saves the draft again in the follow-up turn, held still.
+        container.ingest_service().ingest(path, HELD_SAVE, None, _row(session), run)
+
+        _relay(relays, run)
+
+        assert fake.sent[1:] == [container.brief_service().follow_up([path])]
+        assert len(_turns(session, run)) == 2
+        assert run.state_code is SessionState.IDLE
+
+    def test_a_work_items_turn_ending_with_its_save_held_gets_none(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        answering: tuple[RelayService, _Answering, str],
+        project: Project,
+    ) -> None:
+        relays, fake, name = answering
+        run = _agent_session(session, project, name)
+        _held_save(container, session, project, run)
+        _send(relays, session, run, "Write the palette")
+
+        _relay(relays, run)
+
+        assert len(_turns(session, run)) == 1
+        assert run.state_code is SessionState.IDLE
+
+    def test_a_brain_turn_ending_clean_gets_none(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        answering: tuple[RelayService, _Answering, str],
+        project: Project,
+    ) -> None:
+        relays, fake, name = answering
+        run = _agent_session(session, project, name)
+        run.kind_code = "chat"
+        container.document_service().bear_draft(project, "# Badges\n")
+        container.ingest_service().ingest(
+            f"draft-{project.number}/project.md",
+            b"# Badge colours\n",
+            None,
+            _row(session),
+            run,
+        )
+        _send(relays, session, run, "Write the palette")
+
+        _relay(relays, run)
+
+        assert len(_turns(session, run)) == 1
+        assert run.state_code is SessionState.IDLE
+
+    def test_a_brain_session_stopped_under_its_turn_gets_none(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        project: Project,
+        idle: models.Session,
+    ) -> None:
+        idle.kind_code = "chat"
+        _held_save(container, session, project, idle)
+        _send(relays, session, idle)
+        _stopped(idle)
+        _turn_of(
+            fake_controller, controller_session, raw_turn("turn_text"), "interrupted"
+        )
+
+        _relay(relays, idle)
+
+        assert len(_turns(session, idle)) == 1
+        assert idle.state_code is SessionState.STOPPED
+
+
 class _Opened:
     """A listener of the slot's open event, counting its calls."""
 
@@ -2329,6 +2564,92 @@ class TestEnvironmentUnderATurn:
         assert opened.calls == 1
         assert _row(session).stop_due_at is not None
         assert ProjectChanged(project.id) in engine_events
+
+
+def _closed_chat(db: DbSession, run: models.Session) -> None:
+    """`run` a chat's Session, the chat closed by Finish under its turn."""
+    run.kind_code = "chat"
+    db.flush()
+    db.add(
+        Chat(
+            id=run.id,
+            project_id=run.project_id,
+            session_kind_code="chat",
+            kind_code=ChatKind.PROJECT,
+            closed_at=datetime.now(UTC),
+            close_cause_code=CloseCause.FINISHED,
+        )
+    )
+    db.flush()
+
+
+class TestAClosedChatsLastTurn:
+    """A chat closed while its turn ran has the close's record after the
+    turn's end, however it ends (F130.1; the B2 ruling; V28)."""
+
+    def test_a_turn_whose_controller_session_is_gone_ends_before_the_close(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        idle: models.Session,
+    ) -> None:
+        _send(relays, session, idle)
+        _stopped(idle)
+        _closed_chat(session, idle)
+        fake_controller.restart(ENV)
+        fake_controller.set_status(ENV, "running")
+
+        _relay(relays, idle)
+
+        assert [payload["type"] for _, payload in _servers(session, idle)] == [
+            SESSION_GONE,
+            CLOSED,
+        ]
+        assert _records(session, idle.id)[-1].record.payload == {
+            "type": CLOSED,
+            "cause": "finished",
+        }
+
+    def test_a_turn_its_environment_stopped_under_ends_before_the_close(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        idle: models.Session,
+    ) -> None:
+        _send(relays, session, idle)
+        _stopped(idle)
+        _closed_chat(session, idle)
+        fake_controller.set_status(ENV, "stopped")
+
+        _relay(relays, idle)
+
+        assert [payload["type"] for _, payload in _servers(session, idle)] == [
+            ENVIRONMENT_STOPPED,
+            CLOSED,
+        ]
+
+    def test_a_turn_ending_with_its_result_ends_before_the_close(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        idle: models.Session,
+    ) -> None:
+        _send(relays, session, idle)
+        _stopped(idle)
+        _closed_chat(session, idle)
+        _turn_of(
+            fake_controller, controller_session, raw_turn("turn_text"), "interrupted"
+        )
+
+        _relay(relays, idle)
+
+        records = _records(session, idle.id)
+        assert records[-2].record.kind_code == RecordKind.RESULT
+        assert records[-1].record.payload == {"type": CLOSED, "cause": "finished"}
 
 
 class TestInterrupt:

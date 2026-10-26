@@ -10,8 +10,9 @@ expands from the environment of the process the controller spawns, so the
 token is in neither argv nor a file. `strictMcpConfig` is left unset, and the
 session keeps its environment's own servers. The token's sha256 is the
 Session's `token_hash`, which its creator writes with the controller session
-the create made. With no server's URL configured, a create carries neither the
-token nor the entry.
+the create made. A create with no surface, a finished project's brain
+session's (F5.5), or with no server's URL configured, carries neither the
+token nor the entry, so no bearer reaches either surface's routes from it.
 """
 
 import hashlib
@@ -105,10 +106,11 @@ class PilotServer:
 
     def inject(self, create: ScopedCreate) -> Injected:
         """`create`'s request with a token minted for it, and the server of its
-        surface named in its `mcpConfig` with the token as its bearer."""
+        surface named in its `mcpConfig` with the token as its bearer; a
+        create with no surface is handed neither."""
         token = secrets.token_urlsafe(32)
         request = create.request
-        if self._url is None:
+        if self._url is None or create.surface is None:
             return Injected(request, token_hash(token))
         registration = {
             "mcpServers": {

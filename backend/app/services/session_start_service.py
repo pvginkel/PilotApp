@@ -61,7 +61,7 @@ roll's overlap (§8.1) changes nothing the first has written.
 A work item's Stop ends its Session where it is (F67.1): a turn in flight is
 interrupted after the commit, and a start held or under way ends, nothing of it
 sent afterwards. Finish and Archive stop every Session of the project so (F5.1,
-F128.1). Its Resume writes a server-own Turn, "continue", or the ended Turn's
+F128.1), and Reopen a finished project's chat (F5.5). Its Resume writes a server-own Turn, "continue", or the ended Turn's
 message while the Session has no conversation (R15's rule), and passes the gate
 as a start does (F67.2): `held`, or `starting`, its loop sending the Turn to
 its controller session, or to one created anew, its environment started again,
@@ -684,7 +684,8 @@ class SessionStartService:
     ) -> None:
         """Every Session of the project running, starting or held, a Chat's
         among them, stopped by `person` at `at` as a Stop stops a work item:
-        Finish's and Archive's (F5.1, F128.1). It calls no controller in the
+        Finish's and Archive's (F5.1, F128.1), and Reopen's of a finished
+        project's chat (F5.5). It calls no controller in the
         transaction. The caller holds the project's row; the Sessions are
         locked before any Item, which a turn's end locks after its Session."""
         for session in db.scalars(

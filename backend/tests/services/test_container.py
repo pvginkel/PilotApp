@@ -5,7 +5,7 @@ import json
 import logging
 import threading
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -17,9 +17,16 @@ from app.app_config import AppSettings
 from app.config import Settings
 from app.database import scoped_session
 from app.exceptions import ConfigurationError
-from app.models import Environment, Project, User
+from app.models import Chat, Environment, Project, Turn, User
 from app.models import Session as AgentSession
-from app.models.reference import SessionState, UserKind
+from app.models.reference import (
+    ChatKind,
+    CloseCause,
+    ProjectState,
+    SessionState,
+    UserKind,
+)
+from app.services.chat_close_service import ChatCloseService
 from app.services.container import (
     ServiceContainer,
     require_pilot_server,
@@ -376,6 +383,87 @@ class TestRelayWatchdogWiring:
             wait_until(lambda: _watchdog_ticks() >= ticks + 2, "two watchdog ticks")
         finally:
             coordinator.shutdown()
+
+
+class TestChatCloseWiring:
+    def test_the_close_timer_runs_from_startup_and_closes_an_overdue_chat(
+        self, committed_app: Flask, fake_controller: ServedFakeController
+    ) -> None:
+        container = committed_app.container
+        container.app_config.override(
+            AppSettings(
+                controller_url=fake_controller.url,
+                scheduler_tick_seconds=0.05,
+                chat_close_timeout_seconds=60,
+            )
+        )
+        client_of(container, fake_controller)
+        ended = datetime.now(UTC) - timedelta(minutes=2)
+        with scoped_session(container) as db:
+            person = User(
+                kind_code=UserKind.PERSON,
+                subject="subject-ada",
+                handle="ada",
+                name="Ada Example",
+                avatar_slot=1,
+            )
+            db.add(person)
+            db.flush()
+            project = Project(
+                created_by_user_id=person.id,
+                state_code=ProjectState.OPEN,
+                slug="soup-club",
+            )
+            db.add(project)
+            db.flush()
+            run = AgentSession(
+                project_id=project.id,
+                kind_code="chat",
+                cwd="/work/PilotProjects",
+                token_hash="a" * 64,
+                state_code=SessionState.FAILED,
+                turns=1,
+                turn_started_at=ended,
+                turn_ended_at=ended,
+            )
+            db.add(run)
+            db.flush()
+            db.add(
+                Chat(
+                    id=run.id,
+                    project_id=project.id,
+                    session_kind_code="chat",
+                    kind_code=ChatKind.PROJECT,
+                )
+            )
+            db.add(
+                Turn(
+                    session_id=run.id,
+                    seq=1,
+                    message="/chat",
+                    started_at=ended,
+                    ended_at=ended,
+                )
+            )
+            chat_id = run.id
+        closes = container.chat_close_service()
+        assert isinstance(closes, ChatCloseService)
+        assert closes is container.chat_close_service()
+        coordinator = container.lifecycle_coordinator()
+
+        coordinator.fire_startup()
+        try:
+            wait_until(
+                lambda: _close_cause(container, chat_id) is CloseCause.TIMEOUT,
+                "the chat closed by its timer",
+            )
+        finally:
+            coordinator.shutdown()
+
+
+def _close_cause(container: ServiceContainer, chat_id: uuid.UUID) -> CloseCause | None:
+    with scoped_session(container) as db:
+        return db.get_one(Chat, chat_id).close_cause_code
 
 
 class TestSessionStartWiring:

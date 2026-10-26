@@ -137,6 +137,14 @@ class AppEnvironment(BaseSettings):
             "job's (F139)"
         ),
     )
+    CHAT_CLOSE_TIMEOUT: float = Field(
+        default=3300.0,
+        gt=0,
+        description=(
+            "Seconds after its last turn ended at which an open project chat with "
+            "no turn in flight closes; cache_expiration_ttl's 55 minutes (F130)"
+        ),
+    )
 
 
 class AppSettings(BaseModel):
@@ -239,6 +247,11 @@ class AppSettings(BaseModel):
     brain_reasoning_effort: str = "xhigh"
     """The reasoning effort every brain session is created with (F139)."""
 
+    chat_close_timeout_seconds: float = 3300.0
+    """How long after its last turn ended an open project chat with no turn in
+    flight stands before the scheduler's tick closes it (F130; design 2
+    §13)."""
+
     def dump_for_logging(self) -> dict[str, str]:
         """Every setting, for the boot log, with the Sensitive ones as ``***``."""
         return dump_config_for_logging(self)
@@ -275,4 +288,5 @@ class AppSettings(BaseModel):
             ),
             brain_model=env.BRAIN_MODEL,
             brain_reasoning_effort=env.BRAIN_REASONING_EFFORT,
+            chat_close_timeout_seconds=env.CHAT_CLOSE_TIMEOUT,
         )

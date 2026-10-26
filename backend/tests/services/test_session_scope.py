@@ -1,8 +1,9 @@
 """What a Session's headless create is handed, derived in one place from its
-columns, its kind and its Project (TD §4.2, §4.5; F50, F84; design 3 §12; DB
-decision 57, assertion 244; V13, V27)."""
+columns, its kind and its Project (TD §4.2, §4.5; F50, F84, F5.5; design 3
+§12; DB decision 57, assertion 244; V05, V13, V27)."""
 
 import pytest
+from sqlalchemy import text as sql
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
@@ -74,6 +75,47 @@ class TestScopedCreate:
         folder = f"/work/Projects/draft-{project.number}"
         assert request.sandbox_writable_dirs == [folder]
         assert request.env == [f"PILOT_PROJECT={folder}"]
+
+    @pytest.mark.parametrize("kind", ["chat", "job"])
+    def test_a_finished_projects_brain_session_reads_only_with_no_surface(
+        self, session: DbSession, project: Project, kind: str
+    ) -> None:
+        project.state_code, project.slug = ProjectState.FINISHED, "soup-club"
+        run = _session(session, project, kind)
+
+        assert scoped_create(session, run) == ScopedCreate(
+            COLUMNS.model_copy(
+                update={
+                    "sandbox_read_only_cwd": True,
+                    "env": ["PILOT_PROJECT=/work/Projects/soup-club"],
+                }
+            ),
+            None,
+        )
+
+    def test_a_finished_projects_work_item_keeps_its_columns_and_pilot_work(
+        self, session: DbSession, project: Project
+    ) -> None:
+        project.state_code, project.slug = ProjectState.FINISHED, "soup-club"
+        run = _session(session, project, "work")
+
+        assert scoped_create(session, run) == ScopedCreate(COLUMNS, Surface.WORK)
+
+    def test_the_projects_state_is_read_as_the_database_has_it(
+        self, session: DbSession, project: Project
+    ) -> None:
+        """A re-create in a transaction that read the project before its
+        Finish committed takes the finished scope (V27)."""
+        project.state_code, project.slug = ProjectState.OPEN, "soup-club"
+        run = _session(session, project, "chat")
+        session.execute(
+            sql("UPDATE projects SET state_code = 'finished' WHERE id = :id"),
+            {"id": project.id},
+        )
+
+        scoped = scoped_create(session, run)
+
+        assert (scoped.surface, scoped.request.sandbox_writable_dirs) == (None, None)
 
 
 class TestProjectFolder:
