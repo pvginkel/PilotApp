@@ -7,8 +7,9 @@ with the stage's `config/<stage>/`:
 - **dev**, `pilot-dev`, at `https://pilot-dev.home`, internal. Every green build of PilotApp's
   `main` deploys it, with no hand step. Its sessions and environments are `kubecoder-dev`'s, a
   KubeCoder with a fleet of its own, never the operator's.
-- **prd**, `pilot-prd`, production, at `https://pilot.ginbov.nl`. It moves only when the operator
-  promotes a commit, by starting the Jenkins job `PilotApp/Promote-PRD` by hand.
+- **prd**, `pilot-prd`, production, at `https://pilot.ginbov.nl`. It moves only when a commit is
+  promoted: the Jenkins job `PilotApp/Promote-PRD`, started by hand by the operator or, on their
+  standing word, by the session working with them.
 
 The chart is the same; what differs is each Application and its values (`<n>` is a PilotApp build
 number):
