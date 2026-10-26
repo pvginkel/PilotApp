@@ -751,6 +751,39 @@ class TestControllerClient:
         )
         assert running.sessions(ENV) == []
 
+    def test_a_boxed_create_without_the_sandbox_profile_is_refused_before_its_folders(
+        self, running: ServedFakeController, controller_client: ControllerClient
+    ) -> None:
+        # The worker's order (sandbox.go): the profile first, so a pod without
+        # it answers 409 even where no folder of the box is on the tree.
+        running.no_sandbox_profile(ENV)
+        request = HeadlessCreateRequest(
+            cwd="Missing", sandbox=True, sandbox_writable_dirs=["/work/Gone"]
+        )
+
+        with pytest.raises(ControllerProblem) as caught:
+            controller_client.create_headless_session(ENV, request)
+
+        assert caught.value.problem_type is ControllerProblemType.CAPABILITY_UNAVAILABLE
+        assert running.sessions(ENV) == []
+
+    def test_a_boxed_create_names_its_missing_cwd_before_a_missing_listed_folder(
+        self, running: ServedFakeController, controller_client: ControllerClient
+    ) -> None:
+        # The worker's order (sandbox.go): the cwd, then each listed folder.
+        request = HeadlessCreateRequest(
+            cwd="Missing", sandbox=True, sandbox_writable_dirs=["/work/Gone"]
+        )
+
+        with pytest.raises(ControllerProblem) as caught:
+            controller_client.create_headless_session(ENV, request)
+
+        assert caught.value.problem_type is ControllerProblemType.VALIDATION_ERROR
+        assert caught.value.title == (
+            'invalid sandbox scope: the cwd "/work/Missing" does not exist'
+        )
+        assert running.sessions(ENV) == []
+
     def test_a_create_with_no_box_needs_no_folder_and_no_sandbox_profile(
         self, running: ServedFakeController, controller_client: ControllerClient
     ) -> None:
