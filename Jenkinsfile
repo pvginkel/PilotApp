@@ -66,6 +66,12 @@ pipeline {
                             // The library fixes run-suite's flags, so the suite runner's pnpm store
                             // cache is switched on here instead of with --build-cache.
                             BUILD_CACHE: 'true',
+                            // The suite as `kc project test` runs it: pytest on eight processes
+                            // (pytest-xdist), Playwright on four workers, about 1.1 GiB apiece. The
+                            // fixed flags again: pytest reads PYTEST_ADDOPTS itself, and run-suite
+                            // reads PLAYWRIGHT_WORKERS for its --workers.
+                            PYTEST_ADDOPTS: '-n 8',
+                            PLAYWRIGHT_WORKERS: '4',
                         ],
                         secrets: [],
                     )
