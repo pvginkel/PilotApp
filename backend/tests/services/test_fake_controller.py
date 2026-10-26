@@ -72,6 +72,7 @@ class TestFakeController:
             "not-whitelisted",
             "unprojectable",
             "unreadable",
+            "no-sandbox-profile",
             "put-file",
             "file-text",
             "remove-file",
@@ -250,6 +251,46 @@ class TestFakeController:
         assert response.get_json()["type"] == "validation-error"
         assert "KUBECODER_EXAMPLE=2" in response.get_json()["title"]
         assert fake.sessions("env-1") == []
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"sandbox": "yes"},
+            {"sandboxReadOnlyCwd": 1},
+            {"sandboxWritableDirs": "/work/Example"},
+            {"sandboxWritableDirs": [1]},
+        ],
+    )
+    def test_create_refuses_a_box_field_of_another_type(
+        self, fake: FakeController, http: Client, body: dict[str, object]
+    ) -> None:
+        fake.add_environment("env-1", status="running")
+        fake.put_file("env-1", "/work/Example/notes.md", b"Notes.")
+
+        response = http.post(
+            "/environments/env-1/sessions/headless", json=body, headers=BEARER
+        )
+
+        assert response.status_code == 422
+        assert response.get_json()["type"] == "validation-error"
+        assert fake.sessions("env-1") == []
+
+    def test_the_sandbox_profile_given_back_lets_a_boxed_create_through(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.add_environment("env-1", status="running")
+        fake.put_file("env-1", "/work/Example/notes.md", b"Notes.")
+        http.post("/fake/no-sandbox-profile", json={"env_id": "env-1"})
+        http.post("/fake/no-sandbox-profile", json={"env_id": "env-1", "on": False})
+
+        response = http.post(
+            "/environments/env-1/sessions/headless",
+            json={"sandbox": True},
+            headers=BEARER,
+        )
+
+        assert response.status_code == 200
+        assert fake.session("env-1", "claude-1").box == ("/work/Example",)
 
     def test_create_takes_a_name_that_holds_the_reserved_prefix_further_in(
         self, fake: FakeController, http: Client

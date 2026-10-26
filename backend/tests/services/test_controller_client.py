@@ -611,12 +611,30 @@ class TestControllerClient:
             strict_mcp_config=True,
             disable_slash_commands=True,
             enable_cross_session_messaging=False,
+            sandbox=True,
+            sandbox_read_only_cwd=True,
+            sandbox_writable_dirs=["/work/Example/out"],
         )
+        running.put_file(ENV, "/work/Example/out/notes.md", b"Notes.")
 
         # The fake refuses a field the controller does not know.
-        assert (
-            controller_client.create_headless_session(ENV, request).name == "claude-1"
-        )
+        name = controller_client.create_headless_session(ENV, request).name
+
+        assert running.session(ENV, name).create_body == {
+            "cwd": "Example",
+            "resume": "conversation-1",
+            "agent": "claude",
+            "model": "example-model",
+            "reasoningEffort": "high",
+            "env": ["TZ=UTC"],
+            "mcpConfig": [".mcp.json"],
+            "strictMcpConfig": True,
+            "disableSlashCommands": True,
+            "enableCrossSessionMessaging": False,
+            "sandbox": True,
+            "sandboxReadOnlyCwd": True,
+            "sandboxWritableDirs": ["/work/Example/out"],
+        }
 
     @pytest.mark.parametrize(
         ("arrange", "problem_type"),
@@ -645,6 +663,192 @@ class TestControllerClient:
             controller_client.create_headless_session(ENV, HeadlessCreateRequest())
 
         assert caught.value.problem_type == problem_type
+
+    # -- A boxed headless session ---------------------------------------------
+
+    @pytest.mark.parametrize(
+        ("request_", "title"),
+        [
+            (
+                HeadlessCreateRequest(sandbox_writable_dirs=["/work/Projects/gone"]),
+                'invalid sandbox scope: sandboxWritableDirs entry "/work/Projects/gone" '
+                "does not exist",
+            ),
+            (
+                HeadlessCreateRequest(sandbox_writable_dirs=["Projects/acme"]),
+                'invalid sandbox scope: sandboxWritableDirs entry "Projects/acme" '
+                "is not an absolute path",
+            ),
+            (
+                HeadlessCreateRequest(sandbox_writable_dirs=["/work/Projects/a.md"]),
+                'invalid sandbox scope: sandboxWritableDirs entry "/work/Projects/a.md" '
+                "is not a directory",
+            ),
+            (
+                HeadlessCreateRequest(cwd="Missing", sandbox=True),
+                'invalid sandbox scope: the cwd "/work/Missing" does not exist',
+            ),
+            (
+                HeadlessCreateRequest(
+                    cwd="/work/Projects/acme",
+                    sandbox_read_only_cwd=True,
+                    sandbox_writable_dirs=["/work/Projects/acme/"],
+                ),
+                "invalid sandbox scope: the read-only cwd /work/Projects/acme is also "
+                'a writable root, the sandboxWritableDirs entry "/work/Projects/acme/"',
+            ),
+        ],
+        ids=["gone", "relative", "a-file", "cwd-gone", "read-only-cwd-writable"],
+    )
+    def test_a_boxed_create_out_of_scope_is_a_validation_error(
+        self,
+        running: ServedFakeController,
+        controller_client: ControllerClient,
+        request_: HeadlessCreateRequest,
+        title: str,
+    ) -> None:
+        running.put_file(ENV, "/work/Example/notes.md", b"Notes.")
+        running.put_file(ENV, "/work/Projects/acme/notes.md", b"Notes.")
+        running.put_file(ENV, "/work/Projects/a.md", b"A file.")
+
+        with pytest.raises(ControllerProblem) as caught:
+            controller_client.create_headless_session(ENV, request_)
+
+        assert caught.value.problem_type is ControllerProblemType.VALIDATION_ERROR
+        # Whole, as the worker wrote it: a failed start shows it (F125).
+        assert caught.value.title == title
+        assert running.sessions(ENV) == []
+
+    @pytest.mark.parametrize(
+        "request_",
+        [
+            HeadlessCreateRequest(sandbox=True),
+            HeadlessCreateRequest(sandbox_read_only_cwd=True),
+            HeadlessCreateRequest(sandbox_writable_dirs=["/work/Example"]),
+        ],
+        ids=["sandbox", "read-only-cwd", "writable-dirs"],
+    )
+    def test_a_boxed_create_on_a_pod_without_the_sandbox_profile_is_refused(
+        self,
+        running: ServedFakeController,
+        controller_client: ControllerClient,
+        request_: HeadlessCreateRequest,
+    ) -> None:
+        running.put_file(ENV, "/work/Example/notes.md", b"Notes.")
+        running.no_sandbox_profile(ENV)
+
+        with pytest.raises(ControllerProblem) as caught:
+            controller_client.create_headless_session(ENV, request_)
+
+        assert caught.value.problem_type is ControllerProblemType.CAPABILITY_UNAVAILABLE
+        assert caught.value.title == (
+            "sandboxing is not enabled for this environment: its pod was composed "
+            "without controllerConfig.sandboxAppArmorProfile; restart the "
+            "environment once that key is set"
+        )
+        assert caught.value.cause.startswith(
+            "the controller answered 409 capability-unavailable: sandboxing is"
+        )
+        assert running.sessions(ENV) == []
+
+    def test_a_create_with_no_box_needs_no_folder_and_no_sandbox_profile(
+        self, running: ServedFakeController, controller_client: ControllerClient
+    ) -> None:
+        running.no_sandbox_profile(ENV)
+        request = HeadlessCreateRequest(
+            cwd="Missing",
+            sandbox=False,
+            sandbox_read_only_cwd=False,
+            sandbox_writable_dirs=[],
+        )
+
+        snapshot = controller_client.create_headless_session(ENV, request)
+
+        assert running.session(ENV, snapshot.name).box is None
+
+    @pytest.fixture
+    def boxed_name(
+        self, running: ServedFakeController, controller_client: ControllerClient
+    ) -> str:
+        """A boxed session in ``ENV``, idle: ``/work/Example`` its read-only
+        cwd and ``/work/Projects/acme`` its one writable folder."""
+        running.put_file(ENV, "/work/Example/notes.md", b"Notes.")
+        running.put_file(ENV, "/work/Projects/acme/notes.md", b"Notes.")
+        request = HeadlessCreateRequest(
+            cwd="Example",
+            sandbox_read_only_cwd=True,
+            sandbox_writable_dirs=["/work/Projects/acme"],
+        )
+        return controller_client.create_headless_session(ENV, request).name
+
+    def test_a_boxed_session_runs_a_turn_while_its_folders_are_there(
+        self, controller_client: ControllerClient, boxed_name: str
+    ) -> None:
+        controller_client.send_message(ENV, boxed_name, "Check the badge.")
+
+        assert controller_client.get_session(ENV, boxed_name).status == "busy"
+
+    @pytest.mark.parametrize(
+        ("removed", "put", "result"),
+        [
+            (
+                "/work/Projects/acme/notes.md",
+                None,
+                "spawn failed: sandbox: scope root /work/Projects/acme: "
+                "lstat /work/Projects/acme: no such file or directory",
+            ),
+            (
+                "/work/Example/notes.md",
+                None,
+                "spawn failed: sandbox: scope root /work/Example: "
+                "lstat /work/Example: no such file or directory",
+            ),
+            (
+                "/work/Projects/acme/notes.md",
+                "/work/Projects/acme",
+                "spawn failed: sandbox: scope root /work/Projects/acme "
+                "is not a directory",
+            ),
+        ],
+        ids=["writable-gone", "read-only-cwd-gone", "now-a-file"],
+    )
+    def test_a_turn_fails_at_its_spawn_once_a_folder_of_its_box_is_gone(
+        self,
+        running: ServedFakeController,
+        controller_client: ControllerClient,
+        boxed_name: str,
+        removed: str,
+        put: str | None,
+        result: str,
+    ) -> None:
+        running.remove_file(ENV, removed)
+        if put is not None:
+            running.put_file(ENV, put, b"A file.")
+
+        controller_client.send_message(ENV, boxed_name, "Check the badge.")
+
+        with controller_client.open_response_stream(ENV, boxed_name, 0) as stream:
+            (frame,) = list(stream)
+        assert isinstance(frame, ResultFrame)
+        assert (frame.is_error, frame.result) == (True, result)
+        snapshot = controller_client.get_session(ENV, boxed_name)
+        # It never ran unboxed: no conversation began.
+        assert (snapshot.status, snapshot.session_id) == ("error", "")
+
+    def test_a_boxed_sessions_box_is_rebuilt_at_every_turn(
+        self,
+        running: ServedFakeController,
+        controller_client: ControllerClient,
+        boxed_name: str,
+    ) -> None:
+        running.remove_file(ENV, "/work/Projects/acme/notes.md")
+        controller_client.send_message(ENV, boxed_name, "Check the badge.")
+        running.put_file(ENV, "/work/Projects/acme/notes.md", b"Notes.")
+
+        controller_client.send_message(ENV, boxed_name, "Check the badge again.")
+
+        snapshot = controller_client.get_session(ENV, boxed_name)
+        assert (snapshot.status, snapshot.turn) == ("busy", 1)
 
     def test_send_message_makes_the_session_busy(
         self,

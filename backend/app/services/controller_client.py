@@ -65,6 +65,7 @@ class ControllerProblemType(StrEnum):
     ADMISSION_BLOCKED = "admission-blocked"
     NAMESPACE_NOT_WHITELISTED = "namespace-not-whitelisted"
     VALIDATION_ERROR = "validation-error"
+    CAPABILITY_UNAVAILABLE = "capability-unavailable"
     WORKER_UNREACHABLE = "worker-unreachable"
     ENVIRONMENT_UNREADABLE = "environment-unreadable"
     PATH_OUTSIDE_WORK = "path-outside-work"
@@ -81,6 +82,7 @@ _PROBLEM_STATUS = {
     ControllerProblemType.ADMISSION_BLOCKED: 409,
     ControllerProblemType.NAMESPACE_NOT_WHITELISTED: 403,
     ControllerProblemType.VALIDATION_ERROR: 422,
+    ControllerProblemType.CAPABILITY_UNAVAILABLE: 409,
     ControllerProblemType.WORKER_UNREACHABLE: 502,
     ControllerProblemType.ENVIRONMENT_UNREADABLE: 503,
     ControllerProblemType.PATH_OUTSIDE_WORK: 403,
@@ -212,6 +214,15 @@ class HeadlessCreateRequest(_ControllerModel):
     strict_mcp_config: bool | None = None
     disable_slash_commands: bool | None = None
     enable_cross_session_messaging: bool | None = None
+    sandbox: bool | None = None
+    """Box every turn in a kernel-enforced write scope: `$HOME`, `/tmp`, the
+    cwd and each of `sandbox_writable_dirs` writable, every other mount
+    read-only. A turn whose box cannot be built fails at its spawn."""
+    sandbox_read_only_cwd: bool | None = None
+    """The cwd a read-only root of the box; True implies `sandbox`."""
+    sandbox_writable_dirs: list[str] | None = None
+    """Absolute paths of existing folders, writable roots of the box; a
+    non-empty list implies `sandbox`."""
 
 
 @dataclass(frozen=True)

@@ -7,7 +7,10 @@ environments and headless sessions with the controller's state machines,
 answers with the controller's status codes and problem+json, and serves the
 response stream and the fleet stream in the controller's SSE framing, and
 reads, writes and lists the files of an environment's `/work`, whatever its
-status, as the controller does off its share.
+status, as the controller does off its share. A boxed headless session keeps
+the worker's rules: its create refused for a folder not on that tree or a pod
+without the sandbox profile, and a turn failing at its spawn once a folder of
+its box is gone.
 
 A test drives it through its verbs, the public methods below: in process under
 pytest, and over HTTP as `POST /fake/<verb>`, the verb's name hyphenated and its
@@ -23,7 +26,9 @@ repo or mode, a folder there while a file is under it, and its path is
 normalised before it is checked; a write takes no `expectedSha256`, and is
 refused while the environment reads `provisioning` or `starting`, a bring-up
 under way, or `deleting`; a reset clears the tree, and a bring-up clones nothing
-into it.
+into it. A box's roots on that tree are its cwd and its writable folders:
+`$HOME` and `/tmp`, writable roots of every box, are off it, so a read-only cwd
+meets no writable root but a listed folder.
 """
 
 from __future__ import annotations
@@ -88,12 +93,22 @@ _CREATE_FIELDS = {
     "strictMcpConfig",
     "disableSlashCommands",
     "enableCrossSessionMessaging",
+    "sandbox",
+    "sandboxReadOnlyCwd",
+    "sandboxWritableDirs",
 }
 
 _ENVIRONMENT_FIELDS = {"repo", "managed", "name"}
 
 _RESERVED_ENV_PREFIX = "KUBECODER_"
 """The environment's own variables: no create's `env` names one."""
+
+_NO_SANDBOX_PROFILE = (
+    "sandboxing is not enabled for this environment: its pod was composed "
+    "without controllerConfig.sandboxAppArmorProfile; restart the environment "
+    "once that key is set"
+)
+"""The worker's title of a boxed create on a pod without the sandbox profile."""
 
 _NAME_MAX = 64
 
@@ -160,6 +175,9 @@ class FakeEnvironment:
     capped: bool = False
     unprojectable: bool = False
     unreadable: bool = False
+    sandbox_profile: bool = True
+    """Whether its pod was composed with the sandbox AppArmor profile, which a
+    boxed create needs."""
     sessions_created: int = 0
     pod_started_at: datetime | None = None
     """Its pod's `startedAt`; None while it has no pod, `stopped`."""
@@ -218,6 +236,9 @@ class FakeSession:
     create_body: dict[str, Any] = field(default_factory=dict)
     """The headless create's body as it came: its `env` and `mcpConfig`
     among it."""
+    box: tuple[str, ...] | None = None
+    """The roots of its box on its environment's tree, which every turn's spawn
+    rebuilds the box from; None for a session with no box."""
 
     def snapshot(self) -> dict[str, Any]:
         return {
@@ -378,6 +399,7 @@ class FakeController:
             "not-whitelisted": self.not_whitelisted,
             "unprojectable": self.unprojectable,
             "unreadable": self.unreadable,
+            "no-sandbox-profile": self.no_sandbox_profile,
             "put-file": self.put_file,
             "file-text": self.file_text,
             "remove-file": self.remove_file,
@@ -538,6 +560,13 @@ class FakeController:
         its read and its file routes are `503 environment-unreadable`."""
         with self._changed:
             self._environment(env_id).unreadable = on
+
+    @validate_call
+    def no_sandbox_profile(self, env_id: str, on: bool = True) -> None:
+        """The environment's pod was composed without the sandbox AppArmor
+        profile: a boxed create is `409 capability-unavailable`."""
+        with self._changed:
+            self._environment(env_id).sandbox_profile = not on
 
     @validate_call
     def put_file(self, env_id: str, path: str, content: bytes) -> None:
@@ -998,14 +1027,17 @@ class FakeController:
                         f"{_RESERVED_ENV_PREFIX} (reserved for the environment's "
                         "own variables)",
                     )
-            environment.sessions_created += 1
             cwd = body.get("cwd") or "Example"
+            cwd = cwd if cwd.startswith("/") else f"/work/{cwd}"
+            box = _box(environment, body, cwd)
+            environment.sessions_created += 1
             session = FakeSession(
                 env_id,
                 f"claude-{environment.sessions_created}",
-                cwd if cwd.startswith("/") else f"/work/{cwd}",
+                cwd,
                 body.get("resume") or "",
                 create_body=body,
+                box=box,
             )
             self._sessions[(env_id, session.name)] = session
             self._publish(self._sessions_frame(env_id))
@@ -1030,7 +1062,7 @@ class FakeController:
         if not isinstance(body, dict) or not isinstance(body.get("message"), str):
             raise FakeControllerProblem(422, "validation-error", "message is required")
         with self._changed:
-            self._gate(env_id)
+            environment = self._gate(env_id)
             session = self._session(env_id, name)
             if session.status not in ("idle", "error"):
                 raise FakeControllerProblem(
@@ -1038,8 +1070,12 @@ class FakeController:
                 )
             session.status = "busy"
             session.result = None
-            session.session_id = session.session_id or str(uuid.uuid4())
+            failure = _spawn_failure(environment, session.box or ())
+            if failure is None:
+                session.session_id = session.session_id or str(uuid.uuid4())
             self._publish(self._sessions_frame(env_id))
+            if failure is not None:
+                self._resolve(session, "spawn-failure", failure)
         return Response(status=202)
 
     def _interrupt(self, request: Request, env_id: str, name: str) -> Response:
@@ -1348,6 +1384,86 @@ def _store(environment: FakeEnvironment, raw: str, data: bytes) -> None:
             )
         parent = posixpath.dirname(parent)
     environment.files[path] = data
+
+
+def _box(
+    environment: FakeEnvironment, body: dict[str, Any], cwd: str
+) -> tuple[str, ...] | None:
+    """The roots of the box a headless create asks for, writable then
+    read-only, as the worker resolves them; None for a create that asks for
+    none. The worker's refusals, in its order."""
+    sandbox = body.get("sandbox", False)
+    read_only = body.get("sandboxReadOnlyCwd", False)
+    dirs = body.get("sandboxWritableDirs") or []
+    if (
+        not isinstance(sandbox, bool)
+        or not isinstance(read_only, bool)
+        or not isinstance(dirs, list)
+        or not all(isinstance(entry, str) for entry in dirs)
+    ):
+        raise FakeControllerProblem(
+            422,
+            "validation-error",
+            "sandbox and sandboxReadOnlyCwd are booleans, sandboxWritableDirs "
+            "a list of strings",
+        )
+    if not (sandbox or read_only or dirs):
+        return None
+    if not environment.sandbox_profile:
+        raise FakeControllerProblem(409, "capability-unavailable", _NO_SANDBOX_PROFILE)
+    cwd_root = _box_root(environment, cwd, f"the cwd {_quoted(cwd)}")
+    listed = [
+        _box_root(environment, entry, f"sandboxWritableDirs entry {_quoted(entry)}")
+        for entry in dirs
+    ]
+    if not read_only:
+        return (cwd_root, *listed)
+    for entry, root in zip(dirs, listed, strict=True):
+        if root == cwd_root:
+            raise _invalid_scope(
+                f"the read-only cwd {cwd_root} is also a writable root, "
+                f"the sandboxWritableDirs entry {_quoted(entry)}"
+            )
+    return (*listed, cwd_root)
+
+
+def _box_root(environment: FakeEnvironment, path: str, named: str) -> str:
+    """`path` normalised, a folder on the environment's tree; `named` is what
+    the refusal calls it."""
+    if not path.startswith("/"):
+        raise _invalid_scope(f"{named} is not an absolute path")
+    root = posixpath.normpath(path)
+    if environment.holds_folder(root):
+        return root
+    if root in environment.files:
+        raise _invalid_scope(f"{named} is not a directory")
+    raise _invalid_scope(f"{named} does not exist")
+
+
+def _invalid_scope(cause: str) -> FakeControllerProblem:
+    return FakeControllerProblem(
+        422, "validation-error", f"invalid sandbox scope: {cause}"
+    )
+
+
+def _spawn_failure(environment: FakeEnvironment, box: Iterable[str]) -> str | None:
+    """The result of a turn whose box cannot be built from `box`: a root no
+    longer a folder on the environment's tree. None when every root is one."""
+    for root in box:
+        if environment.holds_folder(root):
+            continue
+        if root in environment.files:
+            return f"spawn failed: sandbox: scope root {root} is not a directory"
+        return (
+            f"spawn failed: sandbox: scope root {root}: "
+            f"lstat {root}: no such file or directory"
+        )
+    return None
+
+
+def _quoted(text: str) -> str:
+    """`text` as Go's `%q` writes it, as the worker's titles quote a path."""
+    return json.dumps(text, ensure_ascii=False)
 
 
 def _no_such_path(raw: str) -> FakeControllerProblem:
