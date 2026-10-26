@@ -1427,6 +1427,71 @@ class TestPilotStoreServiceAddProse:
         assert _effects(session) == []
 
     @pytest.mark.parametrize(
+        ("kind", "markdown", "fault"),
+        [
+            pytest.param(
+                "decision",
+                DECISION.replace(
+                    "recommend: Dome\n",
+                    "answer: Tunnel\nby: ada\nat: 2026-10-26T10:00:00Z\n",
+                ),
+                "line 10: block D1: `by: ada` is ada's answer, which the record"
+                " does not hold",
+                id="answered",
+            ),
+            pytest.param(
+                "action",
+                "# Pitch the tent\n\n```action id=A1\nby: ada\n"
+                "done: 2026-10-26T10:00:00Z\n```\n",
+                "line 4: block A1: `by: ada` is ada's answer, which the record"
+                " does not hold",
+                id="done",
+            ),
+        ],
+    )
+    def test_a_persons_answer_in_the_text_is_refused_and_nothing_minted(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+        kind: str,
+        markdown: str,
+        fault: str,
+    ) -> None:
+        run = _brain(session, project, environment)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _service(container).add_item(
+                _admitted(run), _added(kind=kind, markdown=markdown), TOOL_USE_ID
+            )
+
+        assert refused.value.message == (
+            f"Cannot add a {kind} item because its text holds faults: {fault}"
+        )
+        assert session.scalars(select(Item)).all() == []
+        assert _effects(session) == []
+
+    def test_the_agents_own_answer_in_the_text_is_born(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, project, environment)
+
+        added = _service(container).add_item(
+            _admitted(run),
+            _added(kind="document", markdown=SETTLED_PLAN),
+            TOOL_USE_ID,
+        )
+        clear_after_commit_callbacks()
+
+        assert _document_text(session, added.item) == SETTLED_PLAN
+
+    @pytest.mark.parametrize(
         ("fields", "cause"),
         [
             pytest.param(

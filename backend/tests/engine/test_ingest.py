@@ -273,6 +273,24 @@ class TestIngestServiceBornFaults:
     ) -> None:
         assert container.ingest_service().born_faults(project, "# Camp notes\n") == ()
 
+    def test_a_persons_answer_is_a_fault_the_agents_is_not(
+        self, container: ServiceContainer, project: Project
+    ) -> None:
+        text = (
+            "# Camp\n\n"
+            "```question id=Q1\nanswer: The lake\nby: agent\n```\n\n"
+            "```question id=Q2\nanswer: The forest\nby: ada\n```\n"
+        )
+
+        faults = container.ingest_service().born_faults(project, text)
+
+        assert faults == (
+            dsl.Fault(
+                10,
+                "block Q2: `by: ada` is ada's answer, which the record does not hold",
+            ),
+        )
+
 
 class TestIngestServicePaths:
     @pytest.mark.parametrize(

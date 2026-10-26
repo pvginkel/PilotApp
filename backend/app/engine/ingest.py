@@ -148,9 +148,21 @@ class IngestService:
         """`text`, the text an item of Pilot's own is to be born with in
         `project`, read as a save of it is: every fault it holds, its own and
         those against the record, the title rule's among them, in line order
-        (`dsl.DocumentKind.OWN_ITEM`)."""
+        (`dsl.DocumentKind.OWN_ITEM`). A block's `by` naming a person is a
+        fault too: a born text has no published one to hold that person's
+        answer (§6.4)."""
         facts = self._facts(project, dsl.DocumentKind.OWN_ITEM, {})
-        return tuple(dsl.validate(dsl.parse(text), facts))
+        parsed = dsl.parse(text)
+        persons = [
+            dsl.Fault(
+                block.lines["by"].first,
+                f"block {block.local_id}: `by: {block.by}` is {block.by}'s answer,"
+                " which the record does not hold",
+            )
+            for block in parsed.blocks
+            if block.by is not None and block.by != dsl.AGENT
+        ]
+        return tuple(_in_line_order([*dsl.validate(parsed, facts), *persons]))
 
     def write_down(self, paths: Iterable[str]) -> None:
         """The reconcile writes `paths`, from the tree's root, down from the
