@@ -1,7 +1,8 @@
 /**
  * A tool call's line (decision 3): its icon, what it did, a spinner while it runs; it opens to
- * its input and its result. A `pilot-store` call that changed the record shows as its effect
- * where it ran, in its step's place (decision 5, ruled 2026-10-18).
+ * its input and its result. A call that changed the record — a `pilot-store` call, or a worker's
+ * `register_document` or `attach_file` — shows as its effect where it ran, in its step's place
+ * (decision 5, ruled 2026-10-18).
  */
 
 import { useState } from 'react';

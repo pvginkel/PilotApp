@@ -502,11 +502,11 @@ class ServiceContainer(containers.DeclarativeContainer):
         controller_client=controller_client.provider,
     )
 
-    # A person's message to a project's brain: its chat, started in the store
-    # with its brief when none is open (design 3 §5.3, §12)
     # A project's chats as a person reads them, and their place in them (F40.3,
     # F43)
     chat_read_service = providers.Factory(ChatReadService, db=db_session)
+    # A person's message to a project's brain: its chat, started in the store
+    # with its brief when none is open (design 3 §5.3, §12)
     chat_service = providers.Factory(
         ChatService,
         db=db_session,

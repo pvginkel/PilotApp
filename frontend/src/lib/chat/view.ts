@@ -47,7 +47,7 @@ export interface ToolCallView {
   stopped?: boolean;
   /** Set on an Agent call: its sub-agent. */
   agent?: AgentView;
-  /** What a `pilot-store` call changed (the server's effect records). */
+  /** What a `pilot-store` call, or a worker's `register_document` or `attach_file`, changed (the server's effect records). */
   effects: Effect[];
 }
 
