@@ -21,6 +21,7 @@ from app.services.attachment_service import AttachmentService
 from app.services.auth_service import AuthService
 from app.services.brief_service import BriefService
 from app.services.chat_close_service import ChatCloseService
+from app.services.chat_read_service import ChatReadService
 from app.services.chat_service import ChatService
 from app.services.condition_service import ConditionService
 from app.services.controller_client import ControllerClient
@@ -229,15 +230,12 @@ class ServiceContainer(containers.DeclarativeContainer):
         queue_max_frames=config.provided.sse_queue_max_frames,
     )
 
-    # A Session's records and its hubs, the live frames on the browsers'
-    # connections (design 2 §10, §11)
+    # A Session's hubs, the live frames on the browsers' connections (design 2
+    # §11)
     session_stream_service = providers.Singleton(
         SessionStreamService,
         container=__self__,
         sse_connection_manager=sse_connection_manager,
-    )
-    session_record_service = providers.Factory(
-        SessionRecordService, db=db_session, session_streams=session_stream_service
     )
 
     # The turn-end read of the documents a work item's run registered (TD
@@ -405,6 +403,15 @@ class ServiceContainer(containers.DeclarativeContainer):
         tree_service=tree_service,
     )
 
+    # A Session's records, their one writer and the one read (design 2 §10,
+    # §11.4); a chat's record moves its project's chat.md
+    session_record_service = providers.Factory(
+        SessionRecordService,
+        db=db_session,
+        session_streams=session_stream_service,
+        view_service=view_service,
+    )
+
     # A tool call's Effects, placed by a record of its Turn (F41)
     effect_service = providers.Factory(
         EffectService, db=db_session, session_record_service=session_record_service
@@ -497,6 +504,9 @@ class ServiceContainer(containers.DeclarativeContainer):
 
     # A person's message to a project's brain: its chat, started in the store
     # with its brief when none is open (design 3 §5.3, §12)
+    # A project's chats as a person reads them, and their place in them (F40.3,
+    # F43)
+    chat_read_service = providers.Factory(ChatReadService, db=db_session)
     chat_service = providers.Factory(
         ChatService,
         db=db_session,
@@ -504,6 +514,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         session_start_service=session_start_service,
         brief_service=brief_service,
         session_record_service=session_record_service,
+        view_service=view_service,
         brain_model=app_config.provided.brain_model,
         brain_reasoning_effort=app_config.provided.brain_reasoning_effort,
     )

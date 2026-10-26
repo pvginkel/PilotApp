@@ -508,10 +508,12 @@ class TestSyncService:
         folder = f"draft-{project.number}"
         manifest = container.tree_service().manifest()
         hashes = {entry.path: entry.hash for entry in manifest}
-        # The item as synced, an older timeline as synced, the plan gone from
-        # disk, and in the shadow a path of a folder no longer synced.
+        # The item and the chat as synced, an older timeline as synced, the
+        # plan gone from disk, and in the shadow a path of a folder no longer
+        # synced.
         tree = {
             item: hashes[item],
+            f"{folder}/chat.md": hashes[f"{folder}/chat.md"],
             f"{folder}/timeline.json": HASH,
             "reference.json": hashes["reference.json"],
         }
@@ -622,7 +624,7 @@ class TestSyncService:
             f"{entry.path}\0{entry.hash}\0{int(entry.readonly)}\n" for entry in manifest
         )
 
-        assert len(manifest) == 4
+        assert len(manifest) == 5
         assert _sync(container).manifest_hash() == sha256_hex(listing)
 
     def test_manifest_hash_moves_with_the_manifest(

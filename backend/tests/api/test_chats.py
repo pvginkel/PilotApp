@@ -1,8 +1,10 @@
 """A person's message to a project's brain through the API (F38.3, F130,
-F5.5, F128.5; design 3 §5.3; V05, V06, V25)."""
+F5.5, F128.5; design 3 §5.3; V05, V06, V25); and the project's chats as a
+person reads them, with their place in them (F40.3, F43; V09)."""
 
 import uuid
 from collections.abc import Iterator
+from datetime import datetime, timedelta
 
 import pytest
 from dependency_injector import providers
@@ -10,8 +12,8 @@ from flask.testing import FlaskClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
-from app.models import Chat, Project, Turn, User
-from app.models.reference import ProjectState, TransitionKind
+from app.models import Chat, ChatRead, Project, Turn, User
+from app.models.reference import ChatKind, CloseCause, ProjectState, TransitionKind
 from app.services.chat_close_service import ChatCloseService
 from app.services.container import ServiceContainer
 from app.services.environment_service import EnvironmentService
@@ -20,6 +22,7 @@ from app.services.session_start_service import SessionStartService
 from app.services.start_gate import WorkSlots
 from app.services.turn_end_read_service import TurnEndReadService
 from app.utils.after_commit import clear_after_commit_callbacks
+from tests.support.chats import ChatWriter, close_chat, open_chat
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
 from tests.support.supervisor import Supervise
 
@@ -35,6 +38,19 @@ def _sign_in(client: FlaskClient, roles: tuple[str, ...] = ("editor",)) -> None:
 
 def _messages(project_id: uuid.UUID) -> str:
     return f"/api/projects/{project_id}/chat/messages"
+
+
+def _chats(project_id: uuid.UUID) -> str:
+    return f"/api/projects/{project_id}/chats"
+
+
+def _read(project_id: uuid.UUID) -> str:
+    return f"/api/projects/{project_id}/chat/read"
+
+
+def _stamp(at: datetime) -> str:
+    """A time as the API writes it."""
+    return at.isoformat().replace("+00:00", "Z")
 
 
 @pytest.fixture(autouse=True)
@@ -255,3 +271,154 @@ class TestSendChatMessage:
         response = oidc_client.post(_messages(uuid.uuid4()), json={"words": "Hi"})
 
         assert response.status_code == 401
+
+
+class TestListChats:
+    def test_it_answers_the_chats_in_order_and_the_callers_place(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        person: User,
+    ) -> None:
+        at = datetime.fromisoformat("2026-10-12T09:00:00+00:00")
+        definition = open_chat(session, opened, kind=ChatKind.DEFINITION, opened_at=at)
+        close_chat(session, definition, at + timedelta(hours=1), CloseCause.CREATED)
+        chat = open_chat(session, opened, opened_at=at + timedelta(hours=2))
+        writer = ChatWriter(session, container.session_record_service(), chat)
+        writer.message(person, "What next?")
+        writer.text("Two things.")
+        _sign_in(client)
+
+        response = client.get(_chats(opened.id))
+
+        assert response.status_code == 200
+        assert response.get_json() == {
+            "chats": [
+                {
+                    "id": str(definition.id),
+                    "kind": "definition",
+                    "opened_at": "2026-10-12T09:00:00Z",
+                    "closed_at": "2026-10-12T10:00:00Z",
+                    "close_cause": "created",
+                },
+                {
+                    "id": str(chat.id),
+                    "kind": "project",
+                    "opened_at": "2026-10-12T11:00:00Z",
+                    "closed_at": None,
+                    "close_cause": None,
+                },
+            ],
+            "read_at": None,
+            "unread": True,
+        }
+
+    def test_after_the_caller_read_it_nothing_is_unread(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        person: User,
+    ) -> None:
+        writer = ChatWriter(
+            session, container.session_record_service(), open_chat(session, opened)
+        )
+        writer.message(person, "What next?")
+        writer.text("Two things.")
+        _sign_in(client)
+        read = client.put(_read(opened.id)).get_json()
+
+        response = client.get(_chats(opened.id))
+
+        assert response.status_code == 200
+        assert (response.get_json()["read_at"], response.get_json()["unread"]) == (
+            read["read_at"],
+            False,
+        )
+
+    def test_a_caller_with_no_handle_reads_it_with_no_place(
+        self, client: FlaskClient, session: DbSession, opened: Project
+    ) -> None:
+        open_chat(session, opened)
+        response = client.post(
+            "/api/testing/auth/session",
+            json={"subject": "subject-ben", "roles": ["editor"]},
+        )
+        assert response.status_code == 201
+
+        response = client.get(_chats(opened.id))
+
+        assert response.status_code == 200
+        assert len(response.get_json()["chats"]) == 1
+        assert (response.get_json()["read_at"], response.get_json()["unread"]) == (
+            None,
+            False,
+        )
+
+    def test_no_project_has_the_id_404(self, client: FlaskClient, person: User) -> None:
+        _sign_in(client)
+
+        assert client.get(_chats(uuid.uuid4())).status_code == 404
+
+    def test_without_editor_it_is_refused(
+        self, client: FlaskClient, opened: Project
+    ) -> None:
+        _sign_in(client, roles=())
+
+        assert client.get(_chats(opened.id)).status_code == 403
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        assert oidc_client.get(_chats(uuid.uuid4())).status_code == 401
+
+
+class TestReadChat:
+    def test_it_writes_the_callers_place_now(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        opened: Project,
+        person: User,
+    ) -> None:
+        _sign_in(client)
+
+        response = client.put(_read(opened.id))
+
+        assert response.status_code == 200
+        read = session.get_one(ChatRead, (person.id, opened.id))
+        assert response.get_json() == {"read_at": _stamp(read.read_at), "unread": False}
+
+    def test_a_caller_with_no_handle_is_409(
+        self, client: FlaskClient, session: DbSession, opened: Project
+    ) -> None:
+        response = client.post(
+            "/api/testing/auth/session",
+            json={"subject": "subject-ben", "roles": ["editor"]},
+        )
+        assert response.status_code == 201
+
+        response = client.put(_read(opened.id))
+
+        assert response.status_code == 409
+        assert session.scalars(select(ChatRead)).all() == []
+
+    def test_no_project_has_the_id_404(self, client: FlaskClient, person: User) -> None:
+        _sign_in(client)
+
+        assert client.put(_read(uuid.uuid4())).status_code == 404
+
+    def test_without_editor_it_is_refused(
+        self, client: FlaskClient, opened: Project
+    ) -> None:
+        _sign_in(client, roles=())
+
+        assert client.put(_read(opened.id)).status_code == 403
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        assert oidc_client.put(_read(uuid.uuid4())).status_code == 401

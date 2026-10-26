@@ -33,6 +33,7 @@ from sqlalchemy.orm import Session, aliased
 from app.database import scoped_session
 from app.engine.documents import awaiting_read, awaits_read, listed
 from app.engine.record import TURN_ENDED
+from app.engine.views import ViewService
 from app.models import Document, Item, Project
 from app.models.reference import RecordKind
 from app.services.controller_client import (
@@ -189,7 +190,9 @@ class TurnEndReadService:
         # A registered document is a Prose Item's.
         assert item is not None
         db.execute(select(Project.id).where(Project.id == project.id).with_for_update())
-        records = SessionRecordService(db, self._streams)
+        records = SessionRecordService(
+            db, self._streams, ViewService(db, self._container.engine_bus())
+        )
         records.lock_session(session_id)
         documents.lock(document)
         if not awaits_read(item, document):

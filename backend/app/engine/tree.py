@@ -8,7 +8,14 @@ from sqlalchemy import exists, or_, select
 from sqlalchemy.orm import Session
 
 from app.engine.attachments import AttachmentStore
-from app.engine.paths import PLAN, REFERENCE, TIMELINE, attachment_path, tree_path
+from app.engine.paths import (
+    CHAT,
+    PLAN,
+    REFERENCE,
+    TIMELINE,
+    attachment_path,
+    tree_path,
+)
 from app.engine.plan import PlanService
 from app.engine.views import Rendering, ViewService
 from app.exceptions import RecordNotFoundException
@@ -96,6 +103,8 @@ class TreeService:
         if project is not None:
             if rest == TIMELINE:
                 return _file(self.view_service.timeline(project))
+            if rest == CHAT:
+                return _file(self.view_service.chat(project))
             if rest == PLAN:
                 return TreePlan(project)
             attachment = _ATTACHMENT.fullmatch(rest)
@@ -187,7 +196,8 @@ class TreeService:
 
     def _folder(self, project: Project) -> list[ManifestEntry]:
         """Every path of the project's folder, from the tree's root, in path
-        order; its `timeline.json` and attachments are read-only."""
+        order; its `timeline.json`, `chat.md` and attachments are
+        read-only."""
         documents = {
             tree_path(project, document.path): document
             for document in self.db.scalars(
@@ -219,6 +229,11 @@ class TreeService:
                 tree_path(project, TIMELINE),
                 self.view_service.timeline(project).hash,
                 True,
+            )
+        )
+        entries.append(
+            ManifestEntry(
+                tree_path(project, CHAT), self.view_service.chat(project).hash, True
             )
         )
         entries.append(

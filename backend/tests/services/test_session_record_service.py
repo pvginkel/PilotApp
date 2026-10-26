@@ -170,6 +170,45 @@ class TestReadRecords:
             )
         ) == [3]
 
+    def test_it_reads_the_records_whose_payload_is_of_one_type(
+        self,
+        session: DbSession,
+        records: SessionRecordService,
+        project_session: models.Session,
+    ) -> None:
+        turn = _turn(session, project_session, 1, None)
+        records.append(
+            project_session.id, RecordKind.SERVER, payload={"type": "effect"}
+        )
+        _line(records, project_session, turn, 10)
+        records.append(
+            project_session.id,
+            RecordKind.CLAUDE,
+            payload="effect",
+            turn_id=turn.id,
+            raw_offset=20,
+            controller_session="claude-1",
+        )
+        records.append(
+            project_session.id, RecordKind.SERVER, payload={"type": "closed"}
+        )
+        records.append(
+            project_session.id, RecordKind.SERVER, payload={"type": "effect"}
+        )
+
+        assert _seqs(
+            read_records(session, project_session.id, payload_type="effect", limit=10)
+        ) == [1, 5]
+        assert _seqs(
+            read_records(
+                session,
+                project_session.id,
+                kind=RecordKind.CLAUDE,
+                payload_type="system",
+                limit=10,
+            )
+        ) == [2]
+
     def test_it_reads_one_sessions_records_only(
         self,
         session: DbSession,

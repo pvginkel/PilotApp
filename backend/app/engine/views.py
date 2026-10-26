@@ -1,9 +1,10 @@
 """The read-only views rendered from the rows: `reference.json` at the tree's
-root and `timeline.json` in every project's folder (DB decision 34, TD
-§7.1.1, design 1 §8)."""
+root, and `timeline.json` and `chat.md` in every project's folder (DB
+decisions 34 and 49, TD §7.1.1, design 1 §8, design 3 §10)."""
 
 import json
 import uuid
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -12,9 +13,17 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.engine.bus import EngineBus, ProjectChanged, TreeHashMoved
-from app.engine.paths import TIMELINE, attachment_path, folder, sha256_hex, tree_path
+from app.engine.paths import (
+    CHAT,
+    TIMELINE,
+    attachment_path,
+    folder,
+    sha256_hex,
+    tree_path,
+)
 from app.models import (
     Attachment,
+    Chat,
     ConfirmationReason,
     Document,
     Item,
@@ -23,13 +32,23 @@ from app.models import (
     Project,
     User,
 )
-from app.models.reference import TaskStatus
+from app.models import Session as AgentSession
+from app.models.reference import ChatKind, RecordKind, TaskStatus
+from app.services.current_line import TOOL_BLOCKS
+from app.services.effect_service import EFFECT
+from app.services.people_service import AGENT_HANDLE
+from app.services.session_record_service import StoredRecord, read_records
+from app.services.start_gate import CHAT_KIND
 
 READONLY = (
     "a projection of the record; an edit is reverted"
     " — the timeline is edited through the tools"
 )
-"""Each view's top-level `readonly` line (design 1 §8)."""
+"""Each view's top-level `readonly` line (design 1 §8); `chat.md` opens with
+it as an HTML comment."""
+
+_RECORD_PAGE = 500
+"""The records one read of a chat's takes, in order."""
 
 
 @dataclass(frozen=True)
@@ -38,6 +57,25 @@ class Rendering:
 
     text: str
     hash: str
+
+
+@dataclass(frozen=True)
+class ListedChat:
+    """A chat of a project, and when it opened: its Session's creation."""
+
+    chat: Chat
+    opened_at: datetime
+
+
+@dataclass(frozen=True)
+class _Said:
+    """One paragraph of a chat in `chat.md`: a person's message, by their
+    handle, or Pilot's, by none: a text block or an effect's line."""
+
+    place: tuple[int, int, int]
+    author: str | None
+    at: datetime
+    text: str
 
 
 class ViewService:
@@ -150,12 +188,196 @@ class ViewService:
         )
         self.engine_bus.emit(ProjectChanged(project.id))
 
+    def chat(self, project: Project) -> Rendering:
+        """The project's chats as `chat.md` gives them (design 3 §10): in
+        their order (`project_chats`), each under its opening stamp and
+        ending with its close's, or "Open"; in each, a person's messages
+        from the `send` records, their words verbatim, and Pilot's text,
+        the main thread's `assistant` text blocks alone, with each effect's
+        line where its call ran, every record read through the one read
+        function."""
+        paragraphs = [f"<!-- {READONLY} -->"]
+        for listed in project_chats(self.db, project.id):
+            paragraphs.append(f"## Chat · opened {utc_time(listed.opened_at)}")
+            paragraphs.extend(self._conversation(listed.chat.id))
+            closed = listed.chat.closed_at
+            paragraphs.append(
+                "Open" if closed is None else f"Closed {utc_time(closed)}"
+            )
+        text = "\n\n".join(paragraphs) + "\n"
+        return Rendering(text, sha256_hex(text))
+
+    def recorded(self, session: AgentSession, kind: RecordKind, payload: Any) -> None:
+        """A record of `kind` carrying `payload` was written for `session`:
+        tell the bus once the transaction commits that its project's
+        `chat.md` has a new hash, when the Session is a chat's and the file
+        shows the record."""
+        if session.kind_code == CHAT_KIND and shows_in_chat(kind, payload):
+            self.chat_moved(self.db.get_one(Project, session.project_id))
+
+    def chat_moved(self, project: Project) -> None:
+        """Tell the bus the project's `chat.md` has a new hash, once the
+        transaction commits."""
+        self.engine_bus.emit(
+            TreeHashMoved(tree_path(project, CHAT), self.chat(project).hash)
+        )
+
+    def chats_moved(self, project: Project) -> None:
+        """A chat of the project opened or closed: tell the bus `chat.md` has
+        a new hash and that what the project's screens show moved, once the
+        transaction commits (F80.2's chat)."""
+        self.chat_moved(project)
+        self.engine_bus.emit(ProjectChanged(project.id))
+
+    def _conversation(self, session_id: uuid.UUID) -> list[str]:
+        """The chat's paragraphs in their order, each run of Pilot's and each
+        person's message under its author's handle and its first stamp. An
+        effect stands after the `assistant` record that made its call, else
+        in its own record's place."""
+        said: list[_Said] = []
+        calls: dict[str, int] = {}
+        for stored in self._every(session_id, RecordKind.CLAUDE, "assistant"):
+            record = stored.record
+            calls.update(dict.fromkeys(_calls(record.payload), record.seq))
+            said.extend(
+                _Said((record.seq, 0, record.seq), None, record.at, text)
+                for text in pilot_text(record.payload)
+            )
+        for stored in self._every(session_id, RecordKind.SEND):
+            record = stored.record
+            # A `send`'s Turn has its person and their words (`ck_turns_words`).
+            assert stored.author is not None and stored.words is not None
+            said.append(
+                _Said(
+                    (record.seq, 0, record.seq),
+                    stored.author,
+                    record.at,
+                    stored.words.rstrip("\n"),
+                )
+            )
+        for stored in self._every(session_id, RecordKind.SERVER, EFFECT):
+            record = stored.record
+            call = record.payload.get("toolUseId")
+            effect = record.payload["effect"]
+            said.append(
+                _Said(
+                    (
+                        calls.get(call, record.seq) if call else record.seq,
+                        1,
+                        record.seq,
+                    ),
+                    None,
+                    record.at,
+                    f"{effect['verb']} · {effect['label']}",
+                )
+            )
+        paragraphs: list[str] = []
+        speaking: str | None = None
+        for line in sorted(said, key=lambda line: line.place):
+            author = AGENT_HANDLE if line.author is None else line.author
+            if line.author is not None or speaking != AGENT_HANDLE:
+                paragraphs.append(f"**{author}** · {utc_time(line.at)}")
+            speaking = author
+            paragraphs.append(line.text)
+        return paragraphs
+
+    def _every(
+        self, session_id: uuid.UUID, kind: RecordKind, payload_type: str | None = None
+    ) -> Iterator[StoredRecord]:
+        """Every record of the Session of `kind`, whose payload's `type` is
+        `payload_type` when given, in order, a page at a time."""
+        after = 0
+        while True:
+            page = read_records(
+                self.db,
+                session_id,
+                after=after,
+                kind=kind,
+                payload_type=payload_type,
+                limit=_RECORD_PAGE,
+            )
+            yield from page
+            if len(page) < _RECORD_PAGE:
+                return
+            after = page[-1].record.seq
+
     def _handles(self, user_ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
         return dict(
             self.db.execute(
                 select(User.id, User.handle).where(User.id.in_(user_ids))
             ).all()
         )
+
+
+def project_chats(db: Session, project_id: uuid.UUID) -> list[ListedChat]:
+    """The project's chats in their order (F40.3): the definition chat first,
+    where one exists, then the project's chats in the order they opened."""
+    return [
+        ListedChat(chat, opened_at)
+        for chat, opened_at in db.execute(
+            select(Chat, AgentSession.created_at)
+            .join(AgentSession, AgentSession.id == Chat.id)
+            .where(Chat.project_id == project_id)
+            .order_by(
+                (Chat.kind_code == ChatKind.DEFINITION).desc(),
+                AgentSession.created_at,
+                Chat.id,
+            )
+        )
+    ]
+
+
+def pilot_text(payload: Any) -> list[str]:
+    """Pilot's words in a `claude` record's line: a main-thread `assistant`
+    line's text blocks, a blank one left out; none in any other line, a
+    sub-agent's included."""
+    return [
+        block["text"].strip("\n")
+        for block in _main_thread_blocks(payload)
+        if block.get("type") == "text"
+        and isinstance(block.get("text"), str)
+        and block["text"].strip()
+    ]
+
+
+def shows_in_chat(kind: RecordKind, payload: Any) -> bool:
+    """Whether `chat.md` shows a record of `kind` carrying `payload`, or
+    places an effect by it: a person's message, an effect, Pilot's text and
+    a main-thread tool call."""
+    match kind:
+        case RecordKind.SEND:
+            return True
+        case RecordKind.SERVER:
+            return isinstance(payload, dict) and payload.get("type") == EFFECT
+        case RecordKind.CLAUDE:
+            return bool(pilot_text(payload) or _calls(payload))
+        case RecordKind.RESULT:
+            return False
+
+
+def _main_thread_blocks(payload: Any) -> list[dict[str, Any]]:
+    """The content blocks of a main-thread `assistant` line; none for any
+    other line."""
+    if (
+        not isinstance(payload, dict)
+        or payload.get("type") != "assistant"
+        or payload.get("parent_tool_use_id")
+    ):
+        return []
+    message = payload.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(content, list):
+        return []
+    return [block for block in content if isinstance(block, dict)]
+
+
+def _calls(payload: Any) -> list[str]:
+    """The tool-use ids of a main-thread `assistant` line's tool calls."""
+    return [
+        block["id"]
+        for block in _main_thread_blocks(payload)
+        if block.get("type") in TOOL_BLOCKS and isinstance(block.get("id"), str)
+    ]
 
 
 def render_json(data: dict[str, Any]) -> Rendering:

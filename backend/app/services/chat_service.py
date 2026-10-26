@@ -37,6 +37,7 @@ from prometheus_client import Counter
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.engine.views import ViewService
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import Block, Chat, Document, Item, Project, Turn, User
 from app.models import Session as AgentSession
@@ -89,6 +90,7 @@ class ChatService:
         session_start_service: SessionStartService,
         brief_service: BriefService,
         session_record_service: SessionRecordService,
+        view_service: ViewService,
         brain_model: str,
         brain_reasoning_effort: str,
     ) -> None:
@@ -99,6 +101,7 @@ class ChatService:
         self.session_start_service = session_start_service
         self.brief_service = brief_service
         self.records = session_record_service
+        self.view_service = view_service
         self.brain_model = brain_model
         self.brain_reasoning_effort = brain_reasoning_effort
 
@@ -237,7 +240,8 @@ class ChatService:
     def _new_chat(self, project: Project) -> AgentSession:
         """A Chat `project` and its Session, in no environment until its start
         takes the store, in the store repo's root, on the brain's model and
-        effort, its token none holds until its create mints one."""
+        effort, its token none holds until its create mints one; its opening
+        told to the browsers and to `chat.md`."""
         session = AgentSession(
             project_id=project.id,
             kind_code=CHAT_KIND,
@@ -258,6 +262,7 @@ class ChatService:
             )
         )
         self.db.flush()
+        self.view_service.chats_moved(project)
         return session
 
     def _open_chat(self, project_id: uuid.UUID) -> AgentSession | None:

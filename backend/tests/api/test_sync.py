@@ -713,6 +713,7 @@ class TestManifest:
         folder = f"draft-{project.number}"
         plan = container.plan_service().render(project).hash
         timeline = container.view_service().timeline(project).hash
+        chat = container.view_service().chat(project).hash
         reference = container.view_service().reference().hash
         shadow = {
             path: sha256_hex(ANSWERED),
@@ -727,6 +728,7 @@ class TestManifest:
         assert response.status_code == 200
         assert response.json == {
             "manifest": [
+                {"path": f"{folder}/chat.md", "hash": chat, "readonly": True},
                 {"path": path, "hash": sha256_hex(ANSWERED), "readonly": False},
                 {"path": f"{folder}/plan.json", "hash": plan, "readonly": False},
                 {"path": f"{folder}/timeline.json", "hash": timeline, "readonly": True},
@@ -734,6 +736,7 @@ class TestManifest:
             ],
             "send_up": [path],
             "write_down": [
+                {"path": f"{folder}/chat.md", "hash": chat, "readonly": True},
                 {"path": path, "hash": sha256_hex(ANSWERED), "readonly": False},
                 {"path": f"{folder}/plan.json", "hash": plan, "readonly": False},
                 {"path": f"{folder}/timeline.json", "hash": timeline, "readonly": True},
@@ -785,6 +788,7 @@ class TestManifestSequences:
         assert set(fake_sidecar.tree) == {
             draft,
             item,
+            f"{folder}/chat.md",
             f"{folder}/plan.json",
             f"{folder}/timeline.json",
             "reference.json",
@@ -878,11 +882,13 @@ class TestManifestSequences:
         answer = fake_sidecar.connect()
 
         assert answer["delete"] == [
+            f"{folder}/chat.md",
             f"{folder}/plan.json",
             draft,
             f"{folder}/timeline.json",
         ]
         assert [entry["path"] for entry in answer["write_down"]] == [
+            "badge-colours/chat.md",
             "badge-colours/plan.json",
             "badge-colours/project.md",
             "badge-colours/timeline.json",

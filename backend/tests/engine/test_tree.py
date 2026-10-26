@@ -115,6 +115,7 @@ class TestTreeService:
         folder = f"draft-{project.number}"
 
         assert container.tree_service().hashes(project) == {
+            f"{folder}/chat.md": container.view_service().chat(project).hash,
             f"{folder}/plan.json": container.plan_service().render(project).hash,
             f"{folder}/project.md": sha256_hex(""),
             f"{folder}/timeline.json": container.view_service().timeline(project).hash,
@@ -148,6 +149,7 @@ class TestTreeService:
             "badge-colours/attachments/1/project.md": hashlib.sha256(
                 content
             ).hexdigest(),
+            "badge-colours/chat.md": container.view_service().chat(project).hash,
             "badge-colours/handbook.md": sha256_hex("Keep it short.\n"),
             "badge-colours/items/1-the-palette.md": sha256_hex(_HELD),
             "badge-colours/items/2-which-colour.md": sha256_hex(
@@ -176,6 +178,7 @@ class TestTreeService:
         documents.bear_item(project, "notice", "The palette", project_session)
 
         assert set(container.tree_service().hashes(other)) == {
+            f"draft-{other.number}/chat.md",
             f"draft-{other.number}/plan.json",
             f"draft-{other.number}/project.md",
             f"draft-{other.number}/timeline.json",
@@ -194,6 +197,7 @@ class TestTreeService:
         tree = container.tree_service()
 
         assert sorted(tree.hashes(project)) == [
+            f"{folder}/chat.md",
             f"{folder}/plan.json",
             f"{folder}/project.md",
             f"{folder}/timeline.json",
@@ -243,12 +247,14 @@ class TestTreeServiceManifest:
                 hashlib.sha256(content).hexdigest(),
                 True,
             ),
+            ManifestEntry(f"{folder}/chat.md", views.chat(project).hash, True),
             ManifestEntry(f"{folder}/items/1-the-palette.md", sha256_hex(_HELD), False),
             ManifestEntry(f"{folder}/plan.json", plans.render(project).hash, False),
             ManifestEntry(f"{folder}/project.md", sha256_hex("# Badges\n"), False),
             ManifestEntry(
                 f"{folder}/timeline.json", views.timeline(project).hash, True
             ),
+            ManifestEntry("recipe-box/chat.md", views.chat(opened).hash, True),
             ManifestEntry("recipe-box/plan.json", plans.render(opened).hash, False),
             ManifestEntry("recipe-box/project.md", sha256_hex("# Recipes\n"), False),
             ManifestEntry(
@@ -319,9 +325,13 @@ class TestTreeServicePaths:
     ) -> None:
         tree, views = container.tree_service(), container.view_service()
         timeline, reference = views.timeline(project), views.reference()
+        chat = views.chat(project)
 
         assert tree.resolve(f"draft-{project.number}/timeline.json") == TreeFile(
             timeline.text.encode(), timeline.hash
+        )
+        assert tree.resolve(f"draft-{project.number}/chat.md") == TreeFile(
+            chat.text.encode(), chat.hash
         )
         assert tree.resolve("reference.json") == TreeFile(
             reference.text.encode(), reference.hash

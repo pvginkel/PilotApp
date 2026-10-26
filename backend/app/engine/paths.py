@@ -9,6 +9,7 @@ DRAFT = "project.md"
 HANDBOOK = "handbook.md"
 PLAN = "plan.json"
 TIMELINE = "timeline.json"
+CHAT = "chat.md"
 REFERENCE = "reference.json"
 """At the tree's root, beside the projects' folders (DB decision 34)."""
 

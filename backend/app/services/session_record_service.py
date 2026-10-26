@@ -29,6 +29,7 @@ from app.schemas.session_schema import (
 from app.utils.after_commit import after_commit
 
 if TYPE_CHECKING:
+    from app.engine.views import ViewService
     from app.services.session_stream_service import SessionStreamService
 
 STREAM_ENDED_STATES = (SessionState.ENDED, SessionState.FAILED)
@@ -79,17 +80,21 @@ def read_records(
     after: int = 0,
     before: int | None = None,
     kind: RecordKind | None = None,
+    payload_type: str | None = None,
     limit: int,
     newest_first: bool = False,
 ) -> list[StoredRecord]:
     """The Session's records after the `seq` `after`, and before `before` when
-    given, of `kind` when given, at most `limit`, in order, or newest first."""
+    given, of `kind` when given, whose payload's `type` is `payload_type` when
+    given, at most `limit`, in order, or newest first."""
     is_send = SessionRecord.kind_code == RecordKind.SEND
     bounds = [SessionRecord.session_id == session_id, SessionRecord.seq > after]
     if before is not None:
         bounds.append(SessionRecord.seq < before)
     if kind is not None:
         bounds.append(SessionRecord.kind_code == kind)
+    if payload_type is not None:
+        bounds.append(SessionRecord.payload["type"].astext == payload_type)
     statement = (
         select(
             SessionRecord,
@@ -157,11 +162,18 @@ def to_record_schema(stored: StoredRecord) -> SessionRecordSchema:
 
 class SessionRecordService:
     """Writes a Session's records and reads its pages, in the caller's
-    transaction."""
+    transaction. A record a chat's `chat.md` shows moves the file's hash
+    (`ViewService.recorded`)."""
 
-    def __init__(self, db: Session, session_streams: "SessionStreamService") -> None:
+    def __init__(
+        self,
+        db: Session,
+        session_streams: "SessionStreamService",
+        view_service: "ViewService",
+    ) -> None:
         self.db = db
         self._streams = session_streams
+        self._views = view_service
 
     def require_session(self, session_id: uuid.UUID) -> AgentSession:
         """The Session.
@@ -207,7 +219,7 @@ class SessionRecordService:
         Raises:
             RecordNotFoundException: No Session has the id
         """
-        self.lock_session(session_id)
+        session = self.lock_session(session_id)
         last = last_record(self.db, session_id)
         record = SessionRecord(
             session_id=session_id,
@@ -222,6 +234,7 @@ class SessionRecordService:
         self.db.flush()
         RECORDS_WRITTEN_TOTAL.labels(kind=kind.value).inc()
         after_commit(self._streams.waker(session_id))
+        self._views.recorded(session, kind, payload)
         return record
 
     def read_page(self, session_id: uuid.UUID, *, after: int, limit: int) -> RecordPage:

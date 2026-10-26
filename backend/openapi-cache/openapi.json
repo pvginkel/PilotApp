@@ -629,6 +629,116 @@
         "title": "AttachedSchema",
         "type": "object"
       },
+      "ChatListSchema.f9d9b43": {
+        "description": "A project's chats, and the caller's place in them.",
+        "properties": {
+          "chats": {
+            "description": "The project's chats: the definition chat first where one exists, then the project's chats in the order they opened, the latest last",
+            "items": {
+              "$ref": "#/components/schemas/ChatListSchema.f9d9b43.ChatSchema"
+            },
+            "title": "Chats",
+            "type": "array"
+          },
+          "read_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the caller last saw the project's chat to its end, on any device; null before they first did",
+            "title": "Read At"
+          },
+          "unread": {
+            "description": "Whether a reply of Pilot's came in the project's chats after it",
+            "title": "Unread",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "read_at",
+          "unread",
+          "chats"
+        ],
+        "title": "ChatListSchema",
+        "type": "object"
+      },
+      "ChatListSchema.f9d9b43.ChatKind": {
+        "enum": [
+          "definition",
+          "project"
+        ],
+        "title": "ChatKind",
+        "type": "string"
+      },
+      "ChatListSchema.f9d9b43.ChatSchema": {
+        "description": "One of a project's chats.",
+        "properties": {
+          "close_cause": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ChatListSchema.f9d9b43.CloseCause"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the chat closed: `timeout` after its last turn, `created` at Create project, `finished` at Finish, `reopened` at Reopen; null while it is open"
+          },
+          "closed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the chat closed; null while it is open",
+            "title": "Closed At"
+          },
+          "id": {
+            "description": "The chat's id, its session's, whose records the session's records route reads",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ChatListSchema.f9d9b43.ChatKind",
+            "description": "`definition`, the draft's chat, or `project`, a project's chat"
+          },
+          "opened_at": {
+            "description": "When the chat opened",
+            "format": "date-time",
+            "title": "Opened At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "opened_at",
+          "closed_at",
+          "close_cause"
+        ],
+        "title": "ChatSchema",
+        "type": "object"
+      },
+      "ChatListSchema.f9d9b43.CloseCause": {
+        "enum": [
+          "timeout",
+          "created",
+          "finished",
+          "reopened"
+        ],
+        "title": "CloseCause",
+        "type": "string"
+      },
       "ChatMessageRequestSchema.f9d9b43": {
         "description": "A person's message to the project's brain.",
         "properties": {
@@ -642,6 +752,35 @@
           "words"
         ],
         "title": "ChatMessageRequestSchema",
+        "type": "object"
+      },
+      "ChatReadSchema.f9d9b43": {
+        "description": "The caller's place in the project's chat (F43).",
+        "properties": {
+          "read_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the caller last saw the project's chat to its end, on any device; null before they first did",
+            "title": "Read At"
+          },
+          "unread": {
+            "description": "Whether a reply of Pilot's came in the project's chats after it",
+            "title": "Unread",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "read_at",
+          "unread"
+        ],
+        "title": "ChatReadSchema",
         "type": "object"
       },
       "ChatTurnSchema.f9d9b43": {
@@ -8658,6 +8797,172 @@
           }
         ],
         "summary": "Send Pilot a message in the project, as the signed-in person, the words verbatim: a turn of the project's open chat, its send made now; or, with none open, or with its start failed, the chat started with it, its first turn the chat's brief and the words, which goes out once its session is up in the store, held while the controller is unreachable.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/projects/{project_id}/chat/read": {
+      "put": {
+        "description": "Returns:     200: The caller's place in the project's chat     401: No one is signed in     403: The caller lacks the editor role     404: No project has the id     409: The caller has not chosen a handle",
+        "operationId": "put__api_projects_{project_id}_chat_read",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatReadSchema.f9d9b43"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Say the signed-in person has seen the project's chat to its end now, on whichever device: their place in it, one per person and project.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/projects/{project_id}/chats": {
+      "get": {
+        "description": "Returns:     200: The project's chats and the caller's place in them     401: No one is signed in     403: The caller lacks the editor role     404: No project has the id",
+        "operationId": "get__api_projects_{project_id}_chats",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatListSchema.f9d9b43"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read the project's chats, the definition chat first where one exists, then the project's chats in the order they opened, each open or closed with its cause; and the caller's place in them, whether a reply of Pilot's came after they last saw the chat to its end. A chat's records are its session's.",
         "tags": [],
         "x-required-role": "editor"
       }

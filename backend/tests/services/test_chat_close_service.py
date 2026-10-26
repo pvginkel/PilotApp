@@ -15,6 +15,8 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.database import scoped_session
+from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved
+from app.engine.views import ViewService, utc_time
 from app.models import Chat, Environment, Project, Turn, User
 from app.models.reference import (
     ChatKind,
@@ -171,7 +173,9 @@ def _end_turn(container: ServiceContainer, db: DbSession, run: models.Session) -
     turn = db.scalars(
         select(Turn).where(Turn.session_id == run.id, Turn.ended_at.is_(None))
     ).one()
-    SessionRecordService(db, container.session_stream_service()).append(
+    SessionRecordService(
+        db, container.session_stream_service(), ViewService(db, container.engine_bus())
+    ).append(
         run.id,
         RecordKind.RESULT,
         payload={"type": "result", "interrupted": True},
@@ -203,6 +207,28 @@ class TestCloseOpen:
         ]
         assert _last(session, run.id) == {"type": CLOSED, "cause": "finished"}
         assert run.state_code is SessionState.IDLE
+
+    def test_the_close_is_told_to_the_browsers_and_to_chat_md(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        closes: ChatCloseService,
+        engine_events: list[EngineEvent],
+        opened: Project,
+    ) -> None:
+        _chat(session, opened, _ago(timedelta(minutes=2)))
+        clear_after_commit_callbacks()
+        at = datetime.now(UTC)
+
+        with scoped_session(container) as db:
+            closes.close_open(db, opened, CloseCause.FINISHED, at)
+
+        chat = container.view_service().chat(opened)
+        assert chat.text.endswith(f"\n\nClosed {utc_time(at)}\n")
+        assert engine_events == [
+            TreeHashMoved("soup-club/chat.md", chat.hash),
+            ProjectChanged(opened.id),
+        ]
 
     def test_one_with_a_turn_in_flight_leaves_its_record_to_the_turns_end(
         self, session: DbSession, closes: ChatCloseService, opened: Project

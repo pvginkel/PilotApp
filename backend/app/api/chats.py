@@ -1,5 +1,7 @@
 """A person's message to a project's brain (F38.3, F130; design 3 §5.3): a
-turn of the project's open chat, or the chat started with it in the store.
+turn of the project's open chat, or the chat started with it in the store;
+and the project's chats as a person reads them, with their place in them
+(F40.3, F43).
 
 Access is the API's `editor` gate.
 """
@@ -14,8 +16,15 @@ from sqlalchemy.orm import Session
 
 from app.api.caller import caller
 from app.models import Session as AgentSession
-from app.schemas.chats import ChatMessageRequestSchema, ChatTurnSchema
+from app.schemas.chats import (
+    ChatListSchema,
+    ChatMessageRequestSchema,
+    ChatReadSchema,
+    ChatSchema,
+    ChatTurnSchema,
+)
 from app.schemas.common import ApiErrorResponseSchema
+from app.services.chat_read_service import ChatReadService
 from app.services.chat_service import ChatService
 from app.services.container import ServiceContainer
 from app.services.people_service import PeopleService
@@ -70,3 +79,82 @@ def send_chat_message(
     return ChatTurnSchema(
         chat=turn.session_id, seq=turn.seq, state=session.state_code, error=turn.error
     ).model_dump(mode="json"), 201
+
+
+@chats_bp.route("/<uuid:project_id>/chats", methods=["GET"])
+@api.validate(
+    resp=SpectreeResponse(
+        HTTP_200=ChatListSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def list_chats(
+    project_id: uuid.UUID,
+    chat_read_service: ChatReadService = Provide[ServiceContainer.chat_read_service],
+    people_service: PeopleService = Provide[ServiceContainer.people_service],
+) -> Any:
+    """Read the project's chats, the definition chat first where one exists,
+    then the project's chats in the order they opened, each open or closed
+    with its cause; and the caller's place in them, whether a reply of
+    Pilot's came after they last saw the chat to its end. A chat's records
+    are its session's.
+
+    Returns:
+        200: The project's chats and the caller's place in them
+        401: No one is signed in
+        403: The caller lacks the editor role
+        404: No project has the id
+    """
+    listed = chat_read_service.chats(project_id, people_service.find(caller()))
+    return ChatListSchema(
+        chats=[
+            ChatSchema(
+                id=entry.chat.id,
+                kind=entry.chat.kind_code,
+                opened_at=entry.opened_at,
+                closed_at=entry.chat.closed_at,
+                close_cause=entry.chat.close_cause_code,
+            )
+            for entry in listed.chats
+        ],
+        read_at=listed.place.read_at,
+        unread=listed.place.unread,
+    ).model_dump(mode="json")
+
+
+@chats_bp.route("/<uuid:project_id>/chat/read", methods=["PUT"])
+@api.validate(
+    resp=SpectreeResponse(
+        HTTP_200=ChatReadSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def read_chat(
+    project_id: uuid.UUID,
+    chat_read_service: ChatReadService = Provide[ServiceContainer.chat_read_service],
+    people_service: PeopleService = Provide[ServiceContainer.people_service],
+) -> Any:
+    """Say the signed-in person has seen the project's chat to its end now,
+    on whichever device: their place in it, one per person and project.
+
+    Returns:
+        200: The caller's place in the project's chat
+        401: No one is signed in
+        403: The caller lacks the editor role
+        404: No project has the id
+        409: The caller has not chosen a handle
+    """
+    person = people_service.require_person(
+        caller(), f"mark the chat of project {project_id} read"
+    )
+    place = chat_read_service.read(project_id, person)
+    return ChatReadSchema(read_at=place.read_at, unread=place.unread).model_dump(
+        mode="json"
+    )

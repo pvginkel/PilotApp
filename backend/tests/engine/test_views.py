@@ -1,5 +1,5 @@
-"""The read-only views: `reference.json` and `timeline.json`, their shapes
-pinned, each with its hash computed on render."""
+"""The read-only views: `reference.json`, `timeline.json` and `chat.md`, their
+shapes pinned, each with its hash computed on render."""
 
 import hashlib
 import json
@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session as DbSession
 from app import models
 from app.database import scoped_session
 from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved
-from app.engine.views import READONLY, Rendering
+from app.engine.views import READONLY, Rendering, project_chats, utc_time
 from app.models import (
     Attachment,
     Document,
@@ -22,8 +22,17 @@ from app.models import (
     Project,
     User,
 )
-from app.models.reference import AttachmentSource, ProjectState, TaskStatus
+from app.models.reference import (
+    AttachmentSource,
+    ChatKind,
+    CloseCause,
+    ProjectState,
+    RecordKind,
+    TaskStatus,
+)
 from app.services.container import ServiceContainer
+from app.utils.after_commit import clear_after_commit_callbacks
+from tests.support.chats import ChatWriter, close_chat, open_chat
 
 _CONTENT = b"# Palette\n\nThe two colours compared.\n"
 
@@ -424,5 +433,285 @@ class TestViewService:
             TreeHashMoved(
                 f"draft-{project.number}/timeline.json", views.timeline(project).hash
             ),
+            ProjectChanged(project.id),
+        ]
+
+
+_COMMENT = f"<!-- {READONLY} -->"
+
+
+def _writer(
+    session: DbSession, container: ServiceContainer, run: models.Session
+) -> ChatWriter:
+    return ChatWriter(session, container.session_record_service(), run)
+
+
+def _rendering(rendering: Rendering) -> str:
+    assert rendering.hash == hashlib.sha256(rendering.text.encode()).hexdigest()
+    return rendering.text
+
+
+class TestChatView:
+    """`chat.md` (design 3 §10; F74; D7)."""
+
+    def test_a_project_with_no_chat_has_the_comment_alone(
+        self, container: ServiceContainer, project: Project
+    ) -> None:
+        assert _rendering(container.view_service().chat(project)) == f"{_COMMENT}\n"
+
+    def test_a_chat_shows_the_messages_and_pilots_main_thread_text(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+    ) -> None:
+        run = open_chat(session, project, opened_at=_at(9))
+        chat = _writer(session, container, run)
+        asked = chat.message(person, "What next?\n")
+        said = chat.assistant(
+            [
+                {"type": "thinking", "thinking": "The plan first."},
+                {"type": "text", "text": "Two things."},
+                {"type": "text", "text": "  "},
+            ]
+        )
+        chat.call("toolu_1", "Read")
+        chat.line(
+            {
+                "type": "user",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_1",
+                            "content": "x",
+                        }
+                    ]
+                },
+            }
+        )
+        chat.text("A sub-agent's words.", parent="toolu_2")
+        chat.line({"type": "system", "subtype": "init"})
+        chat.line("not JSON")
+        chat.text("First, the stock.", "Then the bread.")
+        quoted = '<quoted_block id="i/D1">Leek</quoted_block id="i/D1"> Why leek?'
+        again = chat.message(person, quoted)
+        answered = chat.text("Because it is milder.")
+
+        text = _rendering(container.view_service().chat(project))
+
+        assert (
+            text
+            == "\n\n".join(
+                [
+                    _COMMENT,
+                    "## Chat · opened 2026-10-12T09:00:00Z",
+                    f"**ada** · {utc_time(asked.at)}",
+                    "What next?",
+                    f"**agent** · {utc_time(said.at)}",
+                    "Two things.",
+                    "First, the stock.",
+                    "Then the bread.",
+                    f"**ada** · {utc_time(again.at)}",
+                    quoted,
+                    f"**agent** · {utc_time(answered.at)}",
+                    "Because it is milder.",
+                    "Open",
+                ]
+            )
+            + "\n"
+        )
+
+    def test_an_effect_stands_where_its_call_ran(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+    ) -> None:
+        run = open_chat(session, project, opened_at=_at(9))
+        chat = _writer(session, container, run)
+        chat.message(person, "Leek, please.")
+        first = chat.call("toolu_1")
+        chat.text("Recorded.")
+        # A call's effect recorded before the relay recorded the call.
+        chat.effect("toolu_2", "Marked done", "Build notes")
+        chat.call("toolu_2", "mcp__pilot__mark")
+        chat.effect("toolu_1", "Answered", "D1 · Which stock?")
+        chat.effect(None, "Finished", "Soup club")
+        chat.text("All done.")
+
+        text = _rendering(container.view_service().chat(project))
+
+        assert text.split("\n\n")[4:] == [
+            f"**agent** · {utc_time(first.at)}",
+            "Answered · D1 · Which stock?",
+            "Recorded.",
+            "Marked done · Build notes",
+            "Finished · Soup club",
+            "All done.",
+            "Open\n",
+        ]
+
+    def test_a_chat_pilot_speaks_first_in_opens_with_its_line(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+    ) -> None:
+        run = open_chat(session, project, opened_at=_at(9))
+        chat = _writer(session, container, run)
+        chat.server_turn("Your save of `draft-1/project.md` is held.")
+        fixed = chat.effect("toolu_1", "Added", "Action · Store the key")
+
+        text = _rendering(container.view_service().chat(project))
+
+        assert text.split("\n\n")[2:] == [
+            f"**agent** · {utc_time(fixed.at)}",
+            "Added · Action · Store the key",
+            "Open\n",
+        ]
+
+    def test_the_chats_are_oldest_first_the_definition_chat_first_each_closed(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+    ) -> None:
+        earlier = open_chat(session, project, opened_at=_at(10))
+        close_chat(session, earlier, _at(10, 30), CloseCause.TIMEOUT)
+        definition = open_chat(
+            session, project, kind=ChatKind.DEFINITION, opened_at=_at(12)
+        )
+        close_chat(session, definition, _at(12, 5), CloseCause.CREATED)
+        later = open_chat(session, project, opened_at=_at(11))
+        _writer(session, container, later).message(person, "Later.")
+
+        text = _rendering(container.view_service().chat(project))
+
+        assert [
+            paragraph
+            for paragraph in text.rstrip("\n").split("\n\n")
+            if paragraph.startswith(("## ", "Closed", "Open"))
+        ] == [
+            "## Chat · opened 2026-10-12T12:00:00Z",
+            "Closed 2026-10-12T12:05:00Z",
+            "## Chat · opened 2026-10-12T10:00:00Z",
+            "Closed 2026-10-12T10:30:00Z",
+            "## Chat · opened 2026-10-12T11:00:00Z",
+            "Open",
+        ]
+        assert [listed.chat.id for listed in project_chats(session, project.id)] == [
+            definition.id,
+            earlier.id,
+            later.id,
+        ]
+
+    def test_another_projects_chats_are_not_in_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+    ) -> None:
+        other = Project(created_by_user_id=person.id)
+        session.add(other)
+        session.flush()
+        _writer(session, container, open_chat(session, other)).message(person, "Hi.")
+
+        assert _rendering(container.view_service().chat(project)) == f"{_COMMENT}\n"
+
+    def test_a_record_it_shows_moves_its_hash_after_the_commit(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        person: User,
+    ) -> None:
+        run = open_chat(session, project)
+        chat = _writer(session, container, run)
+        path = f"draft-{project.number}/chat.md"
+        views = container.view_service()
+
+        with scoped_session(container):
+            chat.message(person, "What next?")
+            assert engine_events == []
+        sent = views.chat(project).hash
+        with scoped_session(container):
+            chat.text("Two things.")
+        said = views.chat(project).hash
+        with scoped_session(container):
+            chat.call("toolu_1")
+        with scoped_session(container):
+            chat.effect("toolu_1", "Answered", "D1 · Which stock?")
+
+        assert engine_events == [
+            TreeHashMoved(path, sent),
+            TreeHashMoved(path, said),
+            TreeHashMoved(path, said),
+            TreeHashMoved(path, views.chat(project).hash),
+        ]
+
+    def test_a_record_it_does_not_show_moves_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        person: User,
+    ) -> None:
+        chat = _writer(session, container, open_chat(session, project))
+        chat.message(person, "What next?")
+        records = container.session_record_service()
+        clear_after_commit_callbacks()
+
+        with scoped_session(container):
+            chat.line({"type": "system", "subtype": "init"})
+            chat.assistant([{"type": "thinking", "thinking": "Hm."}])
+            chat.text("A sub-agent's words.", parent="toolu_2")
+            records.append(chat.run.id, RecordKind.SERVER, payload={"type": "closed"})
+            assert chat.turn is not None
+            records.append(
+                chat.run.id,
+                RecordKind.RESULT,
+                payload={"turn": 1, "isError": False},
+                turn_id=chat.turn.id,
+                raw_offset=900,
+                controller_session="session-1",
+            )
+
+        assert engine_events == []
+
+    def test_a_work_sessions_record_moves_no_chat(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project_session: models.Session,
+    ) -> None:
+        chat = _writer(session, container, project_session)
+        chat.server_turn("Build it.")
+
+        with scoped_session(container):
+            chat.text("Built.")
+
+        assert engine_events == []
+
+    def test_chats_moved_tells_the_bus_of_the_file_and_the_project(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+    ) -> None:
+        views = container.view_service()
+        with scoped_session(container):
+            views.chats_moved(project)
+            assert engine_events == []
+
+        assert engine_events == [
+            TreeHashMoved(f"draft-{project.number}/chat.md", views.chat(project).hash),
             ProjectChanged(project.id),
         ]

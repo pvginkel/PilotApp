@@ -19,6 +19,7 @@ from werkzeug.wrappers import Request, Response
 
 from app import models
 from app.database import scoped_session
+from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved, _Delivery
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import (
     Block,
@@ -186,6 +187,7 @@ def _chats(
         session_start_service=starts,
         brief_service=container.brief_service(),
         session_record_service=container.session_record_service(),
+        view_service=container.view_service(),
         brain_model="opus",
         brain_reasoning_effort="xhigh",
     )
@@ -235,6 +237,15 @@ def _callbacks() -> set[str]:
     }
 
 
+def _emitted() -> list[EngineEvent]:
+    """The engine's events the transaction holds for its commit."""
+    return [
+        callback.event
+        for callback in after_commit_module._callbacks.get()
+        if isinstance(callback, _Delivery)
+    ]
+
+
 def _chat_rows(db: DbSession, project: Project) -> list[Chat]:
     return list(
         db.scalars(
@@ -258,6 +269,25 @@ def _up(
 
 
 class TestSendStartsTheChat:
+    def test_its_opening_is_told_to_the_browsers_and_to_chat_md(
+        self,
+        container: ServiceContainer,
+        chats: ChatService,
+        opened: Project,
+        person: User,
+    ) -> None:
+        _send(chats, opened, person)
+
+        chat = container.view_service().chat(opened)
+        assert ProjectChanged(opened.id) in _emitted()
+        assert [
+            event.hash
+            for event in _emitted()
+            if isinstance(event, TreeHashMoved) and event.path == "soup-club/chat.md"
+        ][-1] == chat.hash
+        assert "\n\n**ada** · " in chat.text
+        assert chat.text.endswith(f"\n\n{WORDS}\n\nOpen\n")
+
     def test_with_no_chat_open_it_starts_the_projects_chat_briefed(
         self,
         session: DbSession,

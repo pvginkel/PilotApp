@@ -56,7 +56,8 @@ class ErrorsResolved(EngineEvent):
 class ProjectChanged(EngineEvent):
     """What the project's timeline, head or tab shows moved: an item born,
     marked, undone or closed, an item's text published, an item's save held
-    or no longer held, its plan or its standing changed."""
+    or no longer held, its plan or its standing changed, a chat of it opened
+    or closed."""
 
     project_id: uuid.UUID
 

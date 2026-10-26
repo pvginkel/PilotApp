@@ -63,6 +63,7 @@ from sqlalchemy.orm import Session
 
 from app.core_exceptions import ExternalServiceException
 from app.database import scoped_session
+from app.engine.views import ViewService
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import Environment, Turn, Work
 from app.models import Session as AgentSession
@@ -1067,7 +1068,9 @@ class RelayService:
         work_moved(self._container.engine_bus(), session, state=state)
 
     def _records(self, db: Session) -> SessionRecordService:
-        return SessionRecordService(db, self._streams)
+        return SessionRecordService(
+            db, self._streams, ViewService(db, self._container.engine_bus())
+        )
 
     def _client(self) -> ControllerClient:
         client: ControllerClient = self._container.controller_client()

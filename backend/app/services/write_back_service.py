@@ -36,6 +36,7 @@ from sqlalchemy.orm import Session
 from app.database import scoped_session
 from app.engine.bus import EngineBus, EngineEvent, WriteBackOwed
 from app.engine.record import owes_write_back, write_back_owed
+from app.engine.views import ViewService
 from app.models import Document, Item, Project
 from app.models.reference import RecordKind
 from app.services.controller_client import (
@@ -198,7 +199,9 @@ class WriteBackService:
         # A registered document is a Prose Item's.
         assert item is not None
         db.execute(select(Project.id).where(Project.id == project.id).with_for_update())
-        records = SessionRecordService(db, self._streams)
+        records = SessionRecordService(
+            db, self._streams, ViewService(db, self._container.engine_bus())
+        )
         records.lock_session(session_id)
         documents.lock(document)
         if not owes_write_back(item, document) or document.published_hash != owed.hash:

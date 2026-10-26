@@ -313,7 +313,9 @@ def _stop_record(
     """The `server` record that ended the Session's turn 1, its environment
     stopped under it for `cause`."""
     turn = _turn(session, run, 1)
-    SessionRecordService(session, container.session_stream_service()).append(
+    SessionRecordService(
+        session, container.session_stream_service(), container.view_service()
+    ).append(
         run.id,
         RecordKind.SERVER,
         payload={"type": ENVIRONMENT_STOPPED, "cause": cause, "reason": "invented"},
@@ -1932,7 +1934,9 @@ class TestWorkStatus:
         run = session.get_one(models.Session, stopped.id)
         _stop_record(container, session, run, StopCause.ENVIRONMENT_GONE)
         turn = _turn(session, run, 2)
-        SessionRecordService(session, container.session_stream_service()).append(
+        SessionRecordService(
+            session, container.session_stream_service(), container.view_service()
+        ).append(
             run.id,
             RecordKind.RESULT,
             payload={"turn": 1, "interrupted": True},

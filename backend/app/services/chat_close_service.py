@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
+from app.engine.views import ViewService
 from app.models import Chat, Project, Turn
 from app.models import Session as AgentSession
 from app.models.reference import ChatKind, CloseCause, RecordKind, SessionState
@@ -189,16 +190,21 @@ class ChatCloseService:
         at: datetime,
     ) -> None:
         """Under the chat's Session's lock: closed with `cause` at `at`, and
-        the close's record written unless a Turn is in flight."""
+        the close's record written unless a Turn is in flight; the close told
+        to the browsers and to `chat.md`."""
         chat.closed_at = at
         chat.close_cause_code = cause
         db.flush()
         if not _in_flight(db, chat.id):
             records.append(chat.id, RecordKind.SERVER, payload=_closed(cause))
+        self._views(db).chats_moved(db.get_one(Project, chat.project_id))
         logger.info("Chat %s closed: %s", chat.id, cause)
 
     def _records(self, db: Session) -> SessionRecordService:
-        return SessionRecordService(db, self._streams)
+        return SessionRecordService(db, self._streams, self._views(db))
+
+    def _views(self, db: Session) -> ViewService:
+        return ViewService(db, self._container.engine_bus())
 
     def _client(self) -> ControllerClient:
         client: ControllerClient = self._container.controller_client()

@@ -22,7 +22,8 @@ type CurrentLine = dict[str, Any]
 type LineState = Literal["starting", "thinking", "writing", "working", "waiting"]
 
 _AGENT_TOOLS = ("Task", "Agent")
-_TOOL_BLOCKS = ("tool_use", "server_tool_use", "mcp_tool_use")
+TOOL_BLOCKS = ("tool_use", "server_tool_use", "mcp_tool_use")
+"""The content blocks of an `assistant` line that are a tool call."""
 _THINKING_BLOCKS = ("thinking", "redacted_thinking")
 
 
@@ -118,7 +119,7 @@ def _implied_by_line(
             calls = [
                 block
                 for block in blocks
-                if isinstance(block, dict) and block.get("type") in _TOOL_BLOCKS
+                if isinstance(block, dict) and block.get("type") in TOOL_BLOCKS
             ]
             if not calls:
                 return "thinking", None, None
@@ -153,6 +154,6 @@ def _implied_by_partial(
         return "writing", None
     if kind in _THINKING_BLOCKS:
         return "thinking", None
-    if isinstance(block, dict) and kind in _TOOL_BLOCKS:
+    if isinstance(block, dict) and kind in TOOL_BLOCKS:
         return "working", {"tool": block.get("name"), "input": None}
     return None, None
