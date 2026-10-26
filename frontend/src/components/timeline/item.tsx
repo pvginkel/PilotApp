@@ -9,7 +9,8 @@
  * whose latest save is held shows its last published text with a dashed border, a concept (F78). A
  * work item open is its session's (work.tsx, F26). Done, an item is its line (F13.1, F13.2), with
  * Open (F13.3), its attachments' indicator (F13.6), Undo while the record offers it (F14.1) and
- * Discuss (F13.4); a work item's is quieter, its Open the session log (F13.5, F26.6).
+ * Discuss (F13.4), and *In the chat* after a one-ask item's answer given in the chat (F42.3); a
+ * work item's is quieter, its Open the session log (F13.5, F26.6).
  */
 
 import type { AnimationEvent, ReactNode } from 'react';
@@ -17,6 +18,7 @@ import { Link, useParams } from '@tanstack/react-router';
 import { Check, FileText, ScrollText, StickyNote, Undo2, X } from 'lucide-react';
 import { DiscussButton } from '@/components/chat/discuss-button';
 import { quoteOfItem } from '@/components/chat/discuss-quotes';
+import { InChatButton } from '@/components/chat/in-chat-button';
 import { Fold } from '@/components/shared/fold';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Markdown } from '@/components/shared/markdown';
@@ -169,16 +171,25 @@ function saidIn(item: TimelineItem): Said | null {
   return { by: block.by, words, note: block.note };
 }
 
+/** Where a one-ask item's answer given in the chat was recorded, which *In the chat* goes to. */
+function inChatOf(item: TimelineItem) {
+  if (!ONE_ASK.has(item.kind)) return null;
+  const [block] = blocksOf(item);
+  return block?.in_chat ?? null;
+}
+
 /**
  * The same line for every kind: its icon, its title, Open, its attachments' indicator, Undo while
  * the record offers it, Discuss, and when it was done; under the title the person's answer to a one-ask item with its note, the other
- * person's after their avatar. A confirmation's Yes leads it with a green check, its No with a red
- * cross (F22.5). It does not expand.
+ * person's after their avatar, and *In the chat* after it, kept whole, where it was given in the
+ * chat. A confirmation's Yes leads it with a green check, its No with a red cross (F22.5). It does
+ * not expand.
  */
 function DoneLine({ item }: { item: TimelineItem }) {
   const me = usePerson();
   const title = titleOf(item);
   const said = saidIn(item);
+  const place = inChatOf(item);
   // An item's done line is drawn only once it is done.
   const done = item.done!;
   return (
@@ -192,19 +203,22 @@ function DoneLine({ item }: { item: TimelineItem }) {
       {done.undo && <Undo item={item} />}
       <DiscussButton quote={quoteOfItem(item)} testId="timeline.line.discuss" />
       <Time at={done.at} format="clock" testId="timeline.line.time" />
-      {said && (
+      {(said || place) && (
         <span className="said" data-testid="timeline.line.said">
-          <span className="said-text" title={[said.words, said.note].filter(Boolean).join(' · ')}>
-            {said.by.handle !== me.handle && <UserAvatar user={said.by} size="xs" />}
-            {said.words && <LinkedText text={said.words} />}
-            {said.words && said.note && ' · '}
-            {said.note && (
-              <span className="note" data-testid="timeline.line.note">
-                <StickyNote className="icon" aria-hidden="true" />
-                <LinkedText text={said.note} />
-              </span>
-            )}
-          </span>
+          {said && (
+            <span className="said-text" title={[said.words, said.note].filter(Boolean).join(' · ')}>
+              {said.by.handle !== me.handle && <UserAvatar user={said.by} size="xs" />}
+              {said.words && <LinkedText text={said.words} />}
+              {said.words && said.note && ' · '}
+              {said.note && (
+                <span className="note" data-testid="timeline.line.note">
+                  <StickyNote className="icon" aria-hidden="true" />
+                  <LinkedText text={said.note} />
+                </span>
+              )}
+            </span>
+          )}
+          {place && <InChatButton place={place} testId="timeline.line.in-chat" />}
         </span>
       )}
     </div>

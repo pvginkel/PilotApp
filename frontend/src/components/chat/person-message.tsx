@@ -3,9 +3,11 @@
  * column on its left, the time and the avatar under it, and another person's name before the time
  * (the chat mockup's decision 13). A quote it opens with stands over it, and one inside it is a chip
  * where it stands (F39.3). Its words show as written, ticket ids, repos and environments linked
- * (F91, F93).
+ * (F91, F93). Gone to by *In the chat*, it flashes (F42.3): its words, or a message of quotes alone
+ * whole.
  */
 
+import type { AnimationEvent, Ref } from 'react';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Avatar } from '@/components/shared/avatar';
 import { Time } from '@/components/shared/time';
@@ -30,12 +32,31 @@ function leadOf(text: string): { lead: QuoteRef[]; rest: QuotePart[] } {
   return { lead, rest: rest.filter((part) => part.type === 'quote' || part.text !== '') };
 }
 
-export function PersonMessage({ record, fresh, people }: { record: SendRecord; fresh: boolean; people: ChatPeople }) {
+interface PersonMessageProps {
+  record: SendRecord;
+  fresh: boolean;
+  people: ChatPeople;
+  /** It flashes, until `onFlashed`. */
+  flash?: boolean;
+  onFlashed?: () => void;
+  ref?: Ref<HTMLElement>;
+}
+
+export function PersonMessage({ record, fresh, people, flash = false, onFlashed, ref }: PersonMessageProps) {
   const { lead, rest } = leadOf(record.message);
   const author = record.author === null ? null : people.who(record.author);
+  const flashed = (event: AnimationEvent) => {
+    if (event.animationName === 'fresh') onFlashed?.();
+  };
   return (
     <section
-      className={cn('flex max-w-[91%] min-w-0 flex-col items-end self-end', fresh && 'animate-fade-in opacity-0')}
+      ref={ref}
+      className={cn(
+        'flex max-w-[91%] min-w-0 flex-col items-end self-end',
+        fresh && 'animate-fade-in opacity-0',
+        flash && rest.length === 0 && 'flash',
+      )}
+      onAnimationEnd={flashed}
       data-seq={record.seq}
       data-testid="chat.person"
     >
@@ -44,7 +65,10 @@ export function PersonMessage({ record, fresh, people }: { record: SendRecord; f
       ))}
       {rest.length > 0 && (
         <div
-          className="rounded-lg border border-primary-muted-foreground/20 bg-primary-muted px-3 py-2 wrap-anywhere whitespace-pre-wrap"
+          className={cn(
+            'rounded-lg border border-primary-muted-foreground/20 bg-primary-muted px-3 py-2 wrap-anywhere whitespace-pre-wrap',
+            flash && 'flash',
+          )}
           data-testid="chat.person.text"
         >
           {rest.map((part, index) =>

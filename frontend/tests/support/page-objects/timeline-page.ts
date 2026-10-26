@@ -4,7 +4,8 @@ import { waitTestEvent } from '../helpers';
 
 /**
  * A project's timeline (F8): its rows, the opening, its items open and as done lines with Open and
- * Undo, an open item's block (F31) or a confirmation's card (F22), an inline document's blocks,
+ * Undo, an open item's block (F31) or a confirmation's card (F22), *In the chat* in a block's head
+ * and a done line (F42.3), an inline document's blocks,
  * segments and *Send answers* with its dialog (F24.1, F33, F32.5), a larger document's or a
  * review's card (F24.2, F25), that Pilot asked a registered document's writer (F86.8), a section
  * Pilot settled as its line (F31.5), an item's attachments
@@ -107,6 +108,8 @@ export class TimelinePage {
       undo: root.getByTestId('timeline.line.undo'),
       open: root.getByTestId('timeline.line.open'),
       lineDiscuss: root.getByTestId('timeline.line.discuss'),
+      /** *In the chat* after a one-ask item's answer given in the chat. */
+      lineInChat: root.getByTestId('timeline.line.in-chat'),
       /** The attachments' chips, and each by its attachment's id. */
       attachments: root.getByTestId('timeline.attachment'),
       attachment: (attachmentId: string) => root.locator(`[data-testid="timeline.attachment"][data-attachment-id="${attachmentId}"]`),
@@ -250,6 +253,8 @@ export function blockParts(page: Page, root: Locator) {
     kind: root.getByTestId('timeline.block.kind'),
     toggle: root.getByTestId('timeline.block.toggle'),
     answered: root.getByTestId('timeline.block.answered'),
+    /** *In the chat*, on an answer given in the chat. */
+    inChat: root.getByTestId('timeline.block.in-chat'),
     who: root.getByTestId('timeline.block.who'),
     time: root.getByTestId('timeline.block.time'),
     deferred: root.getByTestId('timeline.block.deferred'),

@@ -9,18 +9,23 @@
  * its latest read failed (F113). Sticky scroll keeps a streaming reply in view while the reader is at
  * the bottom; only their own scrolling lets go, and their message sent from the composer under it,
  * or a quote Discuss put there, goes back to the bottom. Shown at its end, and not lying under the
- * overlay, the chat is seen (F43). On a phone it is the same column (decision 12).
+ * overlay, the chat is seen (F43). *In the chat* takes it to the message that gave an answer
+ * (F42.3): the chats before loaded until the one holding it, the pinning let go, the message
+ * scrolled into the middle of the view and flashed, and kept in its place, as *load more* keeps the
+ * line in view, until the reader scrolls. On a phone it is the same column (decision 12).
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronUp } from 'lucide-react';
+import { useFlashes } from '@/components/timeline/flash';
 import { useChatSeen, useProjectChats } from '@/hooks/use-chats';
+import { useChatPlace, type ChatPlace } from '@/hooks/use-in-chat';
 import { usePerson } from '@/hooks/use-self';
 import { useStickyBottom } from '@/hooks/use-sticky-bottom';
 import type { components } from '@/lib/api/generated/types';
 import { day } from '@/lib/chat/format';
 import { ChatEmptyState } from './chat-empty-state';
-import { ChatSection } from './chat-section';
+import { ChatSection, messageKey } from './chat-section';
 import { Composer } from './composer';
 import { chatPeople } from './people';
 
@@ -48,7 +53,13 @@ export function ChatTab({ projectId, members, covered }: ChatTabProps) {
   const container = useRef<HTMLDivElement>(null);
   const wrapper = useRef<HTMLDivElement>(null);
   const { stick, unstick, stuck } = useStickyBottom(container, wrapper, 'chat');
-  useChatSeen(projectId, !covered && stuck && chats !== null, typeof read !== 'string' && read.unread);
+  const { place, reached } = useChatPlace(projectId);
+  // On its way to a place the chat is not shown at its end, however the view stands.
+  useChatSeen(projectId, !covered && stuck && place === null && chats !== null, typeof read !== 'string' && read.unread);
+  const { fresh: flashing, flashed, flash } = useFlashes();
+  // The chats before load until the one holding the place.
+  const holding = place === null || chats === null ? -1 : chats.findIndex((chat) => chat.id === place.chat);
+  if (from !== null && holding >= 0 && holding < from) setFrom(holding);
   // While the chat before loads above, the line at the top of the view keeps its place, until the
   // reader scrolls: a chat's records land after the click, and its growth moves what is below.
   const anchor = useRef<{ element: Element; top: number } | null>(null);
@@ -75,6 +86,30 @@ export function ChatTab({ projectId, members, covered }: ChatTabProps) {
       for (const event of READER) box.removeEventListener(event, release);
     };
   }, []);
+
+  useEffect(() => {
+    if (place !== null) unstick();
+  }, [place, unstick]);
+  // Pinned to the end again, the end rules.
+  useEffect(() => {
+    if (stuck) anchor.current = null;
+  }, [stuck]);
+
+  const gone = useRef<ChatPlace | null>(null);
+  const found = useCallback(
+    (message: HTMLElement, seq: number) => {
+      if (place === null || gone.current === place) return;
+      gone.current = place;
+      const box = container.current!;
+      const offset = () => message.getBoundingClientRect().top - box.getBoundingClientRect().top;
+      unstick();
+      box.scrollTop += offset() - Math.max(0, (box.clientHeight - message.offsetHeight) / 2);
+      anchor.current = { element: message, top: offset() };
+      flash(messageKey(place.chat, seq));
+      reached(place);
+    },
+    [place, unstick, flash, reached],
+  );
 
   const shown = chats !== null && from !== null ? chats.slice(from) : [];
   const before = chats !== null && from !== null && from > 0 ? chats[from - 1] : undefined;
@@ -121,7 +156,15 @@ export function ChatTab({ projectId, members, covered }: ChatTabProps) {
               )}
               {chats?.length === 0 && <ChatEmptyState />}
               {shown.map((chat) => (
-                <ChatSection key={chat.id} chat={chat} people={people} />
+                <ChatSection
+                  key={chat.id}
+                  chat={chat}
+                  people={people}
+                  goTo={place?.chat === chat.id ? place.seq : undefined}
+                  onFound={found}
+                  flashing={flashing}
+                  onFlashed={flashed}
+                />
               ))}
             </>
           )}

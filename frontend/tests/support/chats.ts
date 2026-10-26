@@ -7,7 +7,9 @@
  * person on a connection of their own (`other()`); or through the composer, after `opening()`. A
  * chat's start creates its headless session in the store, `claude-<n>` in the order the backend
  * creates them there; `start()` and `opening()` name it, and the spec plays its turns through
- * `controller` once it is working.
+ * `controller` once it is working. While a turn is in flight, `answer()` records a person's answer
+ * to a block as the chat's brain records it (POST /api/testing/projects/<id>/chat/answers), the
+ * place *In the chat* goes to.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -124,6 +126,29 @@ export class Chats {
   /** Returns once the store's session works on a turn: the message sent to it. */
   async working(session: string): Promise<void> {
     await expect.poll(async () => (await this.controller.sessionViews(this.store)).find((each) => each.name === session)?.working).toBe(true);
+  }
+
+  /**
+   * `person`'s answer to the block `<item>/<local id>`, recorded through the project's open chat as
+   * its brain's `answer` records it while its turn is in flight (F42.1): the effect of the call
+   * `toolUseId` names.
+   */
+  async answer(
+    projectId: string,
+    block: string,
+    value: string,
+    person: string,
+    { note, toolUseId }: { note?: string; toolUseId?: string } = {},
+  ): Promise<void> {
+    const response = await this.page.request.post(`${this.backendUrl}/api/testing/projects/${projectId}/chat/answers`, {
+      data: { block, value, for: person, note, tool_use_id: toolUseId },
+    });
+    expect(response.status(), await response.text()).toBe(201);
+  }
+
+  /** Returns once Pilot no longer answers in the project's latest chat: its next message is taken. */
+  async idle(projectId: string): Promise<void> {
+    await expect.poll(async () => (await this.list(projectId)).chats.at(-1)?.answering).toBe(false);
   }
 
   /** The signed-in person stops Pilot's answer in the project's open chat (F44). */

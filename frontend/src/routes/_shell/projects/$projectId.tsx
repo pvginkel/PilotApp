@@ -9,9 +9,11 @@
  * timeline (F129.4, F37.4), and a work item's session log's opens it there (F69). Another
  * project's address closes it. Beside the head and the timeline stands the side panel, the
  * project's own (F38.1), which a draft does not have; Discuss anywhere on the project's screens
- * opens it on the Chat tab, on top, with what it quotes in the composer (F39). While an overlay is open, the timeline under
- * its backdrop takes no focus, nor the panel where the overlay lies over it; the head's buttons do,
- * the Documents button being how the panel opens over the overlay below a wide window (F98.2).
+ * opens it on the Chat tab, on top, with what it quotes in the composer (F39), and *In the chat* on
+ * a block answered in the chat opens it there at the message that gave the answer (F42.3). While an
+ * overlay is open, the timeline under its backdrop takes no focus, nor the panel where the overlay
+ * lies over it; the head's buttons do, the Documents button being how the panel opens over the
+ * overlay below a wide window (F98.2).
  */
 
 import { useEffect, useState } from 'react';
@@ -25,6 +27,7 @@ import { ProjectHead } from '@/components/projects/project-head';
 import { isCard } from '@/components/timeline/document-state';
 import { Timeline } from '@/components/timeline/timeline';
 import { discussIn, DiscussContext } from '@/hooks/use-discuss';
+import { goToChat, InChatContext, type ChatPlace } from '@/hooks/use-in-chat';
 import { usePanel } from '@/hooks/use-panel';
 import { useProjectHead } from '@/hooks/use-projects';
 import { useTimelineItem, type TimelineItem } from '@/hooks/use-timeline';
@@ -58,42 +61,48 @@ function Project() {
     discussIn(projectId, quote);
     show('chat');
   };
+  const inChat = (place: ChatPlace) => {
+    goToChat(projectId, place);
+    show('chat');
+  };
   const [head, setHead] = useState<HTMLElement | null>(null);
   // Not before the head is read, which says whether it is a draft, nor where it never is.
   const panelShown = panel.open && data !== undefined && data.state !== 'draft';
   const chatShown = panelShown && panel.tab === 'chat';
   return (
     <DiscussContext.Provider value={discuss}>
-      <div className="project" data-panel={panelShown ? 'open' : 'closed'} data-front={front}>
-        <div className="project-main">
-          {data && (
-            <ProjectHead
-              ref={setHead}
-              project={data}
-              chat={{ shown: chatShown, toggle: () => (chatShown ? close() : discuss(null)) }}
-              documents={{ shown: panelShown && panel.tab === 'documents', toggle: () => toggle('documents') }}
+      <InChatContext.Provider value={inChat}>
+        <div className="project" data-panel={panelShown ? 'open' : 'closed'} data-front={front}>
+          <div className="project-main">
+            {data && (
+              <ProjectHead
+                ref={setHead}
+                project={data}
+                chat={{ shown: chatShown, toggle: () => (chatShown ? close() : discuss(null)) }}
+                documents={{ shown: panelShown && panel.tab === 'documents', toggle: () => toggle('documents') }}
+              />
+            )}
+            <Timeline projectId={projectId} address={goneTo} inert={overlay !== null} />
+          </div>
+          {panelShown && (
+            <Panel
+              projectId={projectId}
+              members={data.members}
+              tab={panel.tab}
+              head={head}
+              onTab={show}
+              onClose={close}
+              onOpen={overlayOnTop}
+              covered={covered}
             />
           )}
-          <Timeline projectId={projectId} address={goneTo} inert={overlay !== null} />
+          {overlaid !== null && <DocumentOverlay projectId={projectId} project={data} {...overlaid} />}
+          {attached !== null && <ItemAttachmentOverlay projectId={projectId} {...attached} />}
+          {handbook && <HandbookOverlay projectId={projectId} project={data} />}
+          {projectDocument && <ProjectDocumentOverlay projectId={projectId} project={data} />}
+          {sessionId !== undefined && <SessionLogOverlay projectId={projectId} sessionId={sessionId} />}
         </div>
-        {panelShown && (
-          <Panel
-            projectId={projectId}
-            members={data.members}
-            tab={panel.tab}
-            head={head}
-            onTab={show}
-            onClose={close}
-            onOpen={overlayOnTop}
-            covered={covered}
-          />
-        )}
-        {overlaid !== null && <DocumentOverlay projectId={projectId} project={data} {...overlaid} />}
-        {attached !== null && <ItemAttachmentOverlay projectId={projectId} {...attached} />}
-        {handbook && <HandbookOverlay projectId={projectId} project={data} />}
-        {projectDocument && <ProjectDocumentOverlay projectId={projectId} project={data} />}
-        {sessionId !== undefined && <SessionLogOverlay projectId={projectId} sessionId={sessionId} />}
-      </div>
+      </InChatContext.Provider>
     </DiscussContext.Provider>
   );
 }

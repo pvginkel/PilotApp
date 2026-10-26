@@ -185,6 +185,27 @@
   /* Discuss centres on the label's capitals, whatever the font: its baseline is the icon's foot,
      lowered by half the icon less half the cap height. */
   .block-head .block-discuss { position: relative; top: calc(0.5em - 0.5cap); }
+  /* An answer given in the chat: a small button to its message (F42.3), in a block's head before
+     who answered and in a done line after the answer, kept whole. */
+  .in-chat {
+    display: inline-flex;
+    flex: none;
+    align-items: baseline;
+    gap: 4px;
+    padding: 0 6px;
+    border: 1px solid hsl(var(--border));
+    border-radius: 6px;
+    background: hsl(var(--background));
+    color: hsl(var(--muted-foreground));
+    font: inherit;
+    font-size: 12.5px;
+    line-height: 18px;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .in-chat:hover { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
+  .in-chat .icon { position: relative; top: calc(0.5em - 0.5cap); }
+  .block-head .who .in-chat { margin-right: 4px; }
   .block-controls { padding: 6px 14px 12px; }
   .block.solo .block-controls { padding-top: 12px; }
   .block.solo .block-head + .block-controls { padding-top: 6px; }
@@ -494,10 +515,10 @@
     .option .desc { order: 1; flex-basis: 100%; }
     .option .note { order: 2; }
   }
-  /* A narrow block head wraps what does not fit, and Answered keeps its icon alone, its word left
-     to a screen reader (F98.3). */
+  /* A narrow block head wraps what does not fit, and Answered and In the chat keep their icons
+     alone, their words left to a screen reader (F98.3). */
   @media (max-width: 600px) {
     .block-head { flex-wrap: wrap; }
-    .block-head .chip-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    .block-head .chip-label, .block-head .in-chat-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   }
 }

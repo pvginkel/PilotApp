@@ -3,7 +3,8 @@
  * document alike: a decision's options, a question's field, an action's paste-back and buttons, a
  * confirmation's check and cross. Its head names its kind in a document, where the item's head does
  * not; answered, the head has a chevron where it opens, Answered, and when and by whom, Pilot's
- * mark on a block Pilot settled (F31.1, F31.3). An answer that is not a person's, and every
+ * mark on a block Pilot settled (F31.1, F31.3), *In the chat* before them on an answer given in the
+ * chat, going to its message (F42.3). An answer that is not a person's, and every
  * answer in a done item, reads closed: the answer only, which opens, as the chevron does, to the
  * block's controls, live while the item is not done (F31.2). In a document its head ends in
  * Discuss, quoting the block (F39.1); a one-ask item's is its head's, quoting the item. A deferred block reads "Deferred to
@@ -16,6 +17,7 @@ import { useState } from 'react';
 import { Check, ChevronDown, ChevronUp } from 'lucide-react';
 import { DiscussButton } from '@/components/chat/discuss-button';
 import { quoteOfBlock } from '@/components/chat/discuss-quotes';
+import { InChatButton } from '@/components/chat/in-chat-button';
 import { Time } from '@/components/shared/time';
 import { ActionAnswer } from '@/components/timeline/action';
 import { ConfirmControls, Proposal } from '@/components/timeline/confirmation';
@@ -150,6 +152,7 @@ function BlockHead({ item, block, solo, answered, closable, closed, onToggle }: 
       <span className="grow" />
       {answered && (
         <span className="who" data-testid="timeline.block.who">
+          {block.in_chat !== null && <InChatButton place={block.in_chat} testId="timeline.block.in-chat" />}
           {block.at !== null && <Time at={block.at} format="clock" testId="timeline.block.time" />}
           {block.by !== null && <UserAvatar user={block.by} size="xs" />}
         </span>
