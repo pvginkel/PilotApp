@@ -1512,6 +1512,10 @@ ENDPOINTS = [
         _writer_questions_path(NO_ROW),
         {"questions": [{"block": "Q1", "question": "Which?"}]},
     ),
+    (
+        _chat_answers_path(NO_ROW),
+        {"block": f"{NO_ROW}/D1", "value": "Yes", "for": "ada"},
+    ),
 ]
 
 
