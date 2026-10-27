@@ -953,7 +953,13 @@ class TestQuote:
         assert (turn.quote_item_id, turn.quote_block_id) == (None, None)
 
     @pytest.mark.parametrize(
-        "path", ["handbook.md", "project.md", "attachments/2/menu.pdf"]
+        "path",
+        [
+            "handbook.md",
+            "project.md",
+            "attachments/2/menu.pdf",
+            "attachments/2/menus/menu.pdf",
+        ],
     )
     def test_a_tag_naming_a_file_of_the_projects_folder_quotes_no_item_or_block(
         self,
@@ -985,7 +991,11 @@ class TestQuote:
             "items/1-which-stock.md",
             "../handbook.md",
             "attachments/0/menu.pdf",
-            "attachments/2/menus/menu.pdf",
+            "attachments/2/menus/../menu.pdf",
+            "attachments/2/./menu.pdf",
+            "attachments/2//menu.pdf",
+            "attachments/2/menus/",
+            "attachments/2/..",
         ],
     )
     def test_a_tag_naming_any_other_path_is_no_quote(

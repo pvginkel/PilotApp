@@ -47,8 +47,9 @@ and the quoted thing's title between the two:
 - `<quoted_block id="<item id>/<local id>">…</quoted_block id="…">`, a block;
 - `<quoted_path path="<path>">…</quoted_path path="<path>">`, a file of the project's folder by its
   path there (D070): `handbook.md`, `project.md`, or an attachment's
-  `attachments/<batch>/<filename>`, the batch from 1 and the filename with no `/`. To the server a
-  tag naming any other path is no quote.
+  `attachments/<batch>/<filename>`, the batch from 1 and the filename keeping the slashes of a
+  folder it came in, with no empty, `.` or `..` segment. To the server, as to the UI, a tag naming
+  any other path is no quote.
 
 The Turn's quote is what the first quote tag in the words names: the Item or the Block of the
 project, and none for a path's tag, nor for a tag that names neither, an unknown or malformed id or
