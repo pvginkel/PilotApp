@@ -106,7 +106,8 @@ In `src/components/shared/`:
   and the project document to their overlays, and an attachment to its address under its item's,
   found in the timeline's read by its batch and its filename, a folder's keeping its slashes; a path
   naming no attachment there goes nowhere. Inside a code span or fence, or raw HTML, as the text's
-  own Markdown parse reads it, the tag shows as written (`quotesToLinks`, `lib/chat/quotes.ts`).
+  own Markdown parse reads it, or behind a backslash escape, the tag shows as written
+  (`quotesToLinks`, `lib/chat/quotes.ts`).
   With `deltas`, a streamed text's, its new text fades in (`.delta-fresh`); the chat's view code
   draws its text through it ([`work.md`](work.md)).
   `HeadingWords({text})` is a heading's inline Markdown alone, for inside a button: emphasis, code

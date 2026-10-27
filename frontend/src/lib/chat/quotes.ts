@@ -5,7 +5,7 @@
  * project document's, `project.md`, or an attachment's, `attachments/<batch>/<filename>`, whose
  * filename keeps the slashes of a folder it came in; a tag naming any other path is no quote. Every
  * screen that renders Markdown draws a quote as a chip wherever it stands (F39.3), except inside
- * code, where it shows as written.
+ * code, or behind a backslash escape, where it shows as written.
  */
 
 import remarkGfm from 'remark-gfm';
@@ -51,6 +51,13 @@ function asWritten(text: string): (offset: number) => boolean {
   return (offset) => ranges.some(([start, end]) => start < offset && offset < end);
 }
 
+/** Whether the character at an offset is behind a Markdown backslash escape: an odd run of backslashes before it. */
+function escaped(text: string, offset: number): boolean {
+  let start = offset;
+  while (start > 0 && text[start - 1] === '\\') start -= 1;
+  return (offset - start) % 2 === 1;
+}
+
 interface Quoted {
   /** The Markdown, each quote a link the renderer turns into a chip. */
   markdown: string;
@@ -67,8 +74,8 @@ export function quotesToLinks(text: string): Quoted {
   let last = 0;
   TAG.lastIndex = 0;
   for (let match = TAG.exec(text); match !== null; match = TAG.exec(text)) {
-    if (written(match.index)) {
-      // A tag in code, or what follows it, can still hold one that is not.
+    if (written(match.index) || escaped(text, match.index)) {
+      // A tag in code or escaped, or what follows it, can still hold one that is not.
       TAG.lastIndex = match.index + 1;
       continue;
     }

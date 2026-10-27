@@ -4,7 +4,8 @@
  * the project document, a Markdown attachment — each going to what it quotes: an item to its
  * address, a block to its own, opening the overlay where its document is a card, and a path to its
  * file's overlay, the handbook's, the project document's or an attachment's. Inside a code span or
- * a fence a tag shows as written, as does a tag naming a path that is no quote.
+ * a fence, or behind a backslash escape, a tag shows as written, as does a tag naming a path that is
+ * no quote.
  */
 
 import { test, expect } from '../support/fixtures';
@@ -22,7 +23,7 @@ const tag = (kind: 'item' | 'block', id: string, title: string) => `<quoted_${ki
 const pathTag = (path: string, title: string) => `<quoted_path path="${path}">${title}</quoted_path path="${path}">`;
 
 test.describe('A quote', () => {
-  test('on a timeline item is a chip: an item’s goes to the item, a block’s to the block, opening the overlay where its document is a card; in a code span or a fence the tag shows as written', async ({
+  test('on a timeline item is a chip: an item’s goes to the item, a block’s to the block, opening the overlay where its document is a card; in a code span or a fence, or behind a backslash escape, the tag shows as written', async ({
     page,
     people,
     projects,
@@ -38,7 +39,7 @@ test.describe('A quote', () => {
     const notice = await projects.place(id, {
       kind: 'notice',
       title: 'Quoted',
-      text: `See ${item} and ${block}.\n\nIn a span: \`${item}\`\n\n\`\`\`\n${block}\n\`\`\`\n`,
+      text: `See ${item} and ${block}.\n\nIn a span: \`${item}\`\n\n\`\`\`\n${block}\n\`\`\`\n\nEscaped: \\${item}\n`,
     });
     await timeline.open(id);
 
@@ -48,6 +49,7 @@ test.describe('A quote', () => {
     await expect(chips.first()).toHaveAttribute('data-quote', `item ${decision}`);
     await expect(chips.last()).toHaveAttribute('data-quote', `block ${card}/D1`);
     await expect(text.locator('code')).toHaveText([item, block]);
+    await expect(text.getByText('Escaped:')).toHaveText(`Escaped: ${item}`);
     await expect(text).not.toContainText('pilot-quote');
 
     await chips.first().click();
