@@ -2,22 +2,24 @@
 
 A project's chat is how a person reaches its brain: a headless Claude Code session in the store
 environment, which a message starts, briefed, and which takes the messages after it while it is
-open. A chat closes after a quiet spell, or when its project finishes, reopens or is archived, and
-the next message starts the project's next chat. This page is the chat as built: a message and the
-way it goes, the chat's start in the store and its brief, what the server puts before a message's
-words, the server's follow-up turn, the Stop of Pilot's answer, the close, the chats as a person
-reads them, `chat.md`, the chats as the brain reads them, and the chat's screens: the side panel's
-Chat tab, its composer, Discuss, the unread dot and *In the chat*. What the brain may do through
-its tools is [`mcp.md`](mcp.md)'s, the start, the send and the relay that carry a chat's turns are
+open. A draft's chat is its definition chat, in which Pilot drafts the project with the person; it
+stands in the timeline's place until Create project closes it. A chat closes after a quiet spell, or
+when its project is created, finishes, reopens or is archived, and the next message starts the
+project's next chat. This page is the chat as built: a message and the way it goes, the chat's start
+in the store and its brief, what the server puts before a message's words, the server's follow-up
+turn, the Stop of Pilot's answer, the close, the chats as a person reads them, `chat.md`, the chats
+as the brain reads them, and the chat's screens: the side panel's Chat tab or a draft's definition
+chat, its composer, Discuss, the unread dot and *In the chat*. What the brain may do through its
+tools is [`mcp.md`](mcp.md)'s, the start, the send and the relay that carry a chat's turns are
 [`sessions.md`](sessions.md)'s, the panel's shell is [`documents.md`](documents.md)'s, and the
 tables are [`record.md`](record.md)'s. The skill the brief opens with is PilotProjects'
-`.claude/skills/chat/SKILL.md`.
+`.claude/skills/chat/SKILL.md`, and the definition chat's `create/SKILL.md`.
 
 | Service | Does |
 |---|---|
 | `ChatService` (`chat_service.py`) | a person's message: sent to the project's open chat, or the chat started with it; and the Stop of Pilot's answer |
-| `BriefService` (`brief_service.py`) | the chat's brief, the follow-up turn, and the server's lines after a worker's brief ([`mcp.md`](mcp.md)) |
-| `ChatCloseService` (`chat_close_service.py`) | a chat's close: at Finish, Reopen and Archive, and on the timer `chat-close` |
+| `BriefService` (`brief_service.py`) | the chat's brief, the definition chat's and the setup's ([`work.md`](work.md)), the follow-up turn, and the server's lines after a worker's brief ([`mcp.md`](mcp.md)) |
+| `ChatCloseService` (`chat_close_service.py`) | a chat's close: at Create project, Finish, Reopen and Archive, and on the timer `chat-close` |
 | `ChatReadService` (`chat_read_service.py`) | a project's chats in their order, and a person's place in them |
 | `session_scope.py` | what a brain session's create is handed: its box, its surface and its `PILOT_PROJECT` ([`sessions.md`](sessions.md)) |
 
@@ -31,8 +33,7 @@ message as the signed-in person, the words verbatim, and answers `201` `{chat, s
 the chat's id, which is its Session's, the message's Turn's number in it, the Session's state, and
 the error of a send the controller failed, the Turn ended with it ([`sessions.md`](sessions.md)).
 It is a `400` with no words, a `404` for an unknown project, and a `409` with the reason for a
-caller who has not chosen a handle, in a draft ("its project is a draft": a draft's chat is its
-definition chat, which takes no message here), in an archived project ("its project is archived"),
+caller who has not chosen a handle, in an archived project ("its project is archived"),
 while the chat's start is under way or held ("its chat is starting"), while a turn of it is in
 flight ("a turn is in flight", the controller's `409 session-busy`, or "a turn of its chat is in
 flight"), and with no controller or no store environment configured.
@@ -44,7 +45,8 @@ the chat's records. A quote travels in the words as a tag, the closing tag repea
 and the quoted thing's title between the two:
 
 - `<quoted_item id="<item id>">…</quoted_item id="<item id>">`, an item;
-- `<quoted_block id="<item id>/<local id>">…</quoted_block id="…">`, a block;
+- `<quoted_block id="<item id>/<local id>">…</quoted_block id="…">`, a block, a draft's
+  `project.md/<local id>`;
 - `<quoted_path path="<path>">…</quoted_path path="<path>">`, a file of the project's folder by its
   path there (D070): `handbook.md`, `project.md`, or an attachment's
   `attachments/<batch>/<filename>`, the batch from 1 and the filename keeping the slashes of a
@@ -52,17 +54,18 @@ and the quoted thing's title between the two:
   any other path is no quote.
 
 The Turn's quote is what the first quote tag in the words names: the Item or the Block of the
-project, and none for a path's tag, nor for a tag that names neither, an unknown or malformed id or
-another project's. A path's quote lives in the `words` alone. The brain resolves a quote itself,
-from the tree, a path's from the project's folder; the server inlines nothing.
+project, a block of its draft among them, and none for a path's tag, nor for a tag that names
+neither, an unknown or malformed id or another project's. A path's quote lives in the `words` alone.
+The brain resolves a quote itself, from the tree, a path's from the project's folder; the server
+inlines nothing.
 
 Which way a message goes is the project's open chat's to say, read with its Session:
 
-- **None open**: a Chat, kind `project`, is opened with a Session of kind `chat`, in no environment
-  until its start takes the store, its `cwd` the store repo's root, `/work/PilotProjects`, and its
-  model and effort `BRAIN_MODEL` and `BRAIN_REASONING_EFFORT` (below). Its Turn 1 is the chat's
-  brief followed by the words, and the Session starts through the gate (below). A project has one
-  chat open at a time.
+- **None open**: a Chat is opened with a Session of kind `chat`, its kind `definition` in a draft
+  and `project` otherwise, in no environment until its start takes the store, its `cwd` the store
+  repo's root, `/work/PilotProjects`, and its model and effort `BRAIN_MODEL` and
+  `BRAIN_REASONING_EFFORT` (below). Its Turn 1 is its kind's brief followed by the words, and the
+  Session starts through the gate (below). A project has one chat open at a time.
 - **Open and up**, its Session `idle`, `running`, `ended`, or `stopped` with a conversation: the
   words go to it as a Turn through the relay's send, which first creates the controller session
   again where it is gone ([`sessions.md`](sessions.md)). The chat's Session is locked from before
@@ -86,7 +89,8 @@ and no folder writable, its project's included, and is handed no `pilot-store`, 
 changes the record; its home directory stays writable, and the fleet's tools stay, as for every
 brain session. Its brief says the project is finished. **An archived project** takes no message.
 Archive closed its chat (below), so the refusal guards a send racing the archive; after Bring
-back, which starts nothing, the next message starts a chat, briefed with the project's state.
+back, which starts nothing, the next message starts a chat, briefed with the project's state: in a
+draft, a fresh definition chat.
 
 ## The start in the store
 
@@ -103,11 +107,12 @@ project's folder, `/work/Projects/<folder>`, the one folder under `/work` it wri
 naming that folder, and `pilot-store` handed to it ([`mcp.md`](mcp.md)).
 
 A create boxed with a folder to write that the controller refuses `422` meets that folder not on
-disk yet, as `pilot-sync` writes it a moment after the record changes: it is made again every 2 s
-until 60 s have passed since its first refusal, and then fails the start, as any other refusal
-does, `409 capability-unavailable` (the store's pod composed without the sandbox) among them. A
-finished project's create has no folder to wait for, and its `422` fails the start at once. Once
-created, the Turn is sent, and its relay records the turn.
+disk yet, as `pilot-sync` writes it a moment after the record changes, a new draft's
+`draft-<number>` among them: it is made again every 2 s until 60 s have passed since its first
+refusal, and then fails the start, as any other refusal does, `409 capability-unavailable` (the
+store's pod composed without the sandbox) among them. A finished project's create has no folder to
+wait for, and its `422` fails the start at once. Once created, the Turn is sent, and its relay
+records the turn.
 
 ## The brief
 
@@ -135,7 +140,21 @@ a blank line apart; a line that does not hold is left out, never written as "non
 - `The message, from <handle> (member):`, or `(not a member):`, then the words verbatim, which the
   brief ends with.
 
-No brief carries the handbook: the chat skill reads `handbook.md` before it acts (D058).
+**A definition chat's brief** (`BriefService.definition_chat`) has no switch, pause or notes line,
+none of which a draft has:
+
+- `/create`, which loads PilotProjects' create skill;
+- `Pilot's brief · the definition chat · /work/Projects/draft-<number> · <UTC stamp>`, with
+  `project "<name>"` before the folder once the draft has a title;
+- `The draft: project.md, empty. The person who started it: <handle> (member).`, `project.md.` once
+  its published text is not blank and `(not a member)` for a starter who left, then `Attachments so
+  far: none.`, `1 file (timeline.json lists it).` or `<N> files (timeline.json lists them).`, every
+  attachment of the project counted;
+- `The message:` and the words verbatim, or `The message, from <handle> (member):` or `(not a
+  member):` where someone other than the draft's starter sends the message that starts the chat.
+
+No brief carries the handbook: the chat skill reads `handbook.md` before it acts (D058), and a draft
+has none.
 
 ## Before the words
 
@@ -203,7 +222,7 @@ chat failed to start" or "its chat's session has ended".
 
 ## The close
 
-A chat closes for one of four causes, `Chat.closed_at` and `close_cause_code` written together, and
+A chat closes for one of five causes, `Chat.closed_at` and `close_cause_code` written together, and
 is never sent to again: the next message starts a chat of its own.
 
 - **`timeout`**: the timer `chat-close`, on each round of the scheduler ([`jobs.md`](jobs.md)),
@@ -213,6 +232,9 @@ is never sent to again: the next message starts a chat of its own.
   ended first, a `404` or a `409` counting as ended, and its Session `ended`, then the chat closed.
   A controller that does not answer leaves the chat open for the next round. A definition chat
   never closes by timeout.
+- **`created`**: Create project closes the draft's definition chat in its transaction, once the
+  opening and the setup are placed ([`projects.md`](projects.md)), so the next message starts the
+  project's chat. Create waits for the end of a turn in flight, so the chat has none.
 - **`finished`**: Finish closes the project's open chat in its transaction, after it stopped the
   project's Sessions, a turn the chat had running among them ([`projects.md`](projects.md)).
 - **`reopened`**: Reopen does the same for a chat opened while the project was finished, and stops
@@ -235,13 +257,13 @@ open and its close move `chat.md` and raise `ProjectChanged` ([`engine.md`](engi
 ## The chats read
 
 **`GET /api/projects/<id>/chats`** answers `{chats, read_at, unread}`: the project's chats, the
-definition chat first where one exists, then the project's chats in the order they opened, each
-`{id, kind, opened_at, closed_at, close_cause, answering}`, open or closed with its cause; and the
-caller's place in them, `read_at` null for a caller with no handle. `answering` is whether Pilot is
-answering in the chat, its Session `held`, `starting` or `running`, the states the Stop ends: false
-once that ends, however it ends, and for a closed chat; each move of it raises `ProjectChanged`, as
-every move of a chat's Session's state does ([`work.md`](work.md)). A chat's records are its
-Session's, read and followed as any Session's are ([`sessions.md`](sessions.md)).
+definition chats first, where the project has had any, then its other chats, each in the order they
+opened, each `{id, kind, opened_at, closed_at, close_cause, answering}`, open or closed with its
+cause; and the caller's place in them, `read_at` null for a caller with no handle. `answering` is
+whether Pilot is answering in the chat, its Session `held`, `starting` or `running`, the states the
+Stop ends: false once that ends, however it ends, and for a closed chat; each move of it raises
+`ProjectChanged`, as every move of a chat's Session's state does ([`work.md`](work.md)). A chat's
+records are its Session's, read and followed as any Session's are ([`sessions.md`](sessions.md)).
 
 **`PUT /api/projects/<id>/chat/read`**, no body, says the signed-in person has seen the project's
 chat to its end now, on whichever device: their Chat Read, one per person and project, written at
@@ -279,9 +301,17 @@ filtered, a page at a time.
 ## The Chat tab
 
 The side panel's first tab, the one it opens on ([`documents.md`](documents.md) has the panel's
-shell), is the project's chat (`ChatTab`, `frontend/src/components/chat/chat-tab.tsx`), from the
-chats read (`useProjectChats`, `hooks/use-chats.ts`), read again when the window regains the focus
-and on `project_changed` ([`timeline.md`](timeline.md)).
+shell), is the project's chat (`ProjectChat`, `frontend/src/components/chat/project-chat.tsx`,
+`home="panel"`), from the chats read (`useProjectChats`, `hooks/use-chats.ts`), read again when the
+window regains the focus and on `project_changed` ([`timeline.md`](timeline.md)).
+
+**A draft's chat** stands in the timeline's place instead (`home="feed"`), once the head is read and
+says it is a draft. It is the same chat: the chats before it, *In the chat*'s place, the seen mark
+and Stop. Only where it stands changes: its transcript is in the timeline's column, and its composer
+is in that column too, inside a full-width bordered box. Beside it, the side panel holds the Draft
+and Documents tabs ([`documents.md`](documents.md)). Under an overlay it takes no focus, as the
+timeline does. Once Create project reads the head open, the route draws the timeline in its place,
+and the definition chat stands in the panel's Chat tab, above the line where it closed.
 
 - **What it shows.** The project's latest chat: the open one, or with none open the latest closed
   one. Above it, "The chat before · <day>" loads that chat above what is in view, the line at the
@@ -289,14 +319,17 @@ and on `project_changed` ([`timeline.md`](timeline.md)).
   opens while the tab shows comes in below. Nothing stands in it while the list's read is under
   way, and "The chat did not load." while its latest read failed. A project with no chat reads "Ask
   Pilot about this project: how a session is going, what an item means, a change to the plan.
-  Discuss on an item quotes it here."
+  Discuss on an item quotes it here.", and a draft's "Tell Pilot what to manage", over "A card, a
+  handover, or the idea in your own words. Pilot drafts the project beside the chat as you talk, and
+  nothing is created until you press **Create project**."
 - **A chat** (`chat-section.tsx`) streams its records from the first, as the session log does
   ([`work.md`](work.md)), drawn as `buildChatView` places them: each person's message, Pilot's
   reply to it, the working cue while Pilot answers, and the phantom of the text under way; a date
-  divider over its first message and wherever the day turns; and "Chat closed · <time>" where it
-  closed, its cause not shown. What comes live fades in, what loads does not. A turn its records
-  leave open ends once the list says Pilot no longer answers. Every viewer streams the chats it
-  shows, so another member's message and Pilot's reply to it come to them as to the sender.
+  divider over its first message and wherever the day turns; and where it closed, "Chat closed ·
+  <time>", its cause not shown, or a bare line where Create project closed it. What comes live fades
+  in, what loads does not. A turn its records leave open ends once the list says Pilot no longer
+  answers. Every viewer streams the chats it shows, so another member's message and Pilot's reply to
+  it come to them as to the sender.
 - **A person's message** (`person-message.tsx`) stands on the right in the primary's tint, its
   words as written, ticket ids, repos and environments linked (`LinkedText`, [`ui.md`](ui.md)), not
   Markdown; a quote it opens with is a line over it, and one inside it a chip where it stands; under
@@ -322,13 +355,16 @@ whether Pilot answers into the list as read. In an archived project the field an
 under "The project is archived: bring it back to message Pilot."
 
 **Discuss** (`DiscussButton`, `discuss-button.tsx`) quotes what it stands on into the chat. It ends
-an open item's head, every kind's, and a document's block's head, where a one-ask item's is its
-item's; stands before a done line's time; and stands in the overlay's head of a document (the item),
-an attachment, the handbook, the project document (by path) and a session log (its work item). Its
-quote's label is an item's title; a block's "<ask> · <item's title>"; a file's title as read, else
-"Handbook" or "Project document"; an attachment's title, its path as the timeline gives it. A click
-puts the quote in the project's composer (`hooks/use-discuss.ts`) and opens the panel on the Chat
-tab, on top: the quote stands over the field as a chip, with its remove, the field takes the focus
+an open item's head, every kind's, a document's block's head, where a one-ask item's is its item's,
+and the head of an ask in a draft's Draft tab, quoting it as `project.md/<local id>`; stands before
+a done line's time; and stands in the overlay's head of a document (the item), an attachment, the
+handbook, the project document (by path) and a session log (its work item). Its quote's label is an
+item's title; a block's "<ask> · <item's title>", a draft's ask's "<ask> · <draft's title>", "New
+project" while the draft has none; a file's title as read, else "Handbook" or "Project document"; an
+attachment's title, its path as the timeline gives it. A click puts the quote in the project's
+composer (`hooks/use-discuss.ts`) and opens the panel on the Chat tab, on top; in a draft it goes to
+the definition chat, closing an overlay over it and, below a wide window, the panel. The quote
+stands over the field as a chip, with its remove, the field takes the focus once nothing covers it,
 and the transcript goes to its end. The message goes as the quote's tag, a space and the words, and
 the chip goes once the server took it. The quote is kept in the page alone, by the project: a reload
 keeps the words and not the quote. The head's Discuss ([`projects.md`](projects.md)) opens the Chat
@@ -347,10 +383,11 @@ No other browser hears of the mark: each drops its dot at its next read of the l
 a block whose answer was given in the chat (`in_chat`, [`timeline.md`](timeline.md)): in its head
 before the time, the icon alone at 600px and below, and in a one-ask item's done line after the
 answer, kept whole. A click (`hooks/use-in-chat.ts`) opens the panel on the Chat tab, on top, with
-nothing quoted. The tab loads the chats before until the one holding the answer's record, lets go of
-its end, and once that chat's stream has read to the record scrolls the person's message of the turn
-that holds it, the latest at or before it, into the middle of the view, flashes it and holds it
-there until the reader scrolls. On its way there the chat is not at its end, and so not seen.
+nothing quoted; in a draft it goes to the definition chat as Discuss does. The tab loads the chats
+before until the one holding the answer's record, lets go of its end, and once that chat's stream
+has read to the record scrolls the person's message of the turn that holds it, the latest at or
+before it, into the middle of the view, flashes it and holds it there until the reader scrolls. On
+its way there the chat is not at its end, and so not seen.
 
 ## Settings and metrics
 
@@ -378,17 +415,22 @@ environment's tree, so a chat's start in the store needs a file under `/work/Pil
 under the project's folder (`put_file`), or its create is `422`.
 
 The browser suites are `frontend/tests/chat/` (`chat-tab.spec.ts`, `composer.spec.ts`,
-`discuss.spec.ts`, `in-chat.spec.ts`), and `tests/timeline/quotes.spec.ts` for the chips. The
-Playwright backends start every chat in the store environment of their own fake,
-`playwright-store` (`STORE_ENVIRONMENT_ID`, `loadAppBackendEnv()`), which the `chats` fixture
+`discuss.spec.ts`, `in-chat.spec.ts`), `tests/timeline/quotes.spec.ts` for the chips, and
+`tests/projects/new-project.spec.ts` and `create-project.spec.ts` for the definition chat. The
+Playwright backends start every chat in the store environment of their own fake, `playwright-store`
+(`STORE_ENVIRONMENT_ID`, `loadAppBackendEnv()`), which the `chats` fixture
 (`frontend/tests/support/chats.ts`) puts there once per backend with the store repo and the
 project's folder on its tree. `chats.start(project, words, other?)` sends a message and answers
-`{chat, session}` once the store's session works, and `chats.opening(project)` readies the store
-for a message sent from the composer and answers a wait for its session; the spec plays a turn
-with `controller.play` and `finish` on `chats.store`. `send`, `working(session)`, `idle(project)`,
-`stop`, `seen`, `list` and `other(name, handle)`, another person on a connection of their own, do
-what they say; `answer(project, block, value, handle, {note, toolUseId})` records a person's answer
-as the chat's brain does, while a turn of the open chat is in flight, through the record's testing
-route ([`projects.md`](projects.md)), the place *In the chat* goes to. The `chat` page object
+`{chat, session}` once the store's session works, and `chats.opening(project, folder?)` readies the
+store for a message sent from the composer and answers a wait for its session; `ready(project,
+folder?)` puts the project's folder on the store's tree, an open project's slug unless a draft's
+`draft-<number>` is named, as `projects.makeDraft` answers it, so `ready(project, slug)` before
+Create lets the setup start; the spec plays a turn with `controller.play` and `finish` on
+`chats.store`. `send`, `working(session)`, `idle(project)`, `stop`, `seen`, `list` and `other(name,
+handle)`, another person on a connection of their own, do what they say; `answer(project, block,
+value, handle, {note, toolUseId})` records a person's answer as the chat's brain does, while a turn
+of the open chat is in flight, through the record's testing route ([`projects.md`](projects.md)),
+the place *In the chat* goes to, a draft's ask by `project.md/<local id>`. The `chat` page object
 (`tests/support/page-objects/chat-page.ts`) reads the tab, its dot, the transcript and the composer,
-and `acted('send' | 'stop' | 'read')` waits for that write's success.
+and `acted('send' | 'stop' | 'read')` waits for that write's success; the `definitionChat` fixture
+is the same page object on a draft's chat in the timeline's place.

@@ -12,9 +12,12 @@ attachments and the side panel are [`documents.md`](documents.md)'s.
 
 ## Reading it
 
-**`GET /api/projects/<id>/timeline`** answers the timeline whole, `{finished_at, items}`, and `404`
-for an unknown project. `finished_at` is the latest `finished` transition's time while the project
-is finished, else null. `items` are every item, by `seq`, each with:
+**`GET /api/projects/<id>/timeline`** answers the timeline whole, `{finished_at, items,
+unhung_attachments}`, and `404` for an unknown project. `finished_at` is the latest `finished`
+transition's time while the project is finished, else null. `unhung_attachments` are a draft's
+attachments hung on no item, by batch and then file name, in an item's attachments' shape: what its
+definition chat attached, which Create project hangs on the opening, so none past Create
+([`documents.md`](documents.md)). `items` are every item, by `seq`, each with:
 
 - `id`, `seq`, `kind` (an item kind's code) and `form` (`prose`, `work` or `wait`);
 - `title`, null for a registered document whose text gives none or that has no text, and
@@ -48,8 +51,9 @@ is finished, else null. `items` are every item, by `seq`, each with:
   follows it, and where `body` is null (D032);
 - `attachments`, on every item, work included, in the order they hang on it: `{id, title, filename,
   content_type, size, batch, copied_at, source}`, `batch` the project's attach call it came in,
-  from 1, and `source` where it was copied from, `<environment>:<path>`, null for the draft's copy.
-  Its bytes are streamed apart ([`documents.md`](documents.md));
+  from 1, and `source` where it was copied from, `<environment>:<path>`, null for the draft's copy
+  that Create project hangs on the opening. Its bytes are streamed apart
+  ([`documents.md`](documents.md));
 - `asked_writer_about`: the local ids of the blocks Pilot asked a registered document's writer
   about, in the document's order (`ask_writer`, [`mcp.md`](mcp.md)); empty on every other item;
 - `work`, a work item's status, its Session as its line shows it, null for every other kind
@@ -113,7 +117,8 @@ as well. Each `work_moved`'s status it writes into the timeline as read, with no
 
 `Timeline` (`timeline.tsx`) draws under the project's head, from `useTimeline`
 (`hooks/use-timeline.ts`). It draws every item in its order, the opening first, but waits, which
-draw no line. A project with none reads "Nothing yet".
+draw no line. Every project it draws has its opening: a draft draws its definition chat in the
+timeline's place ([`chats.md`](chats.md)).
 
 - **Dividers** (`rows.ts`). A day divider falls at each new date in the browser's time zone,
   "Thursday 22 October"; a step divider where the step changes, the task's title. An item serving
@@ -215,8 +220,12 @@ The count, the bar and *Send answers* are the same whether it collapses or not.
 ## Answering inline
 
 A one-ask item's block, and each of a document's (`block.tsx`), is answered in its place; each
-click or Send posts through `useAnswer` (`hooks/use-answer.ts`). A one-ask item becomes its done
-line once the screens read it back; a document's block stays, answered, until *Send answers*.
+click or Send posts through `useAnswer` (`hooks/use-answer.ts`). The block's form, `BlockPanel`, is
+the one every ask is drawn with: an item's (`Block`), the handbook's and the project document's in
+the overlay, read only (`DocumentBlock`), and a draft's in its Draft tab, answered through the
+draft's routes (`DraftBlock`, `useDraftAnswer`, [`documents.md`](documents.md)). A one-ask item
+becomes its done line once the screens read it back; a document's block stays, answered, until *Send
+answers*.
 
 - **A decision** (`decision.tsx`): its options as full-width rows, each its label, its line and
   Recommended on the recommendation; a proposal is one row, tinted as recommended, that answers

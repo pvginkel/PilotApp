@@ -71,8 +71,11 @@ is not 64 lowercase hex digits included, is a `400`.
   NUL, `1` for a read-only path or `0`, and a newline.
 - `change`, `{"path", "hash"}`: a path's tree hash moved, sent once the transaction that moved it
   has committed (the bus's `TreeHashMoved`, [`engine.md`](engine.md)).
-- `manifest`, `{}`: the set of syncing projects changed (the bus's `ManifestChanged`): a project
-  archived or brought back ([`projects.md`](projects.md)), and the testing endpoint below.
+- `manifest`, `{}`: the set of syncing projects or their folders changed (the bus's
+  `ManifestChanged`): a draft started from the plus, a project created, its folder moving from
+  `draft-<number>` to its slug, a project archived or brought back ([`projects.md`](projects.md)),
+  and the testing endpoint below. A move is no move to the sidecar: the reconcile deletes the old
+  folder's paths, which the manifest no longer lists, and writes the new one's (below).
 
 A `: heartbeat` comment follows `SYNC_HEARTBEAT_SECONDS` without an event. There is no `id:` field
 and no replay: the sidecar's hashes are its cursor, and a reconnect reconciles. The stream ends on

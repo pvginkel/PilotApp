@@ -17,7 +17,7 @@ commits.
 | `TreeService` (`tree.py`) | what a path names, the bytes it must hold, its tree hash; the manifest |
 | `ViewService` (`views.py`) | `reference.json`, `timeline.json` and `chat.md` ([`chats.md`](chats.md)) |
 | `AttachmentStore` (`attachments.py`) | an attachment's bytes, kept, read and deleted ([`documents.md`](documents.md)) |
-| `AttachService` (`attachments.py`) | files a session copied from its environment, hung on an item as one batch ([`mcp.md`](mcp.md)) |
+| `AttachService` (`attachments.py`) | files a session copied from its environment, hung on an item as one batch, or a draft's on nothing ([`mcp.md`](mcp.md)); at Create project, the draft's copy and the draft's material hung on the opening |
 | `EngineBus` (`bus.py`) | the events, one bus per process |
 
 The grammar the engine reads is [`block-dsl.md`](block-dsl.md), the tree and its files
@@ -29,8 +29,9 @@ engine and the store's tree [`sync.md`](sync.md).
 Every document of Pilot's own is born in the record, published, before any agent edits it, with
 version 1 cut, cause `born`; a worker's is registered (below):
 
-- `bear_draft(project, text="")`: the draft, `project.md`.
-- `bear_handbook(project, text="")`: the handbook, `handbook.md`.
+- `bear_draft(project, text="")`: the draft, `project.md`, at the plus
+  ([`projects.md`](projects.md)).
+- `bear_handbook(project, text="")`: the handbook, `handbook.md`, at Create project.
 - `bear_item(project, kind, title, session, text="")`: a prose item of Pilot's own, of any prose
   kind but the opening, which `session` added; its version is of that session. It takes the next
   `seq` under the project's row lock, and its path from the title. The title is written first into
@@ -41,21 +42,22 @@ version 1 cut, cause `born`; a worker's is registered (below):
   record's facts included, with one fault more: a block whose `by` names a person, since a born text
   has no published one to hold that person's answer.
 - `bear_opening(project, title, user, text)`: the opening, the words of the person who started the
-  project, taken as written. The record reads nothing from its text: it has no blocks, and its kind,
-  title and caches stay as it was born.
+  project, taken as written: at Create project, the first message to its definition chat. The record
+  reads nothing from its text: it has no blocks, and its kind, title and caches stay as it was born.
 
 The births, and a work item's placing, take the Item's `seq` from
 `DocumentService.next_seq(project)`, under the project's row lock until the transaction ends
 (`lock_project(project)`, which `pilot-work`'s registration takes first to read its Session again,
 [`mcp.md`](mcp.md)), so that items in one project take theirs one at a time. A work item has no
 document:
-`RecordService.place_work(project, session, title, plan_task_id=None, *, repo=None)` writes its
-Item, kind `work`, created by its own `session` and sharing its id, on the plan's task when given (a
-task not in the plan is a `RecordNotFoundException`), and its Work, `autopilot` the project's
-switch as it stands and `repo` the repository it is placed by, none for a job;
-`work_done(work_id, at)`, at its turn's end, marks the Item done at `at`, by no one, cause
-`turn_ended`, under the Item's row lock, and leaves one done already, as Finish's close leaves it
-([`sessions.md`](sessions.md)). Each moves `timeline.json`.
+`RecordService.place_work(project, session, title, plan_task_id=None, *, repo=None, trigger=None,
+trigger_item_id=None)` writes its Item, kind `work`, created by its own `session` and sharing its
+id, on the plan's task when given (a task not in the plan is a `RecordNotFoundException`), and its
+Work, `autopilot` the project's switch as it stands and `repo` the repository it is placed by, none
+for a job, which has instead the `trigger` that started it (`setup`, [`work.md`](work.md));
+`work_done(work_id, at)`, at its turn's end, a job's at its last, marks the Item done at `at`, by no
+one, cause `turn_ended`, under the Item's row lock, and leaves one done already, as Finish's close
+leaves it ([`sessions.md`](sessions.md)). Each moves `timeline.json`.
 
 A birth but the opening's refuses a text with a fault of its own (an unclosed fence, a body that is
 no mapping, and the like) and then writes nothing. The opening's is never refused, whatever it
@@ -139,6 +141,10 @@ A save of a document runs in one transaction, under the document's row lock:
 6. With none, the save is merged by ownership against the published text and the result
    published, with a `reverted` Save Error per fault the merge reports; the answer carries the
    merged text where it differs from the save. The `reverted` rows of earlier saves stand.
+
+`project.md` is read as a draft while its project is one, and past Create project under the
+handbook's rules ([`block-dsl.md`](block-dsl.md)): a person's answered block frozen, a dropped one
+restored, and its `slug` read by nothing.
 
 A save of the opening is never read: steps 4 and 5 pass it by, and the decoding's fault with them,
 so it is never held. A save that differs from the published text, an undecodable one included, is
@@ -253,7 +259,7 @@ already emitted in the transaction is delivered once.
 | `DocumentModified(project_id, path)` | on every save of a document, held or published; the record's own writes raise none |
 | `ErrorsRaised(project_id, path)` | on every held save |
 | `ErrorsResolved(project_id, path)` | on a clean save after a held one, and when a held `plan.json` is written down |
-| `ManifestChanged()` | when the set of syncing projects changed: a project archived or brought back ([`projects.md`](projects.md)), and the sync's testing endpoint |
+| `ManifestChanged()` | when the set of syncing projects or their folders changed: a draft started from the plus, a project created, archived or brought back ([`projects.md`](projects.md)), and the sync's testing endpoint |
 | `ProjectChanged(project_id)` | when what the project's timeline, head or tab shows moved: with every `TreeHashMoved` of its `timeline.json`; on a publish that changes the published text of an item, a record write on a held item included, of the handbook or of the project document; on a save that holds an item or ends its hold; on a save that makes its session a document's writer, and for each document a turn's end lets go; on a save of `plan.json` that moved its rendering; on a pause, a resume, a join and a leave ([`projects.md`](projects.md)); on every move of one of its Sessions' state; on a chat's open and close ([`chats.md`](chats.md)); on a registered document's failed read, and on a continuation released, which takes Undo from its run's documents ([`round-trip.md`](round-trip.md)). `ProjectEventService` sends it to the browsers ([`timeline.md`](timeline.md)) |
 | `WriteBackOwed(session_id)` | on a close that owes a registered document's text to its file, and on a Resume that owes a refused one again; the write-back service hears it ([`round-trip.md`](round-trip.md)) |
 | `WorkMoved(project_id, work_id)` | when what a work item's line shows of its Session moved: its state, its current line, its start or its error ([`work.md`](work.md)). `ProjectEventService` sends it with the work item's status |

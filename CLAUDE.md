@@ -8,10 +8,11 @@ talks to Pilot's brain, a headless Claude Code session in a store environment.
 **Its first screens are in**: the handle step, the project list, a project's head and its timeline,
 its work items, its documents in the overlay and the side panel, on the record's schema, the engine
 behind it (`backend/app/engine/`), the sync of the store's tree, the server's jobs on the KubeCoder
-controller, Pilot's MCP server with the worker's round trip, and the project's chat in the side
-panel, with the brain's tools. Every green build of `main` deploys
-itself to the dev stage at `https://pilot-dev.home`, and production at `https://pilot.ginbov.nl`
-runs what the operator promotes from there ([`docs/deployment.md`](docs/deployment.md)). Version 1
+controller, Pilot's MCP server with the worker's round trip, the project's chat in the side panel,
+with the brain's tools, and a new project: the plus, its definition chat and draft, Create project
+and its setup. Every green build of `main` deploys itself to the dev stage at
+`https://pilot-dev.home`, and production at `https://pilot.ginbov.nl` runs what the operator
+promotes from there ([`docs/deployment.md`](docs/deployment.md)). Version 1
 is built from the design record in `../PilotAppSpecs/design/` (start at its README), along the steps
 of its `implementation-plan.md`. Its `features.md` is the version-1 scope, and
 [`docs/change-discipline.md`](docs/change-discipline.md) says how the record binds a change. A
@@ -178,8 +179,9 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
   signed-in test's session included, and the person on the record, with the handle they choose.
 - [`docs/ui.md`](docs/ui.md), [`docs/projects.md`](docs/projects.md),
   [`docs/timeline.md`](docs/timeline.md), [`docs/documents.md`](docs/documents.md): the UI's shell,
-  tokens, shared pieces and links in text; the projects' API and screens; the timeline's API, live
-  event and screens; a document read alone, the attachments, the overlay and the side panel.
+  tokens, shared pieces and links in text; the projects' API and screens, the plus and Create
+  project; the timeline's API, live event and screens; a document read alone, a draft's asks, the
+  attachments, the overlay and the side panel with a draft's Draft tab.
 - [`docs/record.md`](docs/record.md), [`docs/block-dsl.md`](docs/block-dsl.md),
   [`docs/projection.md`](docs/projection.md), [`docs/engine.md`](docs/engine.md): the record's
   schema and the dev seed, the block DSL, the store's tree and its files, and the engine between
@@ -191,9 +193,9 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
   the server's long-lived jobs; the KubeCoder controller's client, its outage, its fleet stream,
   environments on demand and Pilot's own, with its fake; the sessions, the gate and its slot, their
   records, relay and live stream, Stop and Resume; a work item's status, its line and its session
-  log.
+  log, and Pilot's own work, the setup.
 - [`docs/mcp.md`](docs/mcp.md), [`docs/round-trip.md`](docs/round-trip.md),
   [`docs/chats.md`](docs/chats.md): Pilot's MCP server, handed to every session it creates, the
   worker's tools and the brain's; a registered document's read at the run's end, its write-back and
-  the run's continuation; a project's chat, its start in the store, its brief, its Stop, its close,
-  `chat.md`, and its Chat tab, composer, Discuss and *In the chat*.
+  the run's continuation; a project's chat and a draft's definition chat, its start in the store,
+  its brief, its Stop, its close, `chat.md`, and its Chat tab, composer, Discuss and *In the chat*.

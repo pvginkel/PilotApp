@@ -148,11 +148,12 @@ objects into each stage's namespace:
   the dev stage, whose start takes or creates an environment of Pilot's own on `kubecoder-dev` and
   starts its session there; the shutdown timer then stops that environment, and the delete timer
   deletes it once it has stood free for 7 days ([`work.md`](work.md), [`sessions.md`](sessions.md),
-  [`controller.md`](controller.md)). A message to a project's chat starts the stage's store where it
-  is stopped, and the chat's session there ([`chats.md`](chats.md)). Production has no project, so
-  nothing starts there. On either stage a controller that does
-  not answer shows as the gold bar's line over the project list ([`ui.md`](ui.md)); `kubecoder-dev`
-  is on the dev cluster, which is often powered off, and the dev stage's bar then says so.
+  [`controller.md`](controller.md)). A message to a project's chat, a draft's definition chat among
+  them, starts the stage's store where it is stopped, and the chat's session there
+  ([`chats.md`](chats.md)), and Create project starts the setup's there ([`work.md`](work.md)), on
+  production as on dev. On either stage a controller that does not answer shows as the gold bar's
+  line over the project list ([`ui.md`](ui.md)); `kubecoder-dev` is on the dev cluster, which is
+  often powered off, and the dev stage's bar then says so.
 - **Service `pilot`**, port 80 to the UI, its annotation `nginx.webathome.org/server-name` the
   stage's host. Production's `nginx.webathome.org/is-public: "true"` has the estate's front door
   serve it as a public site, over HTTPS with a Let's Encrypt certificate. Dev's `is-public: "false"`

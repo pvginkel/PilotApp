@@ -11,7 +11,8 @@ record's testing route `POST /api/testing/projects/<id>/work` places one so, on 
 `prd` ([`projects.md`](projects.md)). The app places one itself as a run's continuation:
 the close that leaves none of the documents a work item's run registered open places the work item
 that continues its conversation, titled as the run, on its plan task while the plan still has it,
-after the answered items ([`round-trip.md`](round-trip.md)).
+after the answered items ([`round-trip.md`](round-trip.md)). Create project places the setup, a job
+of Pilot's own ([below](#pilots-own-work)).
 
 ## Its status
 
@@ -41,7 +42,9 @@ for the live event:
 - `stopped_cause`: `environment_stopped`, `environment_deleting`, `environment_error` or
   `environment_gone` while it is `stopped` with no person's stop, its environment stopped under its
   turn or settled in error, read from the session's last record; null for a person's stop and for
-  an interrupt made elsewhere.
+  an interrupt made elsewhere;
+- `pilots_own`: whether it is Pilot's own work, a job ([below](#pilots-own-work)), false for a
+  worker's run.
 
 A work item waits on you while `stopped` or `failed`, which its project's badge counts
 ([`projects.md`](projects.md)). It is done at the end of a turn neither interrupted nor in error
@@ -69,10 +72,10 @@ it follows. A move heard while that timeline is being read goes over the read on
 An open work item (`WorkItem`, `frontend/src/components/timeline/work.tsx`) is:
 
 - **Its head**, an item's head ([`timeline.md`](timeline.md)), with the env chip once its start has
-  an environment, the environment's name linked to KubeCoder's Open by its id (`EnvironmentLink`,
-  [`ui.md`](ui.md)), and, while
-  `running` with a `started_at`, "running N min" with a pulse: "under a minute", "12 min", "1 h 5
-  min", "3 h", "2 days", counted again every 15 s on the browser's clock.
+  an environment, but for Pilot's own work, the environment's name linked to KubeCoder's Open by its
+  id (`EnvironmentLink`, [`ui.md`](ui.md)), and, while `running` with a `started_at`, "running N
+  min" with a pulse: "under a minute", "12 min", "1 h 5 min", "3 h", "2 days", counted again every
+  15 s on the browser's clock.
 - **Its title.**
 - **Its one line** (`workLine()`, `frontend/src/lib/utils/status-labels.ts`): a held item's reason,
   "Paused", "Waiting for the controller" or "Waiting for a slot · N running"; else its current line
@@ -90,7 +93,8 @@ An open work item (`WorkItem`, `frontend/src/components/timeline/work.tsx`) is:
   it and Cancel, which takes the focus; Esc or Cancel puts the focus back on Stop, and the question
   goes as the item leaves those states. While `stopped` or `failed`: Resume, then Session log;
   Resume is disabled while the project is archived, as its head's switch is (D012), the API
-  refusing it until Bring back. Otherwise Session log alone.
+  refusing it until Bring back. Otherwise, and for Pilot's own work in every state, Session log
+  alone.
 
 Stop and Resume (`useStop`, `useResume`, `frontend/src/hooks/use-work-acts.ts`) call
 [`sessions.md`](sessions.md)'s routes and write the answer into the cached timeline, only while the
@@ -99,6 +103,43 @@ toast in the API's words, and Resume, or the question, stays offered. Once this 
 Resume lands and swaps the two, the keyboard focus that was on the button that went goes to the
 other's resting button, Resume after a Stop and Stop after a Resume (`useHandoff`, `work.tsx`); a
 swap another browser's act made, or one after the focus moved elsewhere meanwhile, moves no focus.
+
+## Pilot's own work
+
+A background job of Pilot's own is a work item too (`JobService`,
+`backend/app/services/job_service.py`): a fresh brain session in the store for each trigger, ending
+with its turn. It is placed in its caller's transaction, under the project's row:
+
+- its Session is kind `job`, in the store repo's root, on the brain's model and effort
+  ([`chats.md`](chats.md)), its first Turn its trigger's brief;
+- its Work has the trigger that started it and no repository;
+- its Item is next on the timeline.
+
+It starts through the gate as a chat does (`start_brain`, [`sessions.md`](sessions.md)): held while
+its project is paused, taking no slot, boxed to the project's folder with `pilot-store` handed to
+it, and its create made again for a bounded time while that folder is not on disk. Its item is done
+at its last turn's end, the follow-up's where it gets one ([`chats.md`](chats.md)). Neither a
+person's Stop or Resume nor the brain's `stop_work` takes it ([`sessions.md`](sessions.md)); Finish
+and Archive stop it as they stop every session.
+
+**The setup** is the one job placed so far: Create project places it after the opening, titled
+"Setting up the project", trigger `setup` ([`projects.md`](projects.md)). Its brief
+(`BriefService.setup`) is:
+
+- `/plan`, which loads PilotProjects' plan skill, whose setup mode writes the handbook and the plan;
+- `Pilot's brief · the setup · project "<name>" · /work/Projects/<slug> · <UTC stamp>`, the name
+  left out where the project has none;
+- the switch's line, as the chat's brief words it;
+- `The project was created <stamp> from draft-<number>; its folder is now /work/Projects/<slug>.`,
+  `The draft: project.md (the opening item <id> holds the words that started it; the draft's copy
+  and what the chat attached hang on it).` and `The plan: plan.json, empty.`.
+
+It has no pause line, Create opening a draft, which has nothing to pause, and no notes.
+
+On the timeline, a job's `pilots_own` is true. Its line has its session log, and neither the env
+chip, the store's once its start takes it, nor Stop or Resume. Its session log's head names no
+environment. A failed or stopped job shows so, with nothing to press, and its project's badge
+counts it.
 
 ## The session log
 
@@ -109,8 +150,8 @@ log in the overlay over the timeline (`SessionLogOverlay`,
 An address that names no work item of the project reads "The session log did not load".
 
 - **Its head**: "Session log", over the item's title, its environment's link once its start has
-  one, and the session's id; and Discuss, quoting the work item into the chat
-  ([`chats.md`](chats.md)).
+  one, but for Pilot's own work, and the session's id; and Discuss, quoting the work item into the
+  chat ([`chats.md`](chats.md)).
 - **Its body**: the session's records rendered as the chat renders a reply, one reply per turn
   (`ReplyBody`), bare in the log's column, 6px in from either side (D002): the text as Markdown, the
   runs of tool calls with their summaries, a sub-agent's card with its own steps, the phantom of the
@@ -121,8 +162,9 @@ An address that names no work item of the project reads "The session log did not
   record is its effect line in its own place, never inside a run of calls, a check before `<verb> ·
   <label>`, "Registered · inbox/3" or "Attached · <title>" ([`mcp.md`](mcp.md)) (`EffectLine`,
   `components/chat/tool-call.tsx`); its click goes to its block's address, else its item's
-  ([`timeline.md`](timeline.md)), as a quote's chip does ([`ui.md`](ui.md)). An earlier turn ends on
-  its time, with " · Stopped" after an interrupted one and " · Failed" after a failed one.
+  ([`timeline.md`](timeline.md)), a draft's ask to the ask in the Draft tab, as a quote's chip does
+  ([`ui.md`](ui.md)). An earlier turn ends on its time, with " · Stopped" after an interrupted one
+  and " · Failed" after a failed one.
 - **Its tail**: while the item is held, starts or runs, the working cue: the held reason, what the
   turn in flight is doing, or "Starting" and "Waiting for Pilot" before its first record. Otherwise
   how it ended (`sessionLogTail()`): "Stopped by you · <time>", "Stopped by <name> · <time>", the

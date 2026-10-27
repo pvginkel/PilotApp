@@ -12,12 +12,13 @@ against. Tests pin each shape (`TestViewService` in `backend/tests/engine/test_v
 ## The paths
 
 At the tree's root are `reference.json` and a folder per project that is not archived:
-`draft-<number>` while the project is a draft, its slug once it has one. In a project's folder:
+`draft-<number>` while the project is a draft, its slug once Create project gives it one, which
+moves the folder ([`projects.md`](projects.md)). In a project's folder:
 
 | Path | Holds | A save of it |
 |---|---|---|
-| `project.md` | the draft | is ingested |
-| `handbook.md` | the handbook | is ingested |
+| `project.md` | the draft, and past Create the project document | is ingested, past Create under the handbook's rules |
+| `handbook.md` | the handbook, born at Create | is ingested |
 | `items/<seq>-<slug>.md` | a prose item's document | is ingested; the opening's is reverted whole |
 | `inbox/<seq>-<slug>.md` | a worker's registered document, once its file was read | is ingested |
 | `plan.json` | the plan, rendered from its rows | is parsed back into the rows |
@@ -78,9 +79,9 @@ The values the agent writes from a closed list:
   - `created_at`;
   - `done`: null while open, else `at`, `cause` (a done cause's code) and `by` (a handle, or null);
   - `attachments`: the `id` and `path` of each attachment hung on the item, in their order.
-- `attachments`, every attachment of the project by batch and file name: `id`, `path`
-  (`attachments/<batch>/<filename>`), `title`, and `source` (`<environment id>:<path>`, null for
-  the draft's copy).
+- `attachments`, every attachment of the project by batch and file name, a draft's hung on no item
+  among them: `id`, `path` (`attachments/<batch>/<filename>`), `title`, and `source` (`<environment
+  id>:<path>`, null for the draft's copy).
 
 ### `plan.json`
 

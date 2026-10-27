@@ -98,16 +98,19 @@ In `src/components/shared/`:
   ("14:05"), or `stamp`, the date and the time ("22 Oct 2026, 14:05"). The record and the API hold
   times in UTC.
 - `LinkedText` and `EnvironmentLink`: below.
-- `Markdown({text, className?, deltas?})`: GFM (react-markdown with remark-gfm) inside `.prose`, its
-  text linked as the record's words are except in code and inside a link, every link opening in a
-  new tab. A quote tag ([`chats.md`](chats.md) has its forms) is a chip (`QuoteChip`) that goes to
-  what it quotes, from any screen under a project's address (`useOpenQuote`): an item to its
-  address, a block to its own, which opens the overlay where its document is a card, the handbook
-  and the project document to their overlays, and an attachment to its address under its item's,
-  found in the timeline's read by its batch and its filename, a folder's keeping its slashes; a path
-  naming no attachment there goes nowhere. Inside a code span or fence, or raw HTML, as the text's
-  own Markdown parse reads it, or behind a backslash escape, the tag shows as written
-  (`quotesToLinks`, `lib/chat/quotes.ts`).
+- `Markdown({text, className?, deltas?, documentLink?})`: GFM (react-markdown with remark-gfm)
+  inside `.prose`, its text linked as the record's words are except in code and inside a link, every
+  link opening in a new tab. Given `documentLink`, as the Draft tab gives it
+  ([`documents.md`](documents.md)), it draws every link through that component and links nothing
+  else. A quote tag ([`chats.md`](chats.md) has its forms) is a chip (`QuoteChip`) that goes to what
+  it quotes, from any screen under a project's address (`useOpenQuote`): an item to its address, a
+  block to its own, which opens the overlay where its document is a card, a draft's ask,
+  `project.md/<local id>`, to the ask in the Draft tab, past Create to the project document's
+  overlay, the handbook and the project document to their overlays, and an attachment to its
+  address, under its item's where it hangs on one, found in the timeline's read by its batch and its
+  filename, a folder's keeping its slashes; a path naming no attachment there goes nowhere. Inside a
+  code span or fence, or raw HTML, as the text's own Markdown parse reads it, or behind a backslash
+  escape, the tag shows as written (`quotesToLinks`, `lib/chat/quotes.ts`).
   With `deltas`, a streamed text's, its new text fades in (`.delta-fresh`); the chat's view code
   draws its text through it ([`work.md`](work.md)).
   `HeadingWords({text})` is a heading's inline Markdown alone, for inside a button: emphasis, code
@@ -150,7 +153,8 @@ another tab of the browser keeps for the other projects.
 
 The unsent text of every answer's field and of the chat's composer is a second entry,
 `pilot.unsent`, by field: `<item>/<block>/answer`, `/paste`, `/other` and `/no`
-([`timeline.md`](timeline.md)), and `chat/<project>` ([`chats.md`](chats.md)).
+([`timeline.md`](timeline.md)), a draft's ask's under `<project>/project.md/<block>` the same way
+([`documents.md`](documents.md)), and `chat/<project>` ([`chats.md`](chats.md)).
 `useUnsentText(field, initial)` (`src/hooks/use-unsent-text.ts`) reads it when the field opens, so a
 field opened again, after a reload or in another tab, starts from what was left in it, and writes it
 on every keystroke over what the storage holds. An emptied field's entry is deleted, and so is a

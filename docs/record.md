@@ -72,7 +72,8 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   `filename` may hold slashes, a folder's file named by its path relative to the folder. Its
   bytes, `content`, are read and written through the engine's `AttachmentStore` alone: a loaded row
   never holds them ([`documents.md`](documents.md)). `item_attachments` hangs one on an item, in a
-  position among the item's.
+  position among the item's; a draft's material hangs on none until Create project hangs it on the
+  opening, after the draft's copy ([`projects.md`](projects.md)).
 
 **Sessions and environments**
 

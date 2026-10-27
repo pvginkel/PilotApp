@@ -8,13 +8,14 @@ list by REST from any record number and follows it live on its SSE connection. T
 sessions as built: the start through the gate, what a create is handed, the send, the relay, Stop
 and Resume, an environment restarted or stopped under a turn, the current line, the records and
 their stream, and the recovery after a restart. A work item is a Session on the timeline, and what
-its line and its session log show is [`work.md`](work.md)'s; a project's chat is a Session of the
-brain's in the store, and what a message to it does is [`chats.md`](chats.md)'s. The tables are in
-[`record.md`](record.md), and the threads the loops run on in [`jobs.md`](jobs.md).
+its line and its session log show is [`work.md`](work.md)'s, Pilot's own jobs among them; a
+project's chat is a Session of the brain's in the store, and what a message to it does is
+[`chats.md`](chats.md)'s. The tables are in [`record.md`](record.md), and the threads the loops run
+on in [`jobs.md`](jobs.md).
 
 | Service | Does |
 |---|---|
-| `SessionStartService` (`session_start_service.py`) | a work item placed by repository, or a run's continuation, its Session written `held` or `starting` through the gate and brought up by its start loop in an environment of Pilot's own; a brain session's start, brought up in the store; Stop and Resume |
+| `SessionStartService` (`session_start_service.py`) | a work item placed by repository, or a run's continuation, its Session written `held` or `starting` through the gate and brought up by its start loop in an environment of Pilot's own; a brain session's start, a chat's or a job's, brought up in the store; Stop and Resume |
 | `start_gate.py` | `held_reason`, the gate every start passes, and `WorkSlots`, its slot |
 | `session_scope.py` | `scoped_create`, what each create of a Session is handed |
 | `RelayService` (`relay_service.py`) | the send of a Turn, the relay of each turn into the records, and the interrupt of a turn stopped under it |
@@ -25,8 +26,9 @@ brain's in the store, and what a message to it does is [`chats.md`](chats.md)'s.
 
 All are in `backend/app/services/`. The brain's `add_item` places a work item ([`mcp.md`](mcp.md)),
 and so does the record's testing route (below); the close that leaves none of a run's registered
-documents open places the run's continuation ([`round-trip.md`](round-trip.md)). A person's Resume
-carries a stopped or failed work item on, and Stop, the brain's `stop_work`, Finish and Archive
+documents open places the run's continuation ([`round-trip.md`](round-trip.md)); Create project
+places the setup, a job of Pilot's own ([`work.md`](work.md)). A person's Resume carries a stopped
+or failed worker's run on, and Stop, the brain's `stop_work`, Finish and Archive
 stop one.
 
 ## The session start
@@ -256,11 +258,12 @@ The Session's state at its turn's end: `stopped` when the turn was interrupted, 
 item's Session `failed` when its turn ended in error, the error its Turn's (D036); else `idle`, and
 a work item done, as the engine's `work_done` makes it: cause `turn_ended`, by no one, at the turn's
 end, which a Finish that closed it first leaves as Finish closed it. A Session with no work item
-whose turn ended in error is `idle`, the error its Turn's. A Session stopped under the turn keeps
-its stop, and its work item is not done. A work item's turn that ends gives its slot back. A brain
-session left `idle` with a save of its own still held stays `running` with the server's follow-up
-turn, written in flight in that transaction, which the relay sends once it commits; one follow-up
-per turn (D065, [`chats.md`](chats.md)).
+whose turn ended in error is `idle`, the error its Turn's. A job's work item is done at its last
+turn's end: a turn that gets the follow-up turn (below) leaves it open, and the follow-up's end
+makes it done. A Session stopped under the turn keeps its stop, and its work item is not done. A
+work item's turn that ends gives its slot back. A brain session left `idle` with a save of its own
+still held stays `running` with the server's follow-up turn, written in flight in that transaction,
+which the relay sends once it commits; one follow-up per turn (D065, [`chats.md`](chats.md)).
 
 A send the controller accepted once the previous turn's `result` was out can commit before that
 turn's end does. That turn's end then keeps the Session `running`, its current line the next Turn's
@@ -330,9 +333,10 @@ session or an environment that is gone has no turn to interrupt, and the relay e
 no `result` (a `session-gone` record where its controller session is gone), as it does a turn the
 controller never got. A held or starting Session's Turn ends at the stop, unsent, and its start
 sends nothing more, unless its send was already going out: that Turn is put back in flight and
-interrupted (`send_turn`, above). It is a `409` for a Session that is no work item's, for one
-neither running, starting nor held ("its turn has ended", "it is stopped already", "it has failed",
-"its session has ended"), and for a caller with no handle.
+interrupted (`send_turn`, above). It is a `409` for a Session that is no work item's, for a job's,
+Pilot's own work ("it is Pilot's own work"), for one neither running, starting nor held ("its turn
+has ended", "it is stopped already", "it has failed", "its session has ended"), and for a caller
+with no handle.
 
 **`POST /api/sessions/<id>/resume`**, no body (`SessionStartService.resume`), carries a stopped or
 failed work item on: a Turn of the server's own, `continue`, or the latest Turn's message while the
@@ -356,11 +360,11 @@ nothing resets or deletes it (D042, [`controller.md`](controller.md)).
   the start takes a free one or creates one.
 
 Once the Resume's Turn is sent, its `started_at` is the Session's `started_at`. The item stays one
-item. It is a `409` with no controller configured, for a Session that is no work item's, for one
-neither stopped nor failed ("its start waits at the gate", "it is starting", "it is running", "its
-turn has ended", "its session has ended"), for one in an environment Pilot did not create ("its
-environment is not Pilot's"), for one whose stopped turn is still ending, until the interrupt's
-`result` is recorded, and in a finished or an archived project.
+item. It is a `409` with no controller configured, for a Session that is no work item's, for a job's
+("it is Pilot's own work"), for one neither stopped nor failed ("its start waits at the gate", "it
+is starting", "it is running", "its turn has ended", "its session has ended"), for one in an
+environment Pilot did not create ("its environment is not Pilot's"), for one whose stopped turn is
+still ending, until the interrupt's `result` is recorded, and in a finished or an archived project.
 
 **Finish, Archive and Reopen** stop every Session of the project running, starting or held, a
 Chat's among them, as Stop stops one, by the person, at the transition's instant, before Finish's
@@ -370,7 +374,8 @@ close of the open items and before each one's close of the chat (`stop_project`,
 send moves it under that lock alone ([`chats.md`](chats.md)). The chat's own Stop,
 `POST /api/projects/<id>/chat/stop`, stops its Session as Stop stops a work item's, by any person
 (`stop_chat`, [`chats.md`](chats.md)). The brain's `stop_work` stops a work item as Stop does, by
-Pilot ([`mcp.md`](mcp.md)).
+Pilot, and is refused a job's as Stop is ([`mcp.md`](mcp.md)). Finish and Archive stop a job as they
+stop every Session.
 
 ## The current line
 

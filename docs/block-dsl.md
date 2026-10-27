@@ -42,7 +42,8 @@ at: 2026-10-12T09:40:00Z
 - `for`, a handle;
 - `slug`, read in the draft only: the slug the project takes when it is created. Lower-case
   letters, digits and hyphens, not starting with `draft-`, and no other project's. A draft without
-  one is no fault.
+  one is no fault. `slug_problem(slug, taken)` is that check alone, which Create project runs again
+  on the draft's slug ([`projects.md`](projects.md)).
 
 Any other key is ignored.
 
@@ -92,7 +93,8 @@ over it.
 ## Blocks
 
 A block is a fence whose info string is a block kind and the block's local id: `decision id=D1`.
-The local id is unique within its document; the block's id is `<item id>/<local id>`. The body is
+The local id is unique within its document; the block's id is `<item id>/<local id>`, and a draft's,
+which has no item, `project.md/<local id>`, its file's path in the folder. The body is
 a YAML mapping in block style, one key to a line.
 
 | Kind | Takes |
@@ -223,7 +225,9 @@ freezes nothing, and Undo, which takes the answer lines out, unfreezes the block
   keeps them as published, indentation and line endings aside, stands as written, their order
   included; where it changed, dropped or added one, the block's answer lines in the save are taken
   out and the published ones written at the end of the block's mapping, a fault per key. A block may
-  go from the draft, its answers with it.
+  go from the draft, its answers with it. Past Create project, `project.md` is no draft: it is read
+  under the handbook's rules (`DocumentKind.HANDBOOK`), so a person's answer freezes its block and a
+  dropped block is put back.
 - **The opening** is the record's whole: a save that differs from it is reverted, with one fault.
 
 Each fault of the merge is reported at its line in the merged text, and the merged text is
@@ -257,8 +261,9 @@ lines with this package, never through the API (D050). It takes the package from
 PilotApp commit its `pyproject.toml` names and its `uv.lock` pins. Before it writes a document, it
 runs `validate()` with the facts the store's tree carries: the plan's live tasks, the confirmation
 reasons from `reference.json` and the file's own `to`s; no handles, no removed tasks and no other
-project's slug. The rules resting on those are left to `pilot-sync`'s check after the write,
-against the server's whole record ([`sync.md`](sync.md)) (D063). And AIWorkflow's
+project's slug. It reads `project.md` as the draft while `timeline.json` says the project is one,
+and as the handbook is read after. The rules resting on those are left to `pilot-sync`'s check after
+the write, against the server's whole record ([`sync.md`](sync.md)) (D063). And AIWorkflow's
 `/dev:document-format`, the `dev` plugin's skill for an agent that writes a document Pilot reads,
 gives the grammar in its own words. So a change to the grammar here is followed in both:
 PilotProjects' pin is moved by hand, the commit in its `pyproject.toml` and then `uv lock`, and the

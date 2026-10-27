@@ -17,32 +17,34 @@ the timeline with its one current line, Stop and Resume, and its session log
 ([`docs/work.md`](docs/work.md)); each project's status as one icon on its tab, which pauses it, and
 the gold bar over the list while the controller does not answer; and the overlay that opens a
 document, an attachment or the handbook, beside the side panel with the project's chat and its
-documents ([`docs/documents.md`](docs/documents.md)). Nothing in the app creates a project yet, so
-production's list is empty. Beneath the screens are the record's schema and the engine
-behind it: the block DSL, the parse gate and the merge by ownership, the record's own writes,
-and the rendered `timeline.json`, `reference.json` and `plan.json`
-([`docs/engine.md`](docs/engine.md)); and the sync that keeps the store environment's tree in step
-with the record: the `/api/sync` routes and `pilot-sync`, the Go sidecar, in each stage's store
-environment, with the hook that tells the brain what the record made of each edit
-([`docs/sync.md`](docs/sync.md)); and the server's jobs on the KubeCoder controller: the
-environments of its own Pilot creates from a work item's repository, resets before each fresh
-start, stops and deletes, and the sessions it runs there through the gate every start passes,
-recorded and streamed live ([`docs/sessions.md`](docs/sessions.md)); and Pilot's MCP server,
-handed to every session it creates ([`docs/mcp.md`](docs/mcp.md)), through which a work item's
-session registers the documents it wrote and attaches what backs them: each read onto the timeline
-once the run ends, written back to its file once answered, and the conversation continued as a new
-work item once none is open ([`docs/round-trip.md`](docs/round-trip.md)); and the project's chat,
-in the side panel's Chat tab, which every member watches live, Discuss quoting into it anything the
-project shows: a person's message starts the brain's session in the store, sandboxed and briefed,
-which takes the messages after it until it closes, after 55 quiet minutes or at Finish, Reopen and
-Archive, and acts on the record through its own tools, each call's effect shown where it ran, an
-answer given there reached from its block by *In the chat*, its chats projected for it as `chat.md`
-([`docs/chats.md`](docs/chats.md)). The
-brain's own repository holds its map, its rules, its four skills, and `pilot.py`, the script it
-edits a project's folder with, on the block DSL's own package
-([`docs/block-dsl.md`](docs/block-dsl.md)); of the skills, the chat's body is written and the other
-three are still frames. Each stage follows its own KubeCoder's fleet stream; only the dev stage,
-whose testing routes make its projects, starts anything. It is built on the ModernAppTemplate
-stack (Flask on PostgreSQL, React + Vite, Playwright), which CI builds and Argo CD deploys: every
-green build to the dev stage at `https://pilot-dev.home`, and production at
+documents ([`docs/documents.md`](docs/documents.md)). A project starts from the plus beside the
+list, as a draft: its definition chat stands in the timeline's place while Pilot writes the draft,
+`project.md`, in the panel's Draft tab, its asks answered in place, and Create project opens it and
+hands it to Pilot's setup, the brain's first background job ([`docs/projects.md`](docs/projects.md),
+[`docs/work.md`](docs/work.md)). Beneath the screens are the record's schema and the engine behind
+it: the block DSL, the parse gate and the merge by ownership, the record's own writes, and the
+rendered `timeline.json`, `reference.json` and `plan.json` ([`docs/engine.md`](docs/engine.md)); and
+the sync that keeps the store environment's tree in step with the record: the `/api/sync` routes and
+`pilot-sync`, the Go sidecar, in each stage's store environment, with the hook that tells the brain
+what the record made of each edit ([`docs/sync.md`](docs/sync.md)); and the server's jobs on the
+KubeCoder controller: the environments of its own Pilot creates from a work item's repository,
+resets before each fresh start, stops and deletes, and the sessions it runs there through the gate
+every start passes, recorded and streamed live ([`docs/sessions.md`](docs/sessions.md)); and Pilot's
+MCP server, handed to every session it creates ([`docs/mcp.md`](docs/mcp.md)), through which a work
+item's session registers the documents it wrote and attaches what backs them: each read onto the
+timeline once the run ends, written back to its file once answered, and the conversation continued
+as a new work item once none is open ([`docs/round-trip.md`](docs/round-trip.md)); and the project's
+chat, in the side panel's Chat tab, which every member watches live, Discuss quoting into it
+anything the project shows: a person's message starts the brain's session in the store, sandboxed
+and briefed, which takes the messages after it until it closes, after 55 quiet minutes or at Create
+project, Finish, Reopen and Archive, and acts on the record through its own tools, each call's
+effect shown where it ran, an answer given there reached from its block by *In the chat*, its chats
+projected for it as `chat.md` ([`docs/chats.md`](docs/chats.md)). The brain's own repository holds
+its map, its rules, its four skills, and `pilot.py`, the script it edits a project's folder with, on
+the block DSL's own package ([`docs/block-dsl.md`](docs/block-dsl.md)); of the skills, the chat's
+and the create skill's bodies are written, and the plan skill's setup mode, while the rest of the
+plan skill and the pre-rule skill are still frames. Each stage follows its own KubeCoder's fleet
+stream, and the dev stage's testing routes make projects there too. It is built on the
+ModernAppTemplate stack (Flask on PostgreSQL, React + Vite, Playwright), which CI builds and Argo CD
+deploys: every green build to the dev stage at `https://pilot-dev.home`, and production at
 `https://pilot.ginbov.nl` when the operator promotes it ([`docs/deployment.md`](docs/deployment.md)).

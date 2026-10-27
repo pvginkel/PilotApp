@@ -56,7 +56,8 @@ engine (parsing, ownership, splicing, the projection, the sidecar protocol) is a
 server, not a separate app; only the sidecar is Go.
 
 Ids are minted by the server: an item's and an attachment's are GUIDs, and a block's is composed
-from its item's id and its local id. Every surface addresses by them.
+from its item's id and its local id, a draft's from its file's path, `project.md`, which has no
+item. Every surface addresses by them.
 
 ## The surfaces are contracts
 

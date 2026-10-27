@@ -193,23 +193,29 @@ and a controller that does not answer or refuses for a reason of its own a `502`
   material, `<environment>:<path>`, copied in as `attach_file` copies it, a batch per source, every
   source's files under the caps of one call, hung in their order. The effect is "Added · <kind's
   name> · <title>", with one `attached` beside it per attachment hung.
-- **`attach_file(source, to)`**, `POST …/attachments`, answers `201` `{ids, effect}`: the material
+- **`attach_file(source, to?)`**, `POST …/attachments`, answers `201` `{ids, effect}`: the material
   at `source`, `<environment>:<path>` in any environment the controller has, read as the worker's
   `attach_file` reads its own, a file or a folder's every file, one batch hung on the item `to`
-  names. Without `to` it is refused, "it names no item to hang on: give `to`"; an environment the
-  controller does not have is a `404` "Environment <id> was not found". Its effect is the worker's
-  call's, "Attached · …".
+  names. In a draft's definition chat, a `to` left out hangs the batch on nothing, until Create
+  project hangs it on the opening ([`projects.md`](projects.md)); anywhere else it is refused, "it
+  names no item to hang on: give `to`". An environment the controller does not have is a `404`
+  "Environment <id> was not found". Its effect is the worker's call's, "Attached · …", naming no
+  item for a batch hung on nothing.
 - **`answer(block, value, for, note?, to?)`**, `POST …/answers`, answers `200` `{effect}`: the
   person's answer to the block, `<item id>/<local id>`, recorded on their behalf as the record's own
   answer, `via` `chat`, with `note`, and `to` the task or `plan` a `deferred` returns at
-  ([`engine.md`](engine.md)). "Answered · <local id> · <title>".
+  ([`engine.md`](engine.md)). "Answered · <local id> · <title>". A block of a draft's `project.md`
+  is `project.md/<local id>`, which only that draft's definition chat answers, its title the
+  draft's, else `project.md`; anywhere else it is a `409`. Its answer takes no Undo, the draft
+  having no item.
 - **`mark(item, mark, for?)`**, `POST …/marks`, answers `200` `{effect}`: `done` on a document,
   with its recommendations, `read` on a notice, `reviewed` on a review, for the person `for` names;
   without `for`, Pilot's own Done on a document it settled whole, and `read` and `reviewed` refused.
   "Marked done · <title>", "Marked read · …", "Marked reviewed · …".
 - **`stop_work(item)`**, `POST …/stops`, answers `200` `{effect}`: the work item's Session stopped
   by Pilot as a Stop stops one ([`sessions.md`](sessions.md)), refused for an item that is no work
-  item and for a Session neither running, starting nor held. "Stopped · <title>".
+  item, for Pilot's own work, a job, and for a Session neither running, starting nor held. "Stopped
+  · <title>".
 - **`finish()`**, `POST …/finish`, answers `200` `{effect}`: the project finished by Pilot as
   Finish finishes it ([`projects.md`](projects.md)), refused but in an open project. Its effect,
   "Finished · <project>", is written first: the transition then stops the brain's own Session among
@@ -232,7 +238,8 @@ attachment it changed. They are of the session's Turn in flight, placed in its r
 `server` record of that Turn, written under the Session's lock in the call's transaction:
 `{"type": "effect", "toolUseId": <id or null>, "effect": {"verb", "label", "itemId"?,
 "blockId"?}}`, the line as shown, `<verb> · <label>`, the item it goes to (an attachment's, the item
-it hangs on) and the block in it, `<item id>/<local id>`. A call that changed nothing writes none;
+it hangs on, none for a draft's batch hung on nothing) and the block in it, `<item id>/<local id>`,
+or a draft's `project.md/<local id>` with no item. A call that changed nothing writes none;
 one whose Session has no Turn in flight writes none either, its changes standing, and the log says
 so. A view puts the line on the call whose tool-use id it names, whether the effect's record was
 written before or after the call's `assistant` line, and one whose call no record shows in its
