@@ -233,11 +233,12 @@ test.describe('Its asks', () => {
     await expect(overlay.empty).toHaveCount(0);
     await expect(overlay.document.locator('.prose')).toHaveText(['How the trip is planned.', 'How long we stay.']);
     await expect(overlay.blocks).toHaveCount(3);
-    expect(await overlay.blocks.evaluateAll((blocks) => blocks.map((block) => block.getAttribute('data-block-id')))).toEqual([
-      'D1',
-      'Q1',
-      'A1',
-    ]);
+    // Each ask in its place among the prose: a part is its prose's words, or its block's id.
+    expect(
+      await overlay.document
+        .locator(':scope > *')
+        .evaluateAll((parts) => parts.map((part) => part.getAttribute('data-block-id') ?? part.textContent?.trim())),
+    ).toEqual(['How the trip is planned.', 'D1', 'How long we stay.', 'Q1', 'A1']);
 
     // Pilot's answer, closed: the chosen row alone, which opens nothing, Pilot's avatar and the time.
     const pilots = overlay.blockAt('D1');
