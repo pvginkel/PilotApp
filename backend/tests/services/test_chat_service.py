@@ -1387,6 +1387,32 @@ class TestHandbookNotice:
         assert turn.message == f"{STORE_NOTIFICATION}\n\nTwo"
         assert metric_value(HANDBOOK_CHANGED_TOTAL, project=str(opened.id)) == counted
 
+    def test_a_retry_after_a_failed_send_carries_the_notice_again(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+    ) -> None:
+        """A Turn whose send failed never reached the brain, nor its notice."""
+        _idle_chat(services, chats, session, fake, opened, person)
+        container.document_service().bear_handbook(opened, "# Handbook\n")
+        fake.unreachable(STORE_ENVIRONMENT_ID)
+        assert _send(chats, opened, person, "Two").error is not None
+        fake.unreachable(STORE_ENVIRONMENT_ID, on=False)
+        counted = metric_value(HANDBOOK_CHANGED_TOTAL, project=str(opened.id))
+
+        retried = _send(chats, opened, person, "Two")
+
+        assert retried.error is None
+        assert retried.message == f"{STORE_NOTIFICATION}\n\nTwo"
+        assert metric_value(HANDBOOK_CHANGED_TOTAL, project=str(opened.id)) == (
+            counted + 1
+        )
+
 
 @pytest.fixture
 def bea(session: DbSession, opened: Project) -> User:

@@ -149,7 +149,9 @@ without the line is from the person the latest such line named, the brief's incl
 skill records a ruling for that person.
 
 **The handbook's notice.** Where the project's handbook was published later than the chat's latest
-Turn was sent, the server's notice goes first, a blank line before what follows it (D052):
+Turn that reached the brain was sent, the server's notice goes first, a blank line before what
+follows it (D052): a Turn whose send failed never went out, nor its notice, so a message retried
+after a failed send carries the notice again.
 
 ```
 <store_notification>

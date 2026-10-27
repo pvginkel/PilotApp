@@ -247,20 +247,33 @@ class ChatService:
 
     def _handbook_changed(self, project: Project, session: AgentSession) -> bool:
         """Whether the project's handbook was published after the chat's
-        previous Turn was sent."""
-        previous = self.db.scalars(
-            select(Turn.started_at)
-            .where(Turn.session_id == session.id)
-            .order_by(Turn.seq.desc())
-            .limit(1)
-        ).one()
+        previous Turn that reached the brain was sent: one whose send failed
+        (F125) never went out, nor the notice it carried, so its retry
+        carries it again."""
         published = self.db.scalar(
             select(Document.published_at).where(
                 Document.project_id == project.id,
                 Document.role_code == DocumentRole.HANDBOOK,
             )
         )
-        return published is not None and published > previous
+        if published is None:
+            return False
+        turns = self.db.execute(
+            select(Turn.id, Turn.started_at, Turn.error)
+            .where(Turn.session_id == session.id)
+            .order_by(Turn.seq.desc())
+        ).all()
+        for turn_id, started_at, error in turns:
+            if error is None or not read_records(
+                self.db,
+                session.id,
+                turn_id=turn_id,
+                kind=RecordKind.SERVER,
+                payload_type=SEND_FAILED,
+                limit=1,
+            ):
+                return published > started_at
+        return False
 
     def _start(
         self, project_id: uuid.UUID, person: User, words: Words, operation: str
