@@ -43,11 +43,13 @@ interface DecisionOptionsProps {
   closed: boolean;
   /** Whether it takes an answer now. */
   live: boolean;
+  /** An archived project's: the controls stand and take nothing (D012). */
+  disabled?: boolean;
   onOpen: () => void;
   onAnswer: Answer;
 }
 
-export function DecisionOptions({ item, block, chosen, closed, live, onOpen, onAnswer }: DecisionOptionsProps) {
+export function DecisionOptions({ item, block, chosen, closed, live, disabled = false, onOpen, onAnswer }: DecisionOptionsProps) {
   const [typing, setTyping] = useState(false);
   const rows = rowsOf(block);
   const single = block.options.length === 0;
@@ -91,7 +93,7 @@ export function DecisionOptions({ item, block, chosen, closed, live, onOpen, onA
             !live && index !== picked && 'faded',
           )}
           onClick={() => onAnswer(row.answer)}
-          disabled={!live}
+          disabled={!live || disabled}
           data-testid="timeline.block.option"
           data-chosen={index === picked}
         >
@@ -117,7 +119,7 @@ export function DecisionOptions({ item, block, chosen, closed, live, onOpen, onA
             type="button"
             className={cn('option other', words !== null && 'chosen', !live && words === null && 'faded')}
             onClick={() => setTyping(true)}
-            disabled={!live}
+            disabled={!live || disabled}
             data-testid="timeline.block.other"
             data-chosen={words !== null}
           >

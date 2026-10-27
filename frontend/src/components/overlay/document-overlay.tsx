@@ -16,7 +16,7 @@
  */
 
 import type { ReactNode } from 'react';
-import { Link, useNavigate } from '@tanstack/react-router';
+import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { ArrowLeft, Check } from 'lucide-react';
 import { DiscussButton } from '@/components/chat/discuss-button';
 import { quoteOfAttachment, quoteOfItem } from '@/components/chat/discuss-quotes';
@@ -31,7 +31,7 @@ import { Edited } from '@/components/timeline/item-head';
 import { PilotWriting } from '@/components/timeline/writing';
 import { useItemDocument, type ItemDocument } from '@/hooks/use-document';
 import { useReviewed } from '@/hooks/use-marks';
-import type { ProjectHead } from '@/hooks/use-projects';
+import { useArchived, type ProjectHead } from '@/hooks/use-projects';
 import { usePerson } from '@/hooks/use-self';
 import { attachmentIn, blocksOf, titleOf } from '@/hooks/use-timeline';
 
@@ -194,11 +194,13 @@ function footOf(item: ItemDocument, myHandle: string, onSent: () => void): React
   return null;
 }
 
-/** A review's one mark: read, nothing to answer (F25.2). */
+/** A review's one mark: read, nothing to answer (F25.2); disabled while the project is archived (D012). */
 function Reviewed({ item }: { item: ItemDocument }) {
+  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
   const { mark, pending } = useReviewed(item.id);
+  const archived = useArchived(projectId);
   return (
-    <button type="button" className="btn btn-primary" onClick={mark} disabled={pending} data-testid="overlay.reviewed">
+    <button type="button" className="btn btn-primary" onClick={mark} disabled={pending || archived} data-testid="overlay.reviewed">
       <Check className="icon" aria-hidden="true" />
       Reviewed
     </button>

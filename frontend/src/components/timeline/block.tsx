@@ -10,10 +10,12 @@
  * Discuss, quoting the block (F39.1); a one-ask item's is its head's, quoting the item. A deferred block reads "Deferred to
  * <task>", or to the project's end, its note under it; opened, its controls, nothing chosen, stand
  * under that line (F31.4). A note sits under its answer with its icon (F17.4). Gone to at its
- * address, it flashes (F97).
+ * address, it flashes (F97). In an archived project its controls stand disabled, which the API
+ * refuses until Bring back (D012).
  */
 
 import { useState } from 'react';
+import { useParams } from '@tanstack/react-router';
 import { Check, ChevronDown, ChevronUp } from 'lucide-react';
 import { DiscussButton } from '@/components/chat/discuss-button';
 import { quoteOfBlock } from '@/components/chat/discuss-quotes';
@@ -29,6 +31,7 @@ import { QuestionAnswer } from '@/components/timeline/question';
 import { Deferral, DEFERRED } from '@/components/timeline/said';
 import { UserAvatar } from '@/components/timeline/user-avatar';
 import { useAnswer } from '@/hooks/use-answer';
+import { useArchived } from '@/hooks/use-projects';
 import { isAnswered, type Block as BlockData, type TimelineItem } from '@/hooks/use-timeline';
 import { cn } from '@/lib/utils';
 
@@ -40,7 +43,9 @@ interface BlockProps {
 }
 
 export function Block({ item, block, solo = false }: BlockProps) {
+  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
   const { answer, done, saving } = useAnswer(item.id, block.id);
+  const archived = useArchived(projectId);
   const { flashing, onAnimationEnd } = useBlockFlash(item.id, block.id);
   const [opened, setOpened] = useState(false);
   const answered = isAnswered(block);
@@ -53,7 +58,14 @@ export function Block({ item, block, solo = false }: BlockProps) {
   const controls = () => {
     if (block.confirmation) {
       return (
-        <ConfirmControls item={item} block={block} chosen={saving === null ? own : saving.answer} live={live && !closed} onAnswer={answer}>
+        <ConfirmControls
+          item={item}
+          block={block}
+          chosen={saving === null ? own : saving.answer}
+          live={live && !closed}
+          disabled={archived}
+          onAnswer={answer}
+        >
           <Proposal block={block} />
           {saving === null && !deferred && block.note !== null && <Note text={block.note} />}
         </ConfirmControls>
@@ -68,14 +80,28 @@ export function Block({ item, block, solo = false }: BlockProps) {
             chosen={saving === null ? own : saving.answer}
             closed={closed}
             live={live}
+            disabled={archived}
             onOpen={() => setOpened(true)}
             onAnswer={answer}
           />
         );
       case 'question':
-        return <QuestionAnswer item={item} block={block} saving={saving} closed={closed} live={live} onAnswer={answer} />;
+        return (
+          <QuestionAnswer item={item} block={block} saving={saving} closed={closed} live={live} disabled={archived} onAnswer={answer} />
+        );
       case 'action':
-        return <ActionAnswer item={item} block={block} saving={saving} closed={closed} live={live} onAnswer={answer} onDone={done} />;
+        return (
+          <ActionAnswer
+            item={item}
+            block={block}
+            saving={saving}
+            closed={closed}
+            live={live}
+            disabled={archived}
+            onAnswer={answer}
+            onDone={done}
+          />
+        );
       default: {
         const unknown: never = block.kind;
         throw new Error(`A block of kind ${String(unknown)} has no controls`);

@@ -36,6 +36,7 @@ import { SettledLines } from '@/components/timeline/settled';
 import { WriterAsked } from '@/components/timeline/writer-asked';
 import { PilotWriting } from '@/components/timeline/writing';
 import { useReviewed, useSend } from '@/hooks/use-marks';
+import { useArchived } from '@/hooks/use-projects';
 import { blocksOf, isAnswered, titleOf, type Block as BlockData, type TimelineItem } from '@/hooks/use-timeline';
 import { cn } from '@/lib/utils';
 
@@ -145,11 +146,13 @@ function CountChips({ counts }: { counts: Counts }) {
   );
 }
 
-/** A review's one mark: read, nothing to answer (F25.2). */
+/** A review's one mark: read, nothing to answer (F25.2); disabled while the project is archived (D012). */
 function Reviewed({ item }: { item: TimelineItem }) {
+  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
   const { mark, pending } = useReviewed(item.id);
+  const archived = useArchived(projectId);
   return (
-    <button type="button" className="btn" onClick={mark} disabled={pending} data-testid="timeline.item.reviewed">
+    <button type="button" className="btn" onClick={mark} disabled={pending || archived} data-testid="timeline.item.reviewed">
       <Check className="icon" aria-hidden="true" />
       Reviewed
     </button>
@@ -222,9 +225,11 @@ function recommendedWords(block: BlockData, answer: string): string {
   return block.proposal === null ? answer : `${answer}: ${block.proposal}`;
 }
 
-/** `onSent` runs once the record holds the answers. */
+/** `onSent` runs once the record holds the answers; disabled while the project is archived (D012). */
 export function SendAnswers({ item, onSent }: { item: TimelineItem; onSent?: () => void }) {
+  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
   const { mark, pending } = useSend(item.id, onSent);
+  const archived = useArchived(projectId);
   const [asking, setAsking] = useState(false);
   const blocks = blocksOf(item);
   const unanswered = blocks.filter((block) => !isAnswered(block));
@@ -236,7 +241,7 @@ export function SendAnswers({ item, onSent }: { item: TimelineItem; onSent?: () 
         type="button"
         className="btn btn-primary"
         onClick={send}
-        disabled={!ready || pending}
+        disabled={!ready || pending || archived}
         title={ready ? 'Send the answers to Pilot' : 'Answer every block that has no recommendation first'}
         data-testid="timeline.item.send"
       >

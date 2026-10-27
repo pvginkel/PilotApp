@@ -35,6 +35,7 @@ import { WorkItem } from '@/components/timeline/work';
 import { WriterAsked } from '@/components/timeline/writer-asked';
 import { PilotWriting } from '@/components/timeline/writing';
 import { useRead, useUndo } from '@/hooks/use-marks';
+import { useArchived } from '@/hooks/use-projects';
 import { blocksOf, isProse, titleOf, type BodyPart, type TimelineItem, type TimelineUser } from '@/hooks/use-timeline';
 import { usePerson } from '@/hooks/use-self';
 import { cn } from '@/lib/utils';
@@ -106,12 +107,17 @@ function askOf(item: TimelineItem): ReactNode {
   }
 }
 
-/** A notice's one button, its own state: nothing goes back to a session (F23.1). */
+/**
+ * A notice's one button, its own state: nothing goes back to a session (F23.1); disabled while the
+ * project is archived, which the API refuses until Bring back (D012).
+ */
 function Read({ item }: { item: TimelineItem }) {
+  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
   const { mark, pending } = useRead(item.id);
+  const archived = useArchived(projectId);
   return (
     <div className="item-actions">
-      <button type="button" className="btn btn-primary" onClick={mark} disabled={pending} data-testid="timeline.item.read">
+      <button type="button" className="btn btn-primary" onClick={mark} disabled={pending || archived} data-testid="timeline.item.read">
         <Check className="icon" aria-hidden="true" />
         Read
       </button>

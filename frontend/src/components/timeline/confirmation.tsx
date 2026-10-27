@@ -7,10 +7,12 @@
  * (F22.7). The answer given, or being saved, stays coloured. On the card the row is the block, and
  * gone to at its address, it flashes (F97). A registered one whose writer Pilot asked says so under
  * the row (F86.8). Its attachments follow (F17.5), and Pilot's dots end
- * the card while Pilot writes it (F35).
+ * the card while Pilot writes it (F35). In an archived project the check and the cross stand
+ * disabled, which the API refuses until Bring back (D012).
  */
 
 import { useState, type ReactNode } from 'react';
+import { useParams } from '@tanstack/react-router';
 import { Check, ChevronDown, ChevronUp, X } from 'lucide-react';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Markdown } from '@/components/shared/markdown';
@@ -23,6 +25,7 @@ import { Deferral, DEFERRED } from '@/components/timeline/said';
 import { WriterAsked } from '@/components/timeline/writer-asked';
 import { PilotWriting } from '@/components/timeline/writing';
 import { useAnswer, type Answer } from '@/hooks/use-answer';
+import { useArchived } from '@/hooks/use-projects';
 import { blocksOf, isProse, titleOf, type Block, type TimelineItem } from '@/hooks/use-timeline';
 import { cn } from '@/lib/utils';
 
@@ -31,8 +34,10 @@ const NO = 'No';
 
 /** An open confirmation item's card. */
 export function Confirmation({ item }: { item: TimelineItem }) {
+  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
   const [block] = blocksOf(item);
   const { answer, saving } = useAnswer(item.id, block.id);
+  const archived = useArchived(projectId);
   const [details, setDetails] = useState(false);
   // The API gives every prose item but the opening its text.
   const prose = item.body!.filter(isProse);
@@ -45,6 +50,7 @@ export function Confirmation({ item }: { item: TimelineItem }) {
         block={block}
         chosen={saving === null ? block.answer : saving.answer}
         live={saving === null}
+        disabled={archived}
         address
         onAnswer={answer}
       >
@@ -98,6 +104,8 @@ interface ConfirmControlsProps {
   chosen: string | null;
   /** Whether it takes an answer now. */
   live: boolean;
+  /** An archived project's: the controls stand and take nothing (D012). */
+  disabled?: boolean;
   /** Its row carries the block's address: on the card, where no block panel does. */
   address?: boolean;
   onAnswer: Answer;
@@ -105,7 +113,7 @@ interface ConfirmControlsProps {
   children: ReactNode;
 }
 
-export function ConfirmControls({ item, block, chosen, live, address = false, onAnswer, children }: ConfirmControlsProps) {
+export function ConfirmControls({ item, block, chosen, live, disabled = false, address = false, onAnswer, children }: ConfirmControlsProps) {
   const [refusing, setRefusing] = useState(false);
   const { flashing, onAnimationEnd } = useBlockFlash(item.id, block.id);
   const yes = () => {
@@ -126,7 +134,7 @@ export function ConfirmControls({ item, block, chosen, live, address = false, on
             type="button"
             className={cn('yn yes', chosen === YES && 'chosen')}
             onClick={yes}
-            disabled={!live}
+            disabled={!live || disabled}
             title={`Yes: ${block.proposal}`}
             aria-label="Yes"
             data-testid="timeline.confirm.yes"
@@ -137,7 +145,7 @@ export function ConfirmControls({ item, block, chosen, live, address = false, on
             type="button"
             className={cn('yn no', chosen === NO && 'chosen')}
             onClick={() => setRefusing(!refusing)}
-            disabled={!live}
+            disabled={!live || disabled}
             title="No, and say why"
             aria-label="No"
             aria-expanded={refusing}

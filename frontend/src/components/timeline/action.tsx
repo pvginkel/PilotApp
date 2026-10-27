@@ -22,16 +22,18 @@ interface ActionAnswerProps {
   closed: boolean;
   /** Whether it takes an answer now. */
   live: boolean;
+  /** An archived project's: the controls stand and take nothing (D012). */
+  disabled?: boolean;
   onAnswer: Answer;
   onDone: (sent: Sent) => void;
 }
 
-export function ActionAnswer({ item, block, saving, closed, live, onAnswer, onDone }: ActionAnswerProps) {
+export function ActionAnswer({ item, block, saving, closed, live, disabled = false, onAnswer, onDone }: ActionAnswerProps) {
   const said = saidOf(block, saving);
   return (
     <>
       {said !== null && <Said {...said} />}
-      {live && !closed && <ActionControls item={item} block={block} onAnswer={onAnswer} onDone={onDone} />}
+      {live && !closed && <ActionControls item={item} block={block} disabled={disabled} onAnswer={onAnswer} onDone={onDone} />}
     </>
   );
 }
@@ -48,11 +50,12 @@ function saidOf(block: Block, saving: Saving | null) {
 interface ActionControlsProps {
   item: TimelineItem;
   block: Block;
+  disabled: boolean;
   onAnswer: Answer;
   onDone: (sent: Sent) => void;
 }
 
-function ActionControls({ item, block, onAnswer, onDone }: ActionControlsProps) {
+function ActionControls({ item, block, disabled, onAnswer, onDone }: ActionControlsProps) {
   const pasted = useUnsentText(`${item.id}/${block.id}/paste`);
   const [typing, setTyping] = useState(false);
   const optioned = block.options.length > 0;
@@ -74,6 +77,7 @@ function ActionControls({ item, block, onAnswer, onDone }: ActionControlsProps) 
         onSend={optioned ? undefined : done}
         label="What to paste back"
         placeholder="What to paste back, if anything"
+        disabled={disabled}
         testId="timeline.block.paste"
       />
       <div className="item-actions">
@@ -85,6 +89,7 @@ function ActionControls({ item, block, onAnswer, onDone }: ActionControlsProps) 
                 type="button"
                 className={cn('btn', index === 0 && 'btn-primary')}
                 onClick={() => pick(option.label)}
+                disabled={disabled}
                 title={option.text ?? undefined}
                 data-testid="timeline.block.act"
               >
@@ -102,13 +107,20 @@ function ActionControls({ item, block, onAnswer, onDone }: ActionControlsProps) 
                 onClose={() => setTyping(false)}
               />
             ) : (
-              <button type="button" className="btn" onClick={() => setTyping(true)} data-testid="timeline.block.other">
+              <button type="button" className="btn" onClick={() => setTyping(true)} disabled={disabled} data-testid="timeline.block.other">
                 Other…
               </button>
             )}
           </>
         ) : (
-          <button type="button" className="btn btn-primary" onClick={done} title="Done (Ctrl+Enter)" data-testid="timeline.block.done">
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={done}
+            disabled={disabled}
+            title="Done (Ctrl+Enter)"
+            data-testid="timeline.block.done"
+          >
             <Check className="icon" aria-hidden="true" />
             Done
           </button>
