@@ -5,11 +5,12 @@ import { waitForUiState, waitTestEvent } from '../helpers';
 type Group = 'others' | 'finished';
 
 /**
- * The project list in the side column (F1), a tab's status icon, the pause (F1.3, F141), and the
- * archived projects it opens (D012).
+ * The project list in the side column (F1), a tab's status icon, the pause (F1.3, F141), the plus
+ * that starts a new project (F46.1), and the archived projects it opens (D012).
  */
 export class ProjectListPage {
   readonly head: Locator;
+  readonly newProject: Locator;
   readonly menuButton: Locator;
   readonly menu: Locator;
   readonly archivedItem: Locator;
@@ -21,6 +22,7 @@ export class ProjectListPage {
 
   constructor(private readonly page: Page) {
     this.head = page.getByTestId('projects.head');
+    this.newProject = page.getByTestId('projects.new');
     this.menuButton = page.getByTestId('projects.menu.button');
     this.menu = page.getByTestId('projects.menu');
     this.archivedItem = page.getByTestId('projects.menu.archived');
@@ -35,6 +37,11 @@ export class ProjectListPage {
   async open(id: string): Promise<void> {
     await this.page.goto(`/projects/${id}`);
     await waitForUiState(this.page, 'projects.list', 'ready');
+  }
+
+  /** Resolves once the server took the plus's new project, with the draft's id as `fields.project`. */
+  created(): Promise<FormTestEvent> {
+    return waitTestEvent<FormTestEvent>(this.page, 'form', (event) => event.formId === 'projects.new' && event.phase === 'success');
   }
 
   /** The tab named `name`, wherever it shows. */

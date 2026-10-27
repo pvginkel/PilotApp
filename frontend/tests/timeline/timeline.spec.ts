@@ -2,7 +2,7 @@
  * A project's timeline (F8): its items in their order under their date and step dividers (F9); the
  * opening (F18.1, F18.2); an item's head (F12, F10.1, F107, F114); its prose as GFM, linked, folding
  * when long (F29.1, F12.2); a concept (F78); the done line (F13.1, F13.2); anchored to its end, a
- * new item flashing, and at its end on each project (F8.2, F1.6); "Nothing yet" (F113).
+ * new item flashing, and at its end on each project (F8.2, F1.6).
  */
 
 import { test, expect } from '../support/fixtures';
@@ -93,15 +93,6 @@ test.describe('The rows', () => {
       ['timeline.divider.step', 'Ship it'],
       ['timeline.item', expect.stringContaining('Shipped')],
     ]);
-  });
-
-  test('read “Nothing yet” on an empty timeline', async ({ people, projects, timeline }) => {
-    const me = await people.signIn();
-    const id = await projects.make({ state: 'draft', members: [me.handle!] });
-    await timeline.open(id);
-
-    await expect(timeline.empty).toHaveText('Nothing yet');
-    await expect(timeline.items).toHaveCount(0);
   });
 });
 

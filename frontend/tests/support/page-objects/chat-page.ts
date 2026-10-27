@@ -10,7 +10,8 @@ import { waitTestEvent } from '../helpers';
  * state, and the line in its place where the tab's read failed; and under the transcript the
  * composer (F44): the quote Discuss put over its field and its remove (F39.3), its field, Send or
  * Stop in its place, and why an archived project's takes no message. The tab carries the unread dot
- * (F43).
+ * (F43). A draft's definition chat is the same, standing in the timeline's place (`feed`, F46.1),
+ * its empty state "Tell Pilot what to manage" (F113) and no tab.
  */
 export class ChatPage {
   readonly tab: Locator;
@@ -45,11 +46,14 @@ export class ChatPage {
   readonly stop: Locator;
   readonly archived: Locator;
 
-  constructor(private readonly page: Page) {
+  constructor(
+    private readonly page: Page,
+    home: 'panel' | 'feed' = 'panel',
+  ) {
     const panel = page.getByTestId('panel');
     this.tab = panel.getByTestId('panel.tab.chat');
     this.tabDot = this.tab.getByTestId('panel.tab.chat.unread');
-    this.root = panel.getByTestId('panel.chat');
+    this.root = home === 'panel' ? panel.getByTestId('panel.chat') : page.getByTestId('project.chat');
     this.body = this.root.getByTestId('chat.body');
     this.messages = this.root.getByTestId('chat.person');
     this.messageTexts = this.root.getByTestId('chat.person.text');
@@ -66,7 +70,7 @@ export class ChatPage {
     this.closed = this.root.getByTestId('chat.closed');
     this.before = this.root.getByTestId('chat.before');
     this.empty = this.root.getByTestId('chat.empty');
-    this.failed = this.root.getByTestId('panel.chat.failed');
+    this.failed = this.root.getByTestId('chat.failed');
     this.lines = this.root.getByTestId('chat').locator(':scope > *');
     this.composer = this.root.getByTestId('chat.composer');
     this.quote = this.composer.getByTestId('chat.composer.quote');

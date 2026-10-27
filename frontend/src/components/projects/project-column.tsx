@@ -1,15 +1,18 @@
 /**
  * The side column (F1): the project list, the person's projects first, then Other projects and
- * Finished; or the archived projects, opened from the list's menu, with a back arrow (D012).
+ * Finished, under its head's plus, which starts a new project (F46.1); or the archived projects,
+ * opened from the list's menu, with a back arrow (D012).
  */
 
 import { useState } from 'react';
-import { useParams } from '@tanstack/react-router';
-import { Archive, ArrowLeft, ChevronDown, ChevronRight, Ellipsis } from 'lucide-react';
+import { useNavigate, useParams } from '@tanstack/react-router';
+import { Archive, ArrowLeft, ChevronDown, ChevronRight, Ellipsis, Plus } from 'lucide-react';
 import { ProjectTab } from '@/components/projects/project-tab';
 import { Menu, MenuItem } from '@/components/shared/menu';
 import { groupProjects, useArchivedProjects, useProjectList, type ProjectTab as Project } from '@/hooks/use-projects';
+import { usePostProjects } from '@/lib/api/generated/hooks';
 import { rememberInBrowser, useBrowserState, type Group } from '@/lib/browser-state';
+import { trackFormError, trackFormSubmit, trackFormSuccess } from '@/lib/test/form-instrumentation';
 
 export function ProjectColumn() {
   const [archived, setArchived] = useState(false);
@@ -43,6 +46,8 @@ function ProjectList({ onArchived }: { onArchived: () => void }) {
     <>
       <div className="tabs-head" data-testid="projects.head">
         Projects
+        <span className="grow" />
+        <NewProjectButton />
         <Menu
           label="The project list's menu"
           testId="projects.menu"
@@ -75,6 +80,38 @@ function ProjectList({ onArchived }: { onArchived: () => void }) {
         <TabsGroup key={group} group={group} projects={groups[group]} open={isOpen(group)} onToggle={() => toggle(group)} />
       ))}
     </>
+  );
+}
+
+const NEW_PROJECT_FORM = 'projects.new';
+
+/** The plus: a draft, its creator the signed-in person, opened at its own address (F46.1). */
+function NewProjectButton() {
+  const navigate = useNavigate();
+  const create = usePostProjects();
+  const start = () => {
+    if (create.isPending) return;
+    trackFormSubmit(NEW_PROJECT_FORM);
+    create.mutate(undefined, {
+      onSuccess: (draft) => {
+        trackFormSuccess(NEW_PROJECT_FORM, { project: draft.id });
+        void navigate({ to: '/projects/$projectId', params: { projectId: draft.id } });
+      },
+      onError: () => trackFormError(NEW_PROJECT_FORM),
+    });
+  };
+  return (
+    <button
+      type="button"
+      className="btn btn-ghost btn-sm btn-icon"
+      title="New project"
+      aria-label="New project"
+      disabled={create.isPending}
+      onClick={start}
+      data-testid="projects.new"
+    >
+      <Plus className="icon" aria-hidden="true" />
+    </button>
   );
 }
 

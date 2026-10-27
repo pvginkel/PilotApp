@@ -2,7 +2,7 @@
    project tabs" and "Finished projects"). */
 
 @layer components {
-  /* Projects, and its menu at the right. */
+  /* Projects, and the plus and its menu at the right. */
   .tabs-head {
     display: flex;
     align-items: center;
@@ -12,6 +12,7 @@
     font-weight: 600;
     color: hsl(var(--muted-foreground));
   }
+  .tabs-head .grow { flex: 1; }
   /* The archived projects' head: the back arrow, then its name. */
   .tabs-head.archived { justify-content: flex-start; gap: 6px; padding-left: 10px; }
 

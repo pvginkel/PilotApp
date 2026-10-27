@@ -2,8 +2,9 @@
  * Projects on the record for a spec: made in the standing it needs through
  * POST /api/testing/projects, changed through the API the project menu uses, and read as the
  * lists read them. Every list also holds the seed's projects and those earlier specs of the
- * worker made. A project made with a session has items placed on its timeline as Pilot places
- * them, and saves of them as Pilot's (POST /api/testing/projects/<id>/items and
+ * worker made; a draft made with a session (`makeDraft`) answers its folder in the store's tree as
+ * well, where its definition chat's session runs. A project made with a session has items placed
+ * on its timeline as Pilot places them, and saves of them as Pilot's (POST /api/testing/projects/<id>/items and
  * /api/testing/items/<id>/saves), its handbook and its project document saved
  * (/api/testing/projects/<id>/{handbook,draft}/saves), its session's turn ended, a document it settled whole marked
  * Done by Pilot and files it copied attached to an item (/api/testing/items/<id>/attachments); they
@@ -23,6 +24,7 @@ import type { components } from '@/lib/api/generated/types';
 import { makeUnique } from './helpers';
 
 type ProjectSpec = components['schemas']['InventedProjectCreateSchema.6d6b324'];
+type Invented = components['schemas']['InventedProjectSchema.6d6b324'];
 type ProjectTab = components['schemas']['ProjectListResponseSchema.e86ccd6.ProjectTabSchema'];
 type ProjectHead = components['schemas']['ProjectHeadSchema.e86ccd6'];
 type TransitionKind = components['schemas']['TransitionRequestSchema.e86ccd6']['kind'];
@@ -60,19 +62,36 @@ export class Projects {
 
   /** A project in the standing given; answers its id. */
   async make(spec: ProjectSpec): Promise<string> {
-    const response = await this.page.request.post(`${this.backendUrl}/api/testing/projects`, { data: spec });
-    expect(response.status(), await response.text()).toBe(201);
-    return ((await response.json()) as { id: string }).id;
+    return (await this.invent(spec)).id;
   }
 
   /** A project whose session, in an environment of its own, places its items; answers its id. */
   async makeWithSession(spec: Omit<ProjectSpec, 'environment_id'>): Promise<string> {
+    return this.make({ ...spec, environment_id: await this.sessionEnvironment() });
+  }
+
+  /**
+   * A draft whose session, in an environment of its own, saves its project document; answers its id
+   * and its folder in the store's tree, `draft-<number>`, where its definition chat's session runs.
+   */
+  async makeDraft(spec: Omit<ProjectSpec, 'state' | 'environment_id'>): Promise<Invented> {
+    return this.invent({ ...spec, state: 'draft', environment_id: await this.sessionEnvironment() });
+  }
+
+  private async invent(spec: ProjectSpec): Promise<Invented> {
+    const response = await this.page.request.post(`${this.backendUrl}/api/testing/projects`, { data: spec });
+    expect(response.status(), await response.text()).toBe(201);
+    return (await response.json()) as Invented;
+  }
+
+  /** An environment of its own for a project's session; answers its id. */
+  private async sessionEnvironment(): Promise<string> {
     const environment = makeUnique('env');
     const response = await this.page.request.post(`${this.backendUrl}/api/testing/environments`, {
       data: { id: environment, name: environment },
     });
     expect(response.status(), await response.text()).toBe(201);
-    return this.make({ ...spec, environment_id: environment });
+    return environment;
   }
 
   /** An item the project's session places, born from its text; answers its id. */

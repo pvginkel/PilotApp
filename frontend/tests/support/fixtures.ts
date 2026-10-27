@@ -44,6 +44,7 @@ interface DomainFixtures {
   sessionLog: SessionLogPage;
   panel: PanelPage;
   chat: ChatPage;
+  definitionChat: ChatPage;
   chats: Chats;
 }
 
@@ -108,6 +109,9 @@ export const test = infrastructureFixtures.extend<DomainFixtures, DomainWorkerFi
   },
   chat: async ({ page }, use) => {
     await use(new ChatPage(page));
+  },
+  definitionChat: async ({ page }, use) => {
+    await use(new ChatPage(page, 'feed'));
   },
   chats: async ({ page, backendUrl, controller, playwright }, use) => {
     const chats = new Chats(page, backendUrl, controller, playwright);

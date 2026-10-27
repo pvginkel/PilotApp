@@ -8,7 +8,8 @@
  * field after Send and after Stop. Its words are kept in the browser until sent, keyed by the
  * project (F133). What Discuss quoted stands over the field as a chip, with its remove, and goes out
  * as its tag before the words (F38.3, F39.3); Discuss puts the focus in the field. In an archived
- * project it takes no message, and says why (F128.5); the server refuses one all the same.
+ * project it takes no message, and says why (F128.5); the server refuses one all the same. In a
+ * draft it stands under the definition chat, in the timeline's column (F46.1).
  */
 
 import { useEffect, useRef, type MouseEvent } from 'react';
@@ -19,6 +20,8 @@ import { focusTaken, useDiscussed } from '@/hooks/use-discuss';
 import { useArchived } from '@/hooks/use-projects';
 import { useUnsentText } from '@/hooks/use-unsent-text';
 import { quoteTag } from '@/lib/chat/quotes';
+import { cn } from '@/lib/utils';
+import type { ChatHome } from './chat-empty-state';
 import { ComposerQuote } from './quote-chip';
 
 const LINES = 5;
@@ -28,6 +31,8 @@ const keepFocus = (event: MouseEvent) => event.preventDefault();
 
 interface ComposerProps {
   projectId: string;
+  /** Where the chat it sends to stands. */
+  home: ChatHome;
   /** Whether Pilot answers in the project's chat. */
   answering: boolean;
   /** The server took a message of this browser's. */
@@ -36,7 +41,7 @@ interface ComposerProps {
   onDiscussed: () => void;
 }
 
-export function Composer({ projectId, answering, onSent, onDiscussed }: ComposerProps) {
+export function Composer({ projectId, home, answering, onSent, onDiscussed }: ComposerProps) {
   const { text, change } = useUnsentText(`chat/${projectId}`);
   const { quote, focus, drop } = useDiscussed(projectId);
   const sending = useSendMessage(projectId);
@@ -74,53 +79,56 @@ export function Composer({ projectId, answering, onSent, onDiscussed }: Composer
   };
 
   return (
-    <div className="flex-none border-t px-3.5 pt-2.5 pb-3.5" data-testid="chat.composer">
-      {archived && (
-        <p className="mb-2 text-[13px] text-muted-foreground" data-testid="chat.composer.archived">
-          The project is archived: bring it back to message Pilot.
-        </p>
-      )}
-      {quote !== null && <ComposerQuote quote={quote} onRemove={leaveOut} />}
-      <div className="field-row">
-        <TextField
-          ref={field}
-          value={text}
-          onChange={change}
-          onSend={send}
-          label="Message Pilot"
-          placeholder="Message Pilot"
-          disabled={archived}
-          readOnly={sending.pending}
-          lines={LINES}
-          testId="chat.composer.field"
-        />
-        {answering ? (
-          <button
-            type="button"
-            className="btn btn-soft btn-icon"
-            disabled={stopping.pending}
-            onMouseDown={keepFocus}
-            onClick={stopIt}
-            title="Stop Pilot’s answer"
-            aria-label="Stop"
-            data-testid="chat.composer.stop"
-          >
-            <Square className="size-3.5 fill-current" aria-hidden="true" />
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="btn btn-primary btn-icon"
-            disabled={!sendable}
-            onMouseDown={keepFocus}
-            onClick={send}
-            title="Send (Ctrl+Enter)"
-            aria-label="Send"
-            data-testid="chat.composer.send"
-          >
-            <SendHorizontal className="icon" aria-hidden="true" />
-          </button>
+    // In the timeline's column, laid out as the transcript above it is: its scroll gutter kept.
+    <div className={cn('flex-none border-t', home === 'feed' && 'overflow-hidden [scrollbar-gutter:stable]')} data-testid="chat.composer">
+      <div className={cn('pt-2.5 pb-3.5', home === 'feed' ? 'mx-auto max-w-(--column) px-6 max-[900px]:px-3' : 'px-3.5')}>
+        {archived && (
+          <p className="mb-2 text-[13px] text-muted-foreground" data-testid="chat.composer.archived">
+            The project is archived: bring it back to message Pilot.
+          </p>
         )}
+        {quote !== null && <ComposerQuote quote={quote} onRemove={leaveOut} />}
+        <div className="field-row">
+          <TextField
+            ref={field}
+            value={text}
+            onChange={change}
+            onSend={send}
+            label="Message Pilot"
+            placeholder="Message Pilot"
+            disabled={archived}
+            readOnly={sending.pending}
+            lines={LINES}
+            testId="chat.composer.field"
+          />
+          {answering ? (
+            <button
+              type="button"
+              className="btn btn-soft btn-icon"
+              disabled={stopping.pending}
+              onMouseDown={keepFocus}
+              onClick={stopIt}
+              title="Stop Pilot’s answer"
+              aria-label="Stop"
+              data-testid="chat.composer.stop"
+            >
+              <Square className="size-3.5 fill-current" aria-hidden="true" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-primary btn-icon"
+              disabled={!sendable}
+              onMouseDown={keepFocus}
+              onClick={send}
+              title="Send (Ctrl+Enter)"
+              aria-label="Send"
+              data-testid="chat.composer.send"
+            >
+              <SendHorizontal className="icon" aria-hidden="true" />
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

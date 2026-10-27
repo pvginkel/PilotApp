@@ -73,8 +73,8 @@ export class Chats {
     private readonly playwright: PlaywrightWorkerArgs['playwright'],
   ) {}
 
-  /** The store in the fake, its tree holding the store repo and the project's folder. */
-  async ready(projectId: string): Promise<void> {
+  /** The store in the fake, its tree holding the store repo and the project's folder, an open project's by its slug unless named. */
+  async ready(projectId: string, folder = slugOf(projectId)): Promise<void> {
     const response = await this.page.request.get(`${this.backendUrl}/api/testing/controller/environments/${this.store}`, {
       headers: { Authorization: `Bearer ${FAKE_CONTROLLER_TOKEN}` },
     });
@@ -83,7 +83,7 @@ export class Chats {
       await this.controller.addEnvironment(this.store, 'example/PilotProjects', { exempt: true });
       await this.controller.putFile(this.store, `${STORE_REPO}/CLAUDE.md`, '# The store\n');
     }
-    await this.controller.putFile(this.store, `${PROJECTS}/${slugOf(projectId)}/project.md`, '# Invented\n');
+    await this.controller.putFile(this.store, `${PROJECTS}/${folder}/project.md`, '# Invented\n');
   }
 
   /** A message of the signed-in person's to the project's chat. */
@@ -104,11 +104,12 @@ export class Chats {
   }
 
   /**
-   * The store, ready for the project's chat, and a wait for the session the next message opens there,
-   * sent through the API or the composer: answers its name once it works on its first turn.
+   * The store, ready for the project's chat — a draft's in its `folder` (`Projects.makeDraft`) — and a
+   * wait for the session the next message opens there, sent through the API or the composer: answers
+   * its name once it works on its first turn.
    */
-  async opening(projectId: string): Promise<() => Promise<string>> {
-    await this.ready(projectId);
+  async opening(projectId: string, folder?: string): Promise<() => Promise<string>> {
+    await this.ready(projectId, folder);
     const before = new Set(await this.controller.sessions(this.store));
     return async () => {
       let session = '';

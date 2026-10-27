@@ -7,7 +7,8 @@
  * the timeline where the timeline stands, and under a document's in the document's overlay
  * (F28.5). The handbook's address, and the project document's, open it in the overlay over the
  * timeline (F129.4, F37.4), and a work item's session log's opens it there (F69). Another
- * project's address closes it. Beside the head and the timeline stands the side panel, the
+ * project's address closes it. A draft has its definition chat in the timeline's place (F46.1),
+ * once the head says it is one. Beside the head and the timeline stands the side panel, the
  * project's own (F38.1), which a draft does not have; Discuss anywhere on the project's screens
  * opens it on the Chat tab, on top, with what it quotes in the composer (F39), and *In the chat* on
  * a block answered in the chat opens it there at the message that gave the answer (F42.3). While an
@@ -18,6 +19,7 @@
 
 import { useEffect, useState } from 'react';
 import { createFileRoute, useMatch, useParams, useRouterState } from '@tanstack/react-router';
+import { ProjectChat } from '@/components/chat/project-chat';
 import { ItemAttachmentOverlay } from '@/components/overlay/attachment-overlay';
 import { DocumentOverlay } from '@/components/overlay/document-overlay';
 import { HandbookOverlay, ProjectDocumentOverlay } from '@/components/overlay/project-document-overlay';
@@ -66,8 +68,9 @@ function Project() {
     show('chat');
   };
   const [head, setHead] = useState<HTMLElement | null>(null);
+  const draft = data?.state === 'draft';
   // Not before the head is read, which says whether it is a draft, nor where it never is.
-  const panelShown = panel.open && data !== undefined && data.state !== 'draft';
+  const panelShown = panel.open && data !== undefined && !draft;
   const chatShown = panelShown && panel.tab === 'chat';
   return (
     <DiscussContext.Provider value={discuss}>
@@ -82,7 +85,12 @@ function Project() {
                 documents={{ shown: panelShown && panel.tab === 'documents', toggle: () => toggle('documents') }}
               />
             )}
-            <Timeline projectId={projectId} address={goneTo} inert={overlay !== null} />
+            {data !== undefined &&
+              (draft ? (
+                <ProjectChat projectId={projectId} members={data.members} home="feed" covered={overlay !== null} />
+              ) : (
+                <Timeline projectId={projectId} address={goneTo} inert={overlay !== null} />
+              ))}
           </div>
           {panelShown && (
             <Panel

@@ -52,7 +52,7 @@ export function PersonMessage({ record, fresh, people, flash = false, onFlashed,
     <section
       ref={ref}
       className={cn(
-        'flex max-w-[91%] min-w-0 flex-col items-end self-end',
+        'flex max-w-(--person-width,91%) min-w-0 flex-col items-end self-end',
         fresh && 'animate-fade-in opacity-0',
         flash && rest.length === 0 && 'flash',
       )}

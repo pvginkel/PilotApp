@@ -28,7 +28,6 @@ export class TimelinePage {
   readonly openingMore: Locator;
   /** The opening's attachments' chips. */
   readonly openingAttachments: Locator;
-  readonly empty: Locator;
   readonly banners: Locator;
   readonly openAbove: Locator;
   readonly finishedEnd: Locator;
@@ -45,7 +44,6 @@ export class TimelinePage {
     this.openingWords = this.opening.getByTestId('timeline.opening.words');
     this.openingMore = this.opening.getByTestId('timeline.opening.words.more');
     this.openingAttachments = this.opening.getByTestId('timeline.attachment');
-    this.empty = this.root.getByTestId('timeline.empty');
     this.banners = this.root.getByTestId('timeline.banner');
     this.openAbove = this.root.getByTestId('timeline.open-above');
     this.finishedEnd = this.root.getByTestId('timeline.divider.finished');

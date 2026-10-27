@@ -8,7 +8,7 @@
 
 import { useLayoutEffect, useRef, type RefObject } from 'react';
 import { X } from 'lucide-react';
-import { ChatTab } from '@/components/chat/chat-tab';
+import { ProjectChat } from '@/components/chat/project-chat';
 import { DocumentsTab } from '@/components/panel/documents-tab';
 import { useChatDot } from '@/hooks/use-chats';
 import { usePanelDocuments, useWideWindow } from '@/hooks/use-panel';
@@ -80,7 +80,7 @@ export function Panel({ projectId, members, tab, head, onTab, onClose, onOpen, c
       </div>
       <div className={cn('panel-body', tab === 'chat' && 'chat')} role="tabpanel" data-testid="panel.body">
         {tab === 'chat' ? (
-          <ChatTab projectId={projectId} members={members} covered={covered} />
+          <ProjectChat projectId={projectId} members={members} home="panel" covered={covered} />
         ) : (
           <DocumentsTab projectId={projectId} documents={documents} onOpen={onOpen} />
         )}
