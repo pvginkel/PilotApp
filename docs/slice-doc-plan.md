@@ -57,7 +57,9 @@ doc so that the file does not grow. Nothing the pipeline reads by machine goes i
 ### 5. Consumers in other repos
 
 The brain's skills live in `pvginkel/PilotProjects`, the deploy chart in `pvginkel/PilotDeploy`,
-and the dev workflow Pilot drives in the AIWorkflow repo. This phase edits none of them. A slice
+and the dev workflow Pilot drives in `pvginkel/AIWorkflow`. This phase edits none of them: a slice
+whose phases target one keeps that repo's docs in those phases, by its own rules, AIWorkflow's
+`CLAUDE.md` putting a plugin version and a changelog entry with every change. A slice
 that changed a surface they depend on, or anything a deployment has to follow, names it in the
 close-out report so the operator can file the change against its owner.
 

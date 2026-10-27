@@ -17,9 +17,9 @@ repos:
   - url: https://github.com/pvginkel/PilotDeploy
   # The store environment's repo: the brain's skills, no data.
   - url: https://github.com/pvginkel/PilotProjects
-  # The `dev` plugin marketplace, the AI workflow Pilot drives and stage 5
-  # reworks to Pilot's standard: its slices are Pilot's, their phases
-  # targeting ../AIWorkflow.
+  # The `dev` plugin marketplace, the AI workflow Pilot drives, which stage 5
+  # reworks to Pilot's standard in Pilot's slices, their phases targeting
+  # ../AIWorkflow.
   - url: https://github.com/pvginkel/AIWorkflow
   # The AI workflow's own spec repo. Shared, like every spec repo.
   - url: https://github.com/pvginkel/AIWorkflowSpecs

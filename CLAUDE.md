@@ -54,6 +54,12 @@ Other repos the work touches, checked out beside this one:
 - **`../PilotDeploy`**: the deploy chart and its per-stage values.
 - **`../PilotProjects`**: the store environment's repo: the brain's map, skills and scripts, and no
   data.
+- **`../AIWorkflow`**: the `dev` plugin marketplace, the AI workflow Pilot drives, which the plan's
+  stage 5 reworks in Pilot's slices. A phase there keeps that repo's own `CLAUDE.md`: a plugin
+  version and a changelog entry with every change, and a running loop takes it only once pushed and
+  the plugin updated. Its spec repo is `../AIWorkflowSpecs`, a shared tree as this one's is.
+- **`../KubeCoderConfig`**: the `kubecoder` plugin marketplace, the host conventions the `dev`
+  plugin's skills load; every change bumps its plugin version.
 
 ## Template ownership
 
@@ -163,7 +169,9 @@ Code changes go through the `dev` plugin's slice workflow (`/dev:triage` → `/d
 `/dev:run-slice`), which the operator drives. The project's half of that contract is `.aiworkflowrc`
 and `.kubecoder/project.yaml`; nothing the pipeline reads by machine belongs in this file.
 A finding against the workflow itself — a loop's read-back, a document the plugin writes, a
-skill's wording — is `pvginkel/AIWorkflow`'s to fix, never a Pilot slice.
+skill's wording — is a card in `AIWF`, the workflow's own project, never a P card or a Pilot slice,
+and is worked from a session started in `../AIWorkflow`; what Pilot needs the plugin to change,
+stage 5's work, is Pilot's slices, their phases targeting `../AIWorkflow`.
 
 Issue tracking follows the host convention: this project is **`PilotApp`** on the tracker, key
 **`P`**.
