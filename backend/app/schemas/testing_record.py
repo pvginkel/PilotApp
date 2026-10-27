@@ -133,6 +133,11 @@ class InventedProjectCreateSchema(BaseModel):
 
 class InventedProjectSchema(BaseModel):
     id: uuid.UUID = Field(description="The project's id")
+    folder: str = Field(
+        description="The project's folder in the store's tree: `draft-<number>`"
+        " for a draft, else its slug",
+        examples=["draft-7"],
+    )
 
 
 class InventedItemCreateSchema(BaseModel):

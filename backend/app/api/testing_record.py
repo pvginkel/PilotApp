@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.engine.ingest import Ingested
+from app.engine.paths import folder
 from app.exceptions import RouteNotAvailableException
 from app.models.reference import DocumentRole
 from app.schemas.common import ApiErrorResponseSchema
@@ -152,7 +153,7 @@ def create_project(
     """Make a project in the standing given, made now by its first member.
 
     Returns:
-        201: The project's id
+        201: The project's id and its folder in the store's tree
         400: A finished project with auto pilot on, a member named twice,
             open items without an environment, or a plan with a fault
         404: A member is no person, or no environment has the id
@@ -160,7 +161,8 @@ def create_project(
     """
     data = InventedProjectCreateSchema.model_validate(request.get_json())
     project = test_data_service.project(data)
-    return InventedProjectSchema(id=project.id).model_dump(mode="json"), 201
+    response = InventedProjectSchema(id=project.id, folder=folder(project))
+    return response.model_dump(mode="json"), 201
 
 
 @testing_record_bp.route("/projects/<uuid:project_id>/items", methods=["POST"])

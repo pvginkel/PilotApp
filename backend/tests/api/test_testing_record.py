@@ -362,6 +362,18 @@ class TestCreateProject:
             session.get_one(Document, opening.id).published_text,
         ) == ("New project", OPENING_WORDS)
 
+    @pytest.mark.parametrize("state", ["draft", "open"])
+    def test_it_answers_its_folder_in_the_stores_tree(
+        self, client: FlaskClient, session: Session, state: str
+    ) -> None:
+        response = client.post(PROJECTS, json={"members": ["ada"], "state": state})
+
+        body = response.get_json()
+        project = session.get_one(Project, uuid.UUID(body["id"]))
+        assert body["folder"] == (
+            f"draft-{project.number}" if state == "draft" else project.slug
+        )
+
     def test_a_draft_has_no_opening(
         self, client: FlaskClient, session: Session
     ) -> None:
