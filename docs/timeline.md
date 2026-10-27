@@ -41,8 +41,8 @@ is finished, else null. `items` are every item, by `seq`, each with:
   `read_minutes`, that count at 230 words a minute, rounded half up, at least 1; both null where
   `body` is;
 - `writing`: whether a session's running turn is saving the text (`Document.writing_session_id`).
-  A save sets it and the turn's end clears it ([`engine.md`](engine.md)), which no live event
-  announces;
+  A save sets it and the turn's end clears it, each raising `project_changed`
+  ([`engine.md`](engine.md));
 - `edited_at`: the time of the latest `turn` Version that follows the first Version whose text has
   anything in `dsl.body`, the first text the item was shown with; null where no such Version
   follows it, and where `body` is null (D032);
@@ -59,10 +59,14 @@ A block is `{id, kind, confirmation, because, proposal, default, check, options,
 note, via, done, deferral, section}`. `id` is its local id; `because` is a confirmation's reason,
 `{code, name, description}`, the grants table's name and the line the agent reads, not the card's
 words; `options` are `{label, text, recommended}` in order; `via` is `app` for a person's answer
-whose text names no channel; `deferral` is `{to, title}` while `answer` is `deferred`, `title` the
-task's title live from the plan and null for `to: plan`, the project's end; `section` is the
-block's own section, `{heading}`, the heading's text, or null. A person or Pilot, wherever one is
-named, is `{kind, handle, name, initials, avatar_slot}`, Pilot `kind: agent` with no slot.
+whose text names no channel; `in_chat` is where in a chat the answer was recorded, `{chat, seq}`,
+the chat's id and the number in its records of the `server` record placing the latest `answered`
+effect on the block, read through the session's records route ([`sessions.md`](sessions.md)), and
+null unless `via` is `chat` and that effect's call ran in a chat; `deferral` is `{to, title}` while
+`answer` is `deferred`, `title` the task's title live from the plan and null for `to: plan`, the
+project's end; `section` is the block's own section, `{heading}`, the heading's text, or null. A
+person or Pilot, wherever one is named, is `{kind, handle, name, initials, avatar_slot}`, Pilot
+`kind: agent` with no slot.
 
 ## Answering it
 
@@ -97,12 +101,12 @@ delivers to it. A work item's status moves on an event of its own, `work_moved`,
 and moves nothing else ([`work.md`](work.md)).
 
 `useProjectEvents` (`frontend/src/hooks/use-project-events.ts`), called by the shell, reads again,
-on the event, the project lists and the named project's head, timeline, handbook and project
-document, and every document read of an item of it ([`documents.md`](documents.md)), events that
-arrive together once after them; and on every rise of the stream's `isConnected`, the first
-included, every one of those reads, which covers an event sent from a process that does not hold
-the browser's stream. A person's own write reads every query again as well. Each `work_moved`'s
-status it writes into the timeline as read, with no read.
+on the event, the project lists and the named project's head, timeline, handbook, project document
+and chats ([`chats.md`](chats.md)), and every document read of an item of it
+([`documents.md`](documents.md)), events that arrive together once after them; and on every rise of
+the stream's `isConnected`, the first included, every one of those reads, which covers an event sent
+from a process that does not hold the browser's stream. A person's own write reads every query again
+as well. Each `work_moved`'s status it writes into the timeline as read, with no read.
 
 ## The timeline
 
@@ -125,7 +129,8 @@ draw no line. A project with none reads "Nothing yet".
   its attachments; a document and a review draw as [below](#documents-and-reviews). The head
   (`item-head.tsx`) is the kind's icon and label (`kinds.ts`; a confirmation's is "Confirm", a
   document's "Document · N" with its most common block's icon), the time, the full stamp as its
-  tooltip, the Urgent chip and "for <full name>" while it is for someone. The text's prose is GFM
+  tooltip, the Urgent chip and "for <full name>" while it is for someone, and at its end Discuss,
+  quoting the item into the chat ([`chats.md`](chats.md)). The text's prose is GFM
   (`Markdown`, [`ui.md`](ui.md)); the prose before the first block folds past 13.5em with Show
   more, the ask stands in that block's place, and the prose after it shows whole. A concept has a
   dashed border. An open work item is its session's: its env chip once its start has an
@@ -139,8 +144,9 @@ draw no line. A project with none reads "Nothing yet".
   local ids (`writer-asked.tsx`): inline under its title, on a card under its summary, on a one-ask
   item under its title, and on a confirmation under its controls. A done line shows nothing of it.
 - **Pilot writing.** While a session's turn saves an item's text (`writing`), Pilot's avatar and
-  three dots, one at a time brightening, end the open item, every kind but the opening. The turn's
-  end clears the flag with no live event, so the dots go on the screen's next read.
+  three dots, one at a time brightening, end the open item, every kind but the opening. The save
+  that makes the turn the text's writer and the turn's end each raise `project_changed`, so the
+  dots come and go as they happen.
 - **Urgent.** An open urgent item is tinted, its kind's label in the urgent colour. Each has a
   banner pinned at the top of the timeline, in their order, "Urgent · <title> · Show", whose click
   scrolls the item to the middle and flashes it; a finished project's timeline pins none.
@@ -232,21 +238,26 @@ it is blank, a No's excepted. Its words, and every field's here, are kept in the
 ([`ui.md`](ui.md)).
 
 **An answered block on an open item**, Pilot's answer or a deferral, has a head: its kind, a
-chevron, Answered, the time and the avatar of who answered, Pilot's mark for Pilot. An answer that
-is not a person's reads closed, the answer alone, and opens, on a click or the chevron, to the
-block's controls, live, so that the person can replace it. A deferral reads "Deferred to <task>",
-or to *the project's end*, with its note; opened, the controls stand under that line with nothing
-chosen. A note stands under its answer with the note icon. In a document every block has that
-head, its kind named, and once answered Answered. In a done item, as Open shows it, every answered
-block reads closed, a person's answer too, and opens to its controls, all disabled.
+chevron, Answered, the time and the avatar of who answered, Pilot's mark for Pilot, and before the
+time *In the chat* where the answer was given in the chat (`in_chat`), which goes to the message
+that gave it ([`chats.md`](chats.md)). An answer that is not a person's reads closed, the answer
+alone, and opens, on a click or the chevron, to the block's controls, live, so that the person can
+replace it. A deferral reads "Deferred to <task>", or to *the project's end*, with its note; opened,
+the controls stand under that line with nothing chosen. A note stands under its answer with the note
+icon. In a document every block has that head, its kind named, once answered Answered, and at its
+end Discuss, quoting the block into the chat; a one-ask item's block has no Discuss of its own, its
+item's head quoting the item. In a done item, as Open shows it, every answered block reads closed, a
+person's answer too, and opens to its controls, all disabled.
 
 ## Done lines and Undo
 
 A done item is one line that does not expand: its kind's icon, or a confirmation's green check for
-Yes and red cross for No; its title; Open; its attachments' indicator; Undo while `done.undo`; and
-the time it was done. Under the title stands a person's answer to a one-ask item, the other
-person's after their avatar, its note after " · " with the note icon: an option, the words, or
-"Deferred to <task>"; a confirmation's Yes or No shows only its note, and nothing of Pilot's shows.
+Yes and red cross for No; its title; Open; its attachments' indicator; Undo while `done.undo`;
+Discuss, quoting the item into the chat; and the time it was done. Under the title stands a
+person's answer to a one-ask item, the other person's after their avatar, its note after " · " with
+the note icon: an option, the words, or "Deferred to <task>"; a confirmation's Yes or No shows only
+its note, and nothing of Pilot's shows. After an answer given in the chat stands *In the chat*,
+kept whole however the answer is cut ([`chats.md`](chats.md)).
 Undo ("Undo, until a session has taken it") opens the item again, and a one-ask item's block
 unanswered. A worker's registered documents lose it together, as the close of the last of their run
 places the continuation that takes their answers ([`round-trip.md`](round-trip.md)).
@@ -284,7 +295,7 @@ block; a document's own address, an attachment's, the handbook's and the project
 
 **On a narrow window.** At 900px and below an option's line goes under its label, Recommended
 staying at the label's end. At 600px and below a block's head wraps, and Answered shows its icon
-alone, its word left to a screen reader.
+alone, as *In the chat* does, their words left to a screen reader.
 
 ## Testing it
 
@@ -303,7 +314,8 @@ has the testing endpoints they call). A text with one block makes its item that 
 spec's document carries two blocks or more. The `timeline` page object
 (`tests/support/page-objects/timeline-page.ts`) opens a project's timeline (`open`), or an
 address (`openAt`), and reads its items, blocks, segments, cards, settled lines, attachments,
-banners and done lines, and an item's line that Pilot asked its writer (`item(id).writerAsked`,
+banners and done lines, their Discuss and *In the chat*, and an item's line that Pilot asked its
+writer (`item(id).writerAsked`,
 pinned in `frontend/tests/work/registered.spec.ts`); `slowNetwork`
 (`tests/support/network.ts`) holds a write on its way, to see what shows while it saves. A spec
 asserting a live update waits for the stream first (`deploymentSse.ensureConnected()`).

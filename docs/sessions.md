@@ -364,11 +364,13 @@ environment is not Pilot's"), for one whose stopped turn is still ending, until 
 
 **Finish, Archive and Reopen** stop every Session of the project running, starting or held, a
 Chat's among them, as Stop stops one, by the person, at the transition's instant, before Finish's
-close and before the chat's close at Finish and Reopen (`stop_project`,
-[`projects.md`](projects.md)); in a finished project, Reopen's stop meets its read-only chat alone (D068). The project's open chat's
-Session is locked first, whatever its state, since a message's send moves it under that lock alone
-([`chats.md`](chats.md)). The brain's `stop_work` stops a work item as Stop does, by Pilot
-([`mcp.md`](mcp.md)).
+close of the open items and before each one's close of the chat (`stop_project`,
+[`projects.md`](projects.md)); in a finished project, Reopen's stop meets its read-only chat alone
+(D068). The project's open chat's Session is locked first, whatever its state, since a message's
+send moves it under that lock alone ([`chats.md`](chats.md)). The chat's own Stop,
+`POST /api/projects/<id>/chat/stop`, stops its Session as Stop stops a work item's, by any person
+(`stop_chat`, [`chats.md`](chats.md)). The brain's `stop_work` stops a work item as Stop does, by
+Pilot ([`mcp.md`](mcp.md)).
 
 ## The current line
 
@@ -413,9 +415,10 @@ The lock is held until the transaction ends, so a caller commits one record per 
 transaction that ends a Session's stream (`ended` or `failed`) without writing a record registers
 `after_commit(session_stream_service.waker(id))`, or the open views never receive `end`.
 
-**The one read.** `read_records(db, session_id, *, after=0, before=None, kind=None,
-payload_type=None, limit, newest_first=False)`, `payload_type` the payload's `type` to filter on, is
-the only query of `session_records` in the server. `TestTheOneRead`
+**The one read.** `read_records(db, session_id, *, after=0, before=None, turn_id=None, ids=None,
+kind=None, payload_type=None, limit, newest_first=False)`, `turn_id` a Turn's records alone, `ids`
+the records of those ids, and `payload_type` the payload's `type` to filter on, is the only query of
+`session_records` in the server. `TestTheOneRead`
 (`backend/tests/services/test_session_record_service.py`) holds the code to it and to the one
 writer: it fails on code in `app/` outside the read function that names `SessionRecord`, other than
 in an annotation, or the table in a string, and on a `SessionRecord(...)` made outside `append`.

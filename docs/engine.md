@@ -100,9 +100,9 @@ every cache in the same transaction:
   its document's summary. The opening's text rebuilds nothing;
 - for the draft, the project's name: its title, or none.
 
-It validates nothing against the record and cuts no version. A publish that changes an item's
-published text raises `ProjectChanged` (below), and a registered document's first text gives it its
-file in the tree, with a `TreeHashMoved` for its path.
+It validates nothing against the record and cuts no version. A publish that changes the published
+text, an item's, the handbook's or the project document's, raises `ProjectChanged` (below), and a
+registered document's first text gives it its file in the tree, with a `TreeHashMoved` for its path.
 
 ## The ingest
 
@@ -126,7 +126,8 @@ A save of a document runs in one transaction, under the document's row lock:
    hold, are replaced by U+FFFD with a fault at the line of the first; the answer carries the
    replaced text.
 2. The save is stored as the document's ingest, with its session. A session given that is not the
-   one writing the document becomes the writer from now.
+   one writing the document becomes the writer from now, which raises `ProjectChanged`: Pilot's
+   dots show on the document.
 3. The path's `parse` Save Errors go, in every environment: the save's faults replace them.
 4. The text is validated against the record ([`block-dsl.md`](block-dsl.md)): every user's
    handle, the plan's tasks and removed tasks, the confirmation reasons, the other projects' slugs,
@@ -225,12 +226,12 @@ trim every value and read a blank note as none.
 `DocumentService.turn_ended(session)` clears the writing session of every document `session` was
 writing, cuts a `turn` version of each whose published text changed since its last version, and
 returns the paths, from the tree's root and sorted, of those whose latest save is still held. It
-emits nothing. The relay calls it in the transaction that ends a turn on the controller's `result`
-frame, and in the one that ends a turn its environment was stopped under
-([`sessions.md`](sessions.md)). The paths it returns at the `result` of a brain session's turn
-that leaves the Session `idle` are the server's follow-up turn ([`chats.md`](chats.md)); every other
-turn's end drops them. It reads no file: the documents a
-work item's run registered are read once the transaction that makes the work item done commits
+raises `ProjectChanged` for each document it lets go, whatever the Session's state. The relay calls
+it in the transaction that ends a turn on the controller's `result` frame, and in the one that ends
+a turn its environment was stopped under ([`sessions.md`](sessions.md)). The paths it returns at the
+`result` of a brain session's turn that leaves the Session `idle` are the server's follow-up turn
+([`chats.md`](chats.md)); every other turn's end drops them. It reads no file: the documents a work
+item's run registered are read once the transaction that makes the work item done commits
 ([`round-trip.md`](round-trip.md)).
 
 ## The bus
@@ -247,7 +248,7 @@ already emitted in the transaction is delivered once.
 | `ErrorsRaised(project_id, path)` | on every held save |
 | `ErrorsResolved(project_id, path)` | on a clean save after a held one, and when a held `plan.json` is written down |
 | `ManifestChanged()` | when the set of syncing projects changed: a project archived or brought back ([`projects.md`](projects.md)), and the sync's testing endpoint |
-| `ProjectChanged(project_id)` | when what the project's timeline, head or tab shows moved: with every `TreeHashMoved` of its `timeline.json`; on a publish that changes an item's published text, a record write on a held item included; on a save that holds an item or ends its hold; on a save of `plan.json` that moved its rendering; on a pause, a resume, a join and a leave ([`projects.md`](projects.md)); on every move of one of its Sessions' state; on a chat's open and close ([`chats.md`](chats.md)); on a registered document's failed read, and on a continuation released, which takes Undo from its run's documents ([`round-trip.md`](round-trip.md)). `ProjectEventService` sends it to the browsers ([`timeline.md`](timeline.md)) |
+| `ProjectChanged(project_id)` | when what the project's timeline, head or tab shows moved: with every `TreeHashMoved` of its `timeline.json`; on a publish that changes the published text of an item, a record write on a held item included, of the handbook or of the project document; on a save that holds an item or ends its hold; on a save that makes its session a document's writer, and for each document a turn's end lets go; on a save of `plan.json` that moved its rendering; on a pause, a resume, a join and a leave ([`projects.md`](projects.md)); on every move of one of its Sessions' state; on a chat's open and close ([`chats.md`](chats.md)); on a registered document's failed read, and on a continuation released, which takes Undo from its run's documents ([`round-trip.md`](round-trip.md)). `ProjectEventService` sends it to the browsers ([`timeline.md`](timeline.md)) |
 | `WriteBackOwed(session_id)` | on a close that owes a registered document's text to its file, and on a Resume that owes a refused one again; the write-back service hears it ([`round-trip.md`](round-trip.md)) |
 | `WorkMoved(project_id, work_id)` | when what a work item's line shows of its Session moved: its state, its current line, its start or its error ([`work.md`](work.md)). `ProjectEventService` sends it with the work item's status |
 

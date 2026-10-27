@@ -16,8 +16,8 @@ live ([`docs/timeline.md`](docs/timeline.md)); its work items, each a session Pi
 the timeline with its one current line, Stop and Resume, and its session log
 ([`docs/work.md`](docs/work.md)); each project's status as one icon on its tab, which pauses it, and
 the gold bar over the list while the controller does not answer; and the overlay that opens a
-document, an attachment or the handbook, beside the side panel with the project's documents
-([`docs/documents.md`](docs/documents.md)). Nothing in the app creates a project yet, so
+document, an attachment or the handbook, beside the side panel with the project's chat and its
+documents ([`docs/documents.md`](docs/documents.md)). Nothing in the app creates a project yet, so
 production's list is empty. Beneath the screens are the record's schema and the engine
 behind it: the block DSL, the parse gate and the merge by ownership, the record's own writes,
 and the rendered `timeline.json`, `reference.json` and `plan.json`
@@ -32,10 +32,12 @@ handed to every session it creates ([`docs/mcp.md`](docs/mcp.md)), through which
 session registers the documents it wrote and attaches what backs them: each read onto the timeline
 once the run ends, written back to its file once answered, and the conversation continued as a new
 work item once none is open ([`docs/round-trip.md`](docs/round-trip.md)); and the project's chat,
-reached through the API until its screens come: a person's message starts the brain's session in the
-store, sandboxed and briefed, which takes the messages after it until it closes, after 55 quiet
-minutes or at Finish and Reopen, and acts on the record through its own tools, each call's effect
-shown where it ran, its chats projected for it as `chat.md` ([`docs/chats.md`](docs/chats.md)). The
+in the side panel's Chat tab, which every member watches live, Discuss quoting into it anything the
+project shows: a person's message starts the brain's session in the store, sandboxed and briefed,
+which takes the messages after it until it closes, after 55 quiet minutes or at Finish, Reopen and
+Archive, and acts on the record through its own tools, each call's effect shown where it ran, an
+answer given there reached from its block by *In the chat*, its chats projected for it as `chat.md`
+([`docs/chats.md`](docs/chats.md)). The
 brain's own repository holds its map, its rules, its four skills, and `pilot.py`, the script it
 edits a project's folder with, on the block DSL's own package
 ([`docs/block-dsl.md`](docs/block-dsl.md)); of the skills, the chat's body is written and the other

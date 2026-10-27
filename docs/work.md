@@ -95,7 +95,10 @@ An open work item (`WorkItem`, `frontend/src/components/timeline/work.tsx`) is:
 Stop and Resume (`useStop`, `useResume`, `frontend/src/hooks/use-work-acts.ts`) call
 [`sessions.md`](sessions.md)'s routes and write the answer into the cached timeline, only while the
 item there is still in a state the act was made from (`moveWork`). A refusal is the query client's
-toast in the API's words, and Resume, or the question, stays offered.
+toast in the API's words, and Resume, or the question, stays offered. Once this browser's Stop it or
+Resume lands and swaps the two, the keyboard focus that was on the button that went goes to the
+other's resting button, Resume after a Stop and Stop after a Resume (`useHandoff`, `work.tsx`); a
+swap another browser's act made, or one after the focus moved elsewhere meanwhile, moves no focus.
 
 ## The session log
 
@@ -106,20 +109,20 @@ log in the overlay over the timeline (`SessionLogOverlay`,
 An address that names no work item of the project reads "The session log did not load".
 
 - **Its head**: "Session log", over the item's title, its environment's link once its start has
-  one, and the session's id.
+  one, and the session's id; and Discuss, quoting the work item into the chat
+  ([`chats.md`](chats.md)).
 - **Its body**: the session's records rendered as the chat renders a reply, one reply per turn
   (`ReplyBody`), bare in the log's column, 6px in from either side (D002): the text as Markdown, the
   runs of tool calls with their summaries, a sub-agent's card with its own steps, the phantom of the
-  text block under way, a failed turn's error, each effect of the session's calls, and the
-  server's word on a document the session registered, as a notice: "Could not read <path> because
-  <reason>" for a read that failed at its run's end, "Could not write <path> back because
-  <reason>" for a write-back the controller refused ([`round-trip.md`](round-trip.md)). A call that changed the record is its effect line
-  in its own place, never inside a run of calls, a check before `<verb> · <label>`, "Registered ·
-  inbox/3" or "Attached · <title>" ([`mcp.md`](mcp.md)) (`EffectLine`,
+  text block under way, a failed turn's error, each effect of the session's calls, and the server's
+  word on a document the session registered, as a notice: "Could not read <path> because <reason>"
+  for a read that failed at its run's end, "Could not write <path> back because <reason>" for a
+  write-back the controller refused ([`round-trip.md`](round-trip.md)). A call that changed the
+  record is its effect line in its own place, never inside a run of calls, a check before `<verb> ·
+  <label>`, "Registered · inbox/3" or "Attached · <title>" ([`mcp.md`](mcp.md)) (`EffectLine`,
   `components/chat/tool-call.tsx`); its click goes to its block's address, else its item's
-  ([`timeline.md`](timeline.md)). An
-  earlier turn ends on its time, with " · Stopped" after an interrupted one and " · Failed" after a
-  failed one.
+  ([`timeline.md`](timeline.md)), as a quote's chip does ([`ui.md`](ui.md)). An earlier turn ends on
+  its time, with " · Stopped" after an interrupted one and " · Failed" after a failed one.
 - **Its tail**: while the item is held, starts or runs, the working cue: the held reason, what the
   turn in flight is doing, or "Starting" and "Waiting for Pilot" before its first record. Otherwise
   how it ended (`sessionLogTail()`): "Stopped by you · <time>", "Stopped by <name> · <time>", the
@@ -149,13 +152,13 @@ shows it on its own first and then on its call, and one whose call no record sho
 tool-use id, is a step of its own in its record's place (`buildChatView`,
 `frontend/src/lib/chat/view.ts`).
 
-**The chat's view code** is the chat mockup's, carried over for the session log and shared with
-the chat to come: `frontend/src/lib/chat/` (the records on the API's record types, `claude`'s lines,
-the stream's state, the view, the tool summaries, the activity, quotes, times and the transport),
-`frontend/src/components/chat/` (a reply's body and cue, the phantom, the steps, a tool call, a step
-line, the delta fade, a quote chip, the working cue and the actions' context), and the hooks
-`use-chat-stream`, `use-now` and `use-sticky-bottom`. Its Markdown is the app's one renderer
-([`ui.md`](ui.md)).
+**The chat's view code** is the chat mockup's, shared by the session log and the Chat tab
+([`chats.md`](chats.md)): `frontend/src/lib/chat/` (the records on the API's record types,
+`claude`'s lines, the stream's state, the view, the tool summaries, the activity, quotes, times and
+the transport), `frontend/src/components/chat/` (a reply's body and cue, the phantom, the steps, a
+tool call, a step line, the delta fade, a quote chip and the working cue, beside the Chat tab's own
+pieces), and the hooks `use-chat-stream`, `use-now`, `use-sticky-bottom` and `use-open-quote`. Its
+Markdown is the app's one renderer ([`ui.md`](ui.md)).
 
 ## Testing it
 
@@ -168,41 +171,44 @@ registered document ([`round-trip.md`](round-trip.md)).
 
 Each Playwright backend's controller is the fake it serves itself
 ([`controller.md`](controller.md)), which the `controller` fixture
-(`frontend/tests/support/controller.ts`) drives. Its environments are those Pilot's starts create
-in it, each read from its work item (`projects.environment`, below); by the environment's id,
+(`frontend/tests/support/controller.ts`) drives. Its environments are those Pilot's starts create in
+it, each read from its work item (`projects.environment`, below); by the environment's id,
 `play(env, session, lines)` (answering the lines' offsets), `finish(env, session, outcome?,
 result?)`, `restart`, `setStatus`, `settleStarts`, `removeEnvironment` and `unreachable`; then
 `capped(on?)`, the node at its cap, refusing creates, starts and resets; `settleCreates(status)`,
 what a create brings its environment to, null holding it `provisioning`; `outage(on, answer?)`,
 returning once the backend reads the controller as asked; and `dropStreams()`, once the fleet stream
-has reconnected; and the files of an environment as a process in it writes them, `putFile(env, path,
-content)`, `removeFile(env, path)` and `fileText(env, path)`, null where there is none. The fake's
-verbs that act on every environment hold across a worker's specs, so
-the fixture's teardown (`restore()`) undoes an outage, the node's cap and held creates that a spec
-left. Pilot's headless sessions in an environment are
-`claude-1`, `claude-2`, … in the order it creates them, a Resume that re-creates its session making
-the next. `rawTurn(name)` reads the backend suite's invented turns. The worker's `conditions`
-fixture reads what the gold bar reads, and waits at the worker's start for the backend's first
-outage, its fleet stream's refused first open, to end. The fleet stream reconnects on the
-supervisor's backoff, up to 30 s, so a spec whose outage must end sets a timeout of its own.
+has reconnected; `addEnvironment(env, repo, {exempt?})` puts an environment in the fake, as the
+`chats` fixture puts the store ([`chats.md`](chats.md)), and `sessions(env)` and `sessionViews(env)`
+read its headless sessions; and the files of an environment as a process in it writes them,
+`putFile(env, path, content)`, `removeFile(env, path)` and `fileText(env, path)`, null where there
+is none. The fake's verbs that act on every environment hold across a worker's specs, so the
+fixture's teardown (`restore()`) undoes an outage, the node's cap and held creates that a spec left.
+Pilot's headless sessions in an environment are `claude-1`, `claude-2`, … in the order it creates
+them, a Resume that re-creates its session making the next. `rawTurn(name)` reads the backend
+suite's invented turns. The worker's `conditions` fixture reads what the gold bar reads, and waits
+at the worker's start for the backend's first outage, its fleet stream's refused first open, to end.
+The fleet stream reconnects on the supervisor's backoff, up to 30 s, so a spec whose outage must end
+sets a timeout of its own.
 
 `projects.startWork(project, {title, brief, cwd, step?})` places a work item by `projects.repo`, a
-repository of the spec's own (`example/Example-<unique>`), so that its start takes no environment
-an earlier spec of the worker left free, and answers its id; `projects.environment(project, item)`
+repository of the spec's own (`example/Example-<unique>`), so that its start takes no environment an
+earlier spec of the worker left free, and answers its id; `projects.environment(project, item)`
 waits for the environment its start took or created and answers its `{id, name}`, the name the
 project's slug (`slugOf(project)`, the testing route's), `-2` for a second at once;
-`projects.work(project, item)` reads its `work`, `projects.records(session,
-after?)` its records, and `projects.stop(id)` and `projects.resume(id)` call the routes as the
-signed-in person; `projects.register(work, path, toolUseId?)` and `projects.workerAttach(work, path,
-{to?, toolUseId?})` make its worker's calls, each its effect while its turn is in flight, and
+`projects.work(project, item)` reads its `work`, `projects.records(session, after?)` its records,
+and `projects.stop(id)` and `projects.resume(id)` call the routes as the signed-in person;
+`projects.register(work, path, toolUseId?)` and `projects.workerAttach(work, path, {to?,
+toolUseId?})` make its worker's calls, each its effect while its turn is in flight, and
 `projects.askWriter(document, [{block, question}])` the pass's question
 ([`projects.md`](projects.md)). The `sessionLog` fixture's `steps` reads a reply's steps in order
-and `effects` the effects standing on their own. The `timeline` page object's `item(id).work`
-reads the open item (`environment`,
-`running`, `line`, whose `data-state` is the Session's state, `cue`, `step`, `sessionLog`, `stop`,
-`resume`, `stopConfirm`), and the `sessionLog` fixture the log (`sessionLogAddress()`). A spec
-placing an item in a project while a work item's start there still writes waits for that item to
-run first. The backends run with `WORK_PARALLELISM_MAX` 10000 and `PROJECT_PARALLELISM_MAX` 3
-(`loadAppBackendEnv()`, [`controller.md`](controller.md)): a worker's specs share a backend and
-leave work items running, each in projects of its own, so the slot across every project never
-closes, and a project's fourth running or starting work item is held for a slot.
+and `effects` the effects standing on their own. The `timeline` page object's `item(id).work` reads
+the open item (`environment`, `running`, `line`, whose `data-state` is the Session's state, `cue`,
+`step`, `sessionLog`, `stop`, `resume`, `stopConfirm`), and the `sessionLog` fixture the log
+(`sessionLogAddress()`) and its head's `discuss`. A spec placing an item in a project while a work
+item's start there still writes waits for that item to run first. The backends run with
+`WORK_PARALLELISM_MAX` 10000 and `PROJECT_PARALLELISM_MAX` 3 (`loadAppBackendEnv()`,
+[`controller.md`](controller.md), which also gives them their store, [`chats.md`](chats.md)): a
+worker's specs share a backend and leave work items running, each in projects of its own, so the
+slot across every project never closes, and a project's fourth running or starting work item is held
+for a slot.

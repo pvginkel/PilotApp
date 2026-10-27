@@ -333,8 +333,9 @@ roots, none unboxed, and its `create_body` the create's fields as sent.
   `CONTROLLER_URL` is its own `/api/testing/controller` drives the fake with no process added.
   Playwright's backends do: `loadAppBackendEnv()`
   (`frontend/tests/support/backend-env-extensions.ts`) sets each one's `CONTROLLER_URL` so, with an
-  invented `CONTROLLER_TOKEN`, which the fake checks, and the suite's `controller` fixture drives it
-  ([`work.md`](work.md)).
+  invented `CONTROLLER_TOKEN`, which the fake checks, and its `STORE_ENVIRONMENT_ID` to
+  `playwright-store`, an environment the suite's `chats` fixture puts in the fake
+  ([`chats.md`](chats.md)); the `controller` fixture drives it ([`work.md`](work.md)).
 
 A test drives it through its verbs, in process, or over HTTP as `POST <base>/fake/<verb>` with the
 verb hyphenated and its keyword arguments as the JSON body: `add_environment`, `remove_environment`,

@@ -8,8 +8,8 @@ talks to Pilot's brain, a headless Claude Code session in a store environment.
 **Its first screens are in**: the handle step, the project list, a project's head and its timeline,
 its work items, its documents in the overlay and the side panel, on the record's schema, the engine
 behind it (`backend/app/engine/`), the sync of the store's tree, the server's jobs on the KubeCoder
-controller, Pilot's MCP server with the worker's round trip, and the project's chat behind the
-API, with the brain's tools. Every green build of `main` deploys
+controller, Pilot's MCP server with the worker's round trip, and the project's chat in the side
+panel, with the brain's tools. Every green build of `main` deploys
 itself to the dev stage at `https://pilot-dev.home`, and production at `https://pilot.ginbov.nl`
 runs what the operator promotes from there ([`docs/deployment.md`](docs/deployment.md)). Version 1
 is built from the design record in `../PilotAppSpecs/design/` (start at its README), along the steps
@@ -103,7 +103,8 @@ the template gives an app no place for a plugin; the Playwright backends' own se
 `frontend/tests/support/process/servers.ts` merges over the template's from `loadAppBackendEnv()`
 in the app-owned `frontend/tests/support/backend-env-extensions.ts`, given the backend's URL, where
 the template gives an app no place for a backend setting under Playwright: this app's points each
-backend's controller at the fake it serves itself; and `run-suite`'s Playwright worker count,
+backend's controller at the fake it serves itself, and its chats at a store environment in that
+fake; and `run-suite`'s Playwright worker count,
 which `tools/suite_runner/local.py` reads from `PLAYWRIGHT_WORKERS` when no `--workers` is given,
 where the library's `modernApp.test` fixes run-suite's flags and so left CI on the Playwright
 config's count. uv, the migration that keeps the app's loggers,
@@ -194,5 +195,5 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
 - [`docs/mcp.md`](docs/mcp.md), [`docs/round-trip.md`](docs/round-trip.md),
   [`docs/chats.md`](docs/chats.md): Pilot's MCP server, handed to every session it creates, the
   worker's tools and the brain's; a registered document's read at the run's end, its write-back and
-  the run's continuation; a project's chat, its start in the store, its brief, its close and
-  `chat.md`.
+  the run's continuation; a project's chat, its start in the store, its brief, its Stop, its close,
+  `chat.md`, and its Chat tab, composer, Discuss and *In the chat*.

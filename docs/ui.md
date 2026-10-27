@@ -100,23 +100,32 @@ In `src/components/shared/`:
 - `LinkedText` and `EnvironmentLink`: below.
 - `Markdown({text, className?, deltas?})`: GFM (react-markdown with remark-gfm) inside `.prose`, its
   text linked as the record's words are except in code and inside a link, every link opening in a
-  new tab. A quote tag is drawn as a chip, and with `deltas`, a streamed text's, its new text fades
-  in (`.delta-fresh`); the chat's view code draws its text through it ([`work.md`](work.md)).
+  new tab. A quote tag ([`chats.md`](chats.md) has its forms) is a chip (`QuoteChip`) that goes to
+  what it quotes, from any screen under a project's address (`useOpenQuote`): an item to its
+  address, a block to its own, which opens the overlay where its document is a card, the handbook
+  and the project document to their overlays, and an attachment to its address under its item's,
+  found in the timeline's read by its batch and its filename, a folder's keeping its slashes; a path
+  naming no attachment there goes nowhere. Inside a code span or fence, or raw HTML, as the text's
+  own Markdown parse reads it, the tag shows as written (`quotesToLinks`, `lib/chat/quotes.ts`).
+  With `deltas`, a streamed text's, its new text fades in (`.delta-fresh`); the chat's view code
+  draws its text through it ([`work.md`](work.md)).
   `HeadingWords({text})` is a heading's inline Markdown alone, for inside a button: emphasis, code
   and links as the heading shows them, each link nested as `LinkedText`'s are.
 - `Fold({children, testId})`: a text cut at 13.5em, fading out, with Show more; one that fits shows
   whole.
-- `TextField`: the text field every answer is typed into, a `textarea` one line at rest that grows
-  with its text to eight lines and then scrolls. Enter breaks the line; Ctrl+Enter, Cmd+Enter on a
-  Mac, calls its `onSend` where the field has one Send, and Esc its `onEscape` where something holds
-  it. While it has the focus, its parent, the row holding what sends it, is kept in view.
+- `TextField`: the text field every answer and every message to Pilot is typed into, a `textarea`
+  one line at rest that grows with its text to eight lines, or its `lines`, the chat's five, and
+  then scrolls; `readOnly` holds it, keeping the focus, while what it sends is on its way. Enter
+  breaks the line; Ctrl+Enter, Cmd+Enter on a Mac, calls its `onSend` where the field has one Send,
+  and Esc its `onEscape` where something holds it. While it has the focus, its parent, the row
+  holding what sends it, is kept in view.
 
 `shared.css` has the mockup's buttons (`.btn` with `.btn-sm`, `.btn-icon`, `.btn-primary`,
 `.btn-danger`, `.btn-soft`, `.btn-ghost`), the text field (`.field` in a `.field-row` with its
 button beside it, level with its bottom edge), `.chip`, `.popover`, `.menu-pop`, `.dialog`,
 `.empty-state`, `.mention`, `.prose` (its lists with their bullets and numbers, a task list's
 checkboxes), `.fold` and `.link`; `.icon-cap`, an icon on its text's capitals in a flex row;
-`.delta-fresh`; and `@keyframes pulse`.
+`.delta-fresh`; `.unread`, the chat's unread dot ([`chats.md`](chats.md)); and `@keyframes pulse`.
 
 ## The keys
 
@@ -138,8 +147,9 @@ Nothing of it is on the server. A component reads it with `useBrowserState()` an
 `rememberInBrowser(change)`, a panel with `rememberPanel(projectId, panel)`, which keeps what
 another tab of the browser keeps for the other projects.
 
-The unsent text of every answer's field is a second entry, `pilot.unsent`, by field:
-`<item>/<block>/answer`, `/paste`, `/other` and `/no` ([`timeline.md`](timeline.md)).
+The unsent text of every answer's field and of the chat's composer is a second entry,
+`pilot.unsent`, by field: `<item>/<block>/answer`, `/paste`, `/other` and `/no`
+([`timeline.md`](timeline.md)), and `chat/<project>` ([`chats.md`](chats.md)).
 `useUnsentText(field, initial)` (`src/hooks/use-unsent-text.ts`) reads it when the field opens, so a
 field opened again, after a reload or in another tab, starts from what was left in it, and writes it
 on every keystroke over what the storage holds. An emptied field's entry is deleted, and so is a
@@ -224,8 +234,9 @@ of the template's `nginx.conf` (`CLAUDE.md`), which `tests/infrastructure/nginx.
 
 The frontend suite's fixtures (`frontend/tests/support/fixtures.ts`):
 
-- `people`: `signIn({name?, handle?})` signs in a person with a handle, chosen through the API;
-  `firstSignIn({name?})` one at their first sign-in, `null` for a token with no name;
+- `people`: `signIn({name?, handle?, subject?})` signs in a person with a handle, chosen through
+  the API, the same `subject` signing the same person in again; `firstSignIn({name?, subject?})`
+  one at their first sign-in, `null` for a token with no name;
   `other(handle, name?)` puts another person on the record; `self()` reads the signed-in person.
 - `shell`: `open(path)` opens an address once the signed-in person is read; `goldBar` and
   `goldLine(code)` read the gold bar.
@@ -236,5 +247,6 @@ The frontend suite's fixtures (`frontend/tests/support/fixtures.ts`):
   answers only in testing mode and refuses what the boot refuses; `environment(id, name)` puts an
   environment on the record through `POST /api/testing/environments` ([`projects.md`](projects.md)).
 - The page objects `handleStep`, `profile`, `projectList`, `projectHead`, `timeline`, `overlay`,
-  `sessionLog` and `panel`, and `projects` ([`projects.md`](projects.md),
-  [`timeline.md`](timeline.md), [`work.md`](work.md), [`documents.md`](documents.md)).
+  `sessionLog`, `panel` and `chat`, and `projects` and `chats` ([`projects.md`](projects.md),
+  [`timeline.md`](timeline.md), [`work.md`](work.md), [`documents.md`](documents.md),
+  [`chats.md`](chats.md)).

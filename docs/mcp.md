@@ -230,8 +230,9 @@ it hangs on) and the block in it, `<item id>/<local id>`. A call that changed no
 one whose Session has no Turn in flight writes none either, its changes standing, and the log says
 so. A view puts the line on the call whose tool-use id it names, whether the effect's record was
 written before or after the call's `assistant` line, and one whose call no record shows in its
-record's place: a work item's session log ([`work.md`](work.md)) and `chat.md`
-([`chats.md`](chats.md)).
+record's place: a work item's session log ([`work.md`](work.md)), the Chat tab and `chat.md`
+([`chats.md`](chats.md)). A block's latest `answered` effect whose call ran in a chat is where
+*In the chat* goes, the block's `in_chat` ([`timeline.md`](timeline.md)).
 
 ## Testing it
 

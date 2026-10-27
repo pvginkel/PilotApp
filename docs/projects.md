@@ -52,8 +52,8 @@ project's cache it changes (`state_code`, `archived`, `autopilot` or `paused`) i
 |---|---|---|
 | `finished` | an open project | every session of the project running, starting or held stopped, as Stop stops one ([`sessions.md`](sessions.md)), and its open chat closed, `finished` ([`chats.md`](chats.md)); while auto pilot is on, `autopilot_off`, and while it is paused, `resumed`, each at the same instant, by the same person; then every open item but the opening closed unanswered |
 | `reopened` | a finished project | every session of the project running, starting or held stopped, which in a finished project is its read-only chat's alone, and its open chat closed, `reopened`, so that the next message starts one that writes (D068); auto pilot stays off and the project is not paused: a finished project's never are |
-| `archived` | a draft, an open or a finished project | every session of the project running, starting or held stopped; auto pilot and the pause are kept, so Bring back returns the project as it was |
-| `brought_back` | an archived project | |
+| `archived` | a draft, an open or a finished project | every session of the project running, starting or held stopped, and its open chat closed, `archived` ([`chats.md`](chats.md)), so an archived project has no chat open; auto pilot and the pause are kept, so Bring back returns the project as it was |
+| `brought_back` | an archived project | nothing started: the next message starts a chat |
 | `autopilot_on` | an open project with auto pilot off | |
 | `autopilot_off` | a project with auto pilot on | |
 | `paused` | an open project that is not paused | every start in it but a Chat's held at the gate ([`sessions.md`](sessions.md)); a running turn runs out |
@@ -137,14 +137,14 @@ event stream comes up ([`timeline.md`](timeline.md)).
 ## The head
 
 `project-head.tsx` draws the head in two rows: the name, its chip and the ticket and the repo, then
-the auto pilot switch; below them the step button, the members, the Documents button, the
+the auto pilot switch; below them the step button, the members, Discuss, the Documents button, the
 handbook's, the plan's notes button and the project's menu. On a wide window the two rows share one
 line. Under the narrow window's breakpoint they are a row each and the repo is hidden. In a tight
 head the repo and the step's name give way first, then the name, cut with an ellipsis; the chips,
 auto pilot, the members and the icons keep their size.
 
-- **The chips.** A draft shows "Draft", its name and members, and no switch, step, Documents,
-  handbook or notes button.
+- **The chips.** A draft shows "Draft", its name and members, and no switch, step, Discuss,
+  Documents, handbook or notes button.
   A finished project shows the "Finished" chip in place of the switch. An archived project shows
   "Archived" after its name and the rest as it was left, the switch disabled.
 - **The warning triangle** stands after the switch while a work item runs, starts or is held whose
@@ -161,8 +161,11 @@ auto pilot, the members and the icons keep their size.
   notes", each note its summary and then its content.
 - **The members** are small avatars, overlapping by 2px, in the order they joined, in a group named
   "Members".
-- **The Documents button**, pressed while the side panel shows its Documents tab, opens that tab or
-  closes it; **the handbook's** opens the handbook in the overlay ([`documents.md`](documents.md)).
+- **Discuss**, pressed while the side panel shows its Chat tab, opens that tab with nothing quoted
+  or closes it, and carries the unread dot while a reply of Pilot's is unread
+  ([`chats.md`](chats.md)); **the Documents button**, pressed while the panel shows its Documents
+  tab, opens that tab or closes it; **the handbook's** opens the handbook in the overlay
+  ([`documents.md`](documents.md)).
 
 The popovers and the menu close on a press outside them and on Esc.
 
@@ -243,8 +246,9 @@ answers only in testing mode ([`sign-in.md`](sign-in.md)).
   session a `409`.
 - `POST /api/testing/projects/<id>/turn-ends`, no body, ends the turn of the project's session
   started last as the relay does ([`engine.md`](engine.md)), and answers `204`: Pilot's writing
-  flag cleared on every document the session was saving, and a `turn` Version cut of each whose text
-  moved. No live event follows. An unknown project is a `404`, one with no session a `409`.
+  flag cleared on every document the session was saving, each raising `project_changed`, and a
+  `turn` Version cut of each whose text moved. An unknown project is a `404`, one with no session a
+  `409`.
 - `POST /api/testing/items/<id>/done`, no body, marks a document Done as Pilot does one it settled
   or deferred whole, by the project's session, and answers `204`: cause `settled`, a `done` Version
   cut. An unknown item is a `404`; a project with no session, an item that is no document or is
@@ -278,17 +282,26 @@ answers only in testing mode ([`sign-in.md`](sign-in.md)).
   they are asked, nothing started. It answers `201` `{blocks}`, the blocks its writer is asked
   about; an unknown item or block is a `404`, and an item that is no registered document or is
   done, or a block answered or asked about already, a `409`.
+- `POST /api/testing/projects/<id>/chat/answers` `{block, value, for, note?, to?, tool_use_id?}`
+  records the person `for` names' answer to the block `<item id>/<local id>` through the project's
+  open chat, as its brain's `answer` does ([`mcp.md`](mcp.md)): the effect of the call
+  `tool_use_id` names in the chat's turn in flight, the place *In the chat* goes to
+  ([`chats.md`](chats.md)). It answers `201` `{effect}`, the effect's line; an unknown project,
+  block or handle is a `404`, and a project with no chat open, a chat with no turn in flight or an
+  answer the record refuses a `409`.
 
 A project past the draft, born with its opening, an item placed, a work item placed, an item's save
 posted, Pilot's Done and attachments hung each raise `project_changed` through the engine, so an
-open screen follows them ([`timeline.md`](timeline.md)); a turn's end raises none, and a save of the
-handbook none either. The frontend suite's `projects` fixture (`frontend/tests/support/projects.ts`)
+open screen follows them ([`timeline.md`](timeline.md)), and so do a save of the handbook or the
+project document that changes its text or takes it for the session, and a turn's end, for each
+document it lets go. The frontend suite's `projects` fixture (`frontend/tests/support/projects.ts`)
 wraps them (`make`, `makeWithSession`, `place`, `save`, `saveProjectDocument`, `endTurn`,
 `doneByPilot`, `attach`, `register`, `workerAttach`, `askWriter`, `list`, `head`, `transition`, the
 item writes of [`timeline.md`](timeline.md), and the work item's of [`work.md`](work.md)), and the
 page objects `projectList` and `projectHead` drive the screens: `projectList.statusIcon(name)` reads
 a tab's icon, its status and its glyphs, and `projectList.written(id, kind)` waits for its pause or
-resume to be written; `projectHead.autopilotWarning` is the triangle. The status and the pause are
+resume to be written; `projectHead.autopilotWarning` is the triangle, and `discussButton` and
+`discussDot` are Discuss and its dot. The status and the pause are
 pinned in `tests/projects/project-status.spec.ts`. Each Playwright worker's database is a clone of
 the dev seed ([`record.md`](record.md)), so every spec's list holds the seed's projects beside its
 own.

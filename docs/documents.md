@@ -6,6 +6,7 @@ Documents tab. The reads are `backend/app/api/items.py`, `projects.py` and `atta
 `TimelineService` and `AttachmentService`; the screens are `frontend/src/components/overlay/` and
 `components/panel/`. A document on the timeline, inline or as a card, its blocks, its *Unsent* and
 its *Send answers*, is [`timeline.md`](timeline.md)'s, and the overlay draws its text the same way.
+The panel's Chat tab, and Discuss in the overlay's head, are [`chats.md`](chats.md)'s.
 
 ## Reading a document on its own
 
@@ -55,7 +56,8 @@ The title and the stored type do not travel on the stream: the timeline's `attac
 ## The overlay
 
 `Overlay` (`components/overlay/overlay.tsx`) is a page over the project's timeline: a backdrop and
-the sheet, whose head holds the titles, maximize and the cross, over its body and its foot. It
+the sheet, whose head holds the titles, Discuss once what it shows is read, quoting it
+([`chats.md`](chats.md)), maximize and the cross, over its body and its foot. It
 opens in place, two thirds of the window wide, at least 640px and at most the text column with its
 scrollbar, and maximized it takes the window's width; on a wide window both stop at the open panel.
 It lies over the side column, the gold bar and the centre, under the top bar and the drawer. The
@@ -69,7 +71,8 @@ load." A work item's session log opens in it too ([`work.md`](work.md)).
 again when what it shows replaces what had it, and gives it back as it closes to what had it before,
 where that is still on the page. While it is open the timeline under its backdrop takes no focus
 (`inert`), nor the panel below 1200px where the overlay lies over it. The project's head does: its
-Documents button is how the panel opens over the overlay below 1200px.
+Discuss and Documents buttons, and the overlay's own Discuss, are how the panel opens over the
+overlay below 1200px.
 
 ### A document
 
@@ -126,29 +129,31 @@ handbook included, reads "The document did not load."
 
 What the overlay shows is read again on its project's `project_changed`, on every rise of the event
 stream, when the window regains focus and after the person's own writes
-([`timeline.md`](timeline.md)). The record raises no `project_changed` for a save of the handbook,
-and raises one for a save of the project document only where it renames the project, so an open
-handbook shows Pilot's new text on its next read.
+([`timeline.md`](timeline.md)). A save of the handbook or the project document raises one where it
+changes the published text or makes its session the one writing it, and a turn's end raises one for
+each document it lets go ([`engine.md`](engine.md)), so an open overlay shows Pilot's new text, and
+its dots come and go, as they happen.
 
 ## The side panel
 
 `Panel` (`components/panel/panel.tsx`) stands beside the project's head and timeline: a tab strip,
-Documents alone, with its count, and the close cross. The head's Documents button
-([`projects.md`](projects.md)) opens it on the Documents tab, and closes it where that tab is
-showing. A draft has neither the panel nor the button.
+Chat first, with the unread dot ([`chats.md`](chats.md)), then Documents, with its count, and the
+close cross. The head's Discuss ([`projects.md`](projects.md)) opens it on the Chat tab and its
+Documents button on the Documents tab, each closing it where its tab is showing; Discuss elsewhere
+and *In the chat* open it on the Chat tab, on top. A draft has neither the panel nor the buttons.
 
 **Each project's own.** A project's panel, open or closed, and its tab are kept in the browser
 (`usePanel`, `browser-state.ts`'s `panels`, [`ui.md`](ui.md)) as the person last left them, so
 switching projects brings each back as it was. Until the person sets it, it stands open on a wide
-window and closed below one, following the window live.
+window and closed below one, following the window live, on the Chat tab.
 
 - **A wide window**, 1200px and over: the open panel stands beside the timeline, 420px wide, and the
   overlay beside it, to its left. Its head takes the project head's height, its tab on the name's
   baseline.
 - **Below 1200px** it lies over the timeline, and of the panel and the overlay the one opened last
   is on top: the overlay whenever what it shows changes or a row of the panel opens, the panel when
-  the Documents button or its tab opens it. Going to an item's or a block's address, not an
-  attachment's, on a load or by history, closes the panel and keeps it closed.
+  a button of the head, a tab, a Discuss or *In the chat* opens it. Going to an item's or a block's
+  address, not an attachment's, on a load or by history, closes the panel and keeps it closed.
 - **A phone**, 900px and below: it is the whole screen, as the overlay is.
 
 **Esc.** On a wide window Esc closes the overlay and never the panel. Below 1200px, where the two
@@ -158,10 +163,11 @@ it shares the overlay's rank, so it is always the one opened later ([`ui.md`](ui
 
 ### The Documents tab
 
-`documents-tab.tsx`, from the project's timeline and its project document:
+`documents-tab.tsx`, from the project's timeline and its project document, read as one
+(`usePanelDocuments`):
 
-- **The project document** first: its title, the text's, else "Project document", over "Project
-  document".
+- **The project document** first: its title, the text's, else, and until it is read, "Project
+  document", over "Project document".
 - **Attachments**, newest batch first, a batch being the files hung in one call. A batch of one is
   its title over "<item> · <stamp>"; a batch of several is a folder row, the last directory their
   sources share, else "N files", over "<item> · <stamp>", with each file under it, its title over
@@ -170,8 +176,10 @@ it shares the overlay's rank, so it is always the one opened later ([`ui.md`](ui
 - **In the timeline**: the timeline's documents and reviews, newest first, each its title over
   "<Open | Unsent | Done> · <stamp>", *Unsent* as the timeline reads it. With none: "None yet."
 
-Every row opens in the overlay at its address. The tab's count is the attachments and the
-documents, the project document left out.
+Every row opens in the overlay at its address. While either read is under way the two headings
+stand with nothing under them, and while either's latest read failed, "The documents did not load."
+stands in their place, under the project document's row. The tab's count is the attachments and
+the documents, the project document left out, and stands only once both are read.
 
 ## Addresses
 
@@ -206,5 +214,6 @@ project document with `projects.saveProjectDocument(projectId, role, text)`, ove
 testing endpoints ([`projects.md`](projects.md)), on a project made with a session. The `overlay`
 fixture (`tests/support/page-objects/overlay-page.ts`) opens a document's address (`open`), the
 handbook or the project document (`openProjectDocument`), and reads the overlay's head, body, foot
-and attachment view; the `panel` fixture (`panel-page.ts`) reads the panel and its Documents tab. On
-the default 1280px viewport the panel stands open.
+and attachment view, its head's Discuss among them; the `panel` fixture (`panel-page.ts`) reads the
+panel and its Documents tab, and the `chat` fixture its Chat tab ([`chats.md`](chats.md)). On the
+default 1280px viewport the panel stands open, on the Chat tab.

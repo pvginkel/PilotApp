@@ -107,11 +107,12 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   as a start's brief) and its `words`, the person's own, verbatim with their quote tags, which a
   Turn has exactly when it has an author, its `message` ending with them; the item or the block it
   quotes (one at most, only on a Turn with words; a quoted block's removal clears the key;
-  `ck_turns_words`), `started_at`, `ended_at`, and the `error` of a turn that failed.
+  `ck_turns_words`; a file quoted by its path stays in the words alone), `started_at`, `ended_at`,
+  and the `error` of a turn that failed.
 - `chats`: a project's chat, sharing its id with its Session, one of kind `chat` of the same project
   (`session_kind_code`, held `chat`): its kind, `definition` or `project`, and its close,
-  `closed_at` and `close_cause_code` (`timeout`, `created`, `finished`, `reopened`) set together
-  (`ck_chats_close`). A project has one chat open at a time (`uq_chats_open`)
+  `closed_at` and `close_cause_code` (`timeout`, `created`, `finished`, `reopened`, `archived`) set
+  together (`ck_chats_close`). A project has one chat open at a time (`uq_chats_open`)
   ([`chats.md`](chats.md)).
 - `chat_reads`: a person's place in a project's chat, one per user and project, `read_at`.
 - `effects`: a change a session's tool call made to the record, of the Turn the call ran in and
