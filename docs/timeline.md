@@ -176,8 +176,12 @@ answer moves the count, so a document stays as it stands while it is answered.
   makes the review a done line.
 - **A registered document with no text**, awaiting its read or after one that failed, is a review's
   card titled by its file's name, with no "N min read", and its Reviewed only once `awaiting_read` is
-  false: a failed read closes so ([`round-trip.md`](round-trip.md)). Its text, once read, gives it
-  its title and its blocks live.
+  false: a failed read closes so ([`round-trip.md`](round-trip.md)). Each state has a look of its
+  own. Awaiting its read, the card is muted, its file's name in muted text, "Loads when the turn
+  ends" under it and Pilot's dots ending it; muted, not dashed, which marks a concept. Its read
+  failed, a warning chip beside the name reads *Did not load*, since only that state waits on the
+  person's Reviewed. Its text, once read, gives it its title and its blocks live, on a review's
+  card as any other.
 - **The segment bar**: a segment per block, filled once the block is answered, its tooltip what the
   block asks, its section's heading, else its kind, and whether it is answered. Inline, a segment
   scrolls to its block, which flashes; on a card it opens the overlay at the block's address.

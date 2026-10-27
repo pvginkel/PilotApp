@@ -15,7 +15,10 @@
  * Reviewed (F25.2); Pilot's dots end it while Pilot writes. Open opens the overlay at the document's address, and a segment opens
  * it at its block's (F33, F97). A registered document has no text until its file is read at its
  * run's end, nor after a read that failed: a review whose card titles it by its file's name, and
- * which takes no Reviewed until that read is made (F85.1, ruling D1). Where Pilot asked a registered
+ * which takes no Reviewed until that read is made (F85.1, ruling D1). Awaiting its read, its card is
+ * muted, its name in muted text, "Loads when the turn ends" under it and Pilot's dots ending it; its
+ * read failed, a warning chip beside its name, *Did not load*, since only then does it wait on the
+ * person's Reviewed; published, it is any review's card. Where Pilot asked a registered
  * document's writer about its blocks, its line under the title, or on a card under the summary,
  * says so: "Pilot asked the writer about D2 and D4" (F86.8).
  */
@@ -28,7 +31,7 @@ import { LinkedText } from '@/components/shared/linked-text';
 import { Markdown } from '@/components/shared/markdown';
 import { Attachments } from '@/components/timeline/attachments';
 import { Block } from '@/components/timeline/block';
-import { askOf, countsOf, isUnsent, recommendationOf, type Counts } from '@/components/timeline/document-state';
+import { askOf, countsOf, isUnsent, readOf, recommendationOf, type Counts } from '@/components/timeline/document-state';
 import { blockKey, GoToContext } from '@/components/timeline/flash';
 import { Edited, ItemHead } from '@/components/timeline/item-head';
 import { isSettled, piecesOf, SectionsContext } from '@/components/timeline/sections';
@@ -75,16 +78,25 @@ export function DocumentCard({ item }: { item: TimelineItem }) {
   const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
   const navigate = useNavigate();
   const blocks = blocksOf(item);
+  const read = readOf(item);
   const params = { projectId, documentId: item.id };
   const openAt = (itemId: string, blockId: string) =>
     void navigate({ to: '/projects/$projectId/items/$itemId/blocks/$blockId', params: { projectId, itemId, blockId } });
   return (
     <div className="item-body">
       <DocumentHead item={item} />
-      <div className="doc-card" data-testid="timeline.item.card">
-        <div className="item-title" data-testid="timeline.item.title">
-          <LinkedText text={titleOf(item)} />
+      <div className={cn('doc-card', read)} data-testid="timeline.item.card" data-read={read ?? undefined}>
+        <div className="title-row">
+          <div className="item-title" data-testid="timeline.item.title">
+            <LinkedText text={titleOf(item)} />
+          </div>
+          {read === 'failed' && <DidNotLoadChip />}
         </div>
+        {read === 'awaiting' && (
+          <p className="item-sub" data-testid="timeline.item.loads">
+            Loads when the turn ends
+          </p>
+        )}
         {item.summary !== null && (
           <p className="item-sub" data-testid="timeline.item.summary">
             <LinkedText text={item.summary} />
@@ -118,7 +130,7 @@ export function DocumentCard({ item }: { item: TimelineItem }) {
           {item.kind === 'review' && !item.awaiting_read && <Reviewed item={item} />}
         </div>
       </div>
-      {item.writing && <PilotWriting />}
+      {(item.writing || read === 'awaiting') && <PilotWriting />}
     </div>
   );
 }
@@ -156,6 +168,15 @@ function Reviewed({ item }: { item: TimelineItem }) {
       <Check className="icon" aria-hidden="true" />
       Reviewed
     </button>
+  );
+}
+
+/** A registered document whose read failed: it waits on the person's Reviewed (F85.1, ruling D1). */
+function DidNotLoadChip() {
+  return (
+    <span className="chip did-not-load" title="Its file could not be read at the end of its run" data-testid="timeline.item.did-not-load">
+      Did not load
+    </span>
   );
 }
 

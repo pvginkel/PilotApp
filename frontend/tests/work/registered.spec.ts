@@ -1,14 +1,15 @@
 /**
  * A document a work item's session registers (F85.1, F65): on the timeline from its registration,
  * a review titled by its file's name, with no text and no close until the turn that ends its run
- * has read it (review 7), then published as written, its title its text's, live. A read that
- * fails keeps its file's name and no text: it opens to "The document did not load", closes with
- * Reviewed, and its work item's session log says why (ruling D1). Its close is written back to
- * its file, and the close that leaves none of the run's documents open continues the conversation
- * as a new work item after the answered ones, from when Undo is gone from every document of the
- * run (review 1); a write-back the controller refuses is in the run's session log, live, and fails
- * that continuation's start with its reason (F125). One whose writer Pilot asked about its blocks
- * says so on the timeline, live (F86.8).
+ * has read it (review 7), its card muted meanwhile, "Loads when the turn ends" under its name and
+ * Pilot's dots ending it, then published as written, its title its text's, live. A read that
+ * fails keeps its file's name and no text, *Did not load* beside it: it opens to "The document did
+ * not load", closes with Reviewed, and its work item's session log says why (ruling D1). Its close
+ * is written back to its file, and the close that leaves none of the run's documents open
+ * continues the conversation as a new work item after the answered ones, from when Undo is gone
+ * from every document of the run (review 1); a write-back the controller refuses is in the run's
+ * session log, live, and fails that continuation's start with its reason (F125). One whose writer
+ * Pilot asked about its blocks says so on the timeline, live (F86.8).
  */
 
 import { test, expect } from '../support/fixtures';
@@ -107,7 +108,7 @@ async function continued(projects: Projects, project: string, continuation: stri
 }
 
 test.describe('A registered document', () => {
-  test('shows its file’s name and takes no close, on its line or in the overlay, until its run’s end reads it, then its text’s title, live', async ({
+  test('shows its file’s name on a muted card with Pilot’s dots and “Loads when the turn ends”, and takes no close, on its line or in the overlay, until its run’s end reads it, then its text’s title on a published card, live', async ({
     people,
     projects,
     controller,
@@ -129,12 +130,22 @@ test.describe('A registered document', () => {
     await deploymentSse.ensureConnected();
     await expect(item.root).toHaveAttribute('data-state', 'open');
     await expect(item.title).toHaveText('survey.md');
+    await expect(item.root).toHaveClass(/\bawaiting\b/);
+    await expect(item.card.root).toHaveAttribute('data-read', 'awaiting');
+    await expect(item.card.loads).toHaveText('Loads when the turn ends');
+    await expect(item.writing).toBeVisible();
+    await expect(item.card.didNotLoad).toHaveCount(0);
     await expect(item.card.open).toBeVisible();
     await expect(item.card.reviewed).toHaveCount(0);
     await expect(item.card.readTime).toHaveCount(0);
 
     await endRun(controller, environment);
     await expect(item.title).toHaveText('The survey');
+    await expect(item.root).not.toHaveClass(/\bawaiting\b/);
+    await expect(item.card.root).not.toHaveAttribute('data-read');
+    await expect(item.card.loads).toHaveCount(0);
+    await expect(item.writing).toHaveCount(0);
+    await expect(item.card.didNotLoad).toHaveCount(0);
     await expect(item.card.readTime).toHaveText('1 min read');
     await expect(item.card.reviewed).toBeVisible();
     await expect(item.root).toHaveAttribute('data-state', 'open');
@@ -184,7 +195,7 @@ test.describe('A registered document', () => {
     await expect(timeline.item(push).writerAsked).toHaveText('Pilot asked the writer about C1');
   });
 
-  test('whose read at its run’s end fails keeps its file’s name and no text, opens to “The document did not load”, closes with Reviewed, and its session log says why', async ({
+  test('whose read at its run’s end fails keeps its file’s name and no text, “Did not load” beside it, opens to “The document did not load”, closes with Reviewed, and its session log says why', async ({
     people,
     projects,
     controller,
@@ -208,6 +219,11 @@ test.describe('A registered document', () => {
     await timeline.open(project);
     const item = timeline.item(survey);
     await expect(item.title).toHaveText('survey.md');
+    await expect(item.card.root).toHaveAttribute('data-read', 'failed');
+    await expect(item.card.didNotLoad).toHaveText('Did not load');
+    await expect(item.root).not.toHaveClass(/\bawaiting\b/);
+    await expect(item.card.loads).toHaveCount(0);
+    await expect(item.writing).toHaveCount(0);
     await expect(item.card.readTime).toHaveCount(0);
     await expect(item.card.summary).toHaveCount(0);
     await item.card.open.click();

@@ -6,7 +6,8 @@
  * (F22), a short document stands inline (F24.1), and a larger one and a review leave a card
  * (F24.2, F25.1). A registered document whose writer Pilot asked says so under its title (F86.8).
  * Its attachments follow its text (F17.5). An urgent one is tinted (F10.1), and one
- * whose latest save is held shows its last published text with a dashed border, a concept (F78). A
+ * whose latest save is held shows its last published text with a dashed border, a concept (F78), and
+ * a registered document awaiting its read is muted (F85.1). A
  * work item open is its session's (work.tsx, F26). Done, an item is its line (F13.1, F13.2), with
  * Open (F13.3), its attachments' indicator (F13.6), Undo while the record offers it (F14.1) and
  * Discuss (F13.4), and *In the chat* after a one-ask item's answer given in the chat (F42.3); a
@@ -58,6 +59,7 @@ export function Item({ item, fresh, onFlashed }: ItemProps) {
         item.kind === 'confirmation' && 'confirm',
         done && item.kind === 'work' && 'quiet',
         !done && item.concept && 'concept',
+        !done && item.awaiting_read && 'awaiting',
         !done && item.urgent && 'urgent',
         fresh && 'fresh',
       )}

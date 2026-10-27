@@ -76,6 +76,10 @@
     background: linear-gradient(hsl(var(--urgent) / 0.06), hsl(var(--urgent) / 0.06)), hsl(var(--background));
   }
   .item.concept { border-style: dashed; }
+  /* A registered document awaiting its read (F85.1): a muted card, its file's name muted; no dashed
+     border, which marks a concept. */
+  .item.open.awaiting { border-color: hsl(var(--border)); background: hsl(var(--muted) / 0.4); box-shadow: none; }
+  .item.awaiting .item-title { color: hsl(var(--muted-foreground)); }
   .item.fresh { animation: fresh 1.6s ease-out; }
   @keyframes fresh { from { box-shadow: 0 0 0 4px hsl(var(--primary) / 0.35); } }
 
@@ -373,6 +377,9 @@
 
   /* The card a larger document or a review leaves: what is in it, how far the answers are. */
   .doc-card .counts { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
+  .doc-card .title-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+  /* A registered document whose read failed: the one state of the three that waits on the person. */
+  .chip.did-not-load { background: hsl(var(--warning) / 0.15); color: hsl(var(--warning-text)); font-weight: 600; }
   .progress { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 13px; color: hsl(var(--muted-foreground)); }
 
   /* A document's progress: a segment per block, filled once answered; a segment goes to its block. */

@@ -7,7 +7,8 @@ import { waitTestEvent } from '../helpers';
  * Undo, an open item's block (F31) or a confirmation's card (F22), *In the chat* in a block's head
  * and a done line (F42.3), an inline document's blocks,
  * segments and *Send answers* with its dialog (F24.1, F33, F32.5), a larger document's or a
- * review's card (F24.2, F25), that Pilot asked a registered document's writer (F86.8), a section
+ * review's card (F24.2, F25), a registered document's read awaited or failed and that Pilot asked
+ * its writer (F85.1, F86.8), a section
  * Pilot settled as its line (F31.5), an item's attachments
  * and a done line's indicator of them (F17.5, F13.6), Pilot's dots (F35), the
  * urgent banners and the "N open above" chip
@@ -159,6 +160,9 @@ export class TimelinePage {
         summary: root.getByTestId('timeline.item.summary'),
         counts: root.getByTestId('timeline.item.count'),
         readTime: root.getByTestId('timeline.item.read-time'),
+        /** A registered document's "Loads when the turn ends" awaiting its read, and *Did not load* after it failed. */
+        loads: root.getByTestId('timeline.item.loads'),
+        didNotLoad: root.getByTestId('timeline.item.did-not-load'),
         open: root.getByTestId('timeline.item.open'),
         reviewed: root.getByTestId('timeline.item.reviewed'),
       },
