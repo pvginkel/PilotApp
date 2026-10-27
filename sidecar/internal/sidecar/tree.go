@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/pvginkel/PilotApp/sidecar/internal/files"
@@ -33,15 +34,17 @@ const viewMode fs.FileMode = 0o444
 
 // tree is the store's tree as the sidecar keeps it: the files under its
 // root, the shadow of each as it last synced, the local notes on them, the
-// read-only views among them, and the server they sync with.
+// read-only views among them, the write lock of each project folder, and
+// the server they sync with.
 type tree struct {
-	root   string
-	client *protocol.Client
-	shadow *shadow.Store
-	notes  *notes
-	logger *slog.Logger
-	slots  chan struct{}
-	locks  *pathLocks
+	root    string
+	client  *protocol.Client
+	shadow  *shadow.Store
+	notes   *notes
+	logger  *slog.Logger
+	slots   chan struct{}
+	locks   *pathLocks
+	writers *writeLocks
 
 	mu       sync.Mutex
 	readonly map[string]bool
@@ -56,6 +59,7 @@ func newTree(root string, client *protocol.Client, store *shadow.Store, logger *
 		logger:   logger,
 		slots:    make(chan struct{}, parallelCalls),
 		locks:    &pathLocks{held: map[string]*pathLock{}},
+		writers:  newWriteLocks("/proc", logger),
 		readonly: map[string]bool{},
 	}
 }
@@ -101,6 +105,16 @@ func (t *tree) path(name string) (string, bool) {
 	return path, protocol.ValidPath(path)
 }
 
+// writer is the session holding the write lock of path's project folder,
+// "" when none does or path is at the tree's root.
+func (t *tree) writer(path string) string {
+	folder, _, nested := strings.Cut(path, "/")
+	if !nested {
+		return ""
+	}
+	return t.writers.holder(folder)
+}
+
 // hold takes a call's slot and path's lock, false when ctx is done first;
 // release gives both back. A call with the lock never waits for a slot.
 func (t *tree) hold(ctx context.Context, path string) (release func(), ok bool) {
@@ -116,11 +130,12 @@ func (t *tree) hold(ctx context.Context, path string) (release func(), ok bool) 
 	}, true
 }
 
-// walk hashes every file of the tree, by path. A file it cannot read is
-// left out, as its upload leaves it: it costs its own path only.
-func (t *tree) walk() (map[string]string, error) {
+// walk hashes every file of the tree under the directory of under, a path
+// from the tree's root or "" for the root, by path. A file it cannot read
+// is left out, as its upload leaves it: it costs its own path only.
+func (t *tree) walk(under string) (map[string]string, error) {
 	hashes := map[string]string{}
-	err := filepath.WalkDir(t.root, func(name string, entry fs.DirEntry, err error) error {
+	err := filepath.WalkDir(t.name(under), func(name string, entry fs.DirEntry, err error) error {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil
 		}
@@ -341,13 +356,16 @@ func (n *notes) clear(path string) {
 	}
 }
 
-// print is every note as the hook prints it, `<path>: <note>`, in path
-// order; a note made once is printed once.
-func (n *notes) print() []string {
+// print is every note on a path of folder as the hook prints it, `<path>:
+// <note>`, in path order; a note made once is printed once.
+func (n *notes) print(folder string) []string {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	lines := make([]string, 0, len(n.byPath))
+	var lines []string
 	for _, path := range slices.Sorted(maps.Keys(n.byPath)) {
+		if !strings.HasPrefix(path, folder+"/") {
+			continue
+		}
 		lines = append(lines, path+": "+n.byPath[path].text)
 		if n.byPath[path].once {
 			delete(n.byPath, path)

@@ -9,6 +9,10 @@ from app.models.reference import ErrorKind
 Sha256 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 """A hash the protocol speaks: the sha256 of a file's bytes, lowercase hex."""
 
+Folder = Annotated[str, StringConstraints(pattern=r"^[a-z0-9-]+$")]
+"""A project folder the protocol speaks: a name at the tree's root, a slug
+or `draft-<number>` (DB decision 1)."""
+
 
 class SyncProtocolRangeSchema(BaseModel):
     """The protocol versions the server accepts, both ends included: a 426's
@@ -76,12 +80,14 @@ class SyncChangeSchema(BaseModel):
 
 
 class SyncCheckRequestSchema(BaseModel):
-    """The hook's check of a file, as the store's sidecar posts it."""
+    """The hook's check of a project folder, as the store's sidecar posts it
+    once it has flushed the folder."""
 
-    path: str = Field(..., description="The file the hook names, from the tree's root")
-    hash: Sha256 = Field(..., description="The hash of the file on disk, acked")
+    folder: Folder = Field(
+        ..., description="The project folder the hook names, from the tree's root"
+    )
     wait_seconds: float = Field(
-        ..., ge=0, description="How long the sidecar waited for that hash's ack"
+        ..., ge=0, description="How long the sidecar's flush of the folder took"
     )
 
 
@@ -112,20 +118,15 @@ class SyncHomelessDeferralSchema(BaseModel):
 
 
 class SyncCheckResponseSchema(BaseModel):
-    """What the hook prints after an edit, and whether the server agrees with
-    the file's hash."""
+    """What the hook prints after a tool call that can write the folder."""
 
-    checked: bool = Field(
-        ..., description="Whether the server agrees the file holds the hash posted"
-    )
     errors: list[SyncSaveErrorSchema] = Field(
         ...,
-        description="The Save Errors of the file's project folder, in path"
-        " order, or the file's own under no syncing project's folder; the"
+        description="The Save Errors under the folder, in path order; the"
         " `reverted` ones are reported once",
     )
     homeless_deferrals: list[SyncHomelessDeferralSchema] = Field(
         ...,
-        description="The deferrals without a home of the file's project; none"
-        " under no syncing project's folder",
+        description="The deferrals without a home of the folder's project; none"
+        " for a folder of no syncing project",
     )

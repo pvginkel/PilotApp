@@ -7,6 +7,7 @@ import hmac
 import logging
 import re
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Literal
 
@@ -17,23 +18,22 @@ from sqlalchemy.orm import Session
 
 from app.app_config import AppSettings
 from app.engine.ingest import Ingested, IngestService, PathKind
-from app.engine.paths import folder
 from app.engine.plan import HomelessDeferral, PlanService
-from app.engine.tree import ManifestEntry, TreeFile, TreePlan, TreeService
+from app.engine.tree import ManifestEntry, TreeFile, TreeService
 from app.exceptions import (
     AuthenticationException,
     AuthorizationException,
-    RecordNotFoundException,
     SyncProtocolUnsupportedException,
 )
-from app.models import Environment, SaveError
-from app.models.reference import ErrorKind
+from app.models import Environment, SaveError, SessionKind
+from app.models import Session as AgentSession
+from app.models.reference import ErrorKind, Surface
 from app.services.environment_service import EnvironmentService
 
-SYNC_PROTOCOL_MIN = 1
+SYNC_PROTOCOL_MIN = 2
 """The oldest protocol version the server serves."""
 
-SYNC_PROTOCOL_MAX = 1
+SYNC_PROTOCOL_MAX = 2
 """The newest protocol version the server serves. A change to any request or
 response shape of the sync routes bumps it, and the sidecar's own version, in
 one commit (design 1 §5.1)."""
@@ -58,7 +58,7 @@ RECONCILES_TOTAL = Counter(
 )
 HOOK_WAIT_SECONDS = Histogram(
     "pilot_sync_hook_wait_seconds",
-    "The store sidecar's wait for its ack of a file the hook checks, as it reports it",
+    "The store sidecar's flush of the project folder the hook checks, as it reports it",
 )
 
 logger = logging.getLogger(__name__)
@@ -93,7 +93,6 @@ class CheckedError:
 class Checked:
     """What the hook's check answers (design 1 §5.6 step 3)."""
 
-    checked: bool
     errors: list[CheckedError]
     homeless_deferrals: list[HomelessDeferral]
 
@@ -164,16 +163,26 @@ class SyncService:
             .on_conflict_do_nothing(index_elements=[Environment.id])
         )
 
-    def put(self, path: str, content: bytes, base_hash: str | None) -> Ingested:
+    def put(
+        self, path: str, content: bytes, base_hash: str | None, writer: str | None
+    ) -> Ingested:
         """The store's save of `path`, from the tree's root, with the hash its
         sidecar last synced for the path, none when it has none: the engine's
         ingest, its Save Errors keyed by the store's Environment, which
-        `admit()` made."""
+        `admit()` made. `writer` is the Session the sidecar says held the
+        write lock of the path's project folder as it read the file, none
+        when none held it: the save is that Session's when it is a brain
+        session, a chat's or a job's, of the syncing project whose folder
+        holds the path; any other value is logged, and the save is no
+        Session's."""
         started = time.perf_counter()
         environment = self.db.get_one(
             Environment, self.app_settings.store_environment_id
         )
-        answer = self.ingest_service.ingest(path, content, base_hash, environment, None)
+        session = None if writer is None else self._writer(path, writer)
+        answer = self.ingest_service.ingest(
+            path, content, base_hash, environment, session
+        )
         INGEST_SECONDS.labels(kind=answer.kind, outcome=_outcome(answer)).observe(
             time.perf_counter() - started
         )
@@ -238,28 +247,23 @@ class SyncService:
             )
         return Reconciled(manifest, send_up, write_down, delete)
 
-    def check(self, path: str, disk_hash: str, wait_seconds: float) -> Checked:
-        """The hook's check of `path`, from the tree's root, whose file holds
-        `disk_hash` once the store's sidecar has had it acked, after
-        `wait_seconds` of waiting for that (design 1 §5.6 step 3).
+    def check(self, folder: str, wait_seconds: float) -> Checked:
+        """The hook's check of the project folder `folder`, from the tree's
+        root, once the store's sidecar has flushed it, which took
+        `wait_seconds` (design 1 §5.6 step 3).
 
-        `checked` says whether the server agrees with that hash, a
-        disagreement logged. The errors are the Save Errors of the store's
-        Environment under the folder of the syncing project that holds `path`,
-        in path order: its `reverted` rows are deleted as they are read, so
-        each is reported once, to that project's check alone, and its `parse`
-        rows stand until a clean save of their path. With them, that project's
-        deferrals without a home. A path under no syncing project's folder is
-        answered its own Save Errors alone.
+        The errors are the Save Errors of the store's Environment under the
+        folder, in path order: its `reverted` rows are deleted as they are
+        read, so each is reported once, and its `parse` rows stand until a
+        clean save of their path. With them, the deferrals without a home of
+        the syncing project whose folder it is, none for a folder of no
+        syncing project.
         """
         HOOK_WAIT_SECONDS.observe(wait_seconds)
-        checked = self._agrees(path, disk_hash)
-        project = self.tree_service.project_of(path)
+        project = self.tree_service.project_in(folder)
         scope = (
             SaveError.environment_id == self.app_settings.store_environment_id,
-            SaveError.path == path
-            if project is None
-            else SaveError.path.startswith(f"{folder(project)}/"),
+            SaveError.path.startswith(f"{folder}/", autoescape=True),
         )
         columns = (
             SaveError.id,
@@ -285,39 +289,31 @@ class SyncService:
         deferrals = (
             [] if project is None else self.plan_service.homeless_deferrals(project)
         )
-        return Checked(checked, errors, deferrals)
+        return Checked(errors, deferrals)
 
-    def _agrees(self, path: str, disk_hash: str) -> bool:
-        """Whether the server agrees `path` holds `disk_hash`: the path's tree
-        hash, or the hash of the latest save it took of the path. A held
-        `plan.json`'s save is stored nowhere (design 1 §5.3 step 3), so the
-        server agrees with any hash while its `parse` Save Errors stand."""
+    def _writer(self, path: str, writer: str) -> AgentSession | None:
+        """The Session `writer` names, when it is a brain session of the
+        syncing project whose folder holds `path`; else none, logged."""
+        project = self.tree_service.project_of(path)
         try:
-            resolved = self.tree_service.resolve(path)
-        except RecordNotFoundException:
-            logger.info("Sync check of %s: not a path the store syncs", path)
-            return False
-        agreed: set[str | None]
-        if isinstance(resolved, TreeFile):
-            agreed = {resolved.hash}
-        elif isinstance(resolved, TreePlan):
-            if self.tree_service.held_path(path):
-                return True
-            agreed = {self.plan_service.render(resolved.project).hash}
-        else:
-            agreed = {
-                self.tree_service.hash(resolved.project, resolved.document),
-                resolved.document.ingested_hash,
-            }
-        if disk_hash in agreed:
-            return True
+            session_id = uuid.UUID(writer)
+        except ValueError:
+            session_id = None
+        session = None if session_id is None else self.db.get(AgentSession, session_id)
+        if (
+            session is not None
+            and project is not None
+            and session.project_id == project.id
+            and self.db.get_one(SessionKind, session.kind_code).surface == Surface.STORE
+        ):
+            return session
         logger.warning(
-            "Sync check of %s: the store's sidecar has %s acked, which the"
-            " server does not hold for the path",
+            "Sync PUT of %s: the store's sidecar credits it to %r, no brain"
+            " session of the path's project; ingested as no Session's",
             path,
-            disk_hash,
+            writer,
         )
-        return False
+        return None
 
 
 def _outcome(answer: Ingested) -> Outcome:

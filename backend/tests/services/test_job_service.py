@@ -176,7 +176,12 @@ class TestSetup:
             create.request.sandbox_read_only_cwd,
             create.request.sandbox_writable_dirs,
             create.request.env,
-        ) == (STORE_REPO, True, [FOLDER], [f"PILOT_PROJECT={FOLDER}"])
+        ) == (
+            STORE_REPO,
+            True,
+            [FOLDER],
+            [f"PILOT_PROJECT={FOLDER}", f"PILOT_SESSION={job.id}"],
+        )
 
     def test_it_is_held_while_the_project_is_paused(
         self,

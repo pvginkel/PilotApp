@@ -243,7 +243,9 @@ class DocumentService:
         session_id: uuid.UUID | None = None,
     ) -> None:
         """A Document Version of the published text, numbered after the
-        document's highest; `session_id` the Session it is of, if any."""
+        document's highest; `session_id` the Session it is of, if any. Its
+        `created_at` is the clock's, as a Turn's `started_at` and a
+        Document's `published_at` are, so that the three compare."""
         number = (
             self.db.scalar(
                 select(func.max(DocumentVersion.number)).where(
@@ -260,6 +262,7 @@ class DocumentService:
                 text=document.published_text,
                 hash=document.published_hash,
                 session_id=session_id,
+                created_at=datetime.now(UTC),
             )
         )
         self.db.flush()

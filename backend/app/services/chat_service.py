@@ -50,7 +50,16 @@ from sqlalchemy.orm import Session
 from app.engine.paths import DRAFT
 from app.engine.views import ListedChat, ViewService
 from app.exceptions import InvalidOperationException, RecordNotFoundException
-from app.models import Block, Chat, Document, Item, Project, Turn, User
+from app.models import (
+    Block,
+    Chat,
+    Document,
+    DocumentVersion,
+    Item,
+    Project,
+    Turn,
+    User,
+)
 from app.models import Session as AgentSession
 from app.models.reference import (
     ChatKind,
@@ -254,17 +263,40 @@ class ChatService:
 
     def _handbook_changed(self, project: Project, session: AgentSession) -> bool:
         """Whether the project's handbook was published after the chat's
-        previous Turn that reached the brain was sent: one whose send failed
-        (F125) never went out, nor the notice it carried, so its retry
-        carries it again."""
-        published = self.db.scalar(
-            select(Document.published_at).where(
+        previous Turn that reached the brain was sent, by anyone but the chat
+        itself: one whose send failed (F125) never went out, nor the notice it
+        carried, so its retry carries it again. A publication since then is
+        the chat's own when every Version cut of the handbook since is of the
+        chat's Session and its published text is the latest Version's, every
+        Document being born with one; a Version of no Session is a change."""
+        handbook = self.db.execute(
+            select(Document.id, Document.published_at, Document.published_hash).where(
                 Document.project_id == project.id,
                 Document.role_code == DocumentRole.HANDBOOK,
             )
-        )
-        if published is None:
+        ).one_or_none()
+        if handbook is None or handbook.published_at is None:
             return False
+        sent = self._previous_sent(session)
+        if sent is None or handbook.published_at <= sent:
+            return False
+        versions = self.db.execute(
+            select(
+                DocumentVersion.session_id,
+                DocumentVersion.hash,
+                DocumentVersion.created_at,
+            )
+            .where(DocumentVersion.document_id == handbook.id)
+            .order_by(DocumentVersion.number.desc())
+        ).all()
+        since = [version for version in versions if version.created_at > sent]
+        return versions[0].hash != handbook.published_hash or any(
+            version.session_id != session.id for version in since
+        )
+
+    def _previous_sent(self, session: AgentSession) -> datetime | None:
+        """When the chat's previous Turn that reached the brain was sent; none
+        while none did."""
         turns = self.db.execute(
             select(Turn.id, Turn.started_at, Turn.error)
             .where(Turn.session_id == session.id)
@@ -279,8 +311,8 @@ class ChatService:
                 payload_type=SEND_FAILED,
                 limit=1,
             ):
-                return published > started_at
-        return False
+                return started_at
+        return None
 
     def _start(
         self, project_id: uuid.UUID, person: User, words: Words, operation: str

@@ -19,8 +19,8 @@ FAIL line each:
 1. A file edited in the tree reaches the record.
 2. A record edit rewrites the file, and the sidecar does not send its own
    write back.
-3. The hook's local check answers: a clean save, lines the record reverted,
-   a stray file.
+3. The hooks' lock and release answer: a clean save, lines the record
+   reverted, a stray file, each written inside a hold its release flushes.
 4. A dropped connection reconciles: edits made on both sides while it is
    down cross on the reconnect.
 5. A `manifest` event reconciles: a record file deleted from the tree is
@@ -48,7 +48,6 @@ import tempfile
 import threading
 import time
 import urllib.error
-import urllib.parse
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -60,13 +59,14 @@ ENV_FILE = ROOT / "backend" / ".env"
 BACKEND_PORT = 3501
 BACKEND = f"http://127.0.0.1:{BACKEND_PORT}"
 # sidecar/internal/protocol.Version
-PROTOCOL = "1"
+PROTOCOL = "2"
 ENVIRONMENT_VAR = "KUBECODER_ENVIRONMENT_ID"
 # sidecar/internal/files.TempPrefix: the sidecar's own temporary files.
 TEMP_PREFIX = ".pilot-sync-"
 
 # The dev seed's (backend/app/services/test_data_service.py).
-HANDBOOK = "recipe-box/handbook.md"
+FOLDER = "recipe-box"
+HANDBOOK = f"{FOLDER}/handbook.md"
 DRAFT = "draft-*/project.md"
 OPENING = "recipe-box/items/1-*.md"
 IMPORT_PLAN = "recipe-box/items/*-how-to-import-the-remaining-cards.md"
@@ -433,10 +433,26 @@ class Proof:
     local_port: int
     details: list[str] = field(default_factory=list)
 
-    def check(self, path: str) -> Response:
-        """The hook's check of path, as the hook calls it."""
-        query = urllib.parse.quote(str(self.tree.file(path)), safe="/")
-        return call("GET", f"http://127.0.0.1:{self.local_port}/check?path={query}")
+    def hook(self, route: str) -> Response:
+        """A hook's /lock or /release of the seed's project folder, as the
+        proof's own session, by this process."""
+        return call_json(
+            "POST",
+            f"http://127.0.0.1:{self.local_port}/{route}",
+            {
+                "project": str(self.tree.file(FOLDER)),
+                "session": "the-live-proof",
+                "pid": os.getpid(),
+            },
+        )
+
+    def held(self, write: Callable[[], None]) -> Response:
+        """write run inside a hold of the folder's lock, and the release's
+        answer."""
+        locked = self.hook("lock")
+        expect(locked.status == 200, f"lock {FOLDER}: {locked.status}")
+        write()
+        return self.hook("release")
 
     def in_step(self) -> str:
         """The tree is the record's projection: every path of the manifest
@@ -515,22 +531,29 @@ class Proof:
         expect(health.status == 200 and health.body == b"ok\n", "/healthz")
 
         mark = self.log.mark()
-        clean = self.check(HANDBOOK)
+        edited = self.tree.read(HANDBOOK) or b""
+        clean = self.held(
+            lambda: self.tree.write(HANDBOOK, edited + b"- Another proof line.\n")
+        )
         clean_text = clean.body.decode()
-        expect(clean.status == 200, f"check {HANDBOOK}: {clean.status}")
-        expect(not clean_text.startswith("not yet checked"), clean_text)
+        expect(clean.status == 200, f"release {FOLDER}: {clean.status}")
+        expect("not yet checked" not in clean_text, clean_text)
         until(
-            "pilot-sync logs it checked and agreed",
-            lambda: self.log.find("checked", mark, path=HANDBOOK, agreed="true"),
+            "pilot-sync logs it synced and checked",
+            lambda: self.log.find("synced", mark, path=HANDBOOK)
+            and self.log.find("checked", mark, folder=FOLDER),
         )
         self.details += [f"    a clean save, {HANDBOOK}:", indented(clean_text)]
 
         opening = self.tree.find(OPENING)
         published = self.tree.read(opening) or b""
-        self.tree.write(opening, published + b"\nA line the opening never had.\n")
-        reverted = self.check(opening)
+        reverted = self.held(
+            lambda: self.tree.write(
+                opening, published + b"\nA line the opening never had.\n"
+            )
+        )
         reverted_text = reverted.body.decode()
-        expect(reverted.status == 200, f"check {opening}: {reverted.status}")
+        expect(reverted.status == 200, f"release {FOLDER}: {reverted.status}")
         expect(f"{opening}:" in reverted_text, f"no reverted line: {reverted_text!r}")
         expect(self.tree.read(opening) == published, f"{opening} is not reverted")
         self.details += [
@@ -538,10 +561,9 @@ class Proof:
             indented(reverted_text),
         ]
 
-        self.tree.write(STRAY, b"# Notes no item bore\n")
-        stray = self.check(STRAY)
+        stray = self.held(lambda: self.tree.write(STRAY, b"# Notes no item bore\n"))
         stray_text = stray.body.decode()
-        expect(stray.status == 200, f"check {STRAY}: {stray.status}")
+        expect(stray.status == 200, f"release {FOLDER}: {stray.status}")
         expect(
             f"{STRAY}: not a document of the record" in stray_text,
             f"no stray note: {stray_text!r}",
@@ -674,7 +696,7 @@ def prove(work: Path, environment: str) -> bool:
                 proof.tree_reaches_record,
             ),
             (2, "A record edit rewrites the file", proof.record_rewrites_file),
-            (3, "The hook's local check answers", proof.hook_check_answers),
+            (3, "The hooks' lock and release answer", proof.hook_check_answers),
             (4, "A dropped connection reconciles", proof.dropped_connection_reconciles),
             (5, "A `manifest` event reconciles", proof.manifest_reconciles),
         ):

@@ -102,8 +102,9 @@ class IngestService:
         """Take the store's save of `path`, from the tree's root.
 
         `base_hash` is the hash the sidecar last synced for the path, none
-        when it has none; `session` the Session whose turn wrote the save,
-        none while that is not known (design 1 §7).
+        when it has none; `session` the Session the save is credited to, the
+        one that held the write lock of the path's project folder, none when
+        it is no Session's (design 1 §7).
 
         A read-only path stores nothing and is answered with its projection.
         A save of `plan.json` writes the plan's rows, or on any fault changes

@@ -187,7 +187,7 @@ class TestSyncService:
         self, session: DbSession, container: ServiceContainer
     ) -> None:
         # No controller is configured: the id names the store.
-        _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "1")
+        _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "2")
 
         store = session.get_one(Environment, STORE_ENVIRONMENT_ID)
         assert (store.id, store.name, store.exempt) == (
@@ -208,8 +208,8 @@ class TestSyncService:
             STORE_ENVIRONMENT_ID, name="Store", status="running", exempt=True
         )
 
-        _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "1")
-        _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "1")
+        _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "2")
+        _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "2")
 
         store = session.get_one(Environment, STORE_ENVIRONMENT_ID)
         assert (store.name, store.exempt, store.last_state) == (
@@ -229,7 +229,7 @@ class TestSyncService:
     ) -> None:
         _configure(container, controller_url=fake_controller.url)
 
-        _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "1")
+        _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "2")
 
         session.refresh(environment)
         assert (environment.name, environment.exempt) == ("Example-1", False)
@@ -245,7 +245,7 @@ class TestSyncService:
         _configure(container, controller_url=fake_controller.url)
 
         with pytest.raises(ControllerProblem) as raised:
-            _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "1")
+            _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "2")
 
         assert raised.value.problem_type is ControllerProblemType.NOT_FOUND
         assert session.get(Environment, STORE_ENVIRONMENT_ID) is None
@@ -261,7 +261,7 @@ class TestSyncService:
         fake_controller.add_environment(
             STORE_ENVIRONMENT_ID, status="stopped", exempt=True
         )
-        _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "1")
+        _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "2")
         environments = container.environment_service()
 
         settled = environments.start(STORE_ENVIRONMENT_ID)
@@ -288,8 +288,8 @@ class TestSyncService:
         container: ServiceContainer,
         environment: Environment,
     ) -> None:
-        _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "1")
-        _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "1")
+        _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "2")
+        _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "2")
 
         session.refresh(environment)
         assert environment.name == "Example-1"
@@ -303,7 +303,7 @@ class TestSyncService:
         self, session: DbSession, container: ServiceContainer, authorization: str | None
     ) -> None:
         with pytest.raises(AuthenticationException):
-            _sync(container).admit(authorization, STORE_ENVIRONMENT_ID, "1")
+            _sync(container).admit(authorization, STORE_ENVIRONMENT_ID, "2")
 
         assert session.get(Environment, STORE_ENVIRONMENT_ID) is None
 
@@ -314,13 +314,13 @@ class TestSyncService:
 
         for authorization in (BEARER, "Bearer ", None):
             with pytest.raises(AuthenticationException):
-                _sync(container).admit(authorization, STORE_ENVIRONMENT_ID, "1")
+                _sync(container).admit(authorization, STORE_ENVIRONMENT_ID, "2")
 
     def test_admit_refuses_a_bearer_that_is_not_ascii(
         self, container: ServiceContainer
     ) -> None:
         with pytest.raises(AuthenticationException):
-            _sync(container).admit("Bearer tökén", STORE_ENVIRONMENT_ID, "1")
+            _sync(container).admit("Bearer tökén", STORE_ENVIRONMENT_ID, "2")
 
     @pytest.mark.parametrize("environment_id", [None, "", "example-env-2"])
     def test_admit_refuses_another_environment(
@@ -330,7 +330,7 @@ class TestSyncService:
         environment_id: str | None,
     ) -> None:
         with pytest.raises(AuthorizationException) as refused:
-            _sync(container).admit(BEARER, environment_id, "1")
+            _sync(container).admit(BEARER, environment_id, "2")
 
         assert repr(environment_id) in refused.value.message
         assert session.scalars(select(Environment)).all() == []
@@ -342,16 +342,16 @@ class TestSyncService:
 
         for environment_id in ("", STORE_ENVIRONMENT_ID):
             with pytest.raises(AuthorizationException):
-                _sync(container).admit(BEARER, environment_id, "1")
+                _sync(container).admit(BEARER, environment_id, "2")
 
-    @pytest.mark.parametrize("protocol", [None, "", "0", "2", "one", "+1", " 1", "1.0"])
+    @pytest.mark.parametrize("protocol", [None, "", "1", "3", "one", "+2", " 2", "2.0"])
     def test_admit_refuses_a_version_outside_the_range(
         self, session: DbSession, container: ServiceContainer, protocol: str | None
     ) -> None:
         with pytest.raises(SyncProtocolUnsupportedException) as refused:
             _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, protocol)
 
-        assert (refused.value.minimum, refused.value.maximum) == (1, 1)
+        assert (refused.value.minimum, refused.value.maximum) == (2, 2)
         assert session.get(Environment, STORE_ENVIRONMENT_ID) is None
 
     def test_put_keys_its_save_errors_by_the_stores_environment(
@@ -362,9 +362,9 @@ class TestSyncService:
         project_session: models.Session,
     ) -> None:
         path = _bear_item(container, project, project_session)
-        _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "1")
+        _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "2")
 
-        answer = _sync(container).put(path, BROKEN.encode(), sha256_hex(ANSWERED))
+        answer = _sync(container).put(path, BROKEN.encode(), sha256_hex(ANSWERED), None)
 
         assert answer.held
         assert {
@@ -379,11 +379,11 @@ class TestSyncService:
         project_session: models.Session,
     ) -> None:
         path = _bear_item(container, project, project_session)
-        _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "1")
+        _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "2")
         before = (_ingests("document", "published"), _stale_puts())
         edited = ANSWERED.replace("# Which tent?", "# Which tent for the lake?")
 
-        answer = _sync(container).put(path, edited.encode(), sha256_hex(ANSWERED))
+        answer = _sync(container).put(path, edited.encode(), sha256_hex(ANSWERED), None)
 
         assert (answer.kind, answer.held, answer.faults) == (
             PathKind.DOCUMENT,
@@ -402,11 +402,11 @@ class TestSyncService:
         project_session: models.Session,
     ) -> None:
         path = _bear_item(container, project, project_session)
-        _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "1")
+        _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "2")
         before = (_ingests("document", "reverted"), _faults("reverted"))
         save = ANSWERED.replace("by: ada", "by: agent")
 
-        answer = _sync(container).put(path, save.encode(), sha256_hex(ANSWERED))
+        answer = _sync(container).put(path, save.encode(), sha256_hex(ANSWERED), None)
 
         assert len(answer.faults) == 1
         assert (_ingests("document", "reverted"), _faults("reverted")) == (
@@ -421,10 +421,10 @@ class TestSyncService:
         project_session: models.Session,
     ) -> None:
         path = _bear_item(container, project, project_session)
-        _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "1")
+        _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "2")
         before = (_ingests("document", "held"), _faults("parse"), _faults("reverted"))
 
-        answer = _sync(container).put(path, BROKEN.encode(), sha256_hex(ANSWERED))
+        answer = _sync(container).put(path, BROKEN.encode(), sha256_hex(ANSWERED), None)
 
         assert answer.faults
         assert (
@@ -437,11 +437,11 @@ class TestSyncService:
         self, container: ServiceContainer, project: Project
     ) -> None:
         path = f"draft-{project.number}/plan.json"
-        _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "1")
+        _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "2")
         before = (_ingests("plan", "published"), _ingests("plan", "held"))
 
-        published = _sync(container).put(path, PLAN.encode(), None)
-        held = _sync(container).put(path, MISSPELT_PLAN.encode(), published.hash)
+        published = _sync(container).put(path, PLAN.encode(), None, None)
+        held = _sync(container).put(path, MISSPELT_PLAN.encode(), published.hash, None)
 
         assert (published.kind, held.kind, held.held) == (
             PathKind.PLAN,
@@ -456,11 +456,11 @@ class TestSyncService:
     def test_put_observes_a_read_only_path_and_a_stale_base(
         self, container: ServiceContainer, project: Project
     ) -> None:
-        _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "1")
+        _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "2")
         before = (_ingests("view", "readonly"), _stale_puts())
 
         answer = _sync(container).put(
-            f"draft-{project.number}/timeline.json", b"{}\n", None
+            f"draft-{project.number}/timeline.json", b"{}\n", None, None
         )
 
         assert (answer.kind, answer.stale) == (PathKind.VIEW, True)
@@ -472,11 +472,11 @@ class TestSyncService:
     def test_put_refuses_a_path_of_no_syncing_project(
         self, container: ServiceContainer
     ) -> None:
-        _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "1")
+        _sync(container).admit(BEARER, STORE_ENVIRONMENT_ID, "2")
         before = _stale_puts()
 
         with pytest.raises(RecordNotFoundException):
-            _sync(container).put("example/notes.md", b"# Stray\n", None)
+            _sync(container).put("example/notes.md", b"# Stray\n", None, None)
 
         assert _stale_puts() == before
 
@@ -572,8 +572,8 @@ class TestSyncService:
     ) -> None:
         item = _bear_item(container, project, project_session)
         sync = _sync(container)
-        sync.admit(BEARER, STORE_ENVIRONMENT_ID, "1")
-        held = sync.put(item, BROKEN.encode(), sha256_hex(ANSWERED))
+        sync.admit(BEARER, STORE_ENVIRONMENT_ID, "2")
+        held = sync.put(item, BROKEN.encode(), sha256_hex(ANSWERED), None)
         tree = {entry.path: entry.hash for entry in container.tree_service().manifest()}
 
         answer = sync.reconcile(tree, tree)
@@ -592,8 +592,8 @@ class TestSyncService:
         path = f"draft-{project.number}/plan.json"
         with scoped_session(container):
             sync = _sync(container)
-            sync.admit(BEARER, STORE_ENVIRONMENT_ID, "1")
-            held = sync.put(path, MISSPELT_PLAN.encode(), None)
+            sync.admit(BEARER, STORE_ENVIRONMENT_ID, "2")
+            held = sync.put(path, MISSPELT_PLAN.encode(), None, None)
         tree = {entry.path: entry.hash for entry in container.tree_service().manifest()}
         engine_events.clear()
 
@@ -667,9 +667,9 @@ class TestSyncService:
         session.flush()
         sync = _sync(container)
 
-        first = sync.check("camp/a.md", HASH, 0.0)
-        second = sync.check("camp/a.md", HASH, 0.0)
-        drafts = sync.check(f"{draft}/b.md", HASH, 0.0)
+        first = sync.check("camp", 0.0)
+        second = sync.check("camp", 0.0)
+        drafts = sync.check(draft, 0.0)
 
         assert first.errors == [
             CheckedError("camp/a.md", ErrorKind.PARSE, None, "parse on line None"),
@@ -690,44 +690,35 @@ class TestSyncService:
             ("example-env-2", "camp/a.md", ErrorKind.REVERTED),
         ]
 
-    @pytest.mark.parametrize(
-        ("path", "sibling"),
-        [
-            ("reference.json", "notes.md"),
-            ("campsite/a.md", "campsite/b.md"),
-            ("{archived}/a.md", "{archived}/b.md"),
-        ],
-    )
-    def test_check_under_no_syncing_folder_reports_the_paths_own_errors_alone(
+    @pytest.mark.parametrize("folder", ["campsite", "{archived}"])
+    def test_check_of_a_folder_of_no_syncing_project_reports_its_errors_alone(
         self,
         session: DbSession,
         container: ServiceContainer,
         project: Project,
         project_session: models.Session,
         person: User,
-        path: str,
-        sibling: str,
+        folder: str,
     ) -> None:
         archived = _project(session, person)
         archived.archived = True
         session.flush()
-        path, sibling = (
-            name.format(archived=f"draft-{archived.number}") for name in (path, sibling)
-        )
+        folder = folder.format(archived=f"draft-{archived.number}")
+        path = f"{folder}/a.md"
         _deferral(container, project, project_session, person)
         draft = f"draft-{project.number}/a.md"
         session.add_all(
             [
                 _error(STORE_ENVIRONMENT_ID, path, ErrorKind.REVERTED, 1),
                 _error(STORE_ENVIRONMENT_ID, path, ErrorKind.PARSE, 2),
-                _error(STORE_ENVIRONMENT_ID, sibling, ErrorKind.REVERTED, 3),
+                _error(STORE_ENVIRONMENT_ID, "reference.json", ErrorKind.REVERTED, 3),
                 _error(STORE_ENVIRONMENT_ID, draft, ErrorKind.REVERTED, 4),
             ]
         )
         session.flush()
 
-        first = _sync(container).check(path, HASH, 0.0)
-        second = _sync(container).check(path, HASH, 0.0)
+        first = _sync(container).check(folder, 0.0)
+        second = _sync(container).check(folder, 0.0)
 
         assert first.errors == [
             CheckedError(path, ErrorKind.REVERTED, 1, "reverted on line 1"),
@@ -741,7 +732,7 @@ class TestSyncService:
         ) == sorted(
             [
                 (path, ErrorKind.PARSE),
-                (sibling, ErrorKind.REVERTED),
+                ("reference.json", ErrorKind.REVERTED),
                 (draft, ErrorKind.REVERTED),
             ]
         )
@@ -761,8 +752,8 @@ class TestSyncService:
         sync = _sync(container)
 
         answers = [
-            sync.check(path, HASH, 0.0).homeless_deferrals
-            for path in (f"draft-{project.number}/plan.json", "camp/plan.json")
+            sync.check(folder, 0.0).homeless_deferrals
+            for folder in (f"draft-{project.number}", "camp")
         ]
 
         assert [
@@ -773,68 +764,12 @@ class TestSyncService:
             [(theirs, "camp/items/1-camp-chores.md")],
         ]
 
-    def test_check_agrees_with_a_documents_tree_hash_and_its_latest_save(
-        self,
-        container: ServiceContainer,
-        caplog: pytest.LogCaptureFixture,
-        project: Project,
-        project_session: models.Session,
-    ) -> None:
-        item = _bear_item(container, project, project_session)
-        sync = _sync(container)
-        sync.admit(BEARER, STORE_ENVIRONMENT_ID, "1")
-        save = ANSWERED.replace("by: ada", "by: agent")
-        merged = sync.put(item, save.encode(), sha256_hex(ANSWERED))
-
-        with caplog.at_level(logging.INFO):
-            agreed = [
-                sync.check(item, disk_hash, 0.0).checked
-                for disk_hash in (merged.hash, sha256_hex(save))
-            ]
-
-        assert merged.hash == sha256_hex(ANSWERED) != sha256_hex(save)
-        assert agreed == [True, True]
-        assert caplog.text == ""
-
-    def test_check_logs_a_hash_the_server_does_not_hold(
-        self,
-        container: ServiceContainer,
-        caplog: pytest.LogCaptureFixture,
-        project: Project,
-        project_session: models.Session,
-    ) -> None:
-        item = _bear_item(container, project, project_session)
-
-        with caplog.at_level(logging.WARNING):
-            answer = _sync(container).check(item, HASH, 0.0)
-
-        assert not answer.checked
-        assert f"Sync check of {item}: the store's sidecar has {HASH} acked" in (
-            caplog.text
-        )
-
-    def test_check_of_a_path_the_store_does_not_sync_is_not_checked(
-        self,
-        container: ServiceContainer,
-        caplog: pytest.LogCaptureFixture,
-        project: Project,
-    ) -> None:
-        stray = f"draft-{project.number}/notes.md"
-
-        with caplog.at_level(logging.INFO):
-            answer = _sync(container).check(stray, HASH, 0.0)
-
-        assert not answer.checked
-        assert [
-            (record.levelname, record.getMessage()) for record in caplog.records
-        ] == [("INFO", f"Sync check of {stray}: not a path the store syncs")]
-
     def test_check_observes_the_hooks_wait(
         self, container: ServiceContainer, environment: Environment
     ) -> None:
         count, total = _hook_waits()
 
-        _sync(container).check("reference.json", HASH, 0.25)
-        _sync(container).check("reference.json", HASH, 1.5)
+        _sync(container).check("example", 0.25)
+        _sync(container).check("example", 1.5)
 
         assert _hook_waits() == (count + 2, total + 1.75)

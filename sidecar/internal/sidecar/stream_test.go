@@ -299,7 +299,7 @@ func TestWaitsAMinuteOnA426(t *testing.T) {
 	s.opens(func(attempt int) (int, string) {
 		switch attempt {
 		case 1:
-			return http.StatusUpgradeRequired, `{"min": 2, "max": 3}`
+			return http.StatusUpgradeRequired, `{"min": 3, "max": 4}`
 		case 2:
 			return http.StatusServiceUnavailable, `{"error": "unavailable"}`
 		}
@@ -312,7 +312,7 @@ func TestWaitsAMinuteOnA426(t *testing.T) {
 	if got := next(); got != time.Minute {
 		t.Errorf("waited %v after a 426", got)
 	}
-	if !strings.Contains(logged.String(), "min=2 max=3 version=1") {
+	if !strings.Contains(logged.String(), "min=3 max=4 version=2") {
 		t.Errorf("logged %q, not the two numbers", logged.String())
 	}
 	if got := next(); got != time.Second {

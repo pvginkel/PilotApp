@@ -2,8 +2,9 @@
 as dicts, the real sync routes driven through Flask's test client as the
 store's sidecar drives them, with its bearer and the three headers, its change
 stream read between steps and applied as the sidecar applies it, the manifest
-reconcile run as the sidecar runs it, and the hook's check answered with the
-text the agent is told."""
+reconcile run as the sidecar runs it, each project folder's write lock held
+by a session whose saves its uploads carry, and the hook's release answered
+with the text the agent is told."""
 
 import hashlib
 import json
@@ -44,23 +45,14 @@ class Put:
     faults: int
 
 
-@dataclass(frozen=True)
-class Check:
-    """What the hook's check came to: whether the server agreed with the
-    file's hash, and the text the agent is told, empty when there is
-    nothing to tell."""
-
-    checked: bool
-    text: str
-
-
 class FakeSidecar:
     """The sidecar of the store's environment, with `/work/Projects` as
     `tree`: path to bytes, the paths from the tree's root.
 
     `shadow` holds each path's hash as last synced. `notes` holds the local
-    notes the hook prints, by path. `hello` is the change stream's first
-    event, as it last opened.
+    notes the hook prints, by path. `writers` holds the session holding each
+    project folder's write lock, by folder. `hello` is the change stream's
+    first event, as it last opened.
     """
 
     def __init__(self, client: FlaskClient) -> None:
@@ -68,6 +60,7 @@ class FakeSidecar:
         self.tree: dict[str, bytes] = {}
         self.shadow: dict[str, str] = {}
         self.notes: dict[str, str] = {}
+        self.writers: dict[str, str] = {}
         self.hello: dict[str, Any] | None = None
         self._stream: TestResponse | None = None
         self._frames: Iterator[str] | None = None
@@ -86,17 +79,23 @@ class FakeSidecar:
             "/api/sync/events", headers=sync_headers(), buffered=False
         )
 
-    def put(self, path: str, content: bytes, base_hash: str | None) -> TestResponse:
-        """`PUT /api/sync/files/<path>` as the sidecar sends it."""
-        return self.client.put(
-            _url(path),
-            data=content,
-            headers={
-                **sync_headers(),
-                "Content-Type": "application/octet-stream",
-                "X-Pilot-Base-Hash": base_hash or "none",
-            },
-        )
+    def put(
+        self,
+        path: str,
+        content: bytes,
+        base_hash: str | None,
+        session: str | None = None,
+    ) -> TestResponse:
+        """`PUT /api/sync/files/<path>` as the sidecar sends it, `session` the
+        one holding the path's project folder's write lock, if any."""
+        headers = {
+            **sync_headers(),
+            "Content-Type": "application/octet-stream",
+            "X-Pilot-Base-Hash": base_hash or "none",
+        }
+        if session is not None:
+            headers["X-Pilot-Session"] = session
+        return self.client.put(_url(path), data=content, headers=headers)
 
     def get(self, path: str) -> TestResponse:
         """`GET /api/sync/files/<path>` as the sidecar sends it."""
@@ -112,23 +111,39 @@ class FakeSidecar:
             headers=sync_headers(),
         )
 
-    def post_check(self, path: str, hash: str, wait_seconds: float) -> TestResponse:
+    def post_check(self, folder: str, wait_seconds: float) -> TestResponse:
         """`POST /api/sync/check` as the sidecar sends it."""
         return self.client.post(
             "/api/sync/check",
-            json={"path": path, "hash": hash, "wait_seconds": wait_seconds},
+            json={"folder": folder, "wait_seconds": wait_seconds},
             headers=sync_headers(),
         )
 
-    def check(self, path: str) -> Check:
-        """The hook's check of `path` after the agent's edit (design 1 §5.6):
-        the sidecar hashes the file on disk, which its uploads have acked by
-        now with no wait, posts the check, and renders the answer as the hook
-        prints it: each error as `<path>:<line>: <message>`, the line left
-        out when it has none; then each local note as `<path>: <note>`, in
+    def lock(self, folder: str, session: str) -> None:
+        """A hook takes the write lock of `folder` for `session`, which holds
+        it until its release."""
+        assert self.writers.get(folder, session) == session, (
+            f"{folder} is held by another session"
+        )
+        self.writers[folder] = session
+
+    def release(self, folder: str) -> str:
+        """The hook's release after a tool call (design 1 §5.6): the sidecar
+        uploads every file of `folder` whose hash is not the shadow's, as the
+        save of the session holding the folder's lock; posts the folder's
+        check; lets the lock go; and renders the answer as the hook prints it:
+        each error as `<path>:<line>: <message>`, the line left out when it
+        has none; then each local note of the folder as `<path>: <note>`, in
         path order; then the deferrals without a home under `HOMELESS`, each
-        as `- <block> in <document> (<title>), to: <to>`."""
-        response = self.post_check(path, _sha256(self.tree[path]), 0.0)
+        as `- <block> in <document> (<title>), to: <to>`. Empty when there is
+        nothing to tell."""
+        for path in sorted(self.tree):
+            if path.startswith(f"{folder}/") and _sha256(
+                self.tree[path]
+            ) != self.shadow.get(path):
+                self.upload(path)
+        response = self.post_check(folder, 0.0)
+        self.writers.pop(folder, None)
         assert response.status_code == 200, response.get_data(as_text=True)
         answer: dict[str, Any] = response.json
         lines = [
@@ -137,7 +152,11 @@ class FakeSidecar:
             else f"{error['path']}:{error['line']}: {error['message']}"
             for error in answer["errors"]
         ]
-        lines.extend(f"{noted}: {note}" for noted, note in sorted(self.notes.items()))
+        lines.extend(
+            f"{noted}: {note}"
+            for noted, note in sorted(self.notes.items())
+            if noted.startswith(f"{folder}/")
+        )
         if answer["homeless_deferrals"]:
             lines.append(HOMELESS)
             lines.extend(
@@ -145,7 +164,7 @@ class FakeSidecar:
                 f" ({deferral['title']}), to: {deferral['to']}"
                 for deferral in answer["homeless_deferrals"]
             )
-        return Check(answer["checked"], "".join(f"{line}\n" for line in lines))
+        return "".join(f"{line}\n" for line in lines)
 
     def write(self, path: str, content: str | bytes) -> None:
         """The agent writes `path` while the sidecar is not looking: nothing
@@ -160,10 +179,17 @@ class FakeSidecar:
 
     def upload(self, path: str) -> Put | None:
         """The sidecar puts the file at `path` with its shadow hash as the
-        base, writes the bytes the answer carries in place, and records the
-        answer's hash. A path the server answers 404 stays in the tree with a
-        local note, and the answer is none (design 1 §5.5, D10)."""
-        response = self.put(path, self.tree[path], self.shadow.get(path))
+        base and the session holding its project folder's lock, writes the
+        bytes the answer carries in place, and records the answer's hash. A
+        path the server answers 404 stays in the tree with a local note, and
+        the answer is none (design 1 §5.5, D10)."""
+        folder, nested, _ = path.partition("/")
+        response = self.put(
+            path,
+            self.tree[path],
+            self.shadow.get(path),
+            self.writers.get(folder) if nested else None,
+        )
         if response.status_code == 404:
             self.notes[path] = STRAY
             return None

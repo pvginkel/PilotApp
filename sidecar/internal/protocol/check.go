@@ -9,15 +9,12 @@ import (
 	"time"
 )
 
-// CheckAnswer is the check's answer (design 1 §5.6).
+// CheckAnswer is the check's answer of a project folder (design 1 §5.6).
 type CheckAnswer struct {
-	// Checked says whether the server agrees the file holds the hash posted.
-	Checked bool `json:"checked"`
-	// Errors is the Save Errors of the file's project folder, in path order,
-	// or the file's own under no syncing project's folder.
+	// Errors is the Save Errors under the folder, in path order.
 	Errors []SaveError `json:"errors"`
-	// HomelessDeferrals is the file's project's deferrals without a home,
-	// none under no syncing project's folder.
+	// HomelessDeferrals is the folder's project's deferrals without a home,
+	// none for a folder of no syncing project.
 	HomelessDeferrals []HomelessDeferral `json:"homeless_deferrals"`
 }
 
@@ -41,27 +38,28 @@ type HomelessDeferral struct {
 	To string `json:"to"`
 }
 
-// Check posts the hook's check of the file at path, holding hash, after the
-// sidecar waited waited for its ack: POST /api/sync/check.
-func (c *Client) Check(ctx context.Context, path, hash string, waited time.Duration) (CheckAnswer, error) {
-	body, err := json.Marshal(map[string]any{"path": path, "hash": hash, "wait_seconds": waited.Seconds()})
+// Check posts the hook's check of the project folder folder, from the
+// tree's root, after the sidecar's flush of it took waited: POST
+// /api/sync/check.
+func (c *Client) Check(ctx context.Context, folder string, waited time.Duration) (CheckAnswer, error) {
+	body, err := json.Marshal(map[string]any{"folder": folder, "wait_seconds": waited.Seconds()})
 	if err != nil {
-		return CheckAnswer{}, fmt.Errorf("POST the check of %s: %w", path, err)
+		return CheckAnswer{}, fmt.Errorf("POST the check of %s: %w", folder, err)
 	}
 	ctx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/api/sync/check", bytes.NewReader(body))
 	if err != nil {
-		return CheckAnswer{}, fmt.Errorf("POST the check of %s: %w", path, err)
+		return CheckAnswer{}, fmt.Errorf("POST the check of %s: %w", folder, err)
 	}
 	request.Header.Set("Content-Type", "application/json")
 	answer, err := c.do(request)
 	if err != nil {
-		return CheckAnswer{}, fmt.Errorf("POST the check of %s: %w", path, err)
+		return CheckAnswer{}, fmt.Errorf("POST the check of %s: %w", folder, err)
 	}
 	var checked CheckAnswer
 	if err := json.Unmarshal(answer.body, &checked); err != nil {
-		return CheckAnswer{}, fmt.Errorf("POST the check of %s: answered %q: %w", path, answer.body, err)
+		return CheckAnswer{}, fmt.Errorf("POST the check of %s: answered %q: %w", folder, answer.body, err)
 	}
 	return checked, nil
 }

@@ -134,7 +134,7 @@ func (s *Sidecar) overflowed() {
 // read-only views given the view's mode, and its deletes deleted.
 func (s *Sidecar) reconcile(ctx context.Context) error {
 	t := s.tree
-	disk, err := t.walk()
+	disk, err := t.walk("")
 	if err != nil {
 		return fmt.Errorf("reconcile: walk the tree: %w", err)
 	}
@@ -146,7 +146,7 @@ func (s *Sidecar) reconcile(ctx context.Context) error {
 	}
 	slices.Sort(changed)
 	s.uploads.send(changed)
-	if disk, err = t.walk(); err != nil {
+	if disk, err = t.walk(""); err != nil {
 		return fmt.Errorf("reconcile: walk the tree: %w", err)
 	}
 	answer, err := t.client.Manifest(ctx, disk, t.shadow.Hashes())

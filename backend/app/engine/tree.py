@@ -99,7 +99,7 @@ class TreeService:
         if path == REFERENCE:
             return _file(self.view_service.reference())
         folder, _, rest = path.partition("/")
-        project = self._project(folder)
+        project = self.project_in(folder)
         if project is not None:
             if rest == TIMELINE:
                 return _file(self.view_service.timeline(project))
@@ -140,7 +140,7 @@ class TreeService:
         path at the tree's root and for one under a folder no syncing project
         has, an archived project's included (design 1 §5.6 step 3)."""
         folder, slash, _ = path.partition("/")
-        return self._project(folder) if slash else None
+        return self.project_in(folder) if slash else None
 
     def read(self, path: str) -> TreeFile:
         """The bytes `path` must hold in the tree, and their tree hash."""
@@ -253,8 +253,9 @@ class TreeService:
         )
         return sorted(entries, key=lambda entry: entry.path)
 
-    def _project(self, folder: str) -> Project | None:
-        """The syncing project whose folder is `folder` (DB decision 1)."""
+    def project_in(self, folder: str) -> Project | None:
+        """The syncing project whose folder is `folder`, a name at the tree's
+        root (DB decision 1); none when no syncing project's is."""
         draft = _DRAFT_FOLDER.fullmatch(folder)
         named = (
             Project.slug == folder

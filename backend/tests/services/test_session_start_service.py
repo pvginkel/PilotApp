@@ -5920,6 +5920,7 @@ class TestRunBrain:
             "reasoningEffort": "xhigh",
             "env": [
                 f"PILOT_PROJECT={CAMP_FOLDER}",
+                f"PILOT_SESSION={run.id}",
                 f"PILOT_TOKEN={env['PILOT_TOKEN']}",
             ],
             "mcpConfig": body["mcpConfig"],

@@ -59,7 +59,10 @@ class TestScopedCreate:
                 update={
                     "sandbox_read_only_cwd": True,
                     "sandbox_writable_dirs": ["/work/Projects/soup-club"],
-                    "env": ["PILOT_PROJECT=/work/Projects/soup-club"],
+                    "env": [
+                        "PILOT_PROJECT=/work/Projects/soup-club",
+                        f"PILOT_SESSION={run.id}",
+                    ],
                 }
             ),
             Surface.STORE,
@@ -74,7 +77,7 @@ class TestScopedCreate:
 
         folder = f"/work/Projects/draft-{project.number}"
         assert request.sandbox_writable_dirs == [folder]
-        assert request.env == [f"PILOT_PROJECT={folder}"]
+        assert request.env == [f"PILOT_PROJECT={folder}", f"PILOT_SESSION={run.id}"]
 
     @pytest.mark.parametrize("kind", ["chat", "job"])
     def test_a_finished_projects_brain_session_reads_only_with_no_surface(
@@ -87,7 +90,10 @@ class TestScopedCreate:
             COLUMNS.model_copy(
                 update={
                     "sandbox_read_only_cwd": True,
-                    "env": ["PILOT_PROJECT=/work/Projects/soup-club"],
+                    "env": [
+                        "PILOT_PROJECT=/work/Projects/soup-club",
+                        f"PILOT_SESSION={run.id}",
+                    ],
                 }
             ),
             None,

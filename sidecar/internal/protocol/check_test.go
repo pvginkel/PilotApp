@@ -10,11 +10,10 @@ import (
 	"time"
 )
 
-func TestCheckPostsThePathTheHashAndTheWait(t *testing.T) {
+func TestCheckPostsTheFolderAndTheWait(t *testing.T) {
 	client, requests := serve(t, answerWith(http.StatusOK, map[string]string{"Content-Type": "application/json"},
-		`{"checked": true, "errors": [], "homeless_deferrals": []}`))
-	hash := Hash([]byte("saved"))
-	if _, err := client.Check(context.Background(), "proj/a.md", hash, 1500*time.Millisecond); err != nil {
+		`{"errors": [], "homeless_deferrals": []}`))
+	if _, err := client.Check(context.Background(), "proj", 1500*time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
 	check := <-requests
@@ -24,7 +23,7 @@ func TestCheckPostsThePathTheHashAndTheWait(t *testing.T) {
 	for name, value := range map[string]string{
 		"Authorization":         "Bearer " + token,
 		"X-Pilot-Environment":   environment,
-		"X-Pilot-Sync-Protocol": "1",
+		"X-Pilot-Sync-Protocol": "2",
 		"Content-Type":          "application/json",
 	} {
 		if got := check.request.Header.Get(name); got != value {
@@ -35,21 +34,20 @@ func TestCheckPostsThePathTheHashAndTheWait(t *testing.T) {
 	if err := json.Unmarshal(check.body, &body); err != nil {
 		t.Fatal(err)
 	}
-	if want := map[string]any{"path": "proj/a.md", "hash": hash, "wait_seconds": 1.5}; !reflect.DeepEqual(body, want) {
+	if want := map[string]any{"folder": "proj", "wait_seconds": 1.5}; !reflect.DeepEqual(body, want) {
 		t.Fatalf("posted %v", body)
 	}
 }
 
 func TestCheckReadsTheAnswer(t *testing.T) {
 	client, _ := serve(t, answerWith(http.StatusOK, map[string]string{"Content-Type": "application/json"}, `{
-		"checked": false,
 		"errors": [
 			{"path": "proj/a.md", "kind": "reverted", "line": 3, "message": "reverted"},
 			{"path": "proj/plan.json", "kind": "parse", "line": null, "message": "not JSON"}
 		],
 		"homeless_deferrals": [{"block": "P-4/d2", "document": "proj/a.md", "title": "A", "to": "plan"}]
 	}`))
-	got, err := client.Check(context.Background(), "proj/a.md", Hash([]byte("x")), 0)
+	got, err := client.Check(context.Background(), "proj", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,8 +65,8 @@ func TestCheckReadsTheAnswer(t *testing.T) {
 }
 
 func TestCheckReturnsARefusal(t *testing.T) {
-	client, _ := serve(t, answerWith(http.StatusBadRequest, nil, `[{"loc": ["hash"]}]`))
-	_, err := client.Check(context.Background(), "proj/a.md", "nope", 0)
+	client, _ := serve(t, answerWith(http.StatusBadRequest, nil, `[{"loc": ["folder"]}]`))
+	_, err := client.Check(context.Background(), "proj", 0)
 	var refused *StatusError
 	if !errors.As(err, &refused) || refused.Status != http.StatusBadRequest {
 		t.Fatalf("got %v", err)

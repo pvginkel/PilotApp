@@ -26,7 +26,7 @@ import (
 // X-Pilot-Sync-Protocol on every call. A change to any request or response
 // shape of the sync routes bumps it, and the server's SYNC_PROTOCOL_MAX, in
 // one commit (design 1 §5.1).
-const Version = 1
+const Version = 2
 
 // callTimeout bounds a call that is not the change stream.
 const callTimeout = 30 * time.Second
@@ -93,8 +93,10 @@ type PutAnswer struct {
 }
 
 // Put saves content as the file at path, base the hash it last synced with,
-// "" when it has none: PUT /api/sync/files/<path>.
-func (c *Client) Put(ctx context.Context, path string, content []byte, base string) (PutAnswer, error) {
+// "" when it has none, and session the Session holding the write lock of
+// the path's project folder as the file was read, "" when none held it:
+// PUT /api/sync/files/<path>.
+func (c *Client) Put(ctx context.Context, path string, content []byte, base, session string) (PutAnswer, error) {
 	if base == "" {
 		base = "none"
 	}
@@ -106,6 +108,9 @@ func (c *Client) Put(ctx context.Context, path string, content []byte, base stri
 	}
 	request.Header.Set("Content-Type", "application/octet-stream")
 	request.Header.Set("X-Pilot-Base-Hash", base)
+	if session != "" {
+		request.Header.Set("X-Pilot-Session", session)
+	}
 	answer, err := c.put(request, content)
 	if err != nil {
 		return PutAnswer{}, fmt.Errorf("PUT %s: %w", path, err)

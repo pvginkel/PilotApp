@@ -13,7 +13,8 @@ import (
 )
 
 // uploads sends the tree's files up as they change: a file whose hash is not
-// its shadow's goes up with the shadow's hash as its base, and the answer is
+// its shadow's goes up with the shadow's hash as its base, as the save of
+// the session holding its project folder's write lock, and the answer is
 // recorded in the shadow and, when it carries bytes, written in place. A
 // file the sidecar wrote itself hashes as its shadow, so it never goes up; a
 // read-only view written is reverted, and never goes up.
@@ -160,6 +161,9 @@ func (u *uploads) upload(path string) string {
 		t.logger.Error("cannot read a file of the tree", "path", path, "error", err)
 		return ""
 	}
+	// Read after the bytes, so a save written inside a hold goes up as its
+	// holder's: the hold stands until the release's flush has read it.
+	session := t.writer(path)
 	base, synced := t.shadow.Hash(path)
 	if protocol.Hash(sent) == base {
 		return base
@@ -168,7 +172,7 @@ func (u *uploads) upload(path string) string {
 	if view && synced {
 		return t.revert(path)
 	}
-	answer, err := t.client.Put(u.ctx, path, sent, base)
+	answer, err := t.client.Put(u.ctx, path, sent, base, session)
 	switch {
 	case err == nil:
 	case u.ctx.Err() != nil:
@@ -201,7 +205,7 @@ func (u *uploads) upload(path string) string {
 			return ""
 		}
 	}
-	t.logger.Info("synced", "path", path, "hash", answer.Hash, "rewritten", answer.Content != nil,
+	t.logger.Info("synced", "path", path, "hash", answer.Hash, "session", session, "rewritten", answer.Content != nil,
 		"stale", answer.Stale, "faults", answer.Faults)
 	return answer.Hash
 }

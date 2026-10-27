@@ -120,30 +120,40 @@ func TestRevertsAWriteToAReadOnlyViewAndNotesItOnce(t *testing.T) {
 	running.stream.send(t, change("proj/timeline.json", "[1]"))
 	eventually(t, "the view rewritten", func() bool { return holds(view, "[1]") })
 	write(t, document, "two")
-	if got := running.check(t, document); got != "proj/timeline.json: "+revertNote+"\n" {
+	if got := running.report(t, "proj"); got != "proj/timeline.json: "+revertNote+"\n" {
 		t.Fatalf("printed %q", got)
 	}
-	if got := running.check(t, document); got != "" {
+	if got := running.report(t, "proj"); got != "" {
 		t.Fatalf("printed %q the second time", got)
 	}
 }
 
-func TestCheckOfAReadOnlyViewWrittenPostsTheViewsHash(t *testing.T) {
+func TestAReleaseRevertsAViewWrittenInsideItsHoldAndPrintsTheNote(t *testing.T) {
 	s := newServer(t)
 	tree := t.TempDir()
-	view := filepath.Join(tree, "reference.json")
+	view := filepath.Join(tree, "proj", "timeline.json")
+	root := filepath.Join(tree, "reference.json")
+	s.view("proj/timeline.json", "[]")
 	s.view("reference.json", "{}")
 	running := start(t, s, tree, t.TempDir())
 
-	writeOver(t, view, `{"edited": true}`)
-	if got := running.check(t, view); got != "reference.json: "+revertNote+"\n" {
+	running.lock(t, "proj", chat, os.Getpid())
+	writeOver(t, view, `["edited"]`)
+	writeOver(t, root, `{"edited": true}`)
+	if got := running.release(t, "proj", chat); got != "proj/timeline.json: "+revertNote+"\n" {
 		t.Fatalf("printed %q", got)
 	}
-	if !holds(view, "{}") {
+	if !holds(view, "[]") {
 		t.Fatalf("the view holds %q", read(t, view))
 	}
-	if checks := s.checked(); len(checks) != 1 || checks[0].Hash != hashOf("{}") {
-		t.Fatalf("posted %+v", checks)
+	// The tree's root is no project folder: a view there is reverted, and its
+	// note printed by no folder's release.
+	eventually(t, "the root's view reverted", func() bool { return holds(root, "{}") })
+	if note := running.noted("reference.json"); note != revertNote {
+		t.Fatalf("noted %q", note)
+	}
+	if got := running.report(t, "proj"); got != "" {
+		t.Fatalf("printed %q", got)
 	}
 	settle()
 	if puts := s.taken(); len(puts) != 0 {

@@ -27,7 +27,7 @@ type Sidecar struct {
 	watcher *watch.Watcher
 	uploads *uploads
 	logger  *slog.Logger
-	// listener is the local port's, on localhost, served for the hook.
+	// listener is the local port's, on localhost, served for the store's hooks.
 	listener net.Listener
 	// wanted holds a reconcile asked for and not yet run.
 	wanted chan struct{}
@@ -52,7 +52,7 @@ func New(cfg config.Config, logger *slog.Logger) (*Sidecar, error) {
 	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.LocalPort))
 	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", address)
 	if err != nil {
-		return nil, fmt.Errorf("cannot serve the hook's check: %w", err)
+		return nil, fmt.Errorf("cannot serve the hooks' endpoint: %w", err)
 	}
 	t := newTree(cfg.TreeRoot, protocol.NewClient(cfg.PilotURL, cfg.Token, cfg.EnvironmentID), store, logger)
 	s := &Sidecar{
@@ -64,7 +64,7 @@ func New(cfg config.Config, logger *slog.Logger) (*Sidecar, error) {
 	return s, nil
 }
 
-// Run keeps the tree and serves the hook until ctx is done, then abandons
+// Run keeps the tree and serves the hooks until ctx is done, then abandons
 // the calls still out.
 func (s *Sidecar) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
@@ -80,7 +80,7 @@ func (s *Sidecar) Run(ctx context.Context) error {
 	go func() {
 		defer close(served)
 		if err := server.Serve(s.listener); !errors.Is(err, http.ErrServerClosed) {
-			serveErr = fmt.Errorf("serve the hook's check: %w", err)
+			serveErr = fmt.Errorf("serve the hooks' endpoint: %w", err)
 			cancel()
 		}
 	}()

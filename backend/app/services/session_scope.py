@@ -26,6 +26,11 @@ PROJECT_VARIABLE = "PILOT_PROJECT"
 """The `env` entry naming a brain session's project folder, which `pilot.py`
 reads (design 3 §12)."""
 
+SESSION_VARIABLE = "PILOT_SESSION"
+"""The `env` entry naming a brain session's Session, which the store's hooks
+take the write lock of its project folder with, so that its saves are
+credited to it."""
+
 
 @dataclass(frozen=True)
 class ScopedCreate:
@@ -46,9 +51,10 @@ def project_folder(project: Project) -> str:
 def scoped_create(db: Session, session: AgentSession) -> ScopedCreate:
     """The Session's create as its rows have it: its cwd, the conversation it
     resumes, its agent, model and effort, and its kind's surface. A brain
-    session's, a chat's or a job's, is boxed (F50), its cwd read-only and its
-    project's folder its `PILOT_PROJECT`: that folder the one it writes, or,
-    while its Project is finished, none, with no surface (F5.5)."""
+    session's, a chat's or a job's, is boxed (F50), its cwd read-only, its
+    project's folder its `PILOT_PROJECT` and its own id its `PILOT_SESSION`:
+    that folder the one it writes, or, while its Project is finished, none,
+    with no surface (F5.5)."""
     surface = Surface(db.get_one(SessionKind, session.kind_code).surface)
     request = HeadlessCreateRequest(
         cwd=session.cwd,
@@ -62,7 +68,10 @@ def scoped_create(db: Session, session: AgentSession) -> ScopedCreate:
     project = db.get_one(Project, session.project_id, populate_existing=True)
     box = {
         "sandbox_read_only_cwd": True,
-        "env": [f"{PROJECT_VARIABLE}={project_folder(project)}"],
+        "env": [
+            f"{PROJECT_VARIABLE}={project_folder(project)}",
+            f"{SESSION_VARIABLE}={session.id}",
+        ],
     }
     if project.state_code is ProjectState.FINISHED:
         return ScopedCreate(request.model_copy(update=box), None)

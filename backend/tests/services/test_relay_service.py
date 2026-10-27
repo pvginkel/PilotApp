@@ -663,8 +663,9 @@ class TestSend:
             True,
             ["/work/Projects/soup-club"],
         )
-        project_entry, token_entry = body["env"]
+        project_entry, session_entry, token_entry = body["env"]
         assert project_entry == "PILOT_PROJECT=/work/Projects/soup-club"
+        assert session_entry == f"PILOT_SESSION={run.id}"
         assert token_entry.startswith("PILOT_TOKEN=")
         (created,) = fake.sessions(ENV)
         assert created.box is not None
@@ -697,7 +698,10 @@ class TestSend:
         )
         assert "sandboxWritableDirs" not in body
         assert "mcpConfig" not in body
-        assert body["env"] == ["PILOT_PROJECT=/work/Projects/soup-club"]
+        assert body["env"] == [
+            "PILOT_PROJECT=/work/Projects/soup-club",
+            f"PILOT_SESSION={run.id}",
+        ]
         assert run.token_hash not in (None, "")
 
     def test_a_resume_the_controller_refuses_fails_the_turn_and_writes_nothing_else(

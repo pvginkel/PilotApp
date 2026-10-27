@@ -5206,44 +5206,33 @@
         "type": "object"
       },
       "SyncCheckRequestSchema.19c06e7": {
-        "description": "The hook's check of a file, as the store's sidecar posts it.",
+        "description": "The hook's check of a project folder, as the store's sidecar posts it\nonce it has flushed the folder.",
         "properties": {
-          "hash": {
-            "description": "The hash of the file on disk, acked",
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Hash",
-            "type": "string"
-          },
-          "path": {
-            "description": "The file the hook names, from the tree's root",
-            "title": "Path",
+          "folder": {
+            "description": "The project folder the hook names, from the tree's root",
+            "pattern": "^[a-z0-9-]+$",
+            "title": "Folder",
             "type": "string"
           },
           "wait_seconds": {
-            "description": "How long the sidecar waited for that hash's ack",
+            "description": "How long the sidecar's flush of the folder took",
             "minimum": 0,
             "title": "Wait Seconds",
             "type": "number"
           }
         },
         "required": [
-          "path",
-          "hash",
+          "folder",
           "wait_seconds"
         ],
         "title": "SyncCheckRequestSchema",
         "type": "object"
       },
       "SyncCheckResponseSchema.19c06e7": {
-        "description": "What the hook prints after an edit, and whether the server agrees with\nthe file's hash.",
+        "description": "What the hook prints after a tool call that can write the folder.",
         "properties": {
-          "checked": {
-            "description": "Whether the server agrees the file holds the hash posted",
-            "title": "Checked",
-            "type": "boolean"
-          },
           "errors": {
-            "description": "The Save Errors of the file's project folder, in path order, or the file's own under no syncing project's folder; the `reverted` ones are reported once",
+            "description": "The Save Errors under the folder, in path order; the `reverted` ones are reported once",
             "items": {
               "$ref": "#/components/schemas/SyncCheckResponseSchema.19c06e7.SyncSaveErrorSchema"
             },
@@ -5251,7 +5240,7 @@
             "type": "array"
           },
           "homeless_deferrals": {
-            "description": "The deferrals without a home of the file's project; none under no syncing project's folder",
+            "description": "The deferrals without a home of the folder's project; none for a folder of no syncing project",
             "items": {
               "$ref": "#/components/schemas/SyncCheckResponseSchema.19c06e7.SyncHomelessDeferralSchema"
             },
@@ -5260,7 +5249,6 @@
           }
         },
         "required": [
-          "checked",
           "errors",
           "homeless_deferrals"
         ],
@@ -10654,7 +10642,7 @@
             "description": "Bad Gateway"
           }
         },
-        "summary": "The hook's check of a file of the store's tree after an edit (design 1 §5.6 step 3): the file's hash on disk, once its sidecar has it acked, in; whether the server agrees with it, the Save Errors of the file's project folder and that project's deferrals without a home out, a file under no syncing project's folder answered its own Save Errors alone. A `reverted` Save Error is answered once and deleted; a `parse` one stands until a clean save of its path.",
+        "summary": "The hook's check of a project folder of the store's tree after a tool call that can write it (design 1 §5.6 step 3): the folder, once its sidecar has flushed it, in; the Save Errors under the folder and its project's deferrals without a home out, a folder of no syncing project answered its Save Errors alone. A `reverted` Save Error is answered once and deleted; a `parse` one stands until a clean save of its path.",
         "tags": []
       }
     },
@@ -10753,7 +10741,7 @@
         "tags": []
       },
       "put": {
-        "description": "Headers: `X-Pilot-Base-Hash`, the hash the sidecar last synced for the path, or `none`. The body is the file's bytes, at most `SYNC_PUT_MAX_BYTES`.\n\nAnswers 204 when the file needs no change, 200 with the bytes it must now hold when it does; either with `X-Pilot-Hash`, the hash the file holds once answered, and `X-Pilot-Faults`, the count of Save Errors the save raised on the path, and `X-Pilot-Stale: true` when the base hash was not the path's tree hash. 404 for a path of no syncing project.",
+        "description": "Headers: `X-Pilot-Base-Hash`, the hash the sidecar last synced for the path, or `none`; `X-Pilot-Session`, the Session that held the write lock of the path's project folder as the sidecar read the file, left out when none held it: the save is that Session's when it is a brain session of the path's project, and no Session's otherwise. The body is the file's bytes, at most `SYNC_PUT_MAX_BYTES`.\n\nAnswers 204 when the file needs no change, 200 with the bytes it must now hold when it does; either with `X-Pilot-Hash`, the hash the file holds once answered, and `X-Pilot-Faults`, the count of Save Errors the save raised on the path, and `X-Pilot-Stale: true` when the base hash was not the path's tree hash. 404 for a path of no syncing project.",
         "operationId": "put__api_sync_files_{path}",
         "parameters": [
           {

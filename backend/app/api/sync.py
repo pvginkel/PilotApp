@@ -96,8 +96,11 @@ def put_file(
     """The store's save of a file of its tree (design 1 §5.3).
 
     Headers: `X-Pilot-Base-Hash`, the hash the sidecar last synced for the
-    path, or `none`. The body is the file's bytes, at most
-    `SYNC_PUT_MAX_BYTES`.
+    path, or `none`; `X-Pilot-Session`, the Session that held the write lock
+    of the path's project folder as the sidecar read the file, left out when
+    none held it: the save is that Session's when it is a brain session of
+    the path's project, and no Session's otherwise. The body is the file's
+    bytes, at most `SYNC_PUT_MAX_BYTES`.
 
     Answers 204 when the file needs no change, 200 with the bytes it must now
     hold when it does; either with `X-Pilot-Hash`, the hash the file holds
@@ -107,7 +110,12 @@ def put_file(
     """
     base_hash = _base_hash(request.headers.get("X-Pilot-Base-Hash"))
     request.max_content_length = app_settings.sync_put_max_bytes
-    answer = sync_service.put(path, request.get_data(), base_hash)
+    answer = sync_service.put(
+        path,
+        request.get_data(),
+        base_hash,
+        request.headers.get("X-Pilot-Session"),
+    )
     headers = {"X-Pilot-Hash": answer.hash, "X-Pilot-Faults": str(len(answer.faults))}
     if answer.stale:
         headers["X-Pilot-Stale"] = "true"
@@ -197,15 +205,14 @@ def reconcile(
 def check(
     sync_service: SyncService = Provide[ServiceContainer.sync_service],
 ) -> Any:
-    """The hook's check of a file of the store's tree after an edit (design 1
-    §5.6 step 3): the file's hash on disk, once its sidecar has it acked, in;
-    whether the server agrees with it, the Save Errors of the file's project
-    folder and that project's deferrals without a home out, a file under no
-    syncing project's folder answered its own Save Errors alone. A
-    `reverted` Save Error is answered once and deleted; a `parse` one stands
-    until a clean save of its path."""
+    """The hook's check of a project folder of the store's tree after a tool
+    call that can write it (design 1 §5.6 step 3): the folder, once its
+    sidecar has flushed it, in; the Save Errors under the folder and its
+    project's deferrals without a home out, a folder of no syncing project
+    answered its Save Errors alone. A `reverted` Save Error is answered once
+    and deleted; a `parse` one stands until a clean save of its path."""
     body = SyncCheckRequestSchema.model_validate(request.get_json())
-    answer = sync_service.check(body.path, body.hash, body.wait_seconds)
+    answer = sync_service.check(body.folder, body.wait_seconds)
     response = SyncCheckResponseSchema.model_validate(answer, from_attributes=True)
     return jsonify(response.model_dump(mode="json")), 200
 

@@ -42,6 +42,7 @@ from app.models.reference import (
     SessionState,
     TransitionKind,
     UserKind,
+    VersionCause,
 )
 from app.services.auth_service import AuthContext
 from app.services.chat_close_service import CLOSED, ChatCloseService
@@ -384,7 +385,7 @@ class TestSendStartsTheChat:
             True,
             [FOLDER],
         )
-        assert body["env"][0] == f"PILOT_PROJECT={FOLDER}"
+        assert body["env"][:2] == [f"PILOT_PROJECT={FOLDER}", f"PILOT_SESSION={run.id}"]
         assert _sends(session, run.id) == [(1, WORDS)]
 
     def test_while_the_controller_is_unreachable_its_start_is_held(
@@ -1200,7 +1201,7 @@ class TestFinishedProjectChat:
         assert (body["cwd"], body["sandboxReadOnlyCwd"]) == (STORE_REPO, True)
         assert "sandboxWritableDirs" not in body
         assert "mcpConfig" not in body
-        assert body["env"] == [f"PILOT_PROJECT={FOLDER}"]
+        assert body["env"] == [f"PILOT_PROJECT={FOLDER}", f"PILOT_SESSION={run.id}"]
         assert _sends(session, run.id) == [(1, "What was settled?")]
 
     def test_its_create_refused_422_fails_its_start_at_once(
@@ -1450,12 +1451,12 @@ class TestDefinitionChat:
             body["cwd"],
             body["sandboxReadOnlyCwd"],
             body["sandboxWritableDirs"],
-            body["env"][0],
+            body["env"][:2],
         ) == (
             STORE_REPO,
             True,
             [_draft_folder(draft)],
-            f"PILOT_PROJECT={_draft_folder(draft)}",
+            [f"PILOT_PROJECT={_draft_folder(draft)}", f"PILOT_SESSION={run.id}"],
         )
         assert fake.sent == [turn.message]
 
@@ -1605,6 +1606,69 @@ class TestHandbookNotice:
         assert _send(chats, opened, person, "Four").message == (
             f"{STORE_NOTIFICATION}\n\nFour"
         )
+
+    def test_the_chats_own_handbook_edits_bring_none(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+    ) -> None:
+        """Slice 025: the chat's own saves are credited to it, so its turn's
+        Versions are its Session's."""
+        documents = container.document_service()
+        handbook = documents.bear_handbook(opened, "# Handbook\n")
+        run = _idle_chat(services, chats, session, fake, opened, person)
+        documents.publish(handbook, "# Handbook\n\n- Salt last.\n")
+        documents.cut_version(handbook, VersionCause.TURN, run.id)
+        counted = metric_value(HANDBOOK_CHANGED_TOTAL, project=str(opened.id))
+
+        turn = _send(chats, opened, person, "Two")
+
+        assert turn.message == "Two"
+        assert metric_value(HANDBOOK_CHANGED_TOTAL, project=str(opened.id)) == counted
+
+    @pytest.mark.parametrize("writer", ["a job", "nobody", "unversioned"])
+    def test_a_handbook_edit_not_the_chats_own_brings_the_notice(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+        writer: str,
+    ) -> None:
+        """A job's Version, one of no Session, or a publication not yet cut
+        into a Version, each beside the chat's own since its last turn."""
+        documents = container.document_service()
+        handbook = documents.bear_handbook(opened, "# Handbook\n")
+        run = _idle_chat(services, chats, session, fake, opened, person)
+        job = models.Session(
+            project_id=opened.id,
+            environment_id=STORE_ENVIRONMENT_ID,
+            kind_code="job",
+            cwd="/work/PilotProjects",
+            token_hash="2" * 64,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(job)
+        session.flush()
+        documents.publish(handbook, "# Handbook\n\n- Salt last.\n")
+        documents.cut_version(handbook, VersionCause.TURN, run.id)
+        documents.publish(handbook, "# Handbook\n\n- Salt last.\n- Pepper too.\n")
+        if writer != "unversioned":
+            documents.cut_version(
+                handbook, VersionCause.TURN, job.id if writer == "a job" else None
+            )
+
+        turn = _send(chats, opened, person, "Two")
+
+        assert turn.message == f"{STORE_NOTIFICATION}\n\nTwo"
 
     def test_a_send_that_failed_counts_no_notice(
         self,

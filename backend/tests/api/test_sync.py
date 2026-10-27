@@ -4,6 +4,7 @@ store's sidecar is written against, pinned beside the protocol's version."""
 import json
 import logging
 import time
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 
@@ -27,9 +28,11 @@ from app.engine.bus import (
 )
 from app.engine.paths import sha256_hex
 from app.models import Document, Environment, Project, SaveError, User
-from app.models.reference import ErrorKind, ProjectState
+from app.models.reference import ErrorKind, ProjectState, SessionState
 from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerClient
+from app.services.session_scope import STORE_REPO
+from app.services.start_gate import CHAT_KIND, JOB_KIND, WORK_KIND
 from app.services.sync_service import (
     HOOK_WAIT_SECONDS,
     SYNC_PROTOCOL_MAX,
@@ -47,7 +50,6 @@ from tests.support.fake_sidecar import (
     STORE_ENVIRONMENT_ID,
     STRAY,
     SYNC_TOKEN,
-    Check,
     FakeSidecar,
     sync_headers,
 )
@@ -149,7 +151,7 @@ MANIFEST = "event: manifest\ndata: {}\n\n"
 
 def _hello(manifest_hash: str) -> str:
     return (
-        'event: hello\ndata: {"protocol": {"min": 1, "max": 1}, '
+        'event: hello\ndata: {"protocol": {"min": 2, "max": 2}, '
         f'"manifest_hash": "{manifest_hash}"}}\n\n'
     )
 
@@ -217,8 +219,7 @@ def _call(
         json={
             "tree": {},
             "shadow": {},
-            "path": "reference.json",
-            "hash": HASH,
+            "folder": "example",
             "wait_seconds": 0.0,
         },
     )
@@ -232,6 +233,21 @@ def _bear_item(
             project, "decision", "Which tent?", session, text
         )
     return f"draft-{project.number}/items/1-which-tent.md"
+
+
+def _brain(session: DbSession, project: Project, kind: str) -> models.Session:
+    """A brain session of `project`, a chat's or a job's, in the store."""
+    brain = models.Session(
+        project_id=project.id,
+        environment_id=STORE_ENVIRONMENT_ID,
+        kind_code=kind,
+        cwd=STORE_REPO,
+        token_hash=uuid.uuid4().hex * 2,
+        state_code=SessionState.RUNNING,
+    )
+    session.add(brain)
+    session.flush()
+    return brain
 
 
 def _bear_draft(container: ServiceContainer, project: Project) -> str:
@@ -286,7 +302,7 @@ class TestSyncProtocolVersion:
         # A change to a shape these tests pin bumps SYNC_PROTOCOL_MAX and the
         # sidecar's own version in one commit, and SYNC_PROTOCOL_MIN with it
         # when the server cannot serve the old sidecar (design 1 §5.1).
-        assert (SYNC_PROTOCOL_MIN, SYNC_PROTOCOL_MAX) == (1, 1)
+        assert (SYNC_PROTOCOL_MIN, SYNC_PROTOCOL_MAX) == (2, 2)
 
 
 class TestSyncGate:
@@ -364,7 +380,7 @@ class TestSyncGate:
             assert _call(client, *ROUTES[1], headers).status_code == 403
 
     @pytest.mark.parametrize(("method", "url"), ROUTES)
-    @pytest.mark.parametrize("version", ["0", "2", "one", "+1", ""])
+    @pytest.mark.parametrize("version", ["1", "3", "one", "+2", ""])
     def test_a_version_outside_the_range_is_426_with_the_range(
         self,
         session: DbSession,
@@ -388,7 +404,7 @@ class TestSyncGate:
         response = _call(client, *ROUTES[0], headers)
 
         assert response.status_code == 426
-        assert response.json == {"min": 1, "max": 1}
+        assert response.json == {"min": 2, "max": 2}
 
     def test_a_refused_put_acts_on_nothing(
         self,
@@ -642,6 +658,101 @@ class TestPutFile:
         )
 
         assert response.status_code == 400
+
+    @pytest.mark.parametrize("kind", [CHAT_KIND, JOB_KIND])
+    def test_a_save_a_brain_session_of_its_project_held_is_that_sessions(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+        project_session: models.Session,
+        kind: str,
+    ) -> None:
+        path = _bear_item(container, project, project_session, ANSWERED)
+        brain = _brain(session, project, kind)
+        edited = ANSWERED.replace("# Which tent?", "# Which tent for the lake?")
+
+        response = fake_sidecar.put(
+            path, edited.encode(), sha256_hex(ANSWERED), str(brain.id)
+        )
+
+        assert response.status_code == 204
+        document = session.scalars(select(Document)).one()
+        session.refresh(document)
+        assert (document.ingested_session_id, document.writing_session_id) == (
+            brain.id,
+            brain.id,
+        )
+
+    def test_a_save_no_session_held_is_no_sessions(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+        project_session: models.Session,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        path = _bear_item(container, project, project_session, ANSWERED)
+        edited = ANSWERED.replace("# Which tent?", "# Which tent for the lake?")
+
+        with caplog.at_level(logging.WARNING):
+            response = fake_sidecar.put(path, edited.encode(), sha256_hex(ANSWERED))
+
+        assert response.status_code == 204
+        document = session.scalars(select(Document)).one()
+        session.refresh(document)
+        assert (document.ingested_session_id, document.writing_session_id) == (
+            None,
+            None,
+        )
+        assert caplog.text == ""
+
+    @pytest.mark.parametrize(
+        "writer", ["a work session", "another project's chat", "unknown", "garbled"]
+    )
+    def test_a_save_credited_to_anything_else_is_no_sessions_and_logged(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+        caplog: pytest.LogCaptureFixture,
+        writer: str,
+    ) -> None:
+        path = _bear_item(container, project, project_session, ANSWERED)
+        other = Project(created_by_user_id=person.id)
+        session.add(other)
+        session.flush()
+        credited = {
+            "a work session": str(project_session.id),
+            "another project's chat": str(_brain(session, other, CHAT_KIND).id),
+            "unknown": str(uuid.uuid4()),
+            "garbled": "not-a-session",
+        }[writer]
+        assert project_session.kind_code == WORK_KIND
+        edited = ANSWERED.replace("# Which tent?", "# Which tent for the lake?")
+
+        with caplog.at_level(logging.WARNING):
+            response = fake_sidecar.put(
+                path, edited.encode(), sha256_hex(ANSWERED), credited
+            )
+
+        assert response.status_code == 204
+        document = session.scalars(select(Document)).one()
+        session.refresh(document)
+        assert (document.ingested_session_id, document.writing_session_id) == (
+            None,
+            None,
+        )
+        assert document.published_text == edited
+        assert (
+            f"Sync PUT of {path}: the store's sidecar credits it to {credited!r}"
+            in (caplog.text)
+        )
 
 
 class TestGetFile:
@@ -1217,7 +1328,7 @@ class TestEventsSequences:
 class TestCheck:
     """`POST /api/sync/check` (design 1 §5.1, §5.6)."""
 
-    def test_the_answer_is_checked_the_errors_and_the_deferrals(
+    def test_the_answer_is_the_folders_errors_and_its_projects_deferrals(
         self,
         session: DbSession,
         container: ServiceContainer,
@@ -1238,11 +1349,10 @@ class TestCheck:
             for kind in (ErrorKind.REVERTED, ErrorKind.PARSE)
         )
 
-        response = fake_sidecar.post_check(item, sha256_hex(ANSWERED), 0.1)
+        response = fake_sidecar.post_check(f"draft-{project.number}", 0.1)
 
         assert response.status_code == 200
         assert response.json == {
-            "checked": True,
             "errors": [
                 {"path": item, "kind": "reverted", "line": 5, "message": reverted},
                 {"path": plan, "kind": "parse", "line": None, "message": held},
@@ -1263,7 +1373,7 @@ class TestCheck:
             ],
         }
 
-    def test_the_answer_is_the_files_project_folders_alone(
+    def test_the_answer_is_its_folders_alone(
         self,
         session: DbSession,
         container: ServiceContainer,
@@ -1289,10 +1399,11 @@ class TestCheck:
         reverting = ANSWERED.replace("by: ada", "by: agent")
         fake_sidecar.save(mine, reverting)
         fake_sidecar.save(theirs, reverting)
+        my_folder = f"draft-{project.number}"
 
         answers = [
-            fake_sidecar.post_check(path, sha256_hex(ANSWERED), 0.0).json
-            for path in (mine, mine, theirs, theirs)
+            fake_sidecar.post_check(folder, 0.0).json
+            for folder in (my_folder, my_folder, "camp", "camp")
         ]
 
         assert [
@@ -1312,15 +1423,8 @@ class TestCheck:
             [(f"{their_block}/D1", their_done), (f"{their_block}/Q1", their_done)],
         ]
 
-    @pytest.mark.parametrize(
-        ("path", "sibling"),
-        [
-            ("reference.json", "notes.md"),
-            ("example/notes.md", "example/plan.json"),
-            ("{archived}/items/1-which-tent.md", "{archived}/plan.json"),
-        ],
-    )
-    def test_a_path_under_no_syncing_folder_is_answered_its_own_errors_alone(
+    @pytest.mark.parametrize("folder", ["example", "{archived}"])
+    def test_a_folder_of_no_syncing_project_is_answered_its_errors_alone(
         self,
         session: DbSession,
         container: ServiceContainer,
@@ -1328,8 +1432,7 @@ class TestCheck:
         project: Project,
         project_session: models.Session,
         person: User,
-        path: str,
-        sibling: str,
+        folder: str,
     ) -> None:
         archived = Project(created_by_user_id=person.id)
         session.add(archived)
@@ -1339,9 +1442,8 @@ class TestCheck:
         fake_sidecar.save(mine, ANSWERED.replace("by: ada", "by: agent"))
         with scoped_session(container):
             archived.archived = True
-        path, sibling = (
-            name.format(archived=f"draft-{archived.number}") for name in (path, sibling)
-        )
+        folder = folder.format(archived=f"draft-{archived.number}")
+        path = f"{folder}/items/1-which-tent.md"
         session.add_all(
             SaveError(
                 environment_id=STORE_ENVIRONMENT_ID,
@@ -1353,12 +1455,13 @@ class TestCheck:
             for at, kind in (
                 (path, ErrorKind.REVERTED),
                 (path, ErrorKind.PARSE),
-                (sibling, ErrorKind.REVERTED),
+                (f"{folder}-2/notes.md", ErrorKind.REVERTED),
+                ("reference.json", ErrorKind.REVERTED),
             )
         )
         session.flush()
 
-        answers = [fake_sidecar.post_check(path, HASH, 0.0).json for _ in range(2)]
+        answers = [fake_sidecar.post_check(folder, 0.0).json for _ in range(2)]
 
         assert [
             [(error["path"], error["kind"]) for error in answer["errors"]]
@@ -1372,7 +1475,8 @@ class TestCheck:
             [
                 (mine, ErrorKind.REVERTED),
                 (path, ErrorKind.PARSE),
-                (sibling, ErrorKind.REVERTED),
+                (f"{folder}-2/notes.md", ErrorKind.REVERTED),
+                ("reference.json", ErrorKind.REVERTED),
             ]
         )
 
@@ -1400,7 +1504,7 @@ class TestCheck:
             block = str(item.id)
             path = f"draft-{project.number}/{document.path}"
 
-        response = fake_sidecar.post_check(path, sha256_hex(untitled), 0.1)
+        response = fake_sidecar.post_check(f"draft-{project.number}", 0.1)
 
         assert response.status_code == 200
         assert response.json["homeless_deferrals"] == [
@@ -1421,7 +1525,10 @@ class TestCheck:
         fake_sidecar.save(item, ANSWERED.replace("by: ada", "by: agent"))
         fake_sidecar.save(plan, MISSPELT_PLAN)
 
-        answers = [fake_sidecar.post_check(plan, HASH, 0.0).json for _ in range(2)]
+        answers = [
+            fake_sidecar.post_check(f"draft-{project.number}", 0.0).json
+            for _ in range(2)
+        ]
 
         assert [
             [(error["path"], error["kind"]) for error in answer["errors"]]
@@ -1429,111 +1536,10 @@ class TestCheck:
         ] == [[(item, "reverted"), (plan, "parse")], [(plan, "parse")]]
         assert session.scalars(select(SaveError.kind_code)).all() == [ErrorKind.PARSE]
 
-    def test_a_document_checks_its_tree_hash_and_its_latest_save(
-        self,
-        container: ServiceContainer,
-        fake_sidecar: FakeSidecar,
-        caplog: pytest.LogCaptureFixture,
-        project: Project,
-        project_session: models.Session,
-    ) -> None:
-        item = _bear_item(container, project, project_session, ANSWERED)
-        edited = ANSWERED.replace("# Which tent?", "# Which tent for the lake?")
-        reverting = edited.replace("by: ada", "by: agent")
-
-        with caplog.at_level(logging.WARNING):
-            clean = fake_sidecar.save(item, edited).status
-            clean_checked = fake_sidecar.check(item).checked
-            reverted = fake_sidecar.save(item, reverting).status
-            rewritten = fake_sidecar.text(item)
-            # The merged bytes the sidecar wrote, and the save it sent.
-            reverted_checked = [
-                fake_sidecar.check(item).checked,
-                fake_sidecar.post_check(item, sha256_hex(reverting), 0.0).json[
-                    "checked"
-                ],
-            ]
-            held = fake_sidecar.save(item, BROKEN).status
-            held_checked = fake_sidecar.check(item).checked
-
-        assert (clean, reverted, held) == (204, 200, 204)
-        assert rewritten == edited
-        assert (clean_checked, reverted_checked, held_checked) == (
-            True,
-            [True, True],
-            True,
-        )
-        assert caplog.text == ""
-
-    def test_a_hash_the_server_does_not_hold_is_not_checked_and_logged(
-        self,
-        container: ServiceContainer,
-        fake_sidecar: FakeSidecar,
-        caplog: pytest.LogCaptureFixture,
-        project: Project,
-        project_session: models.Session,
-    ) -> None:
-        item = _bear_item(container, project, project_session, ANSWERED)
-
-        with caplog.at_level(logging.WARNING):
-            response = fake_sidecar.post_check(item, HASH, 0.0)
-
-        assert response.json["checked"] is False
-        assert f"Sync check of {item}: the store's sidecar has {HASH} acked" in (
-            caplog.text
-        )
-
-    def test_a_plan_checks_its_rendering_and_while_held_any_hash(
-        self,
-        container: ServiceContainer,
-        fake_sidecar: FakeSidecar,
-        project: Project,
-    ) -> None:
-        plan = f"draft-{project.number}/plan.json"
-        _bear_draft(container, project)
-
-        assert fake_sidecar.save(plan, COMPACT_PLAN).status == 200
-        canonical = fake_sidecar.check(plan).checked
-        # The save the canonical rendering replaced is stored nowhere.
-        compact = fake_sidecar.post_check(plan, sha256_hex(COMPACT_PLAN), 0.0)
-        assert fake_sidecar.save(plan, MISSPELT_PLAN).faults == 1
-        held = [
-            fake_sidecar.check(plan).checked,
-            fake_sidecar.post_check(plan, HASH, 0.0).json["checked"],
-        ]
-        fake_sidecar.connect()
-        written_down = fake_sidecar.post_check(plan, sha256_hex(MISSPELT_PLAN), 0.0)
-
-        assert (canonical, compact.json["checked"]) == (True, False)
-        assert held == [True, True]
-        assert written_down.json["checked"] is False
-        assert fake_sidecar.check(plan).checked
-
-    def test_a_view_checks_its_projection(
-        self, container: ServiceContainer, fake_sidecar: FakeSidecar, project: Project
-    ) -> None:
-        timeline = f"draft-{project.number}/timeline.json"
-        fake_sidecar.connect()
-
-        assert fake_sidecar.check(timeline).checked
-        assert fake_sidecar.check("reference.json").checked
-        assert fake_sidecar.post_check(timeline, HASH, 0.0).json["checked"] is False
-
-    @pytest.mark.parametrize(
-        "path", ["example/notes.md", "draft-1/notes.md", "draft-1/../reference.json"]
-    )
-    def test_a_path_the_tree_does_not_resolve_is_not_checked(
-        self, fake_sidecar: FakeSidecar, path: str
-    ) -> None:
-        response = fake_sidecar.post_check(path, HASH, 0.0)
-
-        assert response.status_code == 200
-        assert response.json["checked"] is False
-
     def test_the_hooks_wait_is_observed(self, fake_sidecar: FakeSidecar) -> None:
         count = _sample(HOOK_WAIT_SECONDS, "pilot_sync_hook_wait_seconds_count")
 
-        fake_sidecar.post_check("reference.json", HASH, 0.125)
+        fake_sidecar.post_check("example", 0.125)
 
         assert (
             _sample(HOOK_WAIT_SECONDS, "pilot_sync_hook_wait_seconds_count")
@@ -1543,12 +1549,14 @@ class TestCheck:
     @pytest.mark.parametrize(
         "body",
         [
-            {"hash": HASH, "wait_seconds": 0.0},
-            {"path": "reference.json", "wait_seconds": 0.0},
-            {"path": "reference.json", "hash": HASH},
-            {"path": "reference.json", "hash": HASH.upper(), "wait_seconds": 0.0},
-            {"path": "reference.json", "hash": HASH, "wait_seconds": -0.1},
-            {"path": "reference.json", "hash": HASH, "wait_seconds": "soon"},
+            {"wait_seconds": 0.0},
+            {"folder": "example"},
+            {"folder": "", "wait_seconds": 0.0},
+            {"folder": "example/notes.md", "wait_seconds": 0.0},
+            {"folder": "..", "wait_seconds": 0.0},
+            {"folder": "Example", "wait_seconds": 0.0},
+            {"folder": "example", "wait_seconds": -0.1},
+            {"folder": "example", "wait_seconds": "soon"},
         ],
     )
     def test_a_body_that_is_not_a_check_is_400(
@@ -1570,7 +1578,7 @@ class TestCheck:
         fake_sidecar.save(item, ANSWERED.replace("by: ada", "by: agent"))
         _configure(container, sync_token="")
 
-        response = fake_sidecar.post_check(item, sha256_hex(ANSWERED), 0.0)
+        response = fake_sidecar.post_check(f"draft-{project.number}", 0.0)
 
         assert response.status_code == 401
         assert session.scalars(select(SaveError.kind_code)).all() == [
@@ -1579,8 +1587,8 @@ class TestCheck:
 
 
 class TestCheckSequences:
-    """Design 1 §5.6, the hook's check through the fake sidecar: what the
-    agent is told after an edit."""
+    """Design 1 §5.6, the hook's release through the fake sidecar: what the
+    agent is told after a tool call that can write its project's folder."""
 
     def test_a_reverted_line_is_told_once(
         self,
@@ -1591,14 +1599,15 @@ class TestCheckSequences:
         project_session: models.Session,
     ) -> None:
         item = _bear_item(container, project, project_session, ANSWERED)
+        folder = f"draft-{project.number}"
         fake_sidecar.connect()
         fake_sidecar.save(item, ANSWERED.replace("by: ada", "by: agent"))
         told = _told(session, item)
 
-        checks = [fake_sidecar.check(item), fake_sidecar.check(item)]
+        releases = [fake_sidecar.release(folder), fake_sidecar.release(folder)]
 
         assert told.startswith(f"{item}:5: ")
-        assert checks == [Check(True, told), Check(True, "")]
+        assert releases == [told, ""]
 
     def test_a_parse_error_is_told_until_a_clean_save(
         self,
@@ -1609,18 +1618,19 @@ class TestCheckSequences:
         project_session: models.Session,
     ) -> None:
         item = _bear_item(container, project, project_session, ANSWERED)
+        folder = f"draft-{project.number}"
         fake_sidecar.connect()
         fake_sidecar.save(item, BROKEN)
         told = _told(session, item)
 
-        held = [fake_sidecar.check(item), fake_sidecar.check(item)]
+        held = [fake_sidecar.release(folder), fake_sidecar.release(folder)]
         fake_sidecar.save(item, ANSWERED.replace("# Which tent?", "# Which tent now?"))
 
         assert told
-        assert held == [Check(True, told), Check(True, told)]
-        assert fake_sidecar.check(item) == Check(True, "")
+        assert held == [told, told]
+        assert fake_sidecar.release(folder) == ""
 
-    def test_the_local_notes_are_told_after_the_errors(
+    def test_the_folders_local_notes_are_told_after_the_errors(
         self,
         session: DbSession,
         container: ServiceContainer,
@@ -1629,18 +1639,17 @@ class TestCheckSequences:
         project_session: models.Session,
     ) -> None:
         item = _bear_item(container, project, project_session, ANSWERED)
-        stray = f"draft-{project.number}/notes.md"
+        folder = f"draft-{project.number}"
+        stray = f"{folder}/notes.md"
         fake_sidecar.write(stray, "# Notes\n")
+        fake_sidecar.write("example/notes.md", "# Another folder's\n")
         fake_sidecar.connect()
         fake_sidecar.save(item, ANSWERED.replace("by: ada", "by: agent"))
         told = _told(session, item)
 
-        checks = [fake_sidecar.check(stray), fake_sidecar.check(item)]
+        releases = [fake_sidecar.release(folder), fake_sidecar.release(folder)]
 
-        assert checks == [
-            Check(False, f"{told}{stray}: {STRAY}\n"),
-            Check(True, f"{stray}: {STRAY}\n"),
-        ]
+        assert releases == [f"{told}{stray}: {STRAY}\n", f"{stray}: {STRAY}\n"]
 
     def test_a_deferral_without_a_home_is_told_until_a_note_names_it(
         self,
@@ -1651,7 +1660,8 @@ class TestCheckSequences:
         person: User,
     ) -> None:
         block, document = _done_deferrals(container, project, project_session, person)
-        plan = f"draft-{project.number}/plan.json"
+        folder = f"draft-{project.number}"
+        plan = f"{folder}/plan.json"
         fake_sidecar.connect()
         noted = json.loads(FIX_PLAN)
         noted["tasks"][0]["notes"] = [
@@ -1663,12 +1673,12 @@ class TestCheckSequences:
             }
         ]
 
-        told = fake_sidecar.check(plan).text
+        told = fake_sidecar.release(folder)
         fake_sidecar.save(plan, json.dumps(noted))
-        homed_one = fake_sidecar.check(plan).text
+        homed_one = fake_sidecar.release(folder)
         # Striking the note leaves the block its home: the note was dealt with.
         fake_sidecar.save(plan, FIX_PLAN)
-        struck = fake_sidecar.check(plan).text
+        struck = fake_sidecar.release(folder)
         noted["notes"] = [
             {
                 "id": "n2",
@@ -1689,4 +1699,43 @@ class TestCheckSequences:
             == struck
             == (f"{HOMELESS}\n- {block}/Q1 in {document} (Camp chores), to: plan\n")
         )
-        assert fake_sidecar.check(plan) == Check(True, "")
+        assert fake_sidecar.release(folder) == ""
+
+    def test_a_save_inside_the_lock_is_its_holders_to_its_turns_end(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        """Slice 025's ruling D1: what a brain session writes while it holds
+        its project folder's lock is its own, so its turn's end finds the
+        save it left held (F79) and the document it was writing (F35)."""
+        item = _bear_item(container, project, project_session, ANSWERED)
+        folder = f"draft-{project.number}"
+        chat = _brain(session, project, CHAT_KIND)
+        fake_sidecar.connect()
+
+        fake_sidecar.lock(folder, str(chat.id))
+        fake_sidecar.write(item, BROKEN)
+        told = fake_sidecar.release(folder)
+        errors = _told(session, item)
+        document = session.scalars(select(Document)).one()
+        session.refresh(document)
+        writing = (document.ingested_session_id, document.writing_session_id)
+        with scoped_session(container) as db:
+            held = container.document_service().turn_ended(
+                db.get_one(models.Session, chat.id)
+            )
+        fake_sidecar.save(item, ANSWERED.replace("# Which tent?", "# Which tent now?"))
+        session.refresh(document)
+
+        assert told == errors
+        assert errors
+        assert writing == (chat.id, chat.id)
+        assert held == [item]
+        assert (document.ingested_session_id, document.writing_session_id) == (
+            None,
+            None,
+        )

@@ -62,7 +62,7 @@ func TestHashIsTheSha256InLowercaseHex(t *testing.T) {
 func TestPutSendsTheThreeHeadersAndTheBase(t *testing.T) {
 	client, requests := serve(t, acknowledge)
 	base := Hash([]byte("before"))
-	if _, err := client.Put(context.Background(), "proj/a b#1.md", []byte("after"), base); err != nil {
+	if _, err := client.Put(context.Background(), "proj/a b#1.md", []byte("after"), base, ""); err != nil {
 		t.Fatal(err)
 	}
 	put := <-requests
@@ -70,7 +70,7 @@ func TestPutSendsTheThreeHeadersAndTheBase(t *testing.T) {
 	want := map[string]string{
 		"Authorization":         "Bearer " + token,
 		"X-Pilot-Environment":   environment,
-		"X-Pilot-Sync-Protocol": "1",
+		"X-Pilot-Sync-Protocol": "2",
 		"X-Pilot-Base-Hash":     base,
 		"Content-Type":          "application/octet-stream",
 	}
@@ -85,11 +85,25 @@ func TestPutSendsTheThreeHeadersAndTheBase(t *testing.T) {
 	if string(put.body) != "after" {
 		t.Errorf("sent %q", put.body)
 	}
+	if _, sent := last.Header["X-Pilot-Session"]; sent {
+		t.Errorf("sent X-Pilot-Session %q with no session", last.Header.Get("X-Pilot-Session"))
+	}
+}
+
+func TestPutSendsTheSessionHoldingTheLock(t *testing.T) {
+	client, requests := serve(t, acknowledge)
+	session := "0f5b3c1e-6a2d-4f8e-9b7a-3c1d2e4f5a6b"
+	if _, err := client.Put(context.Background(), "proj/a.md", []byte("x"), "", session); err != nil {
+		t.Fatal(err)
+	}
+	if got := (<-requests).request.Header.Get("X-Pilot-Session"); got != session {
+		t.Fatalf("got %q", got)
+	}
 }
 
 func TestPutSendsNoneWithoutABase(t *testing.T) {
 	client, requests := serve(t, acknowledge)
-	if _, err := client.Put(context.Background(), "a.md", []byte("x"), ""); err != nil {
+	if _, err := client.Put(context.Background(), "a.md", []byte("x"), "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if got := (<-requests).request.Header.Get("X-Pilot-Base-Hash"); got != "none" {
@@ -101,7 +115,7 @@ func TestPutReadsA204(t *testing.T) {
 	client, _ := serve(t, answerWith(http.StatusNoContent, map[string]string{
 		"X-Pilot-Hash": Hash([]byte("saved")), "X-Pilot-Faults": "2", "X-Pilot-Stale": "true",
 	}, ""))
-	answer, err := client.Put(context.Background(), "a.md", []byte("saved"), "")
+	answer, err := client.Put(context.Background(), "a.md", []byte("saved"), "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +128,7 @@ func TestPutReadsA200(t *testing.T) {
 	client, _ := serve(t, answerWith(http.StatusOK, map[string]string{
 		"X-Pilot-Hash": Hash([]byte("merged")), "X-Pilot-Faults": "1", "Content-Type": "application/octet-stream",
 	}, "merged"))
-	answer, err := client.Put(context.Background(), "a.md", []byte("saved"), "")
+	answer, err := client.Put(context.Background(), "a.md", []byte("saved"), "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +143,7 @@ func TestPutRefusesAHashThatIsNotTheFiles(t *testing.T) {
 		"200": answerWith(http.StatusOK, map[string]string{"X-Pilot-Hash": Hash([]byte("saved")), "X-Pilot-Faults": "0"}, "merged"),
 	} {
 		client, _ := serve(t, answer)
-		if _, err := client.Put(context.Background(), "a.md", []byte("saved"), ""); err == nil {
+		if _, err := client.Put(context.Background(), "a.md", []byte("saved"), "", ""); err == nil {
 			t.Errorf("%s: no error", name)
 		}
 	}
@@ -137,26 +151,26 @@ func TestPutRefusesAHashThatIsNotTheFiles(t *testing.T) {
 
 func TestPutRefusesAnAnswerWithoutFaults(t *testing.T) {
 	client, _ := serve(t, answerWith(http.StatusNoContent, map[string]string{"X-Pilot-Hash": Hash([]byte("saved"))}, ""))
-	if _, err := client.Put(context.Background(), "a.md", []byte("saved"), ""); err == nil {
+	if _, err := client.Put(context.Background(), "a.md", []byte("saved"), "", ""); err == nil {
 		t.Fatal("no error")
 	}
 }
 
 func TestPutAnswersARefusal(t *testing.T) {
 	client, _ := serve(t, answerWith(http.StatusNotFound, nil, `{"error": "not found"}`))
-	if _, err := client.Put(context.Background(), "a.md", []byte("x"), ""); !errors.Is(err, ErrNotFound) {
+	if _, err := client.Put(context.Background(), "a.md", []byte("x"), "", ""); !errors.Is(err, ErrNotFound) {
 		t.Errorf("404: got %v", err)
 	}
 
-	client, _ = serve(t, answerWith(http.StatusUpgradeRequired, nil, `{"min": 2, "max": 3}`))
-	_, err := client.Put(context.Background(), "a.md", []byte("x"), "")
+	client, _ = serve(t, answerWith(http.StatusUpgradeRequired, nil, `{"min": 3, "max": 4}`))
+	_, err := client.Put(context.Background(), "a.md", []byte("x"), "", "")
 	var unsupported *UnsupportedError
-	if !errors.As(err, &unsupported) || unsupported.Min != 2 || unsupported.Max != 3 {
+	if !errors.As(err, &unsupported) || unsupported.Min != 3 || unsupported.Max != 4 {
 		t.Errorf("426: got %v", err)
 	}
 
 	client, _ = serve(t, answerWith(http.StatusUnauthorized, nil, `{"error": "no bearer"}`))
-	_, err = client.Put(context.Background(), "a.md", []byte("x"), "")
+	_, err = client.Put(context.Background(), "a.md", []byte("x"), "", "")
 	var status *StatusError
 	if !errors.As(err, &status) || status.Status != http.StatusUnauthorized || status.Body != `{"error": "no bearer"}` {
 		t.Errorf("401: got %v", err)
@@ -213,7 +227,7 @@ func TestManifestPostsBothMapsAndReadsTheFourLists(t *testing.T) {
 		t.Errorf("posted %s", got)
 	}
 	if posted.request.Method != http.MethodPost || posted.request.URL.Path != "/api/sync/manifest" ||
-		posted.request.Header.Get("Content-Type") != "application/json" || posted.request.Header.Get("X-Pilot-Sync-Protocol") != "1" {
+		posted.request.Header.Get("Content-Type") != "application/json" || posted.request.Header.Get("X-Pilot-Sync-Protocol") != "2" {
 		t.Errorf("got %s %s %v", posted.request.Method, posted.request.URL.Path, posted.request.Header)
 	}
 }
@@ -307,10 +321,10 @@ func TestEventsEndsOnAChangeThatIsNotAPathAndAHash(t *testing.T) {
 }
 
 func TestEventsAnswersARefusal(t *testing.T) {
-	client, _ := serve(t, answerWith(http.StatusUpgradeRequired, nil, `{"min": 2, "max": 3}`))
+	client, _ := serve(t, answerWith(http.StatusUpgradeRequired, nil, `{"min": 3, "max": 4}`))
 	_, err := client.Events(context.Background())
 	var unsupported *UnsupportedError
-	if !errors.As(err, &unsupported) || unsupported.Min != 2 || unsupported.Max != 3 {
+	if !errors.As(err, &unsupported) || unsupported.Min != 3 || unsupported.Max != 4 {
 		t.Errorf("426: got %v", err)
 	}
 	client, _ = serve(t, answerWith(http.StatusForbidden, nil, `{"error": "not the store"}`))

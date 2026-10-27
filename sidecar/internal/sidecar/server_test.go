@@ -51,8 +51,7 @@ type posted struct {
 
 // checkPost is a check the server took.
 type checkPost struct {
-	Path        string  `json:"path"`
-	Hash        string  `json:"hash"`
+	Folder      string  `json:"folder"`
 	WaitSeconds float64 `json:"wait_seconds"`
 }
 
@@ -62,7 +61,7 @@ type checkPost struct {
 // takes what it answered; a GET answers the record once fetching is told of
 // it; a manifest is answered
 // by design 1 §5.5's rule over the record, amended by reconciling; a check
-// is answered by checking, its path agreed and no error by default; the
+// is answered by checking, no error by default; the
 // change stream is accepted unless opening answers its attempt otherwise,
 // and each one accepted is handed to the test on streams. Two PUTs of one
 // path out at once fail the test.
@@ -84,6 +83,7 @@ type server struct {
 	respond     func(put) answer
 	reconciling func(posted, protocol.Reconciled) protocol.Reconciled
 	checking    func(checkPost) protocol.CheckAnswer
+	checkStatus int
 	opening     func(attempt int) (status int, body string)
 	fetching    func(path string)
 }
@@ -105,7 +105,7 @@ func newServer(t *testing.T) *server {
 		out:     map[string]int{},
 		respond: func(put) answer { return answer{} },
 		checking: func(checkPost) protocol.CheckAnswer {
-			return protocol.CheckAnswer{Checked: true, Errors: []protocol.SaveError{}, HomelessDeferrals: []protocol.HomelessDeferral{}}
+			return protocol.CheckAnswer{Errors: []protocol.SaveError{}, HomelessDeferrals: []protocol.HomelessDeferral{}}
 		},
 		opening:  func(int) (int, string) { return 0, "" },
 		fetching: func(string) {},
@@ -134,6 +134,13 @@ func (s *server) answeringChecks(checking func(checkPost) protocol.CheckAnswer) 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.checking = checking
+}
+
+// refusingChecks answers every check status, a refusal.
+func (s *server) refusingChecks(status int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.checkStatus = status
 }
 
 // fetches is told of each GET, by path, before it is answered.
@@ -346,14 +353,18 @@ func (s *server) rule(body posted) protocol.Reconciled {
 func (s *server) check(w http.ResponseWriter, r *http.Request) {
 	var body checkPost
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		s.t.Errorf("posted a check that is not {path, hash, wait_seconds}: %v", err)
+		s.t.Errorf("posted a check that is not {folder, wait_seconds}: %v", err)
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 	s.mu.Lock()
 	s.checks = append(s.checks, body)
-	checking := s.checking
+	checking, status := s.checking, s.checkStatus
 	s.mu.Unlock()
+	if status != 0 {
+		w.WriteHeader(status)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(checking(body)); err != nil {
 		s.t.Error(err)
@@ -397,7 +408,7 @@ func (s *server) events(w http.ResponseWriter, r *http.Request) {
 
 // The change stream's frames, as the server writes them.
 var (
-	hello     = "event: hello\ndata: {\"protocol\": {\"min\": 1, \"max\": 1}, \"manifest_hash\": \"" + hashOf("manifest") + "\"}\n\n"
+	hello     = "event: hello\ndata: {\"protocol\": {\"min\": 2, \"max\": 2}, \"manifest_hash\": \"" + hashOf("manifest") + "\"}\n\n"
 	manifest  = "event: manifest\ndata: {}\n\n"
 	heartbeat = ": heartbeat\n\n"
 )
