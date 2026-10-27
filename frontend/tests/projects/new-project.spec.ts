@@ -27,7 +27,7 @@ const TELL_HOW =
 const draftText = (title: string) => `# ${title}\n\nWhere we sleep.\n\n\`\`\`decision id=D1\noptions:\n  - Tent\n  - Cabin\n\`\`\`\n`;
 
 test.describe('The plus', () => {
-  test('makes a draft of the person’s and opens it: “New project” and “Draft” in their list and its head, and its definition chat in the timeline’s place, saying “Tell Pilot what to manage”, its composer under it', async ({
+  test('makes a draft of the person’s and opens it: “New project” and “Draft” in their list and its head, and its definition chat in the timeline’s place, saying “Tell Pilot what to manage”, its composer under it, the focus in its field', async ({
     page,
     people,
     projects,
@@ -58,6 +58,7 @@ test.describe('The plus', () => {
     await expect(definitionChat.empty.getByRole('heading')).toHaveText(TELL);
     await expect(definitionChat.empty.locator('p')).toHaveText(TELL_HOW);
     await expect(definitionChat.field).toBeEditable();
+    await expect(definitionChat.field).toBeFocused();
     await expect(definitionChat.send).toBeDisabled();
     await expect(timeline.root).toHaveCount(0);
     await expect(panel.tabs).toHaveText(['Draft', 'Documents']);

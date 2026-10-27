@@ -9,6 +9,7 @@ import { useNavigate, useParams } from '@tanstack/react-router';
 import { Archive, ArrowLeft, ChevronDown, ChevronRight, Ellipsis, Plus } from 'lucide-react';
 import { ProjectTab } from '@/components/projects/project-tab';
 import { Menu, MenuItem } from '@/components/shared/menu';
+import { discussIn } from '@/hooks/use-discuss';
 import { groupProjects, useArchivedProjects, useProjectList, type ProjectTab as Project } from '@/hooks/use-projects';
 import { usePostProjects } from '@/lib/api/generated/hooks';
 import { rememberInBrowser, useBrowserState, type Group } from '@/lib/browser-state';
@@ -85,7 +86,7 @@ function ProjectList({ onArchived }: { onArchived: () => void }) {
 
 const NEW_PROJECT_FORM = 'projects.new';
 
-/** The plus: a draft, its creator the signed-in person, opened at its own address (F46.1). */
+/** The plus: a draft, its creator the signed-in person, opened at its own address (F46.1), the focus in its chat's field. */
 function NewProjectButton() {
   const navigate = useNavigate();
   const create = usePostProjects();
@@ -95,6 +96,8 @@ function NewProjectButton() {
     create.mutate(undefined, {
       onSuccess: (draft) => {
         trackFormSuccess(NEW_PROJECT_FORM, { project: draft.id });
+        // As Discuss asks for it, with nothing quoted: the composer's field takes the focus once drawn.
+        discussIn(draft.id, null);
         void navigate({ to: '/projects/$projectId', params: { projectId: draft.id } });
       },
       onError: () => trackFormError(NEW_PROJECT_FORM),

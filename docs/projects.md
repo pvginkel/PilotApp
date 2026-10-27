@@ -132,8 +132,8 @@ does Create project, whose folder moves from `draft-<number>` to its slug.
 
 The side column (`project-column.tsx`). Its head reads "Projects", with the plus ("New project")
 and the overflow menu ("More"), which holds *Archived*, at its right. The plus starts a new project
-(`POST /api/projects`, above) and opens the draft at its address. It is disabled while its post is
-under way.
+(`POST /api/projects`, above) and opens the draft at its address, the focus in its definition chat's
+field. It is disabled while its post is under way.
 
 - **The groups.** The person's projects, the unfinished ones they are a member of, stand under the
   head with no group row; *Other projects* holds the unfinished rest, and *Finished* every finished
