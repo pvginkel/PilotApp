@@ -42,7 +42,8 @@ class EffectLine:
     """The item the line goes to."""
     block_id: str | None = None
     """The block in it the line goes to, by its id `<item id>/<local id>`
-    (TD §4.9)."""
+    (TD §4.9), or `project.md/<local id>` for an ask of a draft, which has no
+    item."""
 
 
 @dataclass(frozen=True)
