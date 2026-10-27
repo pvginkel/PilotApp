@@ -2,7 +2,7 @@
  * One chat as the Chat tab shows it (F38.2, F40): its records streamed from the first while it
  * shows (F40.3), as the view builds them — each person's message, Pilot's reply to it, the cue while
  * Pilot answers — a date divider over its first message and over each the day turns at, the
- * phantom on its turn in flight, and "Chat closed · <time>" where it closed (F130.1). What comes live
+ * phantom on its turn in flight, and the line where it closed (F130.1). What comes live
  * fades in, what loads does not. A turn its records leave open ended when Pilot no longer answers.
  * Asked to go to one of its records, it finds the message of the turn holding it once its stream has
  * read that far: the latest message at or before it (F42.3).
@@ -71,7 +71,7 @@ export function ChatSection({ chat, people, goTo, onFound, flashing, onFlashed }
   }
 
   return items.map((item) => {
-    if (item.kind === 'closed') return <SessionSeparator key={item.key} at={item.at} />;
+    if (item.kind === 'closed') return <SessionSeparator key={item.key} at={item.at} cause={item.cause} />;
     const { turn } = item;
     const { person } = turn;
     const at = person?.at ?? turn.startedAt;

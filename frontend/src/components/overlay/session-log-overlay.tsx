@@ -1,8 +1,8 @@
 /**
  * A work item's session log in the overlay (F69), at its own address over its project's timeline,
  * by the item's id, which is its session's (F97). Its head is "Session log" over the item's title,
- * its environment's link once its start has one, and the session's id, and Discuss, quoting the
- * item (F69.1). Its body is the session's records rendered
+ * its environment's link once its start has one, none for Pilot's own work (F26.3), and the
+ * session's id, and Discuss, quoting the item (F69.1). Its body is the session's records rendered
  * as the chat renders a reply — the runs of calls, the sub-agents' cards, the phantom — streamed
  * from the first record while it is open (F40.3), one reply per turn, each ended one closing on
  * its time; it sticks to the end while it grows, and only the reader's own scrolling lets go
@@ -83,7 +83,7 @@ function Titles({ item, work }: { item: TimelineItem; work: Work }) {
           <LinkedText text={titleOf(item)} />
         </span>
         <span>·</span>
-        {work.environment !== null && (
+        {!work.pilots_own && work.environment !== null && (
           <>
             <EnvironmentLink environment={work.environment} testId="session-log.environment" />
             <span>·</span>

@@ -18,7 +18,7 @@ type ClaudeRecordSchema = Schemas['SessionRecordPageSchema.01118bb.ClaudeRecordS
 type ResultRecordSchema = Schemas['SessionRecordPageSchema.01118bb.ResultRecordSchema'];
 type ServerRecordSchema = Schemas['SessionRecordPageSchema.01118bb.ServerRecordSchema'];
 type StopCause = Schemas['TimelineSchema.1fdd8ae.StopCause'];
-type CloseCause = Schemas['ChatListSchema.f9d9b43.CloseCause'];
+export type CloseCause = Schemas['ChatListSchema.f9d9b43.CloseCause'];
 
 /** A person's message, written at the send: `claude` does not replay it. */
 export type SendRecord = Schemas['SessionRecordPageSchema.01118bb.SendRecordSchema'];

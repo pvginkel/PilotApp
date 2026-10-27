@@ -18,7 +18,7 @@
  * stands in its own record's place.
  */
 
-import type { ChatRecord, Effect, SendRecord, ServerRecord } from './records';
+import type { ChatRecord, CloseCause, Effect, SendRecord, ServerRecord } from './records';
 import { isAssistant, isMainThread, isSystem, isUser, resultText, type AssistantLine, type SystemLine } from './claude-lines';
 
 interface ToolResultView {
@@ -82,7 +82,9 @@ export interface TurnView {
   endedAt?: string;
 }
 
-type ChatItem = { kind: 'turn'; key: string; turn: TurnView } | { kind: 'closed'; key: string; at: string; seq: number };
+type ChatItem =
+  | { kind: 'turn'; key: string; turn: TurnView }
+  | { kind: 'closed'; key: string; at: string; seq: number; cause: CloseCause };
 
 const textOf = (line: AssistantLine) =>
   line.message.content
@@ -168,7 +170,7 @@ export function buildChatView(chatId: string, records: readonly ChatRecord[], { 
       continue;
     }
     if (r.kind === 'server' && r.payload.type === 'closed') {
-      items.push({ kind: 'closed', key: `${chatId}:closed`, at: r.at, seq: r.seq });
+      items.push({ kind: 'closed', key: `${chatId}:closed`, at: r.at, seq: r.seq, cause: r.payload.cause });
       turn = null;
       continue;
     }

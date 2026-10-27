@@ -9,9 +9,10 @@
  * (F125). Its Session log opens the session's records in the overlay (F26.3, F69). Stop, while it
  * runs, starts or is held, asks first in its actions' place, Esc dismissing the question; Resume,
  * once it stopped or failed, carries it on (F67), disabled while the project is archived, as its
- * head's switch is (D012). Once this browser's Stop or Resume swaps the two, the keyboard focus on
- * the button that went goes to the other's resting button, Resume or Stop; a swap another
- * browser's act made moves no focus.
+ * head's switch is (D012). Pilot's own work, a background job such as the setup, has no env chip
+ * and no Stop or Resume, its session log alone (F26.3, F59.1). Once this browser's Stop or Resume
+ * swaps the two, the keyboard focus on the button that went goes to the other's resting button,
+ * Resume or Stop; a swap another browser's act made moves no focus.
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -43,12 +44,13 @@ const actionsOf = (state: Work['state']): Actions | null =>
 export function WorkItem({ item }: { item: TimelineItem }) {
   // The API gives every work item its session.
   const work = item.work!;
-  const actions = actionsOf(work.state);
+  const actions = work.pilots_own ? null : actionsOf(work.state);
   const handoff = useHandoff(actions);
   return (
     <div className="item-body">
       <ItemHead item={item}>
-        {work.environment !== null && (
+        {/* A job's environment is the store's once its start takes it. */}
+        {!work.pilots_own && work.environment !== null && (
           <span className="chip mono env">
             <EnvironmentLink environment={work.environment} testId="timeline.work.environment" />
           </span>

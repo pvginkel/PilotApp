@@ -2,7 +2,7 @@
  * The project's chats where they stand (F38, F40.3, F130.1): the side panel's Chat tab, or, for a
  * draft, its definition chat in the timeline's place, the composer under it in the timeline's
  * column (F46.1; the mockup's `renderChat`, its home the page until Create). Either shows the
- * project's latest chat, or with none open the latest closed one, above its "Chat closed · <time>".
+ * project's latest chat, or with none open the latest closed one, above the line where it closed.
  * "The chat before · <day>" at the top loads that chat above what is in view and leaves the view
  * where it is (the chat mockup's decision 11); a chat that opens while it shows comes in below.
  * Every viewer streams the chats it shows, so another person's message and Pilot's reply come to
