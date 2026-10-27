@@ -384,6 +384,51 @@ func TestAReleaseNamesWhatItsFlushCouldNotSend(t *testing.T) {
 	running.lock(t, "proj", job, os.Getpid())
 }
 
+func TestASaveItsReleaseCouldNotSendGoesUpAsTheReleasersUnderTheNextHolder(t *testing.T) {
+	s := newServer(t)
+	stuck := make(chan struct{})
+	s.answering(func(taken put) answer {
+		if strings.HasSuffix(taken.body, "first") {
+			<-stuck
+		}
+		return answer{}
+	})
+	tree := t.TempDir()
+	kept, rewritten := filepath.Join(tree, "proj", "a.md"), filepath.Join(tree, "proj", "c.md")
+	running := start(t, s, tree, t.TempDir())
+
+	running.lock(t, "proj", chat, os.Getpid())
+	write(t, kept, "a first")
+	write(t, rewritten, "c first")
+	eventually(t, "both PUTs", func() bool { return len(s.taken()) == 2 })
+	write(t, kept, "a second")
+	write(t, rewritten, "c second")
+	if got := running.release(t, "proj", chat); got != "not yet checked: proj/a.md\nnot yet checked: proj/c.md\n" {
+		t.Fatalf("printed %q", got)
+	}
+	running.lock(t, "proj", job, os.Getpid())
+	// Written over before its pass read it: the chat's bytes never go up.
+	write(t, rewritten, "c third")
+	close(stuck)
+	eventually(t, "the late PUTs", func() bool { return len(s.taken()) == 4 })
+	write(t, kept, "a third")
+	if got := running.release(t, "proj", job); got != "" {
+		t.Fatalf("printed %q", got)
+	}
+	settle()
+
+	got := map[string]string{}
+	for _, taken := range s.taken() {
+		got[taken.body] = sessionOf(taken)
+	}
+	want := map[string]string{
+		"a first": chat, "c first": chat, "a second": chat, "c third": job, "a third": job,
+	}
+	if !maps.Equal(got, want) {
+		t.Fatalf("the PUTs carried %v, want %v", got, want)
+	}
+}
+
 func TestAReleasePrintsTheErrorsThenItsFoldersNotesThenTheDeferrals(t *testing.T) {
 	s := newServer(t)
 	s.answering(func(taken put) answer {

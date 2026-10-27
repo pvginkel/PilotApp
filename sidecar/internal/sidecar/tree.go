@@ -34,8 +34,8 @@ const viewMode fs.FileMode = 0o444
 
 // tree is the store's tree as the sidecar keeps it: the files under its
 // root, the shadow of each as it last synced, the local notes on them, the
-// read-only views among them, the write lock of each project folder, and
-// the server they sync with.
+// read-only views among them, the write lock of each project folder, the
+// saves its releases left unsent, and the server they sync with.
 type tree struct {
 	root    string
 	client  *protocol.Client
@@ -45,6 +45,11 @@ type tree struct {
 	slots   chan struct{}
 	locks   *pathLocks
 	writers *writeLocks
+	unsent  *unsent
+	// leaving is held to record what a release leaves unsent, and shared by
+	// an upload from reading a file to naming its bytes' writer, so no
+	// record falls between the two.
+	leaving sync.RWMutex
 
 	mu       sync.Mutex
 	readonly map[string]bool
@@ -60,6 +65,7 @@ func newTree(root string, client *protocol.Client, store *shadow.Store, logger *
 		slots:    make(chan struct{}, parallelCalls),
 		locks:    &pathLocks{held: map[string]*pathLock{}},
 		writers:  newWriteLocks("/proc", logger),
+		unsent:   &unsent{byPath: map[string]unsentSave{}},
 		readonly: map[string]bool{},
 	}
 }
@@ -105,14 +111,29 @@ func (t *tree) path(name string) (string, bool) {
 	return path, protocol.ValidPath(path)
 }
 
-// writer is the session holding the write lock of path's project folder,
-// "" when none does or path is at the tree's root.
-func (t *tree) writer(path string) string {
+// writer is the session the bytes of hash at path are a save of: the one a
+// release left them unsent as, or else the one holding the write lock of
+// path's project folder; "" when neither is, or path is at the tree's root.
+// The caller has shared leaving since it read the bytes.
+func (t *tree) writer(path, hash string) string {
+	if session, left := t.unsent.writer(path, hash); left {
+		return session
+	}
 	folder, _, nested := strings.Cut(path, "/")
 	if !nested {
 		return ""
 	}
 	return t.writers.holder(folder)
+}
+
+// leave records the bytes of hashes, by path, as session's: what a release's
+// flush read and could not get up while the hold stood.
+func (t *tree) leave(hashes map[string]string, session string) {
+	t.leaving.Lock()
+	defer t.leaving.Unlock()
+	for path, hash := range hashes {
+		t.unsent.leave(path, hash, session)
+	}
 }
 
 // hold takes a call's slot and path's lock, false when ctx is done first;

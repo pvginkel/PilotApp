@@ -177,6 +177,63 @@ func (l *writeLocks) free(folder string) {
 	l.freed = make(chan struct{})
 }
 
+// unsent is what releases' flushes read in their project folders and had
+// not got up when their holds went: by path, the hash of those bytes and the
+// session that held the lock as the flush read them. Those bytes go up as
+// that session's, whoever holds the lock by then.
+type unsent struct {
+	mu     sync.Mutex
+	byPath map[string]unsentSave
+}
+
+// unsentSave is the bytes a release left unsent at a path: their hash, and
+// the session they are a save of, "" for none.
+type unsentSave struct {
+	hash    string
+	session string
+}
+
+// leave records the bytes of hash at path as session's, unless they were
+// left there already: they stay the save they were.
+func (u *unsent) leave(path, hash, session string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if left, ok := u.byPath[path]; ok && left.hash == hash {
+		return
+	}
+	u.byPath[path] = unsentSave{hash: hash, session: session}
+}
+
+// writer is the session the bytes of hash at path were left unsent as, false
+// when they were not. Other bytes left at path are no longer on disk, for
+// the caller read hash there after they were left: they are forgotten.
+func (u *unsent) writer(path, hash string) (string, bool) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	left, ok := u.byPath[path]
+	if ok && left.hash == hash {
+		return left.session, true
+	}
+	delete(u.byPath, path)
+	return "", false
+}
+
+// sent forgets the bytes of hash left at path, which the server holds.
+func (u *unsent) sent(path, hash string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.byPath[path].hash == hash {
+		delete(u.byPath, path)
+	}
+}
+
+// forget forgets what was left at path, which is no longer on disk.
+func (u *unsent) forget(path string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	delete(u.byPath, path)
+}
+
 // started is the start time of the running process pid, the 22nd field of
 // its stat (proc(5)); false when there is none, or it has exited and not
 // been reaped.

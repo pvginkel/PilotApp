@@ -94,10 +94,10 @@ func (s *Sidecar) lock(w http.ResponseWriter, r *http.Request) {
 
 // release is the check after a tool call that can write the tree (design 1
 // §5.6): every file of the call's project folder whose bytes are not those
-// it last synced goes up while the session's hold still stands, so it is
-// that session's; the server's check of the folder is asked; and then the
-// hold is given back, the pid's one or, with all, every one the session
-// has. It answers 200 with what the hook prints, whatever the session held.
+// it last synced goes up as the save of the session holding the lock (flush);
+// the server's check of the folder is asked; and then the hold is given
+// back, the pid's one or, with all, every one the session has. It answers
+// 200 with what the hook prints, whatever the session held.
 func (s *Sidecar) release(w http.ResponseWriter, r *http.Request) {
 	call, folder, ok := s.hookCall(w, r)
 	if !ok {
@@ -152,15 +152,17 @@ func (s *Sidecar) hookCall(w http.ResponseWriter, r *http.Request) (hookCall, st
 }
 
 // flush sends up every file of folder whose bytes are not those it last
-// synced, and waits, until flushCap after the call, for each to be read
-// after the call and sent, or found in sync. It answers the paths that were
-// not by then, or whose send came to nothing, in path order.
+// synced, and waits, until flushCap after the call or ctx's end, for each to
+// be read after the call and sent, or found in sync. Those that were not by
+// then, or whose send came to nothing, it leaves unsent as the saves of the
+// session that held the lock as it read them, and answers in path order.
 func (s *Sidecar) flush(ctx context.Context, folder string) []string {
 	disk, err := s.tree.walk(folder)
 	if err != nil {
 		s.logger.Error("cannot walk a project folder", "folder", folder, "error", err)
 		return []string{folder + "/"}
 	}
+	holder := s.tree.writers.holder(folder)
 	settling := map[string]<-chan string{}
 	for path, hash := range disk {
 		if synced, _ := s.tree.shadow.Hash(path); synced != hash {
@@ -170,7 +172,7 @@ func (s *Sidecar) flush(ctx context.Context, folder string) []string {
 	timer := time.NewTimer(flushCap)
 	defer timer.Stop()
 	expired := false
-	var unflushed []string
+	left := map[string]string{}
 	for _, path := range slices.Sorted(maps.Keys(settling)) {
 		var hash string
 		var settled bool
@@ -187,14 +189,15 @@ func (s *Sidecar) flush(ctx context.Context, folder string) []string {
 			case <-timer.C:
 				expired = true
 			case <-ctx.Done():
-				return nil
+				expired = true
 			}
 		}
 		if !settled || hash == "" {
-			unflushed = append(unflushed, path)
+			left[path] = disk[path]
 		}
 	}
-	return unflushed
+	s.tree.leave(left, holder)
+	return slices.Sorted(maps.Keys(left))
 }
 
 // check is the server's check of folder, at most checkCap.

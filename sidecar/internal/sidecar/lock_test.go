@@ -168,3 +168,45 @@ func TestAReleaseGivesBackOnlyAHoldOfItsSessionAndPid(t *testing.T) {
 		t.Fatalf("held by %q", got)
 	}
 }
+
+func TestBytesLeftUnsentStayTheirFirstSessionsUntilTheyGoUpOrAreGone(t *testing.T) {
+	left := &unsent{byPath: map[string]unsentSave{}}
+	writer := func(path, hash string) string {
+		t.Helper()
+		session, ok := left.writer(path, hash)
+		if !ok {
+			return "none"
+		}
+		return session
+	}
+
+	// Left again by the next holder's release, they stay the chat's.
+	left.leave("proj/a.md", "h1", "chat")
+	left.leave("proj/a.md", "h1", "job")
+	if got := writer("proj/a.md", "h1"); got != "chat" {
+		t.Fatalf("h1 is %s's", got)
+	}
+	// Read as other bytes, they are gone from disk, and forgotten.
+	if got := writer("proj/a.md", "h2"); got != "none" {
+		t.Fatalf("h2 is %s's", got)
+	}
+	if got := writer("proj/a.md", "h1"); got != "none" {
+		t.Fatalf("h1, written again, is %s's", got)
+	}
+
+	left.leave("proj/b.md", "h1", "")
+	left.sent("proj/b.md", "h2")
+	if got := writer("proj/b.md", "h1"); got != "" {
+		t.Fatalf("b's h1 is %s's, after other bytes went up", got)
+	}
+	left.sent("proj/b.md", "h1")
+	if got := writer("proj/b.md", "h1"); got != "none" {
+		t.Fatalf("b's h1 is %s's, once it went up", got)
+	}
+
+	left.leave("proj/c.md", "h1", "chat")
+	left.forget("proj/c.md")
+	if got := writer("proj/c.md", "h1"); got != "none" {
+		t.Fatalf("c's h1 is %s's, once c was gone", got)
+	}
+}

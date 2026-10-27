@@ -14,8 +14,8 @@ import (
 
 // uploads sends the tree's files up as they change: a file whose hash is not
 // its shadow's goes up with the shadow's hash as its base, as the save of
-// the session holding its project folder's write lock, and the answer is
-// recorded in the shadow and, when it carries bytes, written in place. A
+// the session its bytes are (tree.writer), and the answer is recorded in
+// the shadow and, when it carries bytes, written in place. A
 // file the sidecar wrote itself hashes as its shadow, so it never goes up; a
 // read-only view written is reverted, and never goes up.
 type uploads struct {
@@ -138,41 +138,21 @@ func (u *uploads) upload(path string) string {
 		return ""
 	}
 	defer release()
-	name := t.name(path)
-	info, err := os.Lstat(name)
-	if errors.Is(err, fs.ErrNotExist) {
-		// Gone: no delete goes up (design 1 §5.5).
-		t.notes.clear(path)
+	file, ok := t.read(path)
+	if !ok {
 		return ""
 	}
-	if err != nil {
-		t.logger.Error("cannot read a file of the tree", "path", path, "error", err)
-		return ""
-	}
-	if !info.Mode().IsRegular() {
-		return ""
-	}
-	sent, err := os.ReadFile(name)
-	if errors.Is(err, fs.ErrNotExist) {
-		t.notes.clear(path)
-		return ""
-	}
-	if err != nil {
-		t.logger.Error("cannot read a file of the tree", "path", path, "error", err)
-		return ""
-	}
-	// Read after the bytes, so a save written inside a hold goes up as its
-	// holder's: the hold stands until the release's flush has read it.
-	session := t.writer(path)
+	sent := file.content
 	base, synced := t.shadow.Hash(path)
-	if protocol.Hash(sent) == base {
+	if file.hash == base {
+		t.unsent.sent(path, base)
 		return base
 	}
 	view := t.view(path)
 	if view && synced {
 		return t.revert(path)
 	}
-	answer, err := t.client.Put(u.ctx, path, sent, base, session)
+	answer, err := t.client.Put(u.ctx, path, sent, base, file.session)
 	switch {
 	case err == nil:
 	case u.ctx.Err() != nil:
@@ -180,7 +160,7 @@ func (u *uploads) upload(path string) string {
 	case errors.Is(err, protocol.ErrNotFound):
 		t.notes.keep(path, strayNote)
 		t.logger.Info("not a path of the record: left as it is", "path", path)
-		return protocol.Hash(sent)
+		return file.hash
 	default:
 		// Left for the next reconcile, whose first step sends it up.
 		t.logger.Error("cannot sync a file of the tree", "path", path, "error", err)
@@ -194,20 +174,69 @@ func (u *uploads) upload(path string) string {
 		t.logger.Error("cannot record a sync", "path", path, "error", err)
 		return ""
 	}
+	t.unsent.sent(path, file.hash)
 	t.notes.clear(path)
 	if answer.Content != nil {
-		mode := info.Mode().Perm()
+		mode := file.mode
 		if view {
 			mode = viewMode
 		}
-		if err := writeAnswer(name, sent, answer.Content, mode); err != nil {
+		if err := writeAnswer(t.name(path), sent, answer.Content, mode); err != nil {
 			t.logger.Error("cannot write a sync's answer", "path", path, "error", err)
 			return ""
 		}
 	}
-	t.logger.Info("synced", "path", path, "hash", answer.Hash, "session", session, "rewritten", answer.Content != nil,
+	t.logger.Info("synced", "path", path, "hash", answer.Hash, "session", file.session, "rewritten", answer.Content != nil,
 		"stale", answer.Stale, "faults", answer.Faults)
 	return answer.Hash
+}
+
+// onDisk is a file of the tree as an upload read it: its bytes, their hash,
+// its mode and the session the bytes are a save of.
+type onDisk struct {
+	content []byte
+	hash    string
+	mode    fs.FileMode
+	session string
+}
+
+// read is the file of path as it is on disk, false when there is none to
+// send: gone, not a regular file, or unreadable.
+func (t *tree) read(path string) (onDisk, bool) {
+	t.leaving.RLock()
+	defer t.leaving.RUnlock()
+	name := t.name(path)
+	info, err := os.Lstat(name)
+	if errors.Is(err, fs.ErrNotExist) {
+		// Gone: no delete goes up (design 1 §5.5).
+		t.gone(path)
+		return onDisk{}, false
+	}
+	if err != nil {
+		t.logger.Error("cannot read a file of the tree", "path", path, "error", err)
+		return onDisk{}, false
+	}
+	if !info.Mode().IsRegular() {
+		return onDisk{}, false
+	}
+	content, err := os.ReadFile(name)
+	if errors.Is(err, fs.ErrNotExist) {
+		t.gone(path)
+		return onDisk{}, false
+	}
+	if err != nil {
+		t.logger.Error("cannot read a file of the tree", "path", path, "error", err)
+		return onDisk{}, false
+	}
+	hash := protocol.Hash(content)
+	return onDisk{content: content, hash: hash, mode: info.Mode().Perm(), session: t.writer(path, hash)}, true
+}
+
+// gone forgets what the tree knows of the file of path but its shadow: its
+// notes and what a release left unsent there.
+func (t *tree) gone(path string) {
+	t.notes.clear(path)
+	t.unsent.forget(path)
 }
 
 // writeAnswer writes answer over the file at name while it still holds
