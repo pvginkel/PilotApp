@@ -1,8 +1,8 @@
 /**
  * *In the chat* (F42.3): a block answered in the chat goes to the message that gave the answer. It
- * opens the side panel on the Chat tab, on top, with nothing quoted, as Discuss opens it; the tab
- * loads the chats before until the one holding the place, then scrolls to that message and flashes
- * it. The place is kept in the page, by the project, until the tab reaches it; each click puts it
+ * opens the side panel on the Chat tab, on top, with nothing quoted, as Discuss opens it, and in a
+ * draft its definition chat in the timeline's place (F46.1); the chat loads the chats before until
+ * the one holding the place, then scrolls to that message and flashes it. The place is kept in the page, by the project, until the tab reaches it; each click puts it
  * afresh, so the same place is gone to again.
  */
 

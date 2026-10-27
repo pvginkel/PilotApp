@@ -2,8 +2,8 @@
  * Discuss (F39): one chat per project, whichever Discuss opens it (F39.4). Discuss on an item, a
  * block, a file's overlay or a session log opens the side panel on the Chat tab, on top, with what
  * it quotes in the composer, until the message carrying it is sent or the quote is dropped (F39.3);
- * the head's Discuss opens it with nothing quoted (F39.2). Either asks for the focus in the
- * composer's field. The quote is kept in the page, by the project, and nothing of it in the
+ * the head's Discuss opens it with nothing quoted (F39.2). In a draft, Discuss takes its definition
+ * chat in the timeline's place instead (F46.1). Either asks for the focus in the composer's field. The quote is kept in the page, by the project, and nothing of it in the
  * browser's storage.
  */
 

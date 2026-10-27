@@ -1,9 +1,10 @@
 /**
  * What flashes on the timeline, each once until its animation ends: an item that arrived or that
  * the reader was taken to, by its id, and a block the reader was taken to, by `<item>/<block>`
- * (F8.2, F97). The overlay flashes the blocks it is taken to on its own, and the Chat tab the
- * message *In the chat* takes it to (F42.3). Elsewhere nothing flashes. A block on the page is gone to as an address goes to it, from a segment of its
- * document's bar (F33).
+ * (F8.2, F97). The overlay flashes the blocks it is taken to on its own, the Chat tab, or a draft's
+ * definition chat, the message *In the chat* takes it to (F42.3), and a draft's Draft tab the ask it
+ * is taken to. Elsewhere nothing flashes. A block on the page is gone to as an address goes to it,
+ * from a segment of its document's bar (F33).
  */
 
 import { createContext, useCallback, useContext, useState, type AnimationEvent } from 'react';
