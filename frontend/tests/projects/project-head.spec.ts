@@ -2,8 +2,8 @@
  * A project's head (F2): the name, the ticket and the repo, linked; the step button and the plan
  * popover (F2.2, F3); the handbook's button (F129.4; its overlay in
  * timeline/project-documents.spec.ts); the plan's notes and a step's (F2.7, F3.6); the members (F2.5); the auto
- * pilot switch, the Finished chip in its place (F2.6, F4.1); a draft's and an archived project's
- * head (D012); a tight head giving way beside the side panel, its menu clear of it; everything it
+ * pilot switch, the Finished chip in its place (F2.6, F4.1); a draft's head, with its draft-panel
+ * toggle (F46.2; its panel in draft-panel.spec.ts), and an archived project's head (D012); a tight head giving way beside the side panel, its menu clear of it; everything it
  * opens closed on another project (F1.6); two rows on a narrow window.
  */
 
@@ -327,7 +327,7 @@ test.describe('Auto pilot', () => {
 });
 
 test.describe('A draft’s head', () => {
-  test('has its name, the Draft chip and its members, and no switch, step or Documents button, nor a side panel on a wide window', async ({
+  test('has its name, the Draft chip, its members and the draft-panel toggle, and no switch, step, Discuss or Documents button; its side panel stands on the Draft tab on a wide window', async ({
     people,
     projects,
     projectHead,
@@ -344,8 +344,11 @@ test.describe('A draft’s head', () => {
     await expect(projectHead.members.locator('.avatar')).toHaveCount(1);
     await expect(projectHead.autopilot).toHaveCount(0);
     await expect(projectHead.step).toHaveCount(0);
+    await expect(projectHead.discussButton).toHaveCount(0);
     await expect(projectHead.documentsButton).toHaveCount(0);
-    await expect(panel.root).toHaveCount(0);
+    await expect(projectHead.handbookButton).toHaveCount(0);
+    await expect(projectHead.draftPanelButton).toHaveAttribute('aria-pressed', 'true');
+    await expect(panel.draftTab).toHaveAttribute('aria-selected', 'true');
 
     await projectHead.open(untitled);
     await expect(projectHead.name).toHaveText('New project');

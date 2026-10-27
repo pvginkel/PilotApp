@@ -2,7 +2,8 @@
  * The documents the overlay reads on its own. An item's, as GET /api/items/<id>/document reads it
  * (F28): its timeline entry and its project, with its text as Done fixed it where Done did
  * (F13.3). The project's handbook (F129.4) and its project document, `project.md` (F37.4), as
- * GET /api/projects/<id>/handbook and …/draft read them, as last published. Each refetches when
+ * GET /api/projects/<id>/handbook and …/draft read them, as last published, the latter by the
+ * overlay and by a draft's Draft tab (F46.3), each reporting its own read. Each refetches when
  * the window comes back into focus, after the person's own writes, which invalidate every query,
  * and on its project's live event (F80.2; use-project-events.ts).
  */
@@ -26,8 +27,8 @@ export function useHandbook(projectId: string) {
   return query;
 }
 
-export function useProjectDraft(projectId: string) {
+export function useProjectDraft(projectId: string, scope: 'overlay.draft' | 'panel.draft') {
   const query = useGetProjectsDraftByProjectId({ path: { project_id: projectId } }, { refetchOnWindowFocus: 'always' });
-  useUiStateInstrumentation('overlay.draft', { isLoading: query.isLoading, error: query.error });
+  useUiStateInstrumentation(scope, { isLoading: query.isLoading, error: query.error });
   return query;
 }

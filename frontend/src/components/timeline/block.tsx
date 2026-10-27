@@ -13,14 +13,16 @@
  * address, it flashes (F97). In an archived project its controls stand disabled, which the API
  * refuses until Bring back (D012). A block of a project's own document, the handbook or
  * `project.md`, has no item, and in the overlay reads only (D1): every answer closed, with no
- * chevron and no Discuss, and an unanswered block open, its controls standing disabled.
+ * chevron and no Discuss, and an unanswered block open, its controls standing disabled. A draft's
+ * block in the Draft tab is answered in place, as a document's is (F47.4), its Discuss quoting it
+ * into the definition chat (F39.1).
  */
 
 import { useState } from 'react';
 import { useParams } from '@tanstack/react-router';
 import { Check, ChevronDown, ChevronUp } from 'lucide-react';
 import { DiscussButton } from '@/components/chat/discuss-button';
-import { quoteOfBlock } from '@/components/chat/discuss-quotes';
+import { quoteOfBlock, quoteOfDraftBlock } from '@/components/chat/discuss-quotes';
 import { InChatButton } from '@/components/chat/in-chat-button';
 import { Time } from '@/components/shared/time';
 import { ActionAnswer } from '@/components/timeline/action';
@@ -32,7 +34,7 @@ import { Note } from '@/components/timeline/note';
 import { QuestionAnswer } from '@/components/timeline/question';
 import { Deferral, DEFERRED } from '@/components/timeline/said';
 import { UserAvatar } from '@/components/timeline/user-avatar';
-import { useAnswer } from '@/hooks/use-answer';
+import { useAnswer, useDraftAnswer, type Answering } from '@/hooks/use-answer';
 import { useArchived } from '@/hooks/use-projects';
 import { isAnswered, type Block as BlockData, type TimelineItem } from '@/hooks/use-timeline';
 import type { QuoteRef } from '@/lib/chat/quotes';
@@ -84,6 +86,34 @@ export function DocumentBlock({ document, block }: { document: string; block: Bl
   );
 }
 
+interface DraftBlockProps {
+  projectId: string;
+  block: BlockData;
+  /** The draft's title, which its Discuss's label names. */
+  title: string | null;
+  flash: Flash;
+}
+
+/** A block of a draft's `project.md`, in the Draft tab: answered in place (F47.4). */
+export function DraftBlock({ projectId, block, title, flash }: DraftBlockProps) {
+  const answering = useDraftAnswer(projectId, block.id);
+  const archived = useArchived(projectId);
+  return (
+    <BlockPanel
+      field={blockKey(`${projectId}/project.md`, block.id)}
+      block={block}
+      solo={false}
+      answering={answering}
+      settled={false}
+      disabled={archived}
+      quote={quoteOfDraftBlock(block, title)}
+      flash={flash}
+    />
+  );
+}
+
+type Flash = ReturnType<typeof useBlockFlash>;
+
 /** What a read-only block's controls take, which stand disabled. */
 const unanswerable = (): never => {
   throw new Error('A read-only block takes no answer');
@@ -95,14 +125,14 @@ interface BlockPanelProps {
   block: BlockData;
   solo: boolean;
   /** How it takes an answer; none where it is read only. */
-  answering: ReturnType<typeof useAnswer> | null;
+  answering: Answering | null;
   /** Its item is done. */
   settled: boolean;
   /** Its controls stand and take nothing. */
   disabled: boolean;
   /** What its head's Discuss quotes; none where its head has no Discuss. */
   quote: QuoteRef | null;
-  flash: ReturnType<typeof useBlockFlash> | null;
+  flash: Flash | null;
 }
 
 function BlockPanel({ field, block, solo, answering, settled, disabled, quote, flash }: BlockPanelProps) {

@@ -6,7 +6,9 @@
  * its stream; an SVG inline only as an image, which runs no script, its text read from the stream
  * that serves it as a download; other text in a monospace block; anything else its title, its
  * file's name and size, and Download. Opened at its address under its item's, it lies over the
- * timeline where the timeline stands.
+ * timeline where the timeline stands. At its address under its project's, it is found wherever it
+ * hangs: on nothing, as a draft's material does until Create project (F36.6), its head's line then
+ * "Attachment of the draft", or on an item.
  */
 
 import { useNavigate } from '@tanstack/react-router';
@@ -17,7 +19,7 @@ import { DidNotLoad, Overlay } from '@/components/overlay/overlay';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Markdown } from '@/components/shared/markdown';
 import { attachmentUrl, useAttachmentText } from '@/hooks/use-attachment';
-import { attachmentIn, titleOf, type Attachment, type TimelineItem } from '@/hooks/use-timeline';
+import { attachmentIn, hungById, titleOf, type Attachment, type TimelineItem } from '@/hooks/use-timeline';
 import { useGetProjectsTimelineByProjectId } from '@/lib/api/generated/hooks';
 
 /** An attachment of an item of the project's timeline, at the attachment's address under the item's. */
@@ -42,16 +44,41 @@ export function ItemAttachmentOverlay({ projectId, itemId, attachmentId }: { pro
   );
 }
 
-export function AttachmentTitles({ item, attachment }: { item: TimelineItem; attachment: Attachment }) {
+/** An attachment of the project, at its address under the project's, wherever it hangs. */
+export function ProjectAttachmentOverlay({ projectId, attachmentId }: { projectId: string; attachmentId: string }) {
+  const navigate = useNavigate();
+  const close = () => void navigate({ to: '/projects/$projectId', params: { projectId } });
+  const { data, error } = useGetProjectsTimelineByProjectId({ path: { project_id: projectId } });
+  const hung = data && hungById(data, attachmentId);
+  const failed = error !== null || (data !== undefined && hung === undefined);
+  return (
+    <Overlay
+      showing={`attachment ${attachmentId}`}
+      titles={hung && <AttachmentTitles item={hung.item} attachment={hung.attachment} />}
+      discuss={hung && <DiscussButton quote={quoteOfAttachment(hung.attachment)} testId="overlay.discuss" />}
+      foot={null}
+      onClose={close}
+    >
+      {failed ? <DidNotLoad /> : hung && <AttachmentBody attachment={hung.attachment} />}
+    </Overlay>
+  );
+}
+
+/** Its title over what it hangs on: its item, or none, a draft's material. */
+export function AttachmentTitles({ item, attachment }: { item: TimelineItem | null; attachment: Attachment }) {
   return (
     <>
       <h2 title={attachment.title} data-testid="overlay.title">
         <Paperclip className="icon" aria-hidden="true" /> {attachment.title}
       </h2>
       <div className="sub" data-testid="overlay.sub">
-        <span>
-          Attachment of “<LinkedText text={titleOf(item)} />”
-        </span>
+        {item === null ? (
+          <span>Attachment of the draft</span>
+        ) : (
+          <span>
+            Attachment of “<LinkedText text={titleOf(item)} />”
+          </span>
+        )}
       </div>
     </>
   );

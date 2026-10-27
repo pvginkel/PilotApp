@@ -135,7 +135,7 @@ export function ProjectChat({ projectId, members, home, covered }: ProjectChatPr
   }, [stick]);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col" inert={covered} data-testid={home === 'feed' ? 'project.chat' : 'panel.chat'}>
+    <div className="project-chat flex min-h-0 flex-1 flex-col" inert={covered} data-testid={home === 'feed' ? 'project.chat' : 'panel.chat'}>
       {/* The browser's own scroll anchoring off: it would move the view a second time. */}
       <div
         ref={container}
@@ -191,6 +191,7 @@ export function ProjectChat({ projectId, members, home, covered }: ProjectChatPr
         answering={chats?.at(-1)?.answering ?? false}
         onSent={toEnd}
         onDiscussed={toEnd}
+        covered={covered}
       />
     </div>
   );

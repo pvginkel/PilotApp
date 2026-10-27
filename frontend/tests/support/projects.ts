@@ -7,7 +7,8 @@
  * on its timeline as Pilot places them, and saves of them as Pilot's (POST /api/testing/projects/<id>/items and
  * /api/testing/items/<id>/saves), its handbook and its project document saved
  * (/api/testing/projects/<id>/{handbook,draft}/saves), its session's turn ended, a document it settled whole marked
- * Done by Pilot and files it copied attached to an item (/api/testing/items/<id>/attachments); they
+ * Done by Pilot and files it copied attached to an item (/api/testing/items/<id>/attachments), or a
+ * draft's hung on nothing, as its definition chat attaches them (/api/testing/projects/<id>/attachments); they
  * are answered through the items API, and a block of the handbook or of the project document by its
  * path in the store's tree, as the record answers it (/api/testing/sync/answer). A work item is placed by repository and its session started
  * in an environment of Pilot's own its start takes or creates in the worker's fake controller
@@ -42,6 +43,7 @@ type Environment = NonNullable<Work['environment']>;
 type RecordPage = components['schemas']['SessionRecordPageSchema.01118bb'];
 type Block = components['schemas']['TimelineSchema.1fdd8ae.BlockSchema'];
 type BlockPart = components['schemas']['TimelineSchema.1fdd8ae.BlockPartSchema'];
+type ProjectDocument = components['schemas']['ProjectDocumentSchema.1fdd8ae'];
 
 /** The slug the testing route gives an open project it makes: `project-` and its id's first 12 hex digits. */
 export function slugOf(projectId: string): string {
@@ -130,6 +132,22 @@ export class Projects {
     });
     expect(response.status(), await response.text()).toBe(201);
     return ((await response.json()) as { ids: string[] }).ids;
+  }
+
+  /** Files a draft's definition chat attaches in one call, one batch hung on nothing; answers the batch and their ids, in the files' order. */
+  async attachToDraft(projectId: string, files: AttachedFile[]): Promise<{ batch: number; ids: string[] }> {
+    const response = await this.page.request.post(`${this.backendUrl}/api/testing/projects/${projectId}/attachments`, {
+      data: { files: files.map((file) => ({ ...file, content: Buffer.from(file.content).toString('base64') })) },
+    });
+    expect(response.status(), await response.text()).toBe(201);
+    return (await response.json()) as { batch: number; ids: string[] };
+  }
+
+  /** The project's draft, `project.md`, as the signed-in person reads it. */
+  async draft(id: string): Promise<ProjectDocument> {
+    const response = await this.page.request.get(`${this.backendUrl}/api/projects/${id}/draft`);
+    expect(response.status(), await response.text()).toBe(200);
+    return (await response.json()) as ProjectDocument;
   }
 
   /** Pilot marks Done a document whose every block it answered or deferred. */

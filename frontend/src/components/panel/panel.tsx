@@ -1,15 +1,16 @@
 /**
  * The side panel (F38.1), its shell: the tab strip, Chat first with the unread dot (F43), then
- * Documents with its count (F37.3), and the close cross. On a wide window it stands beside the timeline, its head as tall as
- * the project's head and its tab's text on the project name's baseline, in whatever font (F98.1);
- * below one it lies over the timeline, with a head of its own height (F98.2); on a phone it is the
- * whole screen (F98.3).
+ * Documents with its count (F37.3), and the close cross; a draft's, Draft in Chat's place (F46.3).
+ * On a wide window it stands beside the timeline, its head as tall as the project's head and its
+ * tab's text on the project name's baseline, in whatever font (F98.1); below one it lies over the
+ * timeline, with a head of its own height (F98.2); on a phone it is the whole screen (F98.3).
  */
 
 import { useLayoutEffect, useRef, type RefObject } from 'react';
 import { X } from 'lucide-react';
 import { ProjectChat } from '@/components/chat/project-chat';
 import { DocumentsTab } from '@/components/panel/documents-tab';
+import { DraftTab } from '@/components/panel/draft-tab';
 import { useChatDot } from '@/hooks/use-chats';
 import { usePanelDocuments, useWideWindow } from '@/hooks/use-panel';
 import type { components } from '@/lib/api/generated/types';
@@ -20,6 +21,8 @@ type Member = components['schemas']['ProjectHeadSchema.e86ccd6.MemberSchema'];
 
 interface PanelProps {
   projectId: string;
+  /** The project is a draft. */
+  draft: boolean;
   /** The project's members, as its head reads them. */
   members: readonly Member[];
   tab: PanelTab;
@@ -33,24 +36,31 @@ interface PanelProps {
   covered: boolean;
 }
 
-export function Panel({ projectId, members, tab, head, onTab, onClose, onOpen, covered }: PanelProps) {
+export function Panel({ projectId, draft, members, tab, head, onTab, onClose, onOpen, covered }: PanelProps) {
   const documents = usePanelDocuments(projectId);
-  const unread = useChatDot(projectId);
   const panelHead = useAlignedHead(head, useWideWindow());
   return (
-    <aside className="panel" aria-label="The project’s chat and documents" inert={covered} data-testid="panel">
+    <aside
+      className="panel"
+      aria-label={draft ? 'The draft and its documents' : 'The project’s chat and documents'}
+      inert={covered}
+      data-testid="panel"
+    >
       <div ref={panelHead} className="panel-head" role="tablist" data-testid="panel.head">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === 'chat'}
-          className={cn('ptab', tab === 'chat' && 'on')}
-          onClick={() => onTab('chat')}
-          data-testid="panel.tab.chat"
-        >
-          Chat
-          {unread && <span className="unread" role="img" aria-label="Unread reply" data-testid="panel.tab.chat.unread" />}
-        </button>
+        {draft ? (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'draft'}
+            className={cn('ptab', tab === 'draft' && 'on')}
+            onClick={() => onTab('draft')}
+            data-testid="panel.tab.draft"
+          >
+            Draft
+          </button>
+        ) : (
+          <ChatTab projectId={projectId} on={tab === 'chat'} onTab={onTab} />
+        )}
         <button
           type="button"
           role="tab"
@@ -81,11 +91,31 @@ export function Panel({ projectId, members, tab, head, onTab, onClose, onOpen, c
       <div className={cn('panel-body', tab === 'chat' && 'chat')} role="tabpanel" data-testid="panel.body">
         {tab === 'chat' ? (
           <ProjectChat projectId={projectId} members={members} home="panel" covered={covered} />
+        ) : tab === 'draft' ? (
+          <DraftTab projectId={projectId} />
         ) : (
-          <DocumentsTab projectId={projectId} documents={documents} onOpen={onOpen} />
+          <DocumentsTab projectId={projectId} draft={draft} documents={documents} onOpen={onOpen} />
         )}
       </div>
     </aside>
+  );
+}
+
+/** The Chat tab, with its unread dot (F43). */
+function ChatTab({ projectId, on, onTab }: { projectId: string; on: boolean; onTab: (tab: PanelTab) => void }) {
+  const unread = useChatDot(projectId);
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={on}
+      className={cn('ptab', on && 'on')}
+      onClick={() => onTab('chat')}
+      data-testid="panel.tab.chat"
+    >
+      Chat
+      {unread && <span className="unread" role="img" aria-label="Unread reply" data-testid="panel.tab.chat.unread" />}
+    </button>
   );
 }
 

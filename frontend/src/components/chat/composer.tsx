@@ -7,7 +7,8 @@
  * the field does not wait, so the next message can be written meanwhile. The focus stays in the
  * field after Send and after Stop. Its words are kept in the browser until sent, keyed by the
  * project (F133). What Discuss quoted stands over the field as a chip, with its remove, and goes out
- * as its tag before the words (F38.3, F39.3); Discuss puts the focus in the field. In an archived
+ * as its tag before the words (F38.3, F39.3); Discuss puts the focus in the field, once nothing lies
+ * over it. In an archived
  * project it takes no message, and says why (F128.5); the server refuses one all the same. In a
  * draft it stands under the definition chat, in the timeline's column (F46.1).
  */
@@ -39,9 +40,11 @@ interface ComposerProps {
   onSent: () => void;
   /** Discuss put the focus in the field. */
   onDiscussed: () => void;
+  /** It lies under the overlay and its backdrop: it takes no focus. */
+  covered: boolean;
 }
 
-export function Composer({ projectId, home, answering, onSent, onDiscussed }: ComposerProps) {
+export function Composer({ projectId, home, answering, onSent, onDiscussed, covered }: ComposerProps) {
   const { text, change } = useUnsentText(`chat/${projectId}`);
   const { quote, focus, drop } = useDiscussed(projectId);
   const sending = useSendMessage(projectId);
@@ -52,11 +55,11 @@ export function Composer({ projectId, home, answering, onSent, onDiscussed }: Co
   const sendable = !archived && !answering && !sending.pending && words !== '';
 
   useEffect(() => {
-    if (!focus) return;
+    if (!focus || covered) return;
     focusTaken(projectId);
     field.current!.focus();
     onDiscussed();
-  }, [focus, projectId, onDiscussed]);
+  }, [focus, covered, projectId, onDiscussed]);
 
   const send = () => {
     field.current!.focus();

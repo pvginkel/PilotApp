@@ -1,12 +1,14 @@
 /**
  * The side panel (F38.1): each project's own, open or closed and on which tab, as the person last
  * left it, kept in the browser and nothing of it on the server (F1.6, F133); until they set it,
- * open on a wide window and closed below one, on the Chat tab. On a wide window it stands beside the
- * timeline and the overlay beside it (F98.1). Below one the two lie over each other, the one opened
- * last on top, and Esc closes that one first; with no overlay open Esc leaves the panel alone; going
- * to an item closes the panel (F98.2). Its Documents tab lists the project document, the
- * attachments, a batch of several together, and the timeline's documents and reviews, newest first
- * (F37), from the project's timeline and its project document, read as one.
+ * open on a wide window and closed below one, on its first tab: an open project's Chat, a draft's
+ * Draft (F46.3), each standing for the other across Create project. On a wide window it stands
+ * beside the timeline, or a draft's definition chat, and the overlay beside it (F98.1). Below one
+ * the two lie over each other, the one opened last on top, and Esc closes that one first; with no
+ * overlay open Esc leaves the panel alone; going to an item closes the panel (F98.2). Its Documents
+ * tab lists the project document, the attachments, a batch of several together, and the timeline's
+ * documents and reviews, newest first (F37), from the project's timeline and its project document,
+ * read as one; a draft's lists what Pilot attached so far, hung on nothing (F36.6).
  */
 
 import { useEffect, useState, useSyncExternalStore } from 'react';
@@ -45,14 +47,18 @@ interface PanelState {
   overlayOnTop: () => void;
 }
 
+/** A draft's first tab is Draft where an open project's is Chat; Documents is either's. */
+const tabOf = (tab: PanelTab, draft: boolean): PanelTab => (tab === 'documents' ? tab : draft ? 'draft' : 'chat');
+
 /**
- * The project's panel, beside an overlay showing what `overlay` keys, or none, at an address that
- * goes to the item `goneTo` keys, or none.
+ * The project's panel, a draft's if `draft`, beside an overlay showing what `overlay` keys, or none,
+ * at an address that goes to the item `goneTo` keys, or none.
  */
-export function usePanel(projectId: string, overlay: string | null, goneTo: string | null): PanelState {
+export function usePanel(projectId: string, draft: boolean, overlay: string | null, goneTo: string | null): PanelState {
   const { panels } = useBrowserState();
   const wide = useWideWindow();
-  const panel = panels[projectId] ?? { open: wide, tab: PANEL_TABS[0] };
+  const left = panels[projectId] ?? { open: wide, tab: PANEL_TABS[0] };
+  const panel = { ...left, tab: tabOf(left.tab, draft) };
   // What the overlay shows, opened, is on top until the panel is opened or its tab chosen.
   const [front, setFront] = useState<Front>('overlay');
   const [shown, setShown] = useState(overlay);
@@ -82,10 +88,10 @@ export function usePanel(projectId: string, overlay: string | null, goneTo: stri
   };
 }
 
-/** Attachments hung on an item in one call (F37.1). */
+/** Attachments hung on an item in one call (F37.1), or on none: a draft's (F36.6). */
 export interface Batch {
   batch: number;
-  item: TimelineItem;
+  item: TimelineItem | null;
   attachments: Attachment[];
 }
 
@@ -119,17 +125,9 @@ export function usePanelDocuments(projectId: string): PanelDocuments {
   const projectDocument = draft.data?.title ?? null;
   if (timeline.error !== null || draft.error !== null) return { projectDocument, lists: 'failed', count: 0 };
   if (timeline.data === undefined || draft.data === undefined) return { projectDocument, lists: 'pending', count: 0 };
-  const { items } = timeline.data;
-  const batches = items
-    .flatMap((item) => {
-      const byBatch = new Map<number, Batch>();
-      for (const attachment of item.attachments) {
-        const batch = byBatch.get(attachment.batch) ?? { batch: attachment.batch, item, attachments: [] };
-        batch.attachments.push(attachment);
-        byBatch.set(attachment.batch, batch);
-      }
-      return [...byBatch.values()];
-    })
+  const { items, unhung_attachments } = timeline.data;
+  const batches = [...items.map((item) => batchesOf(item, item.attachments)), batchesOf(null, unhung_attachments)]
+    .flat()
     .sort((one, other) => other.batch - one.batch);
   const documents = items.filter((item) => item.kind === 'document' || item.kind === 'review').reverse();
   return {
@@ -137,4 +135,15 @@ export function usePanelDocuments(projectId: string): PanelDocuments {
     lists: { batches, documents },
     count: batches.reduce((count, batch) => count + batch.attachments.length, 0) + documents.length,
   };
+}
+
+/** The attachments of one item, or of none, by their batch, each batch's in their order. */
+function batchesOf(item: TimelineItem | null, attachments: Attachment[]): Batch[] {
+  const byBatch = new Map<number, Batch>();
+  for (const attachment of attachments) {
+    const batch = byBatch.get(attachment.batch) ?? { batch: attachment.batch, item, attachments: [] };
+    batch.attachments.push(attachment);
+    byBatch.set(attachment.batch, batch);
+  }
+  return [...byBatch.values()];
 }

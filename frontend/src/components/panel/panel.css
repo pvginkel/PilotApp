@@ -57,11 +57,20 @@
   .ptab.on { border-bottom-color: hsl(var(--primary)); color: hsl(var(--foreground)); }
   .ptab .unread { position: relative; top: -0.9em; margin-left: -2px; }
   .panel-body { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
-  /* The Chat tab scrolls its transcript alone (chat-tab.tsx), with its own gutter: the composer
+  /* The Chat tab scrolls its transcript alone (project-chat.tsx), with its own gutter: the composer
      under it spans the panel. */
   .panel-body.chat { display: flex; flex-direction: column; overflow: hidden; scrollbar-gutter: auto; }
-  /* *In the chat* flashes the message it goes to, as the timeline flashes what it goes to (F42.3). */
-  .panel-body.chat .flash { animation: fresh 1.6s ease-out; }
+  /* *In the chat* flashes the message it goes to, in the Chat tab and in a draft's definition chat,
+     as the timeline flashes what it goes to (F42.3). */
+  .project-chat .flash { animation: fresh 1.6s ease-out; }
+
+  /* A draft's Draft tab (the mockup's "A new project: the draft"). */
+  .draft-empty { margin: 16px 18px; font-size: 14px; color: hsl(var(--muted-foreground)); }
+  .draft { padding: 16px 18px 18px; }
+  .draft .prose { font-size: 14px; }
+  .draft > .prose + .prose { margin-top: 0.7em; }
+  .draft > .block { margin: 14px 0 20px; }
+  .draft-foot { margin: 16px 0 0; font-size: 13px; color: hsl(var(--muted-foreground)); }
 
   /* The Documents tab. */
   .docs { padding: 4px 8px 16px; }

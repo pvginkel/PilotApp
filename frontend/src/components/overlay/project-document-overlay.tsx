@@ -42,7 +42,7 @@ export function HandbookOverlay({ projectId, project }: ProjectDocumentOverlayPr
 }
 
 export function ProjectDocumentOverlay({ projectId, project }: ProjectDocumentOverlayProps) {
-  const read = useProjectDraft(projectId);
+  const read = useProjectDraft(projectId, 'overlay.draft');
   return (
     <ReadOnlyOverlay
       projectId={projectId}

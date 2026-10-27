@@ -14,7 +14,7 @@ import { unified } from 'unified';
 
 export interface QuoteRef {
   kind: 'item' | 'block' | 'path';
-  /** An item's id, a block's `<item id>/<local id>`, or a path in the project's folder. */
+  /** An item's id, a block's `<item id>/<local id>` or a draft's `project.md/<local id>`, or a path in the project's folder. */
   id: string;
   label: string;
 }

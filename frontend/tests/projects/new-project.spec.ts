@@ -4,6 +4,7 @@
  * F47.1), its head's draft form (F46.2), and its definition chat in the timeline's place, "Tell
  * Pilot what to manage" before the first message (F113), then its transcript and its composer as
  * the Chat tab has them (F38, F40, F44), the lines of what Pilot's tools changed included (F41).
+ * Beside it the panel stands on its Draft tab (draft-panel.spec.ts).
  */
 
 import { test, expect } from '../support/fixtures';
@@ -59,13 +60,13 @@ test.describe('The plus', () => {
     await expect(definitionChat.field).toBeEditable();
     await expect(definitionChat.send).toBeDisabled();
     await expect(timeline.root).toHaveCount(0);
-    await expect(panel.root).toHaveCount(0);
+    await expect(panel.tabs).toHaveText(['Draft', 'Documents']);
+    await expect(panel.draft.empty).toBeVisible();
   });
 });
 
 test.describe('A draft’s definition chat', () => {
   test('stands in the timeline’s place: the person’s message sent from its composer, Pilot’s reply and the line of an answer it recorded, while the draft’s title names the project in the list and the head', async ({
-    page,
     people,
     projects,
     projectList,
@@ -111,6 +112,5 @@ test.describe('A draft’s definition chat', () => {
     await expect(definitionChat.texts).toHaveText(['I drafted the trip: the tent it is.']);
     await expect(definitionChat.replies.getByText(`Answered · D1 · ${title}`)).toBeVisible();
     await expect(definitionChat.send).toBeVisible();
-    await expect(page.getByTestId('panel')).toHaveCount(0);
   });
 });

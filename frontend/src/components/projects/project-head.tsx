@@ -5,9 +5,9 @@
  * (F2.5); Discuss, toggling the side panel's Chat tab with nothing quoted and carrying the unread
  * dot (F2.3, F39.2, F43), the Documents button, toggling its Documents tab, and the handbook,
  * opening in the overlay (F2.3, F129.4); the plan's notes (F2.7); the project's menu (F2.4). A draft, which
- * has neither a handbook (F129.2) nor the side panel, has in its head its name, the
- * Draft chip, its members and its menu. An archived project's reads as it was left, marked
- * archived, its switch not to be flipped (D012).
+ * has no handbook (F129.2), has in its head its name, the Draft chip, its members, the draft-panel
+ * toggle, toggling the side panel's Draft tab (F46.2), and its menu. An archived project's reads as
+ * it was left, marked archived, its switch not to be flipped (D012).
  *
  * On a narrow window it stands in its two rows: the name and auto pilot, then the step, the
  * members and the icons, the repo hidden.
@@ -16,7 +16,7 @@
 import type { Ref } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import { Archive, Files, Flag, MessagesSquare, NotebookText, TriangleAlert } from 'lucide-react';
+import { Archive, FileText, Files, Flag, MessagesSquare, NotebookText, TriangleAlert } from 'lucide-react';
 import { NotesButton } from '@/components/projects/plan-notes';
 import { StepButton } from '@/components/projects/plan-popover';
 import { ProjectMenu } from '@/components/projects/project-menu';
@@ -41,10 +41,12 @@ interface ProjectHeadProps {
   chat: Toggled;
   /** The side panel's Documents tab. */
   documents: Toggled;
+  /** A draft's side panel's Draft tab. */
+  draftTab: Toggled;
   ref?: Ref<HTMLElement>;
 }
 
-export function ProjectHead({ project, chat, documents, ref }: ProjectHeadProps) {
+export function ProjectHead({ project, chat, documents, draftTab, ref }: ProjectHeadProps) {
   const draft = project.state === 'draft';
   return (
     <header ref={ref} className="feed-head" data-testid="project.head">
@@ -85,6 +87,7 @@ export function ProjectHead({ project, chat, documents, ref }: ProjectHeadProps)
         {!draft && <DocumentsButton {...documents} />}
         {!draft && <HandbookButton projectId={project.id} />}
         {!draft && <NotesButton notes={project.notes} />}
+        {draft && <DraftButton {...draftTab} />}
         <ProjectMenu project={project} />
       </div>
     </header>
@@ -123,6 +126,23 @@ function DocumentsButton({ shown, toggle }: Toggled) {
       data-testid="project.documents"
     >
       <Files className="icon" aria-hidden="true" />
+    </button>
+  );
+}
+
+/** A draft's side panel's Draft tab, closing the panel where it is the tab showing (F46.2). */
+function DraftButton({ shown, toggle }: Toggled) {
+  return (
+    <button
+      type="button"
+      className={cn('btn btn-ghost btn-sm btn-icon head-icon', shown && 'on')}
+      onClick={toggle}
+      aria-pressed={shown}
+      title="The draft: what Pilot will set up"
+      aria-label="The draft"
+      data-testid="project.draft-panel"
+    >
+      <FileText className="icon" aria-hidden="true" />
     </button>
   );
 }

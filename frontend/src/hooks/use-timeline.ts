@@ -15,6 +15,7 @@ export type Block = Schemas['TimelineSchema.1fdd8ae.BlockSchema'];
 export type BodyPart = NonNullable<TimelineItem['body']>[number];
 export type Attachment = Schemas['TimelineSchema.1fdd8ae.AttachmentSchema'];
 type ProsePart = Schemas['TimelineSchema.1fdd8ae.ProsePartSchema'];
+type Timeline = Schemas['TimelineSchema.1fdd8ae'];
 
 export function useTimeline(id: string) {
   const query = useGetProjectsTimelineByProjectId({ path: { project_id: id } }, { refetchOnWindowFocus: 'always' });
@@ -38,6 +39,30 @@ export function blocksOf(item: TimelineItem): Block[] {
 /** An item's attachment by its id. */
 export const attachmentIn = (item: TimelineItem, id: string): Attachment | undefined =>
   item.attachments.find((attachment) => attachment.id === id);
+
+/** An attachment where it hangs: on its item, or on none, a draft's material until Create project (F36.6). */
+interface Hung {
+  item: TimelineItem | null;
+  attachment: Attachment;
+}
+
+/** Every attachment of the timeline's read, where it hangs. */
+function hungIn(timeline: Timeline): Hung[] {
+  return [
+    ...timeline.items.flatMap((item) => item.attachments.map((attachment) => ({ item, attachment }))),
+    ...timeline.unhung_attachments.map((attachment) => ({ item: null, attachment })),
+  ];
+}
+
+/** An attachment of the timeline's read by its id. */
+export const hungById = (timeline: Timeline, id: string): Hung | undefined => hungIn(timeline).find(({ attachment }) => attachment.id === id);
+
+/** An attachment of the timeline's read by its path in the project's folder, `attachments/<batch>/<filename>`. */
+export function hungAt(timeline: Timeline, path: string): Hung | undefined {
+  const [root, batch, ...filename] = path.split('/');
+  if (root !== 'attachments') return undefined;
+  return hungIn(timeline).find(({ attachment }) => attachment.batch === Number(batch) && attachment.filename === filename.join('/'));
+}
 
 /** Whether the record counts the block answered: an answer, a deferral included, or an action's Done. */
 export const isAnswered = (block: Block) => block.answer !== null || block.done !== null;

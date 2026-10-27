@@ -5,7 +5,9 @@
  * first, each with its state, Open, *Unsent* (D026) or Done, and its stamp (F37.2). Each opens in
  * the overlay at its address. The project document's row is named "Project document" until its
  * title is read; under the headings stands nothing while the tab's read is under way, and "None
- * yet." under a list read empty; a failed read says so in the lists' place (F113).
+ * yet." under a list read empty; a failed read says so in the lists' place (F113). A draft's lists
+ * the attachments alone, what Pilot attached so far in its definition chat, hung on nothing, each
+ * with its stamp (F46.3, F36.6): its project document is its Draft tab, and it has no timeline.
  */
 
 import type { ReactNode } from 'react';
@@ -18,29 +20,33 @@ import { titleOf, type Attachment, type TimelineItem } from '@/hooks/use-timelin
 
 interface DocumentsTabProps {
   projectId: string;
+  /** The project is a draft. */
+  draft: boolean;
   documents: { projectDocument: string | null; lists: PanelRead };
   /** A row was opened in the overlay. */
   onOpen: () => void;
 }
 
-export function DocumentsTab({ projectId, documents: { projectDocument, lists }, onOpen }: DocumentsTabProps) {
+export function DocumentsTab({ projectId, draft, documents: { projectDocument, lists }, onOpen }: DocumentsTabProps) {
   return (
     <div className="docs" data-testid="panel.documents">
-      <ul>
-        <li>
-          <Link
-            to="/projects/$projectId/project-document"
-            params={{ projectId }}
-            className="doc-row"
-            onClick={onOpen}
-            data-testid="panel.project-document"
-          >
-            <Row icon={<FileText className="icon" aria-hidden="true" />} title={projectDocument ?? 'Project document'}>
-              Project document
-            </Row>
-          </Link>
-        </li>
-      </ul>
+      {!draft && (
+        <ul>
+          <li>
+            <Link
+              to="/projects/$projectId/project-document"
+              params={{ projectId }}
+              className="doc-row"
+              onClick={onOpen}
+              data-testid="panel.project-document"
+            >
+              <Row icon={<FileText className="icon" aria-hidden="true" />} title={projectDocument ?? 'Project document'}>
+                Project document
+              </Row>
+            </Link>
+          </li>
+        </ul>
+      )}
       {lists === 'failed' ? (
         <p className="none failed" data-testid="panel.documents.failed">
           The documents did not load.
@@ -48,20 +54,29 @@ export function DocumentsTab({ projectId, documents: { projectDocument, lists },
       ) : (
         <>
           <h3>Attachments</h3>
-          {lists !== 'pending' && <Attachments projectId={projectId} batches={lists.batches} onOpen={onOpen} />}
-          <h3>In the timeline</h3>
-          {lists !== 'pending' && <TimelineDocuments projectId={projectId} documents={lists.documents} onOpen={onOpen} />}
+          {lists !== 'pending' && <Attachments projectId={projectId} draft={draft} batches={lists.batches} onOpen={onOpen} />}
+          {!draft && <h3>In the timeline</h3>}
+          {!draft && lists !== 'pending' && <TimelineDocuments projectId={projectId} documents={lists.documents} onOpen={onOpen} />}
         </>
       )}
     </div>
   );
 }
 
-function Attachments({ projectId, batches, onOpen }: { projectId: string; batches: Batch[]; onOpen: () => void }) {
+interface AttachmentsProps {
+  projectId: string;
+  draft: boolean;
+  batches: Batch[];
+  onOpen: () => void;
+}
+
+function Attachments({ projectId, draft, batches, onOpen }: AttachmentsProps) {
   if (batches.length === 0) {
     return (
       <p className="none" data-testid="panel.attachments.none">
-        None yet. A session attaches reader’s material here: a design, a survey, a log.
+        {draft
+          ? 'None yet. Pilot attaches here what you point it at in the chat: a card, a handover, a design.'
+          : 'None yet. A session attaches reader’s material here: a design, a survey, a log.'}
       </p>
     );
   }
@@ -71,7 +86,7 @@ function Attachments({ projectId, batches, onOpen }: { projectId: string; batche
         batch.attachments.length === 1 ? (
           <li key={batch.batch}>
             <AttachmentRow projectId={projectId} item={batch.item} attachment={batch.attachments[0]} onOpen={onOpen}>
-              {titleOf(batch.item)} · <Time at={batch.attachments[0].copied_at} format="stamp" />
+              <Hung item={batch.item} at={batch.attachments[0].copied_at} />
             </AttachmentRow>
           </li>
         ) : (
@@ -118,29 +133,40 @@ function Row({ icon, title, children }: { icon: ReactNode; title: string; childr
   );
 }
 
+/** What an attachment hangs on, and when it was copied in: its item's title and the stamp, or the stamp alone. */
+function Hung({ item, at }: { item: TimelineItem | null; at: string }) {
+  return (
+    <>
+      {item !== null && `${titleOf(item)} · `}
+      <Time at={at} format="stamp" />
+    </>
+  );
+}
+
 interface AttachmentRowProps {
   projectId: string;
-  item: TimelineItem;
+  item: TimelineItem | null;
   attachment: Attachment;
   onOpen: () => void;
   /** The line under its title. */
   children: ReactNode;
 }
 
-/** An attachment, opening at its address under its item's (F28.5). */
+/** An attachment, opening at its address under its item's (F28.5), or under its project's where it hangs on none. */
 function AttachmentRow({ projectId, item, attachment, onOpen, children }: AttachmentRowProps) {
-  return (
-    <Link
-      to="/projects/$projectId/items/$itemId/attachments/$attachmentId"
-      params={{ projectId, itemId: item.id, attachmentId: attachment.id }}
-      className="doc-row"
-      onClick={onOpen}
-      data-testid="panel.attachment"
-      data-attachment-id={attachment.id}
-    >
-      <Row icon={<Paperclip className="icon" aria-hidden="true" />} title={attachment.title}>
-        {children}
-      </Row>
+  const row = (
+    <Row icon={<Paperclip className="icon" aria-hidden="true" />} title={attachment.title}>
+      {children}
+    </Row>
+  );
+  const props = { className: 'doc-row', onClick: onOpen, 'data-testid': 'panel.attachment', 'data-attachment-id': attachment.id };
+  return item === null ? (
+    <Link to="/projects/$projectId/attachments/$attachmentId" params={{ projectId, attachmentId: attachment.id }} {...props}>
+      {row}
+    </Link>
+  ) : (
+    <Link to="/projects/$projectId/items/$itemId/attachments/$attachmentId" params={{ projectId, itemId: item.id, attachmentId: attachment.id }} {...props}>
+      {row}
     </Link>
   );
 }
@@ -152,7 +178,7 @@ function BatchRows({ projectId, batch, onOpen }: { projectId: string; batch: Bat
     <li className="doc-batch" data-testid="panel.batch" data-batch={batch.batch}>
       <div className="doc-row" data-testid="panel.batch.head">
         <Row icon={<Folder className="icon" aria-hidden="true" />} title={folderOf(attachments) ?? `${attachments.length} files`}>
-          {titleOf(item)} · <Time at={attachments[0].copied_at} format="stamp" />
+          <Hung item={item} at={attachments[0].copied_at} />
         </Row>
       </div>
       <ul>

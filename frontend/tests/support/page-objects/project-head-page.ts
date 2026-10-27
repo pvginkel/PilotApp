@@ -8,8 +8,8 @@ type Ask = Exclude<Act, 'join' | 'leave'>;
 /**
  * A project's head (F2), auto pilot's switch and its warning triangle (F4), the plan popover its
  * step button opens (F3), Discuss and its unread dot (F2.3, F39.2, F43), the Documents button
- * (F2.3), the handbook's button (F129.4), the plan's notes (F2.7), and the project's menu and the
- * dialogs it opens (F2.4).
+ * (F2.3), the handbook's button (F129.4), the plan's notes (F2.7), a draft's draft-panel toggle
+ * (F46.2), and the project's menu and the dialogs it opens (F2.4).
  */
 export class ProjectHeadPage {
   readonly root: Locator;
@@ -33,6 +33,7 @@ export class ProjectHeadPage {
   readonly handbookButton: Locator;
   readonly notesButton: Locator;
   readonly notes: Locator;
+  readonly draftPanelButton: Locator;
   readonly menuButton: Locator;
   readonly menu: Locator;
   readonly menuItems: Locator;
@@ -59,6 +60,7 @@ export class ProjectHeadPage {
     this.handbookButton = page.getByTestId('project.handbook');
     this.notesButton = page.getByTestId('project.notes.button');
     this.notes = page.getByTestId('project.notes');
+    this.draftPanelButton = page.getByTestId('project.draft-panel');
     this.menuButton = page.getByTestId('project.menu.button');
     this.menu = page.getByTestId('project.menu');
     this.menuItems = this.menu.getByRole('menuitem');

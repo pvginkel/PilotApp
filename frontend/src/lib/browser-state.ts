@@ -12,8 +12,11 @@ export type Theme = (typeof THEMES)[number];
 export const GROUPS = ['others', 'finished'] as const;
 export type Group = (typeof GROUPS)[number];
 
-/** The side panel's tabs (F38.1), the first the one a panel opens on until the person picks another. */
-export const PANEL_TABS = ['chat', 'documents'] as const;
+/**
+ * The side panel's tabs: an open project's Chat and Documents (F38.1), a draft's Draft and
+ * Documents (F46.3). The first is the one a panel opens on until the person picks another.
+ */
+export const PANEL_TABS = ['chat', 'draft', 'documents'] as const;
 export type PanelTab = (typeof PANEL_TABS)[number];
 
 /** A project's side panel as the person last left it: open or not, and its tab. */
