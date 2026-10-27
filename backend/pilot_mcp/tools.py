@@ -58,6 +58,10 @@ def _tool_use_id(ctx: Call) -> str | None:
 BLOCK_ID = r"^[0-9A-Fa-f-]{36}/\S+$"
 """A block's id (TD §4.9), `<item id>/<local id>`."""
 
+ANSWERED_BLOCK = r"^(?:[0-9A-Fa-f-]{36}|project\.md)/\S+$"
+"""A block `answer` takes: a block's id, or `project.md/<local id>`, a block of
+the draft, which has no item."""
+
 _FOR = "for"
 
 
@@ -185,7 +189,10 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
         to: Annotated[
             uuid.UUID | None,
             Field(
-                description="The id of the item it hangs on, an item of your project"
+                description=(
+                    "The id of the item it hangs on, an item of your project;"
+                    " none in a draft's definition chat"
+                )
             ),
         ] = None,
     ) -> AttachedMaterial:
@@ -194,11 +201,13 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
         of the fleet, by `<environment>:<path>`: a file, or a folder and every
         file under it, one attachment per file, all of one batch, each with
         its source. Each is copied now; what changes there later is not seen.
-        `to` is the item it hangs on. A call that cannot copy every file it
-        names — no `to`, a `to` not of your project, an environment the
-        controller does not have, a path outside `/work`, no file there, a
-        file over 16 MiB, a folder over the cap of one call — attaches
-        nothing and answers the reason. Answers `{ids, effect}`, the
+        `to` is the item it hangs on; in a draft's definition chat give none:
+        the material hangs on nothing until Create project hangs it on the
+        opening. A call that cannot copy every file it names — no `to`
+        outside a draft's definition chat, a `to` not of your project, an
+        environment the controller does not have, a path outside `/work`, no
+        file there, a file over 16 MiB, a folder over the cap of one call —
+        attaches nothing and answers the reason. Answers `{ids, effect}`, the
         attachments' ids, a folder's in its files' path order, and the call's
         effect line."""
         return await api.attach_file(
@@ -211,8 +220,12 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
         block: Annotated[
             str,
             Field(
-                pattern=BLOCK_ID,
-                description="The block's id, `<item id>/<local id>`",
+                pattern=ANSWERED_BLOCK,
+                description=(
+                    "The block's id, `<item id>/<local id>`; in a draft's"
+                    " definition chat, `project.md/<local id>` for a block of"
+                    " the draft"
+                ),
             ),
         ],
         value: Annotated[
@@ -253,10 +266,13 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
         their words. A deferral they ask for is `deferred` with `to`. It is
         their answer, through the chat, which they can undo; it replaces the
         block's answer, yours included, while the item is open, and the answer
-        to an item's one block is its Done. A block not of your project, a
-        `for` that names no person, an answer the block does not take, an
-        item that is done, or a registered document whose file has not been
-        read yet is refused with the reason, and nothing is recorded. Answers
+        to an item's one block is its Done. In a draft's definition chat, a
+        block of the draft is `project.md/<local id>`; its answer has no undo,
+        and answering it again replaces it. A block not of your project, a
+        block of `project.md` outside its draft's definition chat, a `for`
+        that names no person, an answer the block does not take, an item that
+        is done, or a registered document whose file has not been read yet is
+        refused with the reason, and nothing is recorded. Answers
         `{effect}`, the call's effect line."""
         return await api.answer(
             _authorization(ctx),

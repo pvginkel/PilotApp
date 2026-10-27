@@ -2,12 +2,13 @@
 (TEST-6): people who never signed in, environments, projects in every
 standing, with members, a plan, their opening and open items, the items a
 project's session adds, an agent's saves of them and of the project's draft
-and handbook, the files it attaches, Pilot's Done, and the end of its turn;
-and a work item placed by repository, started in an environment of Pilot's
-own the stage's own controller creates, and the documents and the material its
-session registers and attaches there, each with its effect; a pre-ruling
-pass's questions to a registered document's writer; and a person's answer the
-brain records through the project's open chat, with its effect.
+and handbook, the files it attaches, a draft's on no item, Pilot's Done, and
+the end of its turn; and a work item placed by repository, started in an
+environment of Pilot's own the stage's own controller creates, and the
+documents and the material its session registers and attaches there, each with
+its effect; a pre-ruling pass's questions to a registered document's writer;
+and a person's answer the brain records through the project's open chat, with
+its effect.
 Nothing in the UI places a work item, which the brain adds (F66).
 
 They answer on every STAGE but prd, whatever FLASK_ENV says, so that the dev
@@ -416,6 +417,39 @@ def create_attachments(
     """
     data = InventedAttachmentsCreateSchema.model_validate(request.get_json())
     attachments = test_data_service.attach(item_id, data.files)
+    return InventedAttachmentsSchema(
+        batch=attachments[0].batch, ids=[attachment.id for attachment in attachments]
+    ).model_dump(mode="json"), 201
+
+
+@testing_record_bp.route("/projects/<uuid:project_id>/attachments", methods=["POST"])
+@api.validate(
+    json=InventedAttachmentsCreateSchema,
+    resp=SpectreeResponse(
+        HTTP_201=InventedAttachmentsSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def create_draft_attachments(
+    project_id: uuid.UUID,
+    test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
+) -> Any:
+    """Copy files into a draft as its definition chat's `attach_file` copies
+    them with no `to` (F36.6): copied from its session's environment, kept
+    through the store, one batch, the project's next, hung on nothing.
+
+    Returns:
+        201: The batch and the attachments' ids
+        400: No file, a filename that is not one path segment or is named
+            twice, or content that is not base64 or is over 16 MiB
+        404: No project has the id
+        409: The project is no draft, or has no session
+    """
+    data = InventedAttachmentsCreateSchema.model_validate(request.get_json())
+    attachments = test_data_service.attach_to_draft(project_id, data.files)
     return InventedAttachmentsSchema(
         batch=attachments[0].batch, ids=[attachment.id for attachment in attachments]
     ).model_dump(mode="json"), 201

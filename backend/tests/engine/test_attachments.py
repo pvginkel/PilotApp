@@ -1,6 +1,6 @@
 """The store of the attachments' bytes (TD §8): put, get, delete; a file
-copied in, and the copies hung on an item as one batch (F36, DB decision
-39)."""
+copied in, and the copies hung on an item, or a draft's on nothing, as one
+batch (F36, DB decisions 39 and 40)."""
 
 import functools
 import hashlib
@@ -316,6 +316,40 @@ class TestAttachService:
             ),
             ProjectChanged(project.id),
         ]
+
+    def test_without_an_item_they_hang_on_nothing_as_the_projects_next_batch(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        project: Project,
+        item: Item,
+        project_session: models.Session,
+        environment: Environment,
+    ) -> None:
+        attach = functools.partial(
+            container.attach_service().attach, environment_id=environment.id
+        )
+
+        attach(item, project_session, [_file("a.md")])
+        unhung = attach(None, project_session, [_file("b.md", b"B"), _file("c.md")])
+
+        assert [
+            (attachment.project_id, attachment.batch, attachment.filename)
+            for attachment in unhung
+        ] == [(project.id, 2, "b.md"), (project.id, 2, "c.md")]
+        assert (
+            session.scalars(
+                select(ItemAttachment.attachment_id).where(
+                    ItemAttachment.attachment_id.in_([each.id for each in unhung])
+                )
+            ).all()
+            == []
+        )
+        assert _hung(session, item) == [(1, 1, "a.md")]
+        folder = f"draft-{project.number}"
+        assert container.tree_service().resolve(
+            f"{folder}/attachments/2/b.md"
+        ) == TreeFile(b"B", hashlib.sha256(b"B").hexdigest())
 
     def test_a_copy_over_16_mib_is_refused_and_none_kept(
         self,

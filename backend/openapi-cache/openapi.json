@@ -340,9 +340,10 @@
         "description": "A person's answer to a block, given in the chat, to record for them.",
         "properties": {
           "block": {
-            "description": "The block's id, `<item id>/<local id>` (TD §4.9)",
+            "description": "The block's id, `<item id>/<local id>` (TD §4.9), or `project.md/<local id>` for a block of the draft, in its definition chat",
             "examples": [
-              "0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15/D1"
+              "0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15/D1",
+              "project.md/Q1"
             ],
             "title": "Block",
             "type": "string"
@@ -1222,9 +1223,10 @@
         "description": "A person's answer to a block, given in the chat, which the project's\nbrain records for them as its `answer` call does.",
         "properties": {
           "block": {
-            "description": "The block's id, `<item id>/<local id>` (TD §4.9)",
+            "description": "The block's id, `<item id>/<local id>` (TD §4.9), or `project.md/<local id>` for a block of the draft, in its definition chat",
             "examples": [
-              "0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15/D1"
+              "0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15/D1",
+              "project.md/Q1"
             ],
             "title": "Block",
             "type": "string"
@@ -2329,7 +2331,7 @@
         "type": "string"
       },
       "ItemDocumentSchema.1fdd8ae.AttachmentSchema": {
-        "description": "A file hung on an item, reader's material (F36), which its stream\n`/api/attachments/<id>` serves without its title or stored type.",
+        "description": "A file hung on an item, or a draft's on none, reader's material (F36),\nwhich its stream `/api/attachments/<id>` serves without its title or\nstored type.",
         "properties": {
           "batch": {
             "description": "The project's attach call it came in, from 1: the files of one call, a folder among them, share it (F37.1)",
@@ -5897,11 +5899,20 @@
             },
             "title": "Items",
             "type": "array"
+          },
+          "unhung_attachments": {
+            "description": "The attachments hung on no item, by batch and file name: a draft's material, attached in its definition chat, until Create project hangs it on the opening (F36.6, F46.3); none past Create",
+            "items": {
+              "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.AttachmentSchema"
+            },
+            "title": "Unhung Attachments",
+            "type": "array"
           }
         },
         "required": [
           "finished_at",
-          "items"
+          "items",
+          "unhung_attachments"
         ],
         "title": "TimelineSchema",
         "type": "object"
@@ -5917,7 +5928,7 @@
         "type": "string"
       },
       "TimelineSchema.1fdd8ae.AttachmentSchema": {
-        "description": "A file hung on an item, reader's material (F36), which its stream\n`/api/attachments/<id>` serves without its title or stored type.",
+        "description": "A file hung on an item, or a draft's on none, reader's material (F36),\nwhich its stream `/api/attachments/<id>` serves without its title or\nstored type.",
         "properties": {
           "batch": {
             "description": "The project's attach call it came in, from 1: the files of one call, a folder among them, share it (F37.1)",
@@ -9473,6 +9484,206 @@
         "x-required-role": "editor"
       }
     },
+    "/api/projects/{project_id}/draft/blocks/{block_id}/answer": {
+      "post": {
+        "description": "Returns:     204: The answer is recorded     400: The body is not an answer     401: No one is signed in     403: The caller lacks the editor role     404: No project has the id, or its draft has no block of the id     409: The caller has not chosen a handle, the project is no draft or is         archived, or the block takes no such answer",
+        "operationId": "post__api_projects_{project_id}_draft_blocks_{block_id}_answer",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "",
+            "in": "path",
+            "name": "block_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnswerRequestSchema.bfdf230"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Answer a block of the draft in place, as the signed-in person, now, through the app: written into `project.md` (F47.4).",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/projects/{project_id}/draft/blocks/{block_id}/done": {
+      "post": {
+        "description": "Returns:     204: The Done is recorded     400: The body is not a Done     401: No one is signed in     403: The caller lacks the editor role     404: No project has the id, or its draft has no block of the id     409: The caller has not chosen a handle, the project is no draft or is         archived, or the block is no action without options",
+        "operationId": "post__api_projects_{project_id}_draft_blocks_{block_id}_done",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "",
+            "in": "path",
+            "name": "block_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActionDoneRequestSchema.bfdf230"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Mark an action of the draft without options Done in place, as the signed-in person, now, with the paste-back as its note (F47.4).",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
     "/api/projects/{project_id}/handbook": {
       "get": {
         "description": "Returns:     200: The handbook as last published     401: No one is signed in     403: The caller lacks the editor role     404: No project has the id, or it is a draft, which has no handbook",
@@ -11793,6 +12004,84 @@
         "x-required-role": "editor"
       }
     },
+    "/api/testing/projects/{project_id}/attachments": {
+      "post": {
+        "description": "Returns:     201: The batch and the attachments' ids     400: No file, a filename that is not one path segment or is named         twice, or content that is not base64 or is over 16 MiB     404: No project has the id     409: The project is no draft, or has no session",
+        "operationId": "post__api_testing_projects_{project_id}_attachments",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventedAttachmentsCreateSchema.6d6b324"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventedAttachmentsSchema.6d6b324"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Copy files into a draft as its definition chat's `attach_file` copies them with no `to` (F36.6): copied from its session's environment, kept through the store, one batch, the project's next, hung on nothing.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
     "/api/testing/projects/{project_id}/chat/answers": {
       "post": {
         "description": "Returns:     201: The call's effect line     400: The body is not a block's id, an answer, a handle, and an         optional note, task and call id, or the stage is prd     404: No project has the id, the block is not of it, or no person has         the handle     409: The project has no chat open, its chat has no turn in flight, or         the record refuses the answer: the reason",
@@ -12651,7 +12940,7 @@
     },
     "/tools/pilot-store/answers": {
       "post": {
-        "description": "Returns:     200: The call's effect line     400: The body is not a block's id, an answer, a handle, and an         optional note and task     401: No bearer, or one no session has     403: The bearer's session is not a chat's or a job's, or has no turn         running     404: The block is not of the session's project, or no person has the         handle     409: The record refuses the answer: the reason",
+        "description": "Returns:     200: The call's effect line     400: The body is not a block's id, an answer, a handle, and an         optional note and task     401: No bearer, or one no session has     403: The bearer's session is not a chat's or a job's, or has no turn         running     404: The block is not of the session's project, or no person has the         handle     409: A block of the draft outside its definition chat, or the record         refuses the answer: the reason",
         "operationId": "post__tools_pilot-store_answers",
         "parameters": [],
         "requestBody": {
@@ -12726,13 +13015,13 @@
             "description": "Conflict"
           }
         },
-        "summary": "`answer(block, value, for, note?, to?)` (F86.2, F42.1): a person's answer to a block, given in the chat, recorded on their behalf through the chat.",
+        "summary": "`answer(block, value, for, note?, to?)` (F86.2, F42.1): a person's answer to a block, given in the chat, recorded on their behalf through the chat: a block of the draft, `project.md/<local id>`, in its definition chat alone (F47.4).",
         "tags": []
       }
     },
     "/tools/pilot-store/attachments": {
       "post": {
-        "description": "Returns:     201: The attachments, one per file, and the call's effect line     400: The body is not a source and an optional item id     401: No bearer, or one no session has     403: The bearer's session is not a chat's or a job's, or has no turn         running     404: `to` names no item of the session's project, or the source's         environment is not the controller's     409: No `to`, or a file cannot be copied, nothing attached: the reason     502: The controller did not answer, or refused for a reason of its own",
+        "description": "Returns:     201: The attachments, one per file, and the call's effect line     400: The body is not a source and an optional item id     401: No bearer, or one no session has     403: The bearer's session is not a chat's or a job's, or has no turn         running     404: `to` names no item of the session's project, or the source's         environment is not the controller's     409: No `to` outside a draft's definition chat, or a file cannot be         copied, nothing attached: the reason     502: The controller did not answer, or refused for a reason of its own",
         "operationId": "post__tools_pilot-store_attachments",
         "parameters": [],
         "requestBody": {
@@ -12817,7 +13106,7 @@
             "description": "Bad Gateway"
           }
         },
-        "summary": "`attach_file(source, to?)` (F86.7, F36.6): outside material, a file or a folder in any environment, copied into the record now with its source and hung on the item `to` names.",
+        "summary": "`attach_file(source, to?)` (F86.7, F36.6): outside material, a file or a folder in any environment, copied into the record now with its source and hung on the item `to` names, or, with no `to` in a draft's definition chat, on nothing.",
         "tags": []
       }
     },

@@ -17,6 +17,7 @@ from app import models
 from app.models import (
     Attachment,
     Block,
+    Chat,
     Document,
     Effect,
     Environment,
@@ -26,7 +27,7 @@ from app.models import (
     User,
     WriterQuestion,
 )
-from app.models.reference import AnswerChannel, ProjectState, SessionState
+from app.models.reference import AnswerChannel, ChatKind, ProjectState, SessionState
 from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerClient
 from app.services.pilot_server import token_hash
@@ -56,6 +57,14 @@ options:
   - Dome
   - Tunnel
 recommend: Dome
+```
+"""
+
+DRAFT = """---
+title: Camp
+---
+
+```question id=Q1
 ```
 """
 
@@ -294,6 +303,9 @@ class TestAnswer:
             {"block": "{item}/D1", "value": "Dome"},
             {"block": "{item}/D1", "value": "Dome", "for_": "ada"},
             {"block": "{item}/D1", "value": "Dome", "for": "ada", "via": "app"},
+            {"block": "project.md/", "value": "Dome", "for": "ada"},
+            {"block": "project.md/Q 1", "value": "Dome", "for": "ada"},
+            {"block": "handbook.md/Q1", "value": "Dome", "for": "ada"},
         ],
         ids=[
             "a-local-id",
@@ -304,6 +316,9 @@ class TestAnswer:
             "no-for",
             "for-by-its-field-name",
             "another-key",
+            "a-draft-block-with-no-local-id",
+            "a-draft-block-with-a-space",
+            "the-handbooks-block",
         ],
     )
     def test_a_body_that_is_not_a_block_an_answer_and_a_handle_is_400(
@@ -365,6 +380,57 @@ class TestAnswer:
 
         assert response.status_code == 409
         assert _error(response).endswith("`to` goes with `deferred` alone")
+
+    def test_in_a_drafts_definition_chat_the_drafts_ask_is_200(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        container.document_service().bear_draft(project, DRAFT)
+        run = _brain(session, project, environment)
+        session.add(
+            Chat(
+                id=run.id,
+                project_id=project.id,
+                session_kind_code="chat",
+                kind_code=ChatKind.DEFINITION,
+            )
+        )
+        session.flush()
+
+        response = client.post(
+            ANSWERS,
+            json={"block": "project.md/Q1", "value": "The lake", "for": "ada"},
+            headers=_bearer(),
+        )
+
+        assert response.status_code == 200
+        assert response.get_json() == {"effect": "Answered · Q1 · Camp"}
+
+    def test_outside_a_drafts_definition_chat_the_drafts_ask_is_409(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        container.document_service().bear_draft(project, DRAFT)
+        _brain(session, project, environment, "job")
+
+        response = client.post(
+            ANSWERS,
+            json={"block": "project.md/Q1", "value": "The lake", "for": "ada"},
+            headers=_bearer(),
+        )
+
+        assert response.status_code == 409
+        assert _error(response).endswith(
+            "`project.md` takes answers in its draft's definition chat alone"
+        )
 
 
 class TestMark:

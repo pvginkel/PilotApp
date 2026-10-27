@@ -2,7 +2,8 @@
 attachment's own row. Every read and write of the bytes goes through
 `AttachmentStore`, so another backend is a change to this module alone.
 
-A file copied in is hung on its item by `AttachService` (F36, DB decision 39).
+A file copied in is hung on its item, a draft's on nothing, by `AttachService`
+(F36, DB decisions 39 and 40).
 """
 
 import hashlib
@@ -117,17 +118,18 @@ class AttachService:
 
     def attach(
         self,
-        item: Item,
+        item: Item | None,
         session: AgentSession,
         copies: Sequence[Copy],
         *,
         environment_id: str,
     ) -> list[Attachment]:
         """`copies`, files `session` copied now from the environment
-        `environment_id`, its own or one it names, kept as one batch, the
-        project's next, and hung on `item` after its own attachments, in their
-        order; their tree paths and the timeline moved once the transaction
-        commits.
+        `environment_id`, its own or one it names, kept as one batch, the next
+        of `session`'s project, and hung on `item` after its own attachments,
+        in their order, or on nothing without `item`: a draft's material,
+        until Create project hangs it on the opening (F36.6, DB decision 40);
+        their tree paths and the timeline moved once the transaction commits.
 
         Raises:
             ValidationException: a copy is over 16 MiB, nothing kept.
@@ -140,7 +142,7 @@ class AttachService:
                 )
         project = self.db.scalars(
             # Two attach calls of one project never take one batch.
-            select(Project).where(Project.id == item.project_id).with_for_update()
+            select(Project).where(Project.id == session.project_id).with_for_update()
         ).one()
         now = self.db.scalar(select(func.now()))
         assert now is not None
@@ -152,7 +154,7 @@ class AttachService:
             )
             or 0
         )
-        position = self._last_position(item)
+        position = 0 if item is None else self._last_position(item)
         attachments: list[Attachment] = []
         for copy in copies:
             attachment = Attachment(
@@ -168,15 +170,16 @@ class AttachService:
                 created_by_session_id=session.id,
             )
             self.attachment_store.put(attachment, copy.content)
-            position += 1
-            self.db.add(
-                ItemAttachment(
-                    item_id=item.id,
-                    attachment_id=attachment.id,
-                    position=position,
-                    attached_at=now,
+            if item is not None:
+                position += 1
+                self.db.add(
+                    ItemAttachment(
+                        item_id=item.id,
+                        attachment_id=attachment.id,
+                        position=position,
+                        attached_at=now,
+                    )
                 )
-            )
             self.engine_bus.emit(
                 TreeHashMoved(
                     tree_path(project, attachment_path(attachment)), attachment.sha256

@@ -47,6 +47,7 @@ from prometheus_client import Counter
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.engine.paths import DRAFT
 from app.engine.views import ListedChat, ViewService
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import Block, Chat, Document, Item, Project, Turn, User
@@ -389,8 +390,9 @@ class ChatService:
 
     def _quote(self, project: Project, person: User, words: str) -> Words:
         """`person`'s `words`, quoting the Item or the Block of the project
-        their first quote tag names (DB 159); none when it names neither, a
-        file's by its path among them (DB decision 62)."""
+        their first quote tag names (DB 159), a block of its draft by
+        `project.md/<local id>`, as `answer` names it; none when it names
+        neither, a file's by its path among them (DB decision 62)."""
         tag = QUOTE_TAG.search(words)
         item_id = block_id = None
         if tag is not None and tag[1] is not None:
@@ -405,8 +407,17 @@ class ChatService:
                     )
             else:
                 item, _, local_id = ref.partition("/")
-                quoted = _uuid(item)
-                if quoted is not None:
+                if item == DRAFT:
+                    block_id = self.db.scalar(
+                        select(Block.id)
+                        .join(Document, Document.id == Block.document_id)
+                        .where(
+                            Document.project_id == project.id,
+                            Document.role_code == DocumentRole.DRAFT,
+                            Block.local_id == local_id,
+                        )
+                    )
+                elif (quoted := _uuid(item)) is not None:
                     block_id = self.db.scalar(
                         select(Block.id)
                         .join(Item, Item.id == Block.document_id)

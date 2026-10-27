@@ -16,6 +16,7 @@ from app import models
 from app.models import (
     Attachment,
     Block,
+    Chat,
     Document,
     Environment,
     Item,
@@ -23,7 +24,7 @@ from app.models import (
     Turn,
     WriterQuestion,
 )
-from app.models.reference import AnswerChannel, ProjectState, SessionState
+from app.models.reference import AnswerChannel, ChatKind, ProjectState, SessionState
 from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerClient
 from app.services.session_record_service import read_records
@@ -541,6 +542,56 @@ class TestAnswer:
         assert error_text(result) == (
             "Error executing tool answer: Person nobody was not found"
         )
+
+    async def test_in_a_drafts_definition_chat_the_drafts_ask_is_answered(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        session: DbSession,
+        container: ServiceContainer,
+        person: models.User,
+        brain: models.Session,
+    ) -> None:
+        project = session.get_one(models.Project, brain.project_id)
+        draft = container.document_service().bear_draft(
+            project, "---\ntitle: Camp\n---\n\n```question id=Q1\n```\n"
+        )
+        session.add(
+            Chat(
+                id=brain.id,
+                project_id=project.id,
+                session_kind_code="chat",
+                kind_code=ChatKind.DEFINITION,
+            )
+        )
+        session.commit()
+
+        result = await call(
+            mcp_app,
+            "answer",
+            {"block": "project.md/Q1", "value": "The lake", "for": person.handle},
+            path=STORE_PATH,
+        )
+
+        assert not result.isError
+        assert result.structuredContent == {"effect": "Answered · Q1 · Camp"}
+        block = session.scalars(
+            select(Block).where(Block.document_id == draft.id)
+        ).one()
+        assert (block.answer, block.via_code) == ("The lake", AnswerChannel.CHAT)
+
+    async def test_another_files_block_is_refused_without_calling_the_api(
+        self, mcp_app: Starlette, routes: ApiRoutes, brain: models.Session
+    ) -> None:
+        result = await call(
+            mcp_app,
+            "answer",
+            {"block": "handbook.md/Q1", "value": "Yes", "for": "ada"},
+            path=STORE_PATH,
+        )
+
+        assert "String should match pattern" in error_text(result)
+        assert routes.calls == []
 
 
 @pytest.mark.anyio

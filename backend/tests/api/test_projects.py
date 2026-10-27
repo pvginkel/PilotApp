@@ -1,7 +1,8 @@
 """/api/projects: the project list, the archived projects and a project's
 head, as the signed-in person reads them (F1, F2, F3, D012); a draft made
-from the plus (F46.1, F47.1); and what they change of a project's standing,
-its transitions and their membership (F4.1, F5, F6, F127, F128)."""
+from the plus (F46.1, F47.1), and their answers to its asks in place (F47.4);
+and what they change of a project's standing, its transitions and their
+membership (F4.1, F5, F6, F127, F128)."""
 
 import base64
 import uuid
@@ -610,6 +611,7 @@ class TestGetTimeline:
                     "work": None,
                 },
             ],
+            "unhung_attachments": [],
         }
 
     def test_a_work_items_entry_carries_its_session(
@@ -897,6 +899,204 @@ class TestGetProjectDocuments:
         self, oidc_client: FlaskClient, document: str
     ) -> None:
         response = oidc_client.get(f"{PROJECTS}/{uuid.uuid4()}/{document}")
+
+        assert response.status_code == 401
+
+
+DRAFT_ASKS = """---
+title: Camp
+---
+
+```question id=Q1
+default: The lake
+```
+
+```action id=A1
+```
+"""
+
+
+def _drafted(container: ServiceContainer, environment: Environment) -> uuid.UUID:
+    """A draft whose `project.md` Pilot wrote with two asks."""
+    draft = _make(container, state="draft", environment_id=environment.id)
+    container.test_data_service().save_project_document(
+        draft, DocumentRole.DRAFT, DRAFT_ASKS
+    )
+    return draft
+
+
+def _draft_block(client: FlaskClient, project_id: uuid.UUID, local_id: str) -> Any:
+    body = client.get(f"{PROJECTS}/{project_id}/draft").get_json()["body"]
+    return next(
+        part["block"]
+        for part in body
+        if part["type"] == "block" and part["block"]["id"] == local_id
+    )
+
+
+@pytest.mark.usefixtures("person")
+class TestAnswerDraftBlock:
+    """A person's answer to the draft's ask, in place (F47.4)."""
+
+    def test_the_answer_is_written_into_the_draft(
+        self, client: FlaskClient, container: ServiceContainer, environment: Environment
+    ) -> None:
+        draft = _drafted(container, environment)
+        _sign_in(client)
+
+        response = client.post(
+            f"{PROJECTS}/{draft}/draft/blocks/Q1/answer",
+            json={"answer": "The forest", "note": "Shade."},
+        )
+
+        assert response.status_code == 204
+        block = _draft_block(client, draft, "Q1")
+        assert (
+            block["answer"],
+            block["by"]["handle"],
+            block["via"],
+            block["note"],
+        ) == (
+            "The forest",
+            "ada",
+            "app",
+            "Shade.",
+        )
+
+    def test_past_create_project_md_takes_no_answer(
+        self, client: FlaskClient, container: ServiceContainer
+    ) -> None:
+        camp = _make(container, name="Camp")
+        _sign_in(client)
+
+        response = client.post(
+            f"{PROJECTS}/{camp}/draft/blocks/Q1/answer", json={"answer": "The lake"}
+        )
+
+        assert response.status_code == 409
+        assert response.get_json()["error"].endswith(
+            "because the project is no draft: its `project.md` takes no answer"
+        )
+
+    def test_an_unknown_project_or_ask_is_not_found(
+        self, client: FlaskClient, container: ServiceContainer, environment: Environment
+    ) -> None:
+        draft = _drafted(container, environment)
+        _sign_in(client)
+
+        unknown = client.post(
+            f"{PROJECTS}/{uuid.uuid4()}/draft/blocks/Q1/answer",
+            json={"answer": "The lake"},
+        )
+        no_ask = client.post(
+            f"{PROJECTS}/{draft}/draft/blocks/Q9/answer", json={"answer": "The lake"}
+        )
+
+        assert (unknown.status_code, no_ask.status_code) == (404, 404)
+
+    def test_a_body_that_is_no_answer_is_refused(
+        self, client: FlaskClient, container: ServiceContainer, environment: Environment
+    ) -> None:
+        draft = _drafted(container, environment)
+        _sign_in(client)
+
+        response = client.post(f"{PROJECTS}/{draft}/draft/blocks/Q1/answer", json={})
+
+        assert response.status_code == 400
+
+    def test_without_editor_it_is_refused(
+        self, client: FlaskClient, container: ServiceContainer, environment: Environment
+    ) -> None:
+        draft = _drafted(container, environment)
+        _sign_in(client, roles=())
+
+        response = client.post(
+            f"{PROJECTS}/{draft}/draft/blocks/Q1/answer", json={"answer": "The lake"}
+        )
+
+        assert response.status_code == 403
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        response = oidc_client.post(
+            f"{PROJECTS}/{uuid.uuid4()}/draft/blocks/Q1/answer",
+            json={"answer": "The lake"},
+        )
+
+        assert response.status_code == 401
+
+
+@pytest.mark.usefixtures("person")
+class TestMarkDraftActionDone:
+    """Done on the draft's action without options, in place (F47.4)."""
+
+    def test_the_done_is_written_into_the_draft_with_the_paste_back(
+        self, client: FlaskClient, container: ServiceContainer, environment: Environment
+    ) -> None:
+        draft = _drafted(container, environment)
+        _sign_in(client)
+
+        response = client.post(
+            f"{PROJECTS}/{draft}/draft/blocks/A1/done", json={"note": "Pitched."}
+        )
+
+        assert response.status_code == 204
+        block = _draft_block(client, draft, "A1")
+        assert (block["done"] is not None, block["by"]["handle"], block["note"]) == (
+            True,
+            "ada",
+            "Pitched.",
+        )
+
+    def test_a_question_takes_no_done(
+        self, client: FlaskClient, container: ServiceContainer, environment: Environment
+    ) -> None:
+        draft = _drafted(container, environment)
+        _sign_in(client)
+
+        response = client.post(f"{PROJECTS}/{draft}/draft/blocks/Q1/done", json={})
+
+        assert response.status_code == 409
+        assert response.get_json()["error"].endswith(
+            "because block Q1 is a question, not an action"
+        )
+
+    def test_past_create_it_is_refused(
+        self, client: FlaskClient, container: ServiceContainer
+    ) -> None:
+        camp = _make(container, name="Camp")
+        _sign_in(client)
+
+        response = client.post(f"{PROJECTS}/{camp}/draft/blocks/A1/done", json={})
+
+        assert response.status_code == 409
+
+    def test_an_unknown_project_is_not_found(self, client: FlaskClient) -> None:
+        _sign_in(client)
+
+        response = client.post(
+            f"{PROJECTS}/{uuid.uuid4()}/draft/blocks/A1/done", json={}
+        )
+
+        assert response.status_code == 404
+
+    def test_without_editor_it_is_refused(
+        self, client: FlaskClient, container: ServiceContainer, environment: Environment
+    ) -> None:
+        draft = _drafted(container, environment)
+        _sign_in(client, roles=())
+
+        response = client.post(f"{PROJECTS}/{draft}/draft/blocks/A1/done", json={})
+
+        assert response.status_code == 403
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        response = oidc_client.post(
+            f"{PROJECTS}/{uuid.uuid4()}/draft/blocks/A1/done", json={}
+        )
 
         assert response.status_code == 401
 

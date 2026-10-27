@@ -1,7 +1,8 @@
 """The projects as the signed-in person reads them, the project list, the
 archived projects, a project's head, its timeline, its draft and its handbook
-(F1, F2, F3, F8, F37.4, F129.4, D012); a draft made from the plus (F46.1); and
-what they change of a project's standing: its transitions, its pause among
+(F1, F2, F3, F8, F37.4, F129.4, D012); a draft made from the plus (F46.1),
+and their answers to its asks in place (F47.4); and what they change of a
+project's standing: its transitions, its pause among
 them, and their membership (F4.1, F5, F6, F127, F128, F141.2)."""
 
 import uuid
@@ -15,6 +16,7 @@ from app.api.caller import caller
 from app.models import PlanNote, User
 from app.models.reference import DocumentRole, TransitionKind
 from app.schemas.common import ApiErrorResponseSchema
+from app.schemas.items import ActionDoneRequestSchema, AnswerRequestSchema
 from app.schemas.projects import (
     BadgeSchema,
     MemberSchema,
@@ -30,6 +32,7 @@ from app.schemas.projects import (
 )
 from app.schemas.timeline import ProjectDocumentSchema, TimelineSchema
 from app.services.container import ServiceContainer
+from app.services.draft_service import DraftService
 from app.services.people_service import initials
 from app.services.project_service import PlanProgress, ProjectHead, ProjectService
 from app.services.timeline_service import TimelineService
@@ -242,6 +245,78 @@ def get_draft(
     return timeline_service.project_document(project_id, DocumentRole.DRAFT).model_dump(
         mode="json"
     )
+
+
+@projects_bp.route(
+    "/<uuid:project_id>/draft/blocks/<block_id>/answer", methods=["POST"]
+)
+@api.validate(
+    json=AnswerRequestSchema,
+    resp=SpectreeResponse(
+        HTTP_204=None,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def answer_draft_block(
+    project_id: uuid.UUID,
+    block_id: str,
+    draft_service: DraftService = Provide[ServiceContainer.draft_service],
+) -> tuple[str, int]:
+    """Answer a block of the draft in place, as the signed-in person, now,
+    through the app: written into `project.md` (F47.4).
+
+    Returns:
+        204: The answer is recorded
+        400: The body is not an answer
+        401: No one is signed in
+        403: The caller lacks the editor role
+        404: No project has the id, or its draft has no block of the id
+        409: The caller has not chosen a handle, the project is no draft or is
+            archived, or the block takes no such answer
+    """
+    body = AnswerRequestSchema.model_validate(request.get_json())
+    draft_service.answer(caller(), project_id, block_id, body.answer, body.note)
+    return "", 204
+
+
+@projects_bp.route("/<uuid:project_id>/draft/blocks/<block_id>/done", methods=["POST"])
+@api.validate(
+    json=ActionDoneRequestSchema,
+    resp=SpectreeResponse(
+        HTTP_204=None,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def mark_draft_action_done(
+    project_id: uuid.UUID,
+    block_id: str,
+    draft_service: DraftService = Provide[ServiceContainer.draft_service],
+) -> tuple[str, int]:
+    """Mark an action of the draft without options Done in place, as the
+    signed-in person, now, with the paste-back as its note (F47.4).
+
+    Returns:
+        204: The Done is recorded
+        400: The body is not a Done
+        401: No one is signed in
+        403: The caller lacks the editor role
+        404: No project has the id, or its draft has no block of the id
+        409: The caller has not chosen a handle, the project is no draft or is
+            archived, or the block is no action without options
+    """
+    body = ActionDoneRequestSchema.model_validate(request.get_json())
+    draft_service.done_action(caller(), project_id, block_id, body.note)
+    return "", 204
 
 
 @projects_bp.route("/<uuid:project_id>/handbook", methods=["GET"])

@@ -120,7 +120,8 @@ def attach_file(
 ) -> Any:
     """`attach_file(source, to?)` (F86.7, F36.6): outside material, a file or
     a folder in any environment, copied into the record now with its source
-    and hung on the item `to` names.
+    and hung on the item `to` names, or, with no `to` in a draft's definition
+    chat, on nothing.
 
     Returns:
         201: The attachments, one per file, and the call's effect line
@@ -130,7 +131,8 @@ def attach_file(
             running
         404: `to` names no item of the session's project, or the source's
             environment is not the controller's
-        409: No `to`, or a file cannot be copied, nothing attached: the reason
+        409: No `to` outside a draft's definition chat, or a file cannot be
+            copied, nothing attached: the reason
         502: The controller did not answer, or refused for a reason of its own
     """
     body = AttachRequestSchema.model_validate(request.get_json())
@@ -165,7 +167,8 @@ def answer(
 ) -> Any:
     """`answer(block, value, for, note?, to?)` (F86.2, F42.1): a person's
     answer to a block, given in the chat, recorded on their behalf through
-    the chat.
+    the chat: a block of the draft, `project.md/<local id>`, in its
+    definition chat alone (F47.4).
 
     Returns:
         200: The call's effect line
@@ -176,7 +179,8 @@ def answer(
             running
         404: The block is not of the session's project, or no person has the
             handle
-        409: The record refuses the answer: the reason
+        409: A block of the draft outside its definition chat, or the record
+            refuses the answer: the reason
     """
     body = AnswerRequestSchema.model_validate(request.get_json())
     line = pilot_store_service.answer(

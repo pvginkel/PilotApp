@@ -251,8 +251,9 @@ BodyPartSchema = Annotated[
 
 
 class AttachmentSchema(BaseModel):
-    """A file hung on an item, reader's material (F36), which its stream
-    `/api/attachments/<id>` serves without its title or stored type."""
+    """A file hung on an item, or a draft's on none, reader's material (F36),
+    which its stream `/api/attachments/<id>` serves without its title or
+    stored type."""
 
     id: uuid.UUID = Field(description="The attachment's id, its stream's address")
     title: str = Field(examples=["Recipe card sketch"])
@@ -526,6 +527,13 @@ class TimelineSchema(BaseModel):
         )
     )
     items: list[TimelineItemSchema] = Field(description="The items, in their order")
+    unhung_attachments: list[AttachmentSchema] = Field(
+        description=(
+            "The attachments hung on no item, by batch and file name: a draft's "
+            "material, attached in its definition chat, until Create project hangs "
+            "it on the opening (F36.6, F46.3); none past Create"
+        )
+    )
 
 
 class ItemDocumentSchema(TimelineItemSchema):

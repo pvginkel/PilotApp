@@ -26,6 +26,7 @@ from app.services.chat_service import ChatService
 from app.services.condition_service import ConditionService
 from app.services.controller_client import ControllerClient
 from app.services.controller_outage import ControllerOutage
+from app.services.draft_service import DraftService
 from app.services.effect_service import EffectService
 from app.services.environment_service import EnvironmentService
 from app.services.fake_controller import FakeController
@@ -450,6 +451,13 @@ class ServiceContainer(containers.DeclarativeContainer):
     # What a person does to an item: its answers and marks (F14, F32.4)
     item_service = providers.Factory(
         ItemService,
+        db=db_session,
+        people_service=people_service,
+        record_service=record_service,
+    )
+    # What a person does to a draft's asks in place (F47.4)
+    draft_service = providers.Factory(
+        DraftService,
         db=db_session,
         people_service=people_service,
         record_service=record_service,

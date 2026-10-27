@@ -1,4 +1,5 @@
-"""Schemas for /api/items: what a person writes to an item's block."""
+"""What a person writes to a block: an item's, under /api/items, and the
+draft's in place, under /api/projects/<id>/draft (F47.4)."""
 
 from pydantic import BaseModel, ConfigDict, Field
 

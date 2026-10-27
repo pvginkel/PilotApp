@@ -3,6 +3,7 @@ chat's or a job's Session while its turn runs, and the seven tools that act on
 its project, each call that changed the record writing its Effect (F41) and
 `ask_writer` its Writer Question (DB decision 59)."""
 
+import functools
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -24,6 +25,7 @@ from app.exceptions import (
 from app.models import (
     Attachment,
     Block,
+    Chat,
     Document,
     Effect,
     Environment,
@@ -39,6 +41,7 @@ from app.models import (
 )
 from app.models.reference import (
     AnswerChannel,
+    ChatKind,
     EffectKind,
     ProjectState,
     RecordKind,
@@ -127,6 +130,16 @@ title: Camp survey
 The lake and the forest compared.
 """
 
+DRAFT = """---
+title: Camp
+slug: camp
+---
+
+```question id=Q1
+default: The lake
+```
+"""
+
 REGISTERED = "/work/Example/docs/survey.md"
 
 REGISTERED_TEXT = """Two asks about the camp.
@@ -175,6 +188,28 @@ def _brain(
 
 def _admitted(run: models.Session) -> Brain:
     return Brain(run.id, run.project_id, run.kind_code)
+
+
+def _chat(
+    db: DbSession, run: models.Session, kind: ChatKind = ChatKind.DEFINITION
+) -> models.Session:
+    """`run` a chat of its project, its draft's definition chat by default."""
+    db.add(
+        Chat(
+            id=run.id,
+            project_id=run.project_id,
+            session_kind_code="chat",
+            kind_code=kind,
+        )
+    )
+    db.flush()
+    return run
+
+
+def _draft_block(db: DbSession, draft: Document, local_id: str) -> Block:
+    return db.scalars(
+        select(Block).where(Block.document_id == draft.id, Block.local_id == local_id)
+    ).one()
 
 
 def _service(container: ServiceContainer) -> PilotStoreService:
@@ -634,6 +669,217 @@ class TestPilotStoreServiceAnswer:
         assert refused.value.message.endswith("because `deferred` names no `to`")
         assert _effects(session) == []
         assert read_records(session, run.id, limit=10) == []
+
+
+class TestPilotStoreServiceAnswerDraft:
+    """In a draft's definition chat, `answer` takes the draft's asks by
+    `project.md/<local id>` (F47.4, F42.1); nowhere else."""
+
+    def test_in_its_definition_chat_the_drafts_ask_is_answered_into_project_md(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        draft = container.document_service().bear_draft(project, DRAFT)
+        run = _chat(session, _brain(session, project, environment))
+
+        line = _service(container).answer(
+            _admitted(run),
+            "project.md/Q1",
+            "The lake",
+            "ada",
+            note="By the water, for the swim.",
+            to=None,
+            tool_use_id=TOOL_USE_ID,
+        )
+
+        block = _draft_block(session, draft, "Q1")
+        assert (
+            block.answer,
+            block.answered_by_user_id,
+            block.via_code,
+            block.note,
+        ) == ("The lake", person.id, AnswerChannel.CHAT, "By the water, for the swim.")
+        assert draft.published_text is not None
+        assert "answer: The lake\nby: ada\n" in draft.published_text
+        assert project.state_code is ProjectState.DRAFT
+        assert (line.verb, line.label) == ("Answered", "Q1 · Camp")
+        assert _effect_record(session, run) == {
+            "type": "effect",
+            "toolUseId": TOOL_USE_ID,
+            "effect": {
+                "verb": "Answered",
+                "label": "Q1 · Camp",
+                "blockId": "project.md/Q1",
+            },
+        }
+        [effect] = _effects(session)
+        assert (effect.kind_code, effect.block_id, effect.item_id) == (
+            EffectKind.ANSWERED,
+            block.id,
+            None,
+        )
+
+    def test_a_draft_with_no_title_is_named_by_its_file(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        container.document_service().bear_draft(project, "```question id=Q1\n```\n")
+        run = _chat(session, _brain(session, project, environment))
+
+        line = _service(container).answer(
+            _admitted(run),
+            "project.md/Q1",
+            "The lake",
+            "ada",
+            note=None,
+            to=None,
+            tool_use_id=TOOL_USE_ID,
+        )
+
+        assert line.label == "Q1 · project.md"
+
+    def test_answering_it_again_replaces_the_answer(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        draft = container.document_service().bear_draft(project, DRAFT)
+        run = _chat(session, _brain(session, project, environment))
+        answer = functools.partial(
+            _service(container).answer,
+            _admitted(run),
+            "project.md/Q1",
+            person="ada",
+            note=None,
+            to=None,
+            tool_use_id=None,
+        )
+
+        answer(value="The lake")
+        answer(value="The forest")
+
+        assert _draft_block(session, draft, "Q1").answer == "The forest"
+        assert len(_effects(session)) == 2
+
+    @pytest.mark.parametrize(
+        "kind",
+        [
+            pytest.param(ChatKind.PROJECT, id="the project's chat"),
+            pytest.param(ChatKind.DEFINITION, id="its definition chat past Create"),
+        ],
+    )
+    def test_past_create_no_chat_answers_the_drafts_ask(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        kind: ChatKind,
+    ) -> None:
+        draft = container.document_service().bear_draft(project, DRAFT)
+        run = _chat(session, _brain(session, project, environment), kind)
+        _opened(session, project)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _service(container).answer(
+                _admitted(run),
+                "project.md/Q1",
+                "The lake",
+                "ada",
+                note=None,
+                to=None,
+                tool_use_id=TOOL_USE_ID,
+            )
+
+        assert refused.value.message == (
+            "Cannot answer block project.md/Q1 because `project.md` takes answers"
+            " in its draft's definition chat alone"
+        )
+        assert _draft_block(session, draft, "Q1").answer is None
+        assert _effects(session) == []
+
+    def test_a_job_answers_no_ask_of_the_draft(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        draft = container.document_service().bear_draft(project, DRAFT)
+        run = _brain(session, project, environment, "job")
+
+        with pytest.raises(InvalidOperationException):
+            _service(container).answer(
+                _admitted(run),
+                "project.md/Q1",
+                "The lake",
+                "ada",
+                note=None,
+                to=None,
+                tool_use_id=TOOL_USE_ID,
+            )
+
+        assert _draft_block(session, draft, "Q1").answer is None
+
+    def test_an_ask_the_draft_does_not_hold_is_not_found_by_its_name(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        container.document_service().bear_draft(project, DRAFT)
+        run = _chat(session, _brain(session, project, environment))
+
+        with pytest.raises(RecordNotFoundException) as refused:
+            _service(container).answer(
+                _admitted(run),
+                "project.md/Q9",
+                "The lake",
+                "ada",
+                note=None,
+                to=None,
+                tool_use_id=TOOL_USE_ID,
+            )
+
+        assert refused.value.message == "Block project.md/Q9 was not found"
+        assert _effects(session) == []
+
+    def test_the_record_refuses_an_answer_of_an_archived_draft(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        draft = container.document_service().bear_draft(project, DRAFT)
+        run = _chat(session, _brain(session, project, environment))
+        project.archived = True
+        session.flush()
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _service(container).answer(
+                _admitted(run),
+                "project.md/Q1",
+                "The lake",
+                "ada",
+                note=None,
+                to=None,
+                tool_use_id=TOOL_USE_ID,
+            )
+
+        assert refused.value.message.endswith("because its project is archived")
+        assert _draft_block(session, draft, "Q1").answer is None
+        assert _effects(session) == []
 
 
 class TestPilotStoreServiceMark:
@@ -2035,6 +2281,64 @@ class TestPilotStoreServiceAttachFile:
             f"Cannot attach {ELSEWHERE}:{DESIGN} because it names no item to hang"
             " on: give `to`"
         )
+
+    def test_without_to_in_a_drafts_definition_chat_it_hangs_on_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        _elsewhere(fake_controller)
+        run = _chat(session, _brain(session, project, environment))
+
+        attached = _service(container).attach_file(
+            _admitted(run), f"{ELSEWHERE}:{DESIGN}", None, TOOL_USE_ID
+        )
+        clear_after_commit_callbacks()
+
+        assert [
+            (attachment.project_id, attachment.batch, attachment.filename)
+            for attachment in attached.attachments
+        ] == [(project.id, 1, "README.md"), (project.id, 1, "data/model.md")]
+        assert session.scalars(select(ItemAttachment)).all() == []
+        assert _effect_record(session, run)["effect"] == {
+            "verb": "Attached",
+            "label": "design, 2 files",
+        }
+        assert [
+            (effect.kind_code, effect.attachment_id) for effect in _effects(session)
+        ] == [
+            (EffectKind.ATTACHED, attachment.id) for attachment in attached.attachments
+        ]
+
+    @pytest.mark.parametrize(
+        "kind",
+        [
+            pytest.param(ChatKind.PROJECT, id="the project's chat"),
+            pytest.param(ChatKind.DEFINITION, id="its definition chat past Create"),
+        ],
+    )
+    def test_without_to_past_create_it_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        kind: ChatKind,
+    ) -> None:
+        run = _chat(session, _brain(session, project, environment), kind)
+        _opened(session, project)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _service(container).attach_file(
+                _admitted(run), f"{ELSEWHERE}:{DESIGN}", None, TOOL_USE_ID
+            )
+
+        assert refused.value.message.endswith("it names no item to hang on: give `to`")
+        assert session.scalars(select(Attachment)).all() == []
 
     def test_a_to_of_another_project_is_not_found(
         self,

@@ -32,6 +32,7 @@ from app.engine.attachments import (
 )
 from app.engine.documents import DocumentService, listed
 from app.engine.ingest import IngestService
+from app.engine.paths import DRAFT
 from app.engine.record import RecordService
 from app.engine.views import ViewService
 from app.exceptions import (
@@ -42,6 +43,7 @@ from app.exceptions import (
 from app.models import (
     Attachment,
     Block,
+    Chat,
     Document,
     Item,
     ItemKind,
@@ -55,7 +57,10 @@ from app.models import (
 from app.models import Session as AgentSession
 from app.models.reference import (
     AnswerChannel,
+    ChatKind,
+    DocumentRole,
     EffectKind,
+    ProjectState,
     SessionState,
     Surface,
     TransitionKind,
@@ -90,6 +95,10 @@ WORK_FIELDS = ("repo", "cwd", "brief", "agent", "model", "reasoning_effort")
 NEEDED_FOR_WORK = ("title", "repo", "cwd", "brief")
 """The fields of `add_item`'s item that one form takes alone, by their names
 on the wire, and those a work item needs."""
+
+DRAFT_BLOCK = f"{DRAFT}/"
+"""How a block of the draft's id starts, `project.md/<local id>`, the name
+its definition chat gives it: the draft has no item to name it by."""
 
 ADDED = "Added"
 ANSWERED = "Answered"
@@ -291,25 +300,28 @@ class PilotStoreService:
     ) -> Attached:
         """Outside material at `source`, `<environment>:<path>`, a file or a
         folder, copied into the record now as one batch with its source and
-        hung on the item `to` names (F86.7, F36.6), as the worker's copy is
-        made, its caps included. The call `tool_use_id`'s effect is one line
-        for its files, "Attached · <title>", or "Attached · <folder>, <n>
-        files".
+        hung on the item `to` names, or, with no `to` in a draft's definition
+        chat, on nothing until Create project hangs it on the opening (F86.7,
+        F36.6), as the worker's copy is made, its caps included. The call
+        `tool_use_id`'s effect is one line for its files, "Attached · <title>",
+        or "Attached · <folder>, <n> files".
 
         Raises:
             RecordNotFoundException: `to` names no item of the brain's
                 project, or the source's environment is not the controller's.
-            InvalidOperationException: no `to`, which a draft's definition
-                chat alone gives; a file cannot be copied, nothing attached.
+            InvalidOperationException: no `to` outside a draft's definition
+                chat; a file cannot be copied, nothing attached.
             ExternalServiceException: the controller did not answer, or
                 refused for a reason of its own.
         """
         operation = f"attach {source}"
-        if to is None:
+        item: Item | None = None
+        if to is not None:
+            item = self._item(brain, to)
+        elif not self._in_definition_chat(brain):
             raise InvalidOperationException(
                 operation, "it names no item to hang on: give `to`"
             )
-        item = self._item(brain, to)
         outside = self._outside(source, operation)
         self._project(brain)
         attachments = self.attach_service.attach(
@@ -319,7 +331,9 @@ class PilotStoreService:
             environment_id=outside.environment_id,
         )
         line = EffectLine(
-            ATTACHED, attached_label(outside.path, attachments), item_id=item.id
+            ATTACHED,
+            attached_label(outside.path, attachments),
+            item_id=None if item is None else item.id,
         )
         self.effect_service.record(
             brain.session_id,
@@ -344,22 +358,52 @@ class PilotStoreService:
         tool_use_id: str | None,
     ) -> EffectLine:
         """The answer `value` of the person whose handle is `person` to the
-        block `block_id`, `<item id>/<local id>`, recorded on their behalf
-        through the chat, with `note` and, for `deferred`, `to` (F42.1, F86.2):
-        the record's own answer, its undo included. The call `tool_use_id`'s
-        effect is "Answered · <local id> · <title>".
+        block `block_id`, `<item id>/<local id>`, or `project.md/<local id>`,
+        a block of the draft, in its definition chat (F47.4), recorded on
+        their behalf through the chat, with `note` and, for `deferred`, `to`
+        (F42.1, F86.2): the record's own answer, an item's undo included. The
+        call `tool_use_id`'s effect is "Answered · <local id> · <title>", the
+        draft's title its own, else its file's name.
 
         Raises:
             RecordNotFoundException: the block is not of the brain's project,
                 or no person has the handle.
-            InvalidOperationException: the record refuses the answer.
+            InvalidOperationException: a block of `project.md` outside its
+                draft's definition chat; the record refuses the answer.
         """
-        self._project(brain)
-        item_id, local_id = _parts(block_id)
-        item = self._item(brain, item_id)
-        document = self.db.get(Document, item.id)
-        if document is None:
-            raise RecordNotFoundException("Block", block_id)
+        project = self._project(brain)
+        if block_id.startswith(DRAFT_BLOCK):
+            local_id = block_id.removeprefix(DRAFT_BLOCK)
+            if not self._in_definition_chat(brain):
+                raise InvalidOperationException(
+                    f"answer block {block_id}",
+                    f"`{DRAFT}` takes answers in its draft's definition chat alone",
+                )
+            document = self.db.scalars(
+                select(Document).where(
+                    Document.project_id == project.id,
+                    Document.role_code == DocumentRole.DRAFT,
+                )
+            ).one()
+            # The record's refusal names the block by the draft's row id,
+            # which the brain does not hold.
+            if not self.db.scalar(
+                select(
+                    exists().where(
+                        Block.document_id == document.id, Block.local_id == local_id
+                    )
+                )
+            ):
+                raise RecordNotFoundException("Block", block_id)
+            item_id, title = None, project.name or DRAFT
+        else:
+            item_uuid, local_id = _parts(block_id)
+            item = self._item(brain, item_uuid)
+            found = self.db.get(Document, item.id)
+            if found is None:
+                raise RecordNotFoundException("Block", block_id)
+            document, item_id, title = found, item.id, self._title(item)
+            block_id = f"{item.id}/{local_id}"
         self.record_service.answer(
             document,
             local_id,
@@ -375,10 +419,7 @@ class PilotStoreService:
             )
         ).one()
         line = EffectLine(
-            ANSWERED,
-            f"{local_id} · {self._title(item)}",
-            item_id=item.id,
-            block_id=f"{item.id}/{local_id}",
+            ANSWERED, f"{local_id} · {title}", item_id=item_id, block_id=block_id
         )
         self.effect_service.record(
             brain.session_id,
@@ -674,6 +715,23 @@ class PilotStoreService:
             .with_for_update()
             .execution_options(populate_existing=True)
         ).one()
+
+    def _in_definition_chat(self, brain: Brain) -> bool:
+        """Whether the brain is its draft's definition chat, the one session
+        that answers the draft's asks and attaches on nothing (F47.4,
+        F36.6)."""
+        return (
+            self.db.scalar(
+                select(Chat.id)
+                .join(Project, Project.id == Chat.project_id)
+                .where(
+                    Chat.id == brain.session_id,
+                    Chat.kind_code == ChatKind.DEFINITION,
+                    Project.state_code == ProjectState.DRAFT,
+                )
+            )
+            is not None
+        )
 
     def _item(self, brain: Brain, item_id: uuid.UUID) -> Item:
         item = self.db.get(Item, item_id)

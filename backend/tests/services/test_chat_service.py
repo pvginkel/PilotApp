@@ -73,6 +73,15 @@ MCP_URL = "https://pilot-mcp.example.com/mcp"
 STORE_REPO = "/work/PilotProjects"
 FOLDER = "/work/Projects/soup-club"
 WORDS = "What next?"
+
+DRAFT_ASKS = """---
+title: Soup club
+---
+
+```question id=Q1
+default: The lake
+```
+"""
 NO_ITEM = "0b7c51d2-9e3f-4a61-8d0e-5f2c7a9b1e44"
 """An item id no item has."""
 
@@ -1023,6 +1032,53 @@ class TestQuote:
         turn = _send(chats, opened, person, words)
 
         assert (turn.quote_item_id, turn.quote_block_id) == (decision.id, None)
+
+    def test_a_tag_naming_a_block_of_the_draft_quotes_it_as_answer_names_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        chats: ChatService,
+        project: Project,
+        person: User,
+    ) -> None:
+        draft = container.document_service().bear_draft(project, DRAFT_ASKS)
+        block = session.scalars(
+            select(Block).where(Block.document_id == draft.id, Block.local_id == "Q1")
+        ).one()
+
+        turn = _send(
+            chats, project, person, f"{_quoting('block', 'project.md/Q1')} The lake."
+        )
+
+        assert (turn.quote_item_id, turn.quote_block_id) == (None, block.id)
+
+    @pytest.mark.parametrize(
+        "local_id",
+        [
+            pytest.param("Q2", id="another draft's"),
+            pytest.param("Q9", id="no draft's"),
+        ],
+    )
+    def test_a_block_its_draft_does_not_hold_quotes_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        chats: ChatService,
+        project: Project,
+        person: User,
+        local_id: str,
+    ) -> None:
+        container.document_service().bear_draft(project, DRAFT_ASKS)
+        other = Project(created_by_user_id=person.id)
+        session.add(other)
+        session.flush()
+        container.document_service().bear_draft(other, "```question id=Q2\n```\n")
+
+        turn = _send(
+            chats, project, person, _quoting("block", f"project.md/{local_id}")
+        )
+
+        assert (turn.quote_item_id, turn.quote_block_id) == (None, None)
 
 
 class TestRefusals:

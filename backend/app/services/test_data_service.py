@@ -892,8 +892,9 @@ class TestDataService:
         tool_use_id: str | None,
     ) -> EffectLine:
         """The answer `value` of the person whose handle is `person` to the
-        block `block_id`, `<item id>/<local id>`, recorded through the
-        project's open chat as its brain's `answer` records it (F42.1,
+        block `block_id`, `<item id>/<local id>`, or `project.md/<local id>` in
+        a draft's definition chat, recorded through the project's open chat as
+        its brain's `answer` records it (F42.1,
         F86.2), with `note` and, for `deferred`, `to`: the call
         `tool_use_id`'s effect in the chat's Turn in flight, the place *In the
         chat* goes to (F42.3).
@@ -942,7 +943,42 @@ class TestDataService:
         if item is None:
             raise RecordNotFoundException("Item", str(item_id))
         project = self.db.get_one(Project, item.project_id)
-        session = self._session_of(project, f"attach files to item {item.id}")
+        return self._copied(project, item, files, f"attach files to item {item.id}")
+
+    def attach_to_draft(
+        self, project_id: uuid.UUID, files: Sequence[InventedFileSchema]
+    ) -> list[Attachment]:
+        """`files` copied into the draft from the session's working folder by
+        the project's session in one call, as its definition chat's
+        `attach_file` copies them with no `to` (F36.6): one batch, the
+        project's next, hung on nothing.
+
+        Raises:
+            ValidationException: a file is over 16 MiB.
+            RecordNotFoundException: no project has the id.
+            InvalidOperationException: the project is no draft, or has no
+                session.
+        """
+        project = self.db.get(Project, project_id)
+        if project is None:
+            raise RecordNotFoundException("Project", str(project_id))
+        operation = f"attach files to the draft of project {project.id}"
+        if project.state_code is not ProjectState.DRAFT:
+            raise InvalidOperationException(
+                operation, "the project is no draft: a file hangs on nothing in one"
+            )
+        return self._copied(project, None, files, operation)
+
+    def _copied(
+        self,
+        project: Project,
+        item: Item | None,
+        files: Sequence[InventedFileSchema],
+        operation: str,
+    ) -> list[Attachment]:
+        """`files` copied by the project's session in one call, hung on `item`
+        or on nothing."""
+        session = self._session_of(project, operation)
         # A spec makes the project's sessions with an environment_id.
         assert session.environment_id is not None
         return self.attach_service.attach(

@@ -1398,6 +1398,33 @@ class TestTimeline:
             ],
             [_attachment(log, "text/plain", 2, 3, source)],
         ]
+        assert timeline.unhung_attachments == []
+
+    def test_a_drafts_material_hangs_on_no_item_by_batch_and_file_name(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container, state="draft", environment_id=environment.id)
+        source = f"{environment.id}:{_session_of(session, project).cwd}"
+        data = container.test_data_service()
+        sketch, notes = data.attach_to_draft(
+            project.id,
+            [_file("sketch.md", b"# Sketch\n"), _file("notes.txt", b"Bring boots.")],
+        )
+        (photo,) = data.attach_to_draft(
+            project.id, [_file("map.png", b"PNG", "image/png")]
+        )
+
+        timeline = container.timeline_service().timeline(project.id)
+
+        assert timeline.items == []
+        assert timeline.unhung_attachments == [
+            _attachment(notes, "text/markdown", 12, 1, source),
+            _attachment(sketch, "text/markdown", 9, 1, source),
+            _attachment(photo, "image/png", 3, 2, source),
+        ]
 
     def test_an_items_attachments_go_by_their_position_not_the_order_they_were_hung_in(
         self,

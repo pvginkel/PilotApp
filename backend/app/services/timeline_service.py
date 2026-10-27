@@ -11,7 +11,7 @@ from pathlib import PurePosixPath
 from typing import Any, cast
 
 import pilot_dsl as dsl
-from sqlalchemy import ColumnElement, and_, func, or_, select
+from sqlalchemy import ColumnElement, and_, exists, func, or_, select
 from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import Session, aliased
 
@@ -362,8 +362,8 @@ class TimelineService:
 
     def timeline(self, project_id: uuid.UUID) -> TimelineSchema:
         """The project's every item in order, as its line and its open form
-        show it. A prose item's text is the one last published, a held save's
-        never (F78).
+        show it, and the attachments hung on none, a draft's (F36.6). A prose
+        item's text is the one last published, a held save's never (F78).
 
         Raises:
             RecordNotFoundException: no project has the id.
@@ -389,6 +389,17 @@ class TimelineService:
                     and document.published_text is not None
                 },
             ),
+            unhung_attachments=[
+                _attachment(attachment)
+                for attachment in self.db.scalars(
+                    select(Attachment)
+                    .where(
+                        Attachment.project_id == project.id,
+                        ~exists().where(ItemAttachment.attachment_id == Attachment.id),
+                    )
+                    .order_by(Attachment.batch, Attachment.filename)
+                )
+            ],
         )
 
     def item_document(self, item_id: uuid.UUID) -> ItemDocumentSchema:
@@ -712,23 +723,7 @@ class TimelineService:
             .where(ItemAttachment.item_id.in_(item_ids))
             .order_by(ItemAttachment.item_id, ItemAttachment.position)
         ):
-            hung.setdefault(item_id, []).append(
-                AttachmentSchema(
-                    id=attachment.id,
-                    title=attachment.title,
-                    filename=attachment.filename,
-                    content_type=attachment.content_type,
-                    size=attachment.size,
-                    batch=attachment.batch,
-                    copied_at=attachment.copied_at,
-                    source=(
-                        None
-                        if attachment.source_path is None
-                        else f"{attachment.source_environment_id}:"
-                        f"{attachment.source_path}"
-                    ),
-                )
-            )
+            hung.setdefault(item_id, []).append(_attachment(attachment))
         return hung
 
     def _done(self, item: Item, reader: "_Reader") -> DoneSchema | None:
@@ -835,6 +830,23 @@ class _Reader:
                 else SectionSchema(heading=block.section.heading)
             ),
         )
+
+
+def _attachment(attachment: Attachment) -> AttachmentSchema:
+    return AttachmentSchema(
+        id=attachment.id,
+        title=attachment.title,
+        filename=attachment.filename,
+        content_type=attachment.content_type,
+        size=attachment.size,
+        batch=attachment.batch,
+        copied_at=attachment.copied_at,
+        source=(
+            None
+            if attachment.source_path is None
+            else f"{attachment.source_environment_id}:{attachment.source_path}"
+        ),
+    )
 
 
 def _answerers(bodies: Iterable[Iterable[dsl.Prose | dsl.Block]]) -> set[str]:

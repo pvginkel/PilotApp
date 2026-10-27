@@ -6,6 +6,7 @@ from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
+from app.engine.paths import DRAFT
 from app.schemas.timeline import HeldReason
 
 Mark = Literal["done", "read", "reviewed"]
@@ -93,12 +94,37 @@ BlockId = Annotated[
 ]
 
 
+def _answered_block(value: str) -> str:
+    """A block `answer` takes: a block's id, or `project.md/<local id>`, a
+    block of the draft, which has no item (F47.4)."""
+    if not value.startswith(f"{DRAFT}/"):
+        return _block_id(value)
+    local = value.removeprefix(f"{DRAFT}/")
+    if not local or any(char.isspace() for char in local):
+        raise ValueError(f"a block of the draft is `{DRAFT}/<local id>`")
+    return value
+
+
+AnsweredBlockId = Annotated[
+    str,
+    AfterValidator(_answered_block),
+    Field(
+        description=(
+            "The block's id, `<item id>/<local id>` (TD §4.9), or"
+            " `project.md/<local id>` for a block of the draft, in its"
+            " definition chat"
+        ),
+        examples=["0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15/D1", "project.md/Q1"],
+    ),
+]
+
+
 class AnswerRequestSchema(BaseModel):
     """A person's answer to a block, given in the chat, to record for them."""
 
     model_config = ConfigDict(extra="forbid")
 
-    block: BlockId
+    block: AnsweredBlockId
     value: str = Field(
         min_length=1,
         description=(

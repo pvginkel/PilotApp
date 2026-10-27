@@ -1511,6 +1511,75 @@ class TestAttach:
         assert session.scalars(select(Attachment)).all() == []
 
 
+class TestAttachToDraft:
+    def test_the_drafts_session_copies_them_in_one_batch_hung_on_nothing(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        environment: Environment,
+    ) -> None:
+        service = container.test_data_service()
+        draft = service.project(_spec(state="draft", environment_id=environment.id))
+
+        first = service.attach_to_draft(
+            draft.id, [_file("a.md", b"A"), _file("b.png", b"B", "image/png")]
+        )
+        [second] = service.attach_to_draft(draft.id, [_file("a.md", b"C")])
+
+        project_session = _session_of(session, draft)
+        assert [
+            (attachment.batch, attachment.filename, attachment.source_path)
+            for attachment in [*first, second]
+        ] == [
+            (1, "a.md", f"{project_session.cwd}/a.md"),
+            (1, "b.png", f"{project_session.cwd}/b.png"),
+            (2, "a.md", f"{project_session.cwd}/a.md"),
+        ]
+        assert session.scalars(select(ItemAttachment)).all() == []
+        assert container.tree_service().read(
+            f"draft-{draft.number}/attachments/2/a.md"
+        ) == TreeFile(b"C", hashlib.sha256(b"C").hexdigest())
+
+    def test_an_unknown_project_is_not_found(self, container: ServiceContainer) -> None:
+        project_id = uuid.uuid4()
+
+        with pytest.raises(RecordNotFoundException) as raised:
+            container.test_data_service().attach_to_draft(
+                project_id, [_file("a.md", b"A")]
+            )
+
+        assert raised.value.message == f"Project {project_id} was not found"
+
+    def test_a_project_past_its_draft_is_refused(
+        self, container: ServiceContainer, session: DbSession, camp: Project
+    ) -> None:
+        with pytest.raises(InvalidOperationException) as raised:
+            container.test_data_service().attach_to_draft(
+                camp.id, [_file("a.md", b"A")]
+            )
+
+        assert raised.value.message == (
+            f"Cannot attach files to the draft of project {camp.id} because the"
+            " project is no draft: a file hangs on nothing in one"
+        )
+        assert session.scalars(select(Attachment)).all() == []
+
+    def test_a_draft_without_a_session_is_refused(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        draft = container.test_data_service().project(_spec(state="draft"))
+
+        with pytest.raises(InvalidOperationException) as raised:
+            container.test_data_service().attach_to_draft(
+                draft.id, [_file("a.md", b"A")]
+            )
+
+        assert raised.value.message.endswith(
+            "because the project has no session: make it with an environment_id"
+        )
+
+
 REGISTERED = "/work/Camp/docs/refinement.md"
 
 

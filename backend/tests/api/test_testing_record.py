@@ -81,6 +81,10 @@ def _attachments_path(item_id: uuid.UUID | str) -> str:
     return f"/api/testing/items/{item_id}/attachments"
 
 
+def _draft_attachments_path(project_id: uuid.UUID | str) -> str:
+    return f"{PROJECTS}/{project_id}/attachments"
+
+
 def _turn_ends_path(project_id: uuid.UUID | str) -> str:
     return f"{PROJECTS}/{project_id}/turn-ends"
 
@@ -908,6 +912,59 @@ class TestCreateAttachments:
 
 
 @pytest.mark.usefixtures("person")
+class TestCreateDraftAttachments:
+    def test_files_of_a_draft_hang_on_nothing_listed_and_streamed(
+        self, client: FlaskClient, session: Session, environment: Environment
+    ) -> None:
+        draft_id = _make(client, state="draft", environment_id=environment.id)
+
+        response = client.post(
+            _draft_attachments_path(draft_id),
+            json={"files": [_file("sketch.md", b"# Sketch\n"), _file("b.md", b"B")]},
+        )
+
+        assert response.status_code == 201
+        body = response.get_json()
+        assert (body["batch"], len(body["ids"])) == (1, 2)
+        assert _count(session, ItemAttachment) == 0
+        timeline = client.get(f"/api/projects/{draft_id}/timeline").get_json()
+        assert [
+            attachment["filename"] for attachment in timeline["unhung_attachments"]
+        ] == ["b.md", "sketch.md"]
+        streamed = client.get(f"/api/attachments/{body['ids'][0]}")
+        assert (streamed.status_code, streamed.data) == (200, b"# Sketch\n")
+
+    def test_a_project_past_its_draft_conflicts(
+        self, client: FlaskClient, session: Session, environment: Environment
+    ) -> None:
+        project_id = _make(client, environment_id=environment.id)
+
+        response = client.post(
+            _draft_attachments_path(project_id), json={"files": [_file("a.md", b"A")]}
+        )
+
+        assert response.status_code == 409
+        assert _count(session, Attachment) == 0
+
+    def test_an_unknown_project_is_not_found(self, client: FlaskClient) -> None:
+        response = client.post(
+            _draft_attachments_path(uuid.uuid4()),
+            json={"files": [_file("a.md", b"A")]},
+        )
+
+        assert response.status_code == 404
+
+    def test_a_body_with_no_file_is_invalid(
+        self, client: FlaskClient, environment: Environment
+    ) -> None:
+        draft_id = _make(client, state="draft", environment_id=environment.id)
+
+        response = client.post(_draft_attachments_path(draft_id), json={"files": []})
+
+        assert response.status_code == 400
+
+
+@pytest.mark.usefixtures("person")
 class TestCreateTurnEnd:
     def test_pilot_writes_no_longer_and_its_change_is_an_edit(
         self, client: FlaskClient, session: Session, environment: Environment
@@ -1501,6 +1558,7 @@ ENDPOINTS = [
     (_items_path(NO_ROW), {"kind": "notice", "title": "Camp", "text": "Hi"}),
     (_saves_path(NO_ROW), {"text": "Hi"}),
     (_attachments_path(NO_ROW), {"files": [_file("a.md", b"Hi")]}),
+    (_draft_attachments_path(NO_ROW), {"files": [_file("a.md", b"Hi")]}),
     (_turn_ends_path(NO_ROW), {}),
     (_document_saves_path(NO_ROW, "draft"), {"text": "Hi"}),
     (_document_saves_path(NO_ROW, "handbook"), {"text": "Hi"}),
