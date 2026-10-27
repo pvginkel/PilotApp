@@ -5,9 +5,10 @@
  * The Draft tab shows `project.md` as Pilot writes it, live: "Empty" before the first save, then its
  * title, its prose and its asks, Pilot's dots while the turn runs and what Create project does once
  * it ended; a link in it to a document Pilot attached opens that in the overlay, and nothing else
- * in it links (F47.3). Its asks are answered in place, as the timeline answers an ask of the same
- * kind, and written into `project.md` (F47.4); an ask Pilot changes or deletes is drawn as the draft
- * now stands. The definition chat stands in the timeline's place, so a draft's ask's ties to it land
+ * in it links (F47.3); a read that fails says so, and a later read draws the draft (F113). Its asks
+ * are answered in place, as the timeline answers an ask of the same kind, and written into
+ * `project.md` (F47.4); an ask Pilot changes or deletes is drawn as the draft now stands. The
+ * definition chat stands in the timeline's place, so a draft's ask's ties to it land
  * there: Discuss quotes the ask into its composer (F39.1), an ask answered in it shows *In the chat*
  * going to the message (F42.3), and the answer's effect line, as a quote's chip, goes back to the ask
  * in the Draft tab (F41, F39.3). The Documents tab lists what Pilot attached so far, hung on nothing
@@ -16,7 +17,7 @@
  */
 
 import { test, expect } from '../support/fixtures';
-import { makeUnique, waitForUiState } from '../support/helpers';
+import { expectConsoleError, makeUnique, waitForUiState } from '../support/helpers';
 import { isOnTop } from '../support/page-objects/panel-page';
 
 // Invented lines in `claude`'s shapes (backend/tests/fixtures/raw/), each naming its conversation.
@@ -123,6 +124,38 @@ test.describe('The Draft tab', () => {
     await projects.endTurn(id);
     await expect(panel.draft.writing).toHaveCount(0);
     await expect(panel.draft.foot).toHaveText(FOOT);
+  });
+
+  test('says “The draft did not load” in the draft’s place where its read fails, and draws the draft once a later read lands', async ({
+    page,
+    auth,
+    people,
+    projects,
+    projectHead,
+    timeline,
+    panel,
+  }) => {
+    const me = await people.signIn();
+    const { id } = await projects.makeDraft({ members: [me.handle!] });
+    const title = makeUnique('Failed');
+    await projects.saveProjectDocument(id, 'draft', draftText(title));
+    const read = panel.readDraft();
+    await projectHead.open(id);
+    await read;
+    await expect(panel.draft.title).toHaveText(title);
+
+    // The browser's session now lacks the editor role, and the API refuses the tab's read again.
+    await expectConsoleError(page, /403/);
+    await auth.createSession({ name: 'Test Person', roles: [] });
+    await timeline.refocus();
+    await expect(panel.draft.failed).toHaveText('The draft did not load.');
+    await expect(panel.draft.root).toHaveCount(0);
+    await expect(panel.draft.empty).toHaveCount(0);
+
+    await people.firstSignIn();
+    await timeline.refocus();
+    await expect(panel.draft.failed).toHaveCount(0);
+    await expect(panel.draft.title).toHaveText(title);
   });
 
   test('a link to a document Pilot attached opens it in the overlay, whose Discuss quotes it into the definition chat; nothing else in it links, another link or a ticket id', async ({
