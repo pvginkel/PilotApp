@@ -85,8 +85,8 @@ At a document's address (`DocumentOverlay`, read by `useItemDocument`):
   turn saves it. A segment scrolls the body to its block, which flashes, its section opened first.
 - **The foot**: on a done item, "Done · <stamp>", then " · Pilot", or the other person's name, where
   the signed-in person did not do it; on an open review, Reviewed; on an open document, *Send
-  answers*, which closes the overlay once the record holds the answers; on an open one-ask item or
-  notice, nothing.
+  answers*, which closes the overlay once the record holds the answers, each disabled while the
+  project is archived (D012); on an open one-ask item or notice, nothing.
 
 A registered document with no text, awaiting its read at the end of the run that registered it or
 after one that failed ([`round-trip.md`](round-trip.md)), draws its head, titled by its file's

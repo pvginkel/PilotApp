@@ -86,7 +86,8 @@ An answer or a Done on a one-ask item is the item's done. Neither body takes `to
 neither takes another key (`400`): the page never defers. An unknown item answers `404` "Item <id>
 was not found", and a block the item lacks, any block of a work item or of the opening, `404`
 "Block <item>/<block> was not found". A caller who has not chosen a handle, and every refusal of the
-record, answer `409` with the record's reason ([`engine.md`](engine.md)); Undo takes no person, so
+record, an archived project's close or Undo among them, "its project is archived" (D012), answer
+`409` with the record's reason ([`engine.md`](engine.md)); Undo takes no person, so
 it needs no handle. The routes are behind the API's sign-in and `editor` role
 ([`sign-in.md`](sign-in.md)).
 
@@ -278,6 +279,14 @@ places the continuation that takes their answers ([`round-trip.md`](round-trip.m
 opening and done lines, and ends in "Finished · <stamp>", "22 Oct 2026, 14:05". No line offers
 Undo while the project is finished, a line answered before Finish included (D028); Reopen brings it
 back.
+
+**Archived.** An archived project takes Bring back alone (D012), so its timeline reads as it was
+left: every close of an open item stands disabled, not hidden, as a work item's Resume does
+([`work.md`](work.md)): a decision's options, a question's field and Send, an action's
+paste-back, Done, options and Other…, a confirmation's check and cross, a notice's Read, a
+review's Reviewed, a document's *Send answers*, and in the overlay its foot's
+([`documents.md`](documents.md)), each reading the head's `archived` (`useArchived`). No line
+offers Undo while the project is archived; Bring back gives every close and Undo back.
 
 ## Addresses
 

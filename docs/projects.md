@@ -69,7 +69,8 @@ Finish's close is the engine's `RecordService.close_unanswered` ([`engine.md`](e
 open item but the opening is marked done at the transition's instant, by the person who finished,
 with the done cause `finished`, which offers no undo; the project's sessions are stopped and its
 chat closed before it. Once a project is finished nothing of it starts but its chat, which reads
-only; once it is archived nothing does, its chat included ([`chats.md`](chats.md)). Pilot finishes
+only; once it is archived nothing does, its chat included ([`chats.md`](chats.md)), and none of its
+items takes a close or an Undo ([`timeline.md`](timeline.md), D012). Pilot finishes
 a project through `finish` the same way, as Pilot ([`mcp.md`](mcp.md)).
 
 **`POST /api/projects/<id>/membership`** joins the project as the caller (`201`), and **`DELETE`**

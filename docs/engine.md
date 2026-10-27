@@ -161,12 +161,14 @@ project's row lock its `parse` Save Errors go, in every environment, with `Error
 ## The record's own writes
 
 `RecordService`'s writes each take the document's row lock first, so that a write and an ingest of
-one document never interleave. A write that may close a registered document takes the project's row
-`FOR UPDATE` before it, the lock order of the start that places a continuation, so that such a close
-serialises with Finish, with an Undo and with the close of another document of its run. A write that
-touches the text splices it into the published text and publishes it, while the path's latest save
-is held too: the tree keeps the agent's save then, and the next clean save's merge carries the write
-to the file.
+one document never interleave. Every close takes the project's row before it, so that it
+serialises with Archive and reads the archive as it stands: an archived project's item takes no
+close and no Undo (D012). A close of a registered document takes the row `FOR UPDATE`, the lock
+order of the start that places a continuation, so that it serialises with Finish, with an Undo and
+with the close of another document of its run; any other close holds it shared, as an Undo does.
+A write that touches the text splices it into the published text and publishes it, while the
+path's latest save is held too: the tree keeps the agent's save then, and the next clean save's
+merge carries the write to the file.
 
 - `answer(document, local_id, user, answer, *, via=AnswerChannel.APP, note=None, to=None)`: a
   person's answer to a block, `deferred` with `to` naming a task in the plan or `plan`. It
@@ -177,8 +179,9 @@ to the file.
 - `done_action(document, local_id, user, *, note=None)`: Done on an action without options; on a
   one-ask item it is the item's done as well.
 - `undo(item)`: clears a done prose item's mark while no session has taken its answers, its done
-  cause offers undo and its project is not finished (D028); a registered document's
-  `written_back_at` and `write_back_refused_at` go with it, so that its next close writes it again.
+  cause offers undo and its project is neither finished (D028) nor archived (D012); a registered
+  document's `written_back_at` and `write_back_refused_at` go with it, so that its next close writes
+  it again.
   On cause `answered` it also takes out the answer lines of the block the person answered, which
   unfreezes the block. It holds the project's row shared before the document's, so Finish and
   Reopen, which change the project's state under its row lock, never interleave with it.
@@ -202,9 +205,10 @@ write on a done item; a blank answer; `deferred` without `to`, `to` without `def
 naming neither `plan` nor a task in the plan; an answer to an action without options other than a
 deferral; Done on an action with options or on a block that is no action; Done on an item that is
 not a `document`, Read on one that is not a notice, Reviewed on one that is not a review; any
-close of a registered document awaiting its read ("its file has not been read yet"); undo of
-an item that is no prose item, is not done, has been consumed, was done by a cause that offers
-none, or is of a finished project. A block the text does not have is a `RecordNotFoundException`,
+close of a registered document awaiting its read ("its file has not been read yet"); any close
+of an archived project's item ("its project is archived", D012); undo of an item that is no prose
+item, is not done, has been consumed, was done by a cause that offers none, or is of a finished or
+an archived project. A block the text does not have is a `RecordNotFoundException`,
 and the opening has none, nor a registered document whose read failed: an answer or a Done on
 either is refused so.
 

@@ -112,8 +112,8 @@ documents is open: the continuation waits on every one.
 - **Through the gate**, as every start ([`sessions.md`](sessions.md)): `held` while the gate is
   closed for it, else `starting`. Under a pause the person's answers go through, Done and the
   write-back included, and the continuation is held, its line saying "Paused", until the project
-  resumes (D026). In an archived project the close that would place it is refused: its project is
-  archived.
+  resumes (D026). In an archived project every close is refused, so none places it: its project
+  is archived (D012).
 - **Its start writes back first.** Before its environment is brought up, which the controller
   refuses a write during, its start loop runs the write-backs the documents it carries still owe.
   One the controller refused, before or in that run, fails the start: its line reads "Failed ·
