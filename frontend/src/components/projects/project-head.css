@@ -26,8 +26,7 @@
 
   /* In a tight head its parts give way in one order: the repo, then the name, then the step's name
      down to its floor (plan-popover.tsx), then the members, folding to a count (project-head.tsx).
-     The ticket, the chips, auto pilot or Create project and the icons keep their size, so the
-     head's last control, the menu, stays inside it, clear of the panel beside it, down to 1200px.
+     The ticket, the chips, auto pilot or Create project and the icons keep their size.
      Flex items shrink in proportion to factor × size: at a million times the next one's factor,
      each gives way to its floor while the next gives up a millionth as much for its size. */
   .feed-head .repo { flex-shrink: 1e18; }
@@ -126,6 +125,13 @@
   .note-content { margin: 2px 0 0; color: hsl(var(--muted-foreground)); white-space: pre-wrap; }
   .notes-pop { width: 340px; }
   .notes-pop .note-list { padding: 0 14px; }
+
+  /* A head whose menu runs past it in one row, its parts at their floors, stands in its two rows
+     (project-head.tsx); the plan opens under the step. */
+  .feed-head.two-rows { flex-direction: column; align-items: stretch; gap: 8px; }
+  .feed-head.two-rows .head-row { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+  .feed-head.two-rows .step-anchor { flex: 1; }
+  .feed-head.two-rows .plan-pop { right: auto; left: 0; }
 
   /* A narrow window: the name and auto pilot, then the step, the members and the icons, the repo
      hidden; the plan opens under the step, within the window. */

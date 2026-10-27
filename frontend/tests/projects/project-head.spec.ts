@@ -5,11 +5,11 @@
  * pilot switch, the Finished chip in its place (F2.6, F4.1); a draft's head, with its draft-panel
  * toggle (F46.2; its panel in draft-panel.spec.ts), and an archived project's head (D012); a tight head
  * beside the side panel giving way in one order, the repo, the name, the step's name to its floor,
- * then the members folding to a count, its menu clear of the panel; everything it opens closed on
- * another project (F1.6); two rows on a narrow window.
+ * then the members folding to a count, then standing in two rows, its menu clear of the panel;
+ * everything it opens closed on another project (F1.6); two rows on a narrow window.
  */
 
-import type { Locator } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import type { ProjectHeadPage } from '../support/page-objects/project-head-page';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
@@ -396,23 +396,41 @@ test.describe('A tight head beside the side panel', () => {
     };
   }
 
-  /** Every part of the head that shows, left to right, each clear of the next and the menu inside the head. */
+  /** Every part of the head that shows, left to right in its row, each clear of the next and inside the head. */
   async function clear(projectHead: ProjectHeadPage, panel: { root: Locator }): Promise<void> {
     const parts = await projectHead.root.evaluate((head) =>
       Array.from(head.querySelectorAll(':scope > .head-row > *, .members > *, .step-anchor > .btn'))
         .filter((part) => !part.classList.contains('step-anchor') && !part.classList.contains('members') && !part.classList.contains('grow'))
         .map((part) => part.getBoundingClientRect())
         .filter((box) => box.width > 0)
-        .map((box) => ({ left: box.left, right: box.right })),
+        .map((box) => ({ left: box.left, right: box.right, top: box.top, bottom: box.bottom })),
     );
     const head = (await projectHead.root.boundingBox())!;
     for (const [index, part] of parts.slice(1).entries()) {
+      // A part below the one before it starts the second row.
+      if (part.top >= parts[index].bottom) continue;
       // The avatars overlap by 2px on purpose.
       expect(part.left).toBeGreaterThanOrEqual(parts[index].right - 2.01);
     }
-    const [menu, aside] = [(await projectHead.menuButton.boundingBox())!, (await panel.root.boundingBox())!];
-    expect(menu.x + menu.width).toBeLessThanOrEqual(head.x + head.width);
-    expect(head.x + head.width).toBeLessThanOrEqual(aside.x);
+    for (const part of parts) expect(part.right).toBeLessThanOrEqual(head.x + head.width);
+    expect(head.x + head.width).toBeLessThanOrEqual((await panel.root.boundingBox())!.x);
+  }
+
+  /** Whether the head stands in its two rows: the step below the name's row. */
+  async function twoRows(projectHead: ProjectHeadPage): Promise<boolean> {
+    const [name, stepButton] = await Promise.all([projectHead.name, projectHead.step].map(async (locator) => (await locator.boundingBox())!));
+    return stepButton.y >= name.y + name.height;
+  }
+
+  /** Letter-spacing stands in for a wider font, as Jenkins' is. */
+  async function widen(page: Page): Promise<void> {
+    await page.addInitScript(() =>
+      document.addEventListener('DOMContentLoaded', () => {
+        const style = document.createElement('style');
+        style.textContent = 'body { letter-spacing: 0.12em; }';
+        document.head.append(style);
+      }),
+    );
   }
 
   test('gives way in the repo first, then the name, the ticket and the step’s name whole', async ({ people, projects, projectHead, panel }) => {
@@ -544,16 +562,7 @@ test.describe('A tight head beside the side panel', () => {
       panel,
     }) => {
       await page.setViewportSize({ width: 1200, height: 720 });
-      // Letter-spacing stands in for a wider font, as Jenkins' is.
-      if (font === 'a wider font') {
-        await page.addInitScript(() =>
-          document.addEventListener('DOMContentLoaded', () => {
-            const style = document.createElement('style');
-            style.textContent = 'body { letter-spacing: 0.12em; }';
-            document.head.append(style);
-          }),
-        );
-      }
+      if (font === 'a wider font') await widen(page);
       const me = await people.signIn({ name: 'Test Person' });
       const { handles, names } = await six(people, me.handle!);
       const id = await projects.make({
@@ -574,6 +583,40 @@ test.describe('A tight head beside the side panel', () => {
       await expect(projectHead.membersMore).toHaveText(`+${6 - shown}`);
       await expect(projectHead.membersMore).toHaveAttribute('title', names.slice(shown).join(', '));
       expect(await width(projectHead.step.getByTestId('project.step.name'))).toBeCloseTo(NAME_FLOOR, 0);
+      await clear(projectHead, panel);
+    });
+  }
+
+  for (const font of ['the default font', 'a wider font'] as const) {
+    test(`an archived head at 1200px, in ${font}, stands in its two rows once its parts at their floors run past it in one, and in one again once brought back`, async ({
+      page,
+      people,
+      projects,
+      projectHead,
+      panel,
+    }) => {
+      await page.setViewportSize({ width: 1200, height: 720 });
+      if (font === 'a wider font') await widen(page);
+      const me = await people.signIn({ name: 'Test Person' });
+      const { handles } = await six(people, me.handle!);
+      const id = await projects.make({
+        name: `${makeUnique('Archived')} has a long name`,
+        archived: true,
+        ticket: 'PL-7',
+        members: handles,
+        tasks: [LONG_STEP],
+        notes: [note('one')],
+      });
+      await projectHead.open(id);
+      await expect(panel.root).toBeVisible();
+
+      await clear(projectHead, panel);
+      expect(await twoRows(projectHead)).toBe(true);
+
+      await projectHead.choose('bring-back');
+      await projectHead.confirm('bring-back');
+      await expect(projectHead.archived).toHaveCount(0);
+      expect(await twoRows(projectHead)).toBe(false);
       await clear(projectHead, panel);
     });
   }

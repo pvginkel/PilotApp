@@ -13,11 +13,12 @@
  *
  * In a tight head its parts give way in one order: the repo, the name, the step's name down to its
  * floor, then the members, folding to the first avatars and a count; the ticket, the chips, auto
- * pilot or Create project and the icons keep their size. On a narrow window it stands in its two
- * rows: the name and auto pilot, then the step, the members and the icons, the repo hidden.
+ * pilot or Create project and the icons keep their size. Where they still run past the head, it
+ * stands in its two rows, as on a narrow window: the name and auto pilot, then the step, the
+ * members and the icons; a narrow window hides the repo.
  */
 
-import { useLayoutEffect, useState, type Ref } from 'react';
+import { useCallback, useLayoutEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { Archive, FileText, Files, Flag, MessagesSquare, NotebookText, Plus, TriangleAlert } from 'lucide-react';
@@ -47,13 +48,22 @@ interface ProjectHeadProps {
   documents: Toggled;
   /** A draft's side panel's Draft tab. */
   draftTab: Toggled;
-  ref?: Ref<HTMLElement>;
+  ref?: (element: HTMLElement | null) => void;
 }
 
 export function ProjectHead({ project, chat, documents, draftTab, ref }: ProjectHeadProps) {
   const draft = project.state === 'draft';
+  const [head, setHead] = useState<HTMLElement | null>(null);
+  useRows(head);
+  const own = useCallback(
+    (element: HTMLElement | null) => {
+      setHead(element);
+      ref?.(element);
+    },
+    [ref],
+  );
   return (
-    <header ref={ref} className="feed-head" data-testid="project.head">
+    <header ref={own} className="feed-head" data-testid="project.head">
       <div className="head-row">
         <h1 data-testid="project.name">
           <LinkedText text={project.name ?? 'New project'} />
@@ -314,6 +324,32 @@ function Members({ members }: { members: Project['members'] }) {
       )}
     </div>
   );
+}
+
+/**
+ * Stands the head in its two rows while its last part, the menu, runs past it in one: measured in one
+ * row whenever the head's width or its parts change.
+ */
+function useRows(head: HTMLElement | null): void {
+  useLayoutEffect(() => {
+    if (head === null) return;
+    // React writes `className` only when it changes, so the class set here stays.
+    const fit = () => {
+      head.classList.remove('two-rows');
+      const menu = head.querySelector(':scope > .head-row:last-child > :last-child')!;
+      head.classList.toggle('two-rows', menu.getBoundingClientRect().right > head.getBoundingClientRect().right);
+    };
+    // The parent's width is the head's, and its height stays as the head stacks: an observer of the
+    // head would be told, within the frame, of the height it just changed.
+    const resized = new ResizeObserver(fit);
+    resized.observe(head.parentElement!);
+    const changed = new MutationObserver(fit);
+    changed.observe(head, { childList: true, subtree: true, characterData: true });
+    return () => {
+      resized.disconnect();
+      changed.disconnect();
+    };
+  }, [head]);
 }
 
 /** The element's width, as the window and its neighbours change it; null until it is first measured. */
