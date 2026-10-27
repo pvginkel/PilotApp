@@ -34,6 +34,7 @@ from app.services.fleet_consumer import FleetConsumer
 from app.services.frontend_version_service import FrontendVersionService
 from app.services.health_service import HealthService
 from app.services.item_service import ItemService
+from app.services.job_service import JobService
 from app.services.link_service import LinkService
 from app.services.metrics_service import MetricsService
 from app.services.oidc_client_service import OidcClientService
@@ -479,6 +480,19 @@ class ServiceContainer(containers.DeclarativeContainer):
         sse_connection_manager=sse_connection_manager,
     )
     register_for_background_startup(lambda c: c.condition_service())
+    brief_service = providers.Factory(
+        BriefService, db=db_session, plan_service=plan_service
+    )
+    # Pilot's own background jobs, started in the store (design 3 §5.1)
+    job_service = providers.Factory(
+        JobService,
+        db=db_session,
+        record_service=record_service,
+        brief_service=brief_service,
+        session_start_service=session_start_service,
+        brain_model=app_config.provided.brain_model,
+        brain_reasoning_effort=app_config.provided.brain_reasoning_effort,
+    )
     project_service = providers.Factory(
         ProjectService,
         db=db_session,
@@ -491,11 +505,9 @@ class ServiceContainer(containers.DeclarativeContainer):
         chat_close_service=chat_close_service,
         document_service=document_service,
         attach_service=attach_service,
+        job_service=job_service,
     )
     # The brain's tools, under its session's bearer (TD §4.5, F86)
-    brief_service = providers.Factory(
-        BriefService, db=db_session, plan_service=plan_service
-    )
     pilot_store_service = providers.Factory(
         PilotStoreService,
         db=db_session,

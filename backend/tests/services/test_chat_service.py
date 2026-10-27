@@ -2233,7 +2233,11 @@ class TestCreateMeetingAMessage:
 
             def create() -> None:
                 with scoped_session(container) as db:
-                    container.project_service().transition_as(
+                    container.project_service(
+                        job_service=container.job_service(
+                            session_start_service=services[0]
+                        )
+                    ).transition_as(
                         db.get_one(User, person_id), project_id, TransitionKind.OPENED
                     )
                     created.set()

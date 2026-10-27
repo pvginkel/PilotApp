@@ -18,8 +18,13 @@ def folder(project: Project) -> str:
     """The project's folder: `draft-<number>` until Create project takes its
     slug (DB decision 1)."""
     if project.slug is None:
-        return f"draft-{project.number}"
+        return draft_folder(project)
     return project.slug
+
+
+def draft_folder(project: Project) -> str:
+    """The project's folder while it is a draft, `draft-<number>`."""
+    return f"draft-{project.number}"
 
 
 def tree_path(project: Project, path: str) -> str:

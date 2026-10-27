@@ -32,6 +32,9 @@ WORK_KIND = "work"
 """The Session Kind the slot counts: a work item's, never a Chat's or a
 job's (DB 243)."""
 
+JOB_KIND = "job"
+"""The Session Kind of Pilot's own background jobs (F59)."""
+
 COUNTED = (SessionState.RUNNING, SessionState.STARTING)
 """The states a work item holds a slot in."""
 

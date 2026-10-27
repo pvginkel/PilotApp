@@ -51,7 +51,13 @@ from app.models import (
     Work,
 )
 from app.models import Session as AgentSession
-from app.models.reference import AnswerChannel, ProjectState, UserKind, VersionCause
+from app.models.reference import (
+    AnswerChannel,
+    ProjectState,
+    UserKind,
+    VersionCause,
+    WorkTrigger,
+)
 
 NOTICE = "notice"
 WORK = "work"
@@ -375,6 +381,7 @@ class RecordService:
         plan_task_id: str | None = None,
         *,
         repo: str | None = None,
+        trigger: WorkTrigger | None = None,
         trigger_item_id: uuid.UUID | None = None,
     ) -> Work:
         """A work item of `session`, one identity with it (DB Work, decision
@@ -382,9 +389,10 @@ class RecordService:
         timeline, on the plan's task `plan_task_id` when given, created by its
         own Session, and its Work under the switch's setting as it stands
         (F54.7), placed by the repository `repo` its environment is made from
-        (F61.1), none for a job; a run that continues a conversation after
-        Done has the Item `trigger_item_id` whose close released it (decision
-        44).
+        (F61.1), none for a job; a job has the Work Trigger `trigger` that
+        started it, a worker's run none (DB 167); a run that continues a
+        conversation after Done has the Item `trigger_item_id` whose close
+        released it (decision 44).
 
         Raises:
             RecordNotFoundException: the project's plan has no task
@@ -409,6 +417,7 @@ class RecordService:
             project_id=project.id,
             session_kind_code=session.kind_code,
             repo=repo,
+            trigger_code=trigger,
             trigger_item_id=trigger_item_id,
             autopilot=project.autopilot,
         )

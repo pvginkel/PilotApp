@@ -6,10 +6,12 @@ F128, F141.2; DB 170, 171)."""
 
 import json
 import uuid
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from dependency_injector import providers
 from flask import Flask
 from psycopg.errors import LockNotAvailable
 from sqlalchemy import select
@@ -57,12 +59,15 @@ from app.models.reference import (
     TaskStatus,
     TransitionKind,
     UserKind,
+    WorkTrigger,
 )
 from app.schemas.projects import ProjectStatus
 from app.schemas.testing_record import InventedProjectCreateSchema
 from app.services.auth_service import AuthContext
 from app.services.chat_close_service import CLOSED
 from app.services.container import ServiceContainer
+from app.services.controller_outage import ControllerOutage
+from app.services.job_service import SETUP_TITLE
 from app.services.project_service import (
     ARCHIVED_REFUSAL,
     NO_SLUG_REFUSAL,
@@ -76,9 +81,12 @@ from app.services.project_service import (
 )
 from app.services.session_record_service import read_records
 from app.services.session_scope import STORE_REPO
+from app.services.session_start_service import SessionStartService
 from app.services.supervisor import LoopHandle
 from app.services.timeline_service import Badge
 from app.utils import after_commit as after_commit_module
+from tests.support.starts import configured_starts
+from tests.support.supervisor import Supervise
 
 ADA = AuthContext(
     subject="subject-ada", email=None, name="Ada Example", roles={"editor"}
@@ -1001,6 +1009,20 @@ def _create(container: ServiceContainer, project_id: uuid.UUID) -> None:
     container.project_service().transition(ADA, project_id, TransitionKind.OPENED)
 
 
+@pytest.fixture
+def starts(
+    container: ServiceContainer, supervise: Supervise
+) -> Iterator[SessionStartService]:
+    """The container's session start with a controller and the store
+    configured, its loops never run: Create starts the setup through it."""
+    starting = configured_starts(container, supervise)
+    container.session_start_service.override(providers.Object(starting))
+    try:
+        yield starting
+    finally:
+        container.session_start_service.reset_last_overriding()
+
+
 def _opening(db: DbSession, project: Project) -> Item:
     return db.scalars(
         select(Item).where(Item.project_id == project.id, Item.kind_code == "opening")
@@ -1043,7 +1065,7 @@ def _material(
     )
 
 
-@pytest.mark.usefixtures("person")
+@pytest.mark.usefixtures("person", "starts")
 class TestCreateProject:
     """Create project (F48): the draft opened, the handbook and the opening
     born, the material hung on it, the definition chat closed."""
@@ -1209,6 +1231,116 @@ class TestCreateProject:
         assert "camp-site/project.md" in paths
         assert "camp-site/handbook.md" in paths
         assert not any(path.startswith(f"{folder}/") for path in paths)
+
+
+def _setup(db: DbSession, project: Project) -> Item:
+    return db.scalars(
+        select(Item).where(Item.project_id == project.id, Item.kind_code == "work")
+    ).one()
+
+
+@pytest.mark.usefixtures("person")
+class TestCreateProjectSetup:
+    """Create places the setup, Pilot's first background job (F49, F59)."""
+
+    @pytest.mark.usefixtures("starts")
+    def test_it_places_the_setup_after_the_opening_a_job_of_pilots(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        draft = _drafted(container, session, person)
+
+        _create(container, draft.id)
+
+        setup = _setup(session, draft)
+        assert (
+            setup.seq,
+            setup.title,
+            setup.created_by_session_id,
+            setup.created_by_user_id,
+            setup.done_at,
+        ) == (2, SETUP_TITLE, setup.id, None, None)
+        work = session.get_one(models.Work, setup.id)
+        assert (
+            work.session_kind_code,
+            work.trigger_code,
+            work.trigger_item_id,
+            work.repo,
+            work.autopilot,
+        ) == ("job", WorkTrigger.SETUP, None, None, False)
+        job = session.get_one(models.Session, setup.id)
+        assert (
+            job.kind_code,
+            job.cwd,
+            job.model,
+            job.reasoning_effort,
+            job.environment_id,
+            job.state_code,
+            job.turns,
+        ) == ("job", STORE_REPO, "opus", "xhigh", None, SessionState.STARTING, 1)
+
+    @pytest.mark.usefixtures("starts")
+    def test_its_brief_is_the_setups_at_creates_instant(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        draft = _drafted(container, session, person)
+
+        _create(container, draft.id)
+
+        ((_, at, _),) = _transitions(session, draft)
+        (turn,) = session.scalars(
+            select(Turn).where(Turn.session_id == _setup(session, draft).id)
+        )
+        assert (turn.seq, turn.author_user_id, turn.words, turn.started_at) == (
+            1,
+            None,
+            None,
+            at,
+        )
+        assert turn.message == container.brief_service().setup(
+            draft, _opening(session, draft), at
+        )
+        assert turn.message.startswith("/plan\n")
+
+    @pytest.mark.usefixtures("starts")
+    def test_its_start_runs_once_create_commits(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        draft = _drafted(container, session, person)
+
+        _create(container, draft.id)
+
+        assert "_LoopStart" in {
+            type(c).__name__ for c in after_commit_module._callbacks.get()
+        }
+
+    @pytest.mark.usefixtures("starts")
+    def test_while_the_controller_is_unreachable_it_is_held(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        draft = _drafted(container, session, person)
+        controller_outage.call_unanswered()
+
+        _create(container, draft.id)
+
+        job = session.get_one(models.Session, _setup(session, draft).id)
+        assert job.state_code is SessionState.HELD
+        assert draft.state_code is ProjectState.OPEN
+
+    def test_with_no_controller_configured_create_is_refused(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        draft = _drafted(container, session, person)
+
+        with pytest.raises(InvalidOperationException) as raised:
+            _create(container, draft.id)
+
+        assert raised.value.message == (
+            "Cannot create Camp site because no controller is configured"
+        )
 
 
 @pytest.mark.usefixtures("person")

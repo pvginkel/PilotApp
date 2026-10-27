@@ -29,7 +29,8 @@ A brain session's turn that ends with a save of its own still held (the
 engine's turn end, `DocumentService.turn_ended`) gets the Session the server's
 follow-up turn, naming each such path and its faults (F79; design 3 §5.1),
 written in flight in the turn end's transaction and sent by the relay's next
-run; a follow-up turn that itself ends so gets none. A Turn's end in a chat
+run; a follow-up turn that itself ends so gets none. A job's work item is done
+at its last turn's end, the follow-up's when it gets one. A Turn's end in a chat
 closed while it ran writes the close's record after it
 (`ChatCloseService.turn_ended`).
 
@@ -970,7 +971,8 @@ class RelayService:
         ended neither interrupted nor in error makes the work item done
         (decision 44). A Session stopped under the turn stays as its stop left
         it. A brain session left `idle` with a save of its own still held
-        stays `running` with the follow-up turn (`_follow_up`). After the
+        stays `running` with the follow-up turn (`_follow_up`), a job's work
+        item done at that turn's end, not this one's. After the
         commit, a work item's slot opens, the documents its done run
         registered are read, and the environment's shutdown timer is armed if
         nothing runs there.
@@ -1009,15 +1011,16 @@ class RelayService:
                     earlier.ended_at = ended_at
                 following = _turn_in_flight(db, opening.session_id)
                 before = session.state_code
+                held = self._container.document_service().turn_ended(session)
+                follows_up = bool(held) and _follows_up(session, turn)
                 if following is None:
                     _refresh_turns(db, session, turn)
                     if before != SessionState.STOPPED:
-                        self._ended(db, session, frame, ended_at)
+                        self._ended(db, session, frame, ended_at, follows_up)
                     session.current_line = None
                 else:
                     session.current_line = at_send(None, following.started_at)
-                held = self._container.document_service().turn_ended(session)
-                if held and _follows_up(session, turn):
+                if follows_up and session.state_code == SessionState.IDLE:
                     self._follow_up(db, session, held)
                 self._moved(session, state=session.state_code != before)
                 self._slots.left(session, before)
@@ -1030,12 +1033,18 @@ class RelayService:
             self._environments.arm_shutdown_timer(db, opening.env_id)
 
     def _ended(
-        self, db: Session, session: AgentSession, frame: ResultFrame, at: datetime
+        self,
+        db: Session,
+        session: AgentSession,
+        frame: ResultFrame,
+        at: datetime,
+        follows_up: bool,
     ) -> None:
         """The Session's state at its turn's end with no later Turn in flight:
         `stopped` when interrupted, by no one, `failed` for a work item's turn
         ended in error, else `idle`, its work item done (§9.2; DB Session
-        State; decision 44)."""
+        State; decision 44) unless the follow-up turn `follows_up`: a job's
+        is done at its last turn's end (design 3 §5.1)."""
         work = db.get(Work, session.id) is not None
         if frame.interrupted:
             session.state_code = SessionState.STOPPED
@@ -1045,7 +1054,7 @@ class RelayService:
             session.state_code = SessionState.FAILED
         else:
             session.state_code = SessionState.IDLE
-            if work:
+            if work and not follows_up:
                 self._container.record_service().work_done(session.id, at)
                 self._reads.run_ended(db, session.id)
 
@@ -1126,13 +1135,9 @@ def _with_turn_in_flight(
 
 def _follows_up(session: AgentSession, turn: Turn) -> bool:
     """Whether a brain session's turn `turn`, ended with a save of its own
-    still held, gets the follow-up turn: it left the Session `idle`, and is
-    no follow-up itself (one per turn, D065)."""
-    return (
-        session.kind_code != WORK_KIND
-        and session.state_code == SessionState.IDLE
-        and not is_follow_up(turn)
-    )
+    still held, gets the follow-up turn once it leaves the Session `idle`:
+    it is no follow-up itself (one per turn, D065)."""
+    return session.kind_code != WORK_KIND and not is_follow_up(turn)
 
 
 def _environment_id(session: AgentSession) -> str:

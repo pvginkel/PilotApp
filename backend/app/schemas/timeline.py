@@ -368,6 +368,14 @@ class WorkSchema(BaseModel):
     autopilot: bool = Field(
         description="The auto pilot setting its start was briefed under (F4.3)"
     )
+    pilots_own: bool = Field(
+        description=(
+            "Whether it is Pilot's own work, a background job in the store "
+            "(F59.1): its line has its session log and neither an environment "
+            "chip nor Stop / Resume, which the server refuses (F26.3); false "
+            "for a worker's run"
+        )
+    )
     held_reason: HeldReason | None = Field(
         description=(
             "Why the gate holds its start, which its line says: its project "

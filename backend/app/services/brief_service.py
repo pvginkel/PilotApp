@@ -17,12 +17,14 @@ from datetime import datetime
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.engine.paths import draft_folder
 from app.engine.plan import PlanService
 from app.engine.views import utc_time
 from app.models import (
     Attachment,
     Chat,
     Document,
+    Item,
     PlanNote,
     PlanTask,
     Project,
@@ -37,6 +39,7 @@ from app.services.session_scope import project_folder
 
 CHAT_SKILL = "/chat"
 CREATE_SKILL = "/create"
+PLAN_SKILL = "/plan"
 
 NOTES_HEADING = (
     "Open plan notes, by summary (the content and the blocks a read away in"
@@ -132,6 +135,30 @@ class BriefService:
                 if person.id == creator.id
                 else self.message_from(project, person),
                 words,
+            ],
+        )
+
+    def setup(self, project: Project, opening: Item, at: datetime) -> str:
+        """The setup's first Turn (§5.3), at Create project's instant `at`,
+        which opened the project and took its slug: `/plan`, the switch, then
+        the draft's folder and the project's, the draft, the opening that
+        holds the words that started it, and the plan, empty. No pause and no
+        notes: Create opens a draft, which has nothing to pause (F141.2), and
+        its plan holds no note."""
+        return _frame(
+            PLAN_SKILL,
+            "the setup",
+            project,
+            at,
+            [_switch(project)],
+            [
+                f"The project was created {utc_time(at)} from"
+                f" {draft_folder(project)}; its folder is now"
+                f" {project_folder(project)}.",
+                f"The draft: project.md (the opening item {opening.id} holds the"
+                " words that started it; the draft's copy and what the chat"
+                " attached hang on it).",
+                "The plan: plan.json, empty.",
             ],
         )
 

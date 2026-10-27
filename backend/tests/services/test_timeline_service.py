@@ -44,6 +44,7 @@ from app.models.reference import (
     SessionState,
     TransitionKind,
     VersionCause,
+    WorkTrigger,
 )
 from app.schemas.testing_record import InventedFileSchema, InventedProjectCreateSchema
 from app.schemas.timeline import (
@@ -1577,12 +1578,36 @@ class TestTimeline:
             "started_at": datetime(2026, 10, 24, 9, 0, tzinfo=UTC),
             "error": None,
             "autopilot": False,
+            "pilots_own": False,
             "held_reason": None,
             "held_running": None,
             "stopped_at": None,
             "stopped_by": None,
             "stopped_cause": None,
         }
+
+    def test_a_job_is_pilots_own_work(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        """F26.3, F59.1: its line shows no environment chip and no Stop /
+        Resume, though its session runs in the store."""
+        project = _make(container)
+        run = _run(session, project, environment, SessionState.RUNNING)
+        run.kind_code = "job"
+        session.flush()
+        container.record_service().place_work(
+            project, run, "Setting up the project", trigger=WorkTrigger.SETUP
+        )
+        _work(session, project, environment, SessionState.RUNNING)
+
+        _opening, job, worker = container.timeline_service().timeline(project.id).items
+
+        assert job.work is not None and worker.work is not None
+        assert (job.work.pilots_own, worker.work.pilots_own) == (True, False)
+        assert job.work.environment is not None
 
     def test_a_work_item_coming_up_has_the_servers_words_and_no_start_yet(
         self,

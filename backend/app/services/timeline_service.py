@@ -84,7 +84,7 @@ from app.services.controller_outage import ControllerOutage
 from app.services.people_service import initials
 from app.services.relay_service import ENVIRONMENT_STOPPED
 from app.services.session_record_service import last_record, read_records
-from app.services.start_gate import WORK_KIND, Held, WorkSlots, held_reason
+from app.services.start_gate import JOB_KIND, WORK_KIND, Held, WorkSlots, held_reason
 
 WORK = "work"
 WAIT = "wait"
@@ -185,7 +185,7 @@ def work_status(
     when and by whom, a Resume keeping both on the Session (DB Session
     `stopped_at?`, `stopped_by?`); one no one stopped has the cause its
     environment's stop under it left as its last record. One whose start has
-    no environment yet has none (DB 107)."""
+    no environment yet has none (DB 107). A job's is Pilot's own (F59.1)."""
     stopper = aliased(User)
     rows = db.execute(
         select(
@@ -257,6 +257,7 @@ def work_status(
                 else None
             ),
             autopilot=autopilot,
+            pilots_own=session.kind_code == JOB_KIND,
             held_reason=held[session.id].reason if session.id in held else None,
             held_running=held[session.id].running if session.id in held else None,
             stopped_at=(

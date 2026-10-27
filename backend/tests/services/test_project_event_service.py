@@ -282,6 +282,7 @@ class TestProjectEventService:
                     "started_at": None,
                     "error": None,
                     "autopilot": False,
+                    "pilots_own": False,
                     "held_reason": None,
                     "held_running": None,
                     "stopped_at": None,

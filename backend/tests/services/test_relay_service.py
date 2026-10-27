@@ -42,6 +42,7 @@ from app.models.reference import (
     SessionState,
     UserKind,
     VersionCause,
+    WorkTrigger,
 )
 from app.schemas.timeline import StopCause
 from app.services.chat_close_service import CLOSED, ChatCloseService
@@ -1707,6 +1708,61 @@ class TestFollowUpTurn:
 
         assert fake.sent[1:] == [container.brief_service().follow_up([path])]
         assert len(_turns(session, run)) == 2
+        assert run.state_code is SessionState.IDLE
+
+    def test_a_jobs_work_item_is_done_at_its_follow_ups_end_not_its_first(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        answering: tuple[RelayService, _Answering, str],
+        project: Project,
+    ) -> None:
+        """The follow-up is the job's second turn (design 3 §5.1): its end,
+        held still or not, is the job's, and gets no follow-up of its own."""
+        relays, fake, name = answering
+        run = _agent_session(session, project, name)
+        run.kind_code = "job"
+        session.flush()
+        container.record_service().place_work(
+            project, run, "Setting up the project", trigger=WorkTrigger.SETUP
+        )
+        path = _held_save(container, session, project, run)
+        _send(relays, session, run, "/plan")
+
+        _relay(relays, run)
+
+        assert run.state_code is SessionState.RUNNING
+        assert _item_done(session, run) == (None, None, None)
+
+        container.ingest_service().ingest(path, HELD_SAVE, None, _row(session), run)
+        _relay(relays, run)
+
+        done_at, cause, by = _item_done(session, run)
+        assert (cause, by) == ("turn_ended", None)
+        assert done_at == _turns(session, run)[1].ended_at
+        assert run.state_code is SessionState.IDLE
+        assert len(_turns(session, run)) == 2
+
+    def test_a_jobs_turn_ending_clean_is_its_last(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        answering: tuple[RelayService, _Answering, str],
+        project: Project,
+    ) -> None:
+        relays, fake, name = answering
+        run = _agent_session(session, project, name)
+        run.kind_code = "job"
+        session.flush()
+        container.record_service().place_work(
+            project, run, "Setting up the project", trigger=WorkTrigger.SETUP
+        )
+        _send(relays, session, run, "/plan")
+
+        _relay(relays, run)
+
+        (turn,) = _turns(session, run)
+        assert _item_done(session, run) == (turn.ended_at, "turn_ended", None)
         assert run.state_code is SessionState.IDLE
 
     def test_a_work_items_turn_ending_with_its_save_held_gets_none(

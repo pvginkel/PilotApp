@@ -130,7 +130,7 @@ from app.services.session_record_service import (
 )
 from app.services.session_scope import ScopedCreate, scoped_create
 from app.services.session_stream_service import SessionStreamService
-from app.services.start_gate import WORK_KIND, Held, WorkSlots, held_reason
+from app.services.start_gate import JOB_KIND, WORK_KIND, Held, WorkSlots, held_reason
 from app.services.supervisor import LoopHandle, Supervisor
 from app.services.work_status import work_moved
 from app.services.write_back_service import WRITE_BACK_REFUSED
@@ -157,6 +157,9 @@ START_FAILED = "start-failed"
 CREATING = "Creating the session…"
 
 NOT_PILOTS = "its environment is not Pilot's"
+
+PILOTS_OWN = "it is Pilot's own work"
+"""Why a person's Stop and Resume do not take a job (F26.3)."""
 
 FOLDER_WAIT_SECONDS = 60.0
 """How long a boxed create refused `422` is made again from its first refusal:
@@ -682,13 +685,16 @@ class SessionStartService:
 
         Raises:
             RecordNotFoundException: No Session has the id
-            InvalidOperationException: The Session is no work item's, or it is
-                neither running, starting nor held at the gate
+            InvalidOperationException: The Session is no work item's, is a
+                job's, Pilot's own (F26.3), or it is neither running, starting
+                nor held at the gate
         """
         session = self._records(db).lock_session(session_id)
         operation = f"stop {_work_named(db, session_id)}"
         if db.get(Work, session_id) is None:
             raise InvalidOperationException(operation, "it is no work item")
+        if session.kind_code == JOB_KIND:
+            raise InvalidOperationException(operation, PILOTS_OWN)
         if session.state_code not in STOPPABLE:
             raise InvalidOperationException(
                 operation, _STOP_REFUSALS[session.state_code]
@@ -772,9 +778,10 @@ class SessionStartService:
         Raises:
             RecordNotFoundException: No Session has the id
             InvalidOperationException: No controller is configured; the
-                Session is no work item's, is neither stopped nor failed, runs
-                in an environment Pilot did not create, or has its stopped
-                turn still in flight; or the project is finished or archived
+                Session is no work item's, is a job's, Pilot's own (F26.3), is
+                neither stopped nor failed, runs in an environment Pilot did
+                not create, or has its stopped turn still in flight; or the
+                project is finished or archived
         """
         operation = f"resume {_work_named(db, session_id)}"
         if not self._controller_configured:
@@ -786,6 +793,8 @@ class SessionStartService:
         session = records.lock_session(session_id)
         if db.get(Work, session_id) is None:
             raise InvalidOperationException(operation, "it is no work item")
+        if session.kind_code == JOB_KIND:
+            raise InvalidOperationException(operation, PILOTS_OWN)
         if session.state_code not in _RESUMABLE:
             raise InvalidOperationException(
                 operation, _RESUME_REFUSALS[session.state_code]

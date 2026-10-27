@@ -6,10 +6,12 @@ membership (F4.1, F5, F6, F127, F128)."""
 
 import base64
 import uuid
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from dependency_injector import providers
 from flask.testing import FlaskClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -34,10 +36,26 @@ from app.models.reference import (
 )
 from app.schemas.testing_record import InventedFileSchema, InventedProjectCreateSchema
 from app.services.container import ServiceContainer
+from app.services.job_service import SETUP_TITLE
 from app.services.session_scope import STORE_REPO
 from tests.support.fake_sidecar import FakeSidecar
+from tests.support.starts import configured_starts
+from tests.support.supervisor import Supervise
 
 PROJECTS = "/api/projects"
+
+
+@pytest.fixture
+def starts(container: ServiceContainer, supervise: Supervise) -> Iterator[None]:
+    """The routes' session start with a controller and the store configured,
+    its loops never run: Create starts the setup through it."""
+    container.session_start_service.override(
+        providers.Object(configured_starts(container, supervise))
+    )
+    try:
+        yield
+    finally:
+        container.session_start_service.reset_last_overriding()
 
 
 def _sign_in(
@@ -666,6 +684,7 @@ class TestGetTimeline:
             "started_at": "<time>",
             "error": None,
             "autopilot": False,
+            "pilots_own": False,
             "held_reason": None,
             "held_running": None,
             "stopped_at": None,
@@ -1302,6 +1321,7 @@ class TestAddTransition:
         }
         assert set(fake_sidecar.tree) == synced
 
+    @pytest.mark.usefixtures("starts")
     def test_create_project_opens_the_draft_and_moves_its_folder(
         self,
         client: FlaskClient,
@@ -1353,13 +1373,19 @@ class TestAddTransition:
         assert fake_sidecar.tree == {
             entry.path: tree.read(entry.path).content for entry in tree.manifest()
         }
-        (opening, *_) = client.get(f"{PROJECTS}/{draft.id}/timeline").get_json()[
+        (opening, setup) = client.get(f"{PROJECTS}/{draft.id}/timeline").get_json()[
             "items"
         ]
         assert (opening["kind"], opening["words"]) == (
             "opening",
             "Find us a camp site.",
         )
+        assert (setup["kind"], setup["title"]) == ("work", SETUP_TITLE)
+        assert (
+            setup["work"]["state"],
+            setup["work"]["pilots_own"],
+            setup["work"]["environment"],
+        ) == ("starting", True, None)
 
     def test_create_project_is_refused_with_its_reason(
         self, client: FlaskClient, container: ServiceContainer

@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session as DbSession
 from app import models
 from app.database import scoped_session
 from app.models import Environment, Project, Turn, User
-from app.models.reference import RecordKind, SessionState
+from app.models.reference import RecordKind, SessionState, WorkTrigger
 from app.services.chat_close_service import ChatCloseService
 from app.services.container import ServiceContainer
 from app.services.environment_service import EnvironmentService
@@ -528,6 +528,37 @@ def _work_item(
     return run
 
 
+def _job(
+    container: ServiceContainer,
+    session: DbSession,
+    project: Project,
+    run: models.Session,
+    state: SessionState,
+) -> models.Session:
+    """`run` placed as the setup, Pilot's own work item, in `state`, its
+    brief's turn ended unless it runs."""
+    run.kind_code = "job"
+    session.flush()
+    container.record_service().place_work(
+        project, run, "Setting up the project", trigger=WorkTrigger.SETUP
+    )
+    now = datetime.now(UTC)
+    session.add(
+        Turn(
+            session_id=run.id,
+            seq=1,
+            message="/plan",
+            started_at=now,
+            ended_at=None if state == SessionState.RUNNING else now,
+        )
+    )
+    run.state_code = state
+    run.turns = 1
+    session.flush()
+    clear_after_commit_callbacks()
+    return run
+
+
 def _in_pilots_own(session: DbSession, run: models.Session) -> models.Session:
     """`run` moved to an environment of Pilot's own, named after its project."""
     own = Environment(
@@ -693,6 +724,25 @@ class TestStopSession:
 
         assert response.status_code == 409
 
+    def test_pilots_own_work_is_409(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        job = _job(container, session, project, project_session, SessionState.RUNNING)
+        sign_in(client, SUBJECT)
+
+        response = client.post(f"/api/sessions/{job.id}/stop")
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            "Cannot stop Setting up the project because it is Pilot's own work"
+        )
+
     def test_a_caller_without_a_handle_is_409(
         self,
         client: FlaskClient,
@@ -852,6 +902,25 @@ class TestResumeSession:
         assert response.status_code == 409
         assert response.get_json()["error"] == (
             "Cannot resume Build the camp because it is running"
+        )
+
+    def test_pilots_own_work_is_409(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        job = _job(container, session, project, project_session, SessionState.FAILED)
+        sign_in(client, SUBJECT)
+
+        response = client.post(f"/api/sessions/{job.id}/resume")
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            "Cannot resume Setting up the project because it is Pilot's own work"
         )
 
     def test_an_unknown_session_is_404(self, client: FlaskClient, person: User) -> None:

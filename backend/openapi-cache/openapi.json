@@ -3251,6 +3251,11 @@
             "description": "The running work items that leave it no slot, which its line counts, \"Waiting for a slot · N running\": those across every project, or its project's own, whichever maximum closed the gate; null unless `held_reason` is `slot` (F143.4)",
             "title": "Held Running"
           },
+          "pilots_own": {
+            "description": "Whether it is Pilot's own work, a background job in the store (F59.1): its line has its session log and neither an environment chip nor Stop / Resume, which the server refuses (F26.3); false for a worker's run",
+            "title": "Pilots Own",
+            "type": "boolean"
+          },
           "started_at": {
             "anyOf": [
               {
@@ -3311,6 +3316,7 @@
           "started_at",
           "error",
           "autopilot",
+          "pilots_own",
           "held_reason",
           "held_running",
           "stopped_at",
@@ -7171,6 +7177,11 @@
             "description": "The running work items that leave it no slot, which its line counts, \"Waiting for a slot · N running\": those across every project, or its project's own, whichever maximum closed the gate; null unless `held_reason` is `slot` (F143.4)",
             "title": "Held Running"
           },
+          "pilots_own": {
+            "description": "Whether it is Pilot's own work, a background job in the store (F59.1): its line has its session log and neither an environment chip nor Stop / Resume, which the server refuses (F26.3); false for a worker's run",
+            "title": "Pilots Own",
+            "type": "boolean"
+          },
           "started_at": {
             "anyOf": [
               {
@@ -7231,6 +7242,7 @@
           "started_at",
           "error",
           "autopilot",
+          "pilots_own",
           "held_reason",
           "held_running",
           "stopped_at",
@@ -7465,6 +7477,11 @@
             "description": "The running work items that leave it no slot, which its line counts, \"Waiting for a slot · N running\": those across every project, or its project's own, whichever maximum closed the gate; null unless `held_reason` is `slot` (F143.4)",
             "title": "Held Running"
           },
+          "pilots_own": {
+            "description": "Whether it is Pilot's own work, a background job in the store (F59.1): its line has its session log and neither an environment chip nor Stop / Resume, which the server refuses (F26.3); false for a worker's run",
+            "title": "Pilots Own",
+            "type": "boolean"
+          },
           "started_at": {
             "anyOf": [
               {
@@ -7525,6 +7542,7 @@
           "started_at",
           "error",
           "autopilot",
+          "pilots_own",
           "held_reason",
           "held_running",
           "stopped_at",
@@ -10225,7 +10243,7 @@
     },
     "/api/sessions/{session_id}/resume": {
       "post": {
-        "description": "Returns:     200: The work item's status, starting, or held at the gate     401: No one is signed in     403: The caller lacks the editor role     404: No session has the id     409: No controller is configured; the session is no work item's, is         neither stopped nor failed, or has its stopped turn still ending;         or its project is finished or archived",
+        "description": "Returns:     200: The work item's status, starting, or held at the gate     401: No one is signed in     403: The caller lacks the editor role     404: No session has the id     409: No controller is configured; the session is no work item's, is         Pilot's own, is neither stopped nor failed, or has its stopped         turn still ending; or its project is finished or archived",
         "operationId": "post__api_sessions_{session_id}_resume",
         "parameters": [
           {
@@ -10313,7 +10331,7 @@
     },
     "/api/sessions/{session_id}/stop": {
       "post": {
-        "description": "Returns:     200: The work item's status, stopped     401: No one is signed in     403: The caller lacks the editor role     404: No session has the id     409: The caller has not chosen a handle; the session is no work         item's, or is neither running, starting nor held",
+        "description": "Returns:     200: The work item's status, stopped     401: No one is signed in     403: The caller lacks the editor role     404: No session has the id     409: The caller has not chosen a handle; the session is no work         item's, is Pilot's own, or is neither running, starting nor held",
         "operationId": "post__api_sessions_{session_id}_stop",
         "parameters": [
           {

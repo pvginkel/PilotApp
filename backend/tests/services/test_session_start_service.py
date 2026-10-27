@@ -41,6 +41,7 @@ from app.models.reference import (
     TaskStatus,
     TransitionKind,
     UserKind,
+    WorkTrigger,
 )
 from app.schemas.timeline import HeldReason
 from app.services.auth_service import AuthContext
@@ -452,6 +453,24 @@ def _chat(
     db.flush()
     db.add(Turn(session_id=run.id, seq=1, message=BRIEF, started_at=datetime.now(UTC)))
     db.flush()
+    return run
+
+
+def _job(
+    container: ServiceContainer,
+    db: DbSession,
+    project: Project,
+    environment: Environment,
+    state: SessionState,
+) -> models.Session:
+    """The setup's Session in the store's environment, placed as Pilot's
+    work item, its brief written."""
+    run = _chat(db, project, environment, state)
+    run.kind_code = "job"
+    db.flush()
+    container.record_service().place_work(
+        project, run, "Setting up the project", trigger=WorkTrigger.SETUP
+    )
     return run
 
 
@@ -3549,6 +3568,26 @@ class TestStop:
         with pytest.raises(InvalidOperationException, match="it is no work item"):
             starts.stop(session, chat.id, person)
 
+    def test_a_job_pilots_own_work_is_refused(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        """F26.3: Pilot's own work has no Stop."""
+        job = _job(container, session, project, environment, SessionState.RUNNING)
+
+        with pytest.raises(InvalidOperationException) as raised:
+            starts.stop(session, job.id, person)
+
+        assert raised.value.message == (
+            "Cannot stop Setting up the project because it is Pilot's own work"
+        )
+        assert _read(session, job.id).state_code is SessionState.RUNNING
+
     def test_an_unknown_session_is_not_found(
         self, starts: SessionStartService, session: DbSession, person: User
     ) -> None:
@@ -4311,6 +4350,27 @@ class TestResume:
 
         with pytest.raises(InvalidOperationException, match="it is no work item"):
             starts.resume(session, chat.id)
+
+    @pytest.mark.parametrize("state", [SessionState.STOPPED, SessionState.FAILED])
+    def test_a_job_pilots_own_work_is_refused(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        state: SessionState,
+    ) -> None:
+        """F26.3: Pilot's own work has no Resume."""
+        job = _job(container, session, project, environment, state)
+
+        with pytest.raises(InvalidOperationException) as raised:
+            starts.resume(session, job.id)
+
+        assert raised.value.message == (
+            "Cannot resume Setting up the project because it is Pilot's own work"
+        )
+        assert _read(session, job.id).turns == 1
 
     def test_no_controller_refuses_it(
         self,

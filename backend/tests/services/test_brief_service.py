@@ -431,6 +431,56 @@ class TestDefinitionChat:
         )
 
 
+class TestSetup:
+    """The setup's first Turn, at Create project (design 3 §5.3; F49)."""
+
+    def test_it_names_the_drafts_folder_the_opening_and_the_empty_plan(
+        self,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        person: User,
+    ) -> None:
+        opening = container.document_service().bear_opening(
+            opened, "Ada Example started this project", person, "Soup?"
+        )
+
+        assert briefs.setup(opened, opening, AT) == (
+            "/plan\n\n"
+            'Pilot\'s brief · the setup · project "Soup club" ·'
+            " /work/Projects/soup-club · 2026-10-26T09:30:15Z\n\n"
+            "Auto pilot: off — the granted column asks for this session"
+            " (rules/grants.md).\n\n"
+            f"The project was created 2026-10-26T09:30:15Z from"
+            f" draft-{opened.number}; its folder is now /work/Projects/soup-club.\n"
+            f"The draft: project.md (the opening item {opening.id} holds the words"
+            " that started it; the draft's copy and what the chat attached hang on"
+            " it).\n"
+            "The plan: plan.json, empty."
+        )
+
+    def test_a_project_with_no_title_is_named_by_its_folder_alone(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        person: User,
+    ) -> None:
+        """A draft with a body and no title names no project (`_frame`)."""
+        opened.name = None
+        session.flush()
+        opening = container.document_service().bear_opening(
+            opened, "Ada Example started this project", person, "Soup?"
+        )
+
+        assert briefs.setup(opened, opening, AT).startswith(
+            "/plan\n\n"
+            "Pilot's brief · the setup · /work/Projects/soup-club ·"
+            " 2026-10-26T09:30:15Z\n\n"
+        )
+
+
 FINISH = (
     "This project is finished (2026-10-25T18:00:00Z): you read only — no"
     " `pilot-store`, nothing under `/work` you can write. Answer from the tree,"

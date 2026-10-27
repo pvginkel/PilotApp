@@ -46,6 +46,7 @@ from app.models.reference import (
 from app.schemas.projects import ProjectStatus
 from app.services.auth_service import AuthContext
 from app.services.chat_close_service import ChatCloseService
+from app.services.job_service import JobService
 from app.services.people_service import PeopleService
 from app.services.session_start_service import STOPPABLE, SessionStartService
 from app.services.timeline_service import (
@@ -219,6 +220,7 @@ class ProjectService:
         chat_close_service: ChatCloseService,
         document_service: DocumentService,
         attach_service: AttachService,
+        job_service: JobService,
     ) -> None:
         self.db = db
         self.engine_bus = engine_bus
@@ -230,6 +232,7 @@ class ProjectService:
         self.chat_close_service = chat_close_service
         self.document_service = document_service
         self.attach_service = attach_service
+        self.job_service = job_service
 
     def tabs(self, auth: AuthContext, archived: bool) -> list[ProjectTab]:
         """The archived projects, or every other, in the order they were
@@ -458,14 +461,18 @@ class ProjectService:
         decision 1); the handbook born empty beside the draft (F129.2); the
         opening first on the timeline, the first message to the definition
         chat verbatim by its author (F18), the draft as it stands copied onto
-        it, then every attachment hung on nothing (F18.1, F36.6); and the
-        definition chat closed, `created` (F48.2, F130.2), so that the next
-        message starts the project's chat. Once committed the `manifest`
-        event moves the project's folder from `draft-<number>` to `<slug>`.
+        it, then every attachment hung on nothing (F18.1, F36.6); the setup
+        after it, Pilot's first background job (F49), whose session is
+        created once the project's new folder is on disk; and the definition
+        chat closed, `created` (F48.2, F130.2), so that the next message
+        starts the project's chat. Once committed the `manifest` event moves
+        the project's folder from `draft-<number>` to `<slug>`.
 
         Refused while Pilot writes, while nothing is drafted or while the
         draft has no valid slug, never for an ask it leaves open (F48.1);
-        and for a project that is no draft, or is archived.
+        for a project that is no draft, or is archived; and while no
+        controller or no store environment is configured, which the setup
+        needs.
         """
         # Pilot's writing is read under the open chat's lock: a message's
         # send under way holds it from before its Turn to its commit.
@@ -489,6 +496,9 @@ class ProjectService:
         )
         self.attach_service.attach_draft(opening, creation.text)
         self.attach_service.hang_unhung(opening)
+        self.job_service.setup(
+            project, opening, at, _operation(project, TransitionKind.OPENED)
+        )
         self.chat_close_service.close_open(self.db, project, CloseCause.CREATED, at)
         self.view_service.timeline_moved(project)
         self.engine_bus.emit(ManifestChanged())
