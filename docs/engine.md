@@ -45,8 +45,10 @@ version 1 cut, cause `born`; a worker's is registered (below):
   title and caches stay as it was born.
 
 The births, and a work item's placing, take the Item's `seq` from
-`DocumentService.next_seq(project)`, under the project's row lock until the transaction ends, so
-that items in one project take theirs one at a time. A work item has no document:
+`DocumentService.next_seq(project)`, under the project's row lock until the transaction ends
+(`lock_project(project)`, which `pilot-work`'s registration takes first to read its Session again,
+[`mcp.md`](mcp.md)), so that items in one project take theirs one at a time. A work item has no
+document:
 `RecordService.place_work(project, session, title, plan_task_id=None, *, repo=None)` writes its
 Item, kind `work`, created by its own `session` and sharing its id, on the plan's task when given (a
 task not in the plan is a `RecordNotFoundException`), and its Work, `autopilot` the project's

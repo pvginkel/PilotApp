@@ -98,7 +98,10 @@ and it is outside `/api/`, the one prefix the UI's nginx forwards, so neither st
 and only the pod's loopback does, where the MCP server calls it (D048). Every call passes its gate
 first, `PilotWorkService.admit` (`backend/app/services/pilot_work_service.py`): the bearer's sha256
 matched against `sessions.token_hash`, `401` with no bearer or one no Session has, and `403` for a
-Session whose kind's surface is not `pilot-work` or that is no work item's. An answer outside 2xx is
+Session whose kind's surface is not `pilot-work` or that is no work item's, and for one whose turn
+is not running, "Cannot call pilot-work because session <id> has no turn running", as `pilot-store`'s
+gate answers: a bearer acts only while its turn does, so the bearer of a run Finish or Archive
+stopped, or of one that has ended, adds nothing to the record. An answer outside 2xx is
 the API's error envelope, its `error` the reason whole. A controller that does not answer, or that
 refuses for a reason of its own, is a `502`.
 
@@ -111,7 +114,10 @@ those against the record ([`engine.md`](engine.md)). A path outside `/work`, not
 folder, a file over 16 MiB or a text with faults is refused, `409` "Cannot register document <path>
 because …", each fault with its line where it has one (`line N: …; …`), and nothing is minted, so
 the worker fixes the file while its turn still runs and registers it again (D044). The read is made
-before any lock is taken.
+before any lock is taken. Under the project's row lock its `seq` takes, the Session is read again,
+and one no longer running is refused with the gate's `403`, nothing minted: Finish and Archive stop
+the project's Sessions under that row, so a call that waited on it for either registers nothing in
+the project they closed.
 
 A file that reads clean registers its document: `201` for one minted, a review on the project's
 timeline at its next place, with no text until the end of the run ([`round-trip.md`](round-trip.md));
