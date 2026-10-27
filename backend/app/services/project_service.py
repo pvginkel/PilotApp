@@ -1,7 +1,8 @@
 """The projects as the signed-in person reads them, the project list's tabs
-and a project's head, its status among them (F1, F2, F3, F141.1); and what
-they change of a project's standing, its transitions and their membership
-(F4.1, F5, F6, F127, F128, F141.2)."""
+and a project's head, its status among them (F1, F2, F3, F141.1); a draft
+made from the plus (F46.1, F47.1); and what they change of a project's
+standing, its transitions and their membership (F4.1, F5, F6, F127, F128,
+F141.2)."""
 
 import uuid
 from collections.abc import Iterable
@@ -12,7 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.engine.bus import EngineBus, ManifestChanged, ProjectChanged
-from app.engine.documents import OPENING
+from app.engine.documents import OPENING, DocumentService
 from app.engine.record import RecordService
 from app.engine.views import ViewService
 from app.exceptions import InvalidOperationException, RecordNotFoundException
@@ -186,6 +187,7 @@ class ProjectService:
         timeline_service: TimelineService,
         session_start_service: SessionStartService,
         chat_close_service: ChatCloseService,
+        document_service: DocumentService,
     ) -> None:
         self.db = db
         self.engine_bus = engine_bus
@@ -195,6 +197,7 @@ class ProjectService:
         self.timeline_service = timeline_service
         self.session_start_service = session_start_service
         self.chat_close_service = chat_close_service
+        self.document_service = document_service
 
     def tabs(self, auth: AuthContext, archived: bool) -> list[ProjectTab]:
         """The archived projects, or every other, in the order they were
@@ -314,6 +317,30 @@ class ProjectService:
             running_work=running_work,
             open_items=open_items or 0,
         )
+
+    def create(self, auth: AuthContext) -> Project:
+        """The caller's draft, from the plus (F46.1), now: its creator its
+        first member (F127), its draft, `project.md`, born empty (F47.1), in
+        the project list as a draft. Once committed the `manifest` event
+        writes its folder, `draft-<number>`, into the store's tree, which its
+        definition chat's start waits for (F50).
+
+        Raises:
+            InvalidOperationException: the caller has not chosen a handle.
+        """
+        person = self.people_service.require_person(auth, "start a new project")
+        at = datetime.now(UTC)
+        project = Project(created_by_user_id=person.id, created_at=at)
+        self.db.add(project)
+        self.db.flush()
+        self.db.add(
+            ProjectMember(project_id=project.id, user_id=person.id, joined_at=at)
+        )
+        self.db.flush()
+        self.document_service.bear_draft(project)
+        self.engine_bus.emit(ProjectChanged(project.id))
+        self.engine_bus.emit(ManifestChanged())
+        return project
 
     def transition(
         self, auth: AuthContext, project_id: uuid.UUID, kind: TransitionKind

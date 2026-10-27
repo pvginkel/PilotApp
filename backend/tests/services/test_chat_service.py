@@ -1,15 +1,15 @@
 """A person's message to a project's brain: the project's chat started in the
-store, briefed, or a turn of the chat open; a finished project's chat reading
-only, the chat the project's state closed, the handbook's notice, and the line
-naming a later message's author (design 3
-§5.1, §5.3; F38.3, F130, F5.5, F128.1, F128.5; D052; DB decisions 60, 61, 62,
-assertions 159, 229, 243, 244, 245, 251; V02, V05, V06, V12, V13, V16, V25,
-V27, V28)."""
+store, briefed, or a turn of the chat open; a draft's definition chat; a
+finished project's chat reading only, the chat the project's state closed,
+the handbook's notice, and the line naming a later message's author (design 3
+§5.1, §5.3; F38.3, F46.1, F130, F130.2, F5.5, F128.1, F128.5; D052; DB
+decisions 60, 61, 62, assertions 159, 229, 243, 244, 245, 251; V02, V05, V06,
+V12, V13, V16, V25, V27, V28)."""
 
 import json
 import threading
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -43,6 +43,7 @@ from app.models.reference import (
     TransitionKind,
     UserKind,
 )
+from app.services.auth_service import AuthContext
 from app.services.chat_close_service import CLOSED, ChatCloseService
 from app.services.chat_service import (
     HANDBOOK_CHANGED_TOTAL,
@@ -86,15 +87,23 @@ options:
 
 
 class _Sent(ServedFakeController):
-    """The fake, keeping each send's message."""
+    """The fake, keeping each send's message; `during_create`, when set, run
+    once, as a headless create is answered."""
 
     def __init__(self, keepalive_seconds: float) -> None:
         super().__init__(keepalive_seconds)
         self.sent: list[str] = []
+        self.during_create: Callable[[], None] | None = None
 
     def _send(self, request: Request, env_id: str, name: str) -> Response:
         self.sent.append((request.get_json(silent=True) or {}).get("message"))
         return super()._send(request, env_id, name)
+
+    def _create_session(self, request: Request, env_id: str) -> Response:
+        hook, self.during_create = self.during_create, None
+        if hook is not None:
+            hook()
+        return super()._create_session(request, env_id)
 
 
 @pytest.fixture(autouse=True)
@@ -1018,20 +1027,14 @@ class TestQuote:
 
 class TestRefusals:
     @pytest.mark.parametrize(
-        ("standing", "refusal"),
+        "standing",
         [
-            (
-                {"state_code": ProjectState.DRAFT, "slug": None},
-                "its project is a draft",
-            ),
-            ({"archived": True}, "its project is archived"),
-            (
-                {"state_code": ProjectState.FINISHED, "archived": True},
-                "its project is archived",
-            ),
+            {"archived": True},
+            {"state_code": ProjectState.FINISHED, "archived": True},
+            {"state_code": ProjectState.DRAFT, "slug": None, "archived": True},
         ],
     )
-    def test_a_draft_or_an_archived_project_takes_no_message(
+    def test_an_archived_project_takes_no_message(
         self,
         session: DbSession,
         chats: ChatService,
@@ -1039,7 +1042,6 @@ class TestRefusals:
         opened: Project,
         person: User,
         standing: dict[str, Any],
-        refusal: str,
     ) -> None:
         for column, value in standing.items():
             setattr(opened, column, value)
@@ -1047,7 +1049,8 @@ class TestRefusals:
 
         with pytest.raises(
             InvalidOperationException,
-            match=f"Cannot send a message to Pilot in Soup club because {refusal}",
+            match="Cannot send a message to Pilot in Soup club because its project"
+            " is archived",
         ):
             _send(chats, opened, person)
 
@@ -1291,6 +1294,177 @@ class TestTheProjectsStateClosesItsChat:
             opened, person, "Two", turn.started_at
         )
         assert fake.sent == []
+
+
+ADA = AuthContext(
+    subject="subject-ada", email=None, name="Ada Example", roles={"editor"}
+)
+"""The `person` fixture, signed in."""
+
+
+@pytest.fixture
+def draft(container: ServiceContainer, person: User) -> Project:
+    """A draft from the plus, `person`'s, its draft born empty."""
+    made = container.project_service().create(ADA)
+    clear_after_commit_callbacks()
+    return made
+
+
+def _draft_folder(draft: Project) -> str:
+    return f"/work/Projects/draft-{draft.number}"
+
+
+def _on_disk(fake: _Sent, draft: Project) -> None:
+    """The draft's folder written into the store's tree, as `pilot-sync`
+    writes it once the draft's manifest commits."""
+    fake.put_file(STORE_ENVIRONMENT_ID, f"{_draft_folder(draft)}/project.md", b"")
+
+
+class TestDefinitionChat:
+    """A draft's chat, its definition chat, from the plus (design 3 §5.1,
+    §5.3; F46.1, F50, F130.2; DB decision 60)."""
+
+    def test_a_message_to_a_draft_starts_its_definition_chat_briefed(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        chats: ChatService,
+        fake: _Sent,
+        draft: Project,
+        person: User,
+    ) -> None:
+        turn = _send(chats, draft, person)
+
+        (chat,) = _chat_rows(session, draft)
+        assert (chat.id, chat.kind_code, chat.closed_at) == (
+            turn.session_id,
+            ChatKind.DEFINITION,
+            None,
+        )
+        run = _read(session, chat.id)
+        assert (run.kind_code, run.cwd, run.state_code) == (
+            "chat",
+            STORE_REPO,
+            SessionState.STARTING,
+        )
+        assert (turn.seq, turn.author_user_id, turn.words) == (1, person.id, WORDS)
+        assert turn.message == container.brief_service().definition_chat(
+            draft, person, WORDS, turn.started_at
+        )
+        assert turn.message.startswith(
+            "/create\n\nPilot's brief · the definition chat ·"
+            f" {_draft_folder(draft)} · "
+        )
+        assert turn.message.endswith(f"\n\nThe message:\n{WORDS}")
+        assert _sends(session, run.id) == [(1, WORDS)]
+        assert "_LoopStart" in _callbacks()
+        assert fake.calls == []
+
+    def test_its_session_is_created_boxed_in_its_folder_once_that_is_on_disk(
+        self,
+        session: DbSession,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        draft: Project,
+        person: User,
+    ) -> None:
+        """Its first create refused `422`, the folder not yet written, is made
+        again once it is (F50, TD §4.2)."""
+        services[0]._folder_wait, services[0]._folder_retry = 2.0, 0.05
+
+        def refused_once() -> None:
+            fake.during_create = lambda: _on_disk(fake, draft)
+
+        fake.during_create = refused_once
+        turn = _send(chats, draft, person)
+        clear_after_commit_callbacks()
+
+        run = _up(services, session, turn.session_id)
+
+        assert (run.state_code, run.environment_id) == (
+            SessionState.RUNNING,
+            STORE_ENVIRONMENT_ID,
+        )
+        creates = f"POST /environments/{STORE_ENVIRONMENT_ID}/sessions/headless"
+        assert fake.calls.count(creates) == 2
+        (created,) = fake.sessions(STORE_ENVIRONMENT_ID)
+        body = created.create_body
+        assert (
+            body["cwd"],
+            body["sandboxReadOnlyCwd"],
+            body["sandboxWritableDirs"],
+            body["env"][0],
+        ) == (
+            STORE_REPO,
+            True,
+            [_draft_folder(draft)],
+            f"PILOT_PROJECT={_draft_folder(draft)}",
+        )
+        assert fake.sent == [turn.message]
+
+    def test_a_later_message_is_a_turn_of_it_its_words_alone(
+        self,
+        session: DbSession,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        draft: Project,
+        person: User,
+    ) -> None:
+        _on_disk(fake, draft)
+        run = _idle_chat(services, chats, session, fake, draft, person)
+
+        turn = _send(chats, draft, person, "Two")
+
+        assert (turn.session_id, turn.seq, turn.message, turn.words) == (
+            run.id,
+            2,
+            "Two",
+            "Two",
+        )
+        assert fake.sent == ["Two"]
+        assert [chat.kind_code for chat in _chat_rows(session, draft)] == [
+            ChatKind.DEFINITION
+        ]
+
+    def test_after_archive_and_bring_back_a_message_starts_a_fresh_one(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        draft: Project,
+        person: User,
+    ) -> None:
+        """Archive closes the definition chat, `archived`; the archived draft
+        takes no message; once brought back, its next message starts a
+        definition chat afresh, briefed (F130.2; DB decision 60)."""
+        _on_disk(fake, draft)
+        run = _idle_chat(services, chats, session, fake, draft, person)
+        _transition(container, draft, person, TransitionKind.ARCHIVED)
+
+        assert _closed(session, run.id) is CloseCause.ARCHIVED
+        with pytest.raises(InvalidOperationException, match="its project is archived"):
+            _send(chats, draft, person, "Two")
+        _transition(container, draft, person, TransitionKind.BROUGHT_BACK)
+
+        turn = _send(chats, draft, person, "Two")
+
+        assert turn.session_id != run.id
+        assert [
+            (chat.id, chat.kind_code, chat.close_cause_code)
+            for chat in sorted(
+                _chat_rows(session, draft), key=lambda chat: chat.id != run.id
+            )
+        ] == [
+            (run.id, ChatKind.DEFINITION, CloseCause.ARCHIVED),
+            (turn.session_id, ChatKind.DEFINITION, None),
+        ]
+        assert turn.message == container.brief_service().definition_chat(
+            draft, person, "Two", turn.started_at
+        )
 
 
 class TestHandbookNotice:

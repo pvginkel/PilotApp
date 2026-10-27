@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from app.engine.plan import PlanService
 from app.engine.views import utc_time
 from app.models import (
+    Attachment,
     Chat,
     Document,
     PlanNote,
@@ -35,6 +36,7 @@ from app.models.reference import DocumentRole, ErrorKind, ProjectState, Transiti
 from app.services.session_scope import project_folder
 
 CHAT_SKILL = "/chat"
+CREATE_SKILL = "/create"
 
 NOTES_HEADING = (
     "Open plan notes, by summary (the content and the blocks a read away in"
@@ -91,6 +93,46 @@ class BriefService:
             self._notes(project),
             [self._earlier_chats(project)],
             message,
+        )
+
+    def definition_chat(
+        self, project: Project, person: User, words: str, at: datetime
+    ) -> str:
+        """The first Turn of a draft's definition chat, from the plus (§5.3),
+        sent at `at`: `/create`; no switch, no notes and no handbook, a
+        draft having none (F141.2, F129.2); the draft, the person who started
+        it and the attachments so far; then `person`'s `words` verbatim,
+        which it ends with, after the line naming them when another person
+        started the draft (DB decision 61)."""
+        creator = self.db.get_one(User, project.created_by_user_id)
+        draft = self.db.scalar(
+            select(Document.published_text).where(
+                Document.project_id == project.id,
+                Document.role_code == DocumentRole.DRAFT,
+            )
+        )
+        attached = self.db.scalar(
+            select(func.count())
+            .select_from(Attachment)
+            .where(Attachment.project_id == project.id)
+        )
+        return _frame(
+            CREATE_SKILL,
+            "the definition chat",
+            project,
+            at,
+            [
+                f"The draft: project.md{'' if (draft or '').strip() else ', empty'}."
+                f" The person who started it: {creator.handle}"
+                f" ({self._standing(project, creator)}).",
+                f"Attachments so far: {_files(attached or 0)}.",
+            ],
+            [
+                "The message:"
+                if person.id == creator.id
+                else self.message_from(project, person),
+                words,
+            ],
         )
 
     def message_from(self, project: Project, person: User) -> str:
@@ -268,6 +310,15 @@ def _frame(
 def is_follow_up(turn: Turn) -> bool:
     """Whether the Turn is the server's follow-up (`BriefService.follow_up`)."""
     return turn.author_user_id is None and turn.message.endswith(FOLLOW_UP_END)
+
+
+def _files(count: int) -> str:
+    """The attachments a draft's brief counts, which `timeline.json` lists."""
+    if count == 0:
+        return "none"
+    if count == 1:
+        return "1 file (timeline.json lists it)"
+    return f"{count} files (timeline.json lists them)"
 
 
 def _printed(path: str, line: int | None, message: str) -> str:

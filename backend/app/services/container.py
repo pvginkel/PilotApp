@@ -481,6 +481,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         timeline_service=timeline_service,
         session_start_service=session_start_service,
         chat_close_service=chat_close_service,
+        document_service=document_service,
     )
     # The brain's tools, under its session's bearer (TD §4.5, F86)
     brief_service = providers.Factory(

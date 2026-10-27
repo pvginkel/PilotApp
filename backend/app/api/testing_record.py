@@ -8,8 +8,7 @@ own the stage's own controller creates, and the documents and the material its
 session registers and attaches there, each with its effect; a pre-ruling
 pass's questions to a registered document's writer; and a person's answer the
 brain records through the project's open chat, with its effect.
-Nothing in the UI creates a project before the definition chat (F46), nor
-places a work item, which the brain adds (F66).
+Nothing in the UI places a work item, which the brain adds (F66).
 
 They answer on every STAGE but prd, whatever FLASK_ENV says, so that the dev
 stage's deployed check makes its record through them (D027). They sit on

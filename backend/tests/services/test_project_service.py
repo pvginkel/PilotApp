@@ -1,7 +1,8 @@
 """The projects as the signed-in person reads them, the project list's tabs
 and a project's head, its status among them (F1, F2, F3, F141.1; DB 227,
-228); and what they change of a project's standing, its transitions and their
-membership (F4.1, F5, F6, F127, F128, F141.2; DB 170, 171)."""
+228); a draft made from the plus (F46.1, F47.1); and what they change of a
+project's standing, its transitions and their membership (F4.1, F5, F6, F127,
+F128, F141.2; DB 170, 171)."""
 
 import json
 import uuid
@@ -30,6 +31,7 @@ from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.extensions import db
 from app.models import (
     Chat,
+    Document,
     Environment,
     Item,
     PlanNote,
@@ -43,6 +45,7 @@ from app.models import (
 from app.models.reference import (
     ChatKind,
     CloseCause,
+    DocumentRole,
     ProjectState,
     RecordKind,
     SessionState,
@@ -832,6 +835,70 @@ class TestHead:
             container.project_service().head(ADA, unknown)
 
         assert raised.value.message == f"Project {unknown} was not found"
+
+
+@pytest.mark.usefixtures("person")
+class TestCreate:
+    def test_the_plus_makes_a_draft_its_creator_a_member_its_draft_born_empty(
+        self, session: DbSession, container: ServiceContainer, person: User
+    ) -> None:
+        draft = container.project_service().create(ADA)
+
+        assert (
+            draft.state_code,
+            draft.slug,
+            draft.name,
+            draft.archived,
+            draft.autopilot,
+            draft.paused,
+            draft.created_by_user_id,
+        ) == (ProjectState.DRAFT, None, None, False, False, False, person.id)
+        assert [
+            membership.left_at for membership in _memberships(session, draft, person)
+        ] == [None]
+        assert _transitions(session, draft) == []
+        (document,) = session.scalars(
+            select(Document).where(Document.project_id == draft.id)
+        )
+        assert (document.role_code, document.path, document.published_text) == (
+            DocumentRole.DRAFT,
+            "project.md",
+            "",
+        )
+
+    def test_it_is_in_the_project_list_as_a_draft_the_creators(
+        self, container: ServiceContainer
+    ) -> None:
+        draft = container.project_service().create(ADA)
+
+        (tab,) = container.project_service().tabs(ADA, archived=False)
+        assert (tab.project.id, tab.project.state_code, tab.status, tab.member) == (
+            draft.id,
+            ProjectState.DRAFT,
+            None,
+            True,
+        )
+
+    def test_once_committed_its_folder_is_announced_to_the_store(
+        self, container: ServiceContainer, engine_events: list[EngineEvent]
+    ) -> None:
+        with scoped_session(container):
+            draft_id = container.project_service().create(ADA).id
+            assert engine_events == []
+
+        assert ProjectChanged(draft_id) in engine_events
+        assert ManifestChanged() in engine_events
+
+    def test_a_caller_without_a_handle_is_refused(
+        self, session: DbSession, container: ServiceContainer
+    ) -> None:
+        with pytest.raises(InvalidOperationException) as raised:
+            container.project_service().create(NEWCOMER)
+
+        assert raised.value.message == (
+            "Cannot start a new project because you have not chosen your handle yet"
+        )
+        assert session.scalars(select(Project)).all() == []
 
 
 @pytest.mark.usefixtures("person")

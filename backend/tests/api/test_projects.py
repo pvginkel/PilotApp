@@ -1,7 +1,7 @@
 """/api/projects: the project list, the archived projects and a project's
-head, as the signed-in person reads them (F1, F2, F3, D012); and what they
-change of a project's standing, its transitions and their membership (F4.1,
-F5, F6, F127, F128)."""
+head, as the signed-in person reads them (F1, F2, F3, D012); a draft made
+from the plus (F46.1, F47.1); and what they change of a project's standing,
+its transitions and their membership (F4.1, F5, F6, F127, F128)."""
 
 import base64
 import uuid
@@ -1143,6 +1143,87 @@ def _open_memberships(session: Session, project_id: uuid.UUID, person: User) -> 
             )
         ).all()
     )
+
+
+@pytest.mark.usefixtures("person")
+class TestCreateProject:
+    def test_the_plus_answers_the_drafts_head_and_writes_its_folder(
+        self,
+        client: FlaskClient,
+        session: Session,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+    ) -> None:
+        fake_sidecar.connect()
+        fake_sidecar.drain()
+        _sign_in(client)
+
+        response = client.post(PROJECTS)
+        fake_sidecar.drain()
+
+        assert response.status_code == 201, response.get_json()
+        body = response.get_json()
+        assert body == {
+            "id": body["id"],
+            "name": None,
+            "ticket": None,
+            "repo": None,
+            "state": "draft",
+            "archived": False,
+            "autopilot": False,
+            "status": None,
+            "member": True,
+            "members": [
+                {
+                    "handle": "ada",
+                    "name": "Ada Example",
+                    "initials": "AE",
+                    "avatar_slot": 1,
+                }
+            ],
+            "progress": {"done": 0, "total": 0, "in_progress": []},
+            "tasks": [],
+            "notes": [],
+            "running_work": [],
+            "open_items": 0,
+        }
+        draft = session.get_one(Project, uuid.UUID(body["id"]))
+        assert fake_sidecar.tree[f"draft-{draft.number}/project.md"] == b""
+        tree = container.tree_service()
+        assert fake_sidecar.tree == {
+            entry.path: tree.read(entry.path).content for entry in tree.manifest()
+        }
+        listed = client.get(PROJECTS).get_json()["projects"]
+        assert [
+            (tab["id"], tab["name"], tab["state"], tab["member"]) for tab in listed
+        ] == [(body["id"], None, "draft", True)]
+
+    def test_a_caller_without_a_handle_is_a_conflict(
+        self, client: FlaskClient, session: Session
+    ) -> None:
+        _sign_in(client, subject="subject-newcomer")
+
+        response = client.post(PROJECTS)
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            "Cannot start a new project because you have not chosen your handle yet"
+        )
+        assert session.scalars(select(Project)).all() == []
+
+    def test_without_editor_it_is_refused(self, client: FlaskClient) -> None:
+        _sign_in(client, roles=())
+
+        response = client.post(PROJECTS)
+
+        assert response.status_code == 403
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        response = oidc_client.post(PROJECTS)
+
+        assert response.status_code == 401
 
 
 @pytest.mark.usefixtures("person")

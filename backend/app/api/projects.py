@@ -1,8 +1,8 @@
 """The projects as the signed-in person reads them, the project list, the
 archived projects, a project's head, its timeline, its draft and its handbook
-(F1, F2, F3, F8, F37.4, F129.4, D012); and what they change of a project's
-standing: its transitions, its pause among them, and their membership (F4.1,
-F5, F6, F127, F128, F141.2)."""
+(F1, F2, F3, F8, F37.4, F129.4, D012); a draft made from the plus (F46.1); and
+what they change of a project's standing: its transitions, its pause among
+them, and their membership (F4.1, F5, F6, F127, F128, F141.2)."""
 
 import uuid
 from typing import Any
@@ -134,6 +134,34 @@ def list_projects(
             for tab in project_service.tabs(caller(), query.archived)
         ]
     ).model_dump(mode="json")
+
+
+@projects_bp.route("", methods=["POST"])
+@api.validate(
+    resp=SpectreeResponse(
+        HTTP_201=ProjectHeadSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def create_project(
+    project_service: ProjectService = Provide[ServiceContainer.project_service],
+) -> Any:
+    """Start a new project, as the signed-in person: a draft, its creator its
+    one member and its draft, `project.md`, empty, whose definition chat
+    starts with the person's first message to it.
+
+    Returns:
+        201: The draft's head
+        401: No one is signed in
+        403: The caller lacks the editor role
+        409: The caller has not chosen a handle
+    """
+    auth = caller()
+    project = project_service.create(auth)
+    return _head(project_service.head(auth, project.id)), 201
 
 
 @projects_bp.route("/<uuid:project_id>", methods=["GET"])

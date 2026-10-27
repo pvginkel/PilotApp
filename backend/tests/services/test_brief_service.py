@@ -1,17 +1,21 @@
 """The brief a brain session's first Turn carries, per kind, the server's
 trailer on a worker's, and the follow-up turn, against invented records
-(design 3 §5.1 to §5.4; D058; F79, F129.5, F5.5; DB assertion 251; V08, V12,
-V13, V21)."""
+(design 3 §5.1 to §5.4; D058; F46.1, F79, F129.5, F5.5; DB assertion 251;
+V08, V12, V13, V21)."""
 
+import hashlib
 import json
 from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.models import (
+    Attachment,
     Chat,
+    Document,
     Environment,
     Item,
     PlanTask,
@@ -23,6 +27,7 @@ from app.models import (
     User,
 )
 from app.models.reference import (
+    AttachmentSource,
     ChatKind,
     CloseCause,
     ErrorKind,
@@ -317,6 +322,112 @@ class TestMessageFrom:
 
         assert briefs.message_from(opened, person) == (
             "The message, from ada (not a member):"
+        )
+
+
+@pytest.fixture
+def draft(
+    session: DbSession, container: ServiceContainer, project: Project, person: User
+) -> Project:
+    """`project`, a draft from the plus: `person` its member, its draft born
+    empty."""
+    session.add(ProjectMember(project_id=project.id, user_id=person.id, joined_at=AT))
+    session.flush()
+    container.document_service().bear_draft(project)
+    return project
+
+
+def _attached(
+    db: DbSession, project: Project, run: models.Session, filename: str
+) -> None:
+    content = f"# {filename}\n".encode()
+    db.add(
+        Attachment(
+            project_id=project.id,
+            batch=1,
+            title=filename,
+            filename=filename,
+            content_type="text/markdown",
+            size=len(content),
+            sha256=hashlib.sha256(content).hexdigest(),
+            content=content,
+            source_code=AttachmentSource.FILE,
+            source_environment_id=run.environment_id,
+            source_path=f"/work/Notes/{filename}",
+            copied_at=AT,
+            created_by_session_id=run.id,
+        )
+    )
+    db.flush()
+
+
+class TestDefinitionChat:
+    """The definition chat's first Turn, from the plus (design 3 §5.3)."""
+
+    def test_an_empty_drafts_brief_is_the_draft_its_starter_and_the_message(
+        self, briefs: BriefService, draft: Project, person: User
+    ) -> None:
+        assert briefs.definition_chat(draft, person, "Garden sensors?", AT) == (
+            "/create\n\n"
+            "Pilot's brief · the definition chat ·"
+            f" /work/Projects/draft-{draft.number} · 2026-10-26T09:30:15Z\n\n"
+            "The draft: project.md, empty. The person who started it: ada"
+            " (member).\n"
+            "Attachments so far: none.\n\n"
+            "The message:\n"
+            "Garden sensors?"
+        )
+
+    def test_a_written_draft_names_the_project_and_counts_what_is_attached(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        draft: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        document = session.scalars(
+            select(Document).where(Document.project_id == draft.id)
+        ).one()
+        container.document_service().publish(document, "# Garden sensors\n\nSoil.\n")
+        _attached(session, draft, project_session, "soil.md")
+
+        brief = briefs.definition_chat(draft, person, "Hi", AT)
+
+        assert brief.startswith(
+            "/create\n\n"
+            'Pilot\'s brief · the definition chat · project "Garden sensors" ·'
+            f" /work/Projects/draft-{draft.number} · 2026-10-26T09:30:15Z\n\n"
+            "The draft: project.md. The person who started it: ada (member).\n"
+            "Attachments so far: 1 file (timeline.json lists it).\n\n"
+        )
+        _attached(session, draft, project_session, "rain.md")
+        assert "\nAttachments so far: 2 files (timeline.json lists them).\n" in (
+            briefs.definition_chat(draft, person, "Hi", AT)
+        )
+
+    def test_another_persons_first_message_is_named(
+        self, container: ServiceContainer, briefs: BriefService, draft: Project
+    ) -> None:
+        bea = container.test_data_service().person("bea", "Bea Example")
+
+        brief = briefs.definition_chat(draft, bea, "Hi", AT)
+
+        assert brief.endswith(
+            "The person who started it: ada (member).\n"
+            "Attachments so far: none.\n\n"
+            "The message, from bea (not a member):\n"
+            "Hi"
+        )
+
+    def test_it_ends_with_the_words_verbatim(
+        self, briefs: BriefService, draft: Project, person: User
+    ) -> None:
+        words = '  <quoted_path path="project.md">Soil</quoted_path path="project.md">\n\nWhy?\n'
+
+        assert briefs.definition_chat(draft, person, words, AT).endswith(
+            f"The message:\n{words}"
         )
 
 

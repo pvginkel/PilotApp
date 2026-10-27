@@ -244,6 +244,28 @@ class TestSendChatMessage:
         )
         assert session.scalars(select(Chat)).all() == []
 
+    def test_a_drafts_message_starts_its_definition_chat_201(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        starts: None,
+        project: Project,
+        person: User,
+    ) -> None:
+        _sign_in(client)
+
+        response = client.post(_messages(project.id), json={"words": "Hi"})
+
+        assert response.status_code == 201, response.get_json()
+        (chat,) = session.scalars(select(Chat)).all()
+        assert (response.get_json()["chat"], chat.kind_code) == (
+            str(chat.id),
+            ChatKind.DEFINITION,
+        )
+        turn = session.scalars(select(Turn)).one()
+        assert turn.message.startswith("/create\n\n")
+        assert turn.message.endswith("\n\nThe message:\nHi")
+
     def test_a_finished_projects_message_starts_its_chat_reading_only_201(
         self,
         client: FlaskClient,
@@ -488,6 +510,33 @@ class TestListChats:
             "read_at": None,
             "unread": True,
         }
+
+    def test_a_drafts_definition_chat_reads_as_a_projects_chats_do(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        starts: None,
+        project: Project,
+        person: User,
+    ) -> None:
+        _sign_in(client)
+        sent = client.post(_messages(project.id), json={"words": "Hi"})
+        assert sent.status_code == 201, sent.get_json()
+        run = session.get_one(models.Session, uuid.UUID(sent.get_json()["chat"]))
+
+        response = client.get(_chats(project.id))
+
+        assert response.status_code == 200
+        assert response.get_json()["chats"] == [
+            {
+                "id": str(run.id),
+                "kind": "definition",
+                "opened_at": _stamp(run.created_at),
+                "closed_at": None,
+                "close_cause": None,
+                "answering": True,
+            }
+        ]
 
     def test_a_chat_pilot_answers_in_reads_answering(
         self,

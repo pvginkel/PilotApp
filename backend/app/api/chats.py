@@ -55,9 +55,10 @@ def send_chat_message(
 ) -> Any:
     """Send Pilot a message in the project, as the signed-in person, the
     words verbatim: a turn of the project's open chat, its send made now; or,
-    with none open, or with its start failed, the chat started with it, its
-    first turn the chat's brief and the words, which goes out once its
-    session is up in the store, held while the controller is unreachable.
+    with none open, or with its start failed, the chat started with it, a
+    draft's its definition chat, its first turn the chat's brief and the
+    words, which goes out once its session is up in the store, held while the
+    controller is unreachable.
 
     A send the controller fails is the turn's `error` (F125).
 
@@ -67,8 +68,8 @@ def send_chat_message(
         401: No one is signed in
         403: The caller lacks the editor role
         404: No project has the id
-        409: The caller has not chosen a handle; the project is a draft or
-            archived; the chat is starting or a turn of it is in flight; or no
+        409: The caller has not chosen a handle; the project is archived;
+            the chat is starting or a turn of it is in flight; or no
             controller or store environment is configured
     """
     words = ChatMessageRequestSchema.model_validate(request.get_json()).words

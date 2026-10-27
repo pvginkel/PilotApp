@@ -1,14 +1,18 @@
 """A person's message to a project's brain (design 3 §5.1, §5.3; F38.3,
-F130, F5.5, F128.5; DB Chat, Turn, assertions 159, 229, 243, 244, 245, 251).
+F46.1, F130, F5.5, F128.5; DB Chat, Turn, assertions 159, 229, 243, 244, 245,
+251; DB decision 60).
 
 A message is a Turn of the project's open chat, the person's words verbatim
 with their quote tags, its `send` record in its place, and the Item or the
 Block its first quote tag names its quote. With a chat open whose session is
 up, it goes through the relay's send (`RelayService.send`), which resumes a
-controller session that is gone. With none open it starts one: a Chat
-`project`, its Session a `chat` one in the store, its first Turn the brief
-(`BriefService.project_chat`) followed by the words, through the gate
-(`SessionStartService.start_brain`). A chat whose start failed, or was
+controller session that is gone. With none open it starts one: a draft's
+definition chat, Chat `definition`, else a Chat `project`, its Session a
+`chat` one in the store, its first Turn its kind's brief
+(`BriefService.definition_chat`, `BriefService.project_chat`) followed by the
+words, through the gate (`SessionStartService.start_brain`). A draft
+brought back after Archive, which closed its definition chat, starts a fresh
+one with its next message. A chat whose start failed, or was
 stopped before its brief went out, starts afresh, briefed, in the same chat: a
 project has one chat open at a time, and no Close Cause is a failure or a stop.
 While its start is under way or held, a message is refused, as one is while a
@@ -30,10 +34,9 @@ goes before both, counted (D052).
 
 A finished project's chat reads only: a message starts it as in an open
 project, its create boxed with nothing to write and no surface
-(`scoped_create`), its brief the finished project's. A draft's chat, the
-definition chat, takes no message, nor does an archived project, whose open
-chat Archive closed (`ChatCloseService`): the refusal guards a send racing
-the archive.
+(`scoped_create`), its brief the finished project's. An archived project, whose
+open chat Archive closed (`ChatCloseService`), takes no message: the refusal
+guards a send racing the archive.
 """
 
 import re
@@ -137,8 +140,8 @@ class ChatService:
 
         Raises:
             RecordNotFoundException: No project has the id
-            InvalidOperationException: The project is a draft or archived; its
-                chat's start is under way, or a turn of it is in flight; no
+            InvalidOperationException: The project is archived; its chat's
+                start is under way, or a turn of it is in flight; no
                 controller or no store environment is configured
         """
         project = self.db.get(Project, project_id, populate_existing=True)
@@ -306,11 +309,16 @@ class ChatService:
         last = self.db.scalar(
             select(func.max(Turn.seq)).where(Turn.session_id == session.id)
         )
+        brief = (
+            self.brief_service.definition_chat
+            if self.db.get_one(Chat, session.id).kind_code is ChatKind.DEFINITION
+            else self.brief_service.project_chat
+        )
         turn = Turn(
             session_id=session.id,
             seq=(last or 0) + 1,
             author_user_id=person.id,
-            message=self.brief_service.project_chat(project, person, words.text, now),
+            message=brief(project, person, words.text, now),
             words=words.text,
             quote_item_id=words.quote_item_id,
             quote_block_id=words.quote_block_id,
@@ -327,10 +335,11 @@ class ChatService:
         return turn
 
     def _new_chat(self, project: Project) -> AgentSession:
-        """A Chat `project` and its Session, in no environment until its start
-        takes the store, in the store repo's root, on the brain's model and
-        effort, its token none holds until its create mints one; its opening
-        told to the browsers and to `chat.md`."""
+        """A Chat and its Session, in no environment until its start takes
+        the store, in the store repo's root, on the brain's model and effort,
+        its token none holds until its create mints one; its opening told to
+        the browsers and to `chat.md`. A draft's is its definition chat, any
+        other project's a Chat `project`."""
         session = AgentSession(
             project_id=project.id,
             kind_code=CHAT_KIND,
@@ -347,7 +356,11 @@ class ChatService:
                 id=session.id,
                 project_id=project.id,
                 session_kind_code=CHAT_KIND,
-                kind_code=ChatKind.PROJECT,
+                kind_code=(
+                    ChatKind.DEFINITION
+                    if project.state_code is ProjectState.DRAFT
+                    else ChatKind.PROJECT
+                ),
             )
         )
         self.db.flush()
@@ -428,14 +441,11 @@ def _uuid(text: str) -> uuid.UUID | None:
 
 
 def _refuse_message(project: Project, operation: str) -> None:
-    """Refuse a message to a draft's chat, which is the definition chat's, and
-    to an archived project's, a send racing the archive among them (F128.5;
-    DB 245).
+    """Refuse a message to an archived project, a send racing the archive
+    among them, a draft's included (F128.5; DB 245).
 
     Raises:
-        InvalidOperationException: The project is a draft or archived
+        InvalidOperationException: The project is archived
     """
     if project.archived:
         raise InvalidOperationException(operation, "its project is archived")
-    if project.state_code is ProjectState.DRAFT:
-        raise InvalidOperationException(operation, "its project is a draft")
