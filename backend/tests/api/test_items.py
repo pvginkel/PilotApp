@@ -797,6 +797,65 @@ class TestUndo:
         assert oidc_client.post(f"{ITEMS}/{uuid.uuid4()}/undo").status_code == 401
 
 
+@pytest.mark.usefixtures("person")
+class TestInAnArchivedProject:
+    """An archived project takes Bring back alone (D012): every close of its
+    items and an Undo conflict, naming the archive."""
+
+    @pytest.mark.parametrize(
+        ("kind", "text", "path", "body"),
+        [
+            ("decision", DECISION, "blocks/D1/answer", {"answer": "Dome"}),
+            ("action", ACTION, "blocks/A1/done", {}),
+            ("document", RECOMMENDED, "done", None),
+            ("notice", NOTICE, "read", None),
+            ("review", NOTICE, "reviewed", None),
+        ],
+    )
+    def test_every_close_conflicts(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        camp: Project,
+        run: models.Session,
+        kind: str,
+        text: str,
+        path: str,
+        body: dict[str, str] | None,
+    ) -> None:
+        item = _bear(container, camp, run, kind, text)
+        camp.archived = True
+        session.flush()
+        _sign_in(client)
+
+        response = client.post(f"{ITEMS}/{item.id}/{path}", json=body)
+
+        assert response.status_code == 409
+        assert _error(response).endswith("its project is archived")
+        assert item.done_at is None
+
+    def test_undo_conflicts(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        camp: Project,
+        run: models.Session,
+    ) -> None:
+        item = _bear(container, camp, run, "decision", DECISION)
+        _sign_in(client)
+        client.post(f"{ITEMS}/{item.id}/blocks/D1/answer", json={"answer": "Dome"})
+        camp.archived = True
+        session.flush()
+
+        response = client.post(f"{ITEMS}/{item.id}/undo")
+
+        assert response.status_code == 409
+        assert _error(response).endswith("its project is archived")
+        assert item.done_cause_code == "answered"
+
+
 @pytest.fixture
 def second_browser(
     container: ServiceContainer, person: User

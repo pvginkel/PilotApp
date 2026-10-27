@@ -4,8 +4,9 @@ open items (F5.1); and a work item's place and its done at its turn's end
 (DB Work, decision 44).
 
 Each is a write of the caller's transaction, under the document's row lock
-(TD §8.5), a registered document's close under its project's row first; a
-work item's, which has no document, under its project's row or its item's. A
+(TD §8.5), a close and an Undo under its project's row first, and refused
+while the project is archived (D012); a work item's, which has no document,
+under its project's row or its item's. A
 write that touches the text splices it into the published text and publishes
 it, whether or not the path's latest save is held: the tree keeps the agent's
 ingest then, and the next clean save's merge carries the write to the file
@@ -71,6 +72,10 @@ WRITTEN_BACK = (
 UNREAD = "Could not be read: {paths}."
 """Its line naming the run's documents whose turn-end read failed (ruling D1)."""
 
+ARCHIVED = "its project is archived"
+"""Why an archived project's item takes no close and no Undo (D012), as the
+start of its work is refused."""
+
 
 class Continuations(Protocol):
     """Places a work item's continuation through the gate: the session start."""
@@ -122,6 +127,7 @@ class RecordService:
         the answer to a one-ask item is its done (DB 163)."""
         project, item = self._closing(document)
         operation = f"answer block {local_id} of {tree_path(project, document.path)}"
+        _not_archived(project, operation)
         _not_awaiting_read(item, document, operation)
         _a_person(user, operation, "Pilot answers in the file, `by: agent`")
         _not_done(item, operation)
@@ -179,6 +185,7 @@ class RecordService:
         operation = (
             f"mark action {local_id} of {tree_path(project, document.path)} done"
         )
+        _not_archived(project, operation)
         _not_awaiting_read(item, document, operation)
         _a_person(user, operation, "Pilot settles an action in the file")
         _not_done(item, operation)
@@ -202,8 +209,8 @@ class RecordService:
 
     def undo(self, item: Item) -> None:
         """Undo of a done prose item while no session has consumed it, its
-        Done Cause offers it (DB 164, F14.1) and its project is not finished
-        (D028): its done cleared, and on a one-ask item its block's answer
+        Done Cause offers it (DB 164, F14.1) and its project is neither
+        finished (D028) nor archived (D012): its done cleared, and on a one-ask item its block's answer
         with it, an answer of Pilot's it replaced not restored (decision 6); a
         registered document's write-back of that close with it, so that its
         next close writes it again (F65.1).
@@ -289,6 +296,7 @@ class RecordService:
         document = self.db.get_one(Document, item.id)
         project, _ = self._closing(document)
         operation = f"mark {tree_path(project, document.path)} done"
+        _not_archived(project, operation)
         _not_awaiting_read(item, document, operation)
         if item.kind_code != DOCUMENT:
             raise InvalidOperationException(
@@ -445,6 +453,7 @@ class RecordService:
         document = self.db.get_one(Document, item.id)
         project, _ = self._closing(document)
         operation = f"mark {tree_path(project, document.path)} {mark}"
+        _not_archived(project, operation)
         _not_awaiting_read(item, document, operation)
         _a_person(user, operation, "Pilot marks done only a document it settled whole")
         if item.kind_code != kind:
@@ -463,6 +472,8 @@ class RecordService:
         if not self.db.get_one(DoneCause, item.done_cause_code).undo_offered:
             return f"an item done as {item.done_cause_code} offers no undo"
         project = self.db.get_one(Project, item.project_id)
+        if project.archived:
+            return ARCHIVED
         if project.state_code is ProjectState.FINISHED:
             return "the project is finished"
         return None
@@ -472,17 +483,20 @@ class RecordService:
         return self.document_service.owner(document)
 
     def _closing(self, document: Document) -> tuple[Project, Item | None]:
-        """`_locked`, for a write that may close the document. A registered
-        document's close may continue its run (`_release`): the project's row
-        is locked first, exclusively, as the start that places the
-        continuation locks it, before the document's (the start's lock order;
-        review 3). So the close serialises with Finish, with an Undo, and with
-        the close of another document of the run."""
-        if document.source_path is not None:
-            project, _ = self.document_service.owner(document)
-            self.db.execute(
-                select(Project.id).where(Project.id == project.id).with_for_update()
-            )
+        """`_locked`, for a write that may close the document, the project's
+        row locked first, before the document's, so that the close serialises
+        with Archive and reads the project as it stands (D012). A registered
+        document's close may continue its run (`_release`): its project's row
+        is locked exclusively, as the start that places the continuation locks
+        it (the start's lock order; review 3). So the close serialises with
+        Finish, with an Undo, and with the close of another document of the
+        run. Any other close holds the row shared, as an Undo does."""
+        project, _ = self.document_service.owner(document)
+        self.db.execute(
+            select(Project.id)
+            .where(Project.id == project.id)
+            .with_for_update(read=document.source_path is None)
+        )
         return self._locked(document)
 
     def _done_by_its_answer(
@@ -622,6 +636,13 @@ def _open_in(project: Project) -> ColumnElement[bool]:
 def _a_person(user: User, operation: str, cause: str) -> None:
     if user.kind_code is UserKind.AGENT:
         raise InvalidOperationException(operation, cause)
+
+
+def _not_archived(project: Project, operation: str) -> None:
+    """An archived project takes Bring back alone (D012): no close, as no Undo,
+    so the round trip's last close is not the only one it refuses."""
+    if project.archived:
+        raise InvalidOperationException(operation, ARCHIVED)
 
 
 def _not_awaiting_read(item: Item | None, document: Document, operation: str) -> None:

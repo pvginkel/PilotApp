@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session as DbSession
 from app import models
 from app.database import scoped_session
 from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved, WriteBackOwed
-from app.engine.paths import sha256_hex
+from app.engine.paths import sha256_hex, tree_path
 from app.engine.record import owes_write_back, resume_message, write_back_owed
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.extensions import db
@@ -1745,6 +1745,84 @@ class TestRecordServiceAwaitingRead:
         assert session.get_one(Document, item.id).published_text is None
 
 
+class TestRecordServiceArchived:
+    """An archived project takes Bring back alone (D012): its items take no
+    close and no Undo, each refused naming the archive."""
+
+    @pytest.mark.parametrize(
+        ("close", "kind", "text", "operation"),
+        [
+            ("answer", "decision", DECISION, "answer block D1 of {path}"),
+            ("done_action", "action", ACTION, "mark action A1 of {path} done"),
+            ("done", "document", RECOMMENDED, "mark {path} done"),
+            ("read", "notice", NOTICE, "mark {path} Read"),
+            ("reviewed", "review", NOTICE, "mark {path} Reviewed"),
+        ],
+    )
+    def test_every_close_is_refused_naming_the_archive(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+        close: str,
+        kind: str,
+        text: str,
+        operation: str,
+    ) -> None:
+        item, document = _bear(
+            session, container, project, project_session, kind, "Camp", text
+        )
+        project.archived = True
+        session.flush()
+        records = container.record_service()
+
+        with pytest.raises(InvalidOperationException) as refused:
+            if close == "answer":
+                records.answer(document, "D1", person, "Dome")
+            elif close == "done_action":
+                records.done_action(document, "A1", person)
+            else:
+                getattr(records, close)(item, person)
+
+        path = tree_path(project, document.path)
+        assert refused.value.operation == operation.format(path=path)
+        assert refused.value.cause == "its project is archived"
+        assert _done(item) == (None, None, None)
+        assert document.published_text == text
+
+    def test_undo_is_refused_naming_the_archive_and_not_offered(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        item, document = _bear(
+            session,
+            container,
+            project,
+            project_session,
+            "decision",
+            "Which tent?",
+            DECISION,
+        )
+        records = container.record_service()
+        records.answer(document, "D1", person, "Tunnel")
+        project.archived = True
+        session.flush()
+
+        assert records.offers_undo(item) is False
+        with pytest.raises(InvalidOperationException) as refused:
+            records.undo(item)
+
+        assert refused.value.operation == f"undo item {item.id}"
+        assert refused.value.cause == "its project is archived"
+        assert item.done_cause_code == "answered"
+
+
 class TestRecordServiceFailedRead:
     """A registered document whose read failed has no text and no block, and
     closes with Reviewed, as any document with none (ruling D1)."""
@@ -2317,8 +2395,11 @@ class TestRecordServiceRelease:
         with pytest.raises(InvalidOperationException) as refused:
             container.record_service().reviewed(item, person)
 
-        assert refused.value.operation == "continue Refining the camp"
+        # Refused as every close there is (D012), before it would continue.
+        path = tree_path(project, session.get_one(Document, item.id).path)
+        assert refused.value.operation == f"mark {path} Reviewed"
         assert refused.value.cause == "its project is archived"
+        assert _continuations(session, project) == []
 
 
 class TestRecordServiceRetryWriteBacks:
@@ -2906,6 +2987,43 @@ class TestRecordServiceRowLock:
         assert isinstance(raised.value.orig, LockNotAvailable)
         with scoped_session(container) as session:
             assert session.get_one(Item, decision_id).done_cause_code == "answered"
+
+    @pytest.mark.parametrize("write", ["answer", "read"])
+    def test_a_close_waits_for_the_projects_row(
+        self, committed_app: Flask, write: str
+    ) -> None:
+        person_id, decision_id, notice_id = _committed_items(committed_app)
+        item_id = decision_id if write == "answer" else notice_id
+        container = committed_app.container
+        with scoped_session(container) as session:
+            project_id = session.get_one(Item, item_id).project_id
+        with committed_app.app_context():
+            engine = db.engine
+
+        # What Archive holds while it changes the project's standing (D012).
+        with engine.connect() as holder:
+            holder.execute(
+                sql("SELECT id FROM projects WHERE id = :id FOR NO KEY UPDATE"),
+                {"id": project_id},
+            )
+            with (
+                pytest.raises(OperationalError) as raised,
+                scoped_session(container) as session,
+            ):
+                session.execute(sql("SET LOCAL lock_timeout = '200ms'"))
+                records = container.record_service()
+                person = session.get_one(User, person_id)
+                if write == "answer":
+                    records.answer(
+                        session.get_one(Document, item_id), "D1", person, "Tunnel"
+                    )
+                else:
+                    records.read(session.get_one(Item, item_id), person)
+            holder.rollback()
+
+        assert isinstance(raised.value.orig, LockNotAvailable)
+        with scoped_session(container) as session:
+            assert session.get_one(Item, item_id).done_at is None
 
     def test_the_close_waits_for_an_open_items_document_row(
         self, committed_app: Flask
