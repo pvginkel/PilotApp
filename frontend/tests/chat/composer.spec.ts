@@ -4,7 +4,8 @@
  * while the field is empty and the field waiting while the message is on its way; a message with no
  * chat open starts one, shown in the tab. While Pilot answers Send's place is Stop, in every member's
  * composer whoever sent the message, the field not waiting; Stop ends the turn where it is. The
- * focus stays in the field after Send and after Stop. The words are kept in the browser until sent,
+ * focus stays in the field after Send and after Stop, and a message sent takes the chat back to its
+ * end, wherever the reader had scrolled. The words are kept in the browser until sent,
  * keyed by the project (F133). In an archived project it takes no message and says why (F128.5).
  */
 
@@ -23,6 +24,7 @@ const text = (id: string, words: string) =>
   });
 
 const UNSENT_KEY = 'pilot.unsent';
+const ROUTE = Array.from({ length: 40 }, (_, index) => `Stage ${index + 1}, by the lake.`).join('\n\n');
 const ARCHIVED = 'The project is archived: bring it back to message Pilot.';
 
 test.describe('The Chat tab’s composer', () => {
@@ -147,6 +149,44 @@ test.describe('The Chat tab’s composer', () => {
     await controller.play(chats.store, session, [text('second', 'The lakeside ones, then.')]);
     await controller.finish(chats.store, session, 'success', 'The lakeside ones, then.');
     await expect(chat.replyEnds).toHaveCount(2);
+  });
+
+  test('takes the chat back to its end with a message sent, where the reader had scrolled up', async ({
+    page,
+    people,
+    projects,
+    controller,
+    timeline,
+    chat,
+    chats,
+    deploymentSse,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.make({ name: makeUnique('Scrolled'), members: [me.handle!] });
+    await timeline.open(project);
+    await deploymentSse.ensureConnected();
+    const { session } = await chats.start(project, 'Plan the route.');
+    await controller.play(chats.store, session, [text('route', ROUTE)]);
+    await controller.finish(chats.store, session, 'success', 'The route.');
+    await expect(chat.send).toBeVisible();
+
+    const up = chat.sticky(false);
+    await chat.body.hover();
+    await page.mouse.wheel(0, -600);
+    await up;
+    const toEnd = () => chat.body.evaluate((body) => body.scrollHeight - body.scrollTop - body.clientHeight);
+    expect(await toEnd()).toBeGreaterThan(100);
+
+    await chat.field.fill('And the tent?');
+    const sent = chat.acted('send');
+    await chat.send.click();
+    await sent;
+    await expect(chat.messageTexts).toHaveText(['Plan the route.', 'And the tent?']);
+    await expect.poll(toEnd).toBeLessThan(2);
+    await expect(chat.messages.last()).toBeInViewport();
+    await chats.working(session);
+    await controller.finish(chats.store, session, 'success', 'The dome.');
+    await expect(chat.send).toBeVisible();
   });
 
   test('keeps the words not sent in the browser, keyed by the project, after a reload too, until they are sent', async ({
