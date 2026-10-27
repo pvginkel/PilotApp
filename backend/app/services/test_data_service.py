@@ -795,6 +795,8 @@ class TestDataService:
 
         Raises:
             RecordNotFoundException: no work item has the id.
+            AuthorizationException: its session has no turn running, as
+                `PilotWorkService.register_document` refuses it.
             InvalidOperationException: its start has given its session no
                 environment yet, or the file cannot be registered, as
                 `PilotWorkService.register_document` refuses it.

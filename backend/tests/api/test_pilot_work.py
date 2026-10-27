@@ -49,16 +49,17 @@ def _session(
     project: Project,
     environment: Environment,
     kind: str = "work",
+    state: SessionState = SessionState.RUNNING,
 ) -> models.Session:
-    """A running Session of `kind` whose bearer is `TOKEN`; a work one with
-    its Work."""
+    """A Session of `kind` whose bearer is `TOKEN`, running unless `state`
+    says otherwise; a work one with its Work."""
     run = models.Session(
         project_id=project.id,
         environment_id=environment.id,
         kind_code=kind,
         cwd="/work/Example",
         token_hash=token_hash(TOKEN),
-        state_code=SessionState.RUNNING,
+        state_code=state,
     )
     session.add(run)
     session.flush()
@@ -193,6 +194,29 @@ class TestRegisterDocument:
             f"Cannot call pilot-work because session {run.id} is a chat session,"
             " not a work item's"
         )
+
+    def test_a_stopped_session_is_403_and_mints_nothing(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(
+            session, container, project, environment, state=SessionState.STOPPED
+        )
+        _file(fake_controller, environment)
+
+        response = client.post(DOCUMENTS, json={"path": PATH}, headers=_bearer())
+
+        assert response.status_code == 403
+        assert response.get_json()["error"] == (
+            f"Cannot call pilot-work because session {run.id} has no turn running"
+        )
+        assert session.scalars(select(Document)).all() == []
 
     def test_the_gate_answers_before_the_body_is_read(
         self,
@@ -382,6 +406,29 @@ class TestAttachFile:
         response = client.post(ATTACHMENTS, json={"path": PATH}, headers=_bearer())
 
         assert response.status_code == 403
+
+    def test_a_session_whose_turn_has_ended_is_403_and_attaches_nothing(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(
+            session, container, project, environment, state=SessionState.IDLE
+        )
+        _file(fake_controller, environment)
+
+        response = client.post(ATTACHMENTS, json={"path": PATH}, headers=_bearer())
+
+        assert response.status_code == 403
+        assert response.get_json()["error"] == (
+            f"Cannot call pilot-work because session {run.id} has no turn running"
+        )
+        assert session.scalars(select(Attachment)).all() == []
 
     @pytest.mark.parametrize(
         "body",

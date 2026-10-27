@@ -200,7 +200,8 @@ class TestRecord:
         item: Item,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """A bearer used outside its turn (P-60): no Turn to record under."""
+        """A call that finds its Session with no Turn in flight: no Turn to
+        record under."""
         _turn(session, project_session, 1, ended=True)
 
         with caplog.at_level(logging.WARNING, logger="app.services.effect_service"):

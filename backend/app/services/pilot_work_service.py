@@ -26,14 +26,14 @@ from app.exceptions import (
 )
 from app.models import Attachment, Document, Item, Project, Work
 from app.models import Session as AgentSession
-from app.models.reference import EffectKind, Surface
+from app.models.reference import EffectKind, SessionState, Surface
 from app.services.controller_client import (
     ControllerClient,
     ControllerProblem,
     ControllerProblemType,
 )
 from app.services.effect_service import Change, EffectLine, EffectService
-from app.services.pilot_server import bearer_session
+from app.services.pilot_server import bearer_session, no_turn
 
 REGISTERED = "Registered"
 ATTACHED = "Attached"
@@ -81,12 +81,14 @@ class PilotWorkService:
         self.effect_service = effect_service
 
     def admit(self, authorization: str | None) -> Worker:
-        """The work item's Session whose bearer `authorization` carries.
+        """The work item's Session whose bearer `authorization` carries,
+        while its turn runs.
 
         Raises:
             AuthenticationException: no bearer, or one no Session has.
             AuthorizationException: the bearer's Session is not a work
-                item's, whose surface is `pilot-work`.
+                item's, whose surface is `pilot-work`, or has no turn
+                running.
         """
         session, surface = bearer_session(self.db, authorization, Surface.WORK)
         if surface is not Surface.WORK or self.db.get(Work, session.id) is None:
@@ -94,6 +96,8 @@ class PilotWorkService:
                 f"Cannot call pilot-work because session {session.id} is a"
                 f" {session.kind_code} session, not a work item's"
             )
+        if session.state_code != SessionState.RUNNING:
+            raise AuthorizationException(no_turn(Surface.WORK, session.id))
         # A bearer is minted at its Session's create, which names its
         # environment.
         assert session.environment_id is not None
@@ -114,6 +118,9 @@ class PilotWorkService:
         one is the call `tool_use_id`'s effect, "Registered · inbox/<n>".
 
         Raises:
+            AuthorizationException: the worker's Session has no turn running
+                once the project's row is held, as Finish and Archive leave
+                it, nothing minted.
             InvalidOperationException: the file cannot be registered, nothing
                 minted: the controller refused its read — a path outside
                 `/work`, nothing there, a folder, more than 16 MiB — or its
@@ -135,7 +142,7 @@ class PilotWorkService:
                 operation, f"its text holds faults: {listed(version.faults)}"
             )
         registration = self.document_service.register(
-            project, self.db.get_one(AgentSession, worker.session_id), path
+            project, self._still_running(project, worker), path
         )
         if registration.minted:
             item = registration.item
@@ -149,6 +156,24 @@ class PilotWorkService:
                 [Change(EffectKind.REGISTERED, item_id=item.id)],
             )
         return registration
+
+    def _still_running(self, project: Project, worker: Worker) -> AgentSession:
+        """The worker's Session, read again under the project's row lock,
+        which its registration's `seq` takes and holds until the transaction
+        ends; refused unless its turn still runs. Finish and Archive stop the
+        project's Sessions under that row (F5.1, F128.1), so a call that
+        waited on it for either registers nothing in the project they closed.
+
+        Raises:
+            AuthorizationException: the Session has no turn running.
+        """
+        self.document_service.lock_project(project)
+        session = self.db.get_one(
+            AgentSession, worker.session_id, populate_existing=True
+        )
+        if session.state_code != SessionState.RUNNING:
+            raise AuthorizationException(no_turn(Surface.WORK, session.id))
+        return session
 
     def attach_file(
         self, worker: Worker, path: str, to: uuid.UUID | None, tool_use_id: str | None

@@ -8,10 +8,13 @@ from typing import Any
 
 import pytest
 from dependency_injector import providers
+from flask import Flask
 from sqlalchemy import func, select
+from sqlalchemy import text as sql
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
+from app.database import scoped_session
 from app.engine.attachments import MAX_CALL_FILES, MAX_CALL_SIZE
 from app.exceptions import (
     AuthenticationException,
@@ -19,6 +22,7 @@ from app.exceptions import (
     InvalidOperationException,
     RecordNotFoundException,
 )
+from app.extensions import db
 from app.models import (
     Attachment,
     Document,
@@ -28,8 +32,9 @@ from app.models import (
     ItemAttachment,
     Project,
     Turn,
+    User,
 )
-from app.models.reference import EffectKind, RecordKind, SessionState
+from app.models.reference import EffectKind, RecordKind, SessionState, UserKind
 from app.services.container import ServiceContainer
 from app.services.controller_client import (
     FILE_SIZE_CAP,
@@ -43,12 +48,17 @@ from app.services.pilot_server import token_hash
 from app.services.pilot_work_service import Worker
 from app.services.session_record_service import read_records
 from tests.support.fake_controller import ServedFakeController
+from tests.support.locks import in_thread, lock_waits
+from tests.support.supervisor import wait_until
 
 TOKEN = "worker-token"
 
 PATH = "/work/Example/docs/refinement.md"
 
 TEXT = "Two options for the camp.\n\n```question id=Q1\n```\n"
+
+ENVIRONMENT_ID = "example-env-1"
+"""The environment of a committed run (`_committed_run`)."""
 
 
 def _session(
@@ -58,16 +68,17 @@ def _session(
     environment: Environment,
     kind: str = "work",
     token: str = TOKEN,
+    state: SessionState = SessionState.RUNNING,
 ) -> models.Session:
-    """A running Session of `kind` whose bearer is `token`; a work one with
-    its Work."""
+    """A Session of `kind` whose bearer is `token`, running unless `state`
+    says otherwise; a work one with its Work."""
     run = models.Session(
         project_id=project.id,
         environment_id=environment.id,
         kind_code=kind,
         cwd="/work/Example",
         token_hash=token_hash(token),
-        state_code=SessionState.RUNNING,
+        state_code=state,
     )
     session.add(run)
     session.flush()
@@ -85,6 +96,36 @@ def _worker(run: models.Session) -> Worker:
 
 def _items(session: DbSession) -> int:
     return session.scalar(select(func.count()).select_from(Item)) or 0
+
+
+def _committed_run(app: Flask) -> tuple[uuid.UUID, uuid.UUID]:
+    """A draft project and a running work Session of it in `ENVIRONMENT_ID`,
+    committed: their ids."""
+    with scoped_session(app.container) as db_session:
+        person = User(
+            kind_code=UserKind.PERSON,
+            subject="subject-ada",
+            handle="ada",
+            name="Ada Example",
+            avatar_slot=1,
+        )
+        db_session.add(person)
+        db_session.flush()
+        project = Project(created_by_user_id=person.id)
+        db_session.add(project)
+        db_session.add(Environment(id=ENVIRONMENT_ID, name="Example-1", exempt=False))
+        db_session.flush()
+        run = models.Session(
+            project_id=project.id,
+            environment_id=ENVIRONMENT_ID,
+            kind_code="work",
+            cwd="/work/Example",
+            token_hash=token_hash(TOKEN),
+            state_code=SessionState.RUNNING,
+        )
+        db_session.add(run)
+        db_session.flush()
+        return project.id, run.id
 
 
 class TestPilotWorkServiceAdmit:
@@ -162,6 +203,36 @@ class TestPilotWorkServiceAdmit:
         assert refused.value.message == (
             f"Cannot call pilot-work because session {run.id} is a {kind} session,"
             " not a work item's"
+        )
+
+    @pytest.mark.parametrize(
+        "state",
+        [
+            SessionState.HELD,
+            SessionState.STARTING,
+            SessionState.IDLE,
+            SessionState.STOPPED,
+            SessionState.ENDED,
+            SessionState.FAILED,
+        ],
+    )
+    def test_a_session_whose_turn_does_not_run_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        state: SessionState,
+    ) -> None:
+        """A run Finish or Archive stopped, or one that has ended, admits
+        nothing more through its bearer (P-60)."""
+        run = _session(session, container, project, environment, state=state)
+
+        with pytest.raises(AuthorizationException) as refused:
+            container.pilot_work_service().admit(f"Bearer {TOKEN}")
+
+        assert refused.value.message == (
+            f"Cannot call pilot-work because session {run.id} has no turn running"
         )
 
 
@@ -372,6 +443,49 @@ class TestPilotWorkServiceRegisterDocument:
             container.pilot_work_service().register_document(_worker(run), PATH, None)
 
         assert _items(session) == 1
+
+    def test_a_registration_that_waited_out_a_finish_mints_nothing(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+    ) -> None:
+        """Finish and Archive stop the project's Sessions under its row: a
+        registration admitted while its Session ran, then waiting on the row,
+        reads it again there, stopped, and mints nothing (P-60)."""
+        container = committed_app.container
+        project_id, run_id = _committed_run(committed_app)
+        fake_controller.add_environment(ENVIRONMENT_ID)
+        fake_controller.put_file(ENVIRONMENT_ID, PATH, TEXT.encode())
+        with committed_app.app_context():
+            engine = db.engine
+
+        def register() -> object:
+            with scoped_session(container):
+                return container.pilot_work_service().register_document(
+                    Worker(run_id, project_id, ENVIRONMENT_ID, run_id), PATH, None
+                )
+
+        with engine.connect() as finish:
+            finish.execute(
+                sql("SELECT id FROM projects WHERE id = :id FOR UPDATE"),
+                {"id": project_id},
+            )
+            finish.execute(
+                sql("UPDATE sessions SET state_code = 'stopped' WHERE id = :id"),
+                {"id": run_id},
+            )
+            registration = in_thread(register)
+            wait_until(lambda: lock_waits(container) == 1, "the registration waiting")
+            finish.commit()
+
+        with pytest.raises(AuthorizationException) as refused:
+            registration.result()
+        assert refused.value.message == (
+            f"Cannot call pilot-work because session {run_id} has no turn running"
+        )
+        with scoped_session(container) as db_session:
+            assert _items(db_session) == 0
 
 
 FOLDER = "/work/Example/docs/survey"
@@ -948,8 +1062,8 @@ class TestPilotWorkServiceEffects:
         project: Project,
         environment: Environment,
     ) -> None:
-        """pilot-work still admits a bearer outside its turn (P-60): the
-        call stands, with no Turn to record its Effects under."""
+        """A running Session's call that finds no Turn in flight stands, with
+        no Turn to record its Effects under."""
         run = _session(session, container, project, environment)
         fake_controller.add_environment(environment.id)
         fake_controller.put_file(environment.id, PATH, TEXT.encode())

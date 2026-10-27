@@ -70,7 +70,7 @@ from app.services.controller_client import (
 )
 from app.services.effect_service import Change, EffectLine, EffectService
 from app.services.environment_service import EnvironmentService
-from app.services.pilot_server import bearer_session
+from app.services.pilot_server import bearer_session, no_turn
 from app.services.pilot_work_service import ATTACHED, attached_label, material
 from app.services.project_service import ProjectService, project_name
 from app.services.session_scope import project_folder
@@ -196,7 +196,7 @@ class PilotStoreService:
                 f" {session.kind_code} session, not a chat's or a job's"
             )
         if session.state_code != SessionState.RUNNING:
-            raise AuthorizationException(_no_turn(session.id))
+            raise AuthorizationException(no_turn(Surface.STORE, session.id))
         return Brain(session.id, session.project_id, session.kind_code)
 
     def add_item(
@@ -713,7 +713,7 @@ class PilotStoreService:
             .limit(1)
         )
         if turn_id is None:
-            raise AuthorizationException(_no_turn(brain.session_id))
+            raise AuthorizationException(no_turn(Surface.STORE, brain.session_id))
         return turn_id
 
 
@@ -755,7 +755,3 @@ def _parts(block_id: str) -> tuple[uuid.UUID, str]:
     """A block's id, `<item id>/<local id>` (TD §4.9), as its two parts."""
     item, _, local = block_id.partition("/")
     return uuid.UUID(item), local
-
-
-def _no_turn(session_id: uuid.UUID) -> str:
-    return f"Cannot call pilot-store because session {session_id} has no turn running"

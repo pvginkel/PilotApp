@@ -18,6 +18,7 @@ token nor the entry, so no bearer reaches either surface's routes from it.
 import hashlib
 import json
 import secrets
+import uuid
 from dataclasses import dataclass
 
 from sqlalchemy import select
@@ -81,6 +82,12 @@ def bearer_session(
         )
     session, its_surface = found
     return session, Surface(its_surface)
+
+
+def no_turn(surface: Surface, session_id: uuid.UUID) -> str:
+    """The refusal of a call to `surface`'s routes by a Session with no turn
+    running: a bearer acts only while its turn does."""
+    return f"Cannot call {surface} because session {session_id} has no turn running"
 
 
 @dataclass(frozen=True)

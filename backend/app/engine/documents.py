@@ -300,15 +300,20 @@ class DocumentService:
         """The `seq` of the project's next Item, under the project's row lock
         until the transaction ends: births in one project take their `seq`
         one at a time."""
-        self.db.execute(
-            select(Project.id).where(Project.id == project.id).with_for_update()
-        )
+        self.lock_project(project)
         return (
             self.db.scalar(
                 select(func.max(Item.seq)).where(Item.project_id == project.id)
             )
             or 0
         ) + 1
+
+    def lock_project(self, project: Project) -> None:
+        """Hold the project's row until the transaction ends, the lock
+        `next_seq` takes for a birth's `seq`."""
+        self.db.execute(
+            select(Project.id).where(Project.id == project.id).with_for_update()
+        )
 
     def owner(self, document: Document) -> tuple[Project, Item | None]:
         """The document's Project, and its Item for a Prose Item."""
