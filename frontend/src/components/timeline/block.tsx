@@ -11,7 +11,9 @@
  * <task>", or to the project's end, its note under it; opened, its controls, nothing chosen, stand
  * under that line (F31.4). A note sits under its answer with its icon (F17.4). Gone to at its
  * address, it flashes (F97). In an archived project its controls stand disabled, which the API
- * refuses until Bring back (D012).
+ * refuses until Bring back (D012). A block of a project's own document, the handbook or
+ * `project.md`, has no item, and in the overlay reads only (D1): every answer closed, with no
+ * chevron and no Discuss, and an unanswered block open, its controls standing disabled.
  */
 
 import { useState } from 'react';
@@ -24,7 +26,7 @@ import { Time } from '@/components/shared/time';
 import { ActionAnswer } from '@/components/timeline/action';
 import { ConfirmControls, Proposal } from '@/components/timeline/confirmation';
 import { DecisionOptions } from '@/components/timeline/decision';
-import { useBlockFlash } from '@/components/timeline/flash';
+import { blockKey, useBlockFlash } from '@/components/timeline/flash';
 import { blockKindOf } from '@/components/timeline/kinds';
 import { Note } from '@/components/timeline/note';
 import { QuestionAnswer } from '@/components/timeline/question';
@@ -33,6 +35,7 @@ import { UserAvatar } from '@/components/timeline/user-avatar';
 import { useAnswer } from '@/hooks/use-answer';
 import { useArchived } from '@/hooks/use-projects';
 import { isAnswered, type Block as BlockData, type TimelineItem } from '@/hooks/use-timeline';
+import type { QuoteRef } from '@/lib/chat/quotes';
 import { cn } from '@/lib/utils';
 
 interface BlockProps {
@@ -42,28 +45,87 @@ interface BlockProps {
   solo?: boolean;
 }
 
+/** An item's block, answered through its item. */
 export function Block({ item, block, solo = false }: BlockProps) {
   const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
-  const { answer, done, saving } = useAnswer(item.id, block.id);
+  const answering = useAnswer(item.id, block.id);
   const archived = useArchived(projectId);
-  const { flashing, onAnimationEnd } = useBlockFlash(item.id, block.id);
+  const flash = useBlockFlash(item.id, block.id);
+  return (
+    <BlockPanel
+      field={blockKey(item.id, block.id)}
+      block={block}
+      solo={solo}
+      answering={answering}
+      settled={item.done !== null}
+      disabled={archived}
+      quote={solo ? null : quoteOfBlock(item, block)}
+      flash={flash}
+    />
+  );
+}
+
+/**
+ * A block of a project's own document, the handbook or `project.md`, which no item holds; read only
+ * (D1).
+ */
+export function DocumentBlock({ document, block }: { document: string; block: BlockData }) {
+  return (
+    <BlockPanel
+      field={blockKey(document, block.id)}
+      block={block}
+      solo={false}
+      answering={null}
+      settled={false}
+      disabled
+      quote={null}
+      flash={null}
+    />
+  );
+}
+
+/** What a read-only block's controls take, which stand disabled. */
+const unanswerable = (): never => {
+  throw new Error('A read-only block takes no answer');
+};
+
+interface BlockPanelProps {
+  /** The block's key, `<item>/<block>` or `<document>/<block>`: its fields keep their unsent words under it. */
+  field: string;
+  block: BlockData;
+  solo: boolean;
+  /** How it takes an answer; none where it is read only. */
+  answering: ReturnType<typeof useAnswer> | null;
+  /** Its item is done. */
+  settled: boolean;
+  /** Its controls stand and take nothing. */
+  disabled: boolean;
+  /** What its head's Discuss quotes; none where its head has no Discuss. */
+  quote: QuoteRef | null;
+  flash: ReturnType<typeof useBlockFlash> | null;
+}
+
+function BlockPanel({ field, block, solo, answering, settled, disabled, quote, flash }: BlockPanelProps) {
   const [opened, setOpened] = useState(false);
+  const saving = answering?.saving ?? null;
+  const answer = answering?.answer ?? unanswerable;
   const answered = isAnswered(block);
-  const closable = answered && (block.by?.kind !== 'person' || item.done !== null);
+  const closable = answered && (answering === null || block.by?.kind !== 'person' || settled);
   const closed = closable && !opened;
   const deferred = saving === null && block.answer === DEFERRED;
-  const live = item.done === null && saving === null;
+  const live = !settled && saving === null;
+  const off = disabled || answering === null;
   const own = deferred ? null : block.answer;
 
   const controls = () => {
     if (block.confirmation) {
       return (
         <ConfirmControls
-          item={item}
+          field={field}
           block={block}
           chosen={saving === null ? own : saving.answer}
           live={live && !closed}
-          disabled={archived}
+          disabled={off}
           onAnswer={answer}
         >
           <Proposal block={block} />
@@ -75,31 +137,29 @@ export function Block({ item, block, solo = false }: BlockProps) {
       case 'decision':
         return (
           <DecisionOptions
-            item={item}
+            field={field}
             block={block}
             chosen={saving === null ? own : saving.answer}
             closed={closed}
             live={live}
-            disabled={archived}
-            onOpen={() => setOpened(true)}
+            disabled={off}
+            onOpen={answering === null ? null : () => setOpened(true)}
             onAnswer={answer}
           />
         );
       case 'question':
-        return (
-          <QuestionAnswer item={item} block={block} saving={saving} closed={closed} live={live} disabled={archived} onAnswer={answer} />
-        );
+        return <QuestionAnswer field={field} block={block} saving={saving} closed={closed} live={live} disabled={off} onAnswer={answer} />;
       case 'action':
         return (
           <ActionAnswer
-            item={item}
+            field={field}
             block={block}
             saving={saving}
             closed={closed}
             live={live}
-            disabled={archived}
+            disabled={off}
             onAnswer={answer}
-            onDone={done}
+            onDone={answering?.done ?? unanswerable}
           />
         );
       default: {
@@ -111,21 +171,19 @@ export function Block({ item, block, solo = false }: BlockProps) {
 
   return (
     <section
-      className={cn('block', solo && 'solo', answered ? 'answered' : 'open', flashing && 'flash')}
-      onAnimationEnd={onAnimationEnd}
+      className={cn('block', solo && 'solo', answered ? 'answered' : 'open', flash?.flashing && 'flash')}
+      onAnimationEnd={flash?.onAnimationEnd}
       data-testid="timeline.block"
       data-block-id={block.id}
       data-closed={closed}
     >
       {(answered || !solo) && (
         <BlockHead
-          item={item}
           block={block}
-          solo={solo}
           answered={answered}
-          closable={closable}
           closed={closed}
-          onToggle={() => setOpened(!opened)}
+          onToggle={closable && answering !== null ? () => setOpened(!opened) : null}
+          quote={quote}
         />
       )}
       <div className="block-controls">
@@ -137,17 +195,15 @@ export function Block({ item, block, solo = false }: BlockProps) {
 }
 
 interface BlockHeadProps {
-  item: TimelineItem;
   block: BlockData;
-  solo: boolean;
   answered: boolean;
-  /** The answer reads closed until opened, and the chevron toggles it. */
-  closable: boolean;
   closed: boolean;
-  onToggle: () => void;
+  /** Toggles a closed answer open and closed again; none where it stays as it is. */
+  onToggle: (() => void) | null;
+  quote: QuoteRef | null;
 }
 
-function BlockHead({ item, block, solo, answered, closable, closed, onToggle }: BlockHeadProps) {
+function BlockHead({ block, answered, closed, onToggle, quote }: BlockHeadProps) {
   const { icon: Icon, label } = blockKindOf(block);
   const toggle = closed ? 'Show every option' : 'Show only the answer';
   return (
@@ -156,7 +212,7 @@ function BlockHead({ item, block, solo, answered, closable, closed, onToggle }: 
         <Icon className="icon" aria-hidden="true" />
         {label}
       </span>
-      {closable && (
+      {onToggle !== null && (
         <button
           type="button"
           className="btn btn-ghost btn-icon toggle"
@@ -183,9 +239,9 @@ function BlockHead({ item, block, solo, answered, closable, closed, onToggle }: 
           {block.by !== null && <UserAvatar user={block.by} size="xs" />}
         </span>
       )}
-      {!solo && (
+      {quote !== null && (
         <DiscussButton
-          quote={quoteOfBlock(item, block)}
+          quote={quote}
           title="Discuss: quote this block into the project’s chat"
           className="block-discuss"
           testId="timeline.block.discuss"

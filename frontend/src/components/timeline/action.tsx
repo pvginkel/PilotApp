@@ -11,12 +11,13 @@ import { TextField } from '@/components/shared/text-field';
 import { Console } from '@/components/timeline/console';
 import { DEFERRED, Said } from '@/components/timeline/said';
 import type { Answer, Saving, Sent } from '@/hooks/use-answer';
-import type { Block, TimelineItem } from '@/hooks/use-timeline';
+import type { Block } from '@/hooks/use-timeline';
 import { useUnsentText } from '@/hooks/use-unsent-text';
 import { cn } from '@/lib/utils';
 
 interface ActionAnswerProps {
-  item: TimelineItem;
+  /** The block's key, which its fields keep their unsent words under. */
+  field: string;
   block: Block;
   saving: Saving | null;
   closed: boolean;
@@ -28,12 +29,12 @@ interface ActionAnswerProps {
   onDone: (sent: Sent) => void;
 }
 
-export function ActionAnswer({ item, block, saving, closed, live, disabled = false, onAnswer, onDone }: ActionAnswerProps) {
+export function ActionAnswer({ field, block, saving, closed, live, disabled = false, onAnswer, onDone }: ActionAnswerProps) {
   const said = saidOf(block, saving);
   return (
     <>
       {said !== null && <Said {...said} />}
-      {live && !closed && <ActionControls item={item} block={block} disabled={disabled} onAnswer={onAnswer} onDone={onDone} />}
+      {live && !closed && <ActionControls field={field} block={block} disabled={disabled} onAnswer={onAnswer} onDone={onDone} />}
     </>
   );
 }
@@ -48,15 +49,15 @@ function saidOf(block: Block, saving: Saving | null) {
 }
 
 interface ActionControlsProps {
-  item: TimelineItem;
+  field: string;
   block: Block;
   disabled: boolean;
   onAnswer: Answer;
   onDone: (sent: Sent) => void;
 }
 
-function ActionControls({ item, block, disabled, onAnswer, onDone }: ActionControlsProps) {
-  const pasted = useUnsentText(`${item.id}/${block.id}/paste`);
+function ActionControls({ field, block, disabled, onAnswer, onDone }: ActionControlsProps) {
+  const pasted = useUnsentText(`${field}/paste`);
   const [typing, setTyping] = useState(false);
   const optioned = block.options.length > 0;
   const done = () => onDone({ note: pasted.text, onSaved: pasted.sent });
@@ -98,7 +99,7 @@ function ActionControls({ item, block, disabled, onAnswer, onDone }: ActionContr
             ))}
             {typing ? (
               <Console
-                field={`${item.id}/${block.id}/other`}
+                field={`${field}/other`}
                 label="Other, in your own words"
                 placeholder="Other: in your own words"
                 send="Send"

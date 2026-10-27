@@ -258,7 +258,6 @@
   .option.other .desc { white-space: pre-wrap; }
   .option.other.chosen { border-style: solid; border-right-width: 2px; border-bottom-width: 2px; }
   .option.other.chosen .label { color: inherit; }
-  .option.closed { cursor: pointer; }
 
   /* Other's console: it takes its row's place, the field with Send and the cross inside its border,
      and keeps some room under it when it is kept in view. */

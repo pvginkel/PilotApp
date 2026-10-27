@@ -7,7 +7,8 @@
  * /api/testing/items/<id>/saves), its handbook and its project document saved
  * (/api/testing/projects/<id>/{handbook,draft}/saves), its session's turn ended, a document it settled whole marked
  * Done by Pilot and files it copied attached to an item (/api/testing/items/<id>/attachments); they
- * are answered through the items API. A work item is placed by repository and its session started
+ * are answered through the items API, and a block of the handbook or of the project document by its
+ * path in the store's tree, as the record answers it (/api/testing/sync/answer). A work item is placed by repository and its session started
  * in an environment of Pilot's own its start takes or creates in the worker's fake controller
  * (/api/testing/projects/<id>/work; `controller.ts` drives the fake), and read as the timeline and
  * the session log read it; a file its session wrote in that environment is registered as its
@@ -116,6 +117,15 @@ export class Projects {
   async doneByPilot(itemId: string): Promise<void> {
     const response = await this.page.request.post(`${this.backendUrl}/api/testing/items/${itemId}/done`);
     expect(response.status(), await response.text()).toBe(204);
+  }
+
+  /** A person's answer to a block of the open project's handbook, or of its project document (`draft`). */
+  async answerProjectDocument(projectId: string, role: 'handbook' | 'draft', block: string, answer: string, handle: string): Promise<void> {
+    const path = `${slugOf(projectId)}/${role === 'handbook' ? 'handbook.md' : 'project.md'}`;
+    const response = await this.page.request.post(`${this.backendUrl}/api/testing/sync/answer`, {
+      data: { path, block, answer, user: handle },
+    });
+    expect(response.status(), await response.text()).toBe(200);
   }
 
   /** The signed-in person's answer to a block, with a note. */

@@ -18,7 +18,7 @@ import { LinkedText } from '@/components/shared/linked-text';
 import { Markdown } from '@/components/shared/markdown';
 import { Attachments } from '@/components/timeline/attachments';
 import { Console } from '@/components/timeline/console';
-import { useBlockFlash } from '@/components/timeline/flash';
+import { blockKey, useBlockFlash } from '@/components/timeline/flash';
 import { ItemHead } from '@/components/timeline/item-head';
 import { Note } from '@/components/timeline/note';
 import { Deferral, DEFERRED } from '@/components/timeline/said';
@@ -37,6 +37,7 @@ export function Confirmation({ item }: { item: TimelineItem }) {
   const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
   const [block] = blocksOf(item);
   const { answer, saving } = useAnswer(item.id, block.id);
+  const flash = useBlockFlash(item.id, block.id);
   const archived = useArchived(projectId);
   const [details, setDetails] = useState(false);
   // The API gives every prose item but the opening its text.
@@ -46,12 +47,12 @@ export function Confirmation({ item }: { item: TimelineItem }) {
     <div className="item-body">
       <ItemHead item={item} because={block.because} />
       <ConfirmControls
-        item={item}
+        field={blockKey(item.id, block.id)}
         block={block}
         chosen={saving === null ? block.answer : saving.answer}
         live={saving === null}
         disabled={archived}
-        address
+        address={flash}
         onAnswer={answer}
       >
         <div className="item-title" data-testid="timeline.item.title">
@@ -98,7 +99,8 @@ export function Proposal({ block }: { block: Block }) {
 }
 
 interface ConfirmControlsProps {
-  item: TimelineItem;
+  /** The block's key, which its No's reason keeps its unsent words under. */
+  field: string;
   block: Block;
   /** The answer that shows chosen: the one being saved, else the block's own. */
   chosen: string | null;
@@ -106,16 +108,15 @@ interface ConfirmControlsProps {
   live: boolean;
   /** An archived project's: the controls stand and take nothing (D012). */
   disabled?: boolean;
-  /** Its row carries the block's address: on the card, where no block panel does. */
-  address?: boolean;
+  /** Its row carries the block's address, and flashes by it: on the card, where no block panel does. */
+  address?: ReturnType<typeof useBlockFlash>;
   onAnswer: Answer;
   /** What the row says beside the check and the cross. */
   children: ReactNode;
 }
 
-export function ConfirmControls({ item, block, chosen, live, disabled = false, address = false, onAnswer, children }: ConfirmControlsProps) {
+export function ConfirmControls({ field, block, chosen, live, disabled = false, address, onAnswer, children }: ConfirmControlsProps) {
   const [refusing, setRefusing] = useState(false);
-  const { flashing, onAnimationEnd } = useBlockFlash(item.id, block.id);
   const yes = () => {
     setRefusing(false);
     onAnswer(YES);
@@ -123,10 +124,10 @@ export function ConfirmControls({ item, block, chosen, live, disabled = false, a
   return (
     <>
       <div
-        className={cn('confirm-row', address && flashing && 'flash')}
-        onAnimationEnd={address ? onAnimationEnd : undefined}
+        className={cn('confirm-row', address?.flashing && 'flash')}
+        onAnimationEnd={address?.onAnimationEnd}
         data-testid="timeline.confirm"
-        data-block-id={address ? block.id : undefined}
+        data-block-id={address === undefined ? undefined : block.id}
       >
         <div className="confirm-text">{children}</div>
         <div className="yes-no">
@@ -158,7 +159,7 @@ export function ConfirmControls({ item, block, chosen, live, disabled = false, a
       {live && refusing && (
         <Console
           className="no"
-          field={`${item.id}/${block.id}/no`}
+          field={`${field}/no`}
           label="No: why not"
           placeholder="No: why not? (you may leave it empty)"
           send="Send No"

@@ -6,7 +6,7 @@
  * words is Other's row, chosen, with the words in it, and reopens the console with them; another
  * option chosen, the words stay there, unchosen. The chosen row fills; once the answer no longer
  * changes, the others fade and are disabled. Closed, the chosen row stands alone and opens its
- * block.
+ * block, or, read only, opens nothing.
  */
 
 import { useState } from 'react';
@@ -14,7 +14,7 @@ import { LinkedText } from '@/components/shared/linked-text';
 import { Console } from '@/components/timeline/console';
 import { Note } from '@/components/timeline/note';
 import type { Answer } from '@/hooks/use-answer';
-import type { Block, TimelineItem } from '@/hooks/use-timeline';
+import type { Block } from '@/hooks/use-timeline';
 import { cn } from '@/lib/utils';
 
 /** A proposal's answer, and the label of a decision's one row where it proposes nothing. */
@@ -36,7 +36,8 @@ function rowsOf(block: Block): Row[] {
 }
 
 interface DecisionOptionsProps {
-  item: TimelineItem;
+  /** The block's key, which its fields keep their unsent words under. */
+  field: string;
   block: Block;
   /** The answer that shows chosen: the one being saved, else the block's own. */
   chosen: string | null;
@@ -45,11 +46,12 @@ interface DecisionOptionsProps {
   live: boolean;
   /** An archived project's: the controls stand and take nothing (D012). */
   disabled?: boolean;
-  onOpen: () => void;
+  /** Opens the closed block; none where it stays closed, its row taking nothing. */
+  onOpen: (() => void) | null;
   onAnswer: Answer;
 }
 
-export function DecisionOptions({ item, block, chosen, closed, live, disabled = false, onOpen, onAnswer }: DecisionOptionsProps) {
+export function DecisionOptions({ field, block, chosen, closed, live, disabled = false, onOpen, onAnswer }: DecisionOptionsProps) {
   const [typing, setTyping] = useState(false);
   const rows = rowsOf(block);
   const single = block.options.length === 0;
@@ -68,8 +70,9 @@ export function DecisionOptions({ item, block, chosen, closed, live, disabled = 
         <button
           type="button"
           className={cn('option chosen closed', single && 'single', row === undefined && 'other')}
-          onClick={onOpen}
-          title="Show every option"
+          onClick={onOpen ?? undefined}
+          disabled={onOpen === null}
+          title={onOpen === null ? undefined : 'Show every option'}
           data-testid="timeline.block.option"
         >
           <RowWords label={row?.label ?? 'Other'} text={row === undefined ? words : row.text} />
@@ -104,7 +107,7 @@ export function DecisionOptions({ item, block, chosen, closed, live, disabled = 
       ))}
       {live && typing ? (
         <Console
-          field={`${item.id}/${block.id}/other`}
+          field={`${field}/other`}
           initial={kept ?? ''}
           label="Other, in your own words"
           placeholder="Other: in your own words"

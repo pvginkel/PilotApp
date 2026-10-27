@@ -2,7 +2,9 @@
  * The project's handbook (F129.4) and its project document, `project.md` (F37.4), in the overlay,
  * each at its own address over the project's timeline (F97), as an attachment opens: rendered,
  * read only, no foot; *Empty* before the first save, Pilot's dots while a turn saves it (F35), and
- * "The document did not load" for a read that fails (F113). The handbook's button stands in the
+ * "The document did not load" for a read that fails (F113). Its asks stand in their places, read
+ * only (D1): an answered one closed, its answer and who gave it showing, an open one open, and
+ * nothing in either to press; a text of asks alone is no longer *Empty*. The handbook's button stands in the
  * head's icon group, left of the notes button (F2.3, F2.7); a draft has none, nor a handbook
  * (F129.2). A save shows live as it lands, Pilot's dots with it until the turn ends, the project
  * document's renaming the project, and once a stream that went down comes back up. On a phone it
@@ -181,6 +183,172 @@ test.describe('The project document', () => {
     await page.goto(projectDocumentAddress(randomUUID()));
     await expect(overlay.failed).toHaveText('The document did not load.');
     await expect(overlay.title).toHaveCount(0);
+  });
+});
+
+/** Nothing in the overlay's body takes a click or a word. */
+const PRESSABLE = 'button:enabled, input:enabled, textarea:enabled, select:enabled, [contenteditable]';
+
+test.describe('Its asks', () => {
+  test('the handbook draws each ask in its place, read only: an answer closed with who gave it and when, an open ask open, nothing to press', async ({
+    people,
+    projects,
+    overlay,
+  }) => {
+    const me = await people.signIn({ name: 'Ada Example' });
+    const id = await projects.makeWithSession({ name: makeUnique('Asks'), members: [me.handle!] });
+    await projects.saveProjectDocument(
+      id,
+      'handbook',
+      [
+        '# Handbook',
+        '',
+        'How the trip is planned.',
+        '',
+        '```decision id=D1',
+        'options:',
+        '  - Train: the night train to Vienna',
+        '  - Car',
+        'recommend: Train',
+        'answer: Car',
+        'by: agent',
+        'at: 2026-10-20T09:00:00Z',
+        '```',
+        '',
+        'How long we stay.',
+        '',
+        '```question id=Q1',
+        'default: Two weeks',
+        '```',
+        '',
+        '```action id=A1',
+        '```',
+        '',
+      ].join('\n'),
+    );
+    await projects.endTurn(id);
+    await projects.answerProjectDocument(id, 'handbook', 'Q1', 'Ten days', me.handle!);
+    await overlay.openProjectDocument(id, 'handbook');
+
+    await expect(overlay.empty).toHaveCount(0);
+    await expect(overlay.document.locator('.prose')).toHaveText(['How the trip is planned.', 'How long we stay.']);
+    await expect(overlay.blocks).toHaveCount(3);
+    expect(await overlay.blocks.evaluateAll((blocks) => blocks.map((block) => block.getAttribute('data-block-id')))).toEqual([
+      'D1',
+      'Q1',
+      'A1',
+    ]);
+
+    // Pilot's answer, closed: the chosen row alone, which opens nothing, Pilot's avatar and the time.
+    const pilots = overlay.blockAt('D1');
+    await expect(pilots.root).toHaveAttribute('data-closed', 'true');
+    await expect(pilots.kind).toHaveText('Decision');
+    await expect(pilots.answered).toBeVisible();
+    await expect(pilots.options).toHaveCount(1);
+    await expect(pilots.option('Car')).toBeDisabled();
+    await expect(pilots.option('Car')).not.toHaveAttribute('title');
+    await expect(pilots.who.locator('.avatar')).toHaveAttribute('title', 'Pilot');
+    await expect(pilots.time).toBeVisible();
+    await expect(pilots.toggle).toHaveCount(0);
+    await expect(pilots.discuss).toHaveCount(0);
+
+    // The person's answer, closed: the words, the person's avatar.
+    const persons = overlay.blockAt('Q1');
+    await expect(persons.root).toHaveAttribute('data-closed', 'true');
+    await expect(persons.answered).toBeVisible();
+    await expect(persons.said).toHaveText('Ten days');
+    await expect(persons.who.locator('.avatar')).toHaveAttribute('title', 'Ada Example');
+    await expect(persons.answerField).toHaveCount(0);
+    await expect(persons.toggle).toHaveCount(0);
+    await expect(persons.discuss).toHaveCount(0);
+
+    // Open: its controls stand, disabled.
+    const open = overlay.blockAt('A1');
+    await expect(open.root).toHaveAttribute('data-closed', 'false');
+    await expect(open.root).toHaveClass(/\bopen\b/);
+    await expect(open.kind).toHaveText('Action');
+    await expect(open.answered).toHaveCount(0);
+    await expect(open.paste).toBeDisabled();
+    await expect(open.done).toBeDisabled();
+    await expect(open.discuss).toHaveCount(0);
+
+    await expect(overlay.body.locator(PRESSABLE)).toHaveCount(0);
+  });
+
+  test('a project document of asks alone is drawn, not Empty: a confirmation and a question left open stand open, a decision Pilot settled and a deferral read closed', async ({
+    people,
+    projects,
+    overlay,
+  }) => {
+    const me = await people.signIn();
+    const name = makeUnique('Only asks');
+    const id = await projects.makeWithSession({ name, members: [me.handle!] });
+    await projects.saveProjectDocument(
+      id,
+      'draft',
+      [
+        `# ${name}`,
+        '',
+        '```decision id=C1',
+        'type: confirmation',
+        'proposal: Book the night train',
+        'because: auto-pilot-off',
+        '```',
+        '',
+        '```question id=Q1',
+        'default: Two weeks',
+        '```',
+        '',
+        '```decision id=D1',
+        'proposal: Pack light',
+        'answer: Agree',
+        'by: agent',
+        '```',
+        '',
+        '```decision id=D2',
+        'options:',
+        '  - Dome',
+        '  - Tunnel',
+        'answer: deferred',
+        'by: agent',
+        'to: plan',
+        '```',
+        '',
+      ].join('\n'),
+    );
+    await projects.endTurn(id);
+    await overlay.openProjectDocument(id, 'draft');
+
+    await expect(overlay.title).toHaveText(name);
+    await expect(overlay.empty).toHaveCount(0);
+    await expect(overlay.document.locator('.prose')).toHaveCount(0);
+    await expect(overlay.blocks).toHaveCount(4);
+
+    const confirm = overlay.blockAt('C1');
+    await expect(confirm.root).toHaveAttribute('data-closed', 'false');
+    await expect(confirm.kind).toHaveText('Confirm');
+    await expect(confirm.root.getByTestId('timeline.confirm.proposal')).toHaveText('Book the night train');
+    await expect(confirm.yes).toBeDisabled();
+    await expect(confirm.no).toBeDisabled();
+
+    const question = overlay.blockAt('Q1');
+    await expect(question.root).toHaveAttribute('data-closed', 'false');
+    await expect(question.answerField).toBeDisabled();
+    await expect(question.answerField).toHaveAttribute('placeholder', 'Default: Two weeks');
+    await expect(question.answerSend).toBeDisabled();
+
+    const agreed = overlay.blockAt('D1');
+    await expect(agreed.root).toHaveAttribute('data-closed', 'true');
+    await expect(agreed.options).toHaveText(['Pack light']);
+    await expect(agreed.options).toBeDisabled();
+    await expect(agreed.who.locator('.avatar')).toHaveAttribute('title', 'Pilot');
+
+    const deferred = overlay.blockAt('D2');
+    await expect(deferred.root).toHaveAttribute('data-closed', 'true');
+    await expect(deferred.deferred).toContainText("Deferred to the project's end");
+    await expect(deferred.options).toHaveCount(0);
+
+    await expect(overlay.body.locator(PRESSABLE)).toHaveCount(0);
   });
 });
 
