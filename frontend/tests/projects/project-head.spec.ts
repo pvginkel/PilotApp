@@ -3,11 +3,14 @@
  * popover (F2.2, F3); the handbook's button (F129.4; its overlay in
  * timeline/project-documents.spec.ts); the plan's notes and a step's (F2.7, F3.6); the members (F2.5); the auto
  * pilot switch, the Finished chip in its place (F2.6, F4.1); a draft's head, with its draft-panel
- * toggle (F46.2; its panel in draft-panel.spec.ts), and an archived project's head (D012); a tight head giving way beside the side panel, its menu clear of it; everything it
- * opens closed on another project (F1.6); two rows on a narrow window.
+ * toggle (F46.2; its panel in draft-panel.spec.ts), and an archived project's head (D012); a tight head
+ * beside the side panel giving way in one order, the repo, the name, the step's name to its floor,
+ * then the members folding to a count, its menu clear of the panel; everything it opens closed on
+ * another project (F1.6); two rows on a narrow window.
  */
 
 import type { Locator } from '@playwright/test';
+import type { ProjectHeadPage } from '../support/page-objects/project-head-page';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 
@@ -378,26 +381,80 @@ test.describe('An archived project’s head', () => {
 
 test.describe('A tight head beside the side panel', () => {
   const LONG_STEP = { id: 'a', title: 'A step whose title runs on well past what the head has room for', status: 'in_progress' as const, notes: [] };
+  // The step's name gives way down to this width (plan-popover.tsx).
+  const NAME_FLOOR = 28;
   const cut = (locator: Locator) => locator.evaluate((element) => element.scrollWidth > element.clientWidth);
+  const width = async (locator: Locator) => (await locator.boundingBox())!.width;
 
-  test('gives way in the repo and the step’s name first, the name whole', async ({ people, projects, projectHead, panel }) => {
+  /** Six people on the record, the spec's own person first: the members in the order they join. */
+  async function six(people: { other(handle: string, name?: string): Promise<void> }, me: string): Promise<{ handles: string[]; names: string[] }> {
+    const others = [1, 2, 3, 4].map((n) => ({ handle: makeUnique(`m${n}`, 6), name: `Member ${n}` }));
+    for (const other of others) await people.other(other.handle, other.name);
+    return {
+      handles: [me, 'ada', ...others.map((other) => other.handle)],
+      names: ['Test Person', 'Ada Example', ...others.map((other) => other.name)],
+    };
+  }
+
+  /** Every part of the head that shows, left to right, each clear of the next and the menu inside the head. */
+  async function clear(projectHead: ProjectHeadPage, panel: { root: Locator }): Promise<void> {
+    const parts = await projectHead.root.evaluate((head) =>
+      Array.from(head.querySelectorAll(':scope > .head-row > *, .members > *, .step-anchor > .btn'))
+        .filter((part) => !part.classList.contains('step-anchor') && !part.classList.contains('members') && !part.classList.contains('grow'))
+        .map((part) => part.getBoundingClientRect())
+        .filter((box) => box.width > 0)
+        .map((box) => ({ left: box.left, right: box.right })),
+    );
+    const head = (await projectHead.root.boundingBox())!;
+    for (const [index, part] of parts.slice(1).entries()) {
+      // The avatars overlap by 2px on purpose.
+      expect(part.left).toBeGreaterThanOrEqual(parts[index].right - 2.01);
+    }
+    const [menu, aside] = [(await projectHead.menuButton.boundingBox())!, (await panel.root.boundingBox())!];
+    expect(menu.x + menu.width).toBeLessThanOrEqual(head.x + head.width);
+    expect(head.x + head.width).toBeLessThanOrEqual(aside.x);
+  }
+
+  test('gives way in the repo first, then the name, the ticket and the step’s name whole', async ({ people, projects, projectHead, panel }) => {
     const me = await people.signIn();
     const id = await projects.make({
-      name: makeUnique('Tight'),
+      name: `${makeUnique('Tight')} has a long name`,
       ticket: 'PL-7',
       repo: 'pvginkel/a-repository-whose-name-runs-on-and-on',
-      members: [me.handle!],
+      members: [me.handle!, 'ada'],
+      tasks: [{ id: 'a', title: 'Import', status: 'in_progress', notes: [] }],
+    });
+    await projectHead.open(id);
+    await expect(panel.root).toBeVisible();
+
+    expect(await width(projectHead.repo)).toBe(0);
+    expect(await cut(projectHead.name)).toBe(true);
+    expect(await cut(projectHead.ticket)).toBe(false);
+    expect(await cut(projectHead.step.getByTestId('project.step.name'))).toBe(false);
+    await clear(projectHead, panel);
+  });
+
+  test('then the step’s name once the name has given way, the members whole while it is above its floor', async ({ people, projects, projectHead, panel }) => {
+    const me = await people.signIn();
+    const id = await projects.make({
+      name: `${makeUnique('Tight')} has a long name`,
+      ticket: 'PL-7',
+      members: [me.handle!, 'ada', 'ben'],
       tasks: [LONG_STEP],
     });
     await projectHead.open(id);
     await expect(panel.root).toBeVisible();
 
-    expect(await cut(projectHead.step.getByTestId('project.step.name'))).toBe(true);
-    expect(await cut(projectHead.repo)).toBe(true);
-    expect(await cut(projectHead.name)).toBe(false);
+    expect(await width(projectHead.name)).toBe(0);
+    const name = projectHead.step.getByTestId('project.step.name');
+    expect(await cut(name)).toBe(true);
+    expect(await width(name)).toBeGreaterThan(NAME_FLOOR);
+    await expect(projectHead.memberAvatars).toHaveCount(3);
+    await expect(projectHead.membersMore).toHaveCount(0);
+    await clear(projectHead, panel);
   });
 
-  test('gives way in the name once they have, the chips, the members and the icons whole, the menu inside the head and clear of the panel', async ({
+  test('gives way in the name once the repo has, the chips, the members and the icons whole, the menu inside the head and clear of the panel', async ({
     people,
     projects,
     projectHead,
@@ -418,15 +475,139 @@ test.describe('A tight head beside the side panel', () => {
     await expect(panel.root).toBeVisible();
 
     expect(await cut(projectHead.name)).toBe(true);
-    for (const whole of [projectHead.archived, projectHead.finished, projectHead.members]) expect(await cut(whole)).toBe(false);
+    for (const whole of [projectHead.archived, projectHead.finished, projectHead.ticket, projectHead.members]) expect(await cut(whole)).toBe(false);
     expect(await projectHead.root.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
-    const [head, menu, aside] = await Promise.all(
-      [projectHead.root, projectHead.menuButton, panel.root].map(async (locator) => (await locator.boundingBox())!),
-    );
-    expect(menu.x + menu.width).toBeLessThanOrEqual(head.x + head.width);
-    expect(head.x + head.width).toBeLessThanOrEqual(aside.x);
+    await clear(projectHead, panel);
     await projectHead.menuButton.click();
     await expect(projectHead.menuItems).toHaveText(['Bring back']);
+  });
+
+  test('a click on the ticket’s last pixels opens the ticket and flips no auto pilot', async ({
+    page,
+    backendUrl,
+    people,
+    projects,
+    projectHead,
+    panel,
+    links,
+  }) => {
+    await links.set({ ticket_url_template: `${backendUrl}/tickets/{id}` });
+    const me = await people.signIn();
+    const id = await projects.make({
+      name: 'Port the recipe importer to the API',
+      ticket: 'RB-12',
+      repo: 'pvginkel/Recipes',
+      members: [me.handle!, 'ada'],
+      tasks: [{ id: 'a', title: 'Write the importer', status: 'in_progress', notes: [] }],
+    });
+    await projectHead.open(id);
+    await expect(panel.root).toBeVisible();
+
+    const ticket = projectHead.ticket.getByRole('link', { name: 'RB-12' });
+    const box = (await ticket.boundingBox())!;
+    expect(box.x + box.width).toBeLessThanOrEqual((await projectHead.autopilot.boundingBox())!.x);
+    const opened = page.waitForEvent('popup');
+    await ticket.click({ position: { x: box.width - 0.5, y: box.height / 2 } });
+    expect((await opened).url()).toBe(`${backendUrl}/tickets/RB-12`);
+    await expect(projectHead.autopilot).toHaveAttribute('aria-checked', 'false');
+    expect((await projects.head(id)).autopilot).toBe(false);
+  });
+
+  test('the step’s ring stays clear of the first member, and the ticket of the Finished chip', async ({ page, people, projects, projectHead, panel }) => {
+    await page.setViewportSize({ width: 1200, height: 720 });
+    const me = await people.signIn({ name: 'Test Person' });
+    const { handles } = await six(people, me.handle!);
+    const id = await projects.make({
+      name: `${makeUnique('Ring')} has a long name`,
+      state: 'finished',
+      ticket: 'RB-12',
+      members: handles,
+      tasks: [LONG_STEP],
+    });
+    await projectHead.open(id);
+    await expect(panel.root).toBeVisible();
+
+    const [ring, avatar, ticket, finished] = await Promise.all(
+      [projectHead.ring, projectHead.memberAvatars.first(), projectHead.ticket, projectHead.finished].map(async (locator) => (await locator.boundingBox())!),
+    );
+    expect(ring.x + ring.width).toBeLessThanOrEqual(avatar.x);
+    expect(ticket.x + ticket.width).toBeLessThanOrEqual(finished.x);
+    await clear(projectHead, panel);
+  });
+
+  for (const font of ['the default font', 'a wider font'] as const) {
+    test(`at 1200px, in ${font}, the members fold last to the first avatars and a count naming the rest, the step’s name at its floor and the menu inside the head`, async ({
+      page,
+      people,
+      projects,
+      projectHead,
+      panel,
+    }) => {
+      await page.setViewportSize({ width: 1200, height: 720 });
+      // Letter-spacing stands in for a wider font, as Jenkins' is.
+      if (font === 'a wider font') {
+        await page.addInitScript(() =>
+          document.addEventListener('DOMContentLoaded', () => {
+            const style = document.createElement('style');
+            style.textContent = 'body { letter-spacing: 0.12em; }';
+            document.head.append(style);
+          }),
+        );
+      }
+      const me = await people.signIn({ name: 'Test Person' });
+      const { handles, names } = await six(people, me.handle!);
+      const id = await projects.make({
+        name: `${makeUnique('Six')} has a long name`,
+        ticket: 'RB-12',
+        repo: 'pvginkel/Recipes',
+        members: handles,
+        tasks: [LONG_STEP],
+        notes: [note('one')],
+      });
+      await projectHead.open(id);
+      await expect(panel.root).toBeVisible();
+
+      await expect(projectHead.membersMore).toBeVisible();
+      const shown = await projectHead.memberAvatars.count();
+      expect(shown).toBeGreaterThanOrEqual(1);
+      expect(await projectHead.memberAvatars.evaluateAll((avatars) => avatars.map((avatar) => avatar.getAttribute('title')))).toEqual(names.slice(0, shown));
+      await expect(projectHead.membersMore).toHaveText(`+${6 - shown}`);
+      await expect(projectHead.membersMore).toHaveAttribute('title', names.slice(shown).join(', '));
+      expect(await width(projectHead.step.getByTestId('project.step.name'))).toBeCloseTo(NAME_FLOOR, 0);
+      await clear(projectHead, panel);
+    });
+  }
+
+  test('the members unfold as the window widens', async ({ page, people, projects, projectHead, panel }) => {
+    await page.setViewportSize({ width: 1200, height: 720 });
+    const me = await people.signIn({ name: 'Test Person' });
+    const { handles } = await six(people, me.handle!);
+    const id = await projects.make({ name: makeUnique('Widen'), ticket: 'RB-12', members: handles, tasks: [LONG_STEP], notes: [note('one')] });
+    await projectHead.open(id);
+    await expect(panel.root).toBeVisible();
+    await expect(projectHead.membersMore).toBeVisible();
+
+    await page.setViewportSize({ width: 1600, height: 720 });
+    await expect(projectHead.memberAvatars).toHaveCount(6);
+    await expect(projectHead.membersMore).toHaveCount(0);
+    await clear(projectHead, panel);
+  });
+
+  test('a draft’s Create project, its members and its menu stay inside the head', async ({ page, people, projects, projectHead, panel }) => {
+    await page.setViewportSize({ width: 1200, height: 720 });
+    const me = await people.signIn({ name: 'Test Person' });
+    const { handles } = await six(people, me.handle!);
+    const id = await projects.make({
+      name: `${makeUnique('Draft')} has a name long enough to fill a project’s head on its own`,
+      state: 'draft',
+      members: handles,
+    });
+    await projectHead.open(id);
+    await expect(panel.root).toBeVisible();
+
+    expect(await cut(projectHead.name)).toBe(true);
+    for (const whole of [projectHead.draft, projectHead.createButton]) expect(await cut(whole)).toBe(false);
+    await clear(projectHead, panel);
   });
 });
 

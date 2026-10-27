@@ -11,11 +11,13 @@
  * head is the open project's once it is read again. An archived project's reads as it was left,
  * marked archived, its switch not to be flipped (D012).
  *
- * On a narrow window it stands in its two rows: the name and auto pilot, then the step, the
- * members and the icons, the repo hidden.
+ * In a tight head its parts give way in one order: the repo, the name, the step's name down to its
+ * floor, then the members, folding to the first avatars and a count; the ticket, the chips, auto
+ * pilot or Create project and the icons keep their size. On a narrow window it stands in its two
+ * rows: the name and auto pilot, then the step, the members and the icons, the repo hidden.
  */
 
-import type { Ref } from 'react';
+import { useLayoutEffect, useState, type Ref } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { Archive, FileText, Files, Flag, MessagesSquare, NotebookText, Plus, TriangleAlert } from 'lucide-react';
@@ -67,18 +69,16 @@ export function ProjectHead({ project, chat, documents, draftTab, ref }: Project
             Archived
           </span>
         )}
-        <div className="meta">
-          {project.ticket && (
-            <span className="mono" data-testid="project.ticket">
-              <LinkedText text={project.ticket} />
-            </span>
-          )}
-          {project.repo && (
-            <span className="repo mono" data-testid="project.repo">
-              <LinkedText text={project.repo} />
-            </span>
-          )}
-        </div>
+        {project.ticket && (
+          <span className="ticket mono" data-testid="project.ticket">
+            <LinkedText text={project.ticket} />
+          </span>
+        )}
+        {project.repo && (
+          <span className="repo mono" data-testid="project.repo">
+            <LinkedText text={project.repo} />
+          </span>
+        )}
         <div className="grow" />
         {draft ? <CreateButton project={project} /> : <Autopilot project={project} />}
       </div>
@@ -189,7 +189,7 @@ function CreateButton({ project }: { project: Project }) {
   return (
     <button
       type="button"
-      className="btn btn-primary btn-sm"
+      className="btn btn-primary btn-sm head-create"
       disabled={refusal !== null || create.isPending}
       title={refusal === null ? CREATE_HOW : `Cannot create ${project.name ?? 'New project'} because ${refusal}`}
       onClick={press}
@@ -270,14 +270,61 @@ function BriefedOtherwise({ project }: { project: Project }) {
   );
 }
 
-/** In the order they joined, overlapping by 2px. */
+// `.avatar.sm` is 24px wide, and each avatar after the first overlaps the one before by 2px.
+const AVATAR = 24;
+const OVERLAP = 2;
+const across = (avatars: number) => avatars * AVATAR - (avatars - 1) * OVERLAP;
+
+/**
+ * In the order they joined, overlapping by 2px. In a tight head they give way last, once the step's
+ * name is at its floor: they fold to the first avatars and a "+N" count of the rest, its tooltip
+ * naming them, one avatar at least showing.
+ */
 function Members({ members }: { members: Project['members'] }) {
+  const [box, setBox] = useState<HTMLDivElement | null>(null);
+  const room = useWidth(box);
   if (members.length === 0) return null;
+  // The box is as wide as every avatar until the head takes width from it: the count goes by the
+  // width the head leaves it, never by what it shows, so a fold never makes room to unfold.
+  const all = across(members.length);
+  const shown = room === null || room > all - 0.5 ? members.length : Math.max(1, Math.floor((room + 0.5 - AVATAR) / (AVATAR - OVERLAP)));
+  const folded = members.slice(shown);
   return (
-    <div className="members" role="group" aria-label="Members" data-testid="project.members">
-      {members.map((member) => (
+    <div
+      ref={setBox}
+      className="members"
+      style={{ flexBasis: all, minWidth: Math.min(all, across(2)) }}
+      role="group"
+      aria-label="Members"
+      data-testid="project.members"
+    >
+      {members.slice(0, shown).map((member) => (
         <Avatar key={member.handle} who={{ name: member.name, initials: member.initials, slot: member.avatar_slot }} size="sm" />
       ))}
+      {folded.length > 0 && (
+        <span
+          className="avatar sm"
+          role="img"
+          title={folded.map((member) => member.name).join(', ')}
+          aria-label={`${folded.length} more: ${folded.map((member) => member.name).join(', ')}`}
+          data-testid="project.members.more"
+        >
+          +{folded.length}
+        </span>
+      )}
     </div>
   );
+}
+
+/** The element's width, as the window and its neighbours change it; null until it is first measured. */
+function useWidth(element: HTMLElement | null): number | null {
+  const [width, setWidth] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    if (element === null) return;
+    // The observer reports the width when it starts, and again on every change.
+    const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [element]);
+  return width;
 }

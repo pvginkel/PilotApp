@@ -8,7 +8,8 @@ type Ask = Exclude<Act, 'join' | 'leave'>;
 /**
  * A project's head (F2), auto pilot's switch and its warning triangle (F4), the plan popover its
  * step button opens (F3), Discuss and its unread dot (F2.3, F39.2, F43), the Documents button
- * (F2.3), the handbook's button (F129.4), the plan's notes (F2.7), a draft's Create project and
+ * (F2.3), the handbook's button (F129.4), the plan's notes (F2.7), the members and the count they
+ * fold to in a tight head (F2.5), a draft's Create project and
  * draft-panel toggle (F46.2, F48), and the project's menu and the dialogs it opens (F2.4).
  */
 export class ProjectHeadPage {
@@ -27,6 +28,8 @@ export class ProjectHeadPage {
   readonly planHeading: Locator;
   readonly planSteps: Locator;
   readonly members: Locator;
+  readonly memberAvatars: Locator;
+  readonly membersMore: Locator;
   readonly documentsButton: Locator;
   readonly discussButton: Locator;
   readonly discussDot: Locator;
@@ -55,6 +58,8 @@ export class ProjectHeadPage {
     this.planHeading = page.getByTestId('project.plan.heading');
     this.planSteps = page.getByTestId('project.plan.step');
     this.members = page.getByTestId('project.members');
+    this.membersMore = page.getByTestId('project.members.more');
+    this.memberAvatars = this.members.locator('.avatar:not([data-testid="project.members.more"])');
     this.documentsButton = page.getByTestId('project.documents');
     this.discussButton = page.getByTestId('project.discuss');
     this.discussDot = this.discussButton.getByTestId('project.discuss.unread');

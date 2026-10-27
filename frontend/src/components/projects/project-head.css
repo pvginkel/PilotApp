@@ -14,20 +14,27 @@
   }
   .feed-head .head-row { display: contents; }
   .feed-head h1 { min-width: 0; margin: 0; overflow: hidden; font-size: 17px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
-  .feed-head .meta { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 13px; color: hsl(var(--muted-foreground)); }
-  .feed-head .meta > :first-child { white-space: nowrap; }
-  .feed-head .meta .repo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .feed-head .grow { flex: 1; }
+  .feed-head .ticket, .feed-head .repo { font-size: 13px; color: hsl(var(--muted-foreground)); white-space: nowrap; }
+  .feed-head .repo { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  /* The spacer before auto pilot takes back the gap after it, and the repo carries the gap before
+     it as its own, giving way with it: neither costs the row a gap once it has no width. */
+  .feed-head .grow { flex: 1; margin-right: -12px; }
+  .feed-head .repo { margin-left: -12px; }
+  .feed-head .repo::before { content: ''; display: inline-block; width: 12px; }
   .chip.draft-chip { background: hsl(var(--primary-muted)); color: hsl(var(--primary-muted-foreground)); }
   .chip.finished-chip, .chip.archived-chip { font-weight: 600; }
 
-  /* In a tight head the repo and the step's name give way, then the name; the chips, auto pilot,
-     the members and the icons keep their size, so the head's last control, the menu, stays inside
-     it, clear of the panel beside it, as long as those alone fit. Flex items shrink in proportion
-     to factor × size, so at this factor the name gives up under a millionth of its width until the
-     two have given way to nothing. */
-  .feed-head .meta, .feed-head .step-anchor { flex-shrink: 1000000; }
-  .feed-head .switch, .feed-head .members, .feed-head .head-icon { flex: none; }
+  /* In a tight head its parts give way in one order: the repo, then the name, then the step's name
+     down to its floor (plan-popover.tsx), then the members, folding to a count (project-head.tsx).
+     The ticket, the chips, auto pilot or Create project and the icons keep their size, so the
+     head's last control, the menu, stays inside it, clear of the panel beside it, down to 1200px.
+     Flex items shrink in proportion to factor × size: at a million times the next one's factor,
+     each gives way to its floor while the next gives up a millionth as much for its size. */
+  .feed-head .repo { flex-shrink: 1e18; }
+  .feed-head h1 { flex-shrink: 1e12; }
+  .feed-head .step-anchor { flex-shrink: 1e6; }
+  .feed-head .members { flex-shrink: 1; justify-content: flex-end; }
+  .feed-head .ticket, .feed-head .chip, .feed-head .switch, .feed-head .head-create, .feed-head .head-icon { flex: none; }
   .feed-head .head-icon { align-self: center; }
   /* Icon buttons side by side touch: the row's gap stands only between them and the rest. */
   .feed-head .head-icon + .head-icon { margin-left: -12px; }
@@ -84,8 +91,7 @@
   /* Beside the switch while work briefed under its other setting runs (F4.3). */
   .switch-warning { flex: none; margin-left: -6px; font-size: 14px; color: hsl(var(--warning-text)); }
 
-  /* The step button: a long step name gives way before the ticket does. */
-  .step-anchor { min-width: 0; }
+  /* The step button: its name gives way down to the floor plan-popover.tsx sets on the anchor. */
   .step-anchor > .btn { max-width: 100%; }
   .step-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   /* ", …" when more steps are in progress: it stays when the name gives way, without the gap. */
@@ -126,8 +132,7 @@
   @media (max-width: 900px) {
     .feed-head { flex-direction: column; align-items: stretch; gap: 8px; padding: 8px 14px; }
     .feed-head .head-row { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
-    .feed-head .meta { flex-shrink: 1; }
-    .feed-head .meta .repo { display: none; }
+    .feed-head .repo { display: none; }
     .feed-head .step-anchor { flex: 1; }
     .plan-pop { right: auto; left: 0; width: min(320px, calc(100vw - 28px)); }
     .notes-pop { width: min(340px, calc(100vw - 28px)); }

@@ -5,7 +5,7 @@
  * tap (F3.6).
  */
 
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { Check, StickyNote } from 'lucide-react';
 import { NoteList } from '@/components/projects/plan-notes';
 import { LinkedText } from '@/components/shared/linked-text';
@@ -16,8 +16,22 @@ import { planStep, stepReading } from '@/lib/utils/status-labels';
 type Progress = ProjectHead['progress'];
 type Task = ProjectHead['tasks'][number];
 
+// The least width the step's name gives way to in a tight head: about three letters and the ellipsis.
+const NAME_FLOOR = 28;
+
 export function StepButton({ progress, tasks }: { progress: Progress; tasks: Task[] }) {
   const reading = stepReading(progress);
+  const button = useRef<HTMLButtonElement>(null);
+  // No CSS width is the lesser of a length and the content's, so the anchor's least width is set
+  // here, from the button and its name measured whole: the button with its name at the floor, or
+  // whole where the name is shorter.
+  useLayoutEffect(() => {
+    const own = button.current!;
+    const anchor = own.closest<HTMLElement>('.step-anchor')!;
+    anchor.style.minWidth = '';
+    const name = own.querySelector('.step-name')!.getBoundingClientRect().width;
+    anchor.style.minWidth = `${own.getBoundingClientRect().width - name + Math.min(NAME_FLOOR, name)}px`;
+  }, [reading.text, reading.more]);
   const going = progress.in_progress;
   const tooltip = `${progress.done} of ${progress.total} steps done${going.length > 0 ? ` · in progress: ${going.join('; ')}` : ''}`;
   return (
@@ -28,6 +42,7 @@ export function StepButton({ progress, tasks }: { progress: Progress; tasks: Tas
       testId="project.plan"
       trigger={({ open, toggle }) => (
         <button
+          ref={button}
           type="button"
           className="btn btn-sm"
           title={tooltip}
