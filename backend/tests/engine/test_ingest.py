@@ -30,7 +30,7 @@ from app.engine.bus import (
 from app.engine.documents import DocumentService
 from app.engine.ingest import Ingested, PathKind, WorkerVersion
 from app.engine.paths import sha256_hex
-from app.engine.tree import TreeFile
+from app.engine.tree import TreeDocument, TreeFile
 from app.exceptions import RecordNotFoundException
 from app.extensions import db
 from app.models import (
@@ -1189,6 +1189,69 @@ class TestIngestServiceMerge:
         assert answer.faults == ()
         assert draft.published_text == "# Which tent?\n"
         assert list(session.scalars(select(Block))) == []
+
+    @pytest.mark.parametrize(
+        ("save", "faults"),
+        [
+            pytest.param(
+                ANSWERED.replace("  - Tunnel\n", "  - Tunnel: sleeps two\n"),
+                (dsl.Fault(5, FROZEN),),
+                id="answered-frozen",
+            ),
+            pytest.param(
+                "# Which tent?\n",
+                (
+                    dsl.Fault(
+                        3, "block D1: only the draft's blocks may be removed; restored"
+                    ),
+                ),
+                id="dropped-restored",
+            ),
+        ],
+    )
+    def test_past_create_the_project_document_is_no_draft(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        save: str,
+        faults: tuple[dsl.Fault, ...],
+    ) -> None:
+        """A person's answered block freezes, and no block goes, from Create
+        project on (F47.4, F32.7)."""
+        draft = _bear_draft(container, project, ANSWERED)
+        _open(session, project, "tents")
+
+        answer = _ingest(container, "tents/project.md", save, environment)
+
+        assert not answer.held
+        assert answer.faults == faults
+        assert answer.content is not None
+        assert draft.published_text == answer.content.decode()
+        assert [block.local_id for block in session.scalars(select(Block))] == ["D1"]
+
+    def test_past_create_its_slug_is_read_by_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """No later save moves the folder (DB decision 1), nor is its slug a
+        fault."""
+        draft = _bear_draft(container, project, DRAFT)
+        _open(session, project, "badges")
+        save = "---\ntitle: Badge palette\nslug: Not A Slug\n---\n"
+
+        answer = _ingest(container, "badges/project.md", save, environment)
+
+        assert (answer.held, answer.faults) == (False, ())
+        assert draft.published_text == save
+        assert (project.slug, project.name) == ("badges", "Badge palette")
+        assert isinstance(
+            container.tree_service().resolve("badges/project.md"), TreeDocument
+        )
 
     def test_an_agent_edit_of_the_opening_is_reverted(
         self,

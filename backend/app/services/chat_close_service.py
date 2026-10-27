@@ -1,6 +1,7 @@
-"""A project chat's close (F130, F5.5, F128.1; DB decisions 57, 60, assertions
-244, 245; design 2 §13): at Finish, `finished`, at Reopen, `reopened`, and at
-Archive, `archived`, in the transition's transaction; and `chat_close_timeout`
+"""A project chat's close (F130, F5.5, F128.1, F48.2; DB decisions 57, 60,
+assertions 244, 245; design 2 §13): at Create project, the definition chat,
+`created`, at Finish, `finished`, at Reopen, `reopened`, and at Archive,
+`archived`, in the transition's transaction; and `chat_close_timeout`
 after its last turn ended with no turn in flight, `timeout`, on the
 scheduler's tick. A closed chat is never sent to again: the next message
 starts a chat of its own (`ChatService`).
@@ -13,9 +14,9 @@ transition commits.
 
 The tick ends the chat's controller session, under its Session's lock, before
 it closes the chat, its Session then `ended`; a controller that does not
-answer leaves the chat open for the next tick. Finish, Reopen and Archive call
-no controller: a chat they close keeps its controller session, idle or
-interrupted, and nothing sends to it again. The definition chat never closes
+answer leaves the chat open for the next tick. Create project, Finish, Reopen
+and Archive call no controller: a chat they close keeps its controller
+session, idle or interrupted, and nothing sends to it again. The definition chat never closes
 by timeout (F130.2).
 """
 
@@ -60,8 +61,8 @@ its environment gone, or not running, which no headless session outlives."""
 
 
 class ChatCloseService:
-    """Closes the project chats: at Finish, Reopen and Archive, and on the
-    timer."""
+    """Closes the project chats: at Create project, Finish, Reopen and
+    Archive, and on the timer."""
 
     def __init__(
         self,
@@ -86,23 +87,32 @@ class ChatCloseService:
             CLOSE_TIMER, self.run_close_timer, needs_controller=True
         )
 
-    def close_open(
-        self, db: Session, project: Project, cause: CloseCause, at: datetime
-    ) -> None:
-        """The project's open chat closed with `cause` at `at`, Finish's,
-        Reopen's or Archive's (F5.5, F128.1), in the caller's transaction, which holds the
-        project's row and has stopped the project's sessions, the chat's
-        among them: its Session locked after that row, before any Item."""
+    def open_chat(self, db: Session, project: Project) -> Chat | None:
+        """The project's open chat, none while none is open, its Session
+        locked until the caller's transaction ends, after the project's row,
+        which the caller holds, and before any Item: a message's send holds
+        that lock from before its Turn to its commit (`ChatService`)."""
         chat = db.scalars(
             select(Chat)
             .where(Chat.project_id == project.id, Chat.closed_at.is_(None))
             .execution_options(populate_existing=True)
         ).one_or_none()
+        if chat is not None:
+            self._records(db).lock_session(chat.id)
+        return chat
+
+    def close_open(
+        self, db: Session, project: Project, cause: CloseCause, at: datetime
+    ) -> None:
+        """The project's open chat closed with `cause` at `at`, Create
+        project's, Finish's, Reopen's or Archive's (F48.2, F5.5, F128.1), in
+        the caller's transaction, which holds the project's row and has
+        stopped the project's sessions, the chat's among them, or at Create
+        found no Turn of it in flight (`open_chat`'s lock)."""
+        chat = self.open_chat(db, project)
         if chat is None:
             return
-        records = self._records(db)
-        records.lock_session(chat.id)
-        self._close(db, records, chat, cause, at)
+        self._close(db, self._records(db), chat, cause, at)
 
     def turn_ended(self, db: Session, session: AgentSession) -> None:
         """A Turn of the Session ended, under its lock: a chat closed while

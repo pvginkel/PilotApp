@@ -19,6 +19,7 @@ from pilot_dsl import (
     Section,
     Span,
     parse,
+    slug_problem,
     validate,
 )
 
@@ -1303,3 +1304,22 @@ class TestValidateWithUnknownFacts:
             )
             == []
         )
+
+
+class TestSlugProblem:
+    """The draft's slug rule, which Create project checks again on its own."""
+
+    @pytest.mark.parametrize(
+        ("slug", "problem"),
+        [
+            ("crumb-2", None),
+            ("Crumb", "is not lower-case letters, digits and hyphens"),
+            ("", "is not lower-case letters, digits and hyphens"),
+            ("draft-7", "starts with `draft-`"),
+            ("harbour", "is taken by another project"),
+        ],
+    )
+    def test_a_slug_is_judged_as_the_draft_s_rule_judges_it(
+        self, slug: str, problem: str | None
+    ) -> None:
+        assert slug_problem(slug, {"harbour"}) == problem

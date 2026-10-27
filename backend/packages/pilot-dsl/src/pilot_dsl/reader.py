@@ -331,7 +331,7 @@ def validate(document: ParsedDocument, facts: Facts) -> list[Fault]:
         )
     slug = front_matter.slug
     if facts.document is DocumentKind.DRAFT and slug is not None:
-        problem = _slug_problem(slug, facts.taken_slugs)
+        problem = slug_problem(slug, facts.taken_slugs)
         if problem is not None:
             faults.append(
                 Fault(lines["slug"].first, f"front matter: `slug: {slug}` {problem}")
@@ -394,7 +394,10 @@ def _record_faults(block: Block, facts: Facts) -> list[Fault]:
     return faults
 
 
-def _slug_problem(slug: str, taken: AbstractSet[str]) -> str | None:
+def slug_problem(slug: str, taken: AbstractSet[str]) -> str | None:
+    """What is wrong with `slug` as a project's slug, none when it is one: the
+    record's check (lower-case letters, digits and hyphens, never starting
+    `draft-`) and no slug of `taken`, the other projects'."""
     if _SLUG.fullmatch(slug) is None:
         return "is not lower-case letters, digits and hyphens"
     if slug.startswith("draft-"):

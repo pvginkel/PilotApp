@@ -185,12 +185,23 @@ class ProjectHeadSchema(BaseModel):
         ),
         examples=[3],
     )
+    create_refusal: str | None = Field(
+        description=(
+            "Why Create project cannot be pressed now, the reason its disabled "
+            "button gives (F48.1): Pilot writing in the definition chat, nothing "
+            "drafted, or a draft with no valid slug; for an archived project or "
+            "one past its draft, its standing. Null when it can be pressed; an "
+            "ask the draft leaves open is no reason"
+        ),
+        examples=["Pilot is writing"],
+    )
 
 
 class TransitionRequestSchema(BaseModel):
     """A change of a project's standing the signed-in person makes."""
 
     kind: Literal[
+        "opened",
         "finished",
         "reopened",
         "archived",
@@ -201,13 +212,14 @@ class TransitionRequestSchema(BaseModel):
         "resumed",
     ] = Field(
         description=(
-            "Which change: Finish, Reopen, Archive, Bring back, auto pilot "
-            "switched on or off, or the project paused or resumed. It must "
-            "follow from the project's standing: Finish from open, Reopen from "
-            "finished, Archive from unarchived, Bring back from archived, auto "
-            "pilot on from off on an open project, off from on, the pause from "
-            "not paused on an open project, the resume from paused; an "
-            "archived project takes Bring back alone"
+            "Which change: Create project, Finish, Reopen, Archive, Bring back, "
+            "auto pilot switched on or off, or the project paused or resumed. "
+            "It must follow from the project's standing: Create project from a "
+            "draft its head's `create_refusal` does not refuse, Finish from "
+            "open, Reopen from finished, Archive from unarchived, Bring back "
+            "from archived, auto pilot on from off on an open project, off from "
+            "on, the pause from not paused on an open project, the resume from "
+            "paused; an archived project takes Bring back alone"
         ),
         examples=["finished"],
     )

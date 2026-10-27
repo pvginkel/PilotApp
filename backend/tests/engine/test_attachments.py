@@ -488,3 +488,90 @@ class TestAttachServiceHang:
             ),
             ProjectChanged(project.id),
         ]
+
+
+class TestAttachServiceAtCreate:
+    """Create project's attachments on the opening: the draft's copy, then
+    the material hung on nothing (F18.1, F36.6; DB decision 14)."""
+
+    def test_the_draft_is_copied_as_the_next_batch_with_no_source(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        project: Project,
+        item: Item,
+        project_session: models.Session,
+        environment: Environment,
+    ) -> None:
+        service = container.attach_service()
+        service.attach(
+            item, project_session, [_file("a.md")], environment_id=environment.id
+        )
+        text = "---\nslug: camp-site\n---\n# Camp site\n"
+
+        copy = service.attach_draft(item, text)
+
+        assert (
+            copy.batch,
+            copy.filename,
+            copy.title,
+            copy.content_type,
+            copy.source_code,
+            copy.source_environment_id,
+            copy.source_path,
+            copy.created_by_session_id,
+        ) == (
+            2,
+            "project.md",
+            "Camp site",
+            "text/markdown",
+            AttachmentSource.DRAFT,
+            None,
+            None,
+            None,
+        )
+        assert container.attachment_store().get(copy) == text.encode()
+        assert _hung(session, item) == [(1, 1, "a.md"), (2, 2, "project.md")]
+        assert container.tree_service().resolve(
+            f"draft-{project.number}/attachments/2/project.md"
+        ) == TreeFile(text.encode(), hashlib.sha256(text.encode()).hexdigest())
+
+    def test_a_draft_with_no_title_is_titled_by_its_file_name(
+        self, container: ServiceContainer, item: Item
+    ) -> None:
+        copy = container.attach_service().attach_draft(item, "")
+
+        assert (copy.title, copy.size) == ("project.md", 0)
+
+    def test_the_material_on_nothing_is_hung_by_batch_then_file_name(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        project: Project,
+        item: Item,
+        project_session: models.Session,
+        environment: Environment,
+    ) -> None:
+        service = container.attach_service()
+        attach = functools.partial(service.attach, environment_id=environment.id)
+        attach(None, project_session, [_file("b.md"), _file("a.md")])
+        attach(item, project_session, [_file("x.md")])
+        attach(None, project_session, [_file("c.md")])
+        opening = Item(
+            project_id=project.id,
+            seq=2,
+            kind_code="opening",
+            title="Ada Example started this project",
+            created_by_user_id=project.created_by_user_id,
+        )
+        session.add(opening)
+        session.flush()
+
+        service.hang_unhung(opening)
+
+        assert _hung(session, opening) == [
+            (1, 1, "a.md"),
+            (2, 1, "b.md"),
+            (3, 3, "c.md"),
+        ]
+        assert _hung(session, item) == [(1, 2, "x.md")]

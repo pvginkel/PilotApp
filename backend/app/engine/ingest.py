@@ -28,7 +28,7 @@ from app.engine.tree import TreeDocument, TreeFile, TreePlan, TreeService
 from app.engine.views import ViewService
 from app.models import Document, Environment, Item, PlanTask, Project, SaveError, User
 from app.models import Session as AgentSession
-from app.models.reference import DocumentRole, ErrorKind
+from app.models.reference import DocumentRole, ErrorKind, ProjectState
 
 _NOT_TEXT = (
     "the file is not UTF-8 text: each sequence that is not, and each NUL,"
@@ -245,7 +245,7 @@ class IngestService:
         text, faults = _decoded(content)
         taken = self._store(document, text, session)
         self._clear(path)
-        kind = _kind(document, item)
+        kind = _kind(project, document, item)
         if kind is dsl.DocumentKind.OPENING:
             # The opening is never read: the merge reverts a save that differs,
             # whatever it holds (DB decision 2).
@@ -395,10 +395,16 @@ def _decoded(content: bytes) -> tuple[str, list[dsl.Fault]]:
     return text.replace("\x00", "�"), [dsl.Fault(line, _NOT_TEXT)]
 
 
-def _kind(document: Document, item: Item | None) -> dsl.DocumentKind:
+def _kind(project: Project, document: Document, item: Item | None) -> dsl.DocumentKind:
     if item is None:
-        if document.role_code is DocumentRole.DRAFT:
+        if (
+            document.role_code is DocumentRole.DRAFT
+            and project.state_code is ProjectState.DRAFT
+        ):
             return dsl.DocumentKind.DRAFT
+        # Past Create project `project.md` is no draft (F47.4): it takes the
+        # handbook's rules, an answered block frozen, a dropped one restored
+        # and its slug read by nothing (DB decision 1).
         return dsl.DocumentKind.HANDBOOK
     if item.kind_code == OPENING:
         return dsl.DocumentKind.OPENING

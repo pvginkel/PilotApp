@@ -23,6 +23,7 @@ from pilot_dsl.reader import (
     Facts,
     body,
     parse,
+    slug_problem,
     validate,
     words,
 )
@@ -63,6 +64,7 @@ __all__ = [
     "merge",
     "parse",
     "recommendation",
+    "slug_problem",
     "validate",
     "with_facts",
     "with_title",

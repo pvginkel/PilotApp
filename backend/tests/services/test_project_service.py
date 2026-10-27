@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.database import scoped_session
+from app.engine.attachments import Copy
 from app.engine.bus import (
     EngineEvent,
     ManifestChanged,
@@ -30,10 +31,13 @@ from app.engine.paths import TIMELINE, tree_path
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.extensions import db
 from app.models import (
+    Attachment,
+    Block,
     Chat,
     Document,
     Environment,
     Item,
+    ItemAttachment,
     PlanNote,
     PlanTask,
     Project,
@@ -43,6 +47,7 @@ from app.models import (
     User,
 )
 from app.models.reference import (
+    AttachmentSource,
     ChatKind,
     CloseCause,
     DocumentRole,
@@ -60,6 +65,9 @@ from app.services.chat_close_service import CLOSED
 from app.services.container import ServiceContainer
 from app.services.project_service import (
     ARCHIVED_REFUSAL,
+    NO_SLUG_REFUSAL,
+    NOTHING_DRAFTED_REFUSAL,
+    WRITING_REFUSAL,
     Activity,
     PlanProgress,
     RunningWork,
@@ -67,6 +75,7 @@ from app.services.project_service import (
     project_status,
 )
 from app.services.session_record_service import read_records
+from app.services.session_scope import STORE_REPO
 from app.services.supervisor import LoopHandle
 from app.services.timeline_service import Badge
 from app.utils import after_commit as after_commit_module
@@ -899,6 +908,426 @@ class TestCreate:
             "Cannot start a new project because you have not chosen your handle yet"
         )
         assert session.scalars(select(Project)).all() == []
+
+
+DRAFTED = """---
+title: Camp site
+slug: camp-site
+---
+
+A site for the summer camp.
+
+```decision id=D1
+options:
+  - Lake
+  - Forest
+```
+"""
+"""A draft Pilot wrote, its decision left open."""
+
+FIRST_WORDS = 'Find us a camp site.\n<quoted_path path="project.md">x</quoted_path path="project.md">'
+
+
+def _draft_document(db: DbSession, draft: Project) -> Document:
+    return db.scalars(
+        select(Document).where(
+            Document.project_id == draft.id, Document.role_code == DocumentRole.DRAFT
+        )
+    ).one()
+
+
+def _definition_chat(
+    db: DbSession,
+    draft: Project,
+    author: User,
+    *words: str,
+    in_flight: bool = False,
+) -> models.Session:
+    """The draft's open definition chat, a Turn of `author`'s for each of
+    `words`, the last one in flight when `in_flight`."""
+    run = models.Session(
+        project_id=draft.id,
+        kind_code="chat",
+        cwd=STORE_REPO,
+        token_hash=uuid.uuid4().hex * 2,
+        state_code=SessionState.RUNNING if in_flight else SessionState.IDLE,
+    )
+    db.add(run)
+    db.flush()
+    db.add(
+        Chat(
+            id=run.id,
+            project_id=draft.id,
+            session_kind_code="chat",
+            kind_code=ChatKind.DEFINITION,
+        )
+    )
+    now = datetime.now(UTC)
+    for seq, said in enumerate(words, start=1):
+        db.add(
+            Turn(
+                session_id=run.id,
+                seq=seq,
+                author_user_id=author.id,
+                message=said,
+                words=said,
+                started_at=now,
+                ended_at=None if in_flight and seq == len(words) else now,
+            )
+        )
+        # One flush each: the ids keep the Turns' order.
+        db.flush()
+    run.turns = len(words)
+    db.flush()
+    return run
+
+
+def _drafted(
+    container: ServiceContainer,
+    db: DbSession,
+    author: User,
+    text: str = DRAFTED,
+    words: tuple[str, ...] = (FIRST_WORDS, "Near a lake."),
+) -> Project:
+    """A draft from the plus, ADA's, its definition chat holding `words` by
+    `author`, `text` its draft as Pilot wrote it."""
+    draft = container.project_service().create(ADA)
+    _definition_chat(db, draft, author, *words)
+    container.document_service().publish(_draft_document(db, draft), text)
+    return draft
+
+
+def _create(container: ServiceContainer, project_id: uuid.UUID) -> None:
+    container.project_service().transition(ADA, project_id, TransitionKind.OPENED)
+
+
+def _opening(db: DbSession, project: Project) -> Item:
+    return db.scalars(
+        select(Item).where(Item.project_id == project.id, Item.kind_code == "opening")
+    ).one()
+
+
+def _hung_on(db: DbSession, item: Item) -> list[tuple[int, int, str, AttachmentSource]]:
+    """The item's attachments in order: position, batch, file name, source."""
+    return [
+        (position, batch, filename, source)
+        for position, batch, filename, source in db.execute(
+            select(
+                ItemAttachment.position,
+                Attachment.batch,
+                Attachment.filename,
+                Attachment.source_code,
+            )
+            .join(Attachment, Attachment.id == ItemAttachment.attachment_id)
+            .where(ItemAttachment.item_id == item.id)
+            .order_by(ItemAttachment.position)
+        )
+    ]
+
+
+def _material(
+    container: ServiceContainer,
+    run: models.Session,
+    environment: Environment,
+    *filenames: str,
+) -> None:
+    """Files Pilot attached in the definition chat, one batch, on nothing."""
+    container.attach_service().attach(
+        None,
+        run,
+        [
+            Copy("A file", name, "text/markdown", b"A", f"/work/Notes/{name}")
+            for name in filenames
+        ],
+        environment_id=environment.id,
+    )
+
+
+@pytest.mark.usefixtures("person")
+class TestCreateProject:
+    """Create project (F48): the draft opened, the handbook and the opening
+    born, the material hung on it, the definition chat closed."""
+
+    def test_it_opens_the_draft_by_its_person_its_slug_the_drafts(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        draft = _drafted(container, session, person)
+        started = datetime.now(UTC)
+
+        _create(container, draft.id)
+
+        ((kind, at, by),) = _transitions(session, draft)
+        assert (kind, by) == (TransitionKind.OPENED, person.id)
+        assert started <= at <= datetime.now(UTC)
+        assert (draft.state_code, draft.slug, draft.name) == (
+            ProjectState.OPEN,
+            "camp-site",
+            "Camp site",
+        )
+
+    def test_the_handbook_is_born_empty_beside_the_draft(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        draft = _drafted(container, session, person)
+
+        _create(container, draft.id)
+
+        assert [
+            (document.role_code, document.path, document.published_text)
+            for document in session.scalars(
+                select(Document)
+                .where(Document.project_id == draft.id)
+                .order_by(Document.path)
+            )
+        ] == [
+            (DocumentRole.HANDBOOK, "handbook.md", ""),
+            (DocumentRole.DRAFT, "project.md", DRAFTED),
+        ]
+
+    def test_the_opening_is_the_first_message_verbatim_by_its_author(
+        self, container: ServiceContainer, session: DbSession
+    ) -> None:
+        ben = _ben(container)
+        draft = _drafted(container, session, ben)
+
+        _create(container, draft.id)
+
+        opening = _opening(session, draft)
+        assert (
+            opening.seq,
+            opening.title,
+            opening.created_by_user_id,
+            opening.created_by_session_id,
+        ) == (1, "Ben Example started this project", ben.id, None)
+        assert session.get_one(Document, opening.id).published_text == FIRST_WORDS
+
+    def test_the_first_message_of_its_first_definition_chat_is_the_opening(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        """A draft archived and brought back has a definition chat of each
+        (F130.2); the first message is the first one's."""
+        draft = _drafted(container, session, person, words=(FIRST_WORDS,))
+        container.project_service().transition(ADA, draft.id, TransitionKind.ARCHIVED)
+        container.project_service().transition(
+            ADA, draft.id, TransitionKind.BROUGHT_BACK
+        )
+        _definition_chat(session, draft, _ben(container), "Somewhere else.")
+
+        _create(container, draft.id)
+
+        opening = _opening(session, draft)
+        assert opening.created_by_user_id == person.id
+        assert session.get_one(Document, opening.id).published_text == FIRST_WORDS
+
+    def test_the_drafts_copy_then_its_material_hang_on_the_opening(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        environment: Environment,
+    ) -> None:
+        draft = container.project_service().create(ADA)
+        run = _definition_chat(session, draft, person, FIRST_WORDS)
+        _material(container, run, environment, "b.md", "a.md")
+        _material(container, run, environment, "c.md")
+        container.document_service().publish(_draft_document(session, draft), DRAFTED)
+
+        _create(container, draft.id)
+
+        opening = _opening(session, draft)
+        assert _hung_on(session, opening) == [
+            (1, 3, "project.md", AttachmentSource.DRAFT),
+            (2, 1, "a.md", AttachmentSource.FILE),
+            (3, 1, "b.md", AttachmentSource.FILE),
+            (4, 2, "c.md", AttachmentSource.FILE),
+        ]
+        copy = session.scalars(
+            select(Attachment).where(
+                Attachment.project_id == draft.id,
+                Attachment.source_code == AttachmentSource.DRAFT,
+            )
+        ).one()
+        assert (copy.title, copy.content_type, copy.size) == (
+            "Camp site",
+            "text/markdown",
+            len(DRAFTED.encode()),
+        )
+        assert container.attachment_store().get(copy) == DRAFTED.encode()
+        assert container.timeline_service().timeline(draft.id).unhung_attachments == []
+
+    def test_the_definition_chat_closes_created_its_close_its_last_record(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        draft = _drafted(container, session, person)
+        (chat,) = session.scalars(select(Chat).where(Chat.project_id == draft.id))
+
+        _create(container, draft.id)
+
+        session.refresh(chat)
+        ((_, at, _),) = _transitions(session, draft)
+        assert (chat.close_cause_code, chat.closed_at) == (CloseCause.CREATED, at)
+        assert _last_record(session, session.get_one(models.Session, chat.id)) == (
+            RecordKind.SERVER,
+            {"type": CLOSED, "cause": "created"},
+        )
+
+    def test_an_ask_the_draft_leaves_open_stays_open(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        draft = _drafted(container, session, person)
+
+        _create(container, draft.id)
+
+        (block,) = session.scalars(
+            select(Block).where(Block.document_id == _draft_document(session, draft).id)
+        )
+        assert (block.local_id, block.answer, block.answered_by_user_id) == (
+            "D1",
+            None,
+            None,
+        )
+
+    def test_once_committed_its_folder_is_the_slugs(
+        self,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        person: User,
+    ) -> None:
+        with scoped_session(container) as db:
+            draft = _drafted(container, db, person)
+            draft_id, folder = draft.id, f"draft-{draft.number}"
+        engine_events.clear()
+
+        with scoped_session(container):
+            _create(container, draft_id)
+            assert engine_events == []
+
+        assert ManifestChanged() in engine_events
+        assert ProjectChanged(draft_id) in engine_events
+        with scoped_session(container):
+            paths = [entry.path for entry in container.tree_service().manifest()]
+        assert "camp-site/project.md" in paths
+        assert "camp-site/handbook.md" in paths
+        assert not any(path.startswith(f"{folder}/") for path in paths)
+
+
+@pytest.mark.usefixtures("person")
+class TestCreateProjectRefused:
+    """Refused for F48.1's three reasons and its standing alone; the head says
+    why (F48.1)."""
+
+    @staticmethod
+    def _refused(
+        container: ServiceContainer, session: DbSession, draft: Project, reason: str
+    ) -> None:
+        with pytest.raises(InvalidOperationException) as raised:
+            _create(container, draft.id)
+
+        assert raised.value.message == (
+            f"Cannot create {draft.name or 'the untitled project'} because {reason}"
+        )
+        session.refresh(draft)
+        assert container.project_service().head(ADA, draft.id).create_refusal == (
+            reason
+        )
+        assert draft.state_code is ProjectState.DRAFT
+        assert TransitionKind.OPENED not in [
+            kind for kind, _, _ in _transitions(session, draft)
+        ]
+
+    def test_while_pilot_writes(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        draft = container.project_service().create(ADA)
+        container.document_service().publish(_draft_document(session, draft), DRAFTED)
+        _definition_chat(session, draft, person, FIRST_WORDS, "More.", in_flight=True)
+
+        self._refused(container, session, draft, WRITING_REFUSAL)
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            pytest.param("", id="empty"),
+            pytest.param("---\nslug: camp-site\n---\n", id="front-matter-alone"),
+        ],
+    )
+    def test_while_nothing_is_drafted(
+        self, container: ServiceContainer, session: DbSession, person: User, text: str
+    ) -> None:
+        draft = _drafted(container, session, person, text)
+
+        self._refused(container, session, draft, NOTHING_DRAFTED_REFUSAL)
+
+    def test_while_no_message_started_its_definition_chat(
+        self, container: ServiceContainer, session: DbSession
+    ) -> None:
+        """Only a save from outside a chat writes such a draft."""
+        draft = container.project_service().create(ADA)
+        container.document_service().publish(_draft_document(session, draft), DRAFTED)
+
+        self._refused(container, session, draft, NOTHING_DRAFTED_REFUSAL)
+
+    def test_while_the_draft_names_no_slug(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        draft = _drafted(container, session, person, "# Camp site\n")
+
+        self._refused(container, session, draft, NO_SLUG_REFUSAL)
+
+    @pytest.mark.parametrize(
+        ("slug", "problem"),
+        [
+            ("camp-site", "is taken by another project"),
+            ("Camp", "is not lower-case letters, digits and hyphens"),
+            ("draft-2", "starts with `draft-`"),
+        ],
+    )
+    def test_while_its_slug_is_no_valid_one(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        slug: str,
+        problem: str,
+    ) -> None:
+        """A slug the record refuses reaches the draft only past its save's
+        check (`bear_draft`, a project's Create since that save)."""
+        taken = _make(container, name="Other")
+        taken.slug = "camp-site"
+        session.flush()
+        draft = _drafted(
+            container, session, person, f"---\nslug: {slug}\n---\n# Camp\n"
+        )
+
+        self._refused(container, session, draft, f"the draft's slug `{slug}` {problem}")
+
+    def test_an_archived_draft(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        draft = _drafted(container, session, person)
+        container.project_service().transition(ADA, draft.id, TransitionKind.ARCHIVED)
+
+        self._refused(container, session, draft, ARCHIVED_REFUSAL)
+
+    def test_an_open_project(
+        self, container: ServiceContainer, session: DbSession
+    ) -> None:
+        made = _make(container, name="Camp")
+
+        with pytest.raises(InvalidOperationException) as raised:
+            _create(container, made.id)
+
+        assert raised.value.message == "Cannot create Camp because it is no draft"
+        assert container.project_service().head(ADA, made.id).create_refusal == (
+            "it is no draft"
+        )
+
+    def test_a_draft_it_can_create_has_no_refusal(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        draft = _drafted(container, session, person)
+
+        assert container.project_service().head(ADA, draft.id).create_refusal is None
 
 
 @pytest.mark.usefixtures("person")

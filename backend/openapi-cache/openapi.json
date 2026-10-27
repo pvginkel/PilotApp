@@ -4057,6 +4057,21 @@
             "title": "Autopilot",
             "type": "boolean"
           },
+          "create_refusal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why Create project cannot be pressed now, the reason its disabled button gives (F48.1): Pilot writing in the definition chat, nothing drafted, or a draft with no valid slug; for an archived project or one past its draft, its standing. Null when it can be pressed; an ask the draft leaves open is no reason",
+            "examples": [
+              "Pilot is writing"
+            ],
+            "title": "Create Refusal"
+          },
           "id": {
             "description": "The project's id",
             "format": "uuid",
@@ -4187,7 +4202,8 @@
           "tasks",
           "notes",
           "running_work",
-          "open_items"
+          "open_items",
+          "create_refusal"
         ],
         "title": "ProjectHeadSchema",
         "type": "object"
@@ -7228,8 +7244,9 @@
         "description": "A change of a project's standing the signed-in person makes.",
         "properties": {
           "kind": {
-            "description": "Which change: Finish, Reopen, Archive, Bring back, auto pilot switched on or off, or the project paused or resumed. It must follow from the project's standing: Finish from open, Reopen from finished, Archive from unarchived, Bring back from archived, auto pilot on from off on an open project, off from on, the pause from not paused on an open project, the resume from paused; an archived project takes Bring back alone",
+            "description": "Which change: Create project, Finish, Reopen, Archive, Bring back, auto pilot switched on or off, or the project paused or resumed. It must follow from the project's standing: Create project from a draft its head's `create_refusal` does not refuse, Finish from open, Reopen from finished, Archive from unarchived, Bring back from archived, auto pilot on from off on an open project, off from on, the pause from not paused on an open project, the resume from paused; an archived project takes Bring back alone",
             "enum": [
+              "opened",
               "finished",
               "reopened",
               "archived",
@@ -10025,7 +10042,7 @@
     },
     "/api/projects/{project_id}/transitions": {
       "post": {
-        "description": "Finish also turns auto pilot off, resumes a paused project, stops the project's sessions and closes its open items unanswered; Archive stops the sessions too, and nothing of the project starts after either. Reopen leaves auto pilot off. A resume lets the project's held starts go on.\n\nReturns:     201: The project's head, with its new standing     400: The kind is not one a person makes     401: No one is signed in     403: The caller lacks the editor role     404: No project has the id     409: The caller has not chosen a handle, or the project's standing         does not allow the change",
+        "description": "Create project opens a draft: its slug the draft's, its handbook born empty, its opening first on the timeline with the draft's copy and the material Pilot attached, its definition chat closed, its folder moved once committed. Finish also turns auto pilot off, resumes a paused project, stops the project's sessions and closes its open items unanswered; Archive stops the sessions too, and nothing of the project starts after either. Reopen leaves auto pilot off. A resume lets the project's held starts go on.\n\nReturns:     201: The project's head, with its new standing     400: The kind is not one a person makes     401: No one is signed in     403: The caller lacks the editor role     404: No project has the id     409: The caller has not chosen a handle, or the project's standing         does not allow the change, or Create project's draft does not",
         "operationId": "post__api_projects_{project_id}_transitions",
         "parameters": [
           {

@@ -6,7 +6,7 @@ membership (F4.1, F5, F6, F127, F128)."""
 
 import base64
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -16,17 +16,25 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.models import (
+    Chat,
     Document,
     Environment,
     Item,
     Project,
     ProjectMember,
     ProjectTransition,
+    Turn,
     User,
 )
-from app.models.reference import DocumentRole, SessionState, TransitionKind
+from app.models.reference import (
+    ChatKind,
+    DocumentRole,
+    SessionState,
+    TransitionKind,
+)
 from app.schemas.testing_record import InventedFileSchema, InventedProjectCreateSchema
 from app.services.container import ServiceContainer
+from app.services.session_scope import STORE_REPO
 from tests.support.fake_sidecar import FakeSidecar
 
 PROJECTS = "/api/projects"
@@ -323,6 +331,7 @@ class TestGetProject:
             ],
             "running_work": [],
             "open_items": 2,
+            "create_refusal": "it is no draft",
         }
 
     def test_the_running_work_is_named_for_the_finish_dialog(
@@ -1101,6 +1110,45 @@ class TestMarkDraftActionDone:
         assert response.status_code == 401
 
 
+CAMP_DRAFT = "---\ntitle: Camp site\nslug: camp-site\n---\n\nNear a lake.\n"
+
+
+def _definition_chat(
+    session: Session, draft: Project, author: User, words: str
+) -> None:
+    """The draft's definition chat, idle after `author`'s first message."""
+    run = models.Session(
+        project_id=draft.id,
+        kind_code="chat",
+        cwd=STORE_REPO,
+        token_hash=uuid.uuid4().hex * 2,
+        state_code=SessionState.IDLE,
+    )
+    session.add(run)
+    session.flush()
+    session.add(
+        Chat(
+            id=run.id,
+            project_id=draft.id,
+            session_kind_code="chat",
+            kind_code=ChatKind.DEFINITION,
+        )
+    )
+    now = datetime.now(UTC)
+    session.add(
+        Turn(
+            session_id=run.id,
+            seq=1,
+            author_user_id=author.id,
+            message=words,
+            words=words,
+            started_at=now,
+            ended_at=now,
+        )
+    )
+    session.flush()
+
+
 @pytest.mark.usefixtures("person")
 class TestAddTransition:
     def test_finish_answers_the_head_with_its_new_standing(
@@ -1254,9 +1302,84 @@ class TestAddTransition:
         }
         assert set(fake_sidecar.tree) == synced
 
+    def test_create_project_opens_the_draft_and_moves_its_folder(
+        self,
+        client: FlaskClient,
+        session: Session,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        person: User,
+    ) -> None:
+        fake_sidecar.connect()
+        _sign_in(client)
+        draft = session.get_one(
+            Project, uuid.UUID(client.post(PROJECTS).get_json()["id"])
+        )
+        _definition_chat(session, draft, person, "Find us a camp site.")
+        container.document_service().publish(
+            session.scalars(
+                select(Document).where(
+                    Document.project_id == draft.id,
+                    Document.role_code == DocumentRole.DRAFT,
+                )
+            ).one(),
+            CAMP_DRAFT,
+        )
+        fake_sidecar.drain()
+
+        response = client.post(
+            f"{PROJECTS}/{draft.id}/transitions", json={"kind": "opened"}
+        )
+        fake_sidecar.drain()
+
+        assert response.status_code == 201, response.get_json()
+        body = response.get_json()
+        assert (body["name"], body["state"], body["create_refusal"]) == (
+            "Camp site",
+            "open",
+            "it is no draft",
+        )
+        assert sorted(fake_sidecar.tree) == [
+            "camp-site/attachments/1/project.md",
+            "camp-site/chat.md",
+            "camp-site/handbook.md",
+            "camp-site/items/1-ada-example-started-this-project.md",
+            "camp-site/plan.json",
+            "camp-site/project.md",
+            "camp-site/timeline.json",
+            "reference.json",
+        ]
+        tree = container.tree_service()
+        assert fake_sidecar.tree == {
+            entry.path: tree.read(entry.path).content for entry in tree.manifest()
+        }
+        (opening, *_) = client.get(f"{PROJECTS}/{draft.id}/timeline").get_json()[
+            "items"
+        ]
+        assert (opening["kind"], opening["words"]) == (
+            "opening",
+            "Find us a camp site.",
+        )
+
+    def test_create_project_is_refused_with_its_reason(
+        self, client: FlaskClient, container: ServiceContainer
+    ) -> None:
+        _sign_in(client)
+        draft = client.post(PROJECTS).get_json()["id"]
+
+        response = client.post(
+            f"{PROJECTS}/{draft}/transitions", json={"kind": "opened"}
+        )
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            "Cannot create the untitled project because nothing is drafted"
+        )
+        assert client.get(f"{PROJECTS}/{draft}").get_json()["state"] == "draft"
+
     @pytest.mark.parametrize(
         "body",
-        [{"kind": "opened"}, {"kind": "pausing"}, {"kind": None}, {}],
+        [{"kind": "pausing"}, {"kind": None}, {}],
     )
     def test_a_kind_no_person_makes_is_refused(
         self, client: FlaskClient, container: ServiceContainer, body: dict[str, Any]
@@ -1386,6 +1509,7 @@ class TestCreateProject:
             "notes": [],
             "running_work": [],
             "open_items": 0,
+            "create_refusal": "nothing is drafted",
         }
         draft = session.get_one(Project, uuid.UUID(body["id"]))
         assert fake_sidecar.tree[f"draft-{draft.number}/project.md"] == b""

@@ -1844,7 +1844,8 @@ class TestNamedMessage:
 def _committed(
     container: ServiceContainer, state: ProjectState = ProjectState.OPEN
 ) -> tuple[uuid.UUID, uuid.UUID]:
-    """A person and a project in `state`, committed; their ids."""
+    """A person and a project in `state`, committed; their ids. A draft's
+    `project.md` names the project and its slug, so Create project takes it."""
     with scoped_session(container) as db:
         person = User(
             kind_code=UserKind.PERSON,
@@ -1855,14 +1856,19 @@ def _committed(
         )
         db.add(person)
         db.flush()
+        draft = state is ProjectState.DRAFT
         project = Project(
             created_by_user_id=person.id,
             state_code=state,
-            slug="soup-club",
+            slug=None if draft else "soup-club",
             name="Soup club",
         )
         db.add(project)
         db.flush()
+        if draft:
+            container.document_service().bear_draft(
+                project, "---\nslug: soup-club\n---\n# Soup club\n"
+            )
         return person.id, project.id
 
 
@@ -1909,7 +1915,7 @@ def _committed_idle_chat(
     state: ProjectState = ProjectState.OPEN,
 ) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
     """A person, a project in `state` and its idle chat on a headless session
-    in the store, committed; their ids."""
+    in the store, a draft's its definition chat, committed; their ids."""
     person_id, project_id = _committed(container, state)
     name = (
         client_of(container, fake)
@@ -1940,7 +1946,11 @@ def _committed_idle_chat(
                 id=run.id,
                 project_id=project_id,
                 session_kind_code="chat",
-                kind_code=ChatKind.PROJECT,
+                kind_code=(
+                    ChatKind.DEFINITION
+                    if state is ProjectState.DRAFT
+                    else ChatKind.PROJECT
+                ),
             )
         )
         db.add(
@@ -2149,5 +2159,119 @@ class TestATransitionMeetingAMessage:
                     CloseCause.ARCHIVED
                 )
                 assert db.scalars(select(Chat.id)).all() == [chat_id]
+        finally:
+            fake.close()
+
+
+class TestCreateMeetingAMessage:
+    """Create project and a message to the definition chat never interleave
+    (F48.1, F48.2)."""
+
+    def test_create_meeting_a_send_in_flight_is_refused(
+        self, committed_app: Flask, supervise: Supervise
+    ) -> None:
+        """Create waits on the chat's Session, which the send holds across
+        the controller's call, and reads Pilot writing once it commits."""
+        container = committed_app.container
+        fake = _SendHeld(keepalive_seconds=0.2)
+        try:
+            fake.add_environment(
+                STORE_ENVIRONMENT_ID, name="PilotProjects", status="running"
+            )
+            person_id, project_id, chat_id = _committed_idle_chat(
+                container, fake, ProjectState.DRAFT
+            )
+            services = _starts(container, supervise)
+
+            def send() -> None:
+                with scoped_session(container) as db:
+                    _chats(container, *services).send(
+                        project_id, db.get_one(User, person_id), "Two"
+                    )
+
+            def create() -> None:
+                with scoped_session(container) as db:
+                    container.project_service().transition_as(
+                        db.get_one(User, person_id), project_id, TransitionKind.OPENED
+                    )
+
+            sending = in_thread(send)
+            assert fake.sending.wait(WAIT_SECONDS)
+            creating = in_thread(create)
+            wait_until(lambda: lock_waits(container) == 1, "Create waiting")
+            fake.release.set()
+            sending.result()
+
+            with pytest.raises(
+                InvalidOperationException,
+                match="Cannot create Soup club because Pilot is writing",
+            ):
+                creating.result()
+            with scoped_session(container) as db:
+                assert db.get_one(Project, project_id).state_code is ProjectState.DRAFT
+                assert db.get_one(Chat, chat_id).closed_at is None
+        finally:
+            fake.close()
+
+    def test_a_message_meeting_create_starts_the_projects_chat(
+        self, committed_app: Flask, supervise: Supervise
+    ) -> None:
+        """The send waits on the definition chat's Session, which Create
+        holds; once Create commits it finds the chat closed and starts the
+        open project's chat, sending nothing to the closed one."""
+        container = committed_app.container
+        fake = _Sent(keepalive_seconds=0.2)
+        try:
+            fake.add_environment(
+                STORE_ENVIRONMENT_ID, name="PilotProjects", status="running"
+            )
+            person_id, project_id, chat_id = _committed_idle_chat(
+                container, fake, ProjectState.DRAFT
+            )
+            services = _starts(container, supervise)
+            created, create_ends = threading.Event(), threading.Event()
+
+            def create() -> None:
+                with scoped_session(container) as db:
+                    container.project_service().transition_as(
+                        db.get_one(User, person_id), project_id, TransitionKind.OPENED
+                    )
+                    created.set()
+                    assert create_ends.wait(WAIT_SECONDS)
+
+            def send() -> uuid.UUID:
+                with scoped_session(container) as db:
+                    return (
+                        _chats(container, *services)
+                        .send(project_id, db.get_one(User, person_id), "Two")
+                        .session_id
+                    )
+
+            creating = in_thread(create)
+            assert created.wait(WAIT_SECONDS)
+            sending = in_thread(send)
+            wait_until(lambda: lock_waits(container) == 1, "the send waiting")
+            create_ends.set()
+            creating.result()
+            new_chat = sending.result()
+
+            assert new_chat != chat_id
+            assert fake.sent == []
+            with scoped_session(container) as db:
+                assert [
+                    (chat.id, chat.kind_code, chat.close_cause_code)
+                    for chat in sorted(
+                        db.scalars(select(Chat)), key=lambda chat: chat.id != chat_id
+                    )
+                ] == [
+                    (chat_id, ChatKind.DEFINITION, CloseCause.CREATED),
+                    (new_chat, ChatKind.PROJECT, None),
+                ]
+                assert _last(db, chat_id) == (
+                    RecordKind.SERVER,
+                    {"type": CLOSED, "cause": "created"},
+                )
+                turn = db.scalars(select(Turn).where(Turn.session_id == new_chat)).one()
+                assert turn.message.startswith("/chat\n\nPilot's brief · ")
         finally:
             fake.close()

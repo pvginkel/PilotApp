@@ -2,8 +2,8 @@
 archived projects, a project's head, its timeline, its draft and its handbook
 (F1, F2, F3, F8, F37.4, F129.4, D012); a draft made from the plus (F46.1),
 and their answers to its asks in place (F47.4); and what they change of a
-project's standing: its transitions, its pause among
-them, and their membership (F4.1, F5, F6, F127, F128, F141.2)."""
+project's standing: its transitions, Create project and its pause among
+them, and their membership (F4.1, F5, F6, F48, F127, F128, F141.2)."""
 
 import uuid
 from typing import Any
@@ -94,6 +94,7 @@ def _head(head: ProjectHead) -> dict[str, Any]:
             for work in head.running_work
         ],
         open_items=head.open_items,
+        create_refusal=head.create_refusal,
     ).model_dump(mode="json")
 
 
@@ -366,7 +367,10 @@ def add_transition(
 ) -> Any:
     """Change the project's standing, as the signed-in person, now.
 
-    Finish also turns auto pilot off, resumes a paused project, stops the
+    Create project opens a draft: its slug the draft's, its handbook born
+    empty, its opening first on the timeline with the draft's copy and the
+    material Pilot attached, its definition chat closed, its folder moved
+    once committed. Finish also turns auto pilot off, resumes a paused project, stops the
     project's sessions and closes its open items unanswered; Archive stops
     the sessions too, and nothing of the project starts after either. Reopen
     leaves auto pilot off. A resume lets the project's held starts go on.
@@ -378,7 +382,7 @@ def add_transition(
         403: The caller lacks the editor role
         404: No project has the id
         409: The caller has not chosen a handle, or the project's standing
-            does not allow the change
+            does not allow the change, or Create project's draft does not
     """
     change = TransitionRequestSchema.model_validate(request.get_json())
     auth = caller()

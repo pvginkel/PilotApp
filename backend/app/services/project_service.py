@@ -1,23 +1,27 @@
 """The projects as the signed-in person reads them, the project list's tabs
 and a project's head, its status among them (F1, F2, F3, F141.1); a draft
-made from the plus (F46.1, F47.1); and what they change of a project's
-standing, its transitions and their membership (F4.1, F5, F6, F127, F128,
-F141.2)."""
+made from the plus (F46.1, F47.1), and Create project, which opens it (F48);
+and what they change of a project's standing, its transitions and their
+membership (F4.1, F5, F6, F127, F128, F141.2)."""
 
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+import pilot_dsl as dsl
+from sqlalchemy import exists, func, select
 from sqlalchemy.orm import Session
 
+from app.engine.attachments import AttachService
 from app.engine.bus import EngineBus, ManifestChanged, ProjectChanged
 from app.engine.documents import OPENING, DocumentService
 from app.engine.record import RecordService
 from app.engine.views import ViewService
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import (
+    Chat,
+    Document,
     Item,
     ItemKind,
     PlanNote,
@@ -25,12 +29,15 @@ from app.models import (
     Project,
     ProjectMember,
     ProjectTransition,
+    Turn,
     User,
     Work,
 )
 from app.models import Session as AgentSession
 from app.models.reference import (
+    ChatKind,
     CloseCause,
+    DocumentRole,
     ProjectState,
     SessionState,
     TaskStatus,
@@ -95,6 +102,20 @@ class ProjectHead:
     notes: tuple[PlanNote, ...]
     running_work: tuple[RunningWork, ...]
     open_items: int
+    create_refusal: str | None
+    """Why Create project cannot be pressed now; none when it can (F48.1)."""
+
+
+@dataclass(frozen=True)
+class _Creation:
+    """What Create project takes from a draft it can create: the slug its
+    front matter names, its text as it stands, and the first message to its
+    definition chat, the opening's words, and that message's author."""
+
+    slug: str
+    text: str
+    words: str
+    author: User
 
 
 @dataclass(frozen=True)
@@ -157,10 +178,19 @@ _VERBS = {
     TransitionKind.AUTOPILOT_OFF: "turn auto pilot off for",
     TransitionKind.PAUSED: "pause",
     TransitionKind.RESUMED: "resume",
+    TransitionKind.OPENED: "create",
 }
 """What a person does with each kind, as a refusal names it."""
 
 ARCHIVED_REFUSAL = "it is archived, and an archived project takes Bring back alone"
+
+WRITING_REFUSAL = "Pilot is writing"
+"""Create project's refusal while a Turn of the definition chat is in flight
+(F48.1): it waits for the turn's end."""
+
+NOTHING_DRAFTED_REFUSAL = "nothing is drafted"
+
+NO_SLUG_REFUSAL = "the draft names no slug"
 
 _CLOSES = {
     TransitionKind.FINISHED: CloseCause.FINISHED,
@@ -188,6 +218,7 @@ class ProjectService:
         session_start_service: SessionStartService,
         chat_close_service: ChatCloseService,
         document_service: DocumentService,
+        attach_service: AttachService,
     ) -> None:
         self.db = db
         self.engine_bus = engine_bus
@@ -198,6 +229,7 @@ class ProjectService:
         self.session_start_service = session_start_service
         self.chat_close_service = chat_close_service
         self.document_service = document_service
+        self.attach_service = attach_service
 
     def tabs(self, auth: AuthContext, archived: bool) -> list[ProjectTab]:
         """The archived projects, or every other, in the order they were
@@ -302,6 +334,7 @@ class ProjectService:
             )
         )
         progress = plan_progress(tasks)
+        creation = self._creation(project)
         return ProjectHead(
             project=project,
             status=project_status(
@@ -316,6 +349,7 @@ class ProjectService:
             notes=tuple(notes.get(None, [])),
             running_work=running_work,
             open_items=open_items or 0,
+            create_refusal=creation if isinstance(creation, str) else None,
         )
 
     def create(self, auth: AuthContext) -> Project:
@@ -346,9 +380,10 @@ class ProjectService:
         self, auth: AuthContext, project_id: uuid.UUID, kind: TransitionKind
     ) -> None:
         """The caller's transition of `kind`, now, the project's caches
-        refreshed with it (DB §7.4). Finish is followed at its instant by
-        `autopilot_off` while auto pilot is on and by `resumed` while the
-        project is paused (DB 171), stops every session of the project that
+        refreshed with it (DB §7.4). `opened` is Create project (`_create`).
+        Finish is followed at its instant by `autopilot_off` while auto pilot
+        is on and by `resumed` while the project is paused (DB 171), stops
+        every session of the project that
         runs, starts or is held, and closes the open items unanswered (F5.1).
         Archive stops them too (F128.1), and nothing of either starts after
         it. Finish, Reopen and Archive close the project's open chat,
@@ -366,7 +401,8 @@ class ProjectService:
         Raises:
             RecordNotFoundException: no project has the id.
             InvalidOperationException: the caller has not chosen a handle, or
-                the project's standing does not allow `kind` (DB 170).
+                the project's standing does not allow `kind` (DB 170), or
+                Create project's draft does not (F48.1).
         """
         project = self._locked(project_id)
         person = self.people_service.require_person(auth, _operation(project, kind))
@@ -386,6 +422,9 @@ class ProjectService:
         self._transition(self._locked(project_id), user, kind)
 
     def _transition(self, project: Project, person: User, kind: TransitionKind) -> None:
+        if kind is TransitionKind.OPENED:
+            self._create(project, person)
+            return
         refusal = _refusal(project, kind)
         if refusal is not None:
             raise InvalidOperationException(_operation(project, kind), refusal)
@@ -412,6 +451,120 @@ class ProjectService:
             self.view_service.timeline_moved(project)
         if kind in (TransitionKind.ARCHIVED, TransitionKind.BROUGHT_BACK):
             self.engine_bus.emit(ManifestChanged())
+
+    def _create(self, project: Project, person: User) -> None:
+        """Create project (F48), by `person`, now, under the project's row: the
+        draft opened, `opened`, its slug the one its front matter names (DB
+        decision 1); the handbook born empty beside the draft (F129.2); the
+        opening first on the timeline, the first message to the definition
+        chat verbatim by its author (F18), the draft as it stands copied onto
+        it, then every attachment hung on nothing (F18.1, F36.6); and the
+        definition chat closed, `created` (F48.2, F130.2), so that the next
+        message starts the project's chat. Once committed the `manifest`
+        event moves the project's folder from `draft-<number>` to `<slug>`.
+
+        Refused while Pilot writes, while nothing is drafted or while the
+        draft has no valid slug, never for an ask it leaves open (F48.1);
+        and for a project that is no draft, or is archived.
+        """
+        # Pilot's writing is read under the open chat's lock: a message's
+        # send under way holds it from before its Turn to its commit.
+        self.chat_close_service.open_chat(self.db, project)
+        creation = self._creation(project)
+        if isinstance(creation, str):
+            raise InvalidOperationException(
+                _operation(project, TransitionKind.OPENED), creation
+            )
+        at = datetime.now(UTC)
+        self._write(project, person, at, TransitionKind.OPENED)
+        # In the flush that opens it: `ck_projects_draft_slug`.
+        project.slug = creation.slug
+        self.db.flush()
+        self.document_service.bear_handbook(project)
+        opening = self.document_service.bear_opening(
+            project,
+            f"{creation.author.name} started this project",
+            creation.author,
+            creation.words,
+        )
+        self.attach_service.attach_draft(opening, creation.text)
+        self.attach_service.hang_unhung(opening)
+        self.chat_close_service.close_open(self.db, project, CloseCause.CREATED, at)
+        self.view_service.timeline_moved(project)
+        self.engine_bus.emit(ManifestChanged())
+
+    def _creation(self, project: Project) -> _Creation | str:
+        """What Create project takes from the project, or why it is refused
+        now: its standing, then Pilot writing in its definition chat, then
+        nothing drafted — the draft as empty as the Draft tab reads it, or
+        no message to its definition chat — then a slug the draft does not
+        name, or one the record refuses or another project has (F48.1)."""
+        refusal = _refusal(project, TransitionKind.OPENED)
+        if refusal is not None:
+            return refusal
+        if self._writing(project):
+            return WRITING_REFUSAL
+        text = self.db.scalars(
+            select(Document.published_text).where(
+                Document.project_id == project.id,
+                Document.role_code == DocumentRole.DRAFT,
+            )
+        ).one()
+        # The draft is born published (`bear_draft`).
+        assert text is not None
+        first = self.db.scalars(
+            select(Turn)
+            .join(Chat, Chat.id == Turn.session_id)
+            .where(
+                Chat.project_id == project.id,
+                Chat.kind_code == ChatKind.DEFINITION,
+                Turn.author_user_id.is_not(None),
+            )
+            .order_by(Turn.id)
+            .limit(1)
+        ).one_or_none()
+        parsed = dsl.parse(text)
+        if first is None or (parsed.title is None and not dsl.body(text)):
+            return NOTHING_DRAFTED_REFUSAL
+        slug = parsed.front_matter.slug
+        if slug is None:
+            return NO_SLUG_REFUSAL
+        problem = dsl.slug_problem(
+            slug,
+            set(
+                self.db.scalars(
+                    select(Project.slug).where(
+                        Project.id != project.id, Project.slug.is_not(None)
+                    )
+                )
+            ),
+        )
+        if problem is not None:
+            return f"the draft's slug `{slug}` {problem}"
+        # A person's Turn has their words (`ck_turns_words`).
+        assert first.author_user_id is not None and first.words is not None
+        return _Creation(
+            slug=slug,
+            text=text,
+            words=first.words,
+            author=self.db.get_one(User, first.author_user_id),
+        )
+
+    def _writing(self, project: Project) -> bool:
+        """Whether a Turn of the project's open chat is in flight: Pilot
+        answering, its start held or under way included (F35)."""
+        return bool(
+            self.db.scalar(
+                select(
+                    exists().where(
+                        Chat.project_id == project.id,
+                        Chat.closed_at.is_(None),
+                        Turn.session_id == Chat.id,
+                        Turn.ended_at.is_(None),
+                    )
+                )
+            )
+        )
 
     def join(self, auth: AuthContext, project_id: uuid.UUID) -> None:
         """The caller's new membership of the project, a rejoin a new row
@@ -496,7 +649,7 @@ class ProjectService:
                 project.autopilot = True
             case TransitionKind.AUTOPILOT_OFF:
                 project.autopilot = False
-            case TransitionKind.REOPENED:
+            case TransitionKind.REOPENED | TransitionKind.OPENED:
                 project.state_code = ProjectState.OPEN
             case TransitionKind.PAUSED:
                 project.paused = True
@@ -606,12 +759,15 @@ def _refusal(project: Project, kind: TransitionKind) -> str | None:
     """Why the project's standing does not allow a transition of `kind`, or
     none: a kind follows from the standing it leaves (DB 170), an archived
     project takes Bring back alone (D012), and auto pilot is an open project's
-    (F2.6, F4.1), as the pause is (F141.2)."""
+    (F2.6, F4.1), as the pause is (F141.2); Create project opens a draft
+    alone, what its draft allows aside (`ProjectService._creation`)."""
     if kind is TransitionKind.BROUGHT_BACK:
         return None if project.archived else "it is not archived"
     if project.archived:
         return ARCHIVED_REFUSAL
     state = project.state_code
+    if kind is TransitionKind.OPENED and state is not ProjectState.DRAFT:
+        return "it is no draft"
     if kind is TransitionKind.FINISHED:
         if state is ProjectState.DRAFT:
             return "it is a draft"
