@@ -1,5 +1,6 @@
 # The environment for Pilot, the project manager that runs multi-step work
-# across the KubeCoder fleet: the application, and the repos its work touches.
+# across the KubeCoder fleet: the application, and the repos its work touches,
+# the AI workflow's among them, worked from here since 2026-10-27.
 # Schema: https://kubecoder.home/help/reference/config-yaml/
 #
 # One sidecar rather than `python` + `frontend`: the Playwright harness boots the
@@ -16,6 +17,16 @@ repos:
   - url: https://github.com/pvginkel/PilotDeploy
   # The store environment's repo: the brain's skills, no data.
   - url: https://github.com/pvginkel/PilotProjects
+  # The `dev` plugin marketplace, the AI workflow Pilot drives and stage 5
+  # reworks to Pilot's standard: its slices are Pilot's, their phases
+  # targeting ../AIWorkflow.
+  - url: https://github.com/pvginkel/AIWorkflow
+  # The AI workflow's own spec repo. Shared, like every spec repo.
+  - url: https://github.com/pvginkel/AIWorkflowSpecs
+    shared: true
+  # The `kubecoder` plugin marketplace: the host conventions the dev plugin's
+  # skills load (youtrack-usage above all) change with the plugin often.
+  - url: https://github.com/pvginkel/KubeCoderConfig
 
 capabilities:
   github: rw
@@ -50,6 +61,9 @@ tools:
   # The gates of PilotProjects (pilot.py and its tests, under uv) and of the
   # dev plugin's repo, AIWorkflow, both `cexec python`.
   - use: python
+  # KubeCoderConfig's setup, which pod start runs, and its Prettier gate run
+  # npm here (its project.yaml).
+  - use: frontend
 
 # Proves PilotApp's Dockerfiles with `kaniko --no-push` before a push hands
 # them to Jenkins, which builds them with helmCharts.kaniko2(...).
@@ -92,9 +106,23 @@ preamble:
     /work/PilotDeploy (the deploy chart) and /work/PilotProjects (the
     store environment's skills).
 
+    The AI workflow is worked from here too: the `dev` plugin marketplace
+    in /work/AIWorkflow, with its spec repo in /work/AIWorkflowSpecs, and
+    the `kubecoder` plugin marketplace in /work/KubeCoderConfig. A session
+    on the plugin itself starts in /work/AIWorkflow, so that its CLAUDE.md
+    loads.
+
     `cexec modern-app` runs the app's toolchain (uv, pnpm); `cexec iac`
     (Terraform, Helm, kubectl) and `cexec aac-tools` (gen-architecture,
-    arch-validate) run PilotDeploy's gates.
+    arch-validate) run PilotDeploy's gates; `cexec python` (uv) those of
+    PilotProjects and AIWorkflow; `cexec frontend` (npm) KubeCoderConfig's
+    Prettier gate. `kc project` verbs are cwd-bound: run them from the
+    repo's root.
 
-    /work/PilotAppSpecs is a SHARED working tree: stage files by name
-    there, never `git add -A`.
+    The `dev` plugin this environment's sessions load is the INSTALLED one,
+    from the marketplace's git URL, not the working tree in
+    /work/AIWorkflow: an edit there changes no running pipeline until it is
+    pushed and the plugin updated.
+
+    /work/PilotAppSpecs and /work/AIWorkflowSpecs are SHARED working trees:
+    stage files by name there, never `git add -A`.
