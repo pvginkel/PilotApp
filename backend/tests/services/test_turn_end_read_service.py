@@ -1,6 +1,7 @@
 """The turn-end read (TD §4.4; F65.1, F89; ruling D1; design 2 §8; V07, V08,
 V24): the documents a work item's run registered, read through the fake
-controller once the run ends, and published as written or their read failed.
+controller once the run ends, and published as written or their read failed;
+then the job after the worker's turn (design 3 D2; slice 025 V12).
 
 The read's run is called on the test's session as its loop calls it; the
 loop's tests run it on a database of its own, as the supervisor does."""
@@ -11,6 +12,7 @@ from datetime import UTC, datetime
 from urllib.parse import quote
 
 import pytest
+from dependency_injector import providers
 from flask import Flask
 from sqlalchemy import select
 from sqlalchemy import text as sql
@@ -21,8 +23,25 @@ from app import extensions, models
 from app.core_exceptions import ExternalServiceException
 from app.database import scoped_session
 from app.engine.documents import awaits_read
-from app.models import Document, DocumentVersion, Environment, Item, Project, User
-from app.models.reference import RecordKind, SessionState, UserKind, VersionCause
+from app.engine.views import ViewService
+from app.models import (
+    Document,
+    DocumentVersion,
+    Environment,
+    Item,
+    Project,
+    Turn,
+    User,
+    Work,
+)
+from app.models.reference import (
+    ProjectState,
+    RecordKind,
+    SessionState,
+    UserKind,
+    VersionCause,
+    WorkTrigger,
+)
 from app.services.container import ServiceContainer
 from app.services.controller_client import (
     FILE_SIZE_CAP,
@@ -33,7 +52,8 @@ from app.services.controller_client import (
 )
 from app.services.controller_outage import ControllerOutage
 from app.services.fake_controller import FakeControllerProblem
-from app.services.session_record_service import read_records
+from app.services.job_service import NEXT_TITLE
+from app.services.session_record_service import SessionRecordService, read_records
 from app.services.supervisor import LoopHandle
 from app.services.turn_end_read_service import (
     READ_FAILED,
@@ -45,6 +65,7 @@ from app.utils.after_commit import clear_after_commit_callbacks
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
 from tests.support.fake_controller import ServedFakeController, client_of
 from tests.support.locks import in_thread, lock_waits
+from tests.support.starts import configured_starts
 from tests.support.supervisor import (
     LogWaiter,
     Supervise,
@@ -57,6 +78,7 @@ PATH = "/work/Example/docs/refinement.md"
 OTHER = "/work/Example/docs/survey.md"
 TEXT = "# Two sites for the camp\n\nThe lake or the hill.\n\n```question id=Q1\n```\n"
 SURVEY = "# The survey\n\nNine of ten want the lake.\n"
+LAST_WORDS = "Registered the refinement; ending the turn."
 SUPERVISOR_LOGGER = "app.services.supervisor"
 READ_LOGGER = "app.services.turn_end_read_service"
 
@@ -71,7 +93,12 @@ def _no_callbacks() -> Iterator[None]:
 def _service(
     container: ServiceContainer, supervise: Supervise
 ) -> tuple[TurnEndReadService, LifecycleCoordinator]:
+    """The reads on a supervisor of their own, the container's start the
+    one the job after a run's turn starts through, its loops never run."""
     supervisor, coordinator = supervise(container)
+    container.session_start_service.override(
+        providers.Object(configured_starts(container, supervise))
+    )
     reads = TurnEndReadService(
         container=container,
         supervisor=supervisor,
@@ -123,10 +150,27 @@ def _register(
 
 
 def _end(db: DbSession, container: ServiceContainer, run: models.Session) -> None:
-    """The run's turn ended well, as the relay ends it: the Session idle, its
-    work item done (decision 44)."""
+    """The run's turn ended well, as the relay ends it: its `result` record,
+    the Session idle, its work item done (decision 44)."""
+    now = datetime.now(UTC)
+    turn = Turn(session_id=run.id, seq=1, message="Refine the camp.", started_at=now)
+    turn.ended_at = now
+    db.add(turn)
+    db.flush()
+    SessionRecordService(
+        db,
+        container.session_stream_service(),
+        ViewService(db, container.engine_bus()),
+    ).append(
+        run.id,
+        RecordKind.RESULT,
+        payload={"type": "result", "subtype": "success", "result": LAST_WORDS},
+        turn_id=turn.id,
+        raw_offset=1,
+        controller_session="camp-1",
+    )
     run.state_code = SessionState.IDLE
-    container.record_service().work_done(run.id, datetime.now(UTC))
+    container.record_service().work_done(run.id, now)
     db.flush()
 
 
@@ -156,6 +200,25 @@ def _servers(db: DbSession, run_id: uuid.UUID) -> list[tuple[int | None, object]
         (stored.turn, stored.record.payload)
         for stored in read_records(db, run_id, kind=RecordKind.SERVER, limit=100)
     ]
+
+
+def _jobs_after(db: DbSession, run: models.Session) -> list[str]:
+    """The titles of the jobs placed after the run's turn (design 3 D2)."""
+    return list(
+        db.scalars(
+            select(Item.title)
+            .join(Work, Work.id == Item.id)
+            .where(
+                Work.trigger_code == WorkTrigger.WORKER_TURN_ENDED,
+                Work.trigger_item_id == run.id,
+            )
+        )
+    )
+
+
+def _place(item: Item, path: str) -> str:
+    """A registered document's place, as a title names it (DB Item sample)."""
+    return f"{path.rsplit('/', 1)[0]}/{item.seq}"
 
 
 def _file_reads(fake: ServedFakeController) -> list[str]:
@@ -447,6 +510,7 @@ class TestTurnEndReadServiceRead:
         document = _document(session, item)
         assert (document.published_text, document.read_failed_at) == (None, None)
         assert item.done_cause_code == "finished"
+        assert _jobs_after(session, run) == []
 
     def test_a_document_already_read_is_not_read_again(
         self,
@@ -480,11 +544,12 @@ class TestTurnEndReadServiceRunEnded:
         _register(container, project, run)
         _end(session, container, run)
 
-        reads.run_ended(session, run.id)
+        reads.run_ended(session, run)
 
         assert "_ReadStart" in _pending()
+        assert _jobs_after(session, run) == []
 
-    def test_a_run_that_registered_none_reads_nothing(
+    def test_a_run_that_registered_none_reads_nothing_and_has_its_job_at_once(
         self,
         session: DbSession,
         container: ServiceContainer,
@@ -494,9 +559,10 @@ class TestTurnEndReadServiceRunEnded:
     ) -> None:
         _end(session, container, run)
 
-        reads.run_ended(session, run.id)
+        reads.run_ended(session, run)
 
         assert "_ReadStart" not in _pending()
+        assert _jobs_after(session, run) == [NEXT_TITLE]
 
 
 def _pending() -> set[str]:
@@ -521,6 +587,17 @@ class _ReadWatched(ServedFakeController):
         if self.refusal is not None:
             raise self.refusal
         return super()._read_file(request, env_id)
+
+
+def _refusing(fake: _ReadWatched, refused: str) -> Callable[[str], None]:
+    """An `on_read` that has the fake refuse the read of `refused`, and every
+    read after it, for a reason of its own."""
+
+    def on_read(path: str) -> None:
+        if path == refused:
+            fake.refusal = FakeControllerProblem(500, "something", "its own")
+
+    return on_read
 
 
 @pytest.fixture
@@ -601,6 +678,85 @@ class TestTurnEndReadServiceRefusals:
         assert awaits_read(item, _document(session, item))
 
 
+class TestTurnEndReadServiceJob:
+    """The job after the worker's turn, placed in the transaction that
+    settles the last document the run registered (design 3 D2; V12)."""
+
+    def test_it_is_placed_with_the_runs_last_read_and_not_before(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        supervise: Supervise,
+        project: Project,
+        watched: tuple[_ReadWatched, models.Session],
+    ) -> None:
+        fake, run = watched
+        fake.put_file(ENV, OTHER, SURVEY.encode())
+        first = _register(container, project, run)
+        second = _register(container, project, run, OTHER)
+        _end(session, container, run)
+        reads = _service(container, supervise)[0]
+
+        fake.on_read = _refusing(fake, OTHER)
+        with pytest.raises(ExternalServiceException):
+            _read(reads, run.id)
+
+        assert _document(session, first).published_text == TEXT
+        assert _jobs_after(session, run) == []
+
+        fake.on_read, fake.refusal = None, None
+        _read(reads, run.id)
+        _read(reads, run.id)
+
+        places = [
+            _place(item, _document(session, item).path) for item in (first, second)
+        ]
+        assert _jobs_after(session, run) == [f"Pre-ruling {places[0]} and {places[1]}"]
+
+    def test_a_failed_read_settles_its_document_as_a_published_one_does(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        reads: TurnEndReadService,
+        fake_controller: ServedFakeController,
+        project: Project,
+        run: models.Session,
+    ) -> None:
+        fake_controller.remove_file(ENV, PATH)
+        item = _register(container, project, run)
+        _end(session, container, run)
+
+        _read(reads, run.id)
+
+        assert _document(session, item).read_failed_at is not None
+        assert _jobs_after(session, run) == [
+            f"Pre-ruling {_place(item, _document(session, item).path)}"
+        ]
+
+    @pytest.mark.parametrize("closed", ["finished", "archived"])
+    def test_a_project_finished_or_archived_meanwhile_gets_none(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        reads: TurnEndReadService,
+        project: Project,
+        run: models.Session,
+        closed: str,
+    ) -> None:
+        item = _register(container, project, run)
+        _end(session, container, run)
+        if closed == "finished":
+            project.slug, project.state_code = "camp", ProjectState.FINISHED
+        else:
+            project.archived = True
+        session.flush()
+
+        _read(reads, run.id)
+
+        assert _document(session, item).published_text == TEXT
+        assert _jobs_after(session, run) == []
+
+
 def _committed_rows(app: Flask, fake: ServedFakeController) -> tuple[uuid.UUID, ...]:
     """A project, a work item's Session in the fake's environment and the
     document it registered there, its file written, committed: their ids."""
@@ -630,8 +786,9 @@ def _end_committed(
 ) -> None:
     """The run's end committed, as the relay's: its reads requested with it."""
     with scoped_session(container) as db:
-        _end(db, container, db.get_one(models.Session, run_id))
-        reads.run_ended(db, run_id)
+        run = db.get_one(models.Session, run_id)
+        _end(db, container, run)
+        reads.run_ended(db, run)
 
 
 def _published(container: ServiceContainer, item_id: uuid.UUID) -> str | None:
@@ -715,6 +872,45 @@ class TestTurnEndReadServiceLoop:
             assert awaits_read(
                 db.get_one(Item, waiting_id), db.get_one(Document, waiting_id)
             )
+            assert len(_jobs_after(db, db.get_one(models.Session, run_id))) == 1
+            assert _jobs_after(db, db.get_one(models.Session, stopped_id)) == []
+
+    def test_a_restart_in_the_middle_of_the_reads_places_the_job_once(
+        self,
+        committed_app: Flask,
+        supervise: Supervise,
+        loop_log: LogWaiter,
+    ) -> None:
+        container = committed_app.container
+        fake = _ReadWatched(keepalive_seconds=0.2)
+        try:
+            client_of(container, fake)
+            project_id, run_id, item_id, _ = _committed_rows(committed_app, fake)
+            fake.put_file(ENV, OTHER, SURVEY.encode())
+            with scoped_session(container) as db:
+                run = db.get_one(models.Session, run_id)
+                other_id = _register(
+                    container, db.get_one(Project, project_id), run, OTHER
+                ).id
+                _end(db, container, run)
+            fake.on_read = _refusing(fake, OTHER)
+            with pytest.raises(ExternalServiceException):
+                # The process stops after the first read committed.
+                _read(_service(container, supervise)[0], run_id)
+            assert _published(container, item_id) == TEXT
+            fake.on_read, fake.refusal = None, None
+            reads, coordinator = _service(container, supervise)
+
+            coordinator.fire_startup()
+
+            loop_log.wait_for(rf"Loop read:{run_id} ended")
+            _read(reads, run_id)
+        finally:
+            fake.close()
+
+        assert _published(container, other_id) == SURVEY
+        with scoped_session(container) as db:
+            assert len(_jobs_after(db, db.get_one(models.Session, run_id))) == 1
 
     def test_a_document_finish_closed_during_its_read_is_left_as_finish_closed_it(
         self,

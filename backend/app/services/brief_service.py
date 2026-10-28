@@ -11,6 +11,7 @@ but `create` reads itself (D058). A worker's carries the handbook verbatim,
 the worker having no tree (F129.5).
 """
 
+import uuid
 from collections.abc import Sequence
 from datetime import datetime
 
@@ -26,6 +27,7 @@ from app.models import (
     Chat,
     Document,
     Item,
+    ItemAttachment,
     PlanNote,
     PlanTask,
     Project,
@@ -36,18 +38,23 @@ from app.models import (
     User,
     Work,
 )
+from app.models import Session as AgentSession
 from app.models.reference import (
     DocumentRole,
     ErrorKind,
     ProjectState,
+    RecordKind,
     TransitionKind,
     WorkTrigger,
 )
+from app.services.session_record_service import read_records
 from app.services.session_scope import project_folder
+from app.services.turn_end_read_service import READ_FAILED
 
 CHAT_SKILL = "/chat"
 CREATE_SKILL = "/create"
 PLAN_SKILL = "/plan"
+PRE_RULE_SKILL = "/pre-rule"
 
 NOTES_HEADING = (
     "Open plan notes, by summary (the content and the blocks a read away in"
@@ -152,14 +159,21 @@ class BriefService:
         """A job's first Turn (§5.3), composed at `at` as it leaves the queue
         or the pause, from the record as it then stands (F59), its trigger at
         `triggered`: the switch, the pause its trigger came in if it did
-        (F141.4, `_trigger_paused`), then its trigger's payload.
-
-        The setup's (F49), triggered at Create project's instant, which opened
-        the project and took its slug: `/plan`, then the draft's folder and
-        the project's, the draft, the opening that holds the words that
-        started it, and the plan, empty. No notes: its plan holds none."""
-        # `JobService` places the setup alone.
+        (F141.4, `_trigger_paused`), then its trigger's payload and the notes
+        it carries."""
+        if work.trigger_code is WorkTrigger.WORKER_TURN_ENDED:
+            # The job after a worker's turn names its run.
+            assert work.trigger_item_id is not None
+            return self._worker_turn_ended(project, work.trigger_item_id, triggered, at)
+        # `JobService` places the setup and the job after a worker's turn alone.
         assert work.trigger_code is WorkTrigger.SETUP
+        return self._setup(project, triggered, at)
+
+    def _setup(self, project: Project, triggered: datetime, at: datetime) -> str:
+        """The setup's (F49), triggered at Create project's instant, which
+        opened the project and took its slug: `/plan`, then the draft's folder
+        and the project's, the draft, the opening that holds the words that
+        started it, and the plan, empty. No notes: its plan holds none."""
         opening = self.db.scalars(
             select(Item.id).where(
                 Item.project_id == project.id, Item.kind_code == OPENING
@@ -181,6 +195,122 @@ class BriefService:
                 "The plan: plan.json, empty.",
             ],
         )
+
+    def _worker_turn_ended(
+        self, project: Project, run_id: uuid.UUID, triggered: datetime, at: datetime
+    ) -> str:
+        """The job after the turn of the worker's run `run_id` (design 3 D2):
+        `/pre-rule`, then the work item's line, the documents the run
+        registered in the order registered, each published or its read failed
+        with the reason the read recorded, else that it registered nothing,
+        and the files attached on the work item; then every open note and the
+        deferrals without a home, the pass's (F57.4)."""
+        lines = [self._run_line(run_id)]
+        registered = self.db.execute(
+            select(Item.id, Document.path, Document.read_failed_at)
+            .join(Document, Document.id == Item.id)
+            .where(
+                Item.created_by_session_id == run_id,
+                Document.source_path.is_not(None),
+            )
+            .order_by(Item.seq)
+        ).all()
+        if registered:
+            failures = self._read_failures(run_id, len(registered))
+            lines.append("Registered this run, in the order registered:")
+            lines.extend(
+                f"- {path} ({item_id}) — "
+                + (
+                    "published"
+                    if failed is None
+                    else f"read failed: {failures[str(item_id)]}"
+                )
+                for item_id, path, failed in registered
+            )
+        else:
+            lines.append("Registered nothing this run.")
+        attached = self.db.scalar(
+            select(func.count())
+            .select_from(ItemAttachment)
+            .where(ItemAttachment.item_id == run_id)
+        )
+        if attached:
+            lines.append(f"Attached on the work item: {_files(attached)}.")
+        return _frame(
+            PRE_RULE_SKILL,
+            "a worker's turn ended",
+            project,
+            at,
+            [_switch(project), self._trigger_paused(project, triggered)],
+            lines,
+            self._notes(project),
+        )
+
+    def _run_line(self, run_id: uuid.UUID) -> str:
+        """The work item's line: its title and id, the plan's task it serves,
+        its repository, environment and controller session, each that it
+        has, its turn's end and its last line, the text its turn ended
+        with."""
+        item = self.db.get_one(Item, run_id)
+        session = self.db.get_one(AgentSession, run_id)
+        repo = self.db.get_one(Work, run_id).repo
+        # A worker's run whose job is placed is done at its turn's end.
+        assert item.done_at is not None
+        task = (
+            None
+            if item.plan_task_id is None
+            else self.db.scalar(
+                select(PlanTask.title).where(
+                    PlanTask.project_id == item.project_id,
+                    PlanTask.task_id == item.plan_task_id,
+                )
+            )
+        )
+        facts = [
+            f'The work item: "{item.title}" ({item.id})',
+            None if item.plan_task_id is None else f'task {item.plan_task_id} "{task}"',
+            None if repo is None else f"repository {repo}",
+            None
+            if session.environment_id is None
+            else f"environment {session.environment_id}",
+            None
+            if session.controller_session is None
+            else f"session {session.controller_session}",
+        ]
+        line = ", ".join(fact for fact in facts if fact is not None)
+        line += f"; its turn ended {utc_time(item.done_at)}"
+        last = self._last_line(run_id)
+        if last is not None:
+            line += f' — the item\'s last line: "{last}"'
+        return f"{line}."
+
+    def _last_line(self, run_id: uuid.UUID) -> str | None:
+        """The last line of the text the run's turn ended with, its `result`
+        record's; None when it ended with none."""
+        # A run done at its turn's end has its `result` record.
+        (result,) = read_records(
+            self.db, run_id, kind=RecordKind.RESULT, limit=1, newest_first=True
+        )
+        text = result.record.payload.get("result")
+        if not isinstance(text, str):
+            return None
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        return lines[-1] if lines else None
+
+    def _read_failures(self, run_id: uuid.UUID, registered: int) -> dict[str, str]:
+        """Why each turn-end read of the run's `registered` documents that
+        failed did, by the document's id, as its `server` record gives it: one
+        per document at most."""
+        return {
+            stored.record.payload["item"]: stored.record.payload["reason"]
+            for stored in read_records(
+                self.db,
+                run_id,
+                kind=RecordKind.SERVER,
+                payload_type=READ_FAILED,
+                limit=registered,
+            )
+        }
 
     def message_from(self, project: Project, person: User) -> str:
         """The line before `person`'s words naming them and whether they are

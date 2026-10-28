@@ -16,6 +16,12 @@ and a `server` record in no Turn of the Session's log names its path and why.
 A read the controller does not answer, or answers `503 environment-unreadable`,
 raises, and the loop runs again after its backoff, waiting the outage out.
 
+Once no document the run registered awaits its read, the job after the
+worker's turn is placed (design 3 D2; `JobService`): in the transaction that
+settles the last, or, for a run that registered none, in the turn end's, which
+holds the project's row before the Session's. The job commits with the write
+that owed it, so a restart between two reads leaves it to the reconcile's.
+
 A run that stops or fails reads nothing: its documents await their reads until
 its Resume's run ends. At STARTUP the job's reconcile runs the reads of every
 Session that owes one, from the rows.
@@ -35,6 +41,7 @@ from app.engine.documents import awaiting_read, awaits_read, listed
 from app.engine.record import TURN_ENDED
 from app.engine.views import ViewService
 from app.models import Document, Item, Project
+from app.models import Session as AgentSession
 from app.models.reference import RecordKind
 from app.services.controller_client import (
     ControllerClient,
@@ -121,11 +128,18 @@ class TurnEndReadService:
             READ_JOB, needs_controller=True, reconcile=self._reconcile
         )
 
-    def run_ended(self, db: Session, session_id: uuid.UUID) -> None:
-        """The Session's work item done at its turn's end, in the caller's
-        transaction: the documents it registered are read once that commits."""
-        if _owed(db, session_id):
-            after_commit(_ReadStart(self, session_id))
+    def run_ended(self, db: Session, session: AgentSession) -> None:
+        """The worker's Session's work item done at its turn's end, in the
+        caller's transaction, which holds its project's row exclusively, read
+        as the lock found it: the documents it registered are read once that
+        commits; a run that registered none has the job after its turn placed
+        now."""
+        if _owed(db, session.id):
+            after_commit(_ReadStart(self, session.id))
+            return
+        self._container.job_service().worker_turn_ended(
+            db.get_one(Project, session.project_id), session.id
+        )
 
     def read(self, session_id: uuid.UUID, handle: LoopHandle) -> None:
         """The read loop's run: each document the Session registered that is
@@ -183,13 +197,19 @@ class TurnEndReadService:
         content: bytes | _Refused,
     ) -> None:
         """What the read gave, written under the Project's row, the Session's
-        and the Document's, unless the document no longer awaits its read."""
+        and the Document's, unless the document no longer awaits its read;
+        with the run's last, the job after its turn placed."""
         documents = self._container.document_service()
         document = db.get_one(Document, owed.document_id)
         project, item = documents.owner(document)
         # A registered document is a Prose Item's.
         assert item is not None
-        db.execute(select(Project.id).where(Project.id == project.id).with_for_update())
+        project = db.scalars(
+            select(Project)
+            .where(Project.id == project.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).one()
         records = SessionRecordService(
             db, self._streams, ViewService(db, self._container.engine_bus())
         )
@@ -213,6 +233,7 @@ class TurnEndReadService:
                     owed.path,
                     session_id,
                 )
+                self._settled(db, project, session_id)
                 return
             reason = f"its text holds faults: {listed(version.faults)}"
         documents.fail_read(document)
@@ -229,6 +250,13 @@ class TurnEndReadService:
         logger.info(
             "Read document %s of session %s: failed, %s", owed.path, session_id, reason
         )
+        self._settled(db, project, session_id)
+
+    def _settled(self, db: Session, project: Project, session_id: uuid.UUID) -> None:
+        """Under the project's row, a document of the Session's run read: once
+        none awaits its read, the job after its turn placed (D2)."""
+        if not _owed(db, session_id):
+            self._container.job_service().worker_turn_ended(project, session_id)
 
     def _client(self) -> ControllerClient:
         client: ControllerClient = self._container.controller_client()

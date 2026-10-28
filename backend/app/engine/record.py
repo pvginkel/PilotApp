@@ -390,8 +390,9 @@ class RecordService:
         own Session, and its Work under the switch's setting as it stands
         (F54.7), placed by the repository `repo` its environment is made from
         (F61.1), none for a job; a job has the Work Trigger `trigger` that
-        started it, a worker's run none (DB 167); a run that continues a
-        conversation after Done has the Item `trigger_item_id` whose close
+        started it, a worker's run none (DB 167); a job's Item
+        `trigger_item_id` is the one whose event triggered it (decision 5), a
+        run's that continues a conversation after Done the one whose close
         released it (decision 44).
 
         Raises:

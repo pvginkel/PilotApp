@@ -1,6 +1,7 @@
-"""Pilot's own background jobs, the setup the one placed, one at a time per
-project, each briefed as it starts (design 3 §5.1 to §5.3; F49, F59, F59.1,
-F59.2, F141.4; TD §4.2; DB Work, assertion 167, 243; V11, V23)."""
+"""Pilot's own background jobs, the setup and the job after a worker's turn,
+one at a time per project, each briefed as it starts (design 3 §5.1 to §5.3,
+D2; F49, F59, F59.1, F59.2, F141.4; TD §4.2; DB Work, assertion 167, 243;
+V01, V11, V12, V23)."""
 
 import threading
 import uuid
@@ -16,10 +17,12 @@ from werkzeug.wrappers import Request, Response
 
 from app import models
 from app.database import scoped_session
+from app.engine.views import ViewService
 from app.exceptions import InvalidOperationException
 from app.models import Item, Project, ProjectTransition, Turn, User, Work
 from app.models.reference import (
     ProjectState,
+    RecordKind,
     SessionState,
     Surface,
     TransitionKind,
@@ -29,7 +32,8 @@ from app.models.reference import (
 from app.schemas.timeline import HeldReason
 from app.services.container import ServiceContainer
 from app.services.controller_outage import ControllerOutage
-from app.services.job_service import SETUP_TITLE, JobService
+from app.services.job_service import NEXT_TITLE, SETUP_TITLE, JobService
+from app.services.session_record_service import SessionRecordService
 from app.services.session_scope import STORE_REPO, scoped_create
 from app.services.session_start_service import SessionStartService
 from app.services.start_gate import Held
@@ -729,3 +733,192 @@ class TestQueueAcrossTransactions:
                 for job in (first, second)
             }
         assert states == {first: SessionState.STARTING, second: SessionState.HELD}
+
+
+WORKER_ENV = "example-soup-3f2a1c"
+
+
+def _worker_run(
+    db: DbSession, container: ServiceContainer, project: Project, files: int
+) -> tuple[models.Session, list[Item]]:
+    """A worker's run whose turn ended well, as the relay ends it, having
+    registered `files` documents, each read and published: the Session and
+    the documents' items in the order registered."""
+    if db.get(models.Environment, WORKER_ENV) is None:
+        db.add(models.Environment(id=WORKER_ENV, name="Soup-1", exempt=False))
+    run = models.Session(
+        project_id=project.id,
+        environment_id=WORKER_ENV,
+        kind_code="work",
+        cwd="/work/Soup",
+        controller_session="claude-7",
+        token_hash=uuid.uuid4().hex,
+        state_code=SessionState.RUNNING,
+    )
+    db.add(run)
+    db.flush()
+    container.record_service().place_work(
+        project, run, "Fixing the stock", repo="example/Soup"
+    )
+    documents = container.document_service()
+    items = [
+        documents.register(project, run, f"/work/Soup/notes-{n}.md").item
+        for n in range(files)
+    ]
+    now = datetime.now(UTC)
+    turn = Turn(session_id=run.id, seq=1, message="Fix the stock.", started_at=now)
+    turn.ended_at = now
+    db.add(turn)
+    db.flush()
+    SessionRecordService(
+        db,
+        container.session_stream_service(),
+        ViewService(db, container.engine_bus()),
+    ).append(
+        run.id,
+        RecordKind.RESULT,
+        payload={"type": "result", "subtype": "success", "result": "Done."},
+        turn_id=turn.id,
+        raw_offset=1,
+        controller_session="claude-7",
+    )
+    run.state_code = SessionState.IDLE
+    container.record_service().work_done(run.id, now)
+    for item in items:
+        documents.publish_read(
+            db.get_one(models.Document, item.id), "# Notes\n\nLeek.\n", run.id
+        )
+    return run, items
+
+
+def _after(
+    container: ServiceContainer,
+    starts: SessionStartService,
+    project: Project,
+    run: models.Session,
+) -> models.Session | None:
+    """The job after the run's turn placed; its Session, None when none is."""
+    work = _jobs(container, starts).worker_turn_ended(project, run.id)
+    return (
+        None
+        if work is None
+        else container.db_session().get_one(models.Session, work.id)
+    )
+
+
+def _place(db: DbSession, item: Item) -> str:
+    """A registered document's place, as a title names it."""
+    path = db.get_one(models.Document, item.id).path
+    return f"{path.rsplit('/', 1)[0]}/{item.seq}"
+
+
+class TestWorkerTurnEnded:
+    """The job after a worker's turn, placed once the turn-end read settled
+    every document the run registered (design 3 §5.3, D2; F59; DB Item
+    sample; V01, V12)."""
+
+    @pytest.mark.parametrize("files", [0, 1, 2, 3])
+    def test_it_places_a_job_its_trigger_item_the_run_titled_by_what_it_registered(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        files: int,
+    ) -> None:
+        run, items = _worker_run(session, container, opened, files)
+        before = datetime.now(UTC)
+
+        job = _after(container, starts, opened, run)
+
+        assert job is not None
+        title = {
+            0: NEXT_TITLE,
+            1: "Pre-ruling {}",
+            2: "Pre-ruling {} and {}",
+            3: "Pre-ruling {}, {} and {}",
+        }[files].format(*(_place(session, item) for item in items))
+        item = session.get_one(Item, job.id)
+        last = items[-1] if items else session.get_one(Item, run.id)
+        assert (item.seq, item.kind_code, item.title, item.created_by_session_id) == (
+            last.seq + 1,
+            "work",
+            title,
+            job.id,
+        )
+        work = session.get_one(Work, job.id)
+        assert (
+            work.session_kind_code,
+            work.trigger_code,
+            work.trigger_item_id,
+            work.repo,
+        ) == ("job", WorkTrigger.WORKER_TURN_ENDED, run.id, None)
+        assert (job.kind_code, job.cwd, job.state_code) == (
+            "job",
+            STORE_REPO,
+            SessionState.STARTING,
+        )
+        assert before <= job.created_at <= datetime.now(UTC)
+        assert _brief(container, job).message.startswith(
+            "/pre-rule\n\nPilot's brief · a worker's turn ended · "
+        )
+
+    def test_a_run_gets_one_job(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+    ) -> None:
+        run, _ = _worker_run(session, container, opened, 1)
+        _after(container, starts, opened, run)
+
+        assert _after(container, starts, opened, run) is None
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(Work)
+                .where(Work.trigger_item_id == run.id)
+            )
+            == 1
+        )
+
+    @pytest.mark.parametrize("closed", ["finished", "archived"])
+    def test_a_project_finished_or_archived_gets_none(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        closed: str,
+    ) -> None:
+        run, _ = _worker_run(session, container, opened, 1)
+        if closed == "finished":
+            opened.state_code = ProjectState.FINISHED
+        else:
+            opened.archived = True
+        session.flush()
+
+        assert _after(container, starts, opened, run) is None
+        assert (
+            session.scalars(select(Work).where(Work.session_kind_code == "job")).all()
+            == []
+        )
+
+    def test_placed_while_the_setup_runs_it_waits_its_turn_behind_it(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        opening: Item,
+    ) -> None:
+        setup = _setup(container, starts, opened)
+        _in(session, setup, SessionState.RUNNING)
+        run, _ = _worker_run(session, container, opened, 1)
+
+        job = _after(container, starts, opened, run)
+
+        assert job is not None
+        assert (job.state_code, job.turns) == (SessionState.HELD, 0)
+        assert starts.held(session, opened, job) == Held(HeldReason.QUEUE)

@@ -7,7 +7,8 @@
  * (F37.4). The Chat tab shows the definition chat above its line, with no label (F130.1), and
  * Discuss opens a new chat below it (F48.2). The setup, Pilot's first background job, is a work item
  * of Pilot's own: its line, its session log, no env chip and no Stop or Resume (F59.1, F26.3), and a
- * quiet done line once its turn ends.
+ * quiet done line once its turn ends. A job placed while it runs, the one after a worker's turn,
+ * waits its turn behind it, its line saying so, and goes on once the setup's turn ends (F59.2).
  */
 
 import type { Page } from '@playwright/test';
@@ -33,6 +34,8 @@ const WORDS = 'Let us plan the summer trip by the lake.';
 const REPLY = 'I drafted the trip; where you sleep is still open.';
 const HOW = 'Hand the project to Pilot: it sets it up and starts the plan';
 const SETUP = 'Setting up the project';
+/** The title of the job after a worker's turn that registered nothing (backend/app/services/job_service.py). */
+const NEXT = 'Deciding what is next';
 
 const SLEEP = '## Where do we sleep?\n\n```decision id=D1\noptions:\n  - Tent\n  - Cabin\n```\n';
 const draftText = (title: string, slug?: string) =>
@@ -240,5 +243,43 @@ test.describe('The setup', () => {
     await expect(setup.lineTitle).toHaveText(SETUP);
     await setup.open.click();
     await expect(page).toHaveURL(`/projects/${id}/sessions/${setupId}`);
+  });
+
+  test('a job placed while it runs, the one after a worker’s turn, waits its turn behind it, its line saying so, and goes on once its turn ends', async ({
+    page,
+    people,
+    projects,
+    projectHead,
+    controller,
+    chats,
+    definitionChat,
+    timeline,
+  }) => {
+    const me = await people.signIn();
+    const { id, slug } = await drafted({ page, projects, projectHead, controller, chats, definitionChat }, me.handle!);
+    const started = await chats.opening(id, slug);
+    await projectHead.create();
+    const session = await started();
+    const work = await projects.startWork(id, { title: 'Surveying the camp', brief: 'Survey the camp.', cwd: '/work/Example' });
+    await expect.poll(async () => (await projects.work(id, work)).state).toBe('running');
+    const { id: environment } = await projects.environment(id, work);
+
+    await controller.finish(environment, 'claude-1');
+
+    let jobId: string | undefined;
+    await expect
+      .poll(async () => {
+        jobId = (await projects.timeline(id)).items.find((item) => item.work?.pilots_own && item.title === NEXT)?.id;
+        return jobId;
+      })
+      .toBeDefined();
+    const job = timeline.item(jobId!);
+    await expect(job.title).toHaveText(NEXT);
+    await expect(job.work.line).toHaveAttribute('data-state', 'held');
+    await expect(job.work.cue).toHaveText('Waiting for the job before it');
+
+    await controller.finish(chats.store, session, 'success', 'The plan is written.');
+    await expect(job.work.running).toBeVisible();
+    await expect(job.work.cue).not.toHaveText('Waiting for the job before it');
   });
 });

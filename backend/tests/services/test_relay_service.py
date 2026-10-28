@@ -14,12 +14,14 @@ from queue import Empty
 from typing import Any, Literal
 
 import pytest
+from dependency_injector import providers
 from flask import Flask
 from sqlalchemy import select
+from sqlalchemy import text as sql
 from sqlalchemy.orm import Session as DbSession
 from werkzeug.wrappers import Request, Response
 
-from app import models
+from app import extensions, models
 from app.core_exceptions import ExternalServiceException
 from app.database import scoped_session
 from app.engine.bus import EngineEvent, ProjectChanged, WorkMoved
@@ -33,6 +35,7 @@ from app.models import (
     Project,
     Turn,
     User,
+    Work,
 )
 from app.models.reference import (
     ChatKind,
@@ -54,6 +57,7 @@ from app.services.controller_client import (
 )
 from app.services.environment_service import SHUTDOWN_TIMER, EnvironmentService
 from app.services.fake_controller import FakeControllerProblem, FinishOutcome
+from app.services.job_service import NEXT_TITLE
 from app.services.pilot_server import PilotServer, token_hash
 from app.services.relay_service import (
     CONTINUE,
@@ -79,6 +83,8 @@ from app.utils import after_commit as after_commit_module
 from app.utils.after_commit import clear_after_commit_callbacks
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
 from tests.support.fake_controller import ServedFakeController, client_of, raw_turn
+from tests.support.locks import lock_waits
+from tests.support.starts import configured_starts
 from tests.support.supervisor import (
     LogWaiter,
     Supervise,
@@ -106,8 +112,13 @@ def _relay_service(
     container: ServiceContainer, supervise: Supervise, mcp_url: str | None = None
 ) -> tuple[RelayService, LifecycleCoordinator]:
     """The relays on a supervisor of their own; their re-creates hand Pilot's
-    MCP server at `mcp_url`, none when it is None."""
+    MCP server at `mcp_url`, none when it is None. The container's start is
+    the one the job after a worker's turn starts through, its loops never
+    run."""
     supervisor, coordinator = supervise(container)
+    container.session_start_service.override(
+        providers.Object(configured_starts(container, supervise))
+    )
     environments = EnvironmentService(
         container=container,
         supervisor=supervisor,
@@ -1581,6 +1592,22 @@ def _item_done(db: DbSession, run: models.Session) -> tuple[Any, ...]:
     return item.done_at, item.done_cause_code, item.done_by_user_id
 
 
+def _job_after(db: DbSession, run: models.Session) -> Work:
+    """The job placed after the run's turn (design 3 D2)."""
+    return db.scalars(select(Work).where(Work.trigger_item_id == run.id)).one()
+
+
+def _jobs_after(db: DbSession, run_id: uuid.UUID) -> list[str]:
+    """The titles of the jobs placed after the run's turn."""
+    return list(
+        db.scalars(
+            select(Item.title)
+            .join(Work, Work.id == Item.id)
+            .where(Work.trigger_item_id == run_id)
+        )
+    )
+
+
 def _moves(events: list[EngineEvent]) -> list[EngineEvent]:
     """What the browsers hear of: the work items' moves and the projects'."""
     return [event for event in events if isinstance(event, WorkMoved | ProjectChanged)]
@@ -1795,6 +1822,8 @@ class TestFollowUpTurn:
 
         (turn,) = _turns(session, run)
         assert _item_done(session, run) == (turn.ended_at, "turn_ended", None)
+        # A job's run is not a worker's: no job follows it.
+        assert _jobs_after(session, run.id) == []
         assert run.state_code is SessionState.IDLE
 
     def test_a_work_items_turn_ending_with_its_save_held_gets_none(
@@ -2003,6 +2032,37 @@ class TestRelayWorkItem:
             READ_JOB, lambda handle: None, key=str(work_item.id)
         )
         assert requested is read
+        # The job after its turn waits for the reads (design 3 D2).
+        assert _jobs_after(session, work_item.id) == []
+
+    @pytest.mark.parametrize(
+        ("outcome", "jobs"),
+        [
+            ("success", [NEXT_TITLE]),
+            ("error", []),
+            ("ended", []),
+            ("interrupted", []),
+        ],
+    )
+    def test_a_run_that_registered_nothing_has_its_job_at_its_end_if_it_ended_well(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        project: Project,
+        work_item: models.Session,
+        outcome: FinishOutcome,
+        jobs: list[str],
+    ) -> None:
+        """Design 3 D2: a run whose turn failed, or was interrupted, waits
+        on a person, and gets no job."""
+        _send(relays, session, work_item)
+        _turn_of(fake_controller, controller_session, raw_turn("turn_text"), outcome)
+
+        _relay(relays, work_item)
+
+        assert _jobs_after(session, work_item.id) == jobs
 
     def test_each_record_that_moves_its_line_moves_the_item_alone(
         self,
@@ -2024,10 +2084,12 @@ class TestRelayWorkItem:
         # The tool call's block start, its `assistant` line, its result, the
         # text block's start and its `assistant` line move the line; the
         # `system`, `rate_limit_event` and `result` lines and the deltas do
-        # not. The turn's end moves its state, and makes it done.
+        # not. The turn's end moves its state, and makes it done, placing the
+        # job after it.
         assert _moves(engine_events) == [
             *[moved] * 5,
             ProjectChanged(project.id),
+            WorkMoved(project.id, _job_after(session, work_item).id),
             moved,
         ]
 
@@ -2158,8 +2220,10 @@ class TestRelayWorkItem:
             "turn_ended",
             None,
         )
-        assert session.scalars(select(Item)).all() == [
-            session.get_one(Item, work_item.id)
+        # The job after its turn is placed at the run's end alone.
+        assert session.scalars(select(Item).order_by(Item.seq)).all() == [
+            session.get_one(Item, work_item.id),
+            session.get_one(Item, _job_after(session, work_item).id),
         ]
 
 
@@ -3070,6 +3134,51 @@ class TestRelayLoop:
         with scoped_session(container) as db:
             document = db.get_one(Document, item_id)
             assert document.published_text == "# Notes\n\nThe lake.\n"
+
+    def test_a_workers_turn_end_takes_the_projects_row_before_the_sessions(
+        self,
+        committed_app: Flask,
+        fake_controller: ServedFakeController,
+        running: tuple[RelayService, str, uuid.UUID, uuid.UUID],
+        loop_log: LogWaiter,
+    ) -> None:
+        # The start's lock order (P-45; slice 025's ruling on A1): the job
+        # after its turn is placed under the project's row, taken first.
+        container = committed_app.container
+        relays, name, run_id, person_id = running
+        with scoped_session(container) as db:
+            run = db.get_one(models.Session, run_id)
+            project_id = run.project_id
+            container.record_service().place_work(
+                db.get_one(Project, project_id), run, "Renaming the badge"
+            )
+        _send_committed(container, relays, run_id, person_id)
+        loop_log.wait_for(rf"Loop relay:{run_id} started")
+        with committed_app.app_context():
+            engine = extensions.db.engine
+
+        with engine.connect() as holder:
+            holder.execute(
+                sql("SELECT id FROM projects WHERE id = :id FOR KEY SHARE"),
+                {"id": project_id},
+            )
+            _turn_of(fake_controller, name, raw_turn("turn_text"))
+            wait_until(lambda: lock_waits(container) == 1, "the turn's end waits")
+            with engine.connect() as other:
+                other.execute(
+                    sql("SELECT id FROM sessions WHERE id = :id FOR UPDATE NOWAIT"),
+                    {"id": run_id},
+                )
+                other.rollback()
+            assert _read(container, run_id).state_code is SessionState.RUNNING
+            holder.rollback()
+
+        def placed() -> list[str]:
+            with scoped_session(container) as db:
+                return _jobs_after(db, run_id)
+
+        wait_until(lambda: placed() == [NEXT_TITLE], "the job placed")
+        assert _read(container, run_id).state_code is SessionState.IDLE
 
     def test_a_send_starts_the_relay_which_records_the_turn_as_it_comes(
         self,

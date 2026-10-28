@@ -1,7 +1,7 @@
 """The brief a brain session's first Turn carries, per kind, the server's
 trailer on a worker's, and the follow-up turn, against invented records
 (design 3 §5.1 to §5.4; D058; F46.1, F79, F129.5, F5.5; DB assertion 251;
-V08, V12, V13, V21)."""
+V03, V08, V12, V13, V21)."""
 
 import hashlib
 import json
@@ -12,12 +12,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
+from app.engine.views import ViewService
 from app.models import (
     Attachment,
     Chat,
     Document,
     Environment,
     Item,
+    ItemAttachment,
     PlanTask,
     Project,
     ProjectMember,
@@ -33,12 +35,16 @@ from app.models.reference import (
     CloseCause,
     ErrorKind,
     ProjectState,
+    RecordKind,
+    SessionState,
     TaskStatus,
     TransitionKind,
     WorkTrigger,
 )
 from app.services.brief_service import FOLLOW_UP_END, BriefService, is_follow_up
 from app.services.container import ServiceContainer
+from app.services.session_record_service import SessionRecordService
+from app.services.turn_end_read_service import READ_FAILED
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
 
 AT = datetime(2026, 10, 26, 9, 30, 15, tzinfo=UTC)
@@ -516,6 +522,183 @@ class TestSetup:
             "/plan\n\n"
             "Pilot's brief · the setup · /work/Projects/soup-club ·"
             " 2026-10-26T09:30:15Z\n\n"
+        )
+
+
+WORKER_ENV = "example-soup-3f2a1c"
+ENDED = datetime(2026, 10, 26, 9, 29, 50, tzinfo=UTC)
+LAST_WORDS = "Fixed the stock.\n\n  Registered the notes; ending the turn.\n"
+STOCK = "# The stock\n\nLeek, not onion.\n"
+
+
+def _worker_run(
+    db: DbSession, container: ServiceContainer, project: Project, task: str | None
+) -> models.Session:
+    """A worker's run in an environment of Pilot's, placed on `task`."""
+    db.add(Environment(id=WORKER_ENV, name="Soup-1", exempt=False))
+    run = models.Session(
+        project_id=project.id,
+        environment_id=WORKER_ENV,
+        kind_code="work",
+        cwd="/work/Soup",
+        controller_session="claude-7",
+        token_hash="7" * 64,
+        state_code=SessionState.RUNNING,
+    )
+    db.add(run)
+    db.flush()
+    container.record_service().place_work(
+        project, run, "Fixing the stock", task, repo="example/Soup"
+    )
+    return run
+
+
+def _turn_ended(
+    db: DbSession, container: ServiceContainer, run: models.Session, words: str
+) -> None:
+    """The run's turn ended well at `ENDED` with `words`, as the relay ends
+    it: its `result` record, the Session idle, its work item done."""
+    turn = Turn(session_id=run.id, seq=1, message="Fix the stock.", started_at=ENDED)
+    turn.ended_at = ENDED
+    db.add(turn)
+    db.flush()
+    _records(db, container).append(
+        run.id,
+        RecordKind.RESULT,
+        payload={"type": "result", "subtype": "success", "result": words},
+        turn_id=turn.id,
+        raw_offset=1,
+        controller_session="claude-7",
+    )
+    run.state_code = SessionState.IDLE
+    container.record_service().work_done(run.id, ENDED)
+
+
+def _records(db: DbSession, container: ServiceContainer) -> SessionRecordService:
+    return SessionRecordService(
+        db, container.session_stream_service(), ViewService(db, container.engine_bus())
+    )
+
+
+def _after(run: models.Session) -> Work:
+    """The job after the run's turn, as the brief reads it."""
+    return Work(trigger_code=WorkTrigger.WORKER_TURN_ENDED, trigger_item_id=run.id)
+
+
+class TestWorkerTurnEnded:
+    """The job after a worker's turn, once the turn-end read settled every
+    document the run registered (design 3 §5.3, D2; F57.4; V03, V12)."""
+
+    def test_every_line_that_holds_is_in_the_frames_order(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        opened.autopilot = True
+        assert container.plan_service().save(opened, json.dumps(PLAN).encode()) == []
+        deferring = container.document_service().bear_item(
+            opened, "decision", "Soup chores", project_session, DEFERRED
+        )
+        container.record_service().done(deferring, person)
+        run = _worker_run(session, container, opened, "fix")
+        documents = container.document_service()
+        stock = documents.register(opened, run, "/work/Soup/stock.md").item
+        notes = documents.register(opened, run, "/work/Soup/notes.md").item
+        _attached(session, opened, run, "stock.txt")
+        _attached(session, opened, run, "salt.txt")
+        for position, attachment in enumerate(
+            session.scalars(select(Attachment).order_by(Attachment.filename)), 1
+        ):
+            session.add(
+                ItemAttachment(
+                    item_id=run.id,
+                    attachment_id=attachment.id,
+                    position=position,
+                    attached_at=AT,
+                )
+            )
+        _turn_ended(session, container, run, LAST_WORDS)
+        documents.publish_read(session.get_one(Document, stock.id), STOCK, run.id)
+        documents.fail_read(session.get_one(Document, notes.id))
+        _records(session, container).append(
+            run.id,
+            RecordKind.SERVER,
+            payload={
+                "type": READ_FAILED,
+                "item": str(notes.id),
+                "path": "/work/Soup/notes.md",
+                "reason": "the controller answered 404 not-found: no such file",
+            },
+        )
+
+        brief = briefs.job(opened, _after(run), AT, LATER)
+
+        stock_path = session.get_one(Document, stock.id).path
+        notes_path = session.get_one(Document, notes.id).path
+        path = f"soup-club/{session.get_one(Document, deferring.id).path}"
+        assert brief == (
+            "/pre-rule\n\n"
+            "Pilot's brief · a worker's turn ended · project \"Soup club\" ·"
+            " /work/Projects/soup-club · 2026-10-26T11:05:40Z\n\n"
+            "Auto pilot: on — the granted column holds for this session"
+            " (rules/grants.md).\n\n"
+            f'The work item: "Fixing the stock" ({run.id}), task fix "Fix the'
+            ' stock", repository example/Soup, environment example-soup-3f2a1c,'
+            " session claude-7; its turn ended 2026-10-26T09:29:50Z — the item's"
+            ' last line: "Registered the notes; ending the turn.".\n'
+            "Registered this run, in the order registered:\n"
+            f"- {stock_path} ({stock.id}) — published\n"
+            f"- {notes_path} ({notes.id}) — read failed: the controller answered"
+            " 404 not-found: no such file\n"
+            "Attached on the work item: 2 files (timeline.json lists them).\n\n"
+            f"{NOTES}\n"
+            '- fix "Fix the stock" · n1: Ask about salt\n'
+            '- taste "Taste it" · n3: Two spoons\n'
+            "- the plan · n2: Add a sweep task\n"
+            f"{HOMELESS}\n"
+            f"- {deferring.id}/D1 in {path} (Soup chores), to: fix\n"
+            f"- {deferring.id}/Q1 in {path} (Soup chores), to: plan"
+        )
+
+    def test_a_run_that_registered_nothing_says_so_and_no_line_holds_unheld(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+    ) -> None:
+        """No task, no text its turn ended with, nothing attached and no note:
+        each line left out."""
+        run = _worker_run(session, container, opened, None)
+        _turn_ended(session, container, run, "")
+
+        assert briefs.job(opened, _after(run), AT, AT).split("\n\n")[3:] == [
+            f'The work item: "Fixing the stock" ({run.id}), repository'
+            " example/Soup, environment example-soup-3f2a1c, session claude-7;"
+            " its turn ended 2026-10-26T09:29:50Z.\n"
+            "Registered nothing this run."
+        ]
+
+    def test_a_trigger_in_a_pause_carries_it_after_the_switch(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        person: User,
+    ) -> None:
+        run = _worker_run(session, container, opened, None)
+        _turn_ended(session, container, run, LAST_WORDS)
+        _transition(session, opened, person, TransitionKind.PAUSED, PAUSED_AT)
+        _transition(session, opened, person, TransitionKind.RESUMED, RESUMED_AT)
+
+        assert briefs.job(opened, _after(run), AT, LATER).split("\n\n")[2] == (
+            "Auto pilot: off — the granted column asks for this session"
+            f" (rules/grants.md).\n{PAUSE_LINE}"
         )
 
 

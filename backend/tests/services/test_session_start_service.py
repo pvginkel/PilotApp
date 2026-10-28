@@ -259,7 +259,8 @@ def _services(
     """The start's services on a supervisor of their own, on the client's
     outage unless `outage` gives another, and on a slot of their own of
     `work_max` and `project_max`, as a process of its own has; their creates
-    hand Pilot's MCP server at `mcp_url`, none when it is None."""
+    hand Pilot's MCP server at `mcp_url`, none when it is None. The start is
+    the container's, which the job after a worker's turn starts through."""
     supervisor, coordinator = supervise(container)
     environments = EnvironmentService(
         container=container,
@@ -300,6 +301,7 @@ def _services(
         controller_configured=controller_configured,
         store_environment_id=STORE_ENVIRONMENT_ID,
     )
+    container.session_start_service.override(providers.Object(starts))
     return starts, environments, coordinator
 
 
