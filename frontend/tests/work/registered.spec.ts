@@ -95,9 +95,10 @@ async function fileEvent(projects: Projects, sessionId: string, type: FileEvent[
   return found[0];
 }
 
-/** The work item the run's documents continue in: the project's other one. */
+/** The work item the run's documents continue in: the project's other one, Pilot's own jobs aside, the one after the run's turn among them. */
 async function continuationOf(projects: Projects, project: string, work: string): Promise<string> {
-  const others = async () => (await projects.timeline(project)).items.filter((item) => item.kind === 'work' && item.id !== work);
+  const others = async () =>
+    (await projects.timeline(project)).items.filter((item) => item.kind === 'work' && item.id !== work && !item.work?.pilots_own);
   await expect.poll(async () => (await others()).length).toBe(1);
   return (await others())[0].id;
 }
@@ -276,10 +277,13 @@ test.describe('A registered document', () => {
     const continuation = await continuationOf(projects, project, work);
     const continuationItem = timeline.item(continuation);
     await expect(continuationItem.title).toHaveText(TITLE);
+    // Pilot's job after the run's turn, placed once the run's documents were read (design 3 D2).
+    const job = (await projects.timeline(project)).items.find((item) => item.work?.pilots_own)!.id;
     expect(await timeline.items.evaluateAll((items) => items.map((each) => each.getAttribute('data-item-id')))).toEqual([
       work,
       survey,
       pitch,
+      job,
       continuation,
     ]);
     await expect(surveyItem.undo).toHaveCount(0);
