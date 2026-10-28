@@ -1,7 +1,8 @@
-"""Pilot's own background jobs, the setup and the job after a worker's turn,
-one at a time per project, each briefed as it starts (design 3 §5.1 to §5.3,
-D2; F49, F59, F59.1, F59.2, F141.4; TD §4.2; DB Work, assertion 167, 243;
-V01, V11, V12, V23)."""
+"""Pilot's own background jobs, the setup, the job after a worker's turn and
+the job after an item of Pilot's own is closed, one at a time per project,
+each briefed as it starts (design 3 §5.1 to §5.3, D2; F14.1, F49, F59, F59.1,
+F59.2, F141.4; TD §4.2; DB Work, assertion 167, 243, decision 45; V01, V11,
+V12, V23, V29)."""
 
 import threading
 import uuid
@@ -10,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from dependency_injector import providers
 from flask import Flask
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session as DbSession
@@ -21,6 +23,7 @@ from app.engine.views import ViewService
 from app.exceptions import InvalidOperationException
 from app.models import Item, Project, ProjectTransition, Turn, User, Work
 from app.models.reference import (
+    AnswerChannel,
     ProjectState,
     RecordKind,
     SessionState,
@@ -922,3 +925,244 @@ class TestWorkerTurnEnded:
         assert job is not None
         assert (job.state_code, job.turns) == (SessionState.HELD, 0)
         assert starts.held(session, opened, job) == Held(HeldReason.QUEUE)
+
+
+QUESTION = """---
+title: When to taste
+---
+
+```question id=Q1
+```
+"""
+
+
+@pytest.fixture
+def placing(container: ServiceContainer, starts: SessionStartService) -> None:
+    """The container's start the configured one, through which a close
+    places the job after it."""
+    container.session_start_service.override(providers.Object(starts))
+
+
+def _pilots(
+    db: DbSession, container: ServiceContainer, project: Project
+) -> models.Document:
+    """A question the project's chat added, a session of Pilot's own."""
+    chat = models.Session(
+        project_id=project.id,
+        kind_code="chat",
+        cwd=STORE_REPO,
+        token_hash=uuid.uuid4().hex,
+        state_code=SessionState.RUNNING,
+    )
+    db.add(chat)
+    db.flush()
+    item = container.document_service().bear_item(
+        project, "question", "When to taste", chat, QUESTION
+    )
+    return db.get_one(models.Document, item.id)
+
+
+def _closed(
+    container: ServiceContainer, document: models.Document, person: User
+) -> models.Session:
+    """The person's answer to the question, its close, through the chat; the
+    job it placed."""
+    container.record_service().answer(
+        document, "Q1", person, "Now", via=AnswerChannel.CHAT
+    )
+    db = container.db_session()
+    work = db.scalars(
+        select(Work)
+        .join(Item, Item.id == Work.id)
+        .where(Work.trigger_item_id == document.id)
+        .order_by(Item.seq.desc())
+        .limit(1)
+    ).one()
+    return db.get_one(models.Session, work.id)
+
+
+@pytest.mark.usefixtures("placing")
+class TestItemDone:
+    """The job after a person's close of an item of Pilot's own, placed in
+    the close's transaction, its brief consuming the item (DB decision 45;
+    F14.1, F59; V01, V23, V29)."""
+
+    def test_it_places_a_job_its_trigger_item_the_item(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        opened: Project,
+        person: User,
+    ) -> None:
+        document = _pilots(session, container, opened)
+        item = session.get_one(Item, document.id)
+        before = datetime.now(UTC)
+
+        job = _closed(container, document, person)
+
+        work = session.get_one(Work, job.id)
+        line = session.get_one(Item, job.id)
+        assert (work.trigger_code, work.trigger_item_id, work.repo) == (
+            WorkTrigger.ITEM_DONE,
+            item.id,
+            None,
+        )
+        assert (line.title, line.seq) == (NEXT_TITLE, item.seq + 1)
+        assert (job.kind_code, job.cwd) == ("job", STORE_REPO)
+        assert before <= job.created_at <= datetime.now(UTC)
+
+    def test_going_at_once_its_brief_consumes_the_item_in_the_close(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        opened: Project,
+        person: User,
+    ) -> None:
+        document = _pilots(session, container, opened)
+
+        job = _closed(container, document, person)
+
+        item = session.get_one(Item, document.id)
+        turn = _brief(container, job)
+        assert job.state_code is SessionState.STARTING
+        assert turn.started_at == job.created_at
+        assert turn.message.startswith(
+            "/plan\n\nPilot's brief · an item of yours is done"
+        )
+        assert (item.consumed_at, item.consumed_session_id) == (job.created_at, job.id)
+
+    def test_held_by_the_pause_its_brief_and_the_consumption_wait_for_the_release(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        person: User,
+    ) -> None:
+        document = _pilots(session, container, opened)
+        _transition(session, opened, person, TransitionKind.PAUSED, datetime.now(UTC))
+        job = _closed(container, document, person)
+        item = session.get_one(Item, document.id)
+        assert (job.state_code, job.turns, item.consumed_at) == (
+            SessionState.HELD,
+            0,
+            None,
+        )
+        assert _jobs(container, starts).unbriefed(item) == job
+        _transition(session, opened, person, TransitionKind.RESUMED, datetime.now(UTC))
+
+        _release(starts)
+
+        job = _read(session, job)
+        item = session.get_one(Item, document.id, populate_existing=True)
+        turn = _brief(container, job)
+        assert job.state_code is SessionState.STARTING
+        assert (item.consumed_at, item.consumed_session_id) == (
+            turn.started_at,
+            job.id,
+        )
+        assert "this job's trigger happened while the project was paused" in (
+            turn.message
+        )
+        assert _jobs(container, starts).unbriefed(item) is None
+
+    def test_placed_while_another_job_runs_it_waits_its_turn(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        opening: Item,
+        person: User,
+    ) -> None:
+        _in(session, _setup(container, starts, opened), SessionState.RUNNING)
+        document = _pilots(session, container, opened)
+
+        job = _closed(container, document, person)
+
+        assert (job.state_code, job.turns) == (SessionState.HELD, 0)
+        assert starts.held(session, opened, job) == Held(HeldReason.QUEUE)
+        assert session.get_one(Item, document.id).consumed_at is None
+
+    def test_a_withdrawn_job_never_starts_and_the_next_goes_on(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        person: User,
+    ) -> None:
+        """Withdrawn while the pause holds both, the job before holds up
+        none: the release lets the next one go."""
+        _transition(session, opened, person, TransitionKind.PAUSED, PAUSED_AT)
+        first = _pilots(session, container, opened)
+        second = _pilots(session, container, opened)
+        withdrawn = _closed(container, first, person)
+        following = _closed(container, second, person)
+
+        container.record_service().undo(session.get_one(Item, first.id))
+        _transition(session, opened, person, TransitionKind.RESUMED, RESUMED_AT)
+        _release(starts)
+
+        withdrawn, following = _read(session, withdrawn), _read(session, following)
+        assert (withdrawn.state_code, withdrawn.turns) == (SessionState.STOPPED, 0)
+        assert following.state_code is SessionState.STARTING
+        status = work_status(
+            session, [withdrawn.id], unreachable=False, slots=starts._slots
+        )[withdrawn.id]
+        assert (status.state, status.stopped_by, status.held_reason) == (
+            SessionState.STOPPED,
+            None,
+            None,
+        )
+
+
+@pytest.mark.usefixtures("placing")
+class TestWithdraw:
+    """`unbriefed` finds the job a close placed while it is held before its
+    brief, and `withdraw` takes it off the gate, its line done `withdrawn`
+    (F14.1; V29)."""
+
+    def test_an_item_with_no_job_has_none(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+    ) -> None:
+        document = _pilots(session, container, opened)
+
+        assert (
+            _jobs(container, starts).unbriefed(session.get_one(Item, document.id))
+            is None
+        )
+
+    def test_withdrawn_its_session_is_stopped_by_no_one_and_its_line_done(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        person: User,
+    ) -> None:
+        _transition(session, opened, person, TransitionKind.PAUSED, PAUSED_AT)
+        document = _pilots(session, container, opened)
+        job = _closed(container, document, person)
+        jobs = _jobs(container, starts)
+        held = jobs.unbriefed(session.get_one(Item, document.id))
+        assert held == job
+
+        jobs.withdraw(job, LATER)
+
+        line = session.get_one(Item, job.id)
+        assert (job.state_code, job.stopped_at, job.stopped_by_user_id) == (
+            SessionState.STOPPED,
+            LATER,
+            None,
+        )
+        assert (line.done_at, line.done_cause_code, line.done_by_user_id) == (
+            LATER,
+            "withdrawn",
+            None,
+        )
+        assert jobs.unbriefed(session.get_one(Item, document.id)) is None

@@ -30,6 +30,7 @@ from app.models import (
     Work,
 )
 from app.models.reference import (
+    AnswerChannel,
     AttachmentSource,
     ChatKind,
     CloseCause,
@@ -790,6 +791,379 @@ class TestJobPause:
         _transition(session, opened, person, TransitionKind.RESUMED, resumed)
 
         assert "Paused" not in briefs.job(opened, SETUP, AT, LATER)
+
+
+CONFIRM = """---
+title: Push the stock
+step: fix
+---
+
+```decision id=C1
+type: confirmation
+because: rider
+proposal: Push the three commits.
+```
+"""
+
+CHOICE = """---
+title: Leek or onion
+---
+
+```decision id=D1
+options:
+  - Leek
+  - Onion
+```
+"""
+
+AGREE = """---
+title: Salt it
+---
+
+```decision id=D1
+proposal: Salt it.
+```
+"""
+
+ASK = """---
+title: When to taste
+---
+
+```question id=Q1
+```
+"""
+
+CHORE = """---
+title: Stir the pot
+---
+
+```action id=A1
+```
+"""
+
+PLAN_DONE = """---
+title: Soup plan
+step: fix
+---
+
+```decision id=D1
+options:
+  - Leek
+  - Onion
+answer: Leek
+by: agent
+at: 2026-10-12T09:30:00Z
+```
+
+```question id=Q1
+default: Tomorrow
+```
+
+```decision id=D2
+proposal: Salt it.
+answer: deferred
+by: agent
+at: 2026-10-12T09:30:00Z
+to: fix
+note: At the stove.
+```
+
+```action id=A1
+done: 2026-10-12T11:00:00Z
+by: ada
+note: Stirred twice.
+```
+"""
+
+
+def _closing(item: Item) -> Work:
+    """The job after the item's close, as the brief reads it."""
+    return Work(trigger_code=WorkTrigger.ITEM_DONE, trigger_item_id=item.id)
+
+
+def _item_line(db: DbSession, item: Item, closed: str) -> str:
+    """The item's line before its close, read from the record."""
+    head = f"The item: {db.get_one(Document, item.id).path} ({item.id})"
+    return f'{head}, {item.kind_code} "{item.title}"{closed}'
+
+
+class TestItemDone:
+    """The job after a person's close of an item of Pilot's own: the item and
+    what was done to it, as the record holds it, then the notes of the task
+    it names and the plan's own (design 3 §5.3; DB decision 45; F57.4; V03,
+    V12)."""
+
+    @pytest.fixture
+    def planned(self, container: ServiceContainer, opened: Project) -> Project:
+        assert container.plan_service().save(opened, json.dumps(PLAN).encode()) == []
+        return opened
+
+    def _bear(
+        self,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        kind: str,
+        text: str,
+    ) -> tuple[Item, Document]:
+        item = container.document_service().bear_item(
+            project, kind, kind.title(), project_session, text
+        )
+        return item, container.db_session().get_one(Document, item.id)
+
+    def test_a_confirmations_yes_and_every_line_in_the_frames_order(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        planned: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        deferring = container.document_service().bear_item(
+            planned, "decision", "Soup chores", project_session, DEFERRED
+        )
+        container.record_service().done(deferring, person)
+        item, document = self._bear(
+            container, planned, project_session, "confirmation", CONFIRM
+        )
+        container.record_service().answer(document, "C1", person, "Yes")
+
+        brief = briefs.job(planned, _closing(item), AT, LATER)
+
+        assert item.done_at is not None
+        head, switch, closed, notes = brief.split("\n\n")[1:]
+        assert head == (
+            'Pilot\'s brief · an item of yours is done · project "Soup club" ·'
+            " /work/Projects/soup-club · 2026-10-26T11:05:40Z"
+        )
+        assert brief.startswith("/plan\n\n")
+        assert switch == (
+            "Auto pilot: off — the granted column asks for this session"
+            " (rules/grants.md)."
+        )
+        assert closed == _item_line(
+            session,
+            item,
+            f", task fix — answered Yes by ada at {_z(item.done_at)}.",
+        )
+        path = f"soup-club/{session.get_one(Document, deferring.id).path}"
+        assert notes == (
+            f"{NOTES}\n"
+            '- fix "Fix the stock" · n1: Ask about salt\n'
+            "- the plan · n2: Add a sweep task\n"
+            f"{HOMELESS}\n"
+            f"- {deferring.id}/D1 in {path} (Soup chores), to: fix\n"
+            f"- {deferring.id}/Q1 in {path} (Soup chores), to: plan"
+        )
+
+    def test_a_no_carries_its_reason(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        planned: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        item, document = self._bear(
+            container, planned, project_session, "confirmation", CONFIRM
+        )
+        container.record_service().answer(
+            document, "C1", person, "No", via=AnswerChannel.CHAT, note="Not today"
+        )
+
+        assert briefs.job(planned, _closing(item), AT, LATER).split("\n\n")[3] == (
+            _item_line(
+                session,
+                item,
+                f", task fix — answered No by ada at {_z(item.done_at)}"
+                ' (via chat), its reason: "Not today".',
+            )
+        )
+
+    @pytest.mark.parametrize(
+        ("kind", "text", "local_id", "answer", "note", "said"),
+        [
+            pytest.param(
+                "decision",
+                CHOICE,
+                "D1",
+                "Leek",
+                "Sweeter",
+                'D1 answered Leek by ada at {at}, note: "Sweeter".',
+                id="an-option",
+            ),
+            pytest.param(
+                "decision",
+                CHOICE,
+                "D1",
+                "Both, halved",
+                None,
+                'D1 answered "Both, halved" (Other) by ada at {at}.',
+                id="free-words",
+            ),
+            pytest.param(
+                "decision",
+                AGREE,
+                "D1",
+                "Agree",
+                None,
+                "D1 answered Agree by ada at {at}.",
+                id="a-proposals-agree",
+            ),
+            pytest.param(
+                "question",
+                ASK,
+                "Q1",
+                "After lunch",
+                None,
+                'Q1 answered "After lunch" by ada at {at}.',
+                id="a-question",
+            ),
+            pytest.param(
+                "decision",
+                CHOICE,
+                "D1",
+                "deferred",
+                None,
+                "D1 answered deferred to fix by ada at {at}.",
+                id="deferred",
+            ),
+        ],
+    )
+    def test_a_one_ask_items_answer_is_its_block_as_answered(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        planned: Project,
+        person: User,
+        project_session: models.Session,
+        kind: str,
+        text: str,
+        local_id: str,
+        answer: str,
+        note: str | None,
+        said: str,
+    ) -> None:
+        item, document = self._bear(container, planned, project_session, kind, text)
+        container.record_service().answer(
+            document,
+            local_id,
+            person,
+            answer,
+            note=note,
+            to="fix" if answer == "deferred" else None,
+        )
+
+        assert briefs.job(planned, _closing(item), AT, LATER).split("\n\n")[3] == (
+            _item_line(session, item, f" — {said.format(at=_z(item.done_at))}")
+        )
+
+    def test_an_actions_done_carries_what_was_pasted_back(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        planned: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        item, document = self._bear(
+            container, planned, project_session, "action", CHORE
+        )
+        container.record_service().done_action(document, "A1", person, note="Twice")
+
+        assert briefs.job(planned, _closing(item), AT, LATER).split("\n\n")[3] == (
+            _item_line(
+                session,
+                item,
+                f' — A1 done by ada at {_z(item.done_at)}, pasted back: "Twice".',
+            )
+        )
+
+    def test_a_documents_done_reads_one_line_per_block_as_closed(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        planned: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        item, _ = self._bear(container, planned, project_session, "document", PLAN_DONE)
+        container.record_service().done(item, person)
+
+        assert briefs.job(planned, _closing(item), AT, LATER).split("\n\n")[3] == (
+            _item_line(
+                session, item, f", task fix — Done by ada at {_z(item.done_at)};"
+            )
+            + " its blocks:\n"
+            "- D1 Leek (by agent)\n"
+            '- Q1 "Tomorrow" (via recommended)\n'
+            '- D2 deferred to fix (by agent), note: "At the stove."\n'
+            '- A1 done, pasted back: "Stirred twice."'
+        )
+
+    def test_a_reviews_reviewed_is_who_and_when(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        planned: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        item, _ = self._bear(
+            container, planned, project_session, "review", "# The tasting\n"
+        )
+        container.record_service().reviewed(item, person)
+
+        assert briefs.job(planned, _closing(item), AT, LATER).split("\n\n")[3] == (
+            _item_line(session, item, f" — Reviewed by ada at {_z(item.done_at)}.")
+        )
+
+    def test_an_item_naming_no_task_carries_the_plans_own_notes_alone(
+        self,
+        container: ServiceContainer,
+        briefs: BriefService,
+        planned: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        item, document = self._bear(
+            container, planned, project_session, "question", ASK
+        )
+        container.record_service().answer(document, "Q1", person, "Now")
+
+        assert briefs.job(planned, _closing(item), AT, LATER).split("\n\n")[4] == (
+            f"{NOTES}\n- the plan · n2: Add a sweep task"
+        )
+
+    def test_a_trigger_in_a_pause_carries_it_after_the_switch(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        item, document = self._bear(container, opened, project_session, "question", ASK)
+        container.record_service().answer(document, "Q1", person, "Now")
+        _transition(session, opened, person, TransitionKind.PAUSED, PAUSED_AT)
+        _transition(session, opened, person, TransitionKind.RESUMED, RESUMED_AT)
+
+        assert briefs.job(opened, _closing(item), AT, LATER).split("\n\n")[2] == (
+            "Auto pilot: off — the granted column asks for this session"
+            f" (rules/grants.md).\n{PAUSE_LINE}"
+        )
+
+
+def _z(moment: datetime | None) -> str:
+    assert moment is not None
+    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 FINISH = (

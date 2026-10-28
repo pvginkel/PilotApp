@@ -258,6 +258,7 @@ class TestTheGate:
 class TestAnswer:
     """`POST /tools/pilot-store/answers`: `answer(block, value, for, note?, to?)`."""
 
+    @pytest.mark.usefixtures("started")
     def test_the_answer_is_200_with_its_effect_line_and_names_the_tool_use(
         self,
         client: FlaskClient,

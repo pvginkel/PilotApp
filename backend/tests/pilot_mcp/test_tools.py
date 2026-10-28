@@ -8,6 +8,7 @@ import uuid
 from datetime import UTC, datetime
 
 import pytest
+from dependency_injector import providers
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 from starlette.applications import Starlette
@@ -40,6 +41,8 @@ from tests.support.pilot_mcp import (
     mcp_session,
     running_session,
 )
+from tests.support.starts import configured_starts
+from tests.support.supervisor import Supervise
 
 PATH = "/work/Example/docs/refinement.md"
 
@@ -463,8 +466,19 @@ def _effect(session: DbSession, brain: models.Session) -> dict[str, object]:
     return payload
 
 
+@pytest.fixture
+def placing(container: ServiceContainer, supervise: Supervise) -> None:
+    """The container's start on a controller, its loops never run, through
+    which a person's close of an item of Pilot's own places the job after
+    it."""
+    container.session_start_service.override(
+        providers.Object(configured_starts(container, supervise))
+    )
+
+
 @pytest.mark.anyio
 class TestAnswer:
+    @pytest.mark.usefixtures("placing")
     async def test_the_answer_is_recorded_for_the_person_through_its_route(
         self,
         mcp_app: Starlette,
@@ -596,6 +610,7 @@ class TestAnswer:
 
 @pytest.mark.anyio
 class TestMark:
+    @pytest.mark.usefixtures("placing")
     async def test_done_is_marked_for_the_person(
         self,
         mcp_app: Starlette,

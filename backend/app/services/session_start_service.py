@@ -115,7 +115,7 @@ from app.models import (
     Work,
 )
 from app.models import Session as AgentSession
-from app.models.reference import ProjectState, RecordKind, SessionState
+from app.models.reference import ProjectState, RecordKind, SessionState, WorkTrigger
 from app.services.controller_client import (
     ControllerClient,
     ControllerEnvironment,
@@ -1419,7 +1419,10 @@ class SessionStartService:
         transaction that moves it to `starting`: its brief composed from the
         record as it stands at `at` (F59; `BriefService.job`), sent as its
         first Turn, and its Work's switch the one that brief states, which the
-        session keeps (F54.7)."""
+        session keeps (F54.7). The job after an item's close consumes the item
+        it is briefed with, which takes Undo from it (F14.1): under the
+        Session's lock, which the item's Undo takes before it reads the
+        item."""
         work = db.get_one(Work, session.id)
         work.autopilot = project.autopilot
         db.add(
@@ -1432,9 +1435,27 @@ class SessionStartService:
                 started_at=at,
             )
         )
+        if work.trigger_code is WorkTrigger.ITEM_DONE:
+            # The job after an item's close names the item.
+            assert work.trigger_item_id is not None
+            closed = db.get_one(Item, work.trigger_item_id)
+            closed.consumed_at = at
+            closed.consumed_session_id = session.id
         db.flush()
         session.turns = 1
         session.turn_started_at = at
+
+    def withdraw(self, db: Session, session: AgentSession, at: datetime) -> None:
+        """A job held before its brief, its Session locked by the caller,
+        withdrawn at `at` by its trigger item's Undo: `stopped` by no one,
+        with no Turn, as a Stop leaves a job held before its brief, so the
+        gate never starts it. It held no slot and no environment; the
+        project's next job goes on once what held this one moves."""
+        session.state_code = SessionState.STOPPED
+        session.stopped_at = at
+        session.current_line = None
+        self._moved(session, state=True)
+        logger.info("Session %s withdrawn before its brief", session.id)
 
     def _moved(self, session: AgentSession, *, state: bool = False) -> None:
         work_moved(self._container.engine_bus(), session, state=state)

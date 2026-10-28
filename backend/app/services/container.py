@@ -360,7 +360,9 @@ class ServiceContainer(containers.DeclarativeContainer):
         plan_service=plan_service,
     )
     # The session start places a run's continuation once its documents are
-    # closed (decision 44); built at the call, as a background service.
+    # closed (decision 44), built at the call, as a background service; the
+    # job service the job after an item of Pilot's own is closed (decision
+    # 45), built at the call, which itself takes a record service.
     record_service = providers.Factory(
         RecordService,
         db=db_session,
@@ -368,6 +370,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         document_service=document_service,
         view_service=view_service,
         continuations=session_start_service.provider,
+        jobs=providers.Callable(lambda container: container.job_service, __self__),
     )
 
     # The write-back of a closed registered document to its file (F65.1);

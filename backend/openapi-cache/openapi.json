@@ -1335,8 +1335,14 @@
         "type": "object"
       },
       "InventedItemCreateSchema.6d6b324": {
-        "description": "A prose item the project's session adds, as Pilot adds one.",
+        "description": "A prose item the project's session, or a job of Pilot's own, adds, as\nPilot adds one.",
         "properties": {
+          "by_pilot": {
+            "default": false,
+            "description": "Added by a session of Pilot's own, a job of the project's in the store, rather than by the project's session: a person's close of it, but a notice's Read, places the job after it (`item_done`). The project needs no session for it",
+            "title": "By Pilot",
+            "type": "boolean"
+          },
           "kind": {
             "description": "The kind it is added as; a text with blocks shows their kind",
             "enum": [
@@ -2833,7 +2839,7 @@
                 "type": "null"
               }
             ],
-            "description": "Who did it; null when the server did, at a turn's end"
+            "description": "Who did it; null when the server did, at a turn's end, or on the Undo that withdrew a job before its brief went out"
           },
           "cause": {
             "description": "How it came to be done",
@@ -2842,7 +2848,8 @@
               "marked",
               "settled",
               "turn_ended",
-              "finished"
+              "finished",
+              "withdrawn"
             ],
             "title": "Cause",
             "type": "string"
@@ -6441,7 +6448,7 @@
                 "type": "null"
               }
             ],
-            "description": "Who did it; null when the server did, at a turn's end"
+            "description": "Who did it; null when the server did, at a turn's end, or on the Undo that withdrew a job before its brief went out"
           },
           "cause": {
             "description": "How it came to be done",
@@ -6450,7 +6457,8 @@
               "marked",
               "settled",
               "turn_ended",
-              "finished"
+              "finished",
+              "withdrawn"
             ],
             "title": "Cause",
             "type": "string"
@@ -12354,7 +12362,7 @@
     },
     "/api/testing/projects/{project_id}/items": {
       "post": {
-        "description": "Returns:     201: The item's id     400: The kind is no prose kind Pilot adds, or the title is empty     404: No project has the id     409: The project has no session, or the text holds a fault",
+        "description": "Returns:     201: The item's id     400: The kind is no prose kind Pilot adds, or the title is empty     404: No project has the id     409: The project has no session and the item is not Pilot's, or the         text holds a fault",
         "operationId": "post__api_testing_projects_{project_id}_items",
         "parameters": [
           {
@@ -12425,7 +12433,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Add a prose item to the project's timeline, by the project's session, as Pilot adds one: its kind, urgency, person, step and blocks, Pilot's answers and deferrals among them, are what its text says.",
+        "summary": "Add a prose item to the project's timeline, by the project's session, or by a job of Pilot's own, as Pilot adds one: its kind, urgency, person, step and blocks, Pilot's answers and deferrals among them, are what its text says.",
         "tags": [],
         "x-required-role": "editor"
       }

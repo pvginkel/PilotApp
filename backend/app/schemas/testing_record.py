@@ -141,7 +141,8 @@ class InventedProjectSchema(BaseModel):
 
 
 class InventedItemCreateSchema(BaseModel):
-    """A prose item the project's session adds, as Pilot adds one."""
+    """A prose item the project's session, or a job of Pilot's own, adds, as
+    Pilot adds one."""
 
     kind: Literal[
         "decision", "confirmation", "question", "action", "notice", "document", "review"
@@ -159,6 +160,15 @@ class InventedItemCreateSchema(BaseModel):
     text: str = Field(
         description="Its Markdown as Pilot writes it, front matter and blocks included",
         examples=["```decision id=D1\noptions:\n  - Dome\n  - Tunnel\n```\n"],
+    )
+    by_pilot: bool = Field(
+        default=False,
+        description=(
+            "Added by a session of Pilot's own, a job of the project's in the "
+            "store, rather than by the project's session: a person's close of "
+            "it, but a notice's Read, places the job after it (`item_done`). "
+            "The project needs no session for it"
+        ),
     )
 
 

@@ -15,7 +15,10 @@ document owes its text to the file it was registered from, written back once
 the transaction commits (F65.1). The close that leaves no document of a work
 item's ended run open continues its conversation in the same transaction
 (decision 44, review 1): the session start places the continuation, and every
-document of the run is consumed by it, its Undo gone.
+document of the run is consumed by it, its Undo gone. A person's close of an
+item of Pilot's own places the job after it in the same transaction (F59; DB
+decision 45), whose brief consumes the item; an Undo before that brief
+withdraws the job (`Jobs`).
 """
 
 import uuid
@@ -47,6 +50,7 @@ from app.models import (
     ItemKind,
     PlanTask,
     Project,
+    SessionKind,
     User,
     Work,
 )
@@ -54,6 +58,7 @@ from app.models import Session as AgentSession
 from app.models.reference import (
     AnswerChannel,
     ProjectState,
+    Surface,
     UserKind,
     VersionCause,
     WorkTrigger,
@@ -67,6 +72,7 @@ MARKED = "marked"
 SETTLED = "settled"
 TURN_ENDED = "turn_ended"
 FINISHED = "finished"
+WITHDRAWN = "withdrawn"
 
 WRITTEN_BACK = (
     "Your documents were answered and written back in place: {paths}."
@@ -100,6 +106,27 @@ class Continuations(Protocol):
         ...
 
 
+class Jobs(Protocol):
+    """Places the job after a person's close of an item of Pilot's own, and
+    withdraws it on the item's Undo before its brief: the job service."""
+
+    def item_done(self, project: Project, item: Item) -> Work:
+        """The job after the close of `item`, placed in the caller's
+        transaction, which holds the project's row exclusively."""
+        ...
+
+    def unbriefed(self, item: Item) -> AgentSession | None:
+        """The job a close of `item` placed that is held before its brief,
+        its Session locked until the transaction ends; None when there is
+        none."""
+        ...
+
+    def withdraw(self, job: AgentSession, at: datetime) -> None:
+        """The job `job`, locked and held before its brief, withdrawn at
+        `at`: it never starts."""
+        ...
+
+
 class RecordService:
     def __init__(
         self,
@@ -108,12 +135,14 @@ class RecordService:
         document_service: DocumentService,
         view_service: ViewService,
         continuations: Callable[[], Continuations],
+        jobs: Callable[[], Jobs],
     ) -> None:
         self.db = db
         self.engine_bus = engine_bus
         self.document_service = document_service
         self.view_service = view_service
         self.continuations = continuations
+        self.jobs = jobs
 
     def answer(
         self,
@@ -219,11 +248,15 @@ class RecordService:
         finished (D028) nor archived (D012): its done cleared, and on a one-ask item its block's answer
         with it, an answer of Pilot's it replaced not restored (decision 6); a
         registered document's write-back of that close with it, so that its
-        next close writes it again (F65.1).
+        next close writes it again (F65.1); and the job its close placed, held
+        before its brief, withdrawn, its work item done `withdrawn`, so that
+        its next close places another.
 
         The project's row is held shared before the document's, so that
         Finish and Reopen, which change the project's state under its row
-        lock, never interleave with an Undo.
+        lock, never interleave with an Undo. The job's Session is locked
+        before the item is read, so that the brief, which consumes the item
+        under that lock, and the Undo never both take effect.
         """
         operation = f"undo item {item.id}"
         if self.db.get_one(ItemKind, item.kind_code).form != PROSE:
@@ -237,6 +270,8 @@ class RecordService:
         ).one()
         document = self.db.get_one(Document, item.id)
         project, _ = self._locked(document)
+        job = self.jobs().unbriefed(item)
+        self.db.refresh(item)
         refusal = self._undo_refusal(item)
         if refusal is not None:
             raise InvalidOperationException(operation, refusal)
@@ -256,6 +291,8 @@ class RecordService:
         item.done_by_user_id = None
         document.written_back_at = None
         document.write_back_refused_at = None
+        if job is not None:
+            self.jobs().withdraw(job, _now())
         self.view_service.timeline_moved(project)
 
     def retry_write_backs(self, continuation_id: uuid.UUID) -> None:
@@ -495,17 +532,20 @@ class RecordService:
     def _closing(self, document: Document) -> tuple[Project, Item | None]:
         """`_locked`, for a write that may close the document, the project's
         row locked first, before the document's, so that the close serialises
-        with Archive and reads the project as it stands (D012). A registered
-        document's close may continue its run (`_release`): its project's row
-        is locked exclusively, as the start that places the continuation locks
-        it (the start's lock order; review 3). So the close serialises with
-        Finish, with an Undo, and with the close of another document of the
-        run. Any other close holds the row shared, as an Undo does."""
+        with Archive and reads the project as it stands (D012). An item's
+        close may place work: a registered document's continue its run
+        (`_release`), an item of Pilot's own's the job after it (`_mark`). Its
+        project's row is locked exclusively from the start, as the start that
+        places the work locks it (the start's lock order; review 3), so that
+        two closes never both upgrade a shared hold. So the close serialises
+        with Finish, with an Undo, and with every other item's close. A
+        project document's, the draft's, holds the row shared, as an Undo
+        does."""
         project, _ = self.document_service.owner(document)
         self.db.execute(
             select(Project.id)
             .where(Project.id == project.id)
-            .with_for_update(read=document.source_path is None)
+            .with_for_update(read=document.project_id is not None)
         )
         return self._locked(document)
 
@@ -541,6 +581,26 @@ class RecordService:
             self.engine_bus.emit(WriteBackOwed(item.created_by_session_id))
         if document.source_path is not None:
             self._release(project, item)
+        elif (
+            user.kind_code is UserKind.PERSON
+            and item.kind_code != NOTICE
+            and self._pilots_own(item)
+        ):
+            self.jobs().item_done(project, item)
+
+    def _pilots_own(self, item: Item) -> bool:
+        """Whether a session of Pilot's own, one handed `pilot-store`, added
+        the item: a person's close of it, but a notice's Read, starts the job
+        after it (DB Work Trigger `item_done`); Pilot's own Done, made by a
+        session acting on the item already, starts none."""
+        return (
+            self.db.scalar(
+                select(SessionKind.surface)
+                .join(AgentSession, AgentSession.kind_code == SessionKind.code)
+                .where(AgentSession.id == item.created_by_session_id)
+            )
+            == Surface.STORE
+        )
 
     def _release(self, project: Project, item: Item) -> None:
         """The close of the registered document `item`, under the project's

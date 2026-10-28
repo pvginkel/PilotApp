@@ -2466,6 +2466,52 @@ class TestRelease:
         assert row.started_pod_at == fake.environment(env_id).pod_started_at
 
 
+class TestWithdraw:
+    """A job held before its brief, withdrawn by its trigger item's Undo:
+    stopped by no one with no Turn, so the gate never starts it, its line
+    told (F14.1; V29)."""
+
+    def test_it_is_stopped_by_no_one_with_no_turn_and_never_released(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        project: Project,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        job = models.Session(
+            project_id=project.id,
+            kind_code="job",
+            cwd="/work/PilotProjects",
+            token_hash="9" * 64,
+            state_code=SessionState.HELD,
+        )
+        session.add(job)
+        session.flush()
+        container.record_service().place_work(
+            project, job, "Deciding what is next", trigger=WorkTrigger.ITEM_DONE
+        )
+        at = datetime.now(UTC)
+        engine_events.clear()
+
+        starts.withdraw(session, job, at)
+        _release(starts)
+
+        job = _read(session, job.id)
+        assert (
+            job.state_code,
+            job.stopped_at,
+            job.stopped_by_user_id,
+            job.turns,
+            job.current_line,
+        ) == (SessionState.STOPPED, at, None, 0, None)
+        assert _turns(session, job.id) == []
+        assert set(_moves(engine_events)) == {
+            WorkMoved(project.id, job.id),
+            ProjectChanged(project.id),
+        }
+
+
 class TestProbe:
     def test_while_the_outage_does_not_hold_it_calls_nothing(
         self,

@@ -56,7 +56,9 @@ class StopCause(StrEnum):
 ItemForm = Literal["prose", "work", "wait"]
 """Item Kind's forms: which subtype an item is."""
 
-DoneCauseCode = Literal["answered", "marked", "settled", "turn_ended", "finished"]
+DoneCauseCode = Literal[
+    "answered", "marked", "settled", "turn_ended", "finished", "withdrawn"
+]
 """Done Cause's codes (DB §2.4)."""
 
 
@@ -90,7 +92,10 @@ class DoneSchema(BaseModel):
     at: datetime = Field(description="When the item was done")
     cause: DoneCauseCode = Field(description="How it came to be done")
     by: UserSchema | None = Field(
-        description="Who did it; null when the server did, at a turn's end"
+        description=(
+            "Who did it; null when the server did, at a turn's end, or on the "
+            "Undo that withdrew a job before its brief went out"
+        )
     )
     undo: bool = Field(
         description=(

@@ -181,17 +181,21 @@ def create_item(
     test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
 ) -> Any:
     """Add a prose item to the project's timeline, by the project's session,
-    as Pilot adds one: its kind, urgency, person, step and blocks, Pilot's
-    answers and deferrals among them, are what its text says.
+    or by a job of Pilot's own, as Pilot adds one: its kind, urgency, person,
+    step and blocks, Pilot's answers and deferrals among them, are what its
+    text says.
 
     Returns:
         201: The item's id
         400: The kind is no prose kind Pilot adds, or the title is empty
         404: No project has the id
-        409: The project has no session, or the text holds a fault
+        409: The project has no session and the item is not Pilot's, or the
+            text holds a fault
     """
     data = InventedItemCreateSchema.model_validate(request.get_json())
-    item = test_data_service.item(project_id, data.kind, data.title, data.text)
+    item = test_data_service.item(
+        project_id, data.kind, data.title, data.text, by_pilot=data.by_pilot
+    )
     return InventedItemSchema(id=item.id).model_dump(mode="json"), 201
 
 

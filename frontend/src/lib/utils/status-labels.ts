@@ -3,7 +3,7 @@
  * (F1.2), derived from the record, never written by the brain (database.md decision 15), a tab's
  * status icon (F1.3, F141.1), and a step's standing in the plan popover (F3.1). How a work item's session reads: its one line on the
  * timeline (F26.1, F26.2, F125), why the gate holds its start (F26.1), why it stopped when no one
- * stopped it (F71), and its session log's tail (F69.2). How a condition that holds all work reads
+ * stopped it (F71), its session log's tail (F69.2), and a job's line withdrawn by an Undo (F14.1). How a condition that holds all work reads
  * on the gold bar (F125).
  */
 
@@ -21,6 +21,7 @@ type HeldReason = components['schemas']['TimelineSchema.1fdd8ae.HeldReason'];
 type CurrentLine = components['schemas']['TimelineSchema.1fdd8ae.CurrentLineSchema'];
 type LineStep = NonNullable<CurrentLine['step']>;
 type ConditionCode = components['schemas']['ConditionsSchema.6c014b4.ConditionCode'];
+type DoneCause = components['schemas']['TimelineSchema.1fdd8ae.DoneSchema']['cause'];
 
 interface StepReading {
   text: string;
@@ -125,6 +126,28 @@ export function heldReasonLabel(reason: HeldReason, running: number | null): str
       return 'Waiting for the job before it';
     default: {
       const unknown: never = reason;
+      return String(unknown);
+    }
+  }
+}
+
+/**
+ * What a work item's done line says of how it closed, under its title: a job withdrawn by the Undo
+ * of the item whose close placed it, before its brief went out, which never ran (F14.1); null for
+ * every other close, which its time stands for.
+ */
+export function workClosedLabel(cause: DoneCause): string | null {
+  switch (cause) {
+    case 'withdrawn':
+      return 'Withdrawn by an Undo';
+    case 'answered':
+    case 'marked':
+    case 'settled':
+    case 'turn_ended':
+    case 'finished':
+      return null;
+    default: {
+      const unknown: never = cause;
       return String(unknown);
     }
   }

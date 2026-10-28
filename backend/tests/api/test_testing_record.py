@@ -689,6 +689,31 @@ class TestCreateItem:
         )
         assert _count(session, Item) == 1
 
+    def test_an_item_by_pilot_is_added_by_a_job_of_the_projects_needing_no_session(
+        self, client: FlaskClient, session: Session
+    ) -> None:
+        project_id = _make(client)
+
+        response = client.post(
+            _items_path(project_id),
+            json={
+                "kind": "question",
+                "title": "Which lake?",
+                "text": "```question id=Q1\n```\n",
+                "by_pilot": True,
+            },
+        )
+
+        assert response.status_code == 201, response.get_json()
+        item = session.get_one(Item, uuid.UUID(response.get_json()["id"]))
+        added_by = session.get_one(models.Session, item.created_by_session_id)
+        assert (added_by.kind_code, added_by.project_id, added_by.state_code) == (
+            "job",
+            item.project_id,
+            SessionState.IDLE,
+        )
+        assert session.get(Work, added_by.id) is None
+
     def test_a_text_with_a_fault_conflicts(
         self, client: FlaskClient, session: Session, environment: Environment
     ) -> None:

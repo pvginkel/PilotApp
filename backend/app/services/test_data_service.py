@@ -684,19 +684,33 @@ class TestDataService:
                 )
         return project
 
-    def item(self, project_id: uuid.UUID, kind: str, title: str, text: str) -> Item:
+    def item(
+        self,
+        project_id: uuid.UUID,
+        kind: str,
+        title: str,
+        text: str,
+        *,
+        by_pilot: bool = False,
+    ) -> Item:
         """A prose item of `kind` the project's session adds with `title` and
-        `text`, born through the engine's `bear_item`.
+        `text`, born through the engine's `bear_item`; `by_pilot`, a job of
+        Pilot's own adds it instead, one whose turn has ended, as a person's
+        close of an item of Pilot's own finds it.
 
         Raises:
             RecordNotFoundException: no project has the id.
-            InvalidOperationException: the project has no session, or the text
-                holds a fault.
+            InvalidOperationException: the project has no session and the item
+                is not `by_pilot`, or the text holds a fault.
         """
         project = self.db.get(Project, project_id)
         if project is None:
             raise RecordNotFoundException("Project", str(project_id))
-        session = self._session_of(project, f"add an item to project {project.id}")
+        session = (
+            self._job(project)
+            if by_pilot
+            else self._session_of(project, f"add an item to project {project.id}")
+        )
         return self.document_service.bear_item(project, kind, title, session, text)
 
     def save(self, item_id: uuid.UUID, text: str) -> Ingested:
@@ -1033,6 +1047,20 @@ class TestDataService:
                 operation,
                 "the project has no session: make it with an environment_id",
             )
+        return session
+
+    def _job(self, project: Project) -> AgentSession:
+        """A job of Pilot's own of `project`, in the store, idle, with no work
+        item of its own."""
+        session = AgentSession(
+            project_id=project.id,
+            kind_code=JOB,
+            cwd=STORE_REPO,
+            token_hash=hashlib.sha256(uuid.uuid4().bytes).hexdigest(),
+            state_code=SessionState.IDLE,
+        )
+        self.db.add(session)
+        self.db.flush()
         return session
 
     def _invented_member(self, handle: str) -> User:

@@ -1,7 +1,9 @@
 /**
  * A notice's Read (F23), its one button (F17.3), the app's own state (F23.1); and Undo (F14.1) in
  * the line of an answer or a mark, whoever gave it, while the record offers it: the item open again,
- * its answer gone, to be answered anew (F32.3, decision 6).
+ * its answer gone, to be answered anew (F32.3, decision 6). On an item of Pilot's own, Undo stands
+ * until the brief of the job its close placed goes out, and withdraws that job, whose line stays,
+ * closed as withdrawn, offering nothing (DB decision 45).
  */
 
 import { test, expect } from '../support/fixtures';
@@ -97,6 +99,38 @@ test.describe('Undo', () => {
     await expect(item.root).toHaveAttribute('data-state', 'open');
     await expect(item.block.options).toHaveCount(2);
     await expect(item.block.root.locator('[data-chosen="true"]')).toHaveCount(0);
+  });
+
+  test('on an item of Pilot’s own withdraws the job its close placed while the pause holds it, its line closed as withdrawn', async ({
+    people,
+    projects,
+    timeline,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.make({ name: makeUnique('Withdrawn'), members: [me.handle!], paused: true });
+    const question = await projects.place(id, { kind: 'question', title: 'Which lake?', text: QUESTION, by_pilot: true });
+    await timeline.open(id);
+    const item = timeline.item(question);
+
+    await item.block.answerField.fill('Lake Como');
+    await item.block.answerSend.click();
+    await expect(item.root).toHaveAttribute('data-state', 'done');
+    const job = (await projects.timeline(id)).items.find((each) => each.kind === 'work')!;
+    expect(job).toMatchObject({ title: 'Deciding what is next', done: null, work: { state: 'held', held_reason: 'paused' } });
+    const line = timeline.item(job.id);
+    await expect(line.work.line).toHaveAttribute('data-state', 'held');
+    await expect(line.work.cue).toHaveText('Paused');
+    await expect(item.undo).toBeVisible();
+
+    await item.undo.click();
+
+    await expect(item.root).toHaveAttribute('data-state', 'open');
+    await expect(line.root).toHaveAttribute('data-state', 'done');
+    await expect(line.closed).toHaveText('Withdrawn by an Undo');
+    await expect(line.undo).toHaveCount(0);
+    const withdrawn = (await projects.timeline(id)).items.find((each) => each.id === job.id)!;
+    expect(withdrawn.done).toMatchObject({ cause: 'withdrawn', by: null, undo: false });
+    expect(withdrawn.work).toMatchObject({ state: 'stopped', stopped_by: null });
   });
 
   test('is in no line of a finished project: an ask Finish closed unanswered, or one answered before', async ({ people, projects, timeline }) => {

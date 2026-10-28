@@ -12,15 +12,17 @@ the worker having no tree (F129.5).
 """
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from datetime import datetime
 
+import pilot_dsl as dsl
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.engine.documents import OPENING
+from app.engine.documents import OPENING, REVIEW
 from app.engine.paths import draft_folder
 from app.engine.plan import PlanService
+from app.engine.record import ANSWERED
 from app.engine.views import utc_time
 from app.models import (
     Attachment,
@@ -108,7 +110,7 @@ class BriefService:
             project,
             at,
             [_switch(project), self._pause(project)],
-            self._notes(project),
+            self._notes(project, None),
             [self._earlier_chats(project)],
             message,
         )
@@ -165,7 +167,11 @@ class BriefService:
             # The job after a worker's turn names its run.
             assert work.trigger_item_id is not None
             return self._worker_turn_ended(project, work.trigger_item_id, triggered, at)
-        # `JobService` places the setup and the job after a worker's turn alone.
+        if work.trigger_code is WorkTrigger.ITEM_DONE:
+            # The job after an item's close names the item.
+            assert work.trigger_item_id is not None
+            return self._item_done(project, work.trigger_item_id, triggered, at)
+        # `JobService` places no job of a wait's firings.
         assert work.trigger_code is WorkTrigger.SETUP
         return self._setup(project, triggered, at)
 
@@ -243,7 +249,62 @@ class BriefService:
             at,
             [_switch(project), self._trigger_paused(project, triggered)],
             lines,
-            self._notes(project),
+            self._notes(project, None),
+        )
+
+    def _item_done(
+        self, project: Project, item_id: uuid.UUID, triggered: datetime, at: datetime
+    ) -> str:
+        """The job after a person's close of the item of Pilot's own
+        `item_id` (DB decision 45): `/plan`, then the item and what was done
+        to it, as the record holds it (`_closed`); then the open notes of the
+        task the item names and the plan's own, the plan's alone where it
+        names none, and the deferrals without a home (F57.4)."""
+        item = self.db.get_one(Item, item_id)
+        return _frame(
+            PLAN_SKILL,
+            "an item of yours is done",
+            project,
+            at,
+            [_switch(project), self._trigger_paused(project, triggered)],
+            [self._closed(item)],
+            self._notes(
+                project, [] if item.plan_task_id is None else [item.plan_task_id]
+            ),
+        )
+
+    def _closed(self, item: Item) -> str:
+        """The closed item's line: its path, id, kind, title and task, then
+        its close, by the person whose close placed the job and when — a
+        one-ask item's block as answered or done; a document's Done, one line
+        per block as the closed block reads; a review's Reviewed."""
+        document = self.db.get_one(Document, item.id)
+        # A person's close starts the job; Pilot's own text is born published.
+        assert item.done_at is not None and item.done_by_user_id is not None
+        assert document.published_text is not None
+        closer = self.db.get_one(User, item.done_by_user_id).handle
+        when = utc_time(item.done_at)
+        head = f'The item: {document.path} ({item.id}), {item.kind_code} "{item.title}"'
+        if item.plan_task_id is not None:
+            head += f", task {item.plan_task_id}"
+        blocks = dsl.parse(document.published_text).blocks
+        if item.done_cause_code == ANSWERED:
+            # The one block a person answered closed the one-ask item.
+            block = next(
+                block
+                for block in blocks
+                if block.by is not None and block.by != dsl.AGENT
+            )
+            return f"{head} — {_answered(block, when)}."
+        if item.kind_code == REVIEW:
+            return f"{head} — Reviewed by {closer} at {when}."
+        if not blocks:
+            return f"{head} — Done by {closer} at {when}."
+        return "\n".join(
+            [
+                f"{head} — Done by {closer} at {when}; its blocks:",
+                *(f"- {_block_line(block, closer)}" for block in blocks),
+            ]
         )
 
     def _run_line(self, run_id: uuid.UUID) -> str:
@@ -437,11 +498,15 @@ class BriefService:
             " and name who can."
         )
 
-    def _notes(self, project: Project) -> list[str]:
-        """The open plan notes, by summary (F57.4), the tasks' in the plan's
-        order and then the plan's own; then the deferrals without a home, as
-        the hook's check prints them (F79.3; DB 214)."""
+    def _notes(self, project: Project, tasks: Collection[str] | None) -> list[str]:
+        """The open plan notes, by summary (F57.4): every one where `tasks` is
+        None, else those of `tasks` and the plan's own; the tasks' in the
+        plan's order and then the plan's own; then the deferrals without a
+        home, as the hook's check prints them (F79.3; DB 214)."""
         lines: list[str] = []
+        scope = PlanNote.project_id == project.id
+        if tasks is not None:
+            scope &= PlanNote.plan_task_id.is_(None) | PlanNote.plan_task_id.in_(tasks)
         for note, task_title in self.db.execute(
             select(PlanNote, PlanTask.title)
             .outerjoin(
@@ -449,7 +514,7 @@ class BriefService:
                 (PlanTask.project_id == PlanNote.project_id)
                 & (PlanTask.task_id == PlanNote.plan_task_id),
             )
-            .where(PlanNote.project_id == project.id, PlanNote.deleted_at.is_(None))
+            .where(scope, PlanNote.deleted_at.is_(None))
             .order_by(
                 PlanNote.plan_task_id.is_(None),
                 PlanTask.position.nulls_last(),
@@ -524,6 +589,74 @@ def _frame(
 def is_follow_up(turn: Turn) -> bool:
     """Whether the Turn is the server's follow-up (`BriefService.follow_up`)."""
     return turn.author_user_id is None and turn.message.endswith(FOLLOW_UP_END)
+
+
+def _answered(block: dsl.Block, when: str) -> str:
+    """A one-ask item's block as its close reads: its answer or its Done, by
+    whom and when, then its `via` and its note as given, a confirmation's No
+    its reason, an action's Done what was pasted back."""
+    if block.done is not None:
+        line = f"{block.local_id} done by {block.by} at {when}"
+    elif block.confirmation:
+        line = f"answered {block.answer} by {block.by} at {when}"
+    else:
+        line = f"{block.local_id} answered {_said(block)} by {block.by} at {when}"
+    if _given(block.via):
+        line += f" (via {block.via})"
+    return line + _noted(block)
+
+
+def _block_line(block: dsl.Block, closer: str) -> str:
+    """A closed document's block as it reads: its answer or its Done, then
+    who gave it where that is not `closer`, the Done's person, and its `via`
+    as given, and its note."""
+    said = "done" if block.done is not None else _said(block)
+    facts = [
+        None if block.by in (None, closer) else f"by {block.by}",
+        f"via {block.via}" if _given(block.via) else None,
+    ]
+    given = ", ".join(fact for fact in facts if fact is not None)
+    line = f"{block.local_id} {said}" + (f" ({given})" if given else "")
+    return line + _noted(block)
+
+
+def _given(via: str | None) -> bool:
+    """Whether a block's `via` is in its file: the app's is the line's
+    absence (FM §4)."""
+    return via is not None and via != dsl.AnswerChannel.APP
+
+
+def _said(block: dsl.Block) -> str:
+    """A block's answer as the file holds it: `deferred` with its `to`; a
+    question's words quoted; an option's label, a confirmation's Yes or No
+    and a proposal's Agree as they are; any other words quoted, as Other's
+    (F17.2)."""
+    answer = block.answer
+    # A closed block that is not done is answered.
+    assert answer is not None
+    if answer == dsl.DEFERRED:
+        return f"deferred to {block.to}"
+    if block.kind is dsl.BlockKind.QUESTION:
+        return f'"{answer}"'
+    if (
+        block.confirmation
+        or answer in {option.label for option in block.options}
+        or (not block.options and answer == dsl.recommendation(block))
+    ):
+        return answer
+    return f'"{answer}" (Other)'
+
+
+def _noted(block: dsl.Block) -> str:
+    """A block's note as given: a confirmation's No's reason, an action's
+    Done's paste-back, else its note."""
+    if block.note is None:
+        return ""
+    if block.done is not None:
+        return f', pasted back: "{block.note}"'
+    if block.confirmation:
+        return f', its reason: "{block.note}"'
+    return f', note: "{block.note}"'
 
 
 def _files(count: int) -> str:

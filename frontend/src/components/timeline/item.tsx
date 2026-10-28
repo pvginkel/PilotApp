@@ -11,7 +11,8 @@
  * work item open is its session's (work.tsx, F26). Done, an item is its line (F13.1, F13.2), with
  * Open (F13.3), its attachments' indicator (F13.6), Undo while the record offers it (F14.1) and
  * Discuss (F13.4), and *In the chat* after a one-ask item's answer given in the chat (F42.3); a
- * work item's is quieter, its Open the session log (F13.5, F26.6).
+ * work item's is quieter, its Open the session log (F13.5, F26.6), and a job's an Undo withdrew
+ * says so (F14.1).
  */
 
 import type { AnimationEvent, ReactNode } from 'react';
@@ -40,6 +41,7 @@ import { useArchived } from '@/hooks/use-projects';
 import { blocksOf, isProse, titleOf, type BodyPart, type TimelineItem, type TimelineUser } from '@/hooks/use-timeline';
 import { usePerson } from '@/hooks/use-self';
 import { cn } from '@/lib/utils';
+import { workClosedLabel } from '@/lib/utils/status-labels';
 
 interface ItemProps {
   item: TimelineItem;
@@ -190,8 +192,8 @@ function inChatOf(item: TimelineItem) {
  * The same line for every kind: its icon, its title, Open, its attachments' indicator, Undo while
  * the record offers it, Discuss, and when it was done; under the title the person's answer to a one-ask item with its note, the other
  * person's after their avatar, and *In the chat* after it, kept whole, where it was given in the
- * chat. A confirmation's Yes leads it with a green check, its No with a red cross (F22.5). It does
- * not expand.
+ * chat; under a job's title that an Undo withdrew it (F14.1). A confirmation's Yes leads it with a
+ * green check, its No with a red cross (F22.5). It does not expand.
  */
 function DoneLine({ item }: { item: TimelineItem }) {
   const me = usePerson();
@@ -200,6 +202,7 @@ function DoneLine({ item }: { item: TimelineItem }) {
   const place = inChatOf(item);
   // An item's done line is drawn only once it is done.
   const done = item.done!;
+  const closed = item.kind === 'work' ? workClosedLabel(done.cause) : null;
   return (
     <div className="line" data-testid="timeline.line">
       <LineLead item={item} />
@@ -227,6 +230,11 @@ function DoneLine({ item }: { item: TimelineItem }) {
             </span>
           )}
           {place && <InChatButton place={place} testId="timeline.line.in-chat" />}
+        </span>
+      )}
+      {closed !== null && (
+        <span className="said" data-testid="timeline.line.closed">
+          <span className="said-text">{closed}</span>
         </span>
       )}
     </div>

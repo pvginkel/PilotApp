@@ -103,6 +103,8 @@ export class TimelinePage {
       lineTitle: root.getByTestId('timeline.line.title'),
       lineTime: root.getByTestId('timeline.line.time'),
       said: root.getByTestId('timeline.line.said'),
+      /** A work item's line: how it closed, where its time does not say it. */
+      closed: root.getByTestId('timeline.line.closed'),
       note: root.getByTestId('timeline.line.note'),
       undo: root.getByTestId('timeline.line.undo'),
       open: root.getByTestId('timeline.line.open'),

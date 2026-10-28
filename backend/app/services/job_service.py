@@ -17,8 +17,10 @@ record as it then stands (F59, F141.4). Its work item is done once its last
 turn ends, a follow-up turn included (`RelayService`), and its project's next
 job goes on then; a person's Stop and Resume do not take it (F26.3).
 
-Two triggers are placed here: the setup, Create project's, and a worker's turn
-ended, once the turn-end read settled every document the run registered (D2).
+Three triggers are placed here: the setup, Create project's; a worker's turn
+ended, once the turn-end read settled every document the run registered (D2);
+and a person's close of an item of Pilot's own (DB decision 45), whose Undo
+withdraws the job while it is held before its brief.
 """
 
 import uuid
@@ -28,7 +30,7 @@ from pathlib import PurePosixPath
 from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
-from app.engine.record import RecordService
+from app.engine.record import WITHDRAWN, RecordService
 from app.models import Document, Item, Project, Work
 from app.models import Session as AgentSession
 from app.models.reference import ProjectState, SessionState, WorkTrigger
@@ -45,8 +47,8 @@ PASS_TITLE = "Pre-ruling {places}"
 each named by its place, `<folder>/<seq>` (DB Item sample)."""
 
 NEXT_TITLE = "Deciding what is next"
-"""The title of the job after a worker's turn whose run registered nothing
-(DB Item sample)."""
+"""The title of the job after a worker's turn whose run registered nothing,
+and of the job after an item of Pilot's own is closed (DB Item sample)."""
 
 
 class JobService:
@@ -110,6 +112,55 @@ class JobService:
             f"place the job after work item {run_id}'s turn",
             trigger_item_id=run_id,
         )
+
+    def item_done(self, project: Project, item: Item) -> Work:
+        """The job after a person's close of the item of Pilot's own `item`
+        (F59; DB decision 45), in the close's transaction, which holds the
+        project's row exclusively: placed now, its trigger item the item. Its
+        brief, composed as it leaves the queue or the pause, consumes the
+        item, which takes Undo from it (F14.1); until then the item's Undo
+        withdraws it (`withdraw`).
+
+        Raises:
+            InvalidOperationException: No controller or no store environment
+                is configured
+        """
+        return self._place(
+            project,
+            WorkTrigger.ITEM_DONE,
+            NEXT_TITLE,
+            datetime.now(UTC),
+            f"place the job after item {item.id}'s close",
+            trigger_item_id=item.id,
+        )
+
+    def unbriefed(self, item: Item) -> AgentSession | None:
+        """The job a close of `item` placed that is still held before its
+        brief, its Session locked and read afresh until the transaction ends;
+        None when there is none. A job that left `held` under the lock is
+        none: its brief consumed the item."""
+        return self.db.scalars(
+            select(AgentSession)
+            .join(Work, Work.id == AgentSession.id)
+            .where(
+                Work.trigger_code == WorkTrigger.ITEM_DONE,
+                Work.trigger_item_id == item.id,
+                AgentSession.state_code == SessionState.HELD,
+                AgentSession.turns == 0,
+            )
+            .with_for_update(of=AgentSession)
+            .execution_options(populate_existing=True)
+        ).one_or_none()
+
+    def withdraw(self, job: AgentSession, at: datetime) -> None:
+        """The job `job`, its Session locked and held before its brief,
+        withdrawn at `at` by its trigger item's Undo: its Session stopped by
+        no one, so it never starts, and its work item done `withdrawn`, which
+        offers nothing and leaves the badge (F8, F94.5)."""
+        self.session_start_service.withdraw(self.db, job, at)
+        line = self.db.get_one(Item, job.id)
+        line.done_at = at
+        line.done_cause_code = WITHDRAWN
 
     def _pass_title(self, run_id: uuid.UUID) -> str:
         """The title of the job after the run's turn: the places of the

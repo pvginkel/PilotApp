@@ -1,7 +1,9 @@
 """The record's own writes: a person's answer, Done on an action, undo, Done
 on a document, Read and Reviewed (design 1 §6.4, F32.4); a work item's place
 and its done at its turn's end (DB Work, decision 44); the close that continues
-a run whose documents are all closed (decision 44; reviews 1 and 3)."""
+a run whose documents are all closed (decision 44; reviews 1 and 3); and the
+close of an item of Pilot's own that places the job after it, which its Undo
+withdraws before its brief (DB decision 45; F14.1; V24, V29)."""
 
 import json
 import uuid
@@ -9,6 +11,7 @@ from datetime import UTC, datetime
 
 import pilot_dsl
 import pytest
+from dependency_injector import providers
 from flask import Flask
 from psycopg.errors import LockNotAvailable
 from sqlalchemy import select
@@ -43,13 +46,18 @@ from app.models.reference import (
     TransitionKind,
     UserKind,
     VersionCause,
+    WorkTrigger,
 )
 from app.services.auth_service import AuthContext
 from app.services.container import ServiceContainer
+from app.services.job_service import NEXT_TITLE
+from app.services.session_scope import STORE_REPO
+from app.services.timeline_service import waiting_on
 from app.utils.after_commit import clear_after_commit_callbacks
 from tests.support.fake_sidecar import FakeSidecar
 from tests.support.locks import in_thread, lock_waits
-from tests.support.supervisor import wait_until
+from tests.support.starts import configured_starts
+from tests.support.supervisor import Supervise, wait_until
 
 DECISION = """---
 title: Which tent?
@@ -3186,34 +3194,6 @@ class TestRecordServiceReleaseLocks:
         with scoped_session(container) as session:
             assert session.get_one(Item, item_id).consumed_session_id == work.id
 
-    def test_a_document_pilot_added_closes_under_an_undos_hold(
-        self, committed_app: Flask
-    ) -> None:
-        person_id, decision_id, _ = _committed_items(committed_app)
-        container = committed_app.container
-        with scoped_session(container) as session:
-            project_id = session.get_one(Item, decision_id).project_id
-        with committed_app.app_context():
-            engine = db.engine
-
-        with engine.connect() as holder:
-            holder.execute(
-                sql("SELECT id FROM projects WHERE id = :id FOR SHARE"),
-                {"id": project_id},
-            )
-            with scoped_session(container) as session:
-                session.execute(sql("SET LOCAL lock_timeout = '200ms'"))
-                container.record_service().answer(
-                    session.get_one(Document, decision_id),
-                    "D1",
-                    session.get_one(User, person_id),
-                    "Tunnel",
-                )
-            holder.rollback()
-
-        with scoped_session(container) as session:
-            assert session.get_one(Item, decision_id).done_at is not None
-
     def test_two_closes_of_the_runs_last_documents_place_one_continuation(
         self, committed_app: Flask
     ) -> None:
@@ -3542,3 +3522,549 @@ class TestRecordServiceWorkDone:
         assert isinstance(raised.value.orig, LockNotAvailable)
         with scoped_session(container) as session:
             assert session.get_one(Item, run_id).done_at is None
+
+
+REVIEW = "---\ntitle: The camp survey\n---\n\nThe lake and the forest compared.\n"
+
+
+def _brain(db: DbSession, project: Project) -> models.Session:
+    """A chat of the project's: a session of Pilot's own, handed
+    `pilot-store`, which adds items."""
+    chat = models.Session(
+        project_id=project.id,
+        kind_code="chat",
+        cwd=STORE_REPO,
+        token_hash=uuid.uuid4().hex,
+        state_code=SessionState.RUNNING,
+    )
+    db.add(chat)
+    db.flush()
+    return chat
+
+
+def _jobs_after(db: DbSession, item: Item) -> list[models.Session]:
+    """The jobs placed after the item's closes, in the order placed."""
+    return list(
+        db.scalars(
+            select(models.Session)
+            .join(Work, Work.id == models.Session.id)
+            .join(Item, Item.id == Work.id)
+            .where(
+                Work.trigger_code == WorkTrigger.ITEM_DONE,
+                Work.trigger_item_id == item.id,
+            )
+            .order_by(Item.seq)
+            .execution_options(populate_existing=True)
+        )
+    )
+
+
+@pytest.fixture
+def opened(session: DbSession, project: Project) -> Project:
+    """`project` open, with its slug."""
+    project.state_code = ProjectState.OPEN
+    project.slug = "camp"
+    session.flush()
+    return project
+
+
+@pytest.fixture
+def placing(container: ServiceContainer, supervise: Supervise) -> None:
+    """The container's start on a controller, its loops never run, through
+    which a close places the job after it."""
+    container.session_start_service.override(
+        providers.Object(configured_starts(container, supervise))
+    )
+
+
+@pytest.mark.usefixtures("placing")
+class TestRecordServiceItemDone:
+    """A person's close of an item of Pilot's own places one job after it,
+    its trigger item the item, in the close's transaction (DB decision 45;
+    F59; V01, V24)."""
+
+    @pytest.mark.parametrize(
+        ("kind", "text", "close"),
+        [
+            pytest.param("decision", DECISION, "answer", id="answered"),
+            pytest.param("action", ACTION, "done_action", id="an-actions-done"),
+            pytest.param("document", RECOMMENDED, "done", id="a-documents-done"),
+            pytest.param("review", REVIEW, "reviewed", id="a-reviews-reviewed"),
+        ],
+    )
+    def test_a_persons_close_places_the_job_after_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        person: User,
+        kind: str,
+        text: str,
+        close: str,
+    ) -> None:
+        item, document = _bear(
+            session, container, opened, _brain(session, opened), kind, "Camp", text
+        )
+        records = container.record_service()
+
+        match close:
+            case "answer":
+                records.answer(document, "D1", person, "Tunnel")
+            case "done_action":
+                records.done_action(document, "A1", person)
+            case "done":
+                records.done(item, person)
+            case "reviewed":
+                records.reviewed(item, person)
+
+        (job,) = _jobs_after(session, item)
+        line = session.get_one(Item, job.id)
+        assert (job.kind_code, line.title, line.kind_code) == (
+            "job",
+            NEXT_TITLE,
+            "work",
+        )
+        assert line.seq == item.seq + 1
+
+    def test_the_chats_answer_on_a_persons_behalf_is_theirs(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        person: User,
+    ) -> None:
+        item, document = _bear(
+            session,
+            container,
+            opened,
+            _brain(session, opened),
+            "decision",
+            "Which tent?",
+            DECISION,
+        )
+
+        container.record_service().answer(
+            document, "D1", person, "Tunnel", via=AnswerChannel.CHAT
+        )
+
+        assert len(_jobs_after(session, item)) == 1
+
+    def test_a_notices_read_and_pilots_own_done_place_none(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        person: User,
+    ) -> None:
+        brain = _brain(session, opened)
+        notice, _ = _bear(
+            session, container, opened, brain, "notice", "Palette", NOTICE
+        )
+        settled, _ = _bear(
+            session, container, opened, brain, "document", "Camp plan", SETTLED
+        )
+        records = container.record_service()
+
+        records.read(notice, person)
+        records.done(settled, _agent(session))
+
+        assert (notice.done_cause_code, settled.done_cause_code) == (
+            "marked",
+            "settled",
+        )
+        assert _jobs_after(session, notice) == _jobs_after(session, settled) == []
+
+    def test_an_answer_that_leaves_the_item_open_places_none(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        person: User,
+    ) -> None:
+        item, document = _bear(
+            session,
+            container,
+            opened,
+            _brain(session, opened),
+            "document",
+            "Camp plan",
+            TWO_ASKS,
+        )
+
+        container.record_service().answer(document, "D1", person, "Tunnel")
+
+        assert item.done_at is None
+        assert _jobs_after(session, item) == []
+
+    def test_an_item_a_workers_session_added_places_none(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        item, document = _bear(
+            session,
+            container,
+            opened,
+            project_session,
+            "decision",
+            "Which tent?",
+            DECISION,
+        )
+
+        container.record_service().answer(document, "D1", person, "Tunnel")
+
+        assert item.done_cause_code == "answered"
+        assert _jobs_after(session, item) == []
+
+    def test_finishs_close_places_none(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        person: User,
+    ) -> None:
+        item, _ = _bear(
+            session,
+            container,
+            opened,
+            _brain(session, opened),
+            "decision",
+            "Which tent?",
+            DECISION,
+        )
+
+        container.record_service().close_unanswered(opened, person, FINISH)
+
+        assert item.done_cause_code == "finished"
+        assert _jobs_after(session, item) == []
+
+
+@pytest.mark.usefixtures("placing")
+class TestRecordServiceItemDoneUndo:
+    """The item keeps Undo until its job's brief goes out, which consumes
+    it; an Undo before then withdraws the job (F14.1; V29)."""
+
+    @pytest.fixture
+    def paused(self, session: DbSession, opened: Project) -> Project:
+        opened.paused = True
+        session.flush()
+        return opened
+
+    def _answered(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+    ) -> Item:
+        item, document = _bear(
+            session,
+            container,
+            project,
+            _brain(session, project),
+            "decision",
+            "Which tent?",
+            DECISION,
+        )
+        container.record_service().answer(document, "D1", person, "Tunnel")
+        return item
+
+    def test_once_its_brief_went_out_the_item_is_consumed_and_takes_no_undo(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        person: User,
+    ) -> None:
+        """Placed in an idle project, the job is briefed at once, in the
+        close's transaction."""
+        item = self._answered(session, container, opened, person)
+        (job,) = _jobs_after(session, item)
+        records = container.record_service()
+
+        assert (job.state_code, job.turns) == (SessionState.STARTING, 1)
+        assert (item.consumed_session_id, item.consumed_at) == (
+            job.id,
+            job.turn_started_at,
+        )
+        assert records.offers_undo(item) is False
+        with pytest.raises(InvalidOperationException) as refused:
+            records.undo(item)
+        assert refused.value.cause == "a session has taken the item's answers"
+
+    def test_while_its_job_is_held_the_item_keeps_undo(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        paused: Project,
+        person: User,
+    ) -> None:
+        item = self._answered(session, container, paused, person)
+        (job,) = _jobs_after(session, item)
+
+        assert (job.state_code, job.turns) == (SessionState.HELD, 0)
+        assert item.consumed_at is None
+        assert container.record_service().offers_undo(item) is True
+
+    def test_an_undo_withdraws_the_held_job_which_never_starts(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        paused: Project,
+        person: User,
+    ) -> None:
+        item = self._answered(session, container, paused, person)
+        (job,) = _jobs_after(session, item)
+        records = container.record_service()
+
+        records.undo(item)
+
+        (job,) = _jobs_after(session, item)
+        line = session.get_one(Item, job.id)
+        assert item.done_at is None
+        assert _block(session, session.get_one(Document, item.id), "D1").answer is None
+        assert (job.state_code, job.turns, job.stopped_by_user_id) == (
+            SessionState.STOPPED,
+            0,
+            None,
+        )
+        assert (line.done_cause_code, line.done_by_user_id) == ("withdrawn", None)
+        assert line.done_at == job.stopped_at
+        assert records.offers_undo(line) is False
+        assert session.scalars(
+            select(Item.id).where(Item.project_id == paused.id, waiting_on(person))
+        ).all() == [item.id]
+
+    def test_the_items_next_close_places_another_job(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        paused: Project,
+        person: User,
+    ) -> None:
+        item = self._answered(session, container, paused, person)
+        records = container.record_service()
+        records.undo(item)
+
+        records.answer(session.get_one(Document, item.id), "D1", person, "Dome")
+
+        withdrawn, placed = _jobs_after(session, item)
+        assert (withdrawn.state_code, placed.state_code) == (
+            SessionState.STOPPED,
+            SessionState.HELD,
+        )
+        assert session.get_one(Item, placed.id).done_at is None
+
+    def test_an_undo_of_an_item_with_no_job_withdraws_none(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        paused: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        item, document = _bear(
+            session,
+            container,
+            paused,
+            project_session,
+            "decision",
+            "Which tent?",
+            DECISION,
+        )
+        records = container.record_service()
+        records.answer(document, "D1", person, "Tunnel")
+
+        records.undo(item)
+
+        assert item.done_at is None
+        assert _jobs_after(session, item) == []
+
+
+def _committed_pilots(
+    app: Flask, supervise: Supervise, items: int, *, paused: bool = False
+) -> tuple[uuid.UUID, uuid.UUID, list[uuid.UUID]]:
+    """An open project, `paused` or not, with `items` decisions its chat
+    added, committed, the app's start on a controller: the person's id, the
+    project's and the decisions'."""
+    container = app.container
+    container.session_start_service.override(
+        providers.Object(configured_starts(container, supervise))
+    )
+    with scoped_session(container) as session:
+        person = User(
+            kind_code=UserKind.PERSON,
+            subject="subject-ada",
+            handle="ada",
+            name="Ada Example",
+            avatar_slot=1,
+        )
+        session.add(person)
+        session.flush()
+        project = Project(
+            created_by_user_id=person.id,
+            state_code=ProjectState.OPEN,
+            slug="camp",
+            paused=paused,
+        )
+        session.add(project)
+        session.flush()
+        brain = _brain(session, project)
+        documents = container.document_service()
+        decisions = [
+            documents.bear_item(project, "decision", f"Tent {n}?", brain, DECISION).id
+            for n in range(items)
+        ]
+        return person.id, project.id, decisions
+
+
+def _committed_jobs(container: ServiceContainer) -> list[models.Session]:
+    """The jobs after a close, in the order placed."""
+    with scoped_session(container) as session:
+        return list(
+            session.scalars(
+                select(models.Session)
+                .join(Work, Work.id == models.Session.id)
+                .join(Item, Item.id == Work.id)
+                .where(Work.trigger_code == WorkTrigger.ITEM_DONE)
+                .order_by(Item.seq)
+            )
+        )
+
+
+class TestRecordServiceItemDoneLocks:
+    """A close of an item takes its project's row exclusively from the
+    start, so two closes never both upgrade a shared hold; the Undo locks
+    the job before it reads the item, so it and the brief never both take
+    effect (the ruling on plan review r1 A1; V24, V29)."""
+
+    def test_two_closes_in_one_project_at_once_both_commit_each_with_its_job(
+        self, committed_app: Flask, supervise: Supervise
+    ) -> None:
+        person_id, project_id, items = _committed_pilots(committed_app, supervise, 2)
+        container = committed_app.container
+        with committed_app.app_context():
+            engine = db.engine
+
+        # An Undo's hold, which both closes would share were theirs shared.
+        with engine.connect() as holder:
+            holder.execute(
+                sql("SELECT id FROM projects WHERE id = :id FOR SHARE"),
+                {"id": project_id},
+            )
+            closes = [
+                in_thread(
+                    lambda item_id=item_id: _answered(container, person_id, item_id)
+                )
+                for item_id in items
+            ]
+            wait_until(lambda: lock_waits(container) == 2, "both closes waiting")
+            holder.rollback()
+
+        assert [close.result() for close in closes] == [True, True]
+        jobs = _committed_jobs(container)
+        with scoped_session(container) as session:
+            assert sorted(
+                session.get_one(Work, job.id).trigger_item_id for job in jobs
+            ) == sorted(items)
+        assert sorted(job.state_code for job in jobs) == sorted(
+            [SessionState.STARTING, SessionState.HELD]
+        )
+
+    def test_an_items_close_waits_for_an_undos_hold(
+        self, committed_app: Flask, supervise: Supervise
+    ) -> None:
+        person_id, project_id, (item_id,) = _committed_pilots(
+            committed_app, supervise, 1
+        )
+        container = committed_app.container
+        with committed_app.app_context():
+            engine = db.engine
+
+        with engine.connect() as holder:
+            holder.execute(
+                sql("SELECT id FROM projects WHERE id = :id FOR SHARE"),
+                {"id": project_id},
+            )
+            with (
+                pytest.raises(OperationalError) as raised,
+                scoped_session(container) as session,
+            ):
+                session.execute(sql("SET LOCAL lock_timeout = '200ms'"))
+                container.record_service().answer(
+                    session.get_one(Document, item_id),
+                    "D1",
+                    session.get_one(User, person_id),
+                    "Tunnel",
+                )
+            holder.rollback()
+
+        assert isinstance(raised.value.orig, LockNotAvailable)
+        assert _committed_jobs(container) == []
+
+    def test_an_undo_waiting_for_the_job_finds_it_briefed_and_is_refused(
+        self, committed_app: Flask, supervise: Supervise
+    ) -> None:
+        """The job's lock taken first, the Undo reads the item as the brief
+        left it: consumed."""
+        person_id, _, (item_id,) = _committed_pilots(
+            committed_app, supervise, 1, paused=True
+        )
+        container = committed_app.container
+        assert _answered(container, person_id, item_id)
+        (job,) = _committed_jobs(container)
+        with committed_app.app_context():
+            engine = db.engine
+
+        # The release's transaction, as it briefs the job: its Session locked,
+        # moved to `starting` with its first Turn, the item consumed.
+        with engine.connect() as release:
+            release.execute(
+                sql("SELECT id FROM sessions WHERE id = :id FOR UPDATE"),
+                {"id": job.id},
+            )
+            undo = in_thread(lambda: _undone(container, item_id))
+            wait_until(lambda: lock_waits(container) == 1, "the Undo waiting")
+            release.execute(
+                sql(
+                    "UPDATE sessions SET state_code = 'starting', turns = 1"
+                    " WHERE id = :id"
+                ),
+                {"id": job.id},
+            )
+            release.execute(
+                sql(
+                    "UPDATE items SET consumed_at = now(), consumed_session_id = :job"
+                    " WHERE id = :id"
+                ),
+                {"id": item_id, "job": job.id},
+            )
+            release.commit()
+
+        assert undo.result() is False
+        with scoped_session(container) as session:
+            item = session.get_one(Item, item_id)
+            assert (item.done_cause_code, item.consumed_session_id) == (
+                "answered",
+                job.id,
+            )
+
+    def test_an_undo_that_takes_the_job_first_withdraws_it_before_any_brief(
+        self, committed_app: Flask, supervise: Supervise
+    ) -> None:
+        person_id, _, (item_id,) = _committed_pilots(
+            committed_app, supervise, 1, paused=True
+        )
+        container = committed_app.container
+        assert _answered(container, person_id, item_id)
+
+        assert _undone(container, item_id)
+
+        (job,) = _committed_jobs(container)
+        with scoped_session(container) as session:
+            assert session.get_one(Item, item_id).consumed_at is None
+            assert session.get_one(Item, job.id).done_cause_code == "withdrawn"
+        assert (job.state_code, job.turns) == (SessionState.STOPPED, 0)
