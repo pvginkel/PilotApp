@@ -341,7 +341,11 @@ class TestFleetConsumer:
         fleet_log.wait_for(r"Fleet stream connected; 1 environments listed", count=2)
         assert _column(container, "env-a", "last_state") == "stopped"
         assert fake_controller.calls.count("GET /environments") == 2
-        assert not container.controller_outage().holds
+        # The log line comes before the stream's `fleet_stream_up()`.
+        wait_until(
+            lambda: not container.controller_outage().holds,
+            "the outage off at the reconnect",
+        )
 
     @pytest.mark.parametrize("answer", ["none", "ingress"])
     def test_the_stream_down_holds_the_outage_on_until_it_reconnects(
