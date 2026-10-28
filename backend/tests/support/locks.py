@@ -7,7 +7,6 @@ from typing import Any
 
 from sqlalchemy import text
 
-from app.database import scoped_session
 from app.services.container import ServiceContainer
 from tests.support.supervisor import WAIT_SECONDS
 
@@ -41,8 +40,13 @@ def in_thread(run: Callable[[], Any]) -> Outcome:
 
 
 def lock_waits(container: ServiceContainer) -> int:
-    """The connections of the app's database waiting on a lock."""
-    with scoped_session(container) as db:
+    """The connections of the app's database waiting on a lock.
+
+    Read on a session, a connection and a transaction of its own, not the
+    container's `db_session`, so that a test can poll it from inside its own
+    `scoped_session`, whose lock a nested `scoped_session` would commit away.
+    """
+    with container.session_maker()() as db:
         waits: int = db.scalar(
             text(
                 "SELECT count(*) FROM pg_stat_activity"
