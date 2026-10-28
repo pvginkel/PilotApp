@@ -56,7 +56,10 @@ def scoped_session(container: "ServiceContainer") -> Generator[Session]:
     alone leaves the session open, its connection idle in transaction until
     the garbage collector gets to it.
 
-    Not for use inside a request, whose session is the same provider.
+    Not for use inside a request, whose session is the same provider, nor
+    nested: on a thread that already holds one, the provider (a
+    ``ContextLocalSingleton``) hands back the outer session, and the inner
+    exit commits and closes it, the outer transaction and its locks with it.
     """
     session: Session = container.db_session()
     try:
