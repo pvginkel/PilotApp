@@ -1747,6 +1747,34 @@ class TestFollowUpTurn:
         assert run.state_code is SessionState.IDLE
         assert len(_turns(session, run)) == 2
 
+    def test_a_jobs_follow_up_keeps_its_place_and_its_end_lets_the_next_job_go_on(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        answering: tuple[RelayService, _Answering, str],
+        project: Project,
+    ) -> None:
+        """The project's next job goes on once the job's last turn ends, its
+        follow-up's (F59.2; design 3 §5.1)."""
+        relays, fake, name = answering
+        run = _agent_session(session, project, name)
+        run.kind_code = "job"
+        session.flush()
+        container.record_service().place_work(
+            project, run, "Setting up the project", trigger=WorkTrigger.SETUP
+        )
+        path = _held_save(container, session, project, run)
+        _send(relays, session, run, "/plan")
+        told: list[None] = []
+        relays._slots.subscribe(lambda: told.append(None))
+
+        _relay(relays, run)
+
+        assert told == []
+        container.ingest_service().ingest(path, HELD_SAVE, None, _row(session), run)
+        _relay(relays, run)
+        assert told == [None]
+
     def test_a_jobs_turn_ending_clean_is_its_last(
         self,
         session: DbSession,

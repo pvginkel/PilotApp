@@ -1,29 +1,44 @@
-"""Pilot's own background jobs, the setup the one placed (design 3 §5.1,
-§5.3; F49, F59, F59.1; TD §4.2; DB Work, assertion 167, 243)."""
+"""Pilot's own background jobs, the setup the one placed, one at a time per
+project, each briefed as it starts (design 3 §5.1 to §5.3; F49, F59, F59.1,
+F59.2, F141.4; TD §4.2; DB Work, assertion 167, 243; V11, V23)."""
 
+import threading
 import uuid
 from collections.abc import Callable, Iterator
-from datetime import UTC, datetime
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import select
+from flask import Flask
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session as DbSession
 from werkzeug.wrappers import Request, Response
 
 from app import models
+from app.database import scoped_session
 from app.exceptions import InvalidOperationException
-from app.models import Item, Project, Turn, User, Work
-from app.models.reference import ProjectState, SessionState, Surface, WorkTrigger
+from app.models import Item, Project, ProjectTransition, Turn, User, Work
+from app.models.reference import (
+    ProjectState,
+    SessionState,
+    Surface,
+    TransitionKind,
+    UserKind,
+    WorkTrigger,
+)
 from app.schemas.timeline import HeldReason
 from app.services.container import ServiceContainer
+from app.services.controller_outage import ControllerOutage
 from app.services.job_service import SETUP_TITLE, JobService
 from app.services.session_scope import STORE_REPO, scoped_create
 from app.services.session_start_service import SessionStartService
+from app.services.start_gate import Held
 from app.services.supervisor import LoopHandle
+from app.services.timeline_service import work_status
 from tests.support.fake_controller import ServedFakeController, client_of
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
 from tests.support.starts import configured_starts
-from tests.support.supervisor import Supervise
+from tests.support.supervisor import WAIT_SECONDS, Supervise, wait_until
 
 AT = datetime(2026, 10, 27, 9, 30, 15, tzinfo=UTC)
 FOLDER = "/work/Projects/soup-club"
@@ -82,11 +97,19 @@ def _setup(
     container: ServiceContainer,
     starts: SessionStartService,
     project: Project,
-    opening: Item,
+    at: datetime = AT,
 ) -> models.Session:
-    """The setup placed; its Session."""
-    work = _jobs(container, starts).setup(project, opening, AT, OPERATION)
+    """The setup placed, triggered at `at`; its Session."""
+    work = _jobs(container, starts).setup(project, at, OPERATION)
     return container.db_session().get_one(models.Session, work.id)
+
+
+def _brief(container: ServiceContainer, job: models.Session) -> Turn:
+    """The job's one Turn, its brief."""
+    (turn,) = container.db_session().scalars(
+        select(Turn).where(Turn.session_id == job.id)
+    )
+    return turn
 
 
 class TestSetup:
@@ -100,7 +123,7 @@ class TestSetup:
         opened: Project,
         opening: Item,
     ) -> None:
-        job = _setup(container, starts, opened, opening)
+        job = _setup(container, starts, opened)
 
         item = session.get_one(Item, job.id)
         assert (
@@ -128,6 +151,7 @@ class TestSetup:
             job.state_code,
             job.turns,
             job.turn_started_at,
+            job.created_at,
         ) == (
             "job",
             STORE_REPO,
@@ -138,9 +162,10 @@ class TestSetup:
             SessionState.STARTING,
             1,
             AT,
+            AT,
         )
 
-    def test_its_first_turn_is_the_setups_brief(
+    def test_going_at_once_its_first_turn_is_the_setups_brief_at_creates_instant(
         self,
         container: ServiceContainer,
         session: DbSession,
@@ -148,16 +173,19 @@ class TestSetup:
         opened: Project,
         opening: Item,
     ) -> None:
-        job = _setup(container, starts, opened, opening)
+        job = _setup(container, starts, opened)
 
-        (turn,) = session.scalars(select(Turn).where(Turn.session_id == job.id))
+        turn = _brief(container, job)
         assert (turn.seq, turn.author_user_id, turn.words, turn.started_at) == (
             1,
             None,
             None,
             AT,
         )
-        assert turn.message == container.brief_service().setup(opened, opening, AT)
+        assert turn.message == container.brief_service().job(
+            opened, session.get_one(Work, job.id), AT, AT
+        )
+        assert f"the opening item {opening.id} holds" in turn.message
 
     def test_its_create_is_boxed_to_the_projects_folder_with_pilot_store(
         self,
@@ -167,7 +195,7 @@ class TestSetup:
         opened: Project,
         opening: Item,
     ) -> None:
-        job = _setup(container, starts, opened, opening)
+        job = _setup(container, starts, opened)
 
         create = scoped_create(session, job)
         assert create.surface is Surface.STORE
@@ -183,7 +211,7 @@ class TestSetup:
             [f"PILOT_PROJECT={FOLDER}", f"PILOT_SESSION={job.id}"],
         )
 
-    def test_it_is_held_while_the_project_is_paused(
+    def test_it_is_held_while_the_project_is_paused_its_brief_not_yet_composed(
         self,
         container: ServiceContainer,
         session: DbSession,
@@ -194,11 +222,15 @@ class TestSetup:
         opened.paused = True
         session.flush()
 
-        job = _setup(container, starts, opened, opening)
+        job = _setup(container, starts, opened)
 
         assert job.state_code is SessionState.HELD
         held = starts.held(session, opened, job)
         assert held is not None and held.reason is HeldReason.PAUSED
+        assert (job.turns, job.turn_started_at) == (0, None)
+        assert (
+            session.scalars(select(Turn).where(Turn.session_id == job.id)).all() == []
+        )
 
     def test_it_takes_no_slot(
         self,
@@ -219,7 +251,7 @@ class TestSetup:
         )
         session.flush()
 
-        job = _setup(container, starts, opened, opening)
+        job = _setup(container, starts, opened)
 
         assert job.state_code is SessionState.STARTING
         assert starts._slots.filled(session, [opened.id]) == {opened.id: 1}
@@ -231,7 +263,7 @@ class TestSetup:
         opening: Item,
     ) -> None:
         with pytest.raises(InvalidOperationException) as raised:
-            container.job_service().setup(opened, opening, AT, OPERATION)
+            container.job_service().setup(opened, AT, OPERATION)
 
         assert raised.value.message == (
             "Cannot create Soup club because no controller is configured"
@@ -269,8 +301,8 @@ class TestSetupStart:
         """`pilot-sync` writes `<slug>/` a moment after Create commits: the
         create refused `422` meanwhile is made again."""
         starts._folder_wait, starts._folder_retry = 2.0, 0.05
-        job = _setup(container, starts, opened, opening)
-        brief = container.brief_service().setup(opened, opening, AT)
+        job = _setup(container, starts, opened)
+        brief = _brief(container, job).message
 
         def folder_written() -> None:
             fake.put_file(STORE_ENVIRONMENT_ID, f"{FOLDER}/plan.json", b"{}")
@@ -295,3 +327,405 @@ class TestSetupStart:
             == 2
         )
         assert fake.sent == [brief]
+
+
+LATER = datetime(2026, 10, 27, 9, 35, 40, tzinfo=UTC)
+"""A second trigger of the project's, after `AT`."""
+
+PAUSED_AT = datetime(2026, 10, 27, 9, 0, 0, tzinfo=UTC)
+RESUMED_AT = datetime(2026, 10, 27, 10, 15, 0, tzinfo=UTC)
+PAUSE_LINE = (
+    "Paused 2026-10-27T09:00:00Z to 2026-10-27T10:15:00Z: this job's trigger"
+    " happened while the project was paused; the record moved on meanwhile."
+)
+
+
+def _transition(
+    db: DbSession, project: Project, person: User, kind: TransitionKind, at: datetime
+) -> None:
+    """The project paused or resumed at `at`, as its transition writes it."""
+    db.add(
+        ProjectTransition(
+            project_id=project.id, kind_code=kind, at=at, by_user_id=person.id
+        )
+    )
+    project.paused = kind is TransitionKind.PAUSED
+    db.flush()
+
+
+def _read(db: DbSession, job: models.Session) -> models.Session:
+    return db.get_one(models.Session, job.id, populate_existing=True)
+
+
+def _release(starts: SessionStartService) -> None:
+    """The release loop's run, as its loop calls it."""
+    starts.release(LoopHandle("start:held"))
+
+
+def _in(db: DbSession, job: models.Session, state: SessionState) -> None:
+    job.state_code = state
+    db.flush()
+
+
+class TestQueue:
+    """A project's jobs one at a time, the chat beside them, in the order
+    their triggers came (F59.2; design 3 §5.1; V23)."""
+
+    @pytest.mark.parametrize("state", [SessionState.STARTING, SessionState.RUNNING])
+    def test_a_job_waits_its_turn_while_another_of_its_project_starts_or_runs(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        opening: Item,
+        state: SessionState,
+    ) -> None:
+        first = _setup(container, starts, opened)
+        _in(session, first, state)
+
+        second = _setup(container, starts, opened, LATER)
+
+        assert second.state_code is SessionState.HELD
+        assert (second.turns, second.turn_started_at) == (0, None)
+        assert starts.held(session, opened, second) == Held(HeldReason.QUEUE)
+        status = work_status(
+            session, [second.id], unreachable=False, slots=starts._slots
+        )[second.id]
+        assert (status.held_reason, status.held_running) == (HeldReason.QUEUE, None)
+
+    def test_a_job_held_before_it_holds_it_up_and_one_after_it_none(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        opening: Item,
+        person: User,
+    ) -> None:
+        _transition(session, opened, person, TransitionKind.PAUSED, PAUSED_AT)
+        first = _setup(container, starts, opened)
+        second = _setup(container, starts, opened, LATER)
+
+        _transition(session, opened, person, TransitionKind.RESUMED, RESUMED_AT)
+
+        assert starts.held(session, opened, first) is None
+        assert starts.held(session, opened, second) == Held(HeldReason.QUEUE)
+
+    @pytest.mark.parametrize(
+        "state", [SessionState.IDLE, SessionState.STOPPED, SessionState.FAILED]
+    )
+    def test_a_job_done_stopped_or_failed_holds_up_none(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        opening: Item,
+        state: SessionState,
+    ) -> None:
+        first = _setup(container, starts, opened)
+        _in(session, first, state)
+
+        second = _setup(container, starts, opened, LATER)
+
+        assert second.state_code is SessionState.STARTING
+        assert _brief(container, second).started_at == LATER
+
+    def test_its_chat_and_another_projects_job_hold_up_none(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        opening: Item,
+        person: User,
+    ) -> None:
+        session.add(
+            models.Session(
+                project_id=opened.id,
+                kind_code="chat",
+                cwd=STORE_REPO,
+                token_hash=uuid.uuid4().hex,
+                state_code=SessionState.RUNNING,
+            )
+        )
+        site = Project(
+            created_by_user_id=person.id,
+            state_code=ProjectState.OPEN,
+            slug="site",
+            name="Site",
+        )
+        session.add(site)
+        session.flush()
+        container.document_service().bear_opening(
+            site, "Ada Example started this project", person, "A site?"
+        )
+        _in(session, _setup(container, starts, site), SessionState.RUNNING)
+
+        job = _setup(container, starts, opened, LATER)
+
+        assert job.state_code is SessionState.STARTING
+
+    def test_the_pause_and_the_outage_come_before_the_queue(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        opening: Item,
+        person: User,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        _setup(container, starts, opened)
+        _transition(session, opened, person, TransitionKind.PAUSED, PAUSED_AT)
+        controller_outage.call_unanswered()
+        second = _setup(container, starts, opened, LATER)
+
+        assert starts.held(session, opened, second) == Held(HeldReason.PAUSED)
+        _transition(session, opened, person, TransitionKind.RESUMED, RESUMED_AT)
+        assert starts.held(session, opened, second) == Held(
+            HeldReason.CONTROLLER_UNREACHABLE
+        )
+        controller_outage.probe_answered()
+        assert starts.held(session, opened, second) == Held(HeldReason.QUEUE)
+
+
+class TestQueueRelease:
+    """The release lets a project's earliest held job go on, its brief
+    composed then from the record as it stands (F59, F59.2, F141.4; V11,
+    V23)."""
+
+    def test_released_only_the_earliest_job_goes_on_whatever_the_loops_order(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        opening: Item,
+        person: User,
+    ) -> None:
+        """The release visits held Sessions in `created_at` order; the queue's
+        is the timeline's, the order the jobs were placed in."""
+        _transition(session, opened, person, TransitionKind.PAUSED, PAUSED_AT)
+        first = _setup(container, starts, opened)
+        second = _setup(container, starts, opened, AT - timedelta(minutes=1))
+        _transition(session, opened, person, TransitionKind.RESUMED, RESUMED_AT)
+
+        _release(starts)
+
+        first, second = _read(session, first), _read(session, second)
+        assert (first.state_code, second.state_code) == (
+            SessionState.STARTING,
+            SessionState.HELD,
+        )
+        assert starts.held(session, opened, second) == Held(HeldReason.QUEUE)
+        assert second.turns == 0
+        assert first.turns == 1
+
+    def test_a_job_triggered_while_paused_is_briefed_at_the_resume_with_the_pause(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        opening: Item,
+        person: User,
+    ) -> None:
+        _transition(session, opened, person, TransitionKind.PAUSED, PAUSED_AT)
+        job = _setup(container, starts, opened)
+        _transition(session, opened, person, TransitionKind.RESUMED, RESUMED_AT)
+
+        _release(starts)
+
+        job = _read(session, job)
+        assert job.state_code is SessionState.STARTING
+        turn = _brief(container, job)
+        assert (job.turns, job.turn_started_at) == (1, turn.started_at)
+        assert turn.message == container.brief_service().job(
+            opened, session.get_one(Work, job.id), AT, turn.started_at
+        )
+        assert turn.message.split("\n\n")[2] == (
+            "Auto pilot: off — the granted column asks for this session"
+            f" (rules/grants.md).\n{PAUSE_LINE}"
+        )
+
+    def test_when_a_job_ends_the_next_goes_on_briefed_and_switched_as_it_then_is(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        opening: Item,
+    ) -> None:
+        first = _setup(container, starts, opened)
+        second = _setup(container, starts, opened, LATER)
+        assert session.get_one(Work, second.id).autopilot is False
+        opened.autopilot = True
+        _in(session, first, SessionState.IDLE)
+
+        _release(starts)
+
+        second = _read(session, second)
+        assert second.state_code is SessionState.STARTING
+        work = session.get_one(Work, second.id)
+        turn = _brief(container, second)
+        assert work.autopilot is True
+        assert turn.started_at > LATER
+        assert turn.message == container.brief_service().job(
+            opened, work, LATER, turn.started_at
+        )
+        assert "Auto pilot: on — the granted column holds" in turn.message
+
+    def test_across_a_restart_the_queue_holds(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        supervise: Supervise,
+        starts: SessionStartService,
+        opened: Project,
+        opening: Item,
+    ) -> None:
+        """A fresh process reconciles the cut start and asks the release:
+        the job behind it still waits, and goes on once that one ends."""
+        first = _setup(container, starts, opened)
+        second = _setup(container, starts, opened, LATER)
+        restarted = configured_starts(container, supervise, project_max=1)
+
+        restarted._reconcile(session)
+        _release(restarted)
+
+        assert (
+            _read(session, first).state_code,
+            _read(session, second).state_code,
+        ) == (
+            SessionState.STARTING,
+            SessionState.HELD,
+        )
+        _in(session, first, SessionState.FAILED)
+        _release(restarted)
+        assert _read(session, second).state_code is SessionState.STARTING
+
+    def test_a_held_jobs_stop_ends_no_turn_it_never_had(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        opening: Item,
+        person: User,
+    ) -> None:
+        """Finish and Archive stop a project's jobs, a held one with no brief
+        among them (`stop_project`)."""
+        _setup(container, starts, opened)
+        second = _setup(container, starts, opened, LATER)
+
+        starts.stop_project(session, opened, person, LATER)
+
+        second = _read(session, second)
+        assert (second.state_code, second.turns, second.turn_ended_at) == (
+            SessionState.STOPPED,
+            0,
+            None,
+        )
+
+
+def _committed_opened(container: ServiceContainer) -> uuid.UUID:
+    """An open project with its opening, committed; its id."""
+    with scoped_session(container) as db:
+        person = User(
+            kind_code=UserKind.PERSON,
+            subject="subject-ada",
+            handle="ada",
+            name="Ada Example",
+            avatar_slot=1,
+        )
+        db.add(person)
+        db.flush()
+        project = Project(
+            created_by_user_id=person.id,
+            state_code=ProjectState.OPEN,
+            slug="soup-club",
+            name="Soup club",
+        )
+        db.add(project)
+        db.flush()
+        container.document_service().bear_opening(
+            project, "Ada Example started this project", person, "Soup?"
+        )
+        return project.id
+
+
+def _waiting_on_a_lock(container: ServiceContainer) -> bool:
+    """Whether a connection to the test's database waits on a lock."""
+    other = container.session_maker()()
+    try:
+        return bool(
+            other.scalar(
+                select(func.count())
+                .select_from(text("pg_stat_activity"))
+                .where(
+                    text("datname = current_database()"),
+                    text("wait_event_type = 'Lock'"),
+                )
+            )
+        )
+    finally:
+        other.rollback()
+        other.close()
+
+
+class TestQueueAcrossTransactions:
+    """A placement and a release reading one project's queue at once start
+    one job (F59.2; the lock order; V23)."""
+
+    def test_a_release_waits_for_a_placement_in_flight_and_one_job_starts(
+        self, committed_app: Flask, supervise: Supervise
+    ) -> None:
+        container = committed_app.container
+        starts = configured_starts(container, supervise, project_max=1)
+        project_id = _committed_opened(container)
+        # A job held by the pause, the pause lifted with no release run: the
+        # gate is open for it.
+        with scoped_session(container) as db:
+            project = db.get_one(Project, project_id)
+            project.paused = True
+            db.flush()
+            first = _jobs(container, starts).setup(project, AT, OPERATION).id
+        with scoped_session(container) as db:
+            db.get_one(Project, project_id).paused = False
+        placed, waited = threading.Event(), threading.Event()
+
+        def place() -> uuid.UUID:
+            """A second job's placement, its commit held until the release
+            waits for it."""
+            with scoped_session(container) as db:
+                work = _jobs(container, starts).setup(
+                    db.get_one(Project, project_id), LATER, OPERATION
+                )
+                placed.set()
+                assert waited.wait(WAIT_SECONDS)
+                return work.id
+
+        def release() -> None:
+            with scoped_session(container) as db:
+                starts._release_one(db, first)
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            placing = pool.submit(place)
+            assert placed.wait(WAIT_SECONDS)
+            releasing = pool.submit(release)
+            wait_until(
+                lambda: _waiting_on_a_lock(container),
+                "the release waits for the placement's project row",
+            )
+            waited.set()
+            second = placing.result(WAIT_SECONDS)
+            releasing.result(WAIT_SECONDS)
+
+        with scoped_session(container) as db:
+            states = {
+                job: db.get_one(models.Session, job).state_code
+                for job in (first, second)
+            }
+        assert states == {first: SessionState.STARTING, second: SessionState.HELD}

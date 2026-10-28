@@ -496,9 +496,7 @@ class ProjectService:
         )
         self.attach_service.attach_draft(opening, creation.text)
         self.attach_service.hang_unhung(opening)
-        self.job_service.setup(
-            project, opening, at, _operation(project, TransitionKind.OPENED)
-        )
+        self.job_service.setup(project, at, _operation(project, TransitionKind.OPENED))
         self.chat_close_service.close_open(self.db, project, CloseCause.CREATED, at)
         self.view_service.timeline_moved(project)
         self.engine_bus.emit(ManifestChanged())

@@ -47,6 +47,7 @@ from app.models import (
     ProjectTransition,
     Turn,
     User,
+    Work,
 )
 from app.models.reference import (
     AttachmentSource,
@@ -1296,9 +1297,11 @@ class TestCreateProjectSetup:
             None,
             at,
         )
-        assert turn.message == container.brief_service().setup(
-            draft, _opening(session, draft), at
+        setup = _setup(session, draft)
+        assert turn.message == container.brief_service().job(
+            draft, session.get_one(Work, setup.id), at, at
         )
+        assert f"the opening item {_opening(session, draft).id} holds" in turn.message
         assert turn.message.startswith("/plan\n")
 
     @pytest.mark.usefixtures("starts")

@@ -25,6 +25,7 @@ from app.models import (
     SaveError,
     Turn,
     User,
+    Work,
 )
 from app.models.reference import (
     AttachmentSource,
@@ -34,6 +35,7 @@ from app.models.reference import (
     ProjectState,
     TaskStatus,
     TransitionKind,
+    WorkTrigger,
 )
 from app.services.brief_service import FOLLOW_UP_END, BriefService, is_follow_up
 from app.services.container import ServiceContainer
@@ -431,8 +433,16 @@ class TestDefinitionChat:
         )
 
 
+SETUP = Work(trigger_code=WorkTrigger.SETUP)
+"""The setup's Work, as the brief reads it."""
+
+LATER = datetime(2026, 10, 26, 11, 5, 40, tzinfo=UTC)
+"""When a job held since `AT` leaves the queue or the pause."""
+
+
 class TestSetup:
-    """The setup's first Turn, at Create project (design 3 §5.3; F49)."""
+    """The setup's first Turn, triggered at Create project (design 3 §5.3;
+    F49)."""
 
     def test_it_names_the_drafts_folder_the_opening_and_the_empty_plan(
         self,
@@ -445,7 +455,7 @@ class TestSetup:
             opened, "Ada Example started this project", person, "Soup?"
         )
 
-        assert briefs.setup(opened, opening, AT) == (
+        assert briefs.job(opened, SETUP, AT, AT) == (
             "/plan\n\n"
             'Pilot\'s brief · the setup · project "Soup club" ·'
             " /work/Projects/soup-club · 2026-10-26T09:30:15Z\n\n"
@@ -459,6 +469,34 @@ class TestSetup:
             "The plan: plan.json, empty."
         )
 
+    def test_composed_later_its_stamp_and_switch_are_then_its_creation_creates(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        person: User,
+    ) -> None:
+        """Held, it is composed as it leaves the queue: the stamp and the
+        switch are the record's then, Create's instant stays Create's (F59,
+        F54.7)."""
+        container.document_service().bear_opening(
+            opened, "Ada Example started this project", person, "Soup?"
+        )
+        opened.autopilot = True
+        session.flush()
+
+        brief = briefs.job(opened, SETUP, AT, LATER)
+
+        assert brief.startswith(
+            "/plan\n\n"
+            'Pilot\'s brief · the setup · project "Soup club" ·'
+            " /work/Projects/soup-club · 2026-10-26T11:05:40Z\n\n"
+            "Auto pilot: on — the granted column holds for this session"
+            " (rules/grants.md).\n\n"
+            "The project was created 2026-10-26T09:30:15Z from"
+        )
+
     def test_a_project_with_no_title_is_named_by_its_folder_alone(
         self,
         session: DbSession,
@@ -470,15 +508,105 @@ class TestSetup:
         """A draft with a body and no title names no project (`_frame`)."""
         opened.name = None
         session.flush()
-        opening = container.document_service().bear_opening(
+        container.document_service().bear_opening(
             opened, "Ada Example started this project", person, "Soup?"
         )
 
-        assert briefs.setup(opened, opening, AT).startswith(
+        assert briefs.job(opened, SETUP, AT, AT).startswith(
             "/plan\n\n"
             "Pilot's brief · the setup · /work/Projects/soup-club ·"
             " 2026-10-26T09:30:15Z\n\n"
         )
+
+
+PAUSED_AT = datetime(2026, 10, 26, 9, 0, 0, tzinfo=UTC)
+RESUMED_AT = datetime(2026, 10, 26, 11, 5, 0, tzinfo=UTC)
+PAUSE_LINE = (
+    "Paused 2026-10-26T09:00:00Z to 2026-10-26T11:05:00Z: this job's trigger"
+    " happened while the project was paused; the record moved on meanwhile."
+)
+
+
+class TestJobPause:
+    """A job whose trigger came while its project was paused carries the
+    pause it came in, its interval and that the record moved on (design 3
+    §5.2; F141.4; V11)."""
+
+    @pytest.fixture
+    def opening(
+        self, container: ServiceContainer, opened: Project, person: User
+    ) -> Item:
+        return container.document_service().bear_opening(
+            opened, "Ada Example started this project", person, "Soup?"
+        )
+
+    @pytest.mark.usefixtures("opening")
+    def test_a_trigger_in_a_pause_carries_it_after_the_switch(
+        self,
+        session: DbSession,
+        briefs: BriefService,
+        opened: Project,
+        person: User,
+    ) -> None:
+        _transition(session, opened, person, TransitionKind.PAUSED, PAUSED_AT)
+        _transition(session, opened, person, TransitionKind.RESUMED, RESUMED_AT)
+
+        assert briefs.job(opened, SETUP, AT, LATER).split("\n\n")[2] == (
+            "Auto pilot: off — the granted column asks for this session"
+            f" (rules/grants.md).\n{PAUSE_LINE}"
+        )
+
+    @pytest.mark.usefixtures("opening")
+    def test_of_two_pauses_it_names_the_one_its_trigger_came_in(
+        self,
+        session: DbSession,
+        briefs: BriefService,
+        opened: Project,
+        person: User,
+    ) -> None:
+        early = datetime(2026, 10, 26, 8, 0, 0, tzinfo=UTC)
+        _transition(session, opened, person, TransitionKind.PAUSED, early)
+        _transition(
+            session, opened, person, TransitionKind.RESUMED, early.replace(minute=30)
+        )
+        _transition(session, opened, person, TransitionKind.PAUSED, PAUSED_AT)
+        _transition(session, opened, person, TransitionKind.RESUMED, RESUMED_AT)
+        _transition(
+            session, opened, person, TransitionKind.PAUSED, RESUMED_AT.replace(minute=6)
+        )
+        _transition(
+            session,
+            opened,
+            person,
+            TransitionKind.RESUMED,
+            RESUMED_AT.replace(minute=7),
+        )
+
+        assert PAUSE_LINE in briefs.job(opened, SETUP, AT, LATER)
+
+    @pytest.mark.parametrize(
+        ("paused", "resumed"),
+        [
+            # Over before the trigger came.
+            (PAUSED_AT, PAUSED_AT.replace(minute=30)),
+            # Begun after it, while the job waited its turn.
+            (AT.replace(minute=45), RESUMED_AT),
+        ],
+    )
+    @pytest.mark.usefixtures("opening")
+    def test_a_trigger_outside_a_pause_carries_none(
+        self,
+        session: DbSession,
+        briefs: BriefService,
+        opened: Project,
+        person: User,
+        paused: datetime,
+        resumed: datetime,
+    ) -> None:
+        _transition(session, opened, person, TransitionKind.PAUSED, paused)
+        _transition(session, opened, person, TransitionKind.RESUMED, resumed)
+
+        assert "Paused" not in briefs.job(opened, SETUP, AT, LATER)
 
 
 FINISH = (

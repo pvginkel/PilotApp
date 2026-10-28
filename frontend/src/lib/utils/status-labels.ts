@@ -109,8 +109,8 @@ export function planStep(status: TaskStatus): PlanStep {
 }
 
 /**
- * Why the gate holds a work item's start, as its line says it (F26.1, F141.5, F143.4); `running`,
- * the work items that leave it no slot, counted while no slot is free.
+ * Why the gate holds a work item's start, as its line says it (F26.1, F141.5, F143.4, F59.2);
+ * `running`, the work items that leave it no slot, counted while no slot is free.
  */
 export function heldReasonLabel(reason: HeldReason, running: number | null): string {
   switch (reason) {
@@ -121,6 +121,8 @@ export function heldReasonLabel(reason: HeldReason, running: number | null): str
     case 'slot':
       // The API counts the running work items whenever it holds a start for a slot.
       return `Waiting for a slot · ${running!} running`;
+    case 'queue':
+      return 'Waiting for the job before it';
     default: {
       const unknown: never = reason;
       return String(unknown);

@@ -17,6 +17,7 @@ from datetime import datetime
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.engine.documents import OPENING
 from app.engine.paths import draft_folder
 from app.engine.plan import PlanService
 from app.engine.views import utc_time
@@ -33,8 +34,15 @@ from app.models import (
     SaveError,
     Turn,
     User,
+    Work,
 )
-from app.models.reference import DocumentRole, ErrorKind, ProjectState, TransitionKind
+from app.models.reference import (
+    DocumentRole,
+    ErrorKind,
+    ProjectState,
+    TransitionKind,
+    WorkTrigger,
+)
 from app.services.session_scope import project_folder
 
 CHAT_SKILL = "/chat"
@@ -138,24 +146,36 @@ class BriefService:
             ],
         )
 
-    def setup(self, project: Project, opening: Item, at: datetime) -> str:
-        """The setup's first Turn (§5.3), at Create project's instant `at`,
-        which opened the project and took its slug: `/plan`, the switch, then
-        the draft's folder and the project's, the draft, the opening that
-        holds the words that started it, and the plan, empty. No pause and no
-        notes: Create opens a draft, which has nothing to pause (F141.2), and
-        its plan holds no note."""
+    def job(
+        self, project: Project, work: Work, triggered: datetime, at: datetime
+    ) -> str:
+        """A job's first Turn (§5.3), composed at `at` as it leaves the queue
+        or the pause, from the record as it then stands (F59), its trigger at
+        `triggered`: the switch, the pause its trigger came in if it did
+        (F141.4, `_trigger_paused`), then its trigger's payload.
+
+        The setup's (F49), triggered at Create project's instant, which opened
+        the project and took its slug: `/plan`, then the draft's folder and
+        the project's, the draft, the opening that holds the words that
+        started it, and the plan, empty. No notes: its plan holds none."""
+        # `JobService` places the setup alone.
+        assert work.trigger_code is WorkTrigger.SETUP
+        opening = self.db.scalars(
+            select(Item.id).where(
+                Item.project_id == project.id, Item.kind_code == OPENING
+            )
+        ).one()
         return _frame(
             PLAN_SKILL,
             "the setup",
             project,
             at,
-            [_switch(project)],
+            [_switch(project), self._trigger_paused(project, triggered)],
             [
-                f"The project was created {utc_time(at)} from"
+                f"The project was created {utc_time(triggered)} from"
                 f" {draft_folder(project)}; its folder is now"
                 f" {project_folder(project)}.",
-                f"The draft: project.md (the opening item {opening.id} holds the"
+                f"The draft: project.md (the opening item {opening} holds the"
                 " words that started it; the draft's copy and what the chat"
                 " attached hang on it).",
                 "The plan: plan.json, empty.",
@@ -232,6 +252,43 @@ class BriefService:
         return (
             f"The project is paused since {utc_time(since)}: anything you start"
             " is held until it resumes — say so."
+        )
+
+    def _trigger_paused(self, project: Project, triggered: datetime) -> str | None:
+        """§5.2's pause line of a job whose trigger at `triggered` came while
+        the project was paused: that pause, from its start to the resume that
+        let the job go on, and that the record moved on meanwhile (F141.4);
+        None for one that came while it was not."""
+        paused = self.db.scalars(
+            select(ProjectTransition)
+            .where(
+                ProjectTransition.project_id == project.id,
+                ProjectTransition.kind_code == TransitionKind.PAUSED,
+                ProjectTransition.at <= triggered,
+            )
+            .order_by(ProjectTransition.id.desc())
+            .limit(1)
+        ).one_or_none()
+        if paused is None:
+            return None
+        resumed = self.db.scalars(
+            select(ProjectTransition)
+            .where(
+                ProjectTransition.project_id == project.id,
+                ProjectTransition.kind_code == TransitionKind.RESUMED,
+                ProjectTransition.id > paused.id,
+            )
+            .order_by(ProjectTransition.id)
+            .limit(1)
+        ).one_or_none()
+        # The gate briefs no job while its project is paused.
+        assert resumed is not None
+        if resumed.at <= triggered:
+            return None
+        return (
+            f"Paused {utc_time(paused.at)} to {utc_time(resumed.at)}: this job's"
+            " trigger happened while the project was paused; the record moved on"
+            " meanwhile."
         )
 
     def _finish(self, project: Project) -> str:

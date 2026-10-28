@@ -488,7 +488,6 @@ class ServiceContainer(containers.DeclarativeContainer):
         JobService,
         db=db_session,
         record_service=record_service,
-        brief_service=brief_service,
         session_start_service=session_start_service,
         brain_model=app_config.provided.brain_model,
         brain_reasoning_effort=app_config.provided.brain_reasoning_effort,

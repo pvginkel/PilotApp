@@ -20,7 +20,11 @@ start enters is a `server` record in no Turn (DB assertion 220), and each such
 record rebuilds the current line in its transaction.
 
 A brain session's start, its rows written by its caller (`start_brain`), passes
-the gate as a work item's does, never held for the pause and taking no slot.
+the gate as a work item's does, taking no slot; a chat's is never held for the
+pause, and a job's waits while another job of its project is before it
+(F59.2). A job is placed with no Turn: its brief is composed from the record
+as it stands when it leaves the queue or the pause (F59), as its first Turn,
+its Work's switch the one that brief states (F54.7).
 Its environment is the store (`STORE_ENVIRONMENT_ID`): its row made on Pilot's
 first touch, then started (`EnvironmentService.start`); the store is exempt, so
 no timer of Pilot's stops it. Its create is boxed (`scoped_create`), and a
@@ -40,14 +44,17 @@ slot (`WorkSlots.took`); a work item's end, its turn's `result`, its Stop, its
 failure or a stop made elsewhere, which frees its slot (`WorkSlots.left`) —
 the held Sessions it opens for move to `starting` in `created_at` order, each
 under its lock while it is still `held`, a work item whose Project has no
-slot passed over, and each loop resumes its start where the rows left it. A
+slot passed over, and a job behind another of its project; each loop resumes
+its start where the rows left it. A job's end, its last turn's, its failure or
+its stop, opens the gate for its project's next job (`WorkSlots.left`). A
 work item it still holds has its line told again, its reason read anew. The
 probe, the controller's readiness call, runs on the scheduler's tick while the
 outage holds.
 
 The lock order (P-45). A start, a Resume and the release take their locks in
 one order: the Project's row, then the Session's, then the slot's
-(`WorkSlots.lock`), then an Environment's. A start that places a work item
+(`WorkSlots.lock`), then an Environment's, the release taking a job's
+Project's row shared. A start that places a work item
 locks its Project's row as `next_seq` does, so its Item's birth takes no lock
 stronger than one it holds. The start loop's transactions lock no Project
 row: no controller call is made while one is locked.
@@ -130,7 +137,14 @@ from app.services.session_record_service import (
 )
 from app.services.session_scope import ScopedCreate, scoped_create
 from app.services.session_stream_service import SessionStreamService
-from app.services.start_gate import JOB_KIND, WORK_KIND, Held, WorkSlots, held_reason
+from app.services.start_gate import (
+    JOB_KIND,
+    WORK_KIND,
+    Held,
+    WorkSlots,
+    held_reason,
+    queued,
+)
 from app.services.supervisor import LoopHandle, Supervisor
 from app.services.work_status import work_moved
 from app.services.write_back_service import WRITE_BACK_REFUSED
@@ -383,7 +397,7 @@ class SessionStartService:
         refusal = _closed(project)
         if refusal is not None:
             raise InvalidOperationException(operation, refusal)
-        held = self._held(db, project, WORK_KIND)
+        held = self._held(db, project, WORK_KIND, queued=False)
         now = datetime.now(UTC)
         session = AgentSession(
             project_id=project_id,
@@ -417,16 +431,19 @@ class SessionStartService:
         the gate holds no longer."""
         if session.state_code is not SessionState.HELD:
             return None
-        return self._held(db, project, session.kind_code)
+        return self._held(db, project, session.kind_code, queued=_queued(db, session))
 
     def start_brain(
         self, db: Session, project: Project, session: AgentSession, operation: str
     ) -> None:
         """A brain Session's start through the gate (§13.4), in the caller's
-        transaction, which holds the project's row and wrote the Session's
-        Turn to send: `held` while the gate is closed for it, else `starting`,
-        its start run once this commits. A Chat's is never held for the pause
-        and takes no slot. No controller call is made.
+        transaction, which holds the project's row: `held` while the gate is
+        closed for it, else `starting`, its start run once this commits. A
+        Chat's, its Turn to send written by the caller, is never held for the
+        pause and takes no slot. A job's, placed with no Turn, waits its turn
+        behind its project's jobs before it; going at once, it is briefed at
+        its trigger's instant, its Session's `created_at` (`_brief`). No
+        controller call is made.
 
         Raises:
             InvalidOperationException: No controller or no store environment
@@ -438,9 +455,11 @@ class SessionStartService:
             raise InvalidOperationException(
                 operation, "no store environment is configured"
             )
-        held = self._held(db, project, session.kind_code)
+        held = self._held(db, project, session.kind_code, queued=_queued(db, session))
         if held is None:
             session.state_code = SessionState.STARTING
+            if _unbriefed(session):
+                self._brief(db, project, session, session.created_at)
             self._begin(db, session)
         else:
             session.state_code = SessionState.HELD
@@ -495,7 +514,7 @@ class SessionStartService:
         task = item.plan_task_id
         if task is not None and not record.in_the_plan(project, task):
             task = None
-        held = self._held(db, project, WORK_KIND)
+        held = self._held(db, project, WORK_KIND, queued=False)
         now = datetime.now(UTC)
         session = AgentSession(
             project_id=project.id,
@@ -661,9 +680,11 @@ class SessionStartService:
         """The release loop's run: each held Session in `created_at` order,
         moved to `starting` under its lock while it is still `held` and the
         gate is open for it, a work item's slot counted under the slot's
-        lock, its loop run once that commits. One the gate still holds has
-        its work item's line told again: the outage's turn or the slot's
-        count, which asked for the run, may have moved its reason."""
+        lock, a job's queue read (`queued`) and its brief composed if it has
+        none yet (`_brief`), its loop run once that commits. One the gate
+        still holds has its work item's line told again: the outage's turn,
+        the slot's count or a job's end, which asked for the run, may have
+        moved its reason."""
         with scoped_session(self._container) as db:
             held = db.scalars(
                 select(AgentSession.id)
@@ -828,7 +849,7 @@ class SessionStartService:
         session.error = None
         session.current_line = None
         self._container.record_service().retry_write_backs(session_id)
-        held = self._held(db, project, session.kind_code)
+        held = self._held(db, project, session.kind_code, queued=False)
         if session.conversation_id is None:
             self._fresh(db, session)
         if held is None:
@@ -872,14 +893,25 @@ class SessionStartService:
         self.release_held()
 
     def _release_one(self, db: Session, session_id: uuid.UUID) -> None:
+        unlocked = db.get_one(AgentSession, session_id)
+        if unlocked.kind_code == JOB_KIND:
+            # Before the Session's lock (the lock order): a job's brief writes
+            # its Session's row a second time, whose foreign key's check then
+            # takes the project's row, which an Item's birth holds exclusively.
+            _standing(db, unlocked.project_id, births=False)
         session = self._records(db).lock_session(session_id)
         if session.state_code != SessionState.HELD:
             return
         project = db.get_one(Project, session.project_id, populate_existing=True)
-        if self._held(db, project, session.kind_code) is not None:
+        if (
+            self._held(db, project, session.kind_code, queued=_queued(db, session))
+            is not None
+        ):
             self._moved(session)
             return
         session.state_code = SessionState.STARTING
+        if _unbriefed(session):
+            self._brief(db, project, session, datetime.now(UTC))
         self._begin(db, session)
         self._moved(session, state=True)
         logger.info("Session %s goes on from held", session_id)
@@ -910,9 +942,10 @@ class SessionStartService:
         current line (F67.1, F69.2). A turn in flight stays so, for its relay to
         record to the end the controller's interrupt gives it once this
         commits; a start held or under way has its Turn ended unsent, and its
-        loop sends nothing more. Its environment is handed to the shutdown
-        timer (`_hand_to_timer`); a start held before it had one arms none. A
-        work item's slot opens once this commits."""
+        loop sends nothing more, and a job held before its brief has none. Its
+        environment is handed to the shutdown timer (`_hand_to_timer`); a start
+        held before it had one arms none. A work item's slot opens once this
+        commits."""
         before = session.state_code
         session.state_code = SessionState.STOPPED
         session.stopped_at = at
@@ -920,7 +953,7 @@ class SessionStartService:
         session.current_line = None
         if before == SessionState.RUNNING:
             self._relays.request_interrupt(session.id)
-        else:
+        elif not _unbriefed(session):
             turn = _latest_turn(db, session.id)
             turn.ended_at = at
             session.turn_ended_at = at
@@ -1359,12 +1392,14 @@ class SessionStartService:
         self._slots.left(session, SessionState.STARTING)
         logger.warning("Session %s failed to start: %s", session_id, reason)
 
-    def _held(self, db: Session, project: Project, kind_code: str) -> Held | None:
+    def _held(
+        self, db: Session, project: Project, kind_code: str, *, queued: bool
+    ) -> Held | None:
         """Why the gate holds a start of a Session of `kind_code` in
-        `project` now; None while it is open. A work item's counts the slot
-        under the slot's lock (`WorkSlots.lock`), held to the transaction's
-        end, so the next start's count sees the Session this one moves to
-        `starting`."""
+        `project` now, a job's `queued` behind another of its project or not;
+        None while it is open. A work item's counts the slot under the slot's
+        lock (`WorkSlots.lock`), held to the transaction's end, so the next
+        start's count sees the Session this one moves to `starting`."""
         filled = None
         if kind_code == WORK_KIND:
             self._slots.lock(db)
@@ -1374,7 +1409,32 @@ class SessionStartService:
             kind_code=kind_code,
             unreachable=self._outage.holds,
             filled=filled,
+            queued=queued,
         )
+
+    def _brief(
+        self, db: Session, project: Project, session: AgentSession, at: datetime
+    ) -> None:
+        """A job leaving the queue or the pause with no Turn yet, in the
+        transaction that moves it to `starting`: its brief composed from the
+        record as it stands at `at` (F59; `BriefService.job`), sent as its
+        first Turn, and its Work's switch the one that brief states, which the
+        session keeps (F54.7)."""
+        work = db.get_one(Work, session.id)
+        work.autopilot = project.autopilot
+        db.add(
+            Turn(
+                session_id=session.id,
+                seq=1,
+                message=self._container.brief_service().job(
+                    project, work, session.created_at, at
+                ),
+                started_at=at,
+            )
+        )
+        db.flush()
+        session.turns = 1
+        session.turn_started_at = at
 
     def _moved(self, session: AgentSession, *, state: bool = False) -> None:
         work_moved(self._container.engine_bus(), session, state=state)
@@ -1387,6 +1447,18 @@ class SessionStartService:
     def _client(self) -> ControllerClient:
         client: ControllerClient = self._container.controller_client()
         return client
+
+
+def _unbriefed(session: AgentSession) -> bool:
+    """Whether the Session is a job held before its brief: placed with no
+    Turn, which `_brief` writes."""
+    return session.kind_code == JOB_KIND and session.turns == 0
+
+
+def _queued(db: Session, session: AgentSession) -> bool:
+    """Whether the Session is a job behind another of its project
+    (`queued`)."""
+    return session.kind_code == JOB_KIND and session.id in queued(db, [session.id])
 
 
 def _pending(db: Session, session_id: uuid.UUID) -> _Pending | None:
