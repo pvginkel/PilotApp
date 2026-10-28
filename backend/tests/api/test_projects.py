@@ -690,6 +690,7 @@ class TestGetTimeline:
             "stopped_at": None,
             "stopped_by": None,
             "stopped_cause": None,
+            "retried": None,
         }
 
     def test_a_block_s_own_section_rides_with_its_text(

@@ -288,6 +288,7 @@ class TestProjectEventService:
                     "stopped_at": None,
                     "stopped_by": None,
                     "stopped_cause": None,
+                    "retried": None,
                 },
             },
         }
