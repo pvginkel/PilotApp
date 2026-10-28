@@ -982,6 +982,31 @@ class TestItemDone:
             )
         )
 
+    def test_a_deferral_carries_where_it_was_deferred_to(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        planned: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        item, document = self._bear(
+            container, planned, project_session, "confirmation", CONFIRM
+        )
+        container.record_service().answer(
+            document, "C1", person, "deferred", via=AnswerChannel.CHAT, to="plan"
+        )
+
+        assert briefs.job(planned, _closing(item), AT, LATER).split("\n\n")[3] == (
+            _item_line(
+                session,
+                item,
+                f", task fix — answered deferred to plan by ada at"
+                f" {_z(item.done_at)} (via chat).",
+            )
+        )
+
     @pytest.mark.parametrize(
         ("kind", "text", "local_id", "answer", "note", "said"),
         [

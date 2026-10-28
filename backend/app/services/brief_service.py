@@ -598,7 +598,7 @@ def _answered(block: dsl.Block, when: str) -> str:
     if block.done is not None:
         line = f"{block.local_id} done by {block.by} at {when}"
     elif block.confirmation:
-        line = f"answered {block.answer} by {block.by} at {when}"
+        line = f"answered {_said(block)} by {block.by} at {when}"
     else:
         line = f"{block.local_id} answered {_said(block)} by {block.by} at {when}"
     if _given(block.via):
