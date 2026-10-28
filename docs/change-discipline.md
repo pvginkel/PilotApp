@@ -14,6 +14,12 @@ topic docs beside this one.
   that list without coming back for scope. A feature that is not on it, or one it lists under
   *Decided out*, is not built, and neither is the groundwork for one because it looked cheap while
   passing: it is a question for the operator.
+- **A planning ruling that splits a feature names each part where it went.** A ruling that gives
+  part of a feature, `F<n>'s <aspect>`, to another slice adds that part to the other row's Features
+  cell in `implementation-plan.md` §3 in the same commit as the ruling, the feature ledger's rows
+  moving with it (the plan's §6). The plan review lists every feature a ruling split and checks
+  each cell: a part missing from the other row's cell leaves the feature under this slice alone,
+  where the ledger and its check read it as built whole.
 - **The rulings are decisions, not suggestions**: `understanding.md` §2, `feed-model.md`,
   `tech-design-options.md` §7 and `ui-conventions.md`; the rows of the spec repo's `decisions.md`,
   which win where they disagree with those; and the decisions taken for now in its
