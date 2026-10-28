@@ -99,10 +99,12 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   ([`work.md`](work.md)): `project_id`, `session_kind_code` (`work` or `job`, never a Chat's),
   `trigger_code` (a job's Work Trigger; a worker's run has none) and `trigger_item_id` (an item of
   the same project, never the work item itself; a continuation's, the registered document whose
-  close released it), `repo`, the repository a worker's run is placed by
-  (none for a job), and `autopilot`, the switch's setting at its brief. Its keys reach its Item and
-  its Session through the one project. A `work`-kind Session may stand with no `work` row, as the
-  seed's idle session and a testing project's do.
+  close released it), `repo`, the repository a worker's run is placed by (none for a job),
+  `autopilot`, the switch's setting at its brief, and `retried_by_id`, the job a person's Retry of
+  this failed or stopped one placed: only a job is retried, never by itself, by a job of the same
+  project, and a job retries one at most (`ck_work_retried_by`, `uq_work_retried_by_id`). Its keys
+  reach its Item and its Session through the one project. A `work`-kind Session may stand with no
+  `work` row, as the seed's idle session and a testing project's do.
 - `turns`: a message sent to a session and the reply it produced, numbered by `seq` from 1 within
   the session: its `message`, what was sent; its `author_user_id` (none for the server's own, such
   as a start's brief) and its `words`, the person's own, verbatim with their quote tags, which a
@@ -143,7 +145,7 @@ added by a revision and nowhere else.
 | Table | Rows |
 |---|---|
 | `item_kinds` (`name`, `form`, `icon`) | prose: `opening`, `decision`, `confirmation`, `question`, `action`, `notice`, `document`, `review`; work: `work`; wait: `card_wait`, `timed_wait` |
-| `done_causes` (`name`, `undo_offered`) | undo offered: `answered`, `marked`, `settled`; not: `turn_ended`, `finished` |
+| `done_causes` (`name`, `undo_offered`) | undo offered: `answered`, `marked`, `settled`; not: `turn_ended`, `finished`, `withdrawn` (a job an Undo of its trigger item withdrew before its brief, which never ran) |
 | `confirmation_reasons` (`name`, `asks_under_autopilot`, `description`) | asked only while auto pilot is off: `auto-pilot-off`, `rider`; asked under auto pilot too: `irreversible`, `product-hold`, `self-approval` |
 | `session_kinds` (`name`, `surface`, `on_timeline`) | `chat` (`pilot-store`, not on the timeline), `work` (`pilot-work`), `job` (`pilot-store`) |
 

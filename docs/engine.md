@@ -12,7 +12,7 @@ commits.
 |---|---|
 | `DocumentService` (`documents.py`) | the births, a worker's registration and its read, `publish()`, the document's row lock, versions, the turn's end |
 | `IngestService` (`ingest.py`) | an agent's save of a path of the tree; the faults of a text Pilot's own item is to be born with |
-| `RecordService` (`record.py`) | a person's answer, Done, undo, Read, Reviewed; Finish's close; a work item placed and done; a run's continuation released |
+| `RecordService` (`record.py`) | a person's answer, Done, undo, Read, Reviewed; Finish's close; a work item placed and done; a run's continuation released; the job after a close of an item of Pilot's own placed, and withdrawn by its Undo |
 | `PlanService` (`plan.py`) | `plan.json`, rendered and saved; the deferrals without a home |
 | `TreeService` (`tree.py`) | what a path names, the bytes it must hold, its tree hash; the manifest |
 | `ViewService` (`views.py`) | `reference.json`, `timeline.json` and `chat.md` ([`chats.md`](chats.md)) |
@@ -54,7 +54,8 @@ document:
 trigger_item_id=None)` writes its Item, kind `work`, created by its own `session` and sharing its
 id, on the plan's task when given (a task not in the plan is a `RecordNotFoundException`), and its
 Work, `autopilot` the project's switch as it stands and `repo` the repository it is placed by, none
-for a job, which has instead the `trigger` that started it (`setup`, [`work.md`](work.md));
+for a job, which has instead the `trigger` that started it and the Item that set it off,
+`trigger_item_id`, where it has one ([`work.md`](work.md));
 `work_done(work_id, at)`, at its turn's end, a job's at its last, marks the Item done at `at`, by no
 one, cause `turn_ended`, under the Item's row lock, and leaves one done already, as Finish's close
 leaves it ([`sessions.md`](sessions.md)). Each moves `timeline.json`.
@@ -112,8 +113,9 @@ registered document's first text gives it its file in the tree, with a `TreeHash
 
 `IngestService.ingest(path, content, base_hash, environment, session)` takes the store's save of
 `path`, from the tree's root: `base_hash` is the hash the sidecar last synced for the path, none
-when it has none, and `session` the session whose turn wrote the save, none while that is not
-known. It answers an `Ingested`:
+when it has none, and `session` the Session whose save it is, none when none is: in the store, the
+brain session that held the project folder's write lock as the sidecar read the file
+([`sync.md`](sync.md)). It answers an `Ingested`:
 
 - `kind`: what the path names, `document`, `plan` or `view` (any read-only path, an attachment
   included);
@@ -187,10 +189,13 @@ merge carries the write to the file.
 - `undo(item)`: clears a done prose item's mark while no session has taken its answers, its done
   cause offers undo and its project is neither finished (D028) nor archived (D012); a registered
   document's `written_back_at` and `write_back_refused_at` go with it, so that its next close writes
-  it again.
+  it again; and the job its close placed, while it is still held before its brief, is withdrawn
+  (below).
   On cause `answered` it also takes out the answer lines of the block the person answered, which
   unfreezes the block. It holds the project's row shared before the document's, so Finish and
-  Reopen, which change the project's state under its row lock, never interleave with it.
+  Reopen, which change the project's state under its row lock, never interleave with it, and locks
+  that job's Session before it reads the item again, so that the job's brief, which consumes the
+  item under that lock, and the Undo never both take effect.
   `offers_undo(item)` says whether `undo` would take the item now, by the same rule.
 - `done(item, user)`: Done on a document. A person's first answers every unanswered block that
   has a recommendation with it, `via: recommended`, and is refused while a block has neither an
@@ -230,13 +235,26 @@ document of the run consumed by it, `consumed_at` and `consumed_session_id`, wit
 Resume of a continuation, clears `write_back_refused_at` on the documents it carries, each owed
 again with its `WriteBackOwed`.
 
+**The job after an item of Pilot's own.** A person's close of an item a session of Pilot's own added,
+one whose Session Kind's surface is `pilot-store` (a chat's or a job's), places the job after it in
+the close's transaction, through the port `Jobs` (`JobService.item_done`, [`work.md`](work.md)):
+an answer that marks a one-ask item done, an action's Done that does, Done and Reviewed. A notice's
+Read, Pilot's own Done, Finish's close, a registered document's close and an item a worker's session
+added place none. Every close of an item holds its project's row `FOR UPDATE`, a close in the draft
+alone holding it shared. The job's brief consumes the item, which takes its Undo
+([`sessions.md`](sessions.md)). An Undo before that, while the job is held behind the project's other
+jobs or by the pause, withdraws it (`JobService.withdraw`): its Session `stopped` by no one, with no
+Turn, and its Item done at the Undo, cause `withdrawn`, by no one, which offers no undo. An Undo that
+finds the job briefed meanwhile is refused, the item consumed.
+
 The writes but the close, which takes its caller's time, record their times to the second; they
 trim every value and read a blank note as none.
 
 ## The turn's end
 
 `DocumentService.turn_ended(session)` clears the writing session of every document `session` was
-writing, cuts a `turn` version of each whose published text changed since its last version, and
+writing, cuts a `turn` version of each whose published text changed since its last version, its
+`created_at` the clock's at the cut, and
 returns the paths, from the tree's root and sorted, of those whose latest save is still held. It
 raises `ProjectChanged` for each document it lets go, whatever the Session's state. The relay calls
 it in the transaction that ends a turn on the controller's `result` frame, and in the one that ends

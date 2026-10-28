@@ -104,8 +104,8 @@ failure to point at, and no guard for a condition the types already rule out.
 
 The boundaries are where checking is the feature: tool and endpoint input, a document the brain or a
 worker session wrote (the block DSL and its front matter, the ownership of an `answer:` line), and
-what the sidecar reports. An error in what an agent wrote is answered to that agent, so it can fix
-it; an input validated at the boundary is not checked again further in.
+what the sidecar reports. An error in what an agent wrote is reported back to the agents writing
+that project, so it is fixed; an input validated at the boundary is not checked again further in.
 
 ## Testability is critical
 

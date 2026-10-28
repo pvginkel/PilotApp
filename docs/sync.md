@@ -30,7 +30,7 @@ made, a call is answered `502`, and makes none, when the controller does not rep
 cannot be reached. With no controller, the row is named by the store's id and not exempt.
 
 **The protocol version.** The server serves `SYNC_PROTOCOL_MIN` to `SYNC_PROTOCOL_MAX`
-(`backend/app/services/sync_service.py`), both 1, and `pilot-sync` speaks `protocol.Version`, 1. A
+(`backend/app/services/sync_service.py`), both 2, and `pilot-sync` speaks `protocol.Version`, 2. A
 change to any request or response shape of the routes bumps the sidecar's version and the
 server's `SYNC_PROTOCOL_MAX` in one commit.
 
@@ -43,14 +43,18 @@ file must hold ([`projection.md`](projection.md)). Every route answers the gate'
 
 | Route | Takes | Answers |
 |---|---|---|
-| `PUT /api/sync/files/<path>` | the file's bytes, at most `SYNC_PUT_MAX_BYTES`; `X-Pilot-Base-Hash`, the hash the sidecar last synced for the path, or `none` | `204` when the file needs no change, `200` with the bytes it must now hold when it does |
+| `PUT /api/sync/files/<path>` | the file's bytes, at most `SYNC_PUT_MAX_BYTES`; `X-Pilot-Base-Hash`, the hash the sidecar last synced for the path, or `none`; `X-Pilot-Session`, the Session whose save the bytes are, left out for none | `204` when the file needs no change, `200` with the bytes it must now hold when it does |
 | `GET /api/sync/files/<path>` | | `200` with the bytes the path must hold, and `X-Pilot-Hash` |
 | `POST /api/sync/manifest` | `{"tree", "shadow"}` | the reconcile, below |
 | `GET /api/sync/events` | | the change stream, below |
-| `POST /api/sync/check` | `{"path", "hash", "wait_seconds"}` | the check, below |
+| `POST /api/sync/check` | `{"folder", "wait_seconds"}` | the check, below |
 
-The put is the engine's ingest of the save, its Save Errors under the store's Environment, by no
-session: nothing tells it which of the project's sessions wrote the file. `204`
+The put is the engine's ingest of the save, its Save Errors under the store's Environment. The
+save is a Session's when `X-Pilot-Session` names a brain session, a chat's or a job's, of the
+syncing project whose folder holds the path: the ingest makes that Session the document's writer
+([`engine.md`](engine.md)). The sidecar names the session that held the project folder's write
+lock as it read the file (below); a value that is no UUID, no Session, a work item's or another
+project's is logged as a warning, and the save, as one with no header, is no Session's. `204`
 for a save the merge left as it was and for a held one, `200` with the merged text, the canonical
 `plan.json` or a read-only path's rendering. Either answer carries `X-Pilot-Hash`, the hash of what
 the file holds once answered, and `X-Pilot-Faults`, the count of Save Errors the save raised on the
@@ -109,30 +113,27 @@ and its `parse` Save Errors go with the save that raised them, in every environm
 
 ## The check
 
-`POST /api/sync/check` is the hook's check of a file after an agent's edit. It takes the file's
-hash on disk once the sidecar has had it acknowledged, and `wait_seconds`, how long the sidecar
-waited for that (at least 0). It answers:
+`POST /api/sync/check` is the check of a project folder after a tool call that can write it: the
+sidecar posts it from a hook's release (below), once it has flushed the folder. It takes `folder`,
+the project folder's name at the tree's root (lowercase letters, digits and hyphens), and
+`wait_seconds`, how long the flush took (at least 0). It answers the folder's whole list, never
+filtered on a path or on who wrote it:
 
-- `checked`, whether the server agrees the file holds that hash: the hash the server last
-  acknowledged for it (D006). It does for the path's tree hash and, for a document, its
-  `ingested_hash`, the latest save the server took, so a document the server rewrote with a `200`
-  checks true by the save's hash as well as by the bytes written. A held `plan.json`, whose save is
-  stored nowhere, agrees with any hash while its `parse` Save Errors stand. Otherwise, and for a
-  path that names nothing, it is false, logged.
-- `errors`: the Save Errors of the store's Environment in the file's project folder, `{"path",
-  "kind", "line", "message"}`, by path and then in the order raised. The folder is the `<slug>/` or
-  `draft-<number>/` the path starts with, when a syncing project has it
-  (`TreeService.project_of`); a path under no syncing project's folder, at the tree's root or in an
-  archived project's, is answered its own Save Errors alone. A `reverted` one is reported once, to
-  its project's check: the statement that reads them deletes them, so another project's check never
-  takes it. A `parse` one stands until a clean save of its path.
-- `homeless_deferrals`: the deferrals without a home of the file's project, `{"block", "document",
-  "title", "to"}`, computed at the check and never stored: a block answered `deferred` in the
-  document of one of its done items, deferred to a plan task that is not done or to the plan while
-  the project is not finished, that no plan note names, a struck note's reference counting. `block`
-  is `<item id>/<local id>`, `document` its path from the tree's root, `title` its item's (null
-  while it has none) and `to` the task or `plan`, in item and block order
-  (`PlanService.homeless_deferrals(project)`). None for a path under no syncing project's folder.
+- `errors`: the Save Errors of the store's Environment under the folder, `{"path", "kind", "line",
+  "message"}`, by path and then in the order raised. A `reverted` one is reported once: the
+  statement that reads them deletes them, so the next check never takes it again. A `parse` one
+  stands until a clean save of its path, and every check of the folder reports it meanwhile,
+  whichever session's tool call asks.
+- `homeless_deferrals`: the deferrals without a home of the folder's project, `{"block",
+  "document", "title", "to"}`, computed at the check and never stored: a block answered `deferred`
+  in the document of one of its done items, deferred to a plan task that is not done or to the plan
+  while the project is not finished, that no plan note names, a struck note's reference counting.
+  `block` is `<item id>/<local id>`, `document` its path from the tree's root, `title` its item's
+  (null while it has none) and `to` the task or `plan`, in item and block order
+  (`PlanService.homeless_deferrals(project)`).
+
+A folder of no syncing project, an archived project's included, is answered its Save Errors alone
+(`TreeService.project_in(folder)`).
 
 ## Settings and metrics
 
@@ -151,7 +152,7 @@ The metrics, on the backend's `/metrics`:
 - `pilot_sync_faults_total{kind}`: the Save Errors the puts raised, `parse` or `reverted`;
 - `pilot_sync_stale_puts_total`: the puts whose base hash was not the path's tree hash;
 - `pilot_sync_reconciles_total`: the manifest calls;
-- `pilot_sync_hook_wait_seconds`, a histogram of the checks' `wait_seconds`;
+- `pilot_sync_hook_wait_seconds`, a histogram of the checks' `wait_seconds`, the flushes' time;
 - `pilot_sync_stream_connects_total`, and the gauge `pilot_sync_stream_connected`: the streams
   open.
 
@@ -166,7 +167,7 @@ is its environment's, and it reads no other variable:
 | `PILOT_URL` | the server's base URL, `http` or `https`; required |
 | `PILOT_SYNC_TOKEN` | the store's bearer; required |
 | `KUBECODER_ENVIRONMENT_ID` | the environment it runs in, sent as `X-Pilot-Environment`; required |
-| `PILOT_SYNC_LOCAL_PORT` | the local check's port; `3510` |
+| `PILOT_SYNC_LOCAL_PORT` | the port of its endpoint for the store's hooks; `3510` |
 | `PILOT_SYNC_TREE_ROOT` | the tree, an absolute path; `/work/Projects` |
 | `PILOT_SYNC_DATA_DIR` | the directory its shadow is kept in, an absolute path; `/var/lib/pilot-sync` |
 
@@ -181,7 +182,10 @@ shadow's is in sync, so a file the sidecar wrote itself never goes back up.
 
 **Up.** fsnotify watches every directory of the tree, one made later included, and a file's change
 is taken once its events have been quiet for 50 ms. A file whose hash is not its shadow's is put
-with the shadow's hash as its base, `none` when the shadow has none. A path has one call out at a
+with the shadow's hash as its base, `none` when the shadow has none, and with `X-Pilot-Session`
+naming whose save the bytes it read are: the session a release left those very bytes unsent as
+(below), else the session holding the write lock of the path's project folder, else none, as for
+every path at the tree's root. A path has one call out at a
 time, and four calls run at once across paths, fetches included. The answer goes into the shadow
 before anything is written, and a `200`'s bytes are written over the file, with its mode, only while
 the file still holds the bytes sent: what the agent wrote meanwhile stays, and goes up next. Every
@@ -219,44 +223,80 @@ the first manifest after a start, no path is. A write that gets through to a vie
 goes nowhere: the shadow's bytes are written back over it, 0444, with a local note. A view the
 shadow does not hold goes up, and the rendering the server answers is written 0444.
 
-## The local check
+## The write lock and the hooks
 
-The sidecar serves the store's hook and `pilot.py` (below) on
-`127.0.0.1:<PILOT_SYNC_LOCAL_PORT>`, in `text/plain`:
+The sidecar serves the store's hooks on `127.0.0.1:<PILOT_SYNC_LOCAL_PORT>`, answering in
+`text/plain`. Every save of a project folder is the save of the brain session holding the folder's
+write lock as the sidecar reads the file, and the check is the lock's release, which reports the
+project's whole list (D077):
 
 - `GET /healthz`: `200`, `ok`.
-- `GET /check?path=<absolute path>`: the check of a file of the tree after an edit. When the file
-  holds its shadow's hash, that hash is posted to `/api/sync/check` at once. Otherwise the check
-  waits for the next upload of the file to read it, and posts what that came to: the hash the
-  server holds for it (the bytes sent on a `204`, the answer written on a `200`, a view's
-  re-projection), or the bytes' own on a `404`. Past 2 s from the call, or when the server cannot be
-  reached, it answers `not yet checked: <path>`. A path that is not absolute or not inside the tree
-  is a `400`, one with no file a `404`.
+- `POST /lock`, `{"project", "session", "pid"}`: the project's folder, absolute (the session's
+  `PILOT_PROJECT`), the brain session's Session id (its `PILOT_SESSION`, [`sessions.md`](sessions.md))
+  and the pid of the session's Claude process. It answers `200` once the session holds the folder's
+  lock. While another session holds it, the call waits; past 60 s it answers `409`, `another session
+  is writing; try again`. A body with an unknown field, a project that is not a folder directly
+  under the tree's root, an empty session or a pid of no running process is a `400`.
+- `POST /release`, `{"project", "session", "pid"}`, or `"all": true` in the pid's place: the check
+  after a tool call that can write the folder. It sends up every file of the folder whose hash is
+  not its shadow's, as the save of the session holding the lock (the flush), and waits up to 5 s in
+  all for them to be read and sent; asks the server's check of the folder, up to 5 s; then gives
+  back the pid's hold, or with `all` every hold the session has. It answers `200` with the text for
+  the agent, whatever the session held: empty when there is nothing to tell.
 
-The answer is the text for the agent, empty when there is nothing to tell: each Save Error as
-`<path>:<line>: <message>` (`<path>: <message>` without a line); then each local note as
-`<path>: <note>`; then the deferrals without a home under the heading `Deferrals without a home (no
-plan note names these blocks):`, each as `- <block> in <document> (<title>), to: <to>`. The local
-notes are what the sidecar knows of a file that the server holds no Save Error for:
+**The lock** is one per project folder, held by one session at a time. It is re-entrant for its
+holder: the session takes it again at once from any pid, its sub-agents' calls included, and it goes
+once the session's last hold is given back. Holds are counted per pid, each with its process's start
+time (`/proc/<pid>/stat`), so a pid the kernel gave another process since, or a zombie, holds
+nothing. The holds of a process that is gone are dropped on every lookup — a waiter's, every
+second, and each upload's — so a session whose process died blocks no one. A file the flush did not
+get up in time is recorded as the save of the session that held the lock as the flush read it, and
+those bytes go up as that session's whoever holds the lock by then; other bytes read there forget the
+record.
+
+**The release's text** is the folder's whole list: each Save Error as `<path>:<line>: <message>`
+(`<path>: <message>` without a line); then each local note on a path of the folder as `<path>:
+<note>`; then `not yet checked: <path>` for each file the flush did not get up, and `not yet
+checked: <folder>/` when the server's check failed or could not be reached; then the deferrals
+without a home under the heading `Deferrals without a home (no plan note names these blocks):`,
+each as `- <block> in <document> (<title>), to: <to>`. The local notes are what the sidecar knows of
+a file that the server holds no Save Error for:
 
 - ``not a document of the record — files are born through `add_item` ``, on a file the server
   answered `404`, kept until the file is taken by a put, written down, deleted or gone;
-- `a read-only view; re-projected`, on a view whose write was undone, printed by one check.
+- `a read-only view; re-projected`, on a view whose write was undone, printed by one release; a
+  view at the tree's root, outside every project folder, is re-projected and printed by none.
 
-**The hook** is `pvginkel/PilotProjects`' `.claude/hooks/pilot-sync-check.py`, which its
-`.claude/settings.json` runs after every `Edit` and `Write` (`PostToolUse`, a 5 s timeout), so a
-session whose project directory is the store's checkout of PilotProjects has it. It reads the tool's
-`file_path` and asks nothing for a path outside `/work/Projects/`. For one inside, it calls
-`/check?path=` on `127.0.0.1`, at the port its own `PILOT_SYNC_LOCAL_PORT` names or `3510`, the port
-both stages' sidecars serve, with a 3 s cap, and hands a non-empty answer to the agent as the tool
-result's `additionalContext`. An empty answer, an error status, a refused connection or the cap
-adds nothing, and it exits 0 every time, so it never stops a turn. PilotProjects' `kc project test`
-runs it against a stand-in for the sidecar.
+**The hook** is `pvginkel/PilotProjects`' `.claude/hooks/pilot-sync-lock.py`, which its
+`.claude/settings.json` runs on four events, so a session whose project directory is the store's
+checkout of PilotProjects has it. It posts, on `127.0.0.1` with no proxy, at the port its own
+`PILOT_SYNC_LOCAL_PORT` names or `3510`, the port both stages' sidecars serve, a body naming
+`$PILOT_PROJECT`, `$PILOT_SESSION` and the session's Claude process, the hook's nearest ancestor that
+is no shell:
 
-**`pilot.py`**, PilotProjects' `tools/pilot.py`, the brain's editing script, asks the same check of
-each file a verb of it wrote, at the same port with a 5 s cap, and prints the answer. It exits 1
-where a Save Error names a file it wrote, 3 where an answer is `not yet checked`, an error status or
-none, and 0 otherwise; its `check <path>` asks it alone, for a file written by hand
+- `PreToolUse`, before every `Edit`, `Write`, `MultiEdit` and `Bash` call, whatever its path: `/lock`.
+  The call runs on a `200` alone; on any other answer, or none within 70 s, it is denied, a `409`'s
+  text its reason. Its timeout, 80 s, is above that cap, which is above the lock's 60 s wait, since
+  Claude Code lets a call run when its hook passes its timeout.
+- `PostToolUse` and `PostToolUseFailure`, after the same calls ran or failed: `/release` with the
+  pid, its non-empty answer put before the agent as `additionalContext`. No answer within 15 s is
+  `not yet checked: <folder>/ (pilot-sync did not answer: …)`, an error status `not yet checked:
+  <folder>/ (pilot-sync answered <status>: …)`. Its timeout is 20 s.
+- `Stop`, at the turn's end: `/release` with `"all": true`, so that no hold outlives its turn. Its
+  check deletes the resets it reads, so a non-empty answer goes before the agent and keeps the turn
+  going, except on a stop that a stop hook already kept going.
+
+A session with no `PILOT_PROJECT`, none that Pilot's server created, takes no lock and posts
+nothing. A `reverted` error is reported once, to whichever session's release reads it; every other
+line of the list is reported after every writing tool call of every session of the project until it
+is gone, so an error one session leaves is taken by the next. A reset raised in one session's call
+and gone by its next can reach another session's release in between. PilotProjects' `kc project
+test` runs the hook against a stand-in for the sidecar.
+
+**`pilot.py`**, PilotProjects' `tools/pilot.py`, the brain's editing script, asks no check and calls
+neither the sidecar nor the server: it runs inside a `Bash` call, whose hooks hold the lock around it
+and report what the record made of its writes once the call is done, so a call after a verb never
+races its ingest. It exits 0 done and 2 refused, with nothing written
 ([`block-dsl.md`](block-dsl.md)).
 
 ## The image
@@ -277,7 +317,7 @@ edit. `kaniko --no-push --context sidecar` builds it here; every green build of 
 what the stages share: `mountWork: true`, so the sidecar sees `/work` and the tree in it;
 `dataPath: /var/lib/pilot-sync`, where the shadow is kept for the environment; the bearer,
 `PILOT_SYNC_TOKEN`, from the catalog secret `pilot-sync-token`; a 128 MiB memory limit; no security
-context, so it runs as the pod's uid; and no ports, since the hook calls it on the pod's own
+context, so it runs as the pod's uid; and no ports, since the hooks call it on the pod's own
 localhost. Each `config/<stage>/values.yaml` sets the stage's image and its `env` whole:
 `PILOT_URL`, `https://pilot-dev.home` or `https://pilot.ginbov.nl`, and `PILOT_SYNC_LOCAL_PORT`
 `3510`. KubeCoder gives it `KUBECODER_ENVIRONMENT_ID`. The image has no shell; its log is the
@@ -295,11 +335,13 @@ production's store.
   puts one path, a `404` noted as the sidecar notes it; `drain()` applies what the stream carried up
   to its heartbeat (the suite's is 0.01 s), fetching each `change`, one answered `404` left for the
   reconcile as the sidecar leaves it, and reconciling on `manifest`;
-  `connect()` reopens the stream and reconciles, `overflow()` reconciles; `check(path)` answers
-  whether the server agreed and the text for the agent. The engine's tests use it too.
+  `connect()` reopens the stream and reconciles, `overflow()` reconciles; `lock(folder, session)`
+  holds a folder's write lock, under which `upload` names the session, and `release(folder)` uploads
+  the folder's unsynced files, posts its check, lets the lock go and answers the text for the agent.
+  The engine's tests use it too.
 - **The sidecar.** `kc project test --project sidecar` runs `go test -race ./...`. The tests play
   the routes from an `httptest` server over a record of their own, on a temporary tree and data
-  directory, and serve the local check on a free port.
+  directory, and serve the hooks' endpoint on a free port.
 - **Live.** `scripts/sync-live-proof.py` runs the binary against the dev stack
   ([`slice-test-plan.md`](slice-test-plan.md) §2). Two testing endpoints set off there what only
   the record can, and answer `400` `ROUTE_NOT_AVAILABLE` unless the server runs with

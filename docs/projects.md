@@ -25,7 +25,8 @@ projects too.
   removed steps not counted, `in_progress` the titles of the steps in progress in the plan's order.
   `badge` is `{count, urgent}`: `count` the project's open items waiting on the caller, which are
   its prose items but the opening, a notice only while it is urgent and a registered document only
-  once its turn-end read is made, and a work item whose session stopped or failed, never a wait and never an item for another person (before the caller
+  once its turn-end read is made, and a work item whose session stopped or failed, a job of Pilot's
+  own only until it is retried, never a wait and never an item for another person (before the caller
   has a handle, every item for someone is another's); `urgent` whether one of them is urgent.
 - **`GET /api/projects/<id>`** answers the project's head: `{id, name, ticket, repo, state,
   archived, autopilot, status, member, members, progress, tasks, notes, running_work, open_items,
@@ -293,11 +294,14 @@ answers only in testing mode ([`sign-in.md`](sign-in.md)).
   configured, or a finished or an archived project, a `409`. A work item is created by its own
   Session, so once one has started, the routes below that act by the project's session started
   last act by it.
-- `POST /api/testing/projects/<id>/items` `{kind, title, text}` adds a prose item as Pilot adds one,
-  born through the engine's `bear_item` by the project's session started last, and answers `201`
-  `{id}`. `kind` is a prose kind but the opening; the text, front matter and blocks included, says
-  the rest ([`block-dsl.md`](block-dsl.md)). A project with no session, or a text with a fault, is a
-  `409`.
+- `POST /api/testing/projects/<id>/items` `{kind, title, text, by_pilot?}` adds a prose item as
+  Pilot adds one, born through the engine's `bear_item` by the project's session started last, and
+  answers `201` `{id}`. `kind` is a prose kind but the opening; the text, front matter and blocks
+  included, says the rest ([`block-dsl.md`](block-dsl.md)). With `by_pilot` true, a job of Pilot's
+  own adds it instead, a new idle one of the project's, made for it, so that a person's close of the
+  item, but a notice's Read, places the job after it ([`work.md`](work.md)); an item added by the
+  project's session, a worker's in the test data, places none. A project with no session, unless
+  `by_pilot`, or a text with a fault, is a `409`.
 - `POST /api/testing/items/<id>/saves` `{text}` ingests an agent's save of the item's file by that
   session, on the tree's current hash, as the store's sync does, and answers `200` `{held, faults:
   [{line, message}]}`. A held save leaves the item a concept until a clean one.

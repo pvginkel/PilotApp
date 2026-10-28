@@ -140,7 +140,8 @@ backend in testing mode for the store: it appends `FLASK_ENV=testing`, a throwaw
 this environment's id as `STORE_ENVIRONMENT_ID` to `backend/.env`, which the backend restarts on.
 It then runs the binary as a plain process on a temporary tree, behind a proxy it can cut, and
 proves five things: a file edited in the tree reaches the record; a record edit rewrites the file
-and is not sent back; the local check answers a clean save, reverted lines and a stray file; a
+and is not sent back; the hooks' lock and release answer a clean save, reverted lines and a stray
+file, each written inside a hold its release flushes; a
 dropped connection reconciles; a `manifest` event reconciles. It prints `PASS <n>.` or `FAIL <n>.`
 per step and `5 of 5 passed`, and exits 0 only then. On exit, SIGTERM included, it writes
 `backend/.env` back byte for byte and waits for the backend to restart on it. A stack that is not
@@ -906,7 +907,7 @@ POD=$(cexec iac kubectl -n pilot-dev get pods -l app.kubernetes.io/name=pilot -o
    reads its sidecar's log, and stops, starts or resets it through `kubecoder-dev`'s API with
    Pilot's dev credential. A reset, of a stopped store, clones PilotProjects' `main` again and
    empties the sidecar's data, so a push to PilotProjects reaches the store that way. A session
-   there whose working directory is `/work/PilotProjects` gets the hook ([`sync.md`](sync.md)).
+   there whose working directory is `/work/PilotProjects` gets the store's hooks ([`sync.md`](sync.md)).
    The dev stage's chats run there: a message to a project's chat on `pilot-dev`, `POST
    /api/projects/<id>/chat/messages` as the signed-in person, starts the store where it is stopped
    and the chat's session in it, boxed and briefed, its records read as any session's

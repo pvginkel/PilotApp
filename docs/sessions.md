@@ -1,12 +1,12 @@
 # Sessions
 
-A Session is a run of a Claude Code conversation that Pilot drives, headless, in one environment
-of the KubeCoder fleet, through the controller ([`controller.md`](controller.md)). Each message
-sent to it is a Turn. Everything the session does is a list of Session Records that the server
-appends to as the controller's raw response stream comes in, numbered from 1; a browser reads the
-list by REST from any record number and follows it live on its SSE connection. This page is the
-sessions as built: the start through the gate, what a create is handed, the send, the relay, Stop
-and Resume, an environment restarted or stopped under a turn, the current line, the records and
+A Session is a run of a Claude Code conversation that Pilot drives, headless, in one environment of
+the KubeCoder fleet, through the controller ([`controller.md`](controller.md)). Each message sent to
+it is a Turn. Everything the session does is a list of Session Records that the server appends to as
+the controller's raw response stream comes in, numbered from 1; a browser reads the list by REST
+from any record number and follows it live on its SSE connection. This page is the sessions as
+built: the start through the gate, what a create is handed, the send, the relay, Stop, Resume and a
+job's Retry, an environment restarted or stopped under a turn, the current line, the records and
 their stream, and the recovery after a restart. A work item is a Session on the timeline, and what
 its line and its session log show is [`work.md`](work.md)'s, Pilot's own jobs among them; a
 project's chat is a Session of the brain's in the store, and what a message to it does is
@@ -15,7 +15,7 @@ on in [`jobs.md`](jobs.md).
 
 | Service | Does |
 |---|---|
-| `SessionStartService` (`session_start_service.py`) | a work item placed by repository, or a run's continuation, its Session written `held` or `starting` through the gate and brought up by its start loop in an environment of Pilot's own; a brain session's start, a chat's or a job's, brought up in the store; Stop and Resume |
+| `SessionStartService` (`session_start_service.py`) | a work item placed by repository, or a run's continuation, its Session written `held` or `starting` through the gate and brought up by its start loop in an environment of Pilot's own; a brain session's start, a chat's or a job's, brought up in the store, a job briefed as it leaves the gate; Stop and Resume |
 | `start_gate.py` | `held_reason`, the gate every start passes, and `WorkSlots`, its slot |
 | `session_scope.py` | `scoped_create`, what each create of a Session is handed |
 | `RelayService` (`relay_service.py`) | the send of a Turn, the relay of each turn into the records, and the interrupt of a turn stopped under it |
@@ -27,9 +27,10 @@ on in [`jobs.md`](jobs.md).
 All are in `backend/app/services/`. The brain's `add_item` places a work item ([`mcp.md`](mcp.md)),
 and so does the record's testing route (below); the close that leaves none of a run's registered
 documents open places the run's continuation ([`round-trip.md`](round-trip.md)); Create project
-places the setup, a job of Pilot's own ([`work.md`](work.md)). A person's Resume carries a stopped
-or failed worker's run on, and Stop, the brain's `stop_work`, Finish and Archive
-stop one.
+places the setup, a job of Pilot's own, and a worker's turn end and a person's close of an item of
+Pilot's own place the jobs after them ([`work.md`](work.md)). A person's Resume carries a stopped
+or failed worker's run on, a person's Retry places a fresh job for a failed or stopped one, and
+Stop, the brain's `stop_work`, Finish and Archive stop a worker's run.
 
 ## The session start
 
@@ -54,17 +55,18 @@ is read under the lock its Item's birth takes, `next_seq`'s `FOR UPDATE`, so a s
 or an Archive never interleave, and two starts of one project go one after the other.
 
 Then the gate decides its state. **The gate** (`held_reason(paused=, kind_code=, unreachable=,
-filled=)`) holds a start while its project is paused ([`projects.md`](projects.md)), a Chat's never
-for the pause; while the controller is unreachable ([`controller.md`](controller.md)); and, a work
-item's alone, while no slot is free (below). Where more than one holds, the pause is read first,
-then the outage, then the slot. A start the gate holds is `held`: its Turn 1 unsent, no `server`
-record, no current line, and no loop run for it. One it lets through is `starting`, takes its slot,
-and has its loop run once the transaction commits. A `starting` Session that has an Environment
-already, a Resume's, has the environment's shutdown timer cleared in the same transaction, and gets
-the `server` record `{"type": "starting", "text": "Starting <environment name>…"}`, in no Turn, and
-the current line from it, unless it has its controller session or its rename is still to make (the
-start loop, below). The record reads "Preparing <environment name>…" for an environment of Pilot's
-own on a new conversation, created or reset.
+filled=, queued=)`) holds a start while its project is paused ([`projects.md`](projects.md)), a
+Chat's never for the pause; while the controller is unreachable ([`controller.md`](controller.md));
+a work item's alone, while no slot is free; and a job's alone, while another job of its project is
+before it (below). Where more than one holds, the pause is read first, then the outage, then the
+slot, then the queue. A start the gate holds is `held`: its Turn 1 unsent, a job's not yet written
+(below), no `server` record, no current line, and no loop run for it. One it lets through is
+`starting`, takes its slot, and has its loop run once the transaction commits. A `starting` Session
+that has an Environment already, a Resume's, has the environment's shutdown timer cleared in the
+same transaction, and gets the `server` record `{"type": "starting", "text": "Starting <environment
+name>…"}`, in no Turn, and the current line from it, unless it has its controller session or its
+rename is still to make (the start loop, below). The record reads "Preparing <environment name>…"
+for an environment of Pilot's own on a new conversation, created or reset.
 
 **The slot.** `WorkSlots` (`start_gate.py`, the container's `work_slots`) counts the Sessions of
 kind `work` that are `running` or `starting`; a Chat's and a job's count for none. No slot is free
@@ -78,13 +80,34 @@ work items of the maximum that closed the gate ([`work.md`](work.md)). A work it
 slot and its end gives it back: its turn's `result`, its Stop, its failed start, a stop made
 elsewhere. Each asks for the release once its transaction commits.
 
+**The queue.** A project's jobs go one at a time, in the order their triggers came, the chat beside
+them (`queued`, `start_gate.py`): a held job stays held, `held_reason` `queue`, while another job of
+its project is `starting` or `running`, or `held` at an earlier place on the timeline, its work
+item's `seq`. A Chat never counts, nor a job stopped, failed or done, so a failed job holds up none
+after it. The queue has no lock of its own: a job takes its `seq` under its project's row as it is
+placed, after every job already held there, and an earlier job blocks a later one whether held or
+starting, so only the earliest held, starting or running job of a project ever goes on, whatever
+reads run at once. A job's end, its Session leaving `starting` or `running`, asks for the release
+once its transaction commits (`WorkSlots.left`); its follow-up turn keeps it `running`, and so keeps
+its place ([`chats.md`](chats.md)).
+
+**A job's brief** is written as the job moves to `starting`, not at its placement: its first Turn,
+composed from the record as it then stands (`BriefService.job`, [`work.md`](work.md)), and its
+Work's `autopilot` set from the project's switch then. A job the gate lets through at its placement
+is briefed in that transaction at its trigger's instant, its Session's `created_at`; one held is
+briefed by the release that moves it, at that instant.
+
 **The lock order.** A start, a Resume and the release take their locks in one order: the Project's
 row, the Session's, the slot's lock, then an Environment's. A start that places a work item holds
 its Project's row `FOR UPDATE`, as `next_seq` takes it, so its Item's birth asks for no lock
 stronger than one it holds; a Resume shares the row. A close that places a continuation holds the
 Project's row `FOR UPDATE`, then the Document's, the slot's and an Environment's; a Resume of a
-continuation locks the documents it carries after its Session's, before the slot. The start loop's
-transactions lock no Project row, so no controller call is made while one is locked.
+continuation locks the documents it carries after its Session's, before the slot. A job's release
+holds its Project's row `FOR SHARE` before its Session's: its brief writes the Session's row a second
+time, whose foreign key's check then takes the Project's row, which an Item's birth holds
+exclusively. A worker's turn end holds its Project's row `FOR UPDATE` before its Session's, as it
+may place the job after its turn (below). The start loop's transactions lock no Project row, so no
+controller call is made while one is locked.
 
 **The start loop.** Once a `starting` Session's transaction commits, the loop `start:<session id>`
 runs the start from the rows, its environment first:
@@ -129,9 +152,11 @@ Session's `cwd`, `agent`, `model`, `reasoning_effort` and `conversation_id` as `
 surface is its kind's ([`record.md`](record.md)): `pilot-work` for a work item. A brain session, a
 chat's or a job's, whose kind's surface is `pilot-store`, is boxed: `sandboxReadOnlyCwd`, its cwd
 the store repo's root, read-only; `sandboxWritableDirs` its project's folder,
-`/work/Projects/<folder>`, the one folder under `/work` it writes; and `PILOT_PROJECT=<that
-folder>` in its `env`, which the brain's `pilot.py` reads. While its Project is finished it is
-boxed with no folder writable and no surface, so it is handed no server, its `PILOT_PROJECT` kept
+`/work/Projects/<folder>`, the one folder under `/work` it writes; and in its `env`
+`PILOT_PROJECT=<that folder>`, which the brain's `pilot.py` reads, and `PILOT_SESSION=<its Session's
+id>`, which the store's hooks send `pilot-sync` as the write lock's holder ([`sync.md`](sync.md)).
+While its Project is finished it is boxed with no folder writable and no surface, so it is handed no
+server, its `PILOT_PROJECT` and `PILOT_SESSION` kept
 ([`chats.md`](chats.md)). The Project's state is read afresh at each create; a chat closes whenever
 the state it was opened under moves, so no create of an open chat crosses states. The controller
 builds the box at every turn's spawn: a folder of it gone since the create fails the turn, which
@@ -141,15 +166,16 @@ A work item in an environment Pilot did not create, which only the dev stage's d
 placed there by the environment's id, is never started there: its start fails with "its
 environment is not Pilot's", nothing called, and its Resume is refused so (below).
 
-**Held, then released.** A held Session goes on when the gate opens for it: at the outage's end,
-at a `resumed` transition's commit, at a work item's start or end, which moves the slot's count,
-and at STARTUP. The loop `start:held` (`release_held()`) takes each held Session in `created_at`
-order and, under its lock, while it is still `held` and the gate, read afresh, is open for it, a
-work item's slot counted under the slot's lock, moves it to `starting` as above and runs its loop.
-A work item it still holds has its line told again ([`work.md`](work.md)), since the outage's turn
-or the slot's count may have moved its reason. A held write's commit asks for the release too,
-while the outage is off, since the gate may have opened between the write's read and its commit.
-The log says `Session <id> is held at its start: <reason>` and `Session <id> goes on from held`.
+**Held, then released.** A held Session goes on when the gate opens for it: at the outage's end, at
+a `resumed` transition's commit, at a work item's start or end, which moves the slot's count, at a
+job's end, which moves its project's queue, and at STARTUP. The loop `start:held` (`release_held()`)
+takes each held Session in `created_at` order and, under its lock, while it is still `held` and the
+gate, read afresh, is open for it, a work item's slot counted under the slot's lock, moves it to
+`starting` as above and runs its loop. A work item it still holds has its line told again
+([`work.md`](work.md)), since the outage's turn or the slot's count may have moved its reason. A
+held write's commit asks for the release too, while the outage is off, since the gate may have
+opened between the write's read and its commit. The log says `Session <id> is held at its start:
+<reason>` and `Session <id> goes on from held`.
 
 **A start that meets the outage.** A start one of whose calls the controller does not answer
 (`ControllerUnreachable`, [`controller.md`](controller.md)), any call of its environment's
@@ -250,7 +276,9 @@ otherwise, and takes each frame in order:
   where the close came while the turn was in flight ([`chats.md`](chats.md)). Once it
   commits, the environment's shutdown timer is armed if nothing else runs there, and, when the
   turn made a work item done, the documents its run registered are read
-  ([`round-trip.md`](round-trip.md)). A `result` whose
+  ([`round-trip.md`](round-trip.md)). A worker's run done with no document registered has the job
+  after its turn placed in the turn end's own transaction; one that registered documents gets it
+  once the read has settled every one ([`work.md`](work.md)). A `result` whose
   Turn has already ended, through another process's relay, writes nothing.
 
 The Session's state at its turn's end: `stopped` when the turn was interrupted, by no one
@@ -316,10 +344,10 @@ Resume starts the environment again (below), which is also KubeCoder's way out o
 column holds the cause: the record that ended the turn is the fact, which the work item's line
 reads ([`work.md`](work.md)).
 
-## Stop and Resume
+## Stop, Resume and Retry
 
-Both are a work item's, by its id, which is its Session's, behind the API's `editor` gate, and
-answer `200` with the item's work status as the timeline reads it ([`work.md`](work.md)), or `404`
+Each is a work item's, by its id, which is its Session's, behind the API's `editor` gate, and
+answers `200` with the item's work status as the timeline reads it ([`work.md`](work.md)), or `404`
 for an unknown Session.
 
 **`POST /api/sessions/<id>/stop`**, no body (`SessionStartService.stop`), stops it where it is, as
@@ -366,6 +394,22 @@ is starting", "it is running", "its turn has ended", "its session has ended"), f
 environment Pilot did not create ("its environment is not Pilot's"), for one whose stopped turn is
 still ending, until the interrupt's `result` is recorded, and in a finished or an archived project.
 
+**`POST /api/sessions/<id>/retry`**, no body (`JobService.retry`), is a job's in Resume's place: for
+a job of Pilot's own that `failed` or is `stopped`, whoever stopped it, its work item open and not
+retried, it places a fresh job for the same trigger, trigger item and title, in a fresh
+conversation, at the project's next place, behind every job of the project already waiting, its
+Session's `created_at` the press; and marks the one retried `retried_by` the new one before the new
+one starts, under the project's row and then the job's Session. The new job passes the gate and is
+briefed as any job ([`work.md`](work.md)). The one retried keeps its state and its open item. It
+answers `200` the retried job's work status, which names the new job, `401` and `403` as the API's
+gate does, and `404` for an unknown Session. It is a `409` with no controller or no store
+environment configured, for a Session that is no work item's, a worker's run ("it is a worker's run,
+which Resume carries on"), a job done ("it is done") or withdrawn by an Undo ("an Undo withdrew it
+before its brief went out"), one retried already ("it was retried already"), one neither failed nor
+stopped (as Resume's refusals word it), one whose stopped turn is still ending, a job after an item's
+close whose item is open again ("the item it follows is open again"), and in a finished or an
+archived project. Nothing else retries a job: the server retries none on its own.
+
 **Finish, Archive and Reopen** stop every Session of the project running, starting or held, a
 Chat's among them, as Stop stops one, by the person, at the transition's instant, before Finish's
 close of the open items and before each one's close of the chat (`stop_project`,
@@ -375,7 +419,7 @@ send moves it under that lock alone ([`chats.md`](chats.md)). The chat's own Sto
 `POST /api/projects/<id>/chat/stop`, stops its Session as Stop stops a work item's, by any person
 (`stop_chat`, [`chats.md`](chats.md)). The brain's `stop_work` stops a work item as Stop does, by
 Pilot, and is refused a job's as Stop is ([`mcp.md`](mcp.md)). Finish and Archive stop a job as they
-stop every Session.
+stop every Session; a job held before its brief has no Turn to end.
 
 ## The current line
 

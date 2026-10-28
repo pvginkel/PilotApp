@@ -13,20 +13,24 @@ plan, its members, the auto pilot switch, and Finish, Reopen, Archive and Bring 
 one thing is answered in place and a document inline or from its card, its answers sent at once,
 with Undo, urgent banners, a badge per tab and a URL per item, and which every open browser follows
 live ([`docs/timeline.md`](docs/timeline.md)); its work items, each a session Pilot runs, live on
-the timeline with its one current line, Stop and Resume, and its session log
-([`docs/work.md`](docs/work.md)); each project's status as one icon on its tab, which pauses it, and
-the gold bar over the list while the controller does not answer; and the overlay that opens a
-document, an attachment or the handbook, beside the side panel with the project's chat and its
-documents ([`docs/documents.md`](docs/documents.md)). A project starts from the plus beside the
-list, as a draft: its definition chat stands in the timeline's place while Pilot writes the draft,
+the timeline with its one current line, Stop and Resume, and its session log, and Pilot's own
+background jobs among them, one at a time per project, each a fresh session of the brain's: the
+setup, the pre-ruling pass after every worker's turn and the plan's next step after every item of
+Pilot's a person closes, with Retry on one that failed ([`docs/work.md`](docs/work.md)); each
+project's status as one icon on its tab, which pauses it, and the gold bar over the list while the
+controller does not answer; and the overlay that opens a document, an attachment or the handbook,
+beside the side panel with the project's chat and its documents
+([`docs/documents.md`](docs/documents.md)). A project starts from the plus beside the list, as a
+draft: its definition chat stands in the timeline's place while Pilot writes the draft,
 `project.md`, in the panel's Draft tab, its asks answered in place, and Create project opens it and
 hands it to Pilot's setup, the brain's first background job ([`docs/projects.md`](docs/projects.md),
 [`docs/work.md`](docs/work.md)). Beneath the screens are the record's schema and the engine behind
 it: the block DSL, the parse gate and the merge by ownership, the record's own writes, and the
 rendered `timeline.json`, `reference.json` and `plan.json` ([`docs/engine.md`](docs/engine.md)); and
 the sync that keeps the store environment's tree in step with the record: the `/api/sync` routes and
-`pilot-sync`, the Go sidecar, in each stage's store environment, with the hook that tells the brain
-what the record made of each edit ([`docs/sync.md`](docs/sync.md)); and the server's jobs on the
+`pilot-sync`, the Go sidecar, in each stage's store environment, with the hooks that hold a
+project's write lock around each of the brain's edits, so that each save is its session's, and tell
+it what the record made of them ([`docs/sync.md`](docs/sync.md)); and the server's jobs on the
 KubeCoder controller: the environments of its own Pilot creates from a work item's repository,
 resets before each fresh start, stops and deletes, and the sessions it runs there through the gate
 every start passes, recorded and streamed live ([`docs/sessions.md`](docs/sessions.md)); and Pilot's
@@ -41,10 +45,10 @@ project, Finish, Reopen and Archive, and acts on the record through its own tool
 effect shown where it ran, an answer given there reached from its block by *In the chat*, its chats
 projected for it as `chat.md` ([`docs/chats.md`](docs/chats.md)). The brain's own repository holds
 its map, its rules, its four skills, and `pilot.py`, the script it edits a project's folder with, on
-the block DSL's own package ([`docs/block-dsl.md`](docs/block-dsl.md)); of the skills, the chat's
-and the create skill's bodies are written, and the plan skill's setup mode, while the rest of the
-plan skill and the pre-rule skill are still frames. Each stage follows its own KubeCoder's fleet
-stream, and the dev stage's testing routes make projects there too. It is built on the
-ModernAppTemplate stack (Flask on PostgreSQL, React + Vite, Playwright), which CI builds and Argo CD
-deploys: every green build to the dev stage at `https://pilot-dev.home`, and production at
-`https://pilot.ginbov.nl` when the operator promotes it ([`docs/deployment.md`](docs/deployment.md)).
+the block DSL's own package ([`docs/block-dsl.md`](docs/block-dsl.md)); its four skills' bodies are
+written: the chat's, the create skill's, the pre-ruling pass and the plan skill's modes. Each stage
+follows its own KubeCoder's fleet stream, and the dev stage's testing routes make projects there
+too. It is built on the ModernAppTemplate stack (Flask on PostgreSQL, React + Vite, Playwright),
+which CI builds and Argo CD deploys: every green build to the dev stage at `https://pilot-dev.home`,
+and production at `https://pilot.ginbov.nl` when the operator promotes it
+([`docs/deployment.md`](docs/deployment.md)).

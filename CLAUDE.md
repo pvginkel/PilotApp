@@ -9,12 +9,13 @@ talks to Pilot's brain, a headless Claude Code session in a store environment.
 its work items, its documents in the overlay and the side panel, on the record's schema, the engine
 behind it (`backend/app/engine/`), the sync of the store's tree, the server's jobs on the KubeCoder
 controller, Pilot's MCP server with the worker's round trip, the project's chat in the side panel,
-with the brain's tools, and a new project: the plus, its definition chat and draft, Create project
-and its setup. Every green build of `main` deploys itself to the dev stage at
-`https://pilot-dev.home`, and production at `https://pilot.ginbov.nl` runs what the operator
-promotes from there ([`docs/deployment.md`](docs/deployment.md)). Version 1
-is built from the design record in `../PilotAppSpecs/design/` (start at its README), along the steps
-of its `implementation-plan.md`. Its `features.md` is the version-1 scope, and
+with the brain's tools, a new project: the plus, its definition chat and draft, Create project and
+its setup, and Pilot's jobs after a worker's turn and an item of its own done. Every green build of
+`main` deploys itself to the dev stage at `https://pilot-dev.home`, and production at
+`https://pilot.ginbov.nl` runs what the operator promotes from there
+([`docs/deployment.md`](docs/deployment.md)). Version 1 is built from the design record in
+`../PilotAppSpecs/design/` (start at its README), along the steps of its `implementation-plan.md`.
+Its `features.md` is the version-1 scope, and
 [`docs/change-discipline.md`](docs/change-discipline.md) says how the record binds a change. A
 decision it leaves open is the operator's to rule, not something to settle in code. Delivery is
 tracked per feature in the record's `feature-ledger.md`, and that is not optional: every slice's doc
@@ -197,13 +198,13 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
   schema and the dev seed, the block DSL, the store's tree and its files, and the engine between
   them.
 - [`docs/sync.md`](docs/sync.md): the sync protocol and `pilot-sync`, the sidecar that keeps the
-  store's tree in step with the record.
+  store's tree in step with the record, and its write lock, through which each save is a session's.
 - [`docs/jobs.md`](docs/jobs.md), [`docs/controller.md`](docs/controller.md),
   [`docs/sessions.md`](docs/sessions.md), [`docs/work.md`](docs/work.md): the supervisor that runs
   the server's long-lived jobs; the KubeCoder controller's client, its outage, its fleet stream,
-  environments on demand and Pilot's own, with its fake; the sessions, the gate and its slot, their
-  records, relay and live stream, Stop and Resume; a work item's status, its line and its session
-  log, and Pilot's own work, the setup.
+  environments on demand and Pilot's own, with its fake; the sessions, the gate, its slot and the
+  jobs' queue, their records, relay and live stream, Stop, Resume and Retry; a work item's status,
+  its line and its session log, and Pilot's own work: its jobs, their briefs, Retry.
 - [`docs/mcp.md`](docs/mcp.md), [`docs/round-trip.md`](docs/round-trip.md),
   [`docs/chats.md`](docs/chats.md): Pilot's MCP server, handed to every session it creates, the
   worker's tools and the brain's; a registered document's read at the run's end, its write-back and

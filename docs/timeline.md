@@ -140,7 +140,8 @@ timeline's place ([`chats.md`](chats.md)).
   (`Markdown`, [`ui.md`](ui.md)); the prose before the first block folds past 13.5em with Show
   more, the ask stands in that block's place, and the prose after it shows whole. A concept has a
   dashed border. An open work item is its session's: its env chip once its start has an
-  environment, its one line and its Stop or Resume ([`work.md`](work.md)).
+  environment, its one line and its Stop or Resume, a job of Pilot's own its Retry once it failed or
+  stopped ([`work.md`](work.md)).
 - **Attachments** (`attachments.tsx`) are chips, the clip and the title, a long one cut short:
   after a one-ask item's or a notice's text, at a confirmation card's end, in the opening's bubble,
   after an inline document's text and on a card. A chip opens the attachment in the overlay
@@ -274,7 +275,9 @@ its note, and nothing of Pilot's shows. After an answer given in the chat stands
 kept whole however the answer is cut ([`chats.md`](chats.md)).
 Undo ("Undo, until a session has taken it") opens the item again, and a one-ask item's block
 unanswered. A worker's registered documents lose it together, as the close of the last of their run
-places the continuation that takes their answers ([`round-trip.md`](round-trip.md)).
+places the continuation that takes their answers ([`round-trip.md`](round-trip.md)). An item of
+Pilot's own loses it once the brief of the job its close placed goes out, at once in an idle
+project, and an Undo before then withdraws that job ([`work.md`](work.md)).
 
 - **Open**, on every done line, opens the item's document in the overlay at its address, as Done
   fixed it ([`documents.md`](documents.md)).
@@ -286,7 +289,8 @@ places the continuation that takes their answers ([`round-trip.md`](round-trip.m
   line as any other, and its overlay's foot names Pilot.
 - **A work item's line** is quieter than the others: set in behind a rule that runs down a run of
   consecutive work lines, in muted text, its icon, its time and its buttons smaller. Its Open opens
-  its session log ([`work.md`](work.md)), and it never offers Undo.
+  its session log ([`work.md`](work.md)), and it never offers Undo. A job an Undo withdrew reads
+  "Withdrawn by an Undo" under its title.
 
 **Finished.** Finish closes every open item but the opening, so a finished project's timeline is its
 opening and done lines, and ends in "Finished · <stamp>", "22 Oct 2026, 14:05". No line offers

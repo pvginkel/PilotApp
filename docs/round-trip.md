@@ -1,16 +1,17 @@
 # The worker round trip
 
-A work item's session writes its decision documents as files in its environment, registers each
-with `register_document`, attaches what backs them, and ends its turn ([`mcp.md`](mcp.md)). Pilot
-reads each document once the run ends and puts it on the project's timeline, a person answers and
-closes it, Pilot writes it back to its file, answers and all, and once none of the run's documents is
-open it continues the conversation as a new work item with a message naming the files. The
-environment may be stopped throughout: the controller's file routes read and write its share, never
-its pod ([`controller.md`](controller.md)).
+A work item's session writes its decision documents as files in its environment, registers each with
+`register_document`, attaches what backs them, and ends its turn ([`mcp.md`](mcp.md)). Pilot reads
+each document once the run ends and puts it on the project's timeline, its job after the turn
+pre-rules what it can ([`work.md`](work.md)), a person answers and closes the rest, Pilot writes it
+back to its file, answers and all, and once none of the run's documents is open it continues the
+conversation as a new work item with a message naming the files. The environment may be stopped
+throughout: the controller's file routes read and write its share, never its pod
+([`controller.md`](controller.md)).
 
 | Service | Does |
 |---|---|
-| `TurnEndReadService` (`backend/app/services/turn_end_read_service.py`) | the read at the run's end, the job `read` |
+| `TurnEndReadService` (`backend/app/services/turn_end_read_service.py`) | the read at the run's end, the job `read`, and the placing of Pilot's job after the run's turn once the read has settled |
 | `WriteBackService` (`backend/app/services/write_back_service.py`) | the write-back of a closed document, the job `write-back` |
 | `RecordService` (`backend/app/engine/record.py`) | the closes, the release of the continuation, Undo ([`engine.md`](engine.md)) |
 | `SessionStartService.continue_run` (`backend/app/services/session_start_service.py`) | the continuation's placement and start ([`sessions.md`](sessions.md)) |
@@ -58,6 +59,17 @@ of session <id> no longer awaits its read`).
 A run that stops or fails reads nothing: its documents await their reads until the run of its
 Resume ends. At STARTUP the job's reconcile runs the reads every Session owes, from the rows.
 
+**Pilot's job after the turn.** The take that leaves none of the run's documents awaiting its read,
+a failed read settling as a published one does, places Pilot's job after the run's turn in its own
+transaction, under the Project's row it holds (`JobService.worker_turn_ended`,
+[`work.md`](work.md)); a run that registered nothing gets it in the transaction of its turn end. It
+is placed once per run: the reads the startup reconcile resumes after a restart place it when they
+settle, and none places a second; none is placed in a finished or an archived project. Its
+pre-ruling pass, PilotProjects' `pre-rule` skill, may answer blocks as Pilot, defer them to a plan
+task, and give an item of kind `document` it settled or deferred whole Pilot's own Done, cause
+`settled`, which closes it as a person's Done does, its write-back and its continuation included;
+Done takes no item of another kind, so a one-block document it answered stays open for a person.
+
 ## The close and the write-back
 
 A registered document closes as any document does: Done, the answer that closes a one-ask item, an
@@ -95,7 +107,10 @@ The close that leaves none of the documents a run registered open places the run
 in its own transaction (D046): once the run's work item is done `turn_ended`, which a close implies
 since nothing closes before its read, and never once one of them was closed by Finish, whatever
 follows, since a Reopen leaves that close as it is. No continuation is placed while any of the run's
-documents is open: the continuation waits on every one.
+documents is open: the continuation waits on every one, and on nothing else. Another run's documents,
+open or not, hold up none of it, so that two runs of one project each go on as soon as their own
+documents are closed, each in its own environment; what waits on a run's open documents is the plan
+skill's to leave unstarted (D076).
 
 - **Placed** by `continue_run` ([`sessions.md`](sessions.md)): a new work item titled as the run, at
   the project's next place, after the answered items, its trigger the item whose close released it,

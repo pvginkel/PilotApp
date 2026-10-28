@@ -18,10 +18,10 @@ tables are [`record.md`](record.md)'s. The skill the brief opens with is PilotPr
 | Service | Does |
 |---|---|
 | `ChatService` (`chat_service.py`) | a person's message: sent to the project's open chat, or the chat started with it; and the Stop of Pilot's answer |
-| `BriefService` (`brief_service.py`) | the chat's brief, the definition chat's and the setup's ([`work.md`](work.md)), the follow-up turn, and the server's lines after a worker's brief ([`mcp.md`](mcp.md)) |
+| `BriefService` (`brief_service.py`) | the chat's brief, the definition chat's and each job's ([`work.md`](work.md)), the follow-up turn, and the server's lines after a worker's brief ([`mcp.md`](mcp.md)) |
 | `ChatCloseService` (`chat_close_service.py`) | a chat's close: at Create project, Finish, Reopen and Archive, and on the timer `chat-close` |
 | `ChatReadService` (`chat_read_service.py`) | a project's chats in their order, and a person's place in them |
-| `session_scope.py` | what a brain session's create is handed: its box, its surface and its `PILOT_PROJECT` ([`sessions.md`](sessions.md)) |
+| `session_scope.py` | what a brain session's create is handed: its box, its surface, its `PILOT_PROJECT` and its `PILOT_SESSION` ([`sessions.md`](sessions.md)) |
 
 All are in `backend/app/services/`; `chat.md` is the engine's `ViewService.chat`
 (`backend/app/engine/views.py`).
@@ -104,7 +104,8 @@ settle awaited, as a stopped store is started on demand ([`controller.md`](contr
 store is exempt, so no timer of Pilot's stops it again. Then "Creating the session…", and the
 create as `scoped_create` derives it ([`sessions.md`](sessions.md)): the cwd read-only, the
 project's folder, `/work/Projects/<folder>`, the one folder under `/work` it writes, `PILOT_PROJECT`
-naming that folder, and `pilot-store` handed to it ([`mcp.md`](mcp.md)).
+naming that folder, `PILOT_SESSION` its own Session's id, and `pilot-store` handed to it
+([`mcp.md`](mcp.md)).
 
 A create boxed with a folder to write that the controller refuses `422` meets that folder not on
 disk yet, as `pilot-sync` writes it a moment after the record changes, a new draft's
@@ -133,8 +134,8 @@ a blank line apart; a line that does not hold is left out, never written as "non
   plan.json; `pilot.py plan note list`):``, then a line per open note, `- <task id> "<title>" ·
   <note id>: <summary>` or `- the plan · <note id>: <summary>`, the tasks' in the plan's order
   and then the plan's own; then `Deferrals without a home (a note names none of these blocks —
-  write one, or answer the block anew in a new item):` and a line per such deferral, as the hook's
-  check prints it ([`sync.md`](sync.md));
+  write one, or answer the block anew in a new item):` and a line per such deferral, as the store's
+  hooks print it ([`sync.md`](sync.md));
 - once a chat of the project has closed, `Earlier chats of this project are in chat.md; the latest
   closed <stamp>.`;
 - `The message, from <handle> (member):`, or `(not a member):`, then the words verbatim, which the
@@ -169,9 +170,9 @@ without the line is from the person the latest such line named, the brief's incl
 skill records a ruling for that person.
 
 **The handbook's notice.** Where the project's handbook was published later than the chat's latest
-Turn that reached the brain was sent, the server's notice goes first, a blank line before what
-follows it (D052): a Turn whose send failed never went out, nor its notice, so a message retried
-after a failed send carries the notice again.
+Turn that reached the brain was sent, by anyone but the chat itself, the server's notice goes first,
+a blank line before what follows it (D052): a Turn whose send failed never went out, nor its notice,
+so a message retried after a failed send carries the notice again.
 
 ```
 <store_notification>
@@ -181,8 +182,10 @@ The handbook (handbook.md) changed since your last turn.
 
 The notice is counted once the send went out, `pilot_chat_handbook_changed_total{project}`, by the
 project's id. A start's Turn carries the brief instead, and the skill reads the handbook then
-anyway. The store's saves name no session ([`sync.md`](sync.md)), so a handbook the chat edited
-itself counts as a change too.
+anyway. A publication since that Turn is the chat's own, and brings no notice, when every Version
+of the handbook cut since is the chat's Session's and the published text is the latest Version's
+(`ChatService._handbook_changed`); a Version of no Session, a save made with no write lock held
+([`sync.md`](sync.md)), counts as a change.
 
 Either way the Turn's `words`, and so its `send` record, are the words alone.
 
@@ -192,16 +195,18 @@ A brain session's turn that ends with a save of its own still held, the paths th
 returns ([`engine.md`](engine.md)), and that leaves the Session `idle`, gets a turn of the server's
 (`RelayService._follow_up`, `BriefService.follow_up`): no author, a line per held path,
 ``Your save of `<path>` is held: `<path>:<line>: <message>`, `…`.``, the path from the tree's root
-and each parse fault as the hook's check prints it (`<path>: <message>` with no line), then `Fix
+and each parse fault as the store's hooks print it (`<path>: <message>` with no line), then `Fix
 it and end your turn.`. It is written in flight in the transaction that ends the turn, the Session
-staying `running` with it, and the relay sends it once that commits. A work item's turn gets none.
+staying `running` with it, and the relay sends it once that commits. A job's follow-up is its
+second turn and keeps the job's place in its project's queue ([`work.md`](work.md)). A work item's
+turn gets none.
 
 A turn gets one follow-up, and a follow-up gets none (D065): one that itself ends with a save
 still held leaves that save held, its item showing its last published text, and the next turn of
-any session of the project meets the fault through the hook ([`sync.md`](sync.md)). A save is a
-session's when its ingest names that session, and the store's sync names none, so a turn of a
-session in the store ends with no save of its own held, and its follow-up comes only where an
-ingest named the session.
+any session of the project meets the fault through the hooks ([`sync.md`](sync.md)). A save is a
+session's when its ingest names that session: in the store, the session that held the project
+folder's write lock as the sidecar read the file ([`sync.md`](sync.md)). A save made with no lock
+held is no session's, and brings no follow-up.
 
 ## Stopping Pilot's answer
 

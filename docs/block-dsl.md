@@ -262,8 +262,9 @@ PilotApp commit its `pyproject.toml` names and its `uv.lock` pins. Before it wri
 runs `validate()` with the facts the store's tree carries: the plan's live tasks, the confirmation
 reasons from `reference.json` and the file's own `to`s; no handles, no removed tasks and no other
 project's slug. It reads `project.md` as the draft while `timeline.json` says the project is one,
-and as the handbook is read after. The rules resting on those are left to `pilot-sync`'s check after
-the write, against the server's whole record ([`sync.md`](sync.md)) (D063). And AIWorkflow's
+and as the handbook is read after. The rules resting on those are left to the check the store's
+hooks report after the `Bash` call that ran it, against the server's whole record
+([`sync.md`](sync.md)) (D063). And AIWorkflow's
 `/dev:document-format`, the `dev` plugin's skill for an agent that writes a document Pilot reads,
 gives the grammar in its own words. So a change to the grammar here is followed in both:
 PilotProjects' pin is moved by hand, the commit in its `pyproject.toml` and then `uv lock`, and the
