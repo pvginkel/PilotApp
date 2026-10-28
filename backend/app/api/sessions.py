@@ -1,6 +1,6 @@
 """A Session's records by REST, and its live frames on the browser's SSE
 connection (design 2 §11.1; F40.3's stream); a work item's Stop and Resume
-(F67).
+(F67), and Retry on a job of Pilot's own that failed or stopped.
 
 Access is the API's `editor` gate. The stream routes subscribe only the
 caller's own connection (SSE-6).
@@ -23,6 +23,7 @@ from app.schemas.session_schema import (
 )
 from app.schemas.timeline import WorkSchema
 from app.services.container import ServiceContainer
+from app.services.job_service import JobService
 from app.services.people_service import PeopleService
 from app.services.session_record_service import SessionRecordService, to_record_schema
 from app.services.session_start_service import SessionStartService
@@ -210,4 +211,41 @@ def resume_session(
             turn still ending; or its project is finished or archived
     """
     session_starts.resume(db, session_id)
+    return timeline_service.work(session_id).model_dump(mode="json")
+
+
+@sessions_bp.route("/<uuid:session_id>/retry", methods=["POST"])
+@api.validate(
+    resp=SpectreeResponse(
+        HTTP_200=WorkSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    )
+)
+@inject
+def retry_session(
+    session_id: uuid.UUID,
+    job_service: JobService = Provide[ServiceContainer.job_service],
+    timeline_service: TimelineService = Provide[ServiceContainer.timeline_service],
+) -> Any:
+    """Retry the failed or stopped job of Pilot's own: a fresh job for the
+    same trigger, in a fresh conversation, at the project's next place,
+    behind the project's jobs already waiting, its brief composed from the
+    record as it stands when it starts. The job retried stays on the
+    timeline with its session log, marked retried by the new one.
+
+    Returns:
+        200: The retried job's status, naming the new job
+        401: No one is signed in
+        403: The caller lacks the editor role
+        404: No session has the id
+        409: The session is no work item's, is a worker's run, is done or
+            was withdrawn by an Undo, was retried already, is neither failed
+            nor stopped, has its stopped turn still ending, or follows an
+            item open again; its project is finished or archived; or no
+            controller or no store environment is configured
+    """
+    job_service.retry(session_id)
     return timeline_service.work(session_id).model_dump(mode="json")

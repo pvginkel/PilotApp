@@ -339,6 +339,13 @@ class CurrentLineSchema(BaseModel):
     )
 
 
+class RetriedSchema(BaseModel):
+    """The job a person's Retry of a failed or stopped job placed."""
+
+    id: uuid.UUID = Field(description="The new job's work item")
+    at: datetime = Field(description="When Retry was pressed, the new job placed")
+
+
 class WorkSchema(BaseModel):
     """A work item's Session, as its line and its head show it (F26, F12)."""
 
@@ -379,8 +386,9 @@ class WorkSchema(BaseModel):
         description=(
             "Whether it is Pilot's own work, a background job in the store "
             "(F59.1): its line has its session log and neither an environment "
-            "chip nor Stop / Resume, which the server refuses (F26.3); false "
-            "for a worker's run"
+            "chip nor Stop / Resume, which the server refuses (F26.3), and "
+            "Retry once it failed or stopped until it is retried; false for a "
+            "worker's run"
         )
     )
     held_reason: HeldReason | None = Field(
@@ -418,6 +426,13 @@ class WorkSchema(BaseModel):
             "made elsewhere, which its stopped line and its session log's tail "
             "say: stopped, being deleted, gone, or in error; null when someone "
             "stopped it, and unless `state` is `stopped` (F26.1, F69.2, F71)"
+        )
+    )
+    retried: RetriedSchema | None = Field(
+        description=(
+            "The job a person's Retry of this failed or stopped job placed, at "
+            "the project's next place, which its line names: it offers Retry no "
+            "more, and no badge counts it (F94.5); null while it is not retried"
         )
     )
 

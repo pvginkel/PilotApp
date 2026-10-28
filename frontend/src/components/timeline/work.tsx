@@ -10,14 +10,17 @@
  * runs, starts or is held, asks first in its actions' place, Esc dismissing the question; Resume,
  * once it stopped or failed, carries it on (F67), disabled while the project is archived, as its
  * head's switch is (D012). Pilot's own work, a background job such as the setup, has no env chip
- * and no Stop or Resume, its session log alone (F26.3, F59.1). Once this browser's Stop or Resume
- * swaps the two, the keyboard focus on the button that went goes to the other's resting button,
- * Resume or Stop; a swap another browser's act made moves no focus.
+ * and no Stop or Resume, its session log alone (F26.3, F59.1), and Retry where Resume is once it
+ * stopped or failed: a fresh job for the same trigger at the project's next place, disabled while
+ * the project is archived. Retried, its line says so under its stop or its failure, and offers
+ * Retry no more. Once this browser's Stop or Resume swaps the two, the keyboard focus on the
+ * button that went goes to the other's resting button, Resume or Stop, and once its Retry lands,
+ * to Session log; a swap another browser's act made moves no focus.
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, useParams } from '@tanstack/react-router';
-import { CircleAlert, Play, ScrollText, Square } from 'lucide-react';
+import { CircleAlert, Play, RotateCw, ScrollText, Square } from 'lucide-react';
 import { WorkingCue } from '@/components/chat/working-cue';
 import { EnvironmentLink, LinkedText } from '@/components/shared/linked-text';
 import { Time } from '@/components/shared/time';
@@ -25,7 +28,7 @@ import { ItemHead } from '@/components/timeline/item-head';
 import { useNow } from '@/hooks/use-now';
 import { useArchived } from '@/hooks/use-projects';
 import { titleOf, type TimelineItem } from '@/hooks/use-timeline';
-import { RESUMABLE, STOPPABLE, useResume, useStop } from '@/hooks/use-work-acts';
+import { RESUMABLE, STOPPABLE, useResume, useRetry, useStop } from '@/hooks/use-work-acts';
 import type { components } from '@/lib/api/generated/types';
 import { useEscape } from '@/lib/keys';
 import { workLine } from '@/lib/utils/status-labels';
@@ -35,16 +38,21 @@ type Work = components['schemas']['TimelineSchema.1fdd8ae.WorkSchema'];
 /** How often "running N min" is counted again, in milliseconds. */
 const TICK = 15_000;
 
-type Actions = 'stop' | 'resume';
+type Actions = 'stop' | 'resume' | 'retry' | 'log';
 
-/** The actions a session's state offers: Stop, Resume, or neither. */
-const actionsOf = (state: Work['state']): Actions | null =>
-  STOPPABLE.includes(state) ? 'stop' : RESUMABLE.includes(state) ? 'resume' : null;
+/**
+ * The actions a session offers: a worker's Stop or Resume by its state, a job's Retry while it is
+ * stopped or failed and not retried, else its session log alone.
+ */
+function actionsOf(work: Work): Actions {
+  if (work.pilots_own) return RESUMABLE.includes(work.state) && work.retried === null ? 'retry' : 'log';
+  return STOPPABLE.includes(work.state) ? 'stop' : RESUMABLE.includes(work.state) ? 'resume' : 'log';
+}
 
 export function WorkItem({ item }: { item: TimelineItem }) {
   // The API gives every work item its session.
   const work = item.work!;
-  const actions = work.pilots_own ? null : actionsOf(work.state);
+  const actions = actionsOf(work);
   const handoff = useHandoff(actions);
   return (
     <div className="item-body">
@@ -61,13 +69,16 @@ export function WorkItem({ item }: { item: TimelineItem }) {
         <LinkedText text={titleOf(item)} />
       </div>
       <Line work={work} />
+      {work.retried !== null && <Retried at={work.retried.at} />}
       {actions === 'stop' ? (
         <StopActions item={item} handoff={handoff} />
       ) : actions === 'resume' ? (
         <ResumeActions item={item} handoff={handoff} />
+      ) : actions === 'retry' ? (
+        <RetryActions item={item} handoff={handoff} />
       ) : (
         <div className="item-actions">
-          <SessionLog item={item} />
+          <SessionLog item={item} rest={handoff.button} />
         </div>
       )}
     </div>
@@ -75,8 +86,8 @@ export function WorkItem({ item }: { item: TimelineItem }) {
 }
 
 interface Handoff {
-  /** The ref of the actions' resting button, Stop's or Resume's. */
-  button: (element: HTMLButtonElement | null) => void;
+  /** The ref of the actions' resting element: Stop's, Resume's or Retry's button, else Session log. */
+  button: (element: HTMLElement | null) => void;
   /** This browser's act starts from `from`, to swap the actions for the `to` ones. */
   start: (from: HTMLElement, to: Actions) => void;
   /** The act's answer: the item's session as it stands, or none where it was refused. */
@@ -88,10 +99,10 @@ interface Handoff {
  * act made the swap, from the button that had the focus then, and nothing has the focus since. Every
  * swap ends the act's wait, as does an answer that leads to no swap.
  */
-function useHandoff(shown: Actions | null): Handoff {
-  const button = useRef<HTMLButtonElement | null>(null);
+function useHandoff(shown: Actions): Handoff {
+  const button = useRef<HTMLElement | null>(null);
   const awaited = useRef<Actions | null>(null);
-  const setButton = useCallback((element: HTMLButtonElement | null) => {
+  const setButton = useCallback((element: HTMLElement | null) => {
     button.current = element;
   }, []);
   useLayoutEffect(() => {
@@ -106,7 +117,7 @@ function useHandoff(shown: Actions | null): Handoff {
       awaited.current = document.activeElement === from ? to : null;
     },
     land: (work) => {
-      if (work === null || actionsOf(work.state) !== awaited.current) awaited.current = null;
+      if (work === null || actionsOf(work) !== awaited.current) awaited.current = null;
     },
   };
 }
@@ -209,6 +220,47 @@ function ResumeActions({ item, handoff }: { item: TimelineItem; handoff: Handoff
   );
 }
 
+/**
+ * A job's Retry, where a worker's Resume is, before Session log; disabled while the project is
+ * archived, which the API refuses until Bring back.
+ */
+function RetryActions({ item, handoff }: { item: TimelineItem; handoff: Handoff }) {
+  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  const { act, pending } = useRetry(item.id);
+  const archived = useArchived(projectId);
+  return (
+    <div className="item-actions">
+      <button
+        ref={(element) => handoff.button(element)}
+        type="button"
+        className="btn btn-sm btn-primary"
+        disabled={pending || archived}
+        onClick={(event) => {
+          handoff.start(event.currentTarget, 'log');
+          void act().then(handoff.land);
+        }}
+        data-testid="timeline.work.retry"
+      >
+        <RotateCw className="icon" aria-hidden="true" />
+        Retry
+      </button>
+      <SessionLog item={item} />
+    </div>
+  );
+}
+
+/** That a person's Retry placed a new job for this one, at the project's next place, and when. */
+function Retried({ at }: { at: string }) {
+  return (
+    <div className="work-line ended retried" data-testid="timeline.work.retried">
+      <RotateCw className="icon" aria-hidden="true" />
+      <span>
+        Retried as a new job below · <Time at={at} format="clock" />
+      </span>
+    </div>
+  );
+}
+
 /** "running N min" from when its run began, with a pulse. */
 function Running({ since }: { since: string }) {
   // performance.timeOrigin + performance.now() is the wall clock's time, in milliseconds.
@@ -280,11 +332,15 @@ function Line({ work }: { work: Work }) {
   }
 }
 
-/** The session log in the overlay, at its address under the project's, by the item's id, its session's. */
-function SessionLog({ item }: { item: TimelineItem }) {
+/**
+ * The session log in the overlay, at its address under the project's, by the item's id, its
+ * session's; `rest` takes it where it is the actions' resting element.
+ */
+function SessionLog({ item, rest }: { item: TimelineItem; rest?: (element: HTMLElement | null) => void }) {
   const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
   return (
     <Link
+      ref={rest}
       to="/projects/$projectId/sessions/$sessionId"
       params={{ projectId, sessionId: item.id }}
       className="btn btn-sm"

@@ -335,3 +335,139 @@ class TestWork:
         )
 
         assert violated_constraint(session) == "ck_work_repo"
+
+
+def _job(
+    session: DbSession,
+    project: Project,
+    environment: Environment,
+    creator: Session,
+    seq: int,
+    kind_code: str = "job",
+) -> uuid.UUID:
+    """A Work of `kind_code` in `project`, the setup when a job; its id."""
+    work_id = uuid.uuid4()
+    session.add_all(
+        [
+            _entry(project, creator, work_id, seq=seq),
+            _run(project, environment, work_id, kind_code=kind_code),
+        ]
+    )
+    session.flush()
+    session.add(
+        _work(
+            project,
+            work_id,
+            session_kind_code=kind_code,
+            trigger_code=WorkTrigger.SETUP if kind_code == "job" else None,
+        )
+    )
+    session.flush()
+    return work_id
+
+
+class TestRetriedBy:
+    """A person's Retry of a failed or stopped job: the job retried names the
+    job the Retry placed, a recursive list (DB Work)."""
+
+    def test_a_job_is_retried_by_another_job_of_its_project(
+        self,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        project_session: Session,
+    ) -> None:
+        failed = _job(session, project, environment, project_session, seq=2)
+        retry = _job(session, project, environment, project_session, seq=3)
+
+        session.get_one(Work, failed).retried_by_id = retry
+        session.flush()
+        session.expire_all()
+
+        assert session.get_one(Work, failed).retried_by_id == retry
+        assert session.get_one(Work, retry).retried_by_id is None
+
+    def test_its_retry_is_of_its_project(
+        self,
+        session: DbSession,
+        project: Project,
+        other_project: Project,
+        environment: Environment,
+        project_session: Session,
+    ) -> None:
+        failed = _job(session, project, environment, project_session, seq=2)
+        elsewhere = _job(session, other_project, environment, project_session, seq=1)
+
+        session.get_one(Work, failed).retried_by_id = elsewhere
+
+        assert (
+            violated_constraint(session)
+            == "work_project_id_retried_by_id_session_kind_code_fkey"
+        )
+
+    def test_its_retry_is_a_job(
+        self,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        project_session: Session,
+    ) -> None:
+        failed = _job(session, project, environment, project_session, seq=2)
+        run = _job(
+            session, project, environment, project_session, seq=3, kind_code="work"
+        )
+
+        session.get_one(Work, failed).retried_by_id = run
+
+        assert (
+            violated_constraint(session)
+            == "work_project_id_retried_by_id_session_kind_code_fkey"
+        )
+
+    def test_a_workers_run_is_never_retried(
+        self,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        project_session: Session,
+    ) -> None:
+        first = _job(
+            session, project, environment, project_session, seq=2, kind_code="work"
+        )
+        second = _job(
+            session, project, environment, project_session, seq=3, kind_code="work"
+        )
+
+        session.get_one(Work, first).retried_by_id = second
+
+        assert violated_constraint(session) == "ck_work_retried_by"
+
+    def test_a_job_is_not_its_own_retry(
+        self,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        project_session: Session,
+    ) -> None:
+        failed = _job(session, project, environment, project_session, seq=2)
+
+        session.get_one(Work, failed).retried_by_id = failed
+
+        assert violated_constraint(session) == "ck_work_retried_by"
+
+    def test_a_retry_retries_one_job(
+        self,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        project_session: Session,
+    ) -> None:
+        first = _job(session, project, environment, project_session, seq=2)
+        second = _job(session, project, environment, project_session, seq=3)
+        retry = _job(session, project, environment, project_session, seq=4)
+        session.get_one(Work, first).retried_by_id = retry
+        session.flush()
+
+        session.get_one(Work, second).retried_by_id = retry
+
+        assert violated_constraint(session) == "uq_work_retried_by_id"

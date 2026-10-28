@@ -491,11 +491,13 @@
     animation: pulse 1.4s ease-in-out infinite;
   }
   /* Its one line: the working cue and the latest step, cut short where long; a stop or a failure
-     in the stopped chip's colour, an error wrapping whole. */
+     in the stopped chip's colour, an error wrapping whole; a job's Retry muted under it. */
   .work-line { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 2px 0 0; font-size: 13px; }
   .work-line .step { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: hsl(var(--foreground) / 0.8); }
   .work-line.ended { align-items: baseline; font-size: 14px; color: hsl(var(--warning-text)); }
   .work-line.ended .icon { position: relative; top: calc(0.5em - 0.5cap); }
+  /* A job's Retry placed a new one: said under its stop or its failure, no longer a warning. */
+  .work-line.ended.retried { color: hsl(var(--muted-foreground)); }
 
   /* ---- The opening ---------------------------------------------------------------------- */
 

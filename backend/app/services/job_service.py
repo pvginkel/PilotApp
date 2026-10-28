@@ -20,7 +20,9 @@ job goes on then; a person's Stop and Resume do not take it (F26.3).
 Three triggers are placed here: the setup, Create project's; a worker's turn
 ended, once the turn-end read settled every document the run registered (D2);
 and a person's close of an item of Pilot's own (DB decision 45), whose Undo
-withdraws the job while it is held before its brief.
+withdraws the job while it is held before its brief. A job that failed or
+stopped takes a person's Retry, a fresh job for the same trigger; the server
+retries none on its own.
 """
 
 import uuid
@@ -30,7 +32,9 @@ from pathlib import PurePosixPath
 from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
+from app.engine.bus import EngineBus
 from app.engine.record import WITHDRAWN, RecordService
+from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import Document, Item, Project, Work
 from app.models import Session as AgentSession
 from app.models.reference import ProjectState, SessionState, WorkTrigger
@@ -38,6 +42,7 @@ from app.services.pilot_server import unheld_token_hash
 from app.services.session_scope import STORE_REPO
 from app.services.session_start_service import SessionStartService
 from app.services.start_gate import JOB_KIND
+from app.services.work_status import work_moved
 
 SETUP_TITLE = "Setting up the project"
 """The setup's work item's title (DB Item sample)."""
@@ -50,6 +55,16 @@ NEXT_TITLE = "Deciding what is next"
 """The title of the job after a worker's turn whose run registered nothing,
 and of the job after an item of Pilot's own is closed (DB Item sample)."""
 
+_RETRIABLE = (SessionState.FAILED, SessionState.STOPPED)
+
+_RETRY_REFUSALS = {
+    SessionState.HELD: "its start waits at the gate",
+    SessionState.STARTING: "it is starting",
+    SessionState.RUNNING: "it is running",
+    SessionState.IDLE: "its turn has ended",
+    SessionState.ENDED: "its session has ended",
+}
+
 
 class JobService:
     """Places Pilot's own background jobs and starts them through the gate."""
@@ -57,12 +72,14 @@ class JobService:
     def __init__(
         self,
         db: Session,
+        engine_bus: EngineBus,
         record_service: RecordService,
         session_start_service: SessionStartService,
         brain_model: str | None,
         brain_reasoning_effort: str | None,
     ) -> None:
         self.db = db
+        self.engine_bus = engine_bus
         self.record_service = record_service
         self.session_start_service = session_start_service
         self.brain_model = brain_model
@@ -162,6 +179,96 @@ class JobService:
         line.done_at = at
         line.done_cause_code = WITHDRAWN
 
+    def retry(self, session_id: uuid.UUID) -> Work:
+        """A person's Retry of the job `session_id`, failed or stopped, its
+        work item open, in the caller's transaction: a fresh job for the
+        same trigger and trigger item, titled as it is, placed at the press's
+        instant at the project's next place, behind every job of the project
+        already waiting, and briefed from the record as it stands when it
+        starts (`_place`). The job retried is marked retried by it, which
+        takes Retry from its line and its line from the badge (F94.5).
+
+        The project's row is locked before the job's Session, the order a
+        placement keeps, so that two Retries of one job, a Finish or an
+        Archive never interleave with it.
+
+        Returns:
+            The new job's Work
+
+        Raises:
+            RecordNotFoundException: No Session has the id
+            InvalidOperationException: The Session is no work item's, is a
+                worker's run, is done (an Undo's withdrawal among it), was
+                retried already, is neither failed nor stopped, has its
+                stopped turn still ending, or follows an item open again; its
+                project is finished or archived; or no controller or no store
+                environment is configured
+        """
+        found = self.db.get(AgentSession, session_id)
+        if found is None:
+            raise RecordNotFoundException("Session", str(session_id))
+        project = self.db.scalars(
+            select(Project)
+            .where(Project.id == found.project_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).one()
+        job = self.db.get_one(
+            AgentSession, session_id, with_for_update=True, populate_existing=True
+        )
+        line = self.db.get(Item, session_id, populate_existing=True)
+        work = self.db.get(Work, session_id, populate_existing=True)
+        operation = (
+            f"retry {line.title}"
+            if line is not None and line.title
+            else f"retry work item {session_id}"
+        )
+        if work is None or line is None:
+            raise InvalidOperationException(operation, "it is no work item")
+        refusal = self._retry_refusal(project, job, work, line)
+        if refusal is not None:
+            raise InvalidOperationException(operation, refusal)
+        assert work.trigger_code is not None and line.title is not None
+        retry = self._place(
+            project,
+            work.trigger_code,
+            line.title,
+            datetime.now(UTC),
+            operation,
+            trigger_item_id=work.trigger_item_id,
+            retried=work,
+        )
+        work_moved(self.engine_bus, job)
+        return retry
+
+    def _retry_refusal(
+        self, project: Project, job: AgentSession, work: Work, line: Item
+    ) -> str | None:
+        """Why the job takes no Retry now; None while it does."""
+        if job.kind_code != JOB_KIND:
+            return "it is a worker's run, which Resume carries on"
+        if line.done_at is not None:
+            if line.done_cause_code == WITHDRAWN:
+                return "an Undo withdrew it before its brief went out"
+            return "it is done"
+        if work.retried_by_id is not None:
+            return "it was retried already"
+        if job.state_code not in _RETRIABLE:
+            return _RETRY_REFUSALS[job.state_code]
+        if job.state_code is SessionState.STOPPED and (
+            job.turns > 0 and job.turn_ended_at is None
+        ):
+            return "its stopped turn is still ending"
+        if project.archived:
+            return "its project is archived"
+        if project.state_code is ProjectState.FINISHED:
+            return "its project is finished"
+        if work.trigger_code is WorkTrigger.ITEM_DONE:
+            assert work.trigger_item_id is not None
+            if self.db.get_one(Item, work.trigger_item_id).done_at is None:
+                return "the item it follows is open again"
+        return None
+
     def _pass_title(self, run_id: uuid.UUID) -> str:
         """The title of the job after the run's turn: the places of the
         documents it registered, in the order registered, else what is next."""
@@ -192,11 +299,14 @@ class JobService:
         operation: str,
         *,
         trigger_item_id: uuid.UUID | None = None,
+        retried: Work | None = None,
     ) -> Work:
-        """A job of `trigger` titled `title`, its trigger's instant `at`,
-        taken under the project's row, which the pause's transitions are read
-        against (`BriefService.job`); its trigger item `trigger_item_id`, the
-        Item whose event triggered it."""
+        """A job of `trigger` titled `title`, placed at `at`, taken under the
+        project's row: its trigger's instant, which the pause's transitions
+        are read against (`BriefService.job`), or a Retry's; its trigger item
+        `trigger_item_id`, the Item whose event triggered it. A Retry's marks
+        the job it retries, `retried`, before it starts, so that its brief
+        reads the trigger's instant as that job's chain has it."""
         session = AgentSession(
             project_id=project.id,
             kind_code=JOB_KIND,
@@ -212,5 +322,8 @@ class JobService:
         work = self.record_service.place_work(
             project, session, title, trigger=trigger, trigger_item_id=trigger_item_id
         )
+        if retried is not None:
+            retried.retried_by_id = work.id
+            self.db.flush()
         self.session_start_service.start_brain(self.db, project, session, operation)
         return work

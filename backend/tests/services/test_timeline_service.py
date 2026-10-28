@@ -52,6 +52,7 @@ from app.schemas.timeline import (
     DoneCauseCode,
     HeldReason,
     ItemKindCode,
+    RetriedSchema,
     StopCause,
 )
 from app.services.auth_service import AuthContext
@@ -293,6 +294,54 @@ def _work(
     )
     session.flush()
     return work
+
+
+def _job(
+    session: DbSession,
+    project: Project,
+    environment: Environment,
+    state: SessionState,
+    created_at: datetime | None = None,
+) -> Item:
+    """The setup, a job of Pilot's own in the store, in `state`, created at
+    `created_at` or now."""
+    run = models.Session(
+        project_id=project.id,
+        environment_id=environment.id,
+        kind_code="job",
+        cwd="/work/PilotProjects",
+        token_hash=uuid.uuid4().hex * 2,
+        state_code=state,
+        created_at=created_at or datetime.now(UTC),
+    )
+    session.add(run)
+    session.flush()
+    job = Item(
+        id=run.id,
+        project_id=project.id,
+        seq=_next_seq(session, project),
+        kind_code="work",
+        title="Setting up the project",
+        created_by_session_id=run.id,
+    )
+    session.add(job)
+    session.flush()
+    session.add(
+        Work(
+            id=run.id,
+            project_id=project.id,
+            session_kind_code="job",
+            trigger_code=WorkTrigger.SETUP,
+            autopilot=False,
+        )
+    )
+    session.flush()
+    return job
+
+
+def _retried(session: DbSession, job: Item, retry: Item) -> None:
+    session.get_one(Work, job.id).retried_by_id = retry.id
+    session.flush()
 
 
 def _turn(
@@ -1584,6 +1633,7 @@ class TestTimeline:
             "stopped_at": None,
             "stopped_by": None,
             "stopped_cause": None,
+            "retried": None,
         }
 
     def test_a_job_is_pilots_own_work(
@@ -1787,6 +1837,28 @@ class TestWorkStatus:
 
     def test_no_ids_read_nothing(self, session: DbSession) -> None:
         assert work_status(session, [], unreachable=False, slots=SLOTS) == {}
+
+    def test_a_retried_job_names_the_job_its_retry_placed_and_the_press(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        """D2, the ruling on Q3: its line says it was retried, by which job;
+        the retry's line is not retried."""
+        project = _make(container)
+        failed = _job(session, project, environment, SessionState.FAILED)
+        pressed = datetime(2026, 10, 28, 9, 30, tzinfo=UTC)
+        retry = _job(session, project, environment, SessionState.HELD, pressed)
+        _retried(session, failed, retry)
+
+        found = work_status(
+            session, [failed.id, retry.id], unreachable=False, slots=SLOTS
+        )
+
+        assert found[failed.id].retried == RetriedSchema(id=retry.id, at=pressed)
+        assert found[failed.id].state is SessionState.FAILED
+        assert found[retry.id].retried is None
 
     @pytest.mark.parametrize(
         "state", [SessionState.HELD, SessionState.STOPPED, SessionState.FAILED]
@@ -2895,6 +2967,28 @@ class TestBadges:
         )
 
         assert self._badges(container, person, project) == {project.id: Badge(2, True)}
+
+    def test_a_failed_or_stopped_job_waits_until_it_is_retried(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        """D2: the badge counts the job until its Retry, so a stall shows;
+        then its retry, once it fails in turn."""
+        project = _make(container)
+        failed = _job(session, project, environment, SessionState.FAILED)
+        _job(session, project, environment, SessionState.STOPPED)
+        assert self._badges(container, person, project) == {project.id: Badge(2, False)}
+
+        retry = _job(session, project, environment, SessionState.HELD)
+        _retried(session, failed, retry)
+        assert self._badges(container, person, project) == {project.id: Badge(1, False)}
+
+        session.get_one(models.Session, retry.id).state_code = SessionState.FAILED
+        session.flush()
+        assert self._badges(container, person, project) == {project.id: Badge(2, False)}
 
     def test_a_wait_waits_on_no_one(
         self,

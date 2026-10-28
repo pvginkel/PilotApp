@@ -948,3 +948,115 @@ class TestResumeSession:
         response = oidc_client.post(f"/api/sessions/{uuid.uuid4()}/resume")
 
         assert response.status_code == 401
+
+
+@pytest.mark.usefixtures("starts")
+class TestRetrySession:
+    def test_it_retries_the_failed_job_and_answers_its_line_retried(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        """The new job, held while the project is paused, is at the project's
+        next place; the line answered names it."""
+        job = _job(container, session, project, project_session, SessionState.FAILED)
+        project.paused = True
+        session.flush()
+        sign_in(client, SUBJECT)
+
+        response = client.post(f"/api/sessions/{job.id}/retry")
+
+        assert response.status_code == 200, response.get_json()
+        body = response.get_json()
+        retry = session.get_one(models.Work, job.id).retried_by_id
+        assert retry is not None
+        assert (body["state"], body["pilots_own"], body["retried"]["id"]) == (
+            "failed",
+            True,
+            str(retry),
+        )
+        assert datetime.fromisoformat(body["retried"]["at"]) == (
+            session.get_one(models.Session, retry).created_at
+        )
+        assert session.get_one(models.Session, retry).state_code is SessionState.HELD
+        assert session.get_one(models.Item, retry).title == "Setting up the project"
+
+    @pytest.mark.parametrize(
+        ("state", "refusal"),
+        [
+            (SessionState.RUNNING, "it is running"),
+            (SessionState.IDLE, "its turn has ended"),
+        ],
+    )
+    def test_a_job_it_cannot_retry_is_409(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        project: Project,
+        project_session: models.Session,
+        state: SessionState,
+        refusal: str,
+    ) -> None:
+        job = _job(container, session, project, project_session, state)
+        sign_in(client, SUBJECT)
+
+        response = client.post(f"/api/sessions/{job.id}/retry")
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            f"Cannot retry Setting up the project because {refusal}"
+        )
+
+    def test_a_workers_run_is_409(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        run = _work_item(
+            container, session, project, project_session, SessionState.FAILED
+        )
+        sign_in(client, SUBJECT)
+
+        response = client.post(f"/api/sessions/{run.id}/retry")
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            "Cannot retry Build the camp because it is a worker's run, which Resume"
+            " carries on"
+        )
+
+    def test_an_unknown_session_is_404(self, client: FlaskClient, person: User) -> None:
+        sign_in(client, SUBJECT)
+
+        response = client.post(f"/api/sessions/{uuid.uuid4()}/retry")
+
+        assert response.status_code == 404
+
+    def test_without_the_editor_role_it_is_403(
+        self, client: FlaskClient, project_session: models.Session
+    ) -> None:
+        response = client.post(
+            "/api/testing/auth/session", json={"subject": SUBJECT, "roles": []}
+        )
+        assert response.status_code == 201
+
+        response = client.post(f"/api/sessions/{project_session.id}/retry")
+
+        assert response.status_code == 403
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        response = oidc_client.post(f"/api/sessions/{uuid.uuid4()}/retry")
+
+        assert response.status_code == 401

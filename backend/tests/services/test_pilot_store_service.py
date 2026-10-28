@@ -1127,6 +1127,37 @@ class TestPilotStoreServiceStopWork:
         )
         assert _effects(session) == []
 
+    def test_a_job_of_pilots_own_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """A job has no Resume, so a job Pilot stopped never goes on (F26.3)."""
+        run = _brain(session, project, environment)
+        job = models.Session(
+            project_id=project.id,
+            kind_code="job",
+            cwd="/work/PilotProjects",
+            token_hash=token_hash(f"job-{uuid.uuid4()}"),
+            state_code=SessionState.RUNNING,
+        )
+        session.add(job)
+        session.flush()
+        container.record_service().place_work(
+            project, job, "Deciding what is next", trigger=WorkTrigger.SETUP
+        )
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _service(container).stop_work(_admitted(run), job.id, TOOL_USE_ID)
+
+        assert refused.value.message == (
+            "Cannot stop Deciding what is next because it is Pilot's own work"
+        )
+        assert job.state_code is SessionState.RUNNING
+        assert _effects(session) == []
+
     def test_a_work_item_of_another_project_is_not_found(
         self,
         session: DbSession,

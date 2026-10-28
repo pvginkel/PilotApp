@@ -6,7 +6,14 @@
 
 import uuid
 
-from sqlalchemy import Boolean, CheckConstraint, ForeignKeyConstraint, Text
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    ForeignKeyConstraint,
+    Index,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.extensions import db
@@ -19,6 +26,10 @@ class Work(db.Model):  # type: ignore[name-defined]
     `project_id` and `session_kind_code` are its Item's and its Session's,
     carried so that the keys reach one Project by both paths (DB assertion
     166) and the checks read the Session Kind (DB 149, 167).
+
+    `retried_by_id` is the job a person's Retry of this failed or stopped
+    job placed, set once and never changed: a recursive list, a job retried
+    at most once and a retry retrying one job.
     """
 
     __tablename__ = "work"
@@ -46,6 +57,21 @@ class Work(db.Model):  # type: ignore[name-defined]
         CheckConstraint(
             "session_kind_code = 'work' OR repo IS NULL", name="ck_work_repo"
         ),
+        # What a retry's key references, so the job it retries is of its
+        # Project and its Session Kind.
+        UniqueConstraint("project_id", "id", "session_kind_code"),
+        ForeignKeyConstraint(
+            ["project_id", "retried_by_id", "session_kind_code"],
+            ["work.project_id", "work.id", "work.session_kind_code"],
+        ),
+        # Only a job is retried, by another job.
+        CheckConstraint(
+            "retried_by_id IS NULL"
+            " OR (session_kind_code = 'job' AND retried_by_id <> id)",
+            name="ck_work_retried_by",
+        ),
+        # A retry retries one job.
+        Index("uq_work_retried_by_id", "retried_by_id", unique=True),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
@@ -55,3 +81,4 @@ class Work(db.Model):  # type: ignore[name-defined]
     trigger_item_id: Mapped[uuid.UUID | None]
     repo: Mapped[str | None] = mapped_column(Text)
     autopilot: Mapped[bool] = mapped_column(Boolean)
+    retried_by_id: Mapped[uuid.UUID | None]

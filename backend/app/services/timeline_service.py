@@ -72,6 +72,7 @@ from app.schemas.timeline import (
     OptionSchema,
     ProjectDocumentSchema,
     ProsePartSchema,
+    RetriedSchema,
     SectionSchema,
     StepSchema,
     StopCause,
@@ -142,8 +143,8 @@ def _waiting() -> ColumnElement[bool]:
     """F94.5's set, whoever an item is for: open; a prose item but the
     opening, a notice only when it is urgent (F23.2, F10.3), and a registered
     document only once its turn-end read is made, since none takes a close
-    before it (review 7); a work item stopped or failed to start; never a
-    wait (F27.5)."""
+    before it (review 7); a work item stopped or failed, a job only until it
+    is retried; never a wait (F27.5)."""
     form = (
         select(ItemKind.form)
         .where(ItemKind.code == Item.kind_code)
@@ -162,6 +163,12 @@ def _waiting() -> ColumnElement[bool]:
         .correlate(Item)
         .exists()
     )
+    retried = (
+        select(Work.id)
+        .where(Work.id == Item.id, Work.retried_by_id.is_not(None))
+        .correlate(Item)
+        .exists()
+    )
     return and_(
         Item.done_at.is_(None),
         or_(
@@ -171,7 +178,7 @@ def _waiting() -> ColumnElement[bool]:
                 or_(Item.kind_code != NOTICE, Item.urgent),
                 ~unread,
             ),
-            and_(form == WORK, state.in_(_STOPPED)),
+            and_(form == WORK, state.in_(_STOPPED), ~retried),
         ),
     )
 
@@ -193,8 +200,10 @@ def work_status(
     when and by whom, a Resume keeping both on the Session (DB Session
     `stopped_at?`, `stopped_by?`); one no one stopped has the cause its
     environment's stop under it left as its last record. One whose start has
-    no environment yet has none (DB 107). A job's is Pilot's own (F59.1)."""
+    no environment yet has none (DB 107). A job's is Pilot's own (F59.1); a
+    retried one's names the job its Retry placed, created at the press."""
     stopper = aliased(User)
+    retry = aliased(AgentSession)
     rows = db.execute(
         select(
             AgentSession,
@@ -203,17 +212,18 @@ def work_status(
             Work.autopilot,
             Project.paused,
             stopper,
+            retry.id,
+            retry.created_at,
         )
         .join(Work, Work.id == AgentSession.id)
         .outerjoin(Environment, Environment.id == AgentSession.environment_id)
         .join(Project, Project.id == AgentSession.project_id)
         .outerjoin(stopper, stopper.id == AgentSession.stopped_by_user_id)
+        .outerjoin(retry, retry.id == Work.retried_by_id)
         .where(AgentSession.id.in_(list(item_ids)))
     ).all()
     failed = [
-        session.id
-        for session, _, _, _, _, _ in rows
-        if session.state_code is SessionState.FAILED
+        session.id for session, *_ in rows if session.state_code is SessionState.FAILED
     ]
     turn_errors: dict[uuid.UUID, str | None] = (
         dict(
@@ -229,13 +239,13 @@ def work_status(
     )
     causes = {
         session.id: _stop_cause(db, session.id)
-        for session, _, _, _, _, _ in rows
+        for session, *_ in rows
         if session.state_code is SessionState.STOPPED
         and session.stopped_by_user_id is None
     }
     waiting = {
         session.project_id
-        for session, _, _, _, _, _ in rows
+        for session, *_ in rows
         if session.state_code is SessionState.HELD and session.kind_code == WORK_KIND
     }
     filled = slots.filled(db, waiting) if waiting else {}
@@ -243,12 +253,12 @@ def work_status(
         db,
         [
             session.id
-            for session, _, _, _, _, _ in rows
+            for session, *_ in rows
             if session.state_code is SessionState.HELD and session.kind_code == JOB_KIND
         ],
     )
     held: dict[uuid.UUID, Held] = {}
-    for session, _, _, _, paused, _ in rows:
+    for session, _, _, _, paused, *_ in rows:
         if session.state_code is not SessionState.HELD:
             continue
         reason = held_reason(
@@ -288,8 +298,20 @@ def work_status(
                 else None
             ),
             stopped_cause=causes.get(session.id),
+            retried=(
+                None if retry_id is None else RetriedSchema(id=retry_id, at=retried_at)
+            ),
         )
-        for session, env_id, name, autopilot, _, stopped_by in rows
+        for (
+            session,
+            env_id,
+            name,
+            autopilot,
+            _,
+            stopped_by,
+            retry_id,
+            retried_at,
+        ) in rows
     }
 
 

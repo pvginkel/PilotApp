@@ -9,6 +9,9 @@
  * of Pilot's own: its line, its session log, no env chip and no Stop or Resume (F59.1, F26.3), and a
  * quiet done line once its turn ends. A job placed while it runs, the one after a worker's turn,
  * waits its turn behind it, its line saying so, and goes on once the setup's turn ends (F59.2).
+ * Failed, it offers Retry where a worker's Resume is: a fresh setup at the project's next place,
+ * the failed line staying with its session log, saying it was retried and offering Retry no more;
+ * a running or done job offers none (D2).
  */
 
 import type { Page } from '@playwright/test';
@@ -281,5 +284,55 @@ test.describe('The setup', () => {
     await controller.finish(chats.store, session, 'success', 'The plan is written.');
     await expect(job.work.running).toBeVisible();
     await expect(job.work.cue).not.toHaveText('Waiting for the job before it');
+  });
+
+  test('failed, it offers Retry; pressed, a fresh setup at the next place takes it on, the failed line saying so and offering Retry no more', async ({
+    page,
+    people,
+    projects,
+    projectHead,
+    controller,
+    chats,
+    definitionChat,
+    timeline,
+  }) => {
+    const me = await people.signIn();
+    const { id, slug } = await drafted({ page, projects, projectHead, controller, chats, definitionChat }, me.handle!);
+    const started = await chats.opening(id, slug);
+    await projectHead.create();
+    const session = await started();
+    const setupId = (await projects.timeline(id)).items.find((item) => item.work?.pilots_own)!.id;
+    const setup = timeline.item(setupId);
+    await expect(setup.work.running).toBeVisible();
+    await expect(setup.work.retry).toHaveCount(0);
+
+    await controller.finish(chats.store, session, 'error', 'The model is overloaded.');
+    await expect(setup.work.line).toHaveText('Failed · The model is overloaded.');
+    await expect(setup.work.retry).toHaveText('Retry');
+    await expect(setup.work.resume).toHaveCount(0);
+    await expect(setup.work.retried).toHaveCount(0);
+
+    const restarted = await chats.opening(id, slug);
+    await setup.work.retry.click();
+    const again = await restarted();
+    await expect(setup.work.retry).toHaveCount(0);
+    await expect(setup.work.sessionLog).toBeFocused();
+    await expect(setup.work.retried).toContainText('Retried as a new job below');
+    await expect(setup.work.line).toHaveText('Failed · The model is overloaded.');
+    await expect(setup.root).toHaveAttribute('data-state', 'open');
+
+    const items = (await projects.timeline(id)).items;
+    const retryId = items.find((item) => item.work?.pilots_own && item.id !== setupId)!.id;
+    expect(items.at(-1)!.id).toBe(retryId);
+    const retry = timeline.item(retryId);
+    await expect(retry.title).toHaveText(SETUP);
+    await expect(retry.work.running).toBeVisible();
+    await expect(retry.work.retry).toHaveCount(0);
+    await expect(retry.work.retried).toHaveCount(0);
+
+    await controller.finish(chats.store, again, 'success', 'The plan is written.');
+    await expect(retry.root).toHaveAttribute('data-state', 'done');
+    await expect(retry.work.retry).toHaveCount(0);
+    await expect(setup.work.retry).toHaveCount(0);
   });
 });

@@ -1417,12 +1417,14 @@ class SessionStartService:
     ) -> None:
         """A job leaving the queue or the pause with no Turn yet, in the
         transaction that moves it to `starting`: its brief composed from the
-        record as it stands at `at` (F59; `BriefService.job`), sent as its
-        first Turn, and its Work's switch the one that brief states, which the
-        session keeps (F54.7). The job after an item's close consumes the item
-        it is briefed with, which takes Undo from it (F14.1): under the
-        Session's lock, which the item's Undo takes before it reads the
-        item."""
+        record as it stands at `at` (F59; `BriefService.job`), its trigger's
+        instant its Session's creation, a Retry's that of the job its trigger
+        placed first (`_triggered`), sent as its first Turn, and its Work's
+        switch the one that brief states, which the session keeps (F54.7).
+        The job after an item's close consumes the item it is briefed with,
+        which takes Undo from it (F14.1): under the Session's lock, which the
+        item's Undo takes before it reads the item. A Retry's finds it
+        consumed by the job it retries, and consumed is final (DB 56)."""
         work = db.get_one(Work, session.id)
         work.autopilot = project.autopilot
         db.add(
@@ -1430,7 +1432,7 @@ class SessionStartService:
                 session_id=session.id,
                 seq=1,
                 message=self._container.brief_service().job(
-                    project, work, session.created_at, at
+                    project, work, _triggered(db, session), at
                 ),
                 started_at=at,
             )
@@ -1439,8 +1441,9 @@ class SessionStartService:
             # The job after an item's close names the item.
             assert work.trigger_item_id is not None
             closed = db.get_one(Item, work.trigger_item_id)
-            closed.consumed_at = at
-            closed.consumed_session_id = session.id
+            if closed.consumed_at is None:
+                closed.consumed_at = at
+                closed.consumed_session_id = session.id
         db.flush()
         session.turns = 1
         session.turn_started_at = at
@@ -1474,6 +1477,17 @@ def _unbriefed(session: AgentSession) -> bool:
     """Whether the Session is a job held before its brief: placed with no
     Turn, which `_brief` writes."""
     return session.kind_code == JOB_KIND and session.turns == 0
+
+
+def _triggered(db: Session, session: AgentSession) -> datetime:
+    """The instant of the job's trigger: its Session's creation, or, for a
+    Retry's job, that of the first job of the chain its Retries make."""
+    first = session
+    while (
+        earlier := db.scalar(select(Work.id).where(Work.retried_by_id == first.id))
+    ) is not None:
+        first = db.get_one(AgentSession, earlier)
+    return first.created_at
 
 
 def _queued(db: Session, session: AgentSession) -> bool:

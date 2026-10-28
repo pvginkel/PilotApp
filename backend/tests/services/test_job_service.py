@@ -20,7 +20,7 @@ from werkzeug.wrappers import Request, Response
 from app import models
 from app.database import scoped_session
 from app.engine.views import ViewService
-from app.exceptions import InvalidOperationException
+from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import Item, Project, ProjectTransition, Turn, User, Work
 from app.models.reference import (
     AnswerChannel,
@@ -1166,3 +1166,494 @@ class TestWithdraw:
             None,
         )
         assert jobs.unbriefed(session.get_one(Item, document.id)) is None
+
+
+def _ended(
+    db: DbSession,
+    container: ServiceContainer,
+    job: models.Session,
+    state: SessionState = SessionState.FAILED,
+    stopped_by: User | None = None,
+) -> models.Session:
+    """The job's turn ended under it, `failed` or `stopped`, by `stopped_by`
+    or no one, its work item left open."""
+    ended = datetime.now(UTC)
+    _brief(container, job).ended_at = ended
+    job.turn_ended_at = ended
+    job.state_code = state
+    if state is SessionState.STOPPED:
+        job.stopped_at = ended
+        job.stopped_by_user_id = None if stopped_by is None else stopped_by.id
+    else:
+        job.error = "API error"
+    db.flush()
+    return job
+
+
+def _retry(
+    container: ServiceContainer, starts: SessionStartService, job: models.Session
+) -> models.Session:
+    """A person's Retry of the job; the new job's Session."""
+    work = _jobs(container, starts).retry(job.id)
+    return container.db_session().get_one(models.Session, work.id)
+
+
+class TestRetry:
+    """A person's Retry of a failed or stopped job: a fresh job for the same
+    trigger at the project's next place, through the queue and the gate, the
+    job retried marked retried by it; the server retries none on its own
+    (D2; the ruling on Q3; F26.3, F94.5; V19)."""
+
+    def test_a_failed_job_is_retried_by_a_fresh_job_for_its_trigger(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        opening: Item,
+    ) -> None:
+        failed = _ended(session, container, _setup(container, starts, opened))
+        before = datetime.now(UTC)
+
+        retry = _retry(container, starts, failed)
+
+        line = session.get_one(Item, retry.id)
+        assert (line.seq, line.kind_code, line.title, line.created_by_session_id) == (
+            session.get_one(Item, failed.id).seq + 1,
+            "work",
+            SETUP_TITLE,
+            retry.id,
+        )
+        work = session.get_one(Work, retry.id)
+        assert (work.trigger_code, work.trigger_item_id, work.retried_by_id) == (
+            WorkTrigger.SETUP,
+            None,
+            None,
+        )
+        assert (retry.kind_code, retry.cwd, retry.conversation_id) == (
+            "job",
+            STORE_REPO,
+            None,
+        )
+        assert before <= retry.created_at <= datetime.now(UTC)
+        assert retry.state_code is SessionState.STARTING
+        assert session.get_one(Work, failed.id).retried_by_id == retry.id
+        assert failed.state_code is SessionState.FAILED
+        assert session.get_one(Item, failed.id).done_at is None
+
+    def test_its_brief_is_composed_as_it_starts_its_triggers_instant_the_first_jobs(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        opening: Item,
+    ) -> None:
+        """A retried setup's brief says when the project was created, however
+        often it was retried (F49, F59)."""
+        first = _ended(session, container, _setup(container, starts, opened))
+        second = _ended(session, container, _retry(container, starts, first))
+        opened.autopilot = True
+        session.flush()
+
+        third = _retry(container, starts, second)
+
+        turn = _brief(container, third)
+        assert turn.started_at == third.created_at
+        assert turn.message == container.brief_service().job(
+            opened, session.get_one(Work, third.id), AT, third.created_at
+        )
+        assert "The project was created 2026-10-27T09:30:15Z from" in turn.message
+        assert session.get_one(Work, third.id).autopilot is True
+
+    @pytest.mark.parametrize("by_a_person", [False, True])
+    def test_a_stopped_job_is_retried_whoever_stopped_it(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        opening: Item,
+        person: User,
+        by_a_person: bool,
+    ) -> None:
+        """Stopped under itself, or by an Archive since brought back: a job
+        takes no Resume, so Retry is what goes on (F26.3)."""
+        stopped = _ended(
+            session,
+            container,
+            _setup(container, starts, opened),
+            SessionState.STOPPED,
+            person if by_a_person else None,
+        )
+
+        retry = _retry(container, starts, stopped)
+
+        assert session.get_one(Work, stopped.id).retried_by_id == retry.id
+        assert retry.state_code is SessionState.STARTING
+
+    def test_it_goes_behind_every_job_already_waiting(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        opening: Item,
+        person: User,
+    ) -> None:
+        failed = _ended(session, container, _setup(container, starts, opened))
+        _transition(session, opened, person, TransitionKind.PAUSED, PAUSED_AT)
+        waiting = _setup(container, starts, opened, LATER)
+
+        retry = _retry(container, starts, failed)
+        _transition(session, opened, person, TransitionKind.RESUMED, RESUMED_AT)
+        _release(starts)
+
+        waiting, retry = _read(session, waiting), _read(session, retry)
+        assert (
+            session.get_one(Item, retry.id).seq > session.get_one(Item, waiting.id).seq
+        )
+        assert waiting.state_code is SessionState.STARTING
+        assert (retry.state_code, retry.turns) == (SessionState.HELD, 0)
+        assert starts.held(session, opened, retry) == Held(HeldReason.QUEUE)
+
+    @pytest.mark.usefixtures("placing")
+    def test_a_retried_item_done_jobs_brief_leaves_the_items_consumption(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        person: User,
+    ) -> None:
+        """Consumed is final (DB 56): the job retried consumed it."""
+        document = _pilots(session, container, opened)
+        failed = _ended(session, container, _closed(container, document, person))
+
+        retry = _retry(container, starts, failed)
+
+        item = session.get_one(Item, document.id, populate_existing=True)
+        assert (item.consumed_at, item.consumed_session_id) == (
+            failed.created_at,
+            failed.id,
+        )
+        assert session.get_one(Work, retry.id).trigger_item_id == item.id
+        assert _brief(container, retry).message.startswith(
+            "/plan\n\nPilot's brief · an item of yours is done"
+        )
+
+    def test_the_job_after_a_worker_turn_retried_names_its_run_which_gets_no_other(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+    ) -> None:
+        run, _ = _worker_run(session, container, opened, 0)
+        job = _after(container, starts, opened, run)
+        assert job is not None
+        failed = _ended(session, container, job)
+
+        retry = _retry(container, starts, failed)
+
+        work = session.get_one(Work, retry.id)
+        assert (work.trigger_code, work.trigger_item_id) == (
+            WorkTrigger.WORKER_TURN_ENDED,
+            run.id,
+        )
+        assert session.get_one(Item, retry.id).title == NEXT_TITLE
+        assert _after(container, starts, opened, run) is None
+
+    def test_the_server_retries_none_on_its_own(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        opening: Item,
+    ) -> None:
+        failed = _ended(session, container, _setup(container, starts, opened))
+
+        _release(starts)
+
+        assert _read(session, failed).state_code is SessionState.FAILED
+        assert session.get_one(Work, failed.id).retried_by_id is None
+        assert session.scalar(select(func.count()).select_from(Work)) == 1
+
+
+class TestRetryRefused:
+    """Retry refused with the reason, nothing placed (D2; V19)."""
+
+    def _refusal(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        job_id: uuid.UUID,
+    ) -> str:
+        db = container.db_session()
+        jobs = db.scalar(select(func.count()).select_from(Work))
+        with pytest.raises(InvalidOperationException) as raised:
+            _jobs(container, starts).retry(job_id)
+        assert db.scalar(select(func.count()).select_from(Work)) == jobs
+        return raised.value.message
+
+    @pytest.mark.parametrize(
+        ("state", "reason"),
+        [
+            (SessionState.HELD, "its start waits at the gate"),
+            (SessionState.STARTING, "it is starting"),
+            (SessionState.RUNNING, "it is running"),
+            (SessionState.IDLE, "its turn has ended"),
+            (SessionState.ENDED, "its session has ended"),
+        ],
+    )
+    def test_a_job_neither_failed_nor_stopped(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        opening: Item,
+        state: SessionState,
+        reason: str,
+    ) -> None:
+        job = _setup(container, starts, opened)
+        _in(session, job, state)
+
+        assert self._refusal(container, starts, job.id) == (
+            f"Cannot retry {SETUP_TITLE} because {reason}"
+        )
+
+    def test_a_job_retried_already(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        opening: Item,
+    ) -> None:
+        failed = _ended(session, container, _setup(container, starts, opened))
+        _retry(container, starts, failed)
+
+        assert self._refusal(container, starts, failed.id) == (
+            f"Cannot retry {SETUP_TITLE} because it was retried already"
+        )
+
+    def test_a_job_whose_work_item_is_done(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        opening: Item,
+    ) -> None:
+        failed = _ended(session, container, _setup(container, starts, opened))
+        container.record_service().work_done(failed.id, datetime.now(UTC))
+
+        assert self._refusal(container, starts, failed.id) == (
+            f"Cannot retry {SETUP_TITLE} because it is done"
+        )
+
+    @pytest.mark.usefixtures("placing")
+    def test_a_job_an_undo_withdrew(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        person: User,
+    ) -> None:
+        """Stopped by no one with no Turn, but done `withdrawn` (P4)."""
+        _transition(session, opened, person, TransitionKind.PAUSED, PAUSED_AT)
+        document = _pilots(session, container, opened)
+        withdrawn = _closed(container, document, person)
+        container.record_service().undo(session.get_one(Item, document.id))
+
+        assert self._refusal(container, starts, withdrawn.id) == (
+            f"Cannot retry {NEXT_TITLE} because an Undo withdrew it before its"
+            " brief went out"
+        )
+
+    def test_a_stopped_job_whose_turn_is_still_ending(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        opening: Item,
+    ) -> None:
+        """Stopped while it ran, by Archive's Stop, the interrupt not yet
+        recorded: its session may still write."""
+        job = _setup(container, starts, opened)
+        job.state_code = SessionState.STOPPED
+        session.flush()
+
+        assert self._refusal(container, starts, job.id) == (
+            f"Cannot retry {SETUP_TITLE} because its stopped turn is still ending"
+        )
+
+    @pytest.mark.parametrize(
+        ("archived", "state", "reason"),
+        [
+            (True, ProjectState.OPEN, "its project is archived"),
+            (False, ProjectState.FINISHED, "its project is finished"),
+        ],
+    )
+    def test_in_a_finished_or_archived_project(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        opening: Item,
+        archived: bool,
+        state: ProjectState,
+        reason: str,
+    ) -> None:
+        failed = _ended(session, container, _setup(container, starts, opened))
+        opened.archived, opened.state_code = archived, state
+        session.flush()
+
+        assert self._refusal(container, starts, failed.id) == (
+            f"Cannot retry {SETUP_TITLE} because {reason}"
+        )
+
+    @pytest.mark.usefixtures("placing")
+    def test_a_job_whose_item_is_open_again(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        person: User,
+    ) -> None:
+        """Archive stopped it before its brief, and the item's Undo took the
+        close back once the project was brought back."""
+        _transition(session, opened, person, TransitionKind.PAUSED, PAUSED_AT)
+        document = _pilots(session, container, opened)
+        job = _closed(container, document, person)
+        job.state_code = SessionState.STOPPED
+        job.stopped_by_user_id = person.id
+        item = session.get_one(Item, document.id)
+        item.done_at = item.done_cause_code = item.done_by_user_id = None
+        session.flush()
+
+        assert self._refusal(container, starts, job.id) == (
+            f"Cannot retry {NEXT_TITLE} because the item it follows is open again"
+        )
+
+    def test_a_workers_run(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+    ) -> None:
+        run, _ = _worker_run(session, container, opened, 0)
+        run.state_code = SessionState.FAILED
+        session.flush()
+
+        assert self._refusal(container, starts, run.id) == (
+            "Cannot retry Fixing the stock because it is a worker's run, which"
+            " Resume carries on"
+        )
+
+    def test_a_session_that_is_no_work_item(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+    ) -> None:
+        chat = models.Session(
+            project_id=opened.id,
+            kind_code="chat",
+            cwd=STORE_REPO,
+            token_hash=uuid.uuid4().hex,
+            state_code=SessionState.FAILED,
+        )
+        session.add(chat)
+        session.flush()
+
+        assert self._refusal(container, starts, chat.id) == (
+            f"Cannot retry work item {chat.id} because it is no work item"
+        )
+
+    def test_an_unknown_session_is_not_found(
+        self, container: ServiceContainer, starts: SessionStartService
+    ) -> None:
+        unknown = uuid.uuid4()
+
+        with pytest.raises(RecordNotFoundException) as raised:
+            _jobs(container, starts).retry(unknown)
+
+        assert raised.value.message == f"Session {unknown} was not found"
+
+    def test_with_no_controller_configured(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        opening: Item,
+    ) -> None:
+        failed = _ended(session, container, _setup(container, starts, opened))
+
+        with pytest.raises(InvalidOperationException) as raised:
+            container.job_service().retry(failed.id)
+
+        assert raised.value.message == (
+            f"Cannot retry {SETUP_TITLE} because no controller is configured"
+        )
+
+
+class TestRetryAcrossTransactions:
+    """Two Retries of one job at once place one job (the lock order)."""
+
+    def test_the_second_waits_for_the_first_and_is_refused(
+        self, committed_app: Flask, supervise: Supervise
+    ) -> None:
+        container = committed_app.container
+        starts = configured_starts(container, supervise, project_max=1)
+        project_id = _committed_opened(container)
+        with scoped_session(container) as db:
+            job = _jobs(container, starts).setup(
+                db.get_one(Project, project_id), AT, OPERATION
+            )
+            failed = db.get_one(models.Session, job.id)
+            failed.state_code = SessionState.FAILED
+            failed.turn_ended_at = datetime.now(UTC)
+        retried, waited = threading.Event(), threading.Event()
+
+        def first() -> uuid.UUID:
+            """A Retry, its commit held until the second waits for it."""
+            with scoped_session(container):
+                work = _jobs(container, starts).retry(job.id)
+                retried.set()
+                assert waited.wait(WAIT_SECONDS)
+                return work.id
+
+        def second() -> str:
+            with (
+                scoped_session(container),
+                pytest.raises(InvalidOperationException) as raised,
+            ):
+                _jobs(container, starts).retry(job.id)
+            return raised.value.message
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            placing = pool.submit(first)
+            assert retried.wait(WAIT_SECONDS)
+            refusing = pool.submit(second)
+            wait_until(
+                lambda: _waiting_on_a_lock(container),
+                "the second Retry waits for the first's project row",
+            )
+            waited.set()
+            retry = placing.result(WAIT_SECONDS)
+            refusal = refusing.result(WAIT_SECONDS)
+
+        assert refusal == f"Cannot retry {SETUP_TITLE} because it was retried already"
+        with scoped_session(container) as db:
+            assert db.get_one(Work, job.id).retried_by_id == retry
+            assert db.scalar(select(func.count()).select_from(Work)) == 2

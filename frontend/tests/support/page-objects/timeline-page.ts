@@ -147,6 +147,9 @@ export class TimelinePage {
         sessionLog: root.getByTestId('timeline.work.session-log'),
         stop: root.getByTestId('timeline.work.stop'),
         resume: root.getByTestId('timeline.work.resume'),
+        /** A job's Retry, once it stopped or failed, and the line saying a Retry placed a new one. */
+        retry: root.getByTestId('timeline.work.retry'),
+        retried: root.getByTestId('timeline.work.retried'),
         /** Stop's question, in the actions' place: its words, Stop it and Cancel. */
         stopConfirm: {
           root: root.getByTestId('timeline.work.stop-confirm'),

@@ -3061,6 +3061,29 @@
         "title": "ProsePartSchema",
         "type": "object"
       },
+      "ItemDocumentSchema.1fdd8ae.RetriedSchema": {
+        "description": "The job a person's Retry of a failed or stopped job placed.",
+        "properties": {
+          "at": {
+            "description": "When Retry was pressed, the new job placed",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "id": {
+            "description": "The new job's work item",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "at"
+        ],
+        "title": "RetriedSchema",
+        "type": "object"
+      },
       "ItemDocumentSchema.1fdd8ae.SectionSchema": {
         "description": "A block's own section (F30.9), which a display may draw as one line\n(F31.5).",
         "properties": {
@@ -3261,9 +3284,20 @@
             "title": "Held Running"
           },
           "pilots_own": {
-            "description": "Whether it is Pilot's own work, a background job in the store (F59.1): its line has its session log and neither an environment chip nor Stop / Resume, which the server refuses (F26.3); false for a worker's run",
+            "description": "Whether it is Pilot's own work, a background job in the store (F59.1): its line has its session log and neither an environment chip nor Stop / Resume, which the server refuses (F26.3), and Retry once it failed or stopped until it is retried; false for a worker's run",
             "title": "Pilots Own",
             "type": "boolean"
+          },
+          "retried": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.RetriedSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The job a person's Retry of this failed or stopped job placed, at the project's next place, which its line names: it offers Retry no more, and no badge counts it (F94.5); null while it is not retried"
           },
           "started_at": {
             "anyOf": [
@@ -3330,7 +3364,8 @@
           "held_running",
           "stopped_at",
           "stopped_by",
-          "stopped_cause"
+          "stopped_cause",
+          "retried"
         ],
         "title": "WorkSchema",
         "type": "object"
@@ -6670,6 +6705,29 @@
         "title": "ProsePartSchema",
         "type": "object"
       },
+      "TimelineSchema.1fdd8ae.RetriedSchema": {
+        "description": "The job a person's Retry of a failed or stopped job placed.",
+        "properties": {
+          "at": {
+            "description": "When Retry was pressed, the new job placed",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "id": {
+            "description": "The new job's work item",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "at"
+        ],
+        "title": "RetriedSchema",
+        "type": "object"
+      },
       "TimelineSchema.1fdd8ae.SectionSchema": {
         "description": "A block's own section (F30.9), which a display may draw as one line\n(F31.5).",
         "properties": {
@@ -7177,9 +7235,20 @@
             "title": "Held Running"
           },
           "pilots_own": {
-            "description": "Whether it is Pilot's own work, a background job in the store (F59.1): its line has its session log and neither an environment chip nor Stop / Resume, which the server refuses (F26.3); false for a worker's run",
+            "description": "Whether it is Pilot's own work, a background job in the store (F59.1): its line has its session log and neither an environment chip nor Stop / Resume, which the server refuses (F26.3), and Retry once it failed or stopped until it is retried; false for a worker's run",
             "title": "Pilots Own",
             "type": "boolean"
+          },
+          "retried": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.RetriedSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The job a person's Retry of this failed or stopped job placed, at the project's next place, which its line names: it offers Retry no more, and no badge counts it (F94.5); null while it is not retried"
           },
           "started_at": {
             "anyOf": [
@@ -7246,7 +7315,8 @@
           "held_running",
           "stopped_at",
           "stopped_by",
-          "stopped_cause"
+          "stopped_cause",
+          "retried"
         ],
         "title": "WorkSchema",
         "type": "object"
@@ -7477,9 +7547,20 @@
             "title": "Held Running"
           },
           "pilots_own": {
-            "description": "Whether it is Pilot's own work, a background job in the store (F59.1): its line has its session log and neither an environment chip nor Stop / Resume, which the server refuses (F26.3); false for a worker's run",
+            "description": "Whether it is Pilot's own work, a background job in the store (F59.1): its line has its session log and neither an environment chip nor Stop / Resume, which the server refuses (F26.3), and Retry once it failed or stopped until it is retried; false for a worker's run",
             "title": "Pilots Own",
             "type": "boolean"
+          },
+          "retried": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkSchema.1fdd8ae.RetriedSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The job a person's Retry of this failed or stopped job placed, at the project's next place, which its line names: it offers Retry no more, and no badge counts it (F94.5); null while it is not retried"
           },
           "started_at": {
             "anyOf": [
@@ -7546,7 +7627,8 @@
           "held_running",
           "stopped_at",
           "stopped_by",
-          "stopped_cause"
+          "stopped_cause",
+          "retried"
         ],
         "title": "WorkSchema",
         "type": "object"
@@ -7733,6 +7815,29 @@
           "input"
         ],
         "title": "LineStepSchema",
+        "type": "object"
+      },
+      "WorkSchema.1fdd8ae.RetriedSchema": {
+        "description": "The job a person's Retry of a failed or stopped job placed.",
+        "properties": {
+          "at": {
+            "description": "When Retry was pressed, the new job placed",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "id": {
+            "description": "The new job's work item",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "at"
+        ],
+        "title": "RetriedSchema",
         "type": "object"
       },
       "WorkSchema.1fdd8ae.SessionState": {
@@ -10325,6 +10430,94 @@
           }
         ],
         "summary": "Resume the stopped or failed work item: a turn of the server's own carries it on, \"continue\", or its last turn's message while it has no conversation, through the gate. It is held while the gate is closed; else its send runs once the request commits, its environment started again when it is not running. It stays one item.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/sessions/{session_id}/retry": {
+      "post": {
+        "description": "Returns:     200: The retried job's status, naming the new job     401: No one is signed in     403: The caller lacks the editor role     404: No session has the id     409: The session is no work item's, is a worker's run, is done or         was withdrawn by an Undo, was retried already, is neither failed         nor stopped, has its stopped turn still ending, or follows an         item open again; its project is finished or archived; or no         controller or no store environment is configured",
+        "operationId": "post__api_sessions_{session_id}_retry",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkSchema.1fdd8ae"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Retry the failed or stopped job of Pilot's own: a fresh job for the same trigger, in a fresh conversation, at the project's next place, behind the project's jobs already waiting, its brief composed from the record as it stands when it starts. The job retried stays on the timeline with its session log, marked retried by the new one.",
         "tags": [],
         "x-required-role": "editor"
       }

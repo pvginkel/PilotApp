@@ -490,6 +490,7 @@ class ServiceContainer(containers.DeclarativeContainer):
     job_service = providers.Factory(
         JobService,
         db=db_session,
+        engine_bus=engine_bus,
         record_service=record_service,
         session_start_service=session_start_service,
         brain_model=app_config.provided.brain_model,
