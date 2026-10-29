@@ -28,6 +28,7 @@ from app.exceptions import (
 from app.models import (
     Attachment,
     Block,
+    ClarificationRun,
     Document,
     DocumentVersion,
     Effect,
@@ -41,6 +42,7 @@ from app.models import (
     ProjectTransition,
     Turn,
     User,
+    Work,
     WriterQuestion,
 )
 from app.models.reference import (
@@ -53,6 +55,7 @@ from app.models.reference import (
     TransitionKind,
     UserKind,
     VersionCause,
+    WorkTrigger,
 )
 from app.schemas.testing_record import (
     OPENING_WORDS,
@@ -1867,6 +1870,106 @@ class TestAskWriter:
             )
 
         assert raised.value.cause == "block Q1 is answered"
+
+
+class TestClarify:
+    @pytest.fixture
+    def document(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> Item:
+        """A document a worker's run registered, read at its run's end."""
+        run = models.Session(
+            project_id=project.id,
+            environment_id=environment.id,
+            kind_code="work",
+            conversation_id="conv-camp",
+            cwd="/work/Camp",
+            agent="writer",
+            token_hash="2" * 64,
+            state_code=SessionState.IDLE,
+        )
+        session.add(run)
+        session.flush()
+        container.record_service().place_work(
+            project, run, "Writing the refinement", repo="example/Camp"
+        )
+        documents = container.document_service()
+        item = documents.register(project, run, REGISTERED).item
+        documents.publish_read(session.get_one(Document, item.id), QUESTIONED, run.id)
+        return item
+
+    def test_the_passs_run_is_placed_on_the_writers_conversation_with_the_reply(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        environment: Environment,
+        document: Item,
+    ) -> None:
+        service = container.test_data_service()
+        service.ask_writer(
+            document.id,
+            [InventedWriterQuestionSchema(block="Q2", question="Which lake?")],
+        )
+
+        run = service.clarify(document.id, "## Q2\nLake Ilm.")
+
+        [clarification] = session.scalars(select(ClarificationRun))
+        assert (clarification.id, clarification.reply) == (run.id, "## Q2\nLake Ilm.")
+        assert clarification.replied_at is not None
+        asking = session.get_one(Work, clarification.pass_id)
+        assert (asking.trigger_code, asking.trigger_item_id) == (
+            WorkTrigger.WORKER_TURN_ENDED,
+            document.created_by_session_id,
+        )
+        assert session.get_one(Item, asking.id).done_at is not None
+        assert (
+            run.kind_code,
+            run.environment_id,
+            run.conversation_id,
+            run.agent,
+            run.state_code,
+        ) == ("work", environment.id, "conv-camp", "writer", SessionState.IDLE)
+        item = session.get_one(Item, run.id)
+        assert (item.title, item.done_at) == (
+            f"Clarify {REGISTERED}",
+            clarification.replied_at,
+        )
+        [turn] = session.scalars(select(Turn).where(Turn.session_id == run.id))
+        assert turn.message.startswith(f"Pilot asks about {REGISTERED}:\n- Q2: Which")
+        assert session.get_one(Work, run.id).repo == "example/Camp"
+
+    def test_an_unknown_item_is_not_found(self, container: ServiceContainer) -> None:
+        with pytest.raises(RecordNotFoundException):
+            container.test_data_service().clarify(uuid.uuid4(), "Lake Ilm.")
+
+    def test_a_document_whose_writer_was_asked_nothing_is_refused(
+        self, container: ServiceContainer, document: Item
+    ) -> None:
+        with pytest.raises(InvalidOperationException) as raised:
+            container.test_data_service().clarify(document.id, "Lake Ilm.")
+
+        assert raised.value.cause == "its writer was asked nothing"
+
+    def test_a_pass_with_its_run_already_is_refused(
+        self, container: ServiceContainer, document: Item
+    ) -> None:
+        service = container.test_data_service()
+        service.ask_writer(
+            document.id,
+            [InventedWriterQuestionSchema(block="Q1", question="Which site?")],
+        )
+        service.clarify(document.id, "The north shore.")
+
+        with pytest.raises(InvalidOperationException) as raised:
+            service.clarify(document.id, "The south shore.")
+
+        assert raised.value.cause == (
+            "the writer has replied to the pass that asked already"
+        )
 
 
 class TestAnswerInChat:

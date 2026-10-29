@@ -257,6 +257,12 @@ class BlockSchema(BaseModel):
     deferral: DeferralSchema | None = Field(
         description="Where a deferred block went; null unless `answer` is `deferred`"
     )
+    writer_asked: bool = Field(
+        description=(
+            "Whether Pilot asked the registered document's writer about the block "
+            "(F52.2), which its line says; false for every other block"
+        )
+    )
     section: SectionSchema | None = Field(
         description=(
             "The block's own section: from the nearest heading before it, the "
@@ -475,6 +481,65 @@ class WorkSchema(BaseModel):
     )
 
 
+class WriterQuestionSchema(BaseModel):
+    """A question Pilot asked a registered document's writer about one of its
+    blocks (F52.2), with the writer's answer to it."""
+
+    block: str = Field(description="The asked block's local id", examples=["D2"])
+    question: str = Field(
+        description="The question, verbatim",
+        examples=["Which cache does 'the cache' mean?"],
+    )
+    asked_at: datetime = Field(description="When it was asked")
+    heading: str = Field(
+        description=(
+            "The heading the clarification run asked the writer to answer it "
+            "under, as its first turn wrote it: `## <local id>`, or `## <path> "
+            "<local id>` where another document asked about has a block of that "
+            "local id"
+        ),
+        examples=["## D2"],
+    )
+    reply: str | None = Field(
+        description=(
+            "The writer's reply under that heading, to the next heading of the "
+            "same or a higher level; null until the reply comes, and where it does "
+            "not keep the heading or holds nothing under it"
+        ),
+        examples=["The OpenAPI cache the frontend reads."],
+    )
+
+
+class ClarificationSchema(BaseModel):
+    """One pre-ruling pass's questions to a registered document's writer and
+    the writer's reply, which the overlay shows as one section, "Pilot asked
+    the writer · <stamp>" (F52.2; DB 257)."""
+
+    asked_at: datetime = Field(
+        description="The section's stamp: when the pass first asked about the document"
+    )
+    questions: list[WriterQuestionSchema] = Field(
+        description="The questions, in their blocks' order"
+    )
+    reply: str | None = Field(
+        description=(
+            "The writer's reply, whole: the clarification run's turn's final text, "
+            "which may answer other documents' questions too; null until its turn "
+            "ends with one"
+        )
+    )
+    replied_at: datetime | None = Field(
+        description="When the reply came, the run's turn's end; null until it does"
+    )
+    split: bool = Field(
+        description=(
+            "Whether the reply kept the asked shape, every question's `reply` "
+            "holding its part: shown per block, else whole; false while there is "
+            "no reply"
+        )
+    )
+
+
 class TimelineItemSchema(BaseModel):
     """An entry on the timeline, with what its line and its open form show."""
 
@@ -577,6 +642,13 @@ class TimelineItemSchema(BaseModel):
             'writer about D2 and D4" (F86.8); empty for every other item'
         ),
         examples=[["D2", "D4"]],
+    )
+    clarifications: list[ClarificationSchema] = Field(
+        description=(
+            "Pilot's questions to a registered document's writer and the "
+            "writer's reply (F52.2): one per pre-ruling pass that asked about its "
+            "blocks, in the order first asked; empty for every other item"
+        )
     )
     work: WorkSchema | None = Field(
         description=(

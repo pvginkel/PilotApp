@@ -500,7 +500,10 @@ class ServiceContainer(containers.DeclarativeContainer):
     # The clarification run a pass's questions place, and its reply (DB
     # decision 63), at the turn ends the relay records
     clarification_service = providers.Factory(
-        ClarificationService, db=db_session, session_start_service=session_start_service
+        ClarificationService,
+        db=db_session,
+        session_start_service=session_start_service,
+        view_service=view_service,
     )
     project_service = providers.Factory(
         ProjectService,

@@ -17,6 +17,7 @@ from app.models import (
     Attachment,
     Block,
     ClaimAssignment,
+    ClarificationRun,
     Document,
     DocumentVersion,
     DoneCause,
@@ -546,6 +547,10 @@ def _attachment(
     )
 
 
+ASKED = datetime(2026, 9, 24, 14, 2, tzinfo=UTC)
+REPLIED = datetime(2026, 9, 24, 14, 21, tzinfo=UTC)
+
+
 def _items(container: ServiceContainer, project: Project) -> list[dict[str, Any]]:
     timeline = container.timeline_service().timeline(project.id)
     items: list[dict[str, Any]] = timeline.model_dump(mode="json")["items"]
@@ -755,6 +760,7 @@ class TestTimeline:
                     "done": None,
                     "claim": None,
                     "deferral": None,
+                    "writer_asked": False,
                     "section": None,
                 },
             },
@@ -1223,6 +1229,194 @@ class TestTimeline:
 
         assert line["asked_writer_about"] == ["Q1", "Q3"]
         assert opening["asked_writer_about"] == []
+
+    def _questioned(
+        self, container: ServiceContainer, db: DbSession, environment: Environment
+    ) -> tuple[Project, Item, models.Session]:
+        """A registered document whose writer a pass asked about Q3 and then
+        Q1, Q2 left unasked."""
+        project = _make(container)
+        run = _run(db, project, environment)
+        container.record_service().place_work(project, run, "Writing the refinement")
+        documents = container.document_service()
+        item = documents.register(project, run, "/work/Camp/docs/refinement.md").item
+        documents.publish_read(
+            db.get_one(Document, item.id),
+            "```question id=Q1\n```\n\n```question id=Q2\n```\n\n"
+            "```question id=Q3\n```\n",
+            run.id,
+        )
+        job = models.Session(
+            project_id=project.id,
+            kind_code="job",
+            cwd="/work/PilotProjects",
+            token_hash="9" * 64,
+            state_code=SessionState.IDLE,
+        )
+        db.add(job)
+        db.flush()
+        container.record_service().place_work(
+            project,
+            job,
+            "Pre-ruling docs/2",
+            trigger=WorkTrigger.WORKER_TURN_ENDED,
+            trigger_item_id=run.id,
+        )
+        turn = Turn(session_id=job.id, seq=1, message="Pre-rule.", started_at=ASKED)
+        db.add(turn)
+        db.flush()
+        for local_id, question, at in (
+            ("Q3", "Which lake?", ASKED),
+            ("Q1", "Which site?", datetime(2026, 9, 24, 14, 3, tzinfo=UTC)),
+        ):
+            db.add(
+                WriterQuestion(
+                    turn_id=turn.id,
+                    block_id=db.scalars(
+                        select(Block.id).where(
+                            Block.document_id == item.id, Block.local_id == local_id
+                        )
+                    ).one(),
+                    question=question,
+                    asked_at=at,
+                )
+            )
+        db.flush()
+        return project, item, job
+
+    def _replied(
+        self,
+        container: ServiceContainer,
+        db: DbSession,
+        project: Project,
+        environment: Environment,
+        job: models.Session,
+        reply: str,
+    ) -> None:
+        clarifying = _run(db, project, environment)
+        container.record_service().place_work(
+            project, clarifying, "Clarify refinement.md"
+        )
+        db.add(
+            ClarificationRun(
+                id=clarifying.id, pass_id=job.id, reply=reply, replied_at=REPLIED
+            )
+        )
+        db.flush()
+
+    def test_before_the_reply_its_clarification_holds_the_questions(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        """From the asking on, the document's clarification holds the
+        questions, and each asked block says its writer was asked (DB 257)."""
+        project, item, _ = self._questioned(container, session, environment)
+
+        line = next(
+            each for each in _items(container, project) if each["id"] == str(item.id)
+        )
+
+        assert line["clarifications"] == [
+            {
+                "asked_at": "2026-09-24T14:02:00Z",
+                "questions": [
+                    {
+                        "block": "Q1",
+                        "question": "Which site?",
+                        "asked_at": "2026-09-24T14:03:00Z",
+                        "heading": "## Q1",
+                        "reply": None,
+                    },
+                    {
+                        "block": "Q3",
+                        "question": "Which lake?",
+                        "asked_at": "2026-09-24T14:02:00Z",
+                        "heading": "## Q3",
+                        "reply": None,
+                    },
+                ],
+                "reply": None,
+                "replied_at": None,
+                "split": False,
+            }
+        ]
+        assert [
+            (part["block"]["id"], part["block"]["writer_asked"])
+            for part in line["body"]
+            if part["type"] == "block"
+        ] == [("Q1", True), ("Q2", False), ("Q3", True)]
+
+    def test_a_reply_that_kept_the_headings_splits_per_block(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project, item, job = self._questioned(container, session, environment)
+        reply = "## Q1\nThe north shore.\n\n## Q3\nLake Ilm."
+        self._replied(container, session, project, environment, job, reply)
+
+        line = next(
+            each for each in _items(container, project) if each["id"] == str(item.id)
+        )
+
+        [clarification] = line["clarifications"]
+        assert [each["reply"] for each in clarification["questions"]] == [
+            "The north shore.",
+            "Lake Ilm.",
+        ]
+        assert (
+            clarification["reply"],
+            clarification["replied_at"],
+            clarification["split"],
+        ) == (reply, "2026-09-24T14:21:00Z", True)
+        document = container.timeline_service().item_document(item.id)
+        assert (
+            document.model_dump(mode="json")["clarifications"] == line["clarifications"]
+        )
+
+    def test_a_reply_that_did_not_keep_them_shows_whole(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project, item, job = self._questioned(container, session, environment)
+        reply = "## Q1\nThe north shore, and the lake is Ilm."
+        self._replied(container, session, project, environment, job, reply)
+
+        line = next(
+            each for each in _items(container, project) if each["id"] == str(item.id)
+        )
+
+        [clarification] = line["clarifications"]
+        assert [each["reply"] for each in clarification["questions"]] == [
+            "The north shore, and the lake is Ilm.",
+            None,
+        ]
+        assert (clarification["reply"], clarification["split"]) == (reply, False)
+
+    def test_an_item_whose_writer_was_asked_nothing_has_no_clarification(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        run = _run(session, project, environment)
+        documents = container.document_service()
+        item = documents.register(project, run, "/work/Camp/docs/survey.md").item
+        documents.publish_read(
+            session.get_one(Document, item.id), "```question id=Q1\n```\n", run.id
+        )
+
+        lines = _items(container, project)
+
+        assert [line["clarifications"] for line in lines] == [[], []]
+        [part] = [part for part in lines[1]["body"] if part["type"] == "block"]
+        assert part["block"]["writer_asked"] is False
 
     def test_a_registered_document_whose_read_failed_has_no_text_and_awaits_nothing(
         self,

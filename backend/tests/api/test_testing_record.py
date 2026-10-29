@@ -36,7 +36,7 @@ from app.models import (
     Work,
     WriterQuestion,
 )
-from app.models.reference import ProjectState, SessionState, VersionCause
+from app.models.reference import ProjectState, SessionState, VersionCause, WorkTrigger
 from app.schemas.testing_record import OPENING_WORDS
 from app.services.chat_close_service import ChatCloseService
 from app.services.container import ServiceContainer
@@ -111,6 +111,10 @@ def _worker_attachments_path(item_id: uuid.UUID | str) -> str:
 
 def _writer_questions_path(item_id: uuid.UUID | str) -> str:
     return f"/api/testing/items/{item_id}/writer-questions"
+
+
+def _clarification_path(item_id: uuid.UUID | str) -> str:
+    return f"/api/testing/items/{item_id}/clarification"
 
 
 def _chat_answers_path(project_id: uuid.UUID | str) -> str:
@@ -1695,6 +1699,7 @@ ENDPOINTS = [
         _writer_questions_path(NO_ROW),
         {"questions": [{"block": "Q1", "question": "Which?"}]},
     ),
+    (_clarification_path(NO_ROW), {"reply": "Lake Ilm."}),
     (
         _chat_answers_path(NO_ROW),
         {"block": f"{NO_ROW}/D1", "value": "Yes", "for": "ada"},
@@ -2082,6 +2087,120 @@ class TestCreateWriterQuestions:
         self, client: FlaskClient, document: Item, body: dict[str, Any]
     ) -> None:
         response = client.post(_writer_questions_path(document.id), json=body)
+
+        assert response.status_code == 400
+
+
+@pytest.mark.usefixtures("person")
+class TestCreateClarification:
+    @pytest.fixture
+    def document(
+        self,
+        session: Session,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> Item:
+        """A document a worker's run registered, read at its run's end,
+        committed so that a refused call's rollback keeps it."""
+        run = models.Session(
+            project_id=project.id,
+            environment_id=environment.id,
+            kind_code="work",
+            conversation_id="conv-camp",
+            cwd="/work/Camp",
+            token_hash="2" * 64,
+            state_code=SessionState.IDLE,
+        )
+        session.add(run)
+        session.flush()
+        container.record_service().place_work(project, run, "Writing the refinement")
+        documents = container.document_service()
+        item = documents.register(project, run, REGISTERED).item
+        documents.publish_read(session.get_one(Document, item.id), QUESTIONED, run.id)
+        session.commit()
+        return item
+
+    def test_the_reply_is_the_documents_clarification_split_per_block(
+        self,
+        client: FlaskClient,
+        session: Session,
+        project: Project,
+        document: Item,
+    ) -> None:
+        client.post(
+            _writer_questions_path(document.id),
+            json={
+                "questions": [
+                    {"block": "Q2", "question": "Which lake?"},
+                    {"block": "Q1", "question": "Which site?"},
+                ]
+            },
+        )
+
+        response = client.post(
+            _clarification_path(document.id),
+            json={"reply": "## Q1\nThe north shore.\n\n## Q2\nLake Ilm."},
+        )
+
+        assert response.status_code == 201
+        run_id = uuid.UUID(response.get_json()["id"])
+        run = session.get_one(models.Session, run_id)
+        assert (run.kind_code, run.conversation_id) == ("work", "conv-camp")
+        assert session.get_one(Work, run_id).trigger_code is None
+        [asking] = session.scalars(
+            select(Work).where(Work.trigger_code == WorkTrigger.WORKER_TURN_ENDED)
+        )
+        assert asking.trigger_item_id == document.created_by_session_id
+        line = _timeline_item(client, str(project.id), str(document.id))
+        [clarification] = line["clarifications"]
+        assert [
+            (each["block"], each["reply"]) for each in clarification["questions"]
+        ] == [("Q1", "The north shore."), ("Q2", "Lake Ilm.")]
+        assert clarification["split"] is True
+        run_line = _timeline_item(client, str(project.id), str(run_id))
+        assert run_line["title"] == f"Clarify {REGISTERED}"
+        assert run_line["done"]["cause"] == "turn_ended"
+
+    def test_an_unknown_item_is_not_found(self, client: FlaskClient) -> None:
+        response = client.post(
+            _clarification_path(uuid.uuid4()), json={"reply": "Lake Ilm."}
+        )
+
+        assert response.status_code == 404
+
+    def test_a_document_asked_nothing_or_replied_to_already_conflicts(
+        self, client: FlaskClient, document: Item
+    ) -> None:
+        asked_nothing = client.post(
+            _clarification_path(document.id), json={"reply": "Lake Ilm."}
+        )
+        client.post(
+            _writer_questions_path(document.id),
+            json={"questions": [{"block": "Q1", "question": "Which site?"}]},
+        )
+        assert (
+            client.post(
+                _clarification_path(document.id), json={"reply": "North."}
+            ).status_code
+            == 201
+        )
+
+        again = client.post(_clarification_path(document.id), json={"reply": "South."})
+
+        assert (asked_nothing.status_code, again.status_code) == (409, 409)
+        assert asked_nothing.get_json()["error"].endswith(
+            "because its writer was asked nothing"
+        )
+        assert again.get_json()["error"].endswith(
+            "because the writer has replied to the pass that asked already"
+        )
+
+    @pytest.mark.parametrize("body", [{}, {"reply": ""}], ids=["none", "an-empty-one"])
+    def test_a_body_with_no_reply_is_invalid(
+        self, client: FlaskClient, document: Item, body: dict[str, Any]
+    ) -> None:
+        response = client.post(_clarification_path(document.id), json=body)
 
         assert response.status_code == 400
 

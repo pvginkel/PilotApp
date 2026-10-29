@@ -1325,6 +1325,40 @@
         "title": "InventedChatAnswerCreateSchema",
         "type": "object"
       },
+      "InventedClarificationCreateSchema.6d6b324": {
+        "description": "The writer's reply to the questions a pre-ruling pass asked about a\nregistered document's blocks.",
+        "properties": {
+          "reply": {
+            "description": "The reply, the clarification run's turn's final text, verbatim: split per block under the headings it was asked for, `## <local id>`, or not",
+            "examples": [
+              "## D2\nThe OpenAPI cache the frontend reads."
+            ],
+            "minLength": 1,
+            "title": "Reply",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reply"
+        ],
+        "title": "InventedClarificationCreateSchema",
+        "type": "object"
+      },
+      "InventedClarificationSchema.6d6b324": {
+        "properties": {
+          "id": {
+            "description": "The clarification run's work item",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "InventedClarificationSchema",
+        "type": "object"
+      },
       "InventedEnvironmentSchema.6d6b324": {
         "description": "An environment of the record, by its KubeCoder id and its name.",
         "properties": {
@@ -2127,6 +2161,14 @@
             "description": "A prose item's text but the opening's, as drawn: its prose parts and blocks in order, split at each block's own section's edges, without the front matter and a first heading that is its title; null for the opening, work and waits",
             "title": "Body"
           },
+          "clarifications": {
+            "description": "Pilot's questions to a registered document's writer and the writer's reply (F52.2): one per pre-ruling pass that asked about its blocks, in the order first asked; empty for every other item",
+            "items": {
+              "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.ClarificationSchema"
+            },
+            "title": "Clarifications",
+            "type": "array"
+          },
           "concept": {
             "description": "Whether the latest save of its text is held, its text shown as last published until a parseable save arrives (F78)",
             "title": "Concept",
@@ -2365,6 +2407,7 @@
           "edited_at",
           "attachments",
           "asked_writer_about",
+          "clarifications",
           "work",
           "project_id"
         ],
@@ -2685,6 +2728,11 @@
               }
             ],
             "description": "How the answer reached the record: `app` for a person's unless the text names another; null for Pilot's unless it names one, and while unanswered"
+          },
+          "writer_asked": {
+            "description": "Whether Pilot asked the registered document's writer about the block (F52.2), which its line says; false for every other block",
+            "title": "Writer Asked",
+            "type": "boolean"
           }
         },
         "required": [
@@ -2705,6 +2753,7 @@
           "done",
           "claim",
           "deferral",
+          "writer_asked",
           "section"
         ],
         "title": "BlockSchema",
@@ -2776,6 +2825,64 @@
           "title"
         ],
         "title": "ClaimedWorkSchema",
+        "type": "object"
+      },
+      "ItemDocumentSchema.1fdd8ae.ClarificationSchema": {
+        "description": "One pre-ruling pass's questions to a registered document's writer and\nthe writer's reply, which the overlay shows as one section, \"Pilot asked\nthe writer · <stamp>\" (F52.2; DB 257).",
+        "properties": {
+          "asked_at": {
+            "description": "The section's stamp: when the pass first asked about the document",
+            "format": "date-time",
+            "title": "Asked At",
+            "type": "string"
+          },
+          "questions": {
+            "description": "The questions, in their blocks' order",
+            "items": {
+              "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.WriterQuestionSchema"
+            },
+            "title": "Questions",
+            "type": "array"
+          },
+          "replied_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the reply came, the run's turn's end; null until it does",
+            "title": "Replied At"
+          },
+          "reply": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The writer's reply, whole: the clarification run's turn's final text, which may answer other documents' questions too; null until its turn ends with one",
+            "title": "Reply"
+          },
+          "split": {
+            "description": "Whether the reply kept the asked shape, every question's `reply` holding its part: shown per block, else whole; false while there is no reply",
+            "title": "Split",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "asked_at",
+          "questions",
+          "reply",
+          "replied_at",
+          "split"
+        ],
+        "title": "ClarificationSchema",
         "type": "object"
       },
       "ItemDocumentSchema.1fdd8ae.ConfirmationReasonSchema": {
@@ -3470,6 +3577,65 @@
         "title": "WorkSchema",
         "type": "object"
       },
+      "ItemDocumentSchema.1fdd8ae.WriterQuestionSchema": {
+        "description": "A question Pilot asked a registered document's writer about one of its\nblocks (F52.2), with the writer's answer to it.",
+        "properties": {
+          "asked_at": {
+            "description": "When it was asked",
+            "format": "date-time",
+            "title": "Asked At",
+            "type": "string"
+          },
+          "block": {
+            "description": "The asked block's local id",
+            "examples": [
+              "D2"
+            ],
+            "title": "Block",
+            "type": "string"
+          },
+          "heading": {
+            "description": "The heading the clarification run asked the writer to answer it under, as its first turn wrote it: `## <local id>`, or `## <path> <local id>` where another document asked about has a block of that local id",
+            "examples": [
+              "## D2"
+            ],
+            "title": "Heading",
+            "type": "string"
+          },
+          "question": {
+            "description": "The question, verbatim",
+            "examples": [
+              "Which cache does 'the cache' mean?"
+            ],
+            "title": "Question",
+            "type": "string"
+          },
+          "reply": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The writer's reply under that heading, to the next heading of the same or a higher level; null until the reply comes, and where it does not keep the heading or holds nothing under it",
+            "examples": [
+              "The OpenAPI cache the frontend reads."
+            ],
+            "title": "Reply"
+          }
+        },
+        "required": [
+          "block",
+          "question",
+          "asked_at",
+          "heading",
+          "reply"
+        ],
+        "title": "WriterQuestionSchema",
+        "type": "object"
+      },
       "LinkSettingsSchema.fb10421": {
         "description": "The link settings the deployment's environment sets (F91, F93); a\nsetting left out or null is unset.",
         "properties": {
@@ -3932,6 +4098,11 @@
               }
             ],
             "description": "How the answer reached the record: `app` for a person's unless the text names another; null for Pilot's unless it names one, and while unanswered"
+          },
+          "writer_asked": {
+            "description": "Whether Pilot asked the registered document's writer about the block (F52.2), which its line says; false for every other block",
+            "title": "Writer Asked",
+            "type": "boolean"
           }
         },
         "required": [
@@ -3952,6 +4123,7 @@
           "done",
           "claim",
           "deferral",
+          "writer_asked",
           "section"
         ],
         "title": "BlockSchema",
@@ -6467,6 +6639,11 @@
               }
             ],
             "description": "How the answer reached the record: `app` for a person's unless the text names another; null for Pilot's unless it names one, and while unanswered"
+          },
+          "writer_asked": {
+            "description": "Whether Pilot asked the registered document's writer about the block (F52.2), which its line says; false for every other block",
+            "title": "Writer Asked",
+            "type": "boolean"
           }
         },
         "required": [
@@ -6487,6 +6664,7 @@
           "done",
           "claim",
           "deferral",
+          "writer_asked",
           "section"
         ],
         "title": "BlockSchema",
@@ -6558,6 +6736,64 @@
           "title"
         ],
         "title": "ClaimedWorkSchema",
+        "type": "object"
+      },
+      "TimelineSchema.1fdd8ae.ClarificationSchema": {
+        "description": "One pre-ruling pass's questions to a registered document's writer and\nthe writer's reply, which the overlay shows as one section, \"Pilot asked\nthe writer · <stamp>\" (F52.2; DB 257).",
+        "properties": {
+          "asked_at": {
+            "description": "The section's stamp: when the pass first asked about the document",
+            "format": "date-time",
+            "title": "Asked At",
+            "type": "string"
+          },
+          "questions": {
+            "description": "The questions, in their blocks' order",
+            "items": {
+              "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.WriterQuestionSchema"
+            },
+            "title": "Questions",
+            "type": "array"
+          },
+          "replied_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the reply came, the run's turn's end; null until it does",
+            "title": "Replied At"
+          },
+          "reply": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The writer's reply, whole: the clarification run's turn's final text, which may answer other documents' questions too; null until its turn ends with one",
+            "title": "Reply"
+          },
+          "split": {
+            "description": "Whether the reply kept the asked shape, every question's `reply` holding its part: shown per block, else whole; false while there is no reply",
+            "title": "Split",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "asked_at",
+          "questions",
+          "reply",
+          "replied_at",
+          "split"
+        ],
+        "title": "ClarificationSchema",
         "type": "object"
       },
       "TimelineSchema.1fdd8ae.ConfirmationReasonSchema": {
@@ -7105,6 +7341,14 @@
             "description": "A prose item's text but the opening's, as drawn: its prose parts and blocks in order, split at each block's own section's edges, without the front matter and a first heading that is its title; null for the opening, work and waits",
             "title": "Body"
           },
+          "clarifications": {
+            "description": "Pilot's questions to a registered document's writer and the writer's reply (F52.2): one per pre-ruling pass that asked about its blocks, in the order first asked; empty for every other item",
+            "items": {
+              "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.ClarificationSchema"
+            },
+            "title": "Clarifications",
+            "type": "array"
+          },
           "concept": {
             "description": "Whether the latest save of its text is held, its text shown as last published until a parseable save arrives (F78)",
             "title": "Concept",
@@ -7337,6 +7581,7 @@
           "edited_at",
           "attachments",
           "asked_writer_about",
+          "clarifications",
           "work"
         ],
         "title": "TimelineItemSchema",
@@ -7557,6 +7802,65 @@
           "retried"
         ],
         "title": "WorkSchema",
+        "type": "object"
+      },
+      "TimelineSchema.1fdd8ae.WriterQuestionSchema": {
+        "description": "A question Pilot asked a registered document's writer about one of its\nblocks (F52.2), with the writer's answer to it.",
+        "properties": {
+          "asked_at": {
+            "description": "When it was asked",
+            "format": "date-time",
+            "title": "Asked At",
+            "type": "string"
+          },
+          "block": {
+            "description": "The asked block's local id",
+            "examples": [
+              "D2"
+            ],
+            "title": "Block",
+            "type": "string"
+          },
+          "heading": {
+            "description": "The heading the clarification run asked the writer to answer it under, as its first turn wrote it: `## <local id>`, or `## <path> <local id>` where another document asked about has a block of that local id",
+            "examples": [
+              "## D2"
+            ],
+            "title": "Heading",
+            "type": "string"
+          },
+          "question": {
+            "description": "The question, verbatim",
+            "examples": [
+              "Which cache does 'the cache' mean?"
+            ],
+            "title": "Question",
+            "type": "string"
+          },
+          "reply": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The writer's reply under that heading, to the next heading of the same or a higher level; null until the reply comes, and where it does not keep the heading or holds nothing under it",
+            "examples": [
+              "The OpenAPI cache the frontend reads."
+            ],
+            "title": "Reply"
+          }
+        },
+        "required": [
+          "block",
+          "question",
+          "asked_at",
+          "heading",
+          "reply"
+        ],
+        "title": "WriterQuestionSchema",
         "type": "object"
       },
       "TransitionRequestSchema.e86ccd6": {
@@ -11882,6 +12186,84 @@
           }
         ],
         "summary": "Hang files on the item as the project's session attaches them in one call (F36.1, F37.1): copied from its environment, kept through the store, one batch, the project's next, after the item's attachments.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/items/{item_id}/clarification": {
+      "post": {
+        "description": "Returns:     201: The clarification run's work item     400: The body is invalid, or the stage is prd     404: No item has the id     409: Its writer was asked nothing, or the pass that asked has its         reply already: the reason",
+        "operationId": "post__api_testing_items_{item_id}_clarification",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventedClarificationCreateSchema.6d6b324"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventedClarificationSchema.6d6b324"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Record the writer's reply to the questions asked about the registered document's blocks (`writer-questions`), as the clarification run of the pass that asked records it (F52.2): the run placed on the conversation of the run that registered the document, its turn ended with the reply, nothing started; the document's clarification shows it.",
         "tags": [],
         "x-required-role": "editor"
       }

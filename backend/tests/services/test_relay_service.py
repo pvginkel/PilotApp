@@ -4181,7 +4181,7 @@ class TestClarificationRun:
         assert asking.state_code is SessionState.STOPPED
         assert _clarifications(session, asking) == []
 
-    def test_its_turns_final_text_is_its_reply(
+    def test_its_turns_final_text_is_its_reply_and_its_job_the_writer_answered(
         self,
         session: DbSession,
         container: ServiceContainer,
@@ -4212,7 +4212,17 @@ class TestClarificationRun:
             REPLY,
             turn.ended_at,
         )
-        assert len(_jobs_after(session, clarifying.id)) == 1
+        # The job after a worker's turn, its trigger item the run (DB 256).
+        [job] = session.scalars(
+            select(Work).where(Work.trigger_item_id == clarifying.id)
+        )
+        assert job.trigger_code is WorkTrigger.WORKER_TURN_ENDED
+        assert _jobs_after(session, clarifying.id) == ["Deciding what is next"]
+        assert (
+            container.brief_service()
+            .job(project, job, turn.ended_at, turn.ended_at)
+            .startswith("/pre-rule\n\nPilot's brief · the writer answered ·")
+        )
 
     @pytest.mark.parametrize("outcome", ["error", "ended", "interrupted"])
     def test_a_failed_run_has_no_reply_and_gets_no_job(

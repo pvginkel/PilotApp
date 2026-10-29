@@ -262,6 +262,25 @@ class InventedWriterQuestionsSchema(BaseModel):
     )
 
 
+class InventedClarificationCreateSchema(BaseModel):
+    """The writer's reply to the questions a pre-ruling pass asked about a
+    registered document's blocks."""
+
+    reply: str = Field(
+        min_length=1,
+        description=(
+            "The reply, the clarification run's turn's final text, verbatim: "
+            "split per block under the headings it was asked for, `## <local "
+            "id>`, or not"
+        ),
+        examples=["## D2\nThe OpenAPI cache the frontend reads."],
+    )
+
+
+class InventedClarificationSchema(BaseModel):
+    id: uuid.UUID = Field(description="The clarification run's work item")
+
+
 class InventedWorkCreateSchema(BaseModel):
     """A work item placed by repository and started, as Pilot starts one, in
     an environment of Pilot's own the stage's controller creates from it."""

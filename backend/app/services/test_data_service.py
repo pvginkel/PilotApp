@@ -19,7 +19,7 @@ from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.orm import Session
 
 from app.engine.attachments import AttachService, Copy
@@ -40,6 +40,7 @@ from app.models import (
     Attachment,
     Block,
     Chat,
+    ClarificationRun,
     Document,
     Environment,
     Item,
@@ -51,6 +52,7 @@ from app.models import (
     Turn,
     User,
     Work,
+    WriterQuestion,
 )
 from app.models import Session as AgentSession
 from app.models.reference import (
@@ -60,6 +62,7 @@ from app.models.reference import (
     SessionState,
     TransitionKind,
     UserKind,
+    WorkTrigger,
 )
 from app.schemas.testing_record import (
     InventedFileSchema,
@@ -67,12 +70,14 @@ from app.schemas.testing_record import (
     InventedWriterQuestionSchema,
 )
 from app.services.auth_service import AuthContext
+from app.services.clarification_service import asked, message, title
 from app.services.effect_service import EffectLine
 from app.services.people_service import PeopleService
 from app.services.pilot_store_service import JOB, Brain, PilotStoreService
 from app.services.pilot_work_service import PilotWorkService, Worker
 from app.services.session_scope import STORE_REPO
 from app.services.session_start_service import SessionStartService
+from app.services.start_gate import WORK_KIND
 
 SLUG = "recipe-box"
 """The open project's slug; the draft beside it has none."""
@@ -357,6 +362,9 @@ NOTICE_TEXT = "# {title}\n"
 
 PASS_BRIEF = "An invented pre-ruling pass, made for a test."
 """The one Turn of the job's Session a spec's pass asks the writer in."""
+
+PASS_TITLE = "Pre-ruling, invented"
+"""The line of a spec's pass once its writer has replied."""
 
 
 class TestDataService:
@@ -937,6 +945,91 @@ class TestDataService:
         session.turn_ended_at = now
         self.db.flush()
         return asked
+
+    def clarify(self, item_id: uuid.UUID, reply: str) -> AgentSession:
+        """The writer's `reply` to the questions a pre-ruling pass asked about
+        the registered document's blocks (`ask_writer`), as the pass's
+        clarification run records it (F52.2; DB 254, 255). A spec's pass,
+        which has no work item, is given one: the job after the turn of the
+        run that registered the document, done. The run is placed on that
+        run's conversation and in its environment, titled and its first Turn
+        written as the pass's end places it, and its turn ended with `reply`,
+        its work item done. No controller call is made, and no job follows.
+
+        Returns:
+            The clarification run's Session
+
+        Raises:
+            RecordNotFoundException: no item has the id.
+            InvalidOperationException: its writer was asked nothing, or the
+                pass that asked has its clarification run already.
+        """
+        item = self.db.get(Item, item_id)
+        if item is None:
+            raise RecordNotFoundException("Item", str(item_id))
+        operation = f"record the writer's reply on item {item_id}"
+        pass_id = self.db.scalars(
+            select(Turn.session_id)
+            .join(WriterQuestion, WriterQuestion.turn_id == Turn.id)
+            .join(Block, Block.id == WriterQuestion.block_id)
+            .where(Block.document_id == item.id)
+            .order_by(WriterQuestion.id)
+            .limit(1)
+        ).first()
+        if pass_id is None:
+            raise InvalidOperationException(operation, "its writer was asked nothing")
+        if self.db.scalar(select(exists().where(ClarificationRun.pass_id == pass_id))):
+            raise InvalidOperationException(
+                operation, "the writer has replied to the pass that asked already"
+            )
+        project = self.db.get_one(Project, item.project_id)
+        # A registered document is a worker's run's (F85.1).
+        assert item.created_by_session_id is not None
+        writer = self.db.get_one(AgentSession, item.created_by_session_id)
+        now = self.db.scalar(select(func.now()))
+        assert now is not None
+        if self.db.get(Work, pass_id) is None:
+            self.record_service.place_work(
+                project,
+                self.db.get_one(AgentSession, pass_id),
+                PASS_TITLE,
+                trigger=WorkTrigger.WORKER_TURN_ENDED,
+                trigger_item_id=writer.id,
+            )
+            self.record_service.work_done(pass_id, now)
+        questions = asked(self.db, pass_id)
+        run = AgentSession(
+            project_id=project.id,
+            environment_id=writer.environment_id,
+            kind_code=WORK_KIND,
+            conversation_id=writer.conversation_id,
+            cwd=writer.cwd,
+            agent=writer.agent,
+            token_hash=hashlib.sha256(uuid.uuid4().bytes).hexdigest(),
+            state_code=SessionState.IDLE,
+            turns=1,
+            turn_started_at=now,
+            turn_ended_at=now,
+        )
+        self.db.add(run)
+        self.db.flush()
+        turn = Turn(
+            session_id=run.id, seq=1, message=message(questions), started_at=now
+        )
+        turn.ended_at = now
+        self.db.add(turn)
+        self.record_service.place_work(
+            project,
+            run,
+            title(questions),
+            repo=self.db.get_one(Work, writer.id).repo,
+        )
+        self.db.add(
+            ClarificationRun(id=run.id, pass_id=pass_id, reply=reply, replied_at=now)
+        )
+        self.record_service.work_done(run.id, now)
+        self.db.flush()
+        return run
 
     def answer_in_chat(
         self,

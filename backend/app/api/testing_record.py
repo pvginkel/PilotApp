@@ -35,6 +35,8 @@ from app.schemas.testing_record import (
     InventedAttachmentsCreateSchema,
     InventedAttachmentsSchema,
     InventedChatAnswerCreateSchema,
+    InventedClarificationCreateSchema,
+    InventedClarificationSchema,
     InventedEnvironmentSchema,
     InventedFaultSchema,
     InventedItemCreateSchema,
@@ -572,6 +574,39 @@ def create_writer_questions(
     data = InventedWriterQuestionsCreateSchema.model_validate(request.get_json())
     blocks = test_data_service.ask_writer(item_id, data.questions)
     return InventedWriterQuestionsSchema(blocks=blocks).model_dump(mode="json"), 201
+
+
+@testing_record_bp.route("/items/<uuid:item_id>/clarification", methods=["POST"])
+@api.validate(
+    json=InventedClarificationCreateSchema,
+    resp=SpectreeResponse(
+        HTTP_201=InventedClarificationSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def create_clarification(
+    item_id: uuid.UUID,
+    test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
+) -> Any:
+    """Record the writer's reply to the questions asked about the registered
+    document's blocks (`writer-questions`), as the clarification run of the
+    pass that asked records it (F52.2): the run placed on the conversation of
+    the run that registered the document, its turn ended with the reply,
+    nothing started; the document's clarification shows it.
+
+    Returns:
+        201: The clarification run's work item
+        400: The body is invalid, or the stage is prd
+        404: No item has the id
+        409: Its writer was asked nothing, or the pass that asked has its
+            reply already: the reason
+    """
+    data = InventedClarificationCreateSchema.model_validate(request.get_json())
+    run = test_data_service.clarify(item_id, data.reply)
+    return InventedClarificationSchema(id=run.id).model_dump(mode="json"), 201
 
 
 @testing_record_bp.route("/projects/<uuid:project_id>/chat/answers", methods=["POST"])

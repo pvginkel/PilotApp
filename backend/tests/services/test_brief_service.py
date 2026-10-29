@@ -18,6 +18,7 @@ from app.models import (
     Block,
     Chat,
     ClaimAssignment,
+    ClarificationRun,
     Document,
     Environment,
     Item,
@@ -30,6 +31,7 @@ from app.models import (
     Turn,
     User,
     Work,
+    WriterQuestion,
 )
 from app.models.reference import (
     AnswerChannel,
@@ -785,6 +787,333 @@ class TestWorkerTurnEnded:
             "Auto pilot: off — the granted column asks for this session"
             f" (rules/grants.md).\n{PAUSE_LINE}"
         )
+
+
+CACHE = """# The cut-over
+
+```question id=Q1
+```
+
+## Which cache?
+
+```decision id=D2
+options:
+  - OpenAPI
+  - Vite
+```
+
+## Keep the shim?
+
+```decision id=D4
+options:
+  - Keep
+  - Drop
+```
+"""
+ASKED = datetime(2026, 10, 26, 9, 31, 0, tzinfo=UTC)
+REPLIED = datetime(2026, 10, 26, 9, 40, 0, tzinfo=UTC)
+ASKS_NOTHING = (
+    "This pass asks nothing: what is still unclear is the operator's, the"
+    " clarification beside the ask."
+)
+
+
+class TestWriterAnswered:
+    """The job after a clarification run's turn: the run, the questions as
+    asked and the writer's answer as each document records it, and that the
+    pass asks nothing (design 3 §5.1, §5.3; DB 256, 257; V08)."""
+
+    def _asked(
+        self,
+        db: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        documents: dict[str, str],
+        questions: list[tuple[str, str, str]],
+    ) -> tuple[models.Session, dict[str, Item]]:
+        """A worker's run on task fix that registered `documents`, by path,
+        its turn ended, and the pass after it, which asked `questions`, each
+        a path, a local id and the question, in that order."""
+        assert container.plan_service().save(project, json.dumps(PLAN).encode()) == []
+        run = _worker_run(db, container, project, "fix")
+        run.conversation_id = "conv-soup"
+        registered = {
+            path: container.document_service().register(project, run, path).item
+            for path in documents
+        }
+        _turn_ended(db, container, run, LAST_WORDS)
+        for path, text in documents.items():
+            container.document_service().publish_read(
+                db.get_one(Document, registered[path].id), text, run.id
+            )
+        asking = models.Session(
+            project_id=project.id,
+            kind_code="job",
+            cwd="/work/PilotProjects",
+            token_hash="9" * 64,
+            state_code=SessionState.IDLE,
+        )
+        db.add(asking)
+        db.flush()
+        turn = Turn(session_id=asking.id, seq=1, message="/pre-rule", started_at=ASKED)
+        db.add(turn)
+        container.record_service().place_work(
+            project,
+            asking,
+            "Pre-ruling soup-club/2",
+            trigger=WorkTrigger.WORKER_TURN_ENDED,
+            trigger_item_id=run.id,
+        )
+        for path, local_id, question in questions:
+            db.add(
+                WriterQuestion(
+                    turn_id=turn.id,
+                    block_id=db.scalars(
+                        select(Block.id).where(
+                            Block.document_id == registered[path].id,
+                            Block.local_id == local_id,
+                        )
+                    ).one(),
+                    question=question,
+                    asked_at=ASKED,
+                )
+            )
+        db.flush()
+        return asking, registered
+
+    def _clarifying(
+        self,
+        db: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        asking: models.Session,
+        reply: str | None,
+        title: str,
+    ) -> models.Session:
+        """The pass's clarification run, its turn ended at `REPLIED` with
+        `reply`."""
+        clarifying = models.Session(
+            project_id=project.id,
+            environment_id=WORKER_ENV,
+            kind_code="work",
+            conversation_id="conv-soup",
+            cwd="/work/Soup",
+            token_hash="8" * 64,
+            state_code=SessionState.IDLE,
+        )
+        db.add(clarifying)
+        db.flush()
+        container.record_service().place_work(
+            project, clarifying, title, "fix", repo="example/Soup"
+        )
+        db.add(
+            ClarificationRun(
+                id=clarifying.id,
+                pass_id=asking.id,
+                reply=reply,
+                replied_at=None if reply is None else REPLIED,
+            )
+        )
+        container.record_service().work_done(clarifying.id, REPLIED)
+        return clarifying
+
+    def test_a_split_reply_per_block_and_every_line_in_the_frames_order(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+    ) -> None:
+        asking, registered = self._asked(
+            session,
+            container,
+            opened,
+            {"/work/Soup/cut-over.md": CACHE},
+            [
+                (
+                    "/work/Soup/cut-over.md",
+                    "D2",
+                    'Does "the cache" mean the OpenAPI one?',
+                ),
+                ("/work/Soup/cut-over.md", "D4", "Which file is the shim?"),
+                ("/work/Soup/cut-over.md", "Q1", "How long is the cut-over?"),
+            ],
+        )
+        clarifying = self._clarifying(
+            session,
+            container,
+            opened,
+            asking,
+            "Answers below.\n\n## D2\nThe OpenAPI cache.\n\n## D4\nThe old loader,"
+            "\nkept until the client is regenerated.\n\n## Q1\nAn hour.",
+            "Clarify /work/Soup/cut-over.md",
+        )
+        run = session.get_one(Item, session.get_one(Work, asking.id).trigger_item_id)
+        cut_over = registered["/work/Soup/cut-over.md"]
+
+        brief = briefs.job(opened, _after(clarifying), AT, LATER)
+
+        path = session.get_one(Document, cut_over.id).path
+        assert brief == (
+            "/pre-rule\n\n"
+            'Pilot\'s brief · the writer answered · project "Soup club" ·'
+            " /work/Projects/soup-club · 2026-10-26T11:05:40Z\n\n"
+            "Auto pilot: off — the granted column asks for this session"
+            " (rules/grants.md).\n\n"
+            'The clarification run: "Clarify /work/Soup/cut-over.md"'
+            f' ({clarifying.id}), of the work item "Fixing the stock" ({run.id}),'
+            " task fix; its turn ended 2026-10-26T09:40:00Z.\n"
+            f"Asked 2026-10-26T09:31:00Z on {path} ({cut_over.id}):\n"
+            "- Q1: How long is the cut-over?\n"
+            '- D2 "Which cache?": Does "the cache" mean the OpenAPI one?\n'
+            '- D4 "Keep the shim?": Which file is the shim?\n'
+            "The writer's answer, as recorded on the document:\n"
+            "- Q1: An hour.\n"
+            "- D2: The OpenAPI cache.\n"
+            "- D4: The old loader,\n"
+            "  kept until the client is regenerated.\n"
+            f"Registered this run: nothing. {ASKS_NOTHING}\n\n"
+            f"{NOTES}\n"
+            '- fix "Fix the stock" · n1: Ask about salt\n'
+            '- taste "Taste it" · n3: Two spoons\n'
+            "- the plan · n2: Add a sweep task"
+        )
+
+    def test_a_reply_that_did_not_keep_the_headings_is_quoted_whole(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+    ) -> None:
+        asking, registered = self._asked(
+            session,
+            container,
+            opened,
+            {"/work/Soup/cut-over.md": CACHE},
+            [
+                ("/work/Soup/cut-over.md", "D2", "Which cache?"),
+                ("/work/Soup/cut-over.md", "D4", "Which shim?"),
+            ],
+        )
+        clarifying = self._clarifying(
+            session,
+            container,
+            opened,
+            asking,
+            "## D2\nThe OpenAPI cache.\n\nThe shim is the old loader.",
+            "Clarify /work/Soup/cut-over.md",
+        )
+
+        group = briefs.job(opened, _after(clarifying), AT, LATER).split("\n\n")[3]
+
+        cut_over = registered["/work/Soup/cut-over.md"]
+        path = session.get_one(Document, cut_over.id).path
+        assert group.split("\n")[1:] == [
+            f"Asked 2026-10-26T09:31:00Z on {path} ({cut_over.id}):",
+            '- D2 "Which cache?": Which cache?',
+            '- D4 "Keep the shim?": Which shim?',
+            "The writer's answer, as recorded on the document, whole — the reply"
+            " did not keep the asked headings:",
+            "> ## D2",
+            "> The OpenAPI cache.",
+            ">",
+            "> The shim is the old loader.",
+            f"Registered this run: nothing. {ASKS_NOTHING}",
+        ]
+
+    def test_a_turn_that_ended_with_no_text_has_no_answer(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+    ) -> None:
+        asking, _ = self._asked(
+            session,
+            container,
+            opened,
+            {"/work/Soup/cut-over.md": CACHE},
+            [("/work/Soup/cut-over.md", "Q1", "How long?")],
+        )
+        clarifying = self._clarifying(
+            session, container, opened, asking, None, "Clarify cut-over.md"
+        )
+
+        group = briefs.job(opened, _after(clarifying), AT, LATER).split("\n\n")[3]
+
+        assert group.split("\n")[2:] == [
+            "- Q1: How long?",
+            "The writer's answer: none — the run's turn ended with no text.",
+            f"Registered this run: nothing. {ASKS_NOTHING}",
+        ]
+
+    def test_each_document_in_timeline_order_and_what_the_run_registered_anyway(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+    ) -> None:
+        """Two documents of one pass, a local id they share named by its
+        document's path; the files attached on the run and a document it
+        registered anyway listed as any run's."""
+        asking, registered = self._asked(
+            session,
+            container,
+            opened,
+            {"/work/Soup/cut-over.md": CACHE, "/work/Soup/drain.md": STOCK + CACHE},
+            [
+                ("/work/Soup/drain.md", "Q1", "Which queue?"),
+                ("/work/Soup/cut-over.md", "Q1", "How long?"),
+            ],
+        )
+        clarifying = self._clarifying(
+            session,
+            container,
+            opened,
+            asking,
+            "## /work/Soup/cut-over.md Q1\nAn hour.\n## /work/Soup/drain.md Q1\n"
+            "The v1 broker's.",
+            "Clarify /work/Soup/cut-over.md and /work/Soup/drain.md",
+        )
+        notes = (
+            container.document_service()
+            .register(opened, clarifying, "/work/Soup/notes.md")
+            .item
+        )
+        container.document_service().publish_read(
+            session.get_one(Document, notes.id), STOCK, clarifying.id
+        )
+        _attached(session, opened, clarifying, "salt.txt")
+        session.add(
+            ItemAttachment(
+                item_id=clarifying.id,
+                attachment_id=session.scalars(select(Attachment.id)).one(),
+                position=1,
+                attached_at=AT,
+            )
+        )
+        session.flush()
+
+        group = briefs.job(opened, _after(clarifying), AT, LATER).split("\n\n")[3]
+
+        cut_over = session.get_one(Document, registered["/work/Soup/cut-over.md"].id)
+        drain = session.get_one(Document, registered["/work/Soup/drain.md"].id)
+        assert group.split("\n")[1:] == [
+            f"Asked 2026-10-26T09:31:00Z on {cut_over.path} ({cut_over.id}):",
+            "- Q1: How long?",
+            "The writer's answer, as recorded on the document:",
+            "- Q1: An hour.",
+            f"Asked 2026-10-26T09:31:00Z on {drain.path} ({drain.id}):",
+            "- Q1: Which queue?",
+            "The writer's answer, as recorded on the document:",
+            "- Q1: The v1 broker's.",
+            "Attached on the work item: 1 file (timeline.json lists it).",
+            "Registered this run, in the order registered:",
+            f"- {session.get_one(Document, notes.id).path} ({notes.id}) — published",
+            ASKS_NOTHING,
+        ]
 
 
 PAUSED_AT = datetime(2026, 10, 26, 9, 0, 0, tzinfo=UTC)

@@ -65,6 +65,7 @@ from app.schemas.timeline import (
     ChatPlaceSchema,
     ClaimedWorkSchema,
     ClaimSchema,
+    ClarificationSchema,
     ConfirmationReasonSchema,
     CurrentLineSchema,
     DeferralSchema,
@@ -84,7 +85,9 @@ from app.schemas.timeline import (
     TimelineSchema,
     UserSchema,
     WorkSchema,
+    WriterQuestionSchema,
 )
+from app.services.clarification_service import Clarification, on_documents
 from app.services.controller_outage import ControllerOutage
 from app.services.people_service import initials
 from app.services.relay_service import ENVIRONMENT_STOPPED
@@ -535,6 +538,7 @@ class TimelineService:
             self._users(set(), _answerers([parts])),
             self._chat_places({document.id: parts}),
             {},
+            frozenset(),
         )
         return ProjectDocumentSchema(
             title=dsl.parse(text).title,
@@ -556,9 +560,9 @@ class TimelineService:
         counts = {item_id: dsl.words(text) for item_id, text in texts.items()}
         edited = self._edited(list(texts))
         attachments = self._attachments([item.id for item, _, _ in rows])
-        asked = writer_asked(
-            self.db, [item.id for item, document, _ in rows if document is not None]
-        )
+        documents = [item.id for item, document, _ in rows if document is not None]
+        asked = writer_asked(self.db, documents)
+        clarified = on_documents(self.db, documents)
         works = work_status(
             self.db,
             [item.id for item, _, form in rows if form == WORK],
@@ -582,6 +586,11 @@ class TimelineService:
             ),
             self._chat_places(bodies),
             self._claims(bodies),
+            frozenset(
+                (document_id, local_id)
+                for document_id, local_ids in asked.items()
+                for local_id in local_ids
+            ),
         )
         held = set(
             self.db.scalars(
@@ -647,6 +656,10 @@ class TimelineService:
                 edited_at=edited.get(item.id),
                 attachments=attachments.get(item.id, []),
                 asked_writer_about=asked.get(item.id, []),
+                clarifications=[
+                    _clarification(clarification)
+                    for clarification in clarified.get(item.id, [])
+                ],
                 work=works[item.id] if form == WORK else None,
             )
             for item, document, form in rows
@@ -681,11 +694,13 @@ class TimelineService:
         users: dict[uuid.UUID | str, User],
         places: dict[tuple[uuid.UUID, str], ChatPlaceSchema],
         claims: dict[tuple[uuid.UUID, str], ClaimedWorkSchema],
+        asked: frozenset[tuple[uuid.UUID, str]],
     ) -> "_Reader":
         return _Reader(
             users=users,
             places=places,
             claims=claims,
+            asked=asked,
             tasks=dict(
                 self.db.execute(
                     select(PlanTask.task_id, PlanTask.title).where(
@@ -894,6 +909,7 @@ class _Reader:
     users: dict[uuid.UUID | str, User]
     places: dict[tuple[uuid.UUID, str], ChatPlaceSchema]
     claims: dict[tuple[uuid.UUID, str], ClaimedWorkSchema]
+    asked: frozenset[tuple[uuid.UUID, str]]
     tasks: dict[str, str]
     reasons: dict[str, ConfirmationReason]
 
@@ -959,12 +975,32 @@ class _Reader:
                 if block.answer == dsl.DEFERRED and block.to is not None
                 else None
             ),
+            writer_asked=(document_id, block.local_id) in self.asked,
             section=(
                 None
                 if block.section is None
                 else SectionSchema(heading=block.section.heading)
             ),
         )
+
+
+def _clarification(clarification: Clarification) -> ClarificationSchema:
+    return ClarificationSchema(
+        asked_at=clarification.asked_at,
+        questions=[
+            WriterQuestionSchema(
+                block=each.local_id,
+                question=each.question,
+                asked_at=each.asked_at,
+                heading=clarification.headings[each.block_id],
+                reply=clarification.parts.get(each.block_id),
+            )
+            for each in clarification.questions
+        ],
+        reply=clarification.reply,
+        replied_at=clarification.replied_at,
+        split=clarification.split,
+    )
 
 
 def _attachment(attachment: Attachment) -> AttachmentSchema:

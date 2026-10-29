@@ -534,6 +534,7 @@ class TestGetTimeline:
                     "edited_at": None,
                     "attachments": [],
                     "asked_writer_about": [],
+                    "clarifications": [],
                     "work": None,
                 },
                 {
@@ -593,6 +594,7 @@ class TestGetTimeline:
                                 "done": None,
                                 "claim": None,
                                 "deferral": None,
+                                "writer_asked": False,
                                 "section": None,
                             },
                         },
@@ -605,6 +607,7 @@ class TestGetTimeline:
                     "edited_at": None,
                     "attachments": [],
                     "asked_writer_about": [],
+                    "clarifications": [],
                     "work": None,
                 },
                 {
@@ -639,6 +642,7 @@ class TestGetTimeline:
                     "edited_at": None,
                     "attachments": [],
                     "asked_writer_about": [],
+                    "clarifications": [],
                     "work": None,
                 },
             ],

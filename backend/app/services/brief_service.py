@@ -30,6 +30,7 @@ from app.models import (
     Block,
     Chat,
     ClaimAssignment,
+    ClarificationRun,
     Document,
     Item,
     ItemAttachment,
@@ -52,6 +53,7 @@ from app.models.reference import (
     TransitionKind,
     WorkTrigger,
 )
+from app.services.clarification_service import Clarification, of_pass
 from app.services.session_record_service import read_records
 from app.services.session_scope import project_folder
 from app.services.turn_end_read_service import READ_FAILED
@@ -75,6 +77,12 @@ HOMELESS_HEADING = (
     "Deferrals without a home (a note names none of these blocks — write one,"
     " or answer the block anew in a new item):"
 )
+
+ASKS_NOTHING = (
+    "This pass asks nothing: what is still unclear is the operator's, the"
+    " clarification beside the ask."
+)
+"""The last line of the writer-answered brief (design 3 §5.3; DB 256)."""
 
 type Group = Sequence[str | None]
 """Lines of a brief kept together; one that does not hold is None."""
@@ -169,6 +177,9 @@ class BriefService:
         if work.trigger_code is WorkTrigger.WORKER_TURN_ENDED:
             # The job after a worker's turn names its run.
             assert work.trigger_item_id is not None
+            clarification = self.db.get(ClarificationRun, work.trigger_item_id)
+            if clarification is not None:
+                return self._writer_answered(project, clarification, triggered, at)
             return self._worker_turn_ended(project, work.trigger_item_id, triggered, at)
         if work.trigger_code is WorkTrigger.ITEM_DONE:
             # The job after an item's close names the item.
@@ -215,37 +226,9 @@ class BriefService:
         the files attached on the work item, and the claimed actions it was
         given (`_given`); then every open note and the deferrals without a
         home, the pass's (F57.4)."""
-        lines = [self._run_line(run_id)]
-        registered = self.db.execute(
-            select(Item.id, Document.path, Document.read_failed_at)
-            .join(Document, Document.id == Item.id)
-            .where(
-                Item.created_by_session_id == run_id,
-                Document.source_path.is_not(None),
-            )
-            .order_by(Item.seq)
-        ).all()
-        if registered:
-            failures = self._read_failures(run_id, len(registered))
-            lines.append("Registered this run, in the order registered:")
-            lines.extend(
-                f"- {path} ({item_id}) — "
-                + (
-                    "published"
-                    if failed is None
-                    else f"read failed: {failures[str(item_id)]}"
-                )
-                for item_id, path, failed in registered
-            )
-        else:
-            lines.append("Registered nothing this run.")
-        attached = self.db.scalar(
-            select(func.count())
-            .select_from(ItemAttachment)
-            .where(ItemAttachment.item_id == run_id)
-        )
-        if attached:
-            lines.append(f"Attached on the work item: {_files(attached)}.")
+        lines: list[str | None] = [self._run_line(run_id)]
+        lines.extend(self._registered(run_id) or ["Registered nothing this run."])
+        lines.append(self._attached(run_id))
         lines.extend(self._given(run_id))
         return _frame(
             PRE_RULE_SKILL,
@@ -256,6 +239,137 @@ class BriefService:
             lines,
             self._notes(project, None),
         )
+
+    def _writer_answered(
+        self,
+        project: Project,
+        run: ClarificationRun,
+        triggered: datetime,
+        at: datetime,
+    ) -> str:
+        """The job after the turn of the clarification run `run` (design 3
+        §5.3, *The writer answered*; DB 256): `/pre-rule`, then the run's
+        line, naming the work item whose conversation it resumed, and per
+        document its pass asked about, in timeline order, the questions as
+        asked and the writer's answer as the document records it
+        (`_clarified`); then the files attached on the run and what it
+        registered, as any run's, and that this pass asks nothing; then every
+        open note and the deferrals without a home."""
+        item = self.db.get_one(Item, run.id)
+        worker_id = self.db.get_one(Work, run.pass_id).trigger_item_id
+        # A clarification run's pass is the job after a worker's turn (DB 254),
+        # and the run is done at its turn's end when its job is placed.
+        assert worker_id is not None and item.done_at is not None
+        worker = self.db.get_one(Item, worker_id)
+        head = (
+            f'The clarification run: "{item.title}" ({item.id}), of the work item'
+            f' "{worker.title}" ({worker.id})'
+        )
+        if worker.plan_task_id is not None:
+            head += f", task {worker.plan_task_id}"
+        lines: list[str | None] = [f"{head}; its turn ended {utc_time(item.done_at)}."]
+        for clarification in of_pass(self.db, run.pass_id):
+            lines.extend(self._clarified(clarification))
+        lines.append(self._attached(run.id))
+        registered = self._registered(run.id)
+        if registered:
+            lines.extend([*registered, ASKS_NOTHING])
+        else:
+            lines.append(f"Registered this run: nothing. {ASKS_NOTHING}")
+        return _frame(
+            PRE_RULE_SKILL,
+            "the writer answered",
+            project,
+            at,
+            [_switch(project), self._trigger_paused(project, triggered)],
+            lines,
+            self._notes(project, None),
+        )
+
+    def _clarified(self, clarification: Clarification) -> list[str]:
+        """A document's clarification as the writer-answered brief gives it:
+        when it was first asked and the document, each question with its
+        block's local id and its section's heading, then the writer's answer
+        as recorded on the document (DB 257): per block where the reply kept
+        the asked headings, else whole, quoted; none where the run's turn
+        ended with no text."""
+        document = self.db.get_one(Document, clarification.item_id)
+        # A Writer Question is asked about a Block of a published text.
+        assert document.published_text is not None
+        sections = {
+            block.local_id: block.section.heading
+            for block in dsl.parse(document.published_text).blocks
+            if block.section is not None
+        }
+        lines = [
+            f"Asked {utc_time(clarification.asked_at)} on {document.path}"
+            f" ({document.id}):"
+        ]
+        for each in clarification.questions:
+            section = sections.get(each.local_id)
+            named = each.local_id if section is None else f'{each.local_id} "{section}"'
+            lines.append(f"- {named}: {each.question}")
+        if clarification.reply is None:
+            lines.append(
+                "The writer's answer: none — the run's turn ended with no text."
+            )
+        elif clarification.split:
+            lines.append("The writer's answer, as recorded on the document:")
+            lines.extend(
+                f"- {each.local_id}: "
+                + clarification.parts[each.block_id].replace("\n", "\n  ")
+                for each in clarification.questions
+            )
+        else:
+            lines.append(
+                "The writer's answer, as recorded on the document, whole — the reply"
+                " did not keep the asked headings:"
+            )
+            lines.extend(
+                f"> {line}" if line else ">"
+                for line in clarification.reply.splitlines()
+            )
+        return lines
+
+    def _registered(self, run_id: uuid.UUID) -> list[str]:
+        """The documents the run registered, in the order registered, each
+        published or its read failed with the reason the read recorded;
+        none where it registered none."""
+        registered = self.db.execute(
+            select(Item.id, Document.path, Document.read_failed_at)
+            .join(Document, Document.id == Item.id)
+            .where(
+                Item.created_by_session_id == run_id,
+                Document.source_path.is_not(None),
+            )
+            .order_by(Item.seq)
+        ).all()
+        if not registered:
+            return []
+        failures = self._read_failures(run_id, len(registered))
+        return [
+            "Registered this run, in the order registered:",
+            *(
+                f"- {path} ({item_id}) — "
+                + (
+                    "published"
+                    if failed is None
+                    else f"read failed: {failures[str(item_id)]}"
+                )
+                for item_id, path, failed in registered
+            ),
+        ]
+
+    def _attached(self, run_id: uuid.UUID) -> str | None:
+        """The files attached on the work item, counted; None for none."""
+        attached = self.db.scalar(
+            select(func.count())
+            .select_from(ItemAttachment)
+            .where(ItemAttachment.item_id == run_id)
+        )
+        if not attached:
+            return None
+        return f"Attached on the work item: {_files(attached)}."
 
     def _item_done(
         self, project: Project, item_id: uuid.UUID, triggered: datetime, at: datetime
