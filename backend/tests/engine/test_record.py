@@ -23,7 +23,12 @@ from app import models
 from app.database import scoped_session
 from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved, WriteBackOwed
 from app.engine.paths import sha256_hex, tree_path
-from app.engine.record import owes_write_back, resume_message, write_back_owed
+from app.engine.record import (
+    autopilot_may_take,
+    owes_write_back,
+    resume_message,
+    write_back_owed,
+)
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.extensions import db
 from app.models import (
@@ -4068,3 +4073,302 @@ class TestRecordServiceItemDoneLocks:
             assert session.get_one(Item, item_id).consumed_at is None
             assert session.get_one(Item, job.id).done_cause_code == "withdrawn"
         assert (job.state_code, job.turns) == (SessionState.STOPPED, 0)
+
+
+PUSH = """---
+title: Push the release
+---
+
+```decision id=C1
+type: confirmation
+because: auto-pilot-off
+proposal: Push the release.
+```
+"""
+
+
+def _pushed_because(because: str) -> str:
+    """`PUSH`, asked on `because`."""
+    return PUSH.replace("because: auto-pilot-off", f"because: {because}")
+
+
+CAMP_CHECKS = """---
+title: Camp checks
+---
+
+```decision id=C1
+type: confirmation
+because: rider
+proposal: Push with the map fix riding along.
+```
+
+```decision id=D1
+proposal: Cook on the fire.
+```
+
+```decision id=C2
+type: confirmation
+because: standing-grant
+proposal: Keep the deploy key past the project.
+```
+
+```decision id=C3
+type: confirmation
+because: auto-pilot-off
+proposal: Tag the release.
+answer: No
+by: agent
+at: 2026-10-12T09:30:00Z
+note: The tag waits for the map.
+```
+"""
+
+
+def _answer(
+    block: Block,
+) -> tuple[str | None, uuid.UUID | None, AnswerChannel | None]:
+    return block.answer, block.answered_by_user_id, block.via_code
+
+
+class TestAutopilotMayTake:
+    """The open confirmations the switch answers, read from `because` (F4.2,
+    F4.4; DB decision 58)."""
+
+    def test_the_open_confirmations_whose_reason_the_switch_answers_in_order(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        project_session: models.Session,
+    ) -> None:
+        checks = _bear(
+            session,
+            container,
+            opened,
+            project_session,
+            "document",
+            "Camp checks",
+            CAMP_CHECKS,
+        )[1]
+        bear = {
+            because: _bear(
+                session,
+                container,
+                opened,
+                project_session,
+                "decision",
+                "Push the release",
+                _pushed_because(because),
+            )[1]
+            for because in ("auto-pilot-off", "irreversible", "rider")
+        }
+        closed = _bear(
+            session,
+            container,
+            opened,
+            project_session,
+            "decision",
+            "Push the release",
+            PUSH,
+        )[0]
+        closed.done_at = datetime.now(UTC)
+        closed.done_cause_code = "finished"
+        session.flush()
+
+        assert session.execute(autopilot_may_take(opened)).all() == [
+            (checks.id, "C1"),
+            (bear["auto-pilot-off"].id, "C1"),
+            (bear["rider"].id, "C1"),
+        ]
+
+    def test_another_projects_are_not_the_projects(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        _bear(
+            session,
+            container,
+            opened,
+            project_session,
+            "decision",
+            "Push the release",
+            PUSH,
+        )
+        other = Project(created_by_user_id=person.id)
+        session.add(other)
+        session.flush()
+
+        assert session.execute(autopilot_may_take(other)).all() == []
+
+
+class TestRecordServiceAutopilotYes:
+    """The switch's Yes answers each open confirmation it would have taken as
+    the person's Yes, through `autopilot`, each answer doing what a person's
+    does (F4.2; DB decisions 7, 58; V02)."""
+
+    def test_it_answers_each_as_the_persons_yes_through_autopilot(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        checks_item, checks = _bear(
+            session,
+            container,
+            opened,
+            project_session,
+            "document",
+            "Camp checks",
+            CAMP_CHECKS,
+        )
+        push_item, push = _bear(
+            session,
+            container,
+            opened,
+            project_session,
+            "decision",
+            "Push the release",
+            PUSH,
+        )
+        before = datetime.now(UTC).replace(microsecond=0)
+
+        container.record_service().autopilot_yes(opened, person)
+
+        yes = ("Yes", person.id, AnswerChannel.AUTOPILOT)
+        assert _answer(_block(session, push, "C1")) == yes
+        assert _answer(_block(session, checks, "C1")) == yes
+        answered_at = _block(session, push, "C1").answered_at
+        assert answered_at is not None
+        assert before <= answered_at <= datetime.now(UTC)
+        assert push.published_text == PUSH.replace(
+            "proposal: Push the release.\n",
+            "proposal: Push the release.\nanswer: Yes\nby: ada\n"
+            f"at: {_z(answered_at)}\nvia: autopilot\n",
+        )
+        assert _done(push_item) == (answered_at, "answered", person.id)
+        assert _done(checks_item) == (None, None, None)
+
+    def test_a_kept_reason_another_ask_and_an_answered_one_are_left_as_they_are(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        _, checks = _bear(
+            session,
+            container,
+            opened,
+            project_session,
+            "document",
+            "Camp checks",
+            CAMP_CHECKS,
+        )
+        kept = {
+            because: _bear(
+                session,
+                container,
+                opened,
+                project_session,
+                "decision",
+                "Push the release",
+                _pushed_because(because),
+            )
+            for because in (
+                "irreversible",
+                "product-hold",
+                "self-approval",
+                "standing-grant",
+            )
+        }
+
+        container.record_service().autopilot_yes(opened, person)
+
+        for item, document in kept.values():
+            assert _answer(_block(session, document, "C1")) == (None, None, None)
+            assert item.done_at is None
+        assert _answer(_block(session, checks, "D1")) == (None, None, None)
+        assert _answer(_block(session, checks, "C2")) == (None, None, None)
+        assert _answer(_block(session, checks, "C3"))[0] == "No"
+        assert _block(session, checks, "C3").answered_by_user_id == _agent(session).id
+
+    def test_with_none_open_it_writes_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        _, document = _bear(
+            session,
+            container,
+            opened,
+            project_session,
+            "decision",
+            "Push the release",
+            _pushed_because("irreversible"),
+        )
+
+        container.record_service().autopilot_yes(opened, person)
+
+        assert _versions(session, document) == [
+            (1, VersionCause.BORN, _pushed_because("irreversible"))
+        ]
+
+    @pytest.mark.usefixtures("placing")
+    def test_an_item_of_pilots_own_places_the_job_after_each_yes(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+        person: User,
+    ) -> None:
+        brain = _brain(session, opened)
+        pushed = [
+            _bear(
+                session,
+                container,
+                opened,
+                brain,
+                "decision",
+                "Push the release",
+                _pushed_because(because),
+            )[0]
+            for because in ("auto-pilot-off", "rider")
+        ]
+
+        container.record_service().autopilot_yes(opened, person)
+
+        jobs = [_jobs_after(session, item) for item in pushed]
+        assert [len(each) for each in jobs] == [1, 1]
+        assert [session.get_one(Item, job.id).seq for (job,) in jobs] == [
+            pushed[-1].seq + 1,
+            pushed[-1].seq + 2,
+        ]
+
+    def test_a_registered_documents_yes_owes_its_write_back_and_continues_its_run(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        run = _ended_run(container, project, project_session)
+        item, document = _registered(session, container, project, run, PUSH)
+
+        container.record_service().autopilot_yes(project, person)
+
+        assert _done(item)[1:] == ("answered", person.id)
+        assert owes_write_back(item, document)
+        (work,) = _continuations(session, project)
+        assert item.consumed_session_id == work.id
+        assert _first_message(session, work) == CONTINUED.format(paths=REGISTERED_PATH)

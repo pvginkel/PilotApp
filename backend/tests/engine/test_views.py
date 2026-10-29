@@ -127,6 +127,16 @@ class TestViewService:
                     ),
                     "asks_under_autopilot": True,
                 },
+                {
+                    "code": "standing-grant",
+                    "name": "Standing grant",
+                    "description": (
+                        "A standing grant, a permission meant to outlast the project"
+                        " or reach past it, of the kept column: asked under auto"
+                        " pilot too."
+                    ),
+                    "asks_under_autopilot": True,
+                },
             ],
             "item_kinds": [
                 {"code": "action", "name": "Action", "form": "prose"},

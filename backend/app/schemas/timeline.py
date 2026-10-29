@@ -127,6 +127,13 @@ class ConfirmationReasonSchema(BaseModel):
     description: str = Field(
         description="When the agent uses the reason, one line, not the card's tooltip"
     )
+    asks_under_autopilot: bool = Field(
+        description=(
+            "Whether it asks under auto pilot too; false for a reason the switch "
+            "answers, whose open confirmation carries the auto pilot mark while "
+            "auto pilot is off (F4.2, F4.4)"
+        )
+    )
 
 
 class DeferralSchema(BaseModel):

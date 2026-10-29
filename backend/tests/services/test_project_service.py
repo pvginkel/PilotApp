@@ -50,6 +50,7 @@ from app.models import (
     Work,
 )
 from app.models.reference import (
+    AnswerChannel,
     AttachmentSource,
     ChatKind,
     CloseCause,
@@ -241,6 +242,39 @@ def _wait(
     session.add(wait)
     session.flush()
     return wait
+
+
+def _confirmations(
+    container: ServiceContainer,
+    session: DbSession,
+    run: models.Session,
+    *becauses: str,
+) -> list[Document]:
+    """One confirmation item per reason in `becauses`, added by `run`."""
+    project = session.get_one(Project, run.project_id)
+    documents = container.document_service()
+    return [
+        session.get_one(
+            Document,
+            documents.bear_item(
+                project,
+                "decision",
+                "Push the release",
+                run,
+                "---\ntitle: Push the release\n---\n\n```decision id=C1\n"
+                f"type: confirmation\nbecause: {because}\n"
+                "proposal: Push the release.\n```\n",
+            ).id,
+        )
+        for because in becauses
+    ]
+
+
+def _answered(
+    session: DbSession, document: Document
+) -> tuple[str | None, uuid.UUID | None, AnswerChannel | None]:
+    block = session.scalars(select(Block).where(Block.document_id == document.id)).one()
+    return block.answer, block.answered_by_user_id, block.via_code
 
 
 QUIET = Activity(running=False, work_running=False, waiting=False, wait_open=False)
@@ -803,6 +837,23 @@ class TestHead:
         head = container.project_service().head(ADA, made.id)
 
         assert head.open_items == 2
+
+    def test_the_open_confirmations_the_switch_would_answer_are_counted(
+        self, container: ServiceContainer, session: DbSession, environment: Environment
+    ) -> None:
+        made = _make(container, name="Camp")
+        run = _run(container, session, made, environment, SessionState.RUNNING)
+        _, rider, _ = _confirmations(
+            container, session, run, "auto-pilot-off", "rider", "standing-grant"
+        )
+        _confirmations(container, session, run, "irreversible")
+        service = container.project_service()
+        assert service.head(ADA, made.id).autopilot_may_take == 2
+
+        ada = session.scalars(select(User).where(User.handle == "ada")).one()
+        container.record_service().answer(rider, "C1", ada, "No")
+
+        assert service.head(ADA, made.id).autopilot_may_take == 1
 
     def test_the_running_work_is_named_and_the_other_open_items_counted(
         self, container: ServiceContainer, session: DbSession, environment: Environment
@@ -1555,6 +1606,87 @@ class TestTransition:
         assert autopilot_off == (TransitionKind.AUTOPILOT_OFF, *finished[1:])
         assert finished[2] == person.id
         assert _standing(made) == (ProjectState.FINISHED, False, False)
+
+    def test_auto_pilot_on_with_the_yes_answers_what_the_switch_takes_as_its_persons(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        environment: Environment,
+    ) -> None:
+        made = _make(container, name="Camp")
+        run = _run(container, session, made, environment, SessionState.RUNNING)
+        off, rider, kept = _confirmations(
+            container, session, run, "auto-pilot-off", "rider", "standing-grant"
+        )
+        before = _transitions(session, made)
+        service = container.project_service()
+
+        service.transition(
+            ADA, made.id, TransitionKind.AUTOPILOT_ON, autopilot_yes=True
+        )
+
+        ((written, _, by),) = _transitions(session, made)[len(before) :]
+        assert (written, by) == (TransitionKind.AUTOPILOT_ON, person.id)
+        assert made.autopilot
+        yes = ("Yes", person.id, AnswerChannel.AUTOPILOT)
+        assert [_answered(session, each) for each in (off, rider, kept)] == [
+            yes,
+            yes,
+            (None, None, None),
+        ]
+        assert service.head(ADA, made.id).autopilot_may_take == 0
+
+    def test_auto_pilot_on_without_the_yes_answers_nothing_and_asks_again(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        environment: Environment,
+    ) -> None:
+        made = _make(container, name="Camp")
+        run = _run(container, session, made, environment, SessionState.RUNNING)
+        (off,) = _confirmations(container, session, run, "auto-pilot-off")
+        service = container.project_service()
+
+        service.transition(ADA, made.id, TransitionKind.AUTOPILOT_ON)
+
+        assert made.autopilot
+        assert _answered(session, off) == (None, None, None)
+        assert service.head(ADA, made.id).autopilot_may_take == 1
+
+        service.transition(ADA, made.id, TransitionKind.AUTOPILOT_OFF)
+        service.transition(
+            ADA, made.id, TransitionKind.AUTOPILOT_ON, autopilot_yes=True
+        )
+
+        assert _answered(session, off) == ("Yes", person.id, AnswerChannel.AUTOPILOT)
+
+    @pytest.mark.usefixtures("starts")
+    def test_the_yes_to_an_item_of_pilots_own_places_the_job_after_it(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        environment: Environment,
+    ) -> None:
+        made = _make(container, name="Camp")
+        brain = _run(container, session, made, environment, SessionState.IDLE, "chat")
+        (off,) = _confirmations(container, session, brain, "auto-pilot-off")
+
+        container.project_service().transition(
+            ADA, made.id, TransitionKind.AUTOPILOT_ON, autopilot_yes=True
+        )
+
+        (job,) = session.scalars(
+            select(Work).where(
+                Work.trigger_code == WorkTrigger.ITEM_DONE,
+                Work.trigger_item_id == off.id,
+            )
+        )
+        assert job.session_kind_code == "job"
+        item = session.get_one(Item, off.id)
+        assert (item.done_cause_code, item.done_by_user_id) == ("answered", person.id)
 
     def test_transition_as_is_the_users_finish_as_the_callers_is(
         self,

@@ -94,6 +94,7 @@ def _head(head: ProjectHead) -> dict[str, Any]:
             for work in head.running_work
         ],
         open_items=head.open_items,
+        autopilot_may_take=head.autopilot_may_take,
         create_refusal=head.create_refusal,
     ).model_dump(mode="json")
 
@@ -374,19 +375,29 @@ def add_transition(
     project's sessions and closes its open items unanswered; Archive stops
     the sessions too, and nothing of the project starts after either. Reopen
     leaves auto pilot off. A resume lets the project's held starts go on.
+    Auto pilot turned on with `answer_confirmations` answers Yes, as the
+    caller's through `autopilot`, every open confirmation it would have
+    taken, each answer doing what a person's does.
 
     Returns:
         201: The project's head, with its new standing
-        400: The kind is not one a person makes
+        400: The kind is not one a person makes, or `answer_confirmations`
+            goes with a kind other than `autopilot_on`
         401: No one is signed in
         403: The caller lacks the editor role
         404: No project has the id
         409: The caller has not chosen a handle, or the project's standing
-            does not allow the change, or Create project's draft does not
+            does not allow the change, or Create project's draft does not,
+            or an answer's job finds no controller configured
     """
     change = TransitionRequestSchema.model_validate(request.get_json())
     auth = caller()
-    project_service.transition(auth, project_id, TransitionKind(change.kind))
+    project_service.transition(
+        auth,
+        project_id,
+        TransitionKind(change.kind),
+        autopilot_yes=change.answer_confirmations,
+    )
     return _head(project_service.head(auth, project_id)), 201
 
 

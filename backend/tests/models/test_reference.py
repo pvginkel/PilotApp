@@ -113,6 +113,7 @@ class TestConfirmationReason:
             ("irreversible", "Irreversible", True),
             ("product-hold", "Product hold", True),
             ("self-approval", "Self-approval", True),
+            ("standing-grant", "Standing grant", True),
         }
 
     def test_every_reason_says_when_to_use_it_in_one_line(
@@ -120,7 +121,7 @@ class TestConfirmationReason:
     ) -> None:
         descriptions = session.scalars(select(ConfirmationReason.description)).all()
 
-        assert len(descriptions) == 5
+        assert len(descriptions) == 6
         assert all(
             description and "\n" not in description for description in descriptions
         )

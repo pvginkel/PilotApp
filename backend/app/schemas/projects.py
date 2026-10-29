@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.models.reference import ProjectState, TaskStatus
 
@@ -185,6 +185,15 @@ class ProjectHeadSchema(BaseModel):
         ),
         examples=[3],
     )
+    autopilot_may_take: int = Field(
+        description=(
+            "The open confirmations the switch would answer: unanswered "
+            "confirmation blocks of open items whose reason does not ask under "
+            "auto pilot (`because.asks_under_autopilot` false). Turning auto "
+            "pilot on with any asks first whether to answer them (F4.2)"
+        ),
+        examples=[2],
+    )
     create_refusal: str | None = Field(
         description=(
             "Why Create project cannot be pressed now, the reason its disabled "
@@ -223,3 +232,18 @@ class TransitionRequestSchema(BaseModel):
         ),
         examples=["finished"],
     )
+    answer_confirmations: bool = Field(
+        default=False,
+        description=(
+            "The switch's dialog's Yes, with `autopilot_on` alone: every open "
+            "confirmation the switch would answer, the head's "
+            "`autopilot_may_take`, answered Yes by the caller through "
+            "`autopilot` as auto pilot turns on (F4.2)"
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _yes_with_autopilot_on(self) -> "TransitionRequestSchema":
+        if self.answer_confirmations and self.kind != "autopilot_on":
+            raise ValueError("`answer_confirmations` goes with `autopilot_on` alone")
+        return self

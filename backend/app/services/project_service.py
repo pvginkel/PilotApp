@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.engine.attachments import AttachService
 from app.engine.bus import EngineBus, ManifestChanged, ProjectChanged
 from app.engine.documents import OPENING, DocumentService
-from app.engine.record import RecordService
+from app.engine.record import RecordService, autopilot_may_take
 from app.engine.views import ViewService
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import (
@@ -103,6 +103,8 @@ class ProjectHead:
     notes: tuple[PlanNote, ...]
     running_work: tuple[RunningWork, ...]
     open_items: int
+    autopilot_may_take: int
+    """The open confirmations the switch answers (F4.2; DB decision 58)."""
     create_refusal: str | None
     """Why Create project cannot be pressed now; none when it can (F48.1)."""
 
@@ -336,6 +338,9 @@ class ProjectService:
                 Item.id.not_in([work.id for work in running_work]),
             )
         )
+        may_take = self.db.scalar(
+            select(func.count()).select_from(autopilot_may_take(project).subquery())
+        )
         progress = plan_progress(tasks)
         creation = self._creation(project)
         return ProjectHead(
@@ -352,6 +357,7 @@ class ProjectService:
             notes=tuple(notes.get(None, [])),
             running_work=running_work,
             open_items=open_items or 0,
+            autopilot_may_take=may_take or 0,
             create_refusal=creation if isinstance(creation, str) else None,
         )
 
@@ -380,10 +386,18 @@ class ProjectService:
         return project
 
     def transition(
-        self, auth: AuthContext, project_id: uuid.UUID, kind: TransitionKind
+        self,
+        auth: AuthContext,
+        project_id: uuid.UUID,
+        kind: TransitionKind,
+        *,
+        autopilot_yes: bool = False,
     ) -> None:
         """The caller's transition of `kind`, now, the project's caches
         refreshed with it (DB §7.4). `opened` is Create project (`_create`).
+        `autopilot_on` with `autopilot_yes`, the switch's dialog's Yes, then
+        answers the open confirmations the switch would have taken, as the
+        caller's Yes through `autopilot` (F4.2; DB decisions 7, 58).
         Finish is followed at its instant by `autopilot_off` while auto pilot
         is on and by `resumed` while the project is paused (DB 171), stops
         every session of the project that
@@ -405,11 +419,13 @@ class ProjectService:
             RecordNotFoundException: no project has the id.
             InvalidOperationException: the caller has not chosen a handle, or
                 the project's standing does not allow `kind` (DB 170), or
-                Create project's draft does not (F48.1).
+                Create project's draft does not (F48.1), or the Yes's close
+                of an item of Pilot's own finds no controller or no store
+                environment configured to place its job on.
         """
-        project = self._locked(project_id)
+        project = self._locked(project_id, exclusive=autopilot_yes)
         person = self.people_service.require_person(auth, _operation(project, kind))
-        self._transition(project, person, kind)
+        self._transition(project, person, kind, autopilot_yes=autopilot_yes)
 
     def transition_as(
         self, user: User, project_id: uuid.UUID, kind: TransitionKind
@@ -424,7 +440,14 @@ class ProjectService:
         """
         self._transition(self._locked(project_id), user, kind)
 
-    def _transition(self, project: Project, person: User, kind: TransitionKind) -> None:
+    def _transition(
+        self,
+        project: Project,
+        person: User,
+        kind: TransitionKind,
+        *,
+        autopilot_yes: bool = False,
+    ) -> None:
         if kind is TransitionKind.OPENED:
             self._create(project, person)
             return
@@ -445,6 +468,8 @@ class ProjectService:
             if project.paused:
                 self._write(project, person, at, TransitionKind.RESUMED)
             self.record_service.close_unanswered(project, person, at)
+        if kind is TransitionKind.AUTOPILOT_ON and autopilot_yes:
+            self.record_service.autopilot_yes(project, person)
         if project.paused != paused:
             self._pause_moved(project)
         if kind in (TransitionKind.PAUSED, TransitionKind.RESUMED):
@@ -618,9 +643,11 @@ class ProjectService:
         self.db.flush()
         self.engine_bus.emit(ProjectChanged(project.id))
 
-    def _locked(self, project_id: uuid.UUID) -> Project:
+    def _locked(self, project_id: uuid.UUID, *, exclusive: bool = False) -> Project:
         """The project, its row held until the transaction ends, so that two
-        changes of its standing never interleave, read as the lock found it.
+        changes of its standing never interleave, read as the lock found it;
+        `exclusive` for a change that closes items, as a close holds it
+        (`RecordService._closing`).
 
         Raises:
             RecordNotFoundException: no project has the id.
@@ -628,7 +655,7 @@ class ProjectService:
         project = self.db.scalars(
             select(Project)
             .where(Project.id == project_id)
-            .with_for_update(key_share=True)
+            .with_for_update(key_share=not exclusive)
             .execution_options(populate_existing=True)
         ).one_or_none()
         if project is None:

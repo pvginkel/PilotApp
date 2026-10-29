@@ -756,7 +756,8 @@ class TestIngestServiceGate:
                         5,
                         "block C1: `because: hurry` is not a confirmation reason"
                         " (auto-pilot-off, irreversible, product-hold, rider,"
-                        " self-approval); the reasons are in `reference.json`",
+                        " self-approval, standing-grant); the reasons are in"
+                        " `reference.json`",
                     ),
                 ),
             ),

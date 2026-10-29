@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.models import (
+    Block,
     Chat,
     Document,
     Environment,
@@ -29,6 +30,7 @@ from app.models import (
     User,
 )
 from app.models.reference import (
+    AnswerChannel,
     ChatKind,
     DocumentRole,
     SessionState,
@@ -349,6 +351,7 @@ class TestGetProject:
             ],
             "running_work": [],
             "open_items": 2,
+            "autopilot_may_take": 0,
             "create_refusal": "it is no draft",
         }
 
@@ -1169,6 +1172,18 @@ def _definition_chat(
     session.flush()
 
 
+_PUSH = """---
+title: Push the release
+---
+
+```decision id=C1
+type: confirmation
+because: rider
+proposal: Push with the map fix riding along.
+```
+"""
+
+
 @pytest.mark.usefixtures("person")
 class TestAddTransition:
     def test_finish_answers_the_head_with_its_new_standing(
@@ -1252,6 +1267,82 @@ class TestAddTransition:
         assert response.status_code == 201
         body = response.get_json()
         assert (body["state"], body["archived"], body["autopilot"]) == standing
+
+    def test_auto_pilot_on_with_the_yes_answers_the_confirmations_it_takes(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        recipes = _make(container, name="Recipe box")
+        project = session.get_one(Project, recipes)
+        item = container.document_service().bear_item(
+            project,
+            "decision",
+            "Push the release",
+            _run(session, project, environment),
+            _PUSH,
+        )
+        _sign_in(client)
+        assert client.get(f"{PROJECTS}/{recipes}").get_json()["autopilot_may_take"] == 1
+
+        response = client.post(
+            f"{PROJECTS}/{recipes}/transitions",
+            json={"kind": "autopilot_on", "answer_confirmations": True},
+        )
+
+        assert response.status_code == 201
+        body = response.get_json()
+        assert (body["autopilot"], body["autopilot_may_take"]) == (True, 0)
+        block = session.scalars(select(Block).where(Block.document_id == item.id)).one()
+        assert (block.answer, block.answered_by_user_id, block.via_code) == (
+            "Yes",
+            person.id,
+            AnswerChannel.AUTOPILOT,
+        )
+
+    def test_auto_pilot_on_without_the_yes_leaves_them_open(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        environment: Environment,
+    ) -> None:
+        recipes = _make(container, name="Recipe box")
+        project = session.get_one(Project, recipes)
+        container.document_service().bear_item(
+            project,
+            "decision",
+            "Push the release",
+            _run(session, project, environment),
+            _PUSH,
+        )
+        _sign_in(client)
+
+        response = client.post(
+            f"{PROJECTS}/{recipes}/transitions",
+            json={"kind": "autopilot_on", "answer_confirmations": False},
+        )
+
+        assert response.status_code == 201
+        body = response.get_json()
+        assert (body["autopilot"], body["autopilot_may_take"]) == (True, 1)
+
+    @pytest.mark.parametrize("kind", ["finished", "autopilot_off", "paused"])
+    def test_the_yes_with_another_kind_is_refused(
+        self, client: FlaskClient, container: ServiceContainer, kind: str
+    ) -> None:
+        recipes = _make(container, name="Recipe box", autopilot=True)
+        _sign_in(client)
+
+        response = client.post(
+            f"{PROJECTS}/{recipes}/transitions",
+            json={"kind": kind, "answer_confirmations": True},
+        )
+
+        assert response.status_code == 400
 
     def test_a_pause_and_a_resume_answer_the_head_with_its_status(
         self, client: FlaskClient, container: ServiceContainer, session: Session
@@ -1536,6 +1627,7 @@ class TestCreateProject:
             "notes": [],
             "running_work": [],
             "open_items": 0,
+            "autopilot_may_take": 0,
             "create_refusal": "nothing is drafted",
         }
         draft = session.get_one(Project, uuid.UUID(body["id"]))

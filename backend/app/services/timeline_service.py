@@ -836,6 +836,7 @@ class _Reader:
                     code=because.code,
                     name=because.name,
                     description=because.description,
+                    asks_under_autopilot=because.asks_under_autopilot,
                 )
             ),
             proposal=block.proposal,

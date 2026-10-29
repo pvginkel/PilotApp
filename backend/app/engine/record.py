@@ -1,6 +1,7 @@
 """The record's own writes (design 1 §6.4, F32.4): a person's answer, Done on
 an action, undo, Done on a document, Read and Reviewed; Finish's close of the
-open items (F5.1); and a work item's place and its done at its turn's end
+open items (F5.1); the switch's Yes to the confirmations it answers (F4.2);
+and a work item's place and its done at its turn's end
 (DB Work, decision 44).
 
 Each is a write of the caller's transaction, under the document's row lock
@@ -28,7 +29,7 @@ from datetime import UTC, datetime
 from typing import Protocol
 
 import pilot_dsl as dsl
-from sqlalchemy import ColumnElement, and_, exists, select
+from sqlalchemy import ColumnElement, Select, and_, exists, select
 from sqlalchemy.orm import Session
 
 from app.engine.bus import EngineBus, ProjectChanged, WriteBackOwed
@@ -44,6 +45,8 @@ from app.engine.paths import tree_path
 from app.engine.views import ViewService
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import (
+    Block,
+    ConfirmationReason,
     Document,
     DoneCause,
     Item,
@@ -73,6 +76,8 @@ SETTLED = "settled"
 TURN_ENDED = "turn_ended"
 FINISHED = "finished"
 WITHDRAWN = "withdrawn"
+
+YES = "Yes"
 
 WRITTEN_BACK = (
     "Your documents were answered and written back in place: {paths}."
@@ -410,6 +415,31 @@ class RecordService:
         if items:
             self.view_service.timeline_moved(project)
 
+    def autopilot_yes(self, project: Project, user: User) -> None:
+        """The switch's Yes (F4.2; DB decisions 7, 58), in the caller's
+        transaction, which holds the project's row exclusively: every
+        confirmation the switch answers that is open once its document's row
+        is held, answered `Yes` by `user` through `autopilot` as `answer`
+        answers it, so that an item of Pilot's own places the job after it and
+        a registered document owes its write-back and may continue its run."""
+        taken = autopilot_may_take(project).subquery()
+        documents = self.db.scalars(
+            select(Document.id)
+            .where(Document.id.in_(select(taken.c.document_id)))
+            .order_by(Document.id)
+            .with_for_update()
+        ).all()
+        for document_id, local_id in self.db.execute(
+            autopilot_may_take(project).where(Block.document_id.in_(documents))
+        ).all():
+            self.answer(
+                self.db.get_one(Document, document_id),
+                local_id,
+                user,
+                YES,
+                via=AnswerChannel.AUTOPILOT,
+            )
+
     def place_work(
         self,
         project: Project,
@@ -691,6 +721,26 @@ def write_back_owed() -> ColumnElement[bool]:
         Item.done_cause_code != FINISHED,
         Document.written_back_at.is_(None),
         Document.write_back_refused_at.is_(None),
+    )
+
+
+def autopilot_may_take(project: Project) -> Select[uuid.UUID, str]:
+    """The project's open confirmations the switch answers (F4.2, F4.4; DB
+    decision 58), each as its document's id and its local id, in timeline
+    order: unanswered, on an open item, `because` a reason that does not ask
+    under auto pilot."""
+    return (
+        select(Block.document_id, Block.local_id)
+        .join(Item, Item.id == Block.document_id)
+        .join(ConfirmationReason, ConfirmationReason.code == Block.because_code)
+        .where(
+            Item.project_id == project.id,
+            Item.done_at.is_(None),
+            Block.confirmation,
+            Block.answer.is_(None),
+            ConfirmationReason.asks_under_autopilot.is_(False),
+        )
+        .order_by(Item.seq, Block.position)
     )
 
 

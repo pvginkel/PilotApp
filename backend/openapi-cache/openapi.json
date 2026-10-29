@@ -2688,6 +2688,11 @@
       "ItemDocumentSchema.1fdd8ae.ConfirmationReasonSchema": {
         "description": "The ground on which a confirmation asks (F22.1).",
         "properties": {
+          "asks_under_autopilot": {
+            "description": "Whether it asks under auto pilot too; false for a reason the switch answers, whose open confirmation carries the auto pilot mark while auto pilot is off (F4.2, F4.4)",
+            "title": "Asks Under Autopilot",
+            "type": "boolean"
+          },
           "code": {
             "examples": [
               "rider"
@@ -2712,7 +2717,8 @@
         "required": [
           "code",
           "name",
-          "description"
+          "description",
+          "asks_under_autopilot"
         ],
         "title": "ConfirmationReasonSchema",
         "type": "object"
@@ -3870,6 +3876,11 @@
       "ProjectDocumentSchema.1fdd8ae.ConfirmationReasonSchema": {
         "description": "The ground on which a confirmation asks (F22.1).",
         "properties": {
+          "asks_under_autopilot": {
+            "description": "Whether it asks under auto pilot too; false for a reason the switch answers, whose open confirmation carries the auto pilot mark while auto pilot is off (F4.2, F4.4)",
+            "title": "Asks Under Autopilot",
+            "type": "boolean"
+          },
           "code": {
             "examples": [
               "rider"
@@ -3894,7 +3905,8 @@
         "required": [
           "code",
           "name",
-          "description"
+          "description",
+          "asks_under_autopilot"
         ],
         "title": "ConfirmationReasonSchema",
         "type": "object"
@@ -4107,6 +4119,14 @@
             "title": "Autopilot",
             "type": "boolean"
           },
+          "autopilot_may_take": {
+            "description": "The open confirmations the switch would answer: unanswered confirmation blocks of open items whose reason does not ask under auto pilot (`because.asks_under_autopilot` false). Turning auto pilot on with any asks first whether to answer them (F4.2)",
+            "examples": [
+              2
+            ],
+            "title": "Autopilot May Take",
+            "type": "integer"
+          },
           "create_refusal": {
             "anyOf": [
               {
@@ -4253,6 +4273,7 @@
           "notes",
           "running_work",
           "open_items",
+          "autopilot_may_take",
           "create_refusal"
         ],
         "title": "ProjectHeadSchema",
@@ -6332,6 +6353,11 @@
       "TimelineSchema.1fdd8ae.ConfirmationReasonSchema": {
         "description": "The ground on which a confirmation asks (F22.1).",
         "properties": {
+          "asks_under_autopilot": {
+            "description": "Whether it asks under auto pilot too; false for a reason the switch answers, whose open confirmation carries the auto pilot mark while auto pilot is off (F4.2, F4.4)",
+            "title": "Asks Under Autopilot",
+            "type": "boolean"
+          },
           "code": {
             "examples": [
               "rider"
@@ -6356,7 +6382,8 @@
         "required": [
           "code",
           "name",
-          "description"
+          "description",
+          "asks_under_autopilot"
         ],
         "title": "ConfirmationReasonSchema",
         "type": "object"
@@ -7324,6 +7351,12 @@
       "TransitionRequestSchema.e86ccd6": {
         "description": "A change of a project's standing the signed-in person makes.",
         "properties": {
+          "answer_confirmations": {
+            "default": false,
+            "description": "The switch's dialog's Yes, with `autopilot_on` alone: every open confirmation the switch would answer, the head's `autopilot_may_take`, answered Yes by the caller through `autopilot` as auto pilot turns on (F4.2)",
+            "title": "Answer Confirmations",
+            "type": "boolean"
+          },
           "kind": {
             "description": "Which change: Create project, Finish, Reopen, Archive, Bring back, auto pilot switched on or off, or the project paused or resumed. It must follow from the project's standing: Create project from a draft its head's `create_refusal` does not refuse, Finish from open, Reopen from finished, Archive from unarchived, Bring back from archived, auto pilot on from off on an open project, off from on, the pause from not paused on an open project, the resume from paused; an archived project takes Bring back alone",
             "enum": [
@@ -10165,7 +10198,7 @@
     },
     "/api/projects/{project_id}/transitions": {
       "post": {
-        "description": "Create project opens a draft: its slug the draft's, its handbook born empty, its opening first on the timeline with the draft's copy and the material Pilot attached, its definition chat closed, its folder moved once committed. Finish also turns auto pilot off, resumes a paused project, stops the project's sessions and closes its open items unanswered; Archive stops the sessions too, and nothing of the project starts after either. Reopen leaves auto pilot off. A resume lets the project's held starts go on.\n\nReturns:     201: The project's head, with its new standing     400: The kind is not one a person makes     401: No one is signed in     403: The caller lacks the editor role     404: No project has the id     409: The caller has not chosen a handle, or the project's standing         does not allow the change, or Create project's draft does not",
+        "description": "Create project opens a draft: its slug the draft's, its handbook born empty, its opening first on the timeline with the draft's copy and the material Pilot attached, its definition chat closed, its folder moved once committed. Finish also turns auto pilot off, resumes a paused project, stops the project's sessions and closes its open items unanswered; Archive stops the sessions too, and nothing of the project starts after either. Reopen leaves auto pilot off. A resume lets the project's held starts go on. Auto pilot turned on with `answer_confirmations` answers Yes, as the caller's through `autopilot`, every open confirmation it would have taken, each answer doing what a person's does.\n\nReturns:     201: The project's head, with its new standing     400: The kind is not one a person makes, or `answer_confirmations`         goes with a kind other than `autopilot_on`     401: No one is signed in     403: The caller lacks the editor role     404: No project has the id     409: The caller has not chosen a handle, or the project's standing         does not allow the change, or Create project's draft does not,         or an answer's job finds no controller configured",
         "operationId": "post__api_projects_{project_id}_transitions",
         "parameters": [
           {

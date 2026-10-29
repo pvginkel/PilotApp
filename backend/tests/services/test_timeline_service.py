@@ -784,6 +784,7 @@ class TestTimeline:
                 "A push with riders, other commits going out with it, asked only"
                 " while auto pilot is off."
             ),
+            "asks_under_autopilot": False,
         }
         (part,) = question["body"]
         assert (part["block"]["kind"], part["block"]["default"]) == (
