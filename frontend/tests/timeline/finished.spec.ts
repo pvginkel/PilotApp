@@ -1,7 +1,8 @@
 /**
  * The Finished end (F5.3): once a project is finished every item the timeline draws is a done
- * line, the opening as it was, and the timeline ends in "Finished · <stamp>"; its tab stands under
- * Finished (F1.5), and no urgent banner is pinned (F10.2).
+ * line, the opening as it was, and the timeline ends in "Finished · <stamp>" with the archive
+ * question under it (F5.6); its tab stands under Finished (F1.5), and no urgent banner is pinned
+ * (F10.2).
  */
 
 import { test, expect } from '../support/fixtures';
@@ -21,7 +22,7 @@ const DECISION = '```decision id=D1\noptions:\n  - Dome\n  - Tunnel\n```\n';
 const URGENT_QUESTION = `---\nurgent: true\n---\n\n${QUESTION}`;
 
 test.describe('A finished project’s timeline', () => {
-  test('draws every item as a done line, the opening as it was, and ends in “Finished · <stamp>”', async ({
+  test('draws every item as a done line, the opening as it was, and ends in “Finished · <stamp>” and its question', async ({
     people,
     projects,
     timeline,
@@ -52,7 +53,8 @@ test.describe('A finished project’s timeline', () => {
 
     const { finished_at } = await projects.timeline(id);
     const rows = await timeline.rowsRead();
-    expect(rows.at(-1)).toEqual(['timeline.divider.finished', `Finished · ${stamp(finished_at!)}`]);
+    expect(rows.at(-2)).toEqual(['timeline.divider.finished', `Finished · ${stamp(finished_at!)}`]);
+    expect(rows.at(-1)?.[0]).toBe('timeline.item');
     await expect(timeline.finishedTime).toHaveAttribute('title', fullStamp(finished_at!));
   });
 

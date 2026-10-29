@@ -1,16 +1,19 @@
 """What a person does to an item on the timeline, by the item's id and a
 block's local id (F30.7): each the record's own write (F32.4), the item and
-the block found by their ids and the writer by the caller."""
+the block found by their ids and the writer by the caller; the archive
+question's Archive archives the project with it (DB 265)."""
 
 import uuid
 
 from sqlalchemy.orm import Session
 
+from app.engine.documents import ARCHIVE, ARCHIVE_QUESTION
 from app.engine.record import RecordService
 from app.exceptions import RecordNotFoundException
 from app.models import Document, Item
 from app.services.auth_service import AuthContext
 from app.services.people_service import PeopleService
+from app.services.project_service import ProjectService
 
 
 class ItemService:
@@ -19,10 +22,12 @@ class ItemService:
         db: Session,
         people_service: PeopleService,
         record_service: RecordService,
+        project_service: ProjectService,
     ) -> None:
         self.db = db
         self.people_service = people_service
         self.record_service = record_service
+        self.project_service = project_service
 
     def answer(
         self,
@@ -33,7 +38,9 @@ class ItemService:
         note: str | None,
     ) -> None:
         """The caller's answer to the block, through the app, with `note`
-        (F17.4); whoever the item is for (F107.1).
+        (F17.4); whoever the item is for (F107.1). Archive on the archive
+        question then archives the project, by the caller, in the same act,
+        with every effect of the menu's Archive (F128.1; DB 265).
 
         Raises:
             RecordNotFoundException: no item has the id, or it has no such
@@ -45,6 +52,9 @@ class ItemService:
         person = self.people_service.require_person(
             auth, f"answer block {block_id} of item {item_id}"
         )
+        if item.kind_code == ARCHIVE_QUESTION and answer.strip() == ARCHIVE:
+            self.project_service.archive_by_its_question(person, item, block_id, note)
+            return
         self.record_service.answer(
             self._document(item, block_id), block_id, person, answer, note=note
         )

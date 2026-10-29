@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
 from app.models import Item, PlanTask, Project, Session, User
@@ -55,7 +56,23 @@ class TestItem:
 
         assert opening.created_by_session_id is None
 
-    def test_only_the_opening_is_a_persons(
+    def test_an_archive_question_is_pilots(
+        self, session: DbSession, project: Project
+    ) -> None:
+        pilot = session.scalars(select(User).where(User.handle == "agent")).one()
+        question = Item(
+            project_id=project.id,
+            seq=1,
+            kind_code="archive_question",
+            title="Archive the project?",
+            created_by_user_id=pilot.id,
+        )
+        session.add(question)
+        session.flush()
+
+        assert question.created_by_session_id is None
+
+    def test_only_the_opening_and_an_archive_question_are_a_users(
         self, session: DbSession, project: Project, person: User
     ) -> None:
         session.add(

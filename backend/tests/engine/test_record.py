@@ -4785,3 +4785,139 @@ class TestRecordServiceClaims:
 
         assert not_theirs.value.message == f"Item {mine.id} was not found"
         assert no_block.value.message == f"Block {mine.id}/A9 was not found"
+
+
+def _question(
+    session: DbSession, container: ServiceContainer, project: Project
+) -> tuple[Item, Document]:
+    question = container.document_service().bear_archive_question(project)
+    return question, session.get_one(Document, question.id)
+
+
+class TestRecordServiceArchiveQuestion:
+    """The archive question, the server's one question after a finish, takes
+    Archive or Keep, closes no job's way and takes no Undo (DB 263 to 265)."""
+
+    @pytest.mark.parametrize(
+        ("answer", "to"), [("Tunnel", None), ("Agree", None), ("deferred", "plan")]
+    )
+    def test_it_takes_archive_or_keep_alone(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+        answer: str,
+        to: str | None,
+    ) -> None:
+        question, document = _question(session, container, project)
+        text = document.published_text
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.record_service().answer(document, "D1", person, answer, to=to)
+
+        assert refused.value.cause == "an archive question is answered Archive or Keep"
+        assert _done(question) == (None, None, None)
+        assert document.published_text == text
+
+    @pytest.mark.parametrize("answer", ["Archive", "Keep", " Keep "])
+    def test_its_answer_is_its_done_by_the_person_and_places_no_job(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+        answer: str,
+    ) -> None:
+        question, document = _question(session, container, project)
+
+        container.record_service().answer(document, "D1", person, answer)
+
+        assert question.done_cause_code == "answered"
+        assert question.done_by_user_id == person.id
+        assert question.kind_code == "archive_question"
+        assert _block(session, document, "D1").answer == answer.strip()
+        assert session.scalars(select(Work)).all() == []
+
+    @pytest.mark.parametrize("state", [ProjectState.DRAFT, ProjectState.OPEN])
+    def test_it_offers_no_undo_where_its_project_would(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+        state: ProjectState,
+    ) -> None:
+        question, document = _question(session, container, project)
+        records = container.record_service()
+        records.answer(document, "D1", person, "Keep")
+        project.state_code = state
+        project.slug = None if state is ProjectState.DRAFT else "camp"
+        session.flush()
+
+        assert records.offers_undo(question) is False
+        with pytest.raises(InvalidOperationException) as refused:
+            records.undo(question)
+
+        assert refused.value.operation == f"undo item {question.id}"
+        assert refused.value.cause == "an archive question offers no undo"
+        assert question.done_cause_code == "answered"
+        assert _block(session, document, "D1").answer == "Keep"
+
+    def test_finishs_close_of_it_offers_no_undo(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+    ) -> None:
+        question, _ = _question(session, container, project)
+        records = container.record_service()
+        records.close_unanswered(project, person, FINISH)
+        project.state_code = ProjectState.OPEN
+        project.slug = "camp"
+        session.flush()
+
+        assert question.done_cause_code == "finished"
+        with pytest.raises(InvalidOperationException) as refused:
+            records.undo(question)
+
+        assert refused.value.cause == "an archive question offers no undo"
+
+    @pytest.mark.parametrize("answer", ["Archive", "Keep"])
+    def test_its_close_answers_the_open_question_by_the_user(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+        answer: str,
+    ) -> None:
+        question, document = _question(session, container, project)
+
+        container.record_service().close_archive_question(project, person, answer)
+
+        assert (question.done_cause_code, question.done_by_user_id) == (
+            "answered",
+            person.id,
+        )
+        block = _block(session, document, "D1")
+        assert (block.answer, block.answered_by_user_id) == (answer, person.id)
+
+    def test_its_close_leaves_a_done_question_as_it_was_and_a_project_without_one(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+    ) -> None:
+        records = container.record_service()
+        records.close_archive_question(project, person, "Keep")
+        question, document = _question(session, container, project)
+        records.answer(document, "D1", person, "Keep")
+        answered = _done(question)
+
+        records.close_archive_question(project, person, "Archive")
+
+        assert _done(question) == answered
+        assert _block(session, document, "D1").answer == "Keep"

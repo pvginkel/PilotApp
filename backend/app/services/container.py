@@ -453,13 +453,6 @@ class ServiceContainer(containers.DeclarativeContainer):
     attachment_service = providers.Factory(
         AttachmentService, db=db_session, attachment_store=attachment_store
     )
-    # What a person does to an item: its answers and marks (F14, F32.4)
-    item_service = providers.Factory(
-        ItemService,
-        db=db_session,
-        people_service=people_service,
-        record_service=record_service,
-    )
     # What a person does to a draft's asks in place (F47.4)
     draft_service = providers.Factory(
         DraftService,
@@ -518,6 +511,14 @@ class ServiceContainer(containers.DeclarativeContainer):
         document_service=document_service,
         attach_service=attach_service,
         job_service=job_service,
+    )
+    # What a person does to an item: its answers and marks (F14, F32.4)
+    item_service = providers.Factory(
+        ItemService,
+        db=db_session,
+        people_service=people_service,
+        record_service=record_service,
+        project_service=project_service,
     )
     # The brain's tools, under its session's bearer (TD §4.5, F86)
     pilot_store_service = providers.Factory(

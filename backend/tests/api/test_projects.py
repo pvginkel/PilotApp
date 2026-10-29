@@ -1221,7 +1221,7 @@ class TestAddTransition:
             body["autopilot"],
             body["member"],
             body["open_items"],
-        ) == ("finished", False, False, True, 0)
+        ) == ("finished", False, False, True, 1)
         assert [
             (transition.kind_code, transition.by_user_id)
             for transition in session.scalars(
@@ -1237,7 +1237,8 @@ class TestAddTransition:
             item.done_cause_code
             for item in session.scalars(
                 select(Item).where(
-                    Item.project_id == recipes, Item.kind_code != "opening"
+                    Item.project_id == recipes,
+                    Item.kind_code.not_in(["opening", "archive_question"]),
                 )
             )
         } == {"finished"}

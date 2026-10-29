@@ -7,7 +7,8 @@
  * An open urgent item has a banner pinned to the top, whose Show scrolls to the item and flashes
  * it; a finished project's has none (F10.2). While open items are scrolled out above, a chip under
  * the banners counts them and scrolls to the nearest (F11). A finished project's timeline ends in
- * "Finished · <stamp>", every item but the opening done by Finish (F5.3).
+ * "Finished · <stamp>", every item but the opening done by Finish (F5.3), and under it the archive
+ * question its latest finish put, open or as its done line (F5.6).
  *
  * Opened at an item's address, the timeline goes to the item and flashes it; at a block's, to the
  * block, its collapsed section opened (F31.5), or to its item where its line or its card stands for
@@ -49,6 +50,9 @@ export function Timeline({ projectId, address, inert }: TimelineProps) {
   const { data } = useTimeline(projectId);
   const items = data?.items.filter((item) => item.form !== 'wait');
   const finishedAt = data?.finished_at ?? null;
+  // Every finish puts one, so a finished project's latest archive question is its latest finish's.
+  const question = finishedAt === null ? undefined : items?.filter((item) => item.kind === 'archive_question').at(-1);
+  const placed = question === undefined ? items : items?.filter((item) => item !== question);
   const urgent = finishedAt === null ? (items ?? []).filter((item) => item.urgent && item.done === null) : [];
   const { fresh, flashed, flash } = useFresh(items);
   const sections = useSections(address === null || address.block === null ? null : blockKey(address.item, address.block));
@@ -176,18 +180,19 @@ export function Timeline({ projectId, address, inert }: TimelineProps) {
         <FlashContext.Provider value={{ fresh, flashed }}>
           <GoToContext.Provider value={goToBlock}>
             <SectionsContext.Provider value={sections}>
-              {items && rowsOf(items).map((row) => <TimelineRow key={row.key} row={row} fresh={fresh} flashed={flashed} />)}
+              {placed && rowsOf(placed).map((row) => <TimelineRow key={row.key} row={row} fresh={fresh} flashed={flashed} />)}
+              {finishedAt !== null && (
+                <div className="divider finished" data-testid="timeline.divider.finished">
+                  <span>
+                    <Flag className="icon" aria-hidden="true" />
+                    Finished · <Time at={finishedAt} format="stamp" testId="timeline.divider.finished.time" />
+                  </span>
+                </div>
+              )}
+              {question && <Item item={question} fresh={fresh.has(question.id)} onFlashed={() => flashed(question.id)} />}
             </SectionsContext.Provider>
           </GoToContext.Provider>
         </FlashContext.Provider>
-        {finishedAt !== null && (
-          <div className="divider finished" data-testid="timeline.divider.finished">
-            <span>
-              <Flag className="icon" aria-hidden="true" />
-              Finished · <Time at={finishedAt} format="stamp" testId="timeline.divider.finished.time" />
-            </span>
-          </div>
-        )}
       </div>
     </div>
   );

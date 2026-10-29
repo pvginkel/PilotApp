@@ -73,6 +73,7 @@ class TestItemKind:
             ("notice", "Notice", "prose", "info"),
             ("document", "Document", "prose", "file"),
             ("review", "Review", "prose", "book"),
+            ("archive_question", "Archive question", "prose", "archive"),
             ("work", "Work", "work", "terminal"),
             ("card_wait", "Card wait", "wait", "ticket"),
             ("timed_wait", "Timed wait", "wait", "hourglass"),

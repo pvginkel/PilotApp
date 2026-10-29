@@ -3,6 +3,7 @@
 import threading
 from datetime import UTC, datetime
 
+import pilot_dsl as dsl
 import pytest
 from flask import Flask
 from psycopg.errors import LockNotAvailable
@@ -329,7 +330,9 @@ class TestDocumentServiceBirth:
 
         assert session.get_one(Document, item.id).path == path
 
-    @pytest.mark.parametrize("kind", ["work", "card_wait", "opening", "palette"])
+    @pytest.mark.parametrize(
+        "kind", ["work", "card_wait", "opening", "archive_question", "palette"]
+    )
     def test_only_a_prose_kind_pilot_adds_is_born(
         self,
         session: DbSession,
@@ -457,6 +460,35 @@ class TestDocumentServiceBirth:
         assert document.summary is None
         [version] = _versions(session, document)
         assert version.session_id is None
+
+    def test_the_archive_question_is_pilots_one_decision_archive_or_keep(
+        self, session: DbSession, container: ServiceContainer, project: Project
+    ) -> None:
+        question = container.document_service().bear_archive_question(project)
+
+        assert (question.seq, question.kind_code) == (1, "archive_question")
+        assert question.title == "Archive the project?"
+        assert question.created_by_user_id == _agent(session).id
+        assert question.created_by_session_id is None
+        assert question.done_at is None
+        document = session.get_one(Document, question.id)
+        assert document.path == "items/1-archive-the-project.md"
+        assert document.published_text == (
+            "---\ntitle: Archive the project?\n---\n"
+            "```decision id=D1\noptions:\n  - Archive\n  - Keep\n```\n"
+        )
+        [block] = _blocks(session, question.id)
+        assert (block.local_id, block.kind_code, block.answer) == (
+            "D1",
+            BlockKind.DECISION,
+            None,
+        )
+        assert [option.label for option in _options(session, block)] == [
+            "Archive",
+            "Keep",
+        ]
+        [version] = _versions(session, document)
+        assert (version.cause_code, version.session_id) == (VersionCause.BORN, None)
 
     @pytest.mark.parametrize("words", [ONE_DECISION, BROKEN])
     def test_the_opening_is_born_unread_with_no_blocks(
@@ -1447,6 +1479,38 @@ class TestDocumentServicePublish:
         documents.publish(session.get_one(Document, item.id), text)
 
         assert item.kind_code == kind
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "---\ntitle: Archive the project?\n---\n"
+            "```decision id=D1\noptions:\n  - Archive\n  - Keep\n"
+            "answer: Keep\nby: ada\nat: 2026-10-12T09:40:00Z\n```\n",
+            CONFIRMATION,
+            ANSWERED,
+            "# Archive the project?\n",
+        ],
+    )
+    def test_an_archive_question_keeps_its_kind_on_every_publish(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+        build_task: PlanTask,
+        text: str,
+    ) -> None:
+        documents = container.document_service()
+        question = documents.bear_archive_question(project)
+        document = session.get_one(Document, question.id)
+
+        documents.publish(document, text)
+
+        assert question.kind_code == "archive_question"
+        assert question.title == dsl.parse(text).title
+        assert [block.local_id for block in _blocks(session, question.id)] == [
+            block.local_id for block in dsl.parse(text).blocks
+        ]
 
     @pytest.mark.parametrize("text", [ONE_DECISION, BROKEN])
     def test_the_openings_text_is_published_unread(

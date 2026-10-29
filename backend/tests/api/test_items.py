@@ -450,6 +450,77 @@ class TestAnswerBlock:
 
 
 @pytest.mark.usefixtures("person")
+class TestAnswerArchiveQuestion:
+    """The archive question's buttons through the answer route (F5.6; DB 265)."""
+
+    def _question(self, client: FlaskClient, camp: Project) -> dict[str, Any]:
+        response = client.post(
+            f"/api/projects/{camp.id}/transitions", json={"kind": "finished"}
+        )
+        assert response.status_code == 201
+        items = client.get(f"/api/projects/{camp.id}/timeline").get_json()["items"]
+        question: dict[str, Any] = items[-1]
+        assert question["kind"] == "archive_question"
+        return question
+
+    def test_archive_answers_it_and_archives_the_project(
+        self, client: FlaskClient, camp: Project
+    ) -> None:
+        _sign_in(client)
+        question = self._question(client, camp)
+
+        response = client.post(
+            f"{ITEMS}/{question['id']}/blocks/D1/answer", json={"answer": "Archive"}
+        )
+
+        assert response.status_code == 204
+        head = client.get(f"/api/projects/{camp.id}").get_json()
+        assert (head["state"], head["archived"]) == ("finished", True)
+        (entry,) = [
+            entry
+            for entry in client.get(f"/api/projects/{camp.id}/timeline").get_json()[
+                "items"
+            ]
+            if entry["id"] == question["id"]
+        ]
+        assert (entry["done"]["cause"], entry["done"]["undo"]) == ("answered", False)
+
+    def test_keep_answers_it_with_no_undo_and_the_project_stays(
+        self, client: FlaskClient, camp: Project
+    ) -> None:
+        _sign_in(client)
+        question = self._question(client, camp)
+
+        response = client.post(
+            f"{ITEMS}/{question['id']}/blocks/D1/answer", json={"answer": "Keep"}
+        )
+
+        assert response.status_code == 204
+        head = client.get(f"/api/projects/{camp.id}").get_json()
+        assert (head["state"], head["archived"], head["open_items"]) == (
+            "finished",
+            False,
+            0,
+        )
+        undo = client.post(f"{ITEMS}/{question['id']}/undo")
+        assert undo.status_code == 409
+        assert "an archive question offers no undo" in _error(undo)
+
+    def test_any_other_answer_is_refused(
+        self, client: FlaskClient, camp: Project
+    ) -> None:
+        _sign_in(client)
+        question = self._question(client, camp)
+
+        response = client.post(
+            f"{ITEMS}/{question['id']}/blocks/D1/answer", json={"answer": "Later"}
+        )
+
+        assert response.status_code == 409
+        assert "an archive question is answered Archive or Keep" in _error(response)
+
+
+@pytest.mark.usefixtures("person")
 class TestMarkActionDone:
     def test_done_and_its_paste_back_are_recorded(
         self,

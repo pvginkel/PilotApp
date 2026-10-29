@@ -140,6 +140,11 @@ class TestViewService:
             ],
             "item_kinds": [
                 {"code": "action", "name": "Action", "form": "prose"},
+                {
+                    "code": "archive_question",
+                    "name": "Archive question",
+                    "form": "prose",
+                },
                 {"code": "card_wait", "name": "Card wait", "form": "wait"},
                 {"code": "confirmation", "name": "Confirmation", "form": "prose"},
                 {"code": "decision", "name": "Decision", "form": "prose"},

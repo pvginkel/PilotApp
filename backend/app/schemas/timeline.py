@@ -22,6 +22,7 @@ ItemKindCode = Literal[
     "notice",
     "document",
     "review",
+    "archive_question",
     "work",
     "card_wait",
     "timed_wait",
@@ -574,7 +575,10 @@ class TimelineItemSchema(BaseModel):
         )
     )
     author: UserSchema | None = Field(
-        description="The opening's author (F18.1); null for every other item"
+        description=(
+            "The opening's author (F18.1), and Pilot for an archive question, the "
+            "server's at a finish (F5.6); null for every other item"
+        )
     )
     words: str | None = Field(
         description="The opening's words, verbatim; null for every other item"

@@ -1,6 +1,7 @@
 """The record's own writes (design 1 §6.4, F32.4): a person's answer, Done on
 an action, undo, Done on a document, Read and Reviewed; Finish's close of the
-open items (F5.1); the switch's Yes to the confirmations it answers (F4.2);
+open items (F5.1); Archive's and Reopen's close of the archive question (DB
+265); the switch's Yes to the confirmations it answers (F4.2);
 a work item's place and its done at its turn's end (DB Work, decision 44);
 and the claimed actions a work item is named for at its `add_item` (DB
 decision 64).
@@ -35,7 +36,11 @@ from sqlalchemy.orm import Session
 
 from app.engine.bus import EngineBus, ProjectChanged, WriteBackOwed
 from app.engine.documents import (
+    ARCHIVE,
+    ARCHIVE_BLOCK,
+    ARCHIVE_QUESTION,
     DOCUMENT,
+    KEEP,
     OPENING,
     PROSE,
     REVIEW,
@@ -166,7 +171,8 @@ class RecordService:
         an option's label, `Agree`, `Yes` or `No`, or free words; `deferred`
         with `to`, a task in the plan or `plan` (decision 47). It replaces the
         block's answer, Pilot's included, while the item is not done (F32.2);
-        the answer to a one-ask item is its done (DB 163)."""
+        the answer to a one-ask item is its done (DB 163). An archive question
+        takes Archive or Keep alone (DB 263)."""
         project, item = self._closing(document)
         operation = f"answer block {local_id} of {tree_path(project, document.path)}"
         _not_archived(project, operation)
@@ -185,6 +191,14 @@ class RecordService:
         if to is not None and to != dsl.PLAN and not self.in_the_plan(project, to):
             raise InvalidOperationException(
                 operation, f"`to: {to}` names neither `plan` nor a task in the plan"
+            )
+        if (
+            item is not None
+            and item.kind_code == ARCHIVE_QUESTION
+            and answer_text not in (ARCHIVE, KEEP)
+        ):
+            raise InvalidOperationException(
+                operation, f"an archive question is answered {ARCHIVE} or {KEEP}"
             )
         blocks = _blocks(item, document)
         block = _block(document, blocks, local_id)
@@ -250,10 +264,11 @@ class RecordService:
         self._done_by_its_answer(project, item, document, blocks, user, at)
 
     def undo(self, item: Item) -> None:
-        """Undo of a done prose item while no session has consumed it, its
-        Done Cause offers it (DB 164, F14.1) and its project is neither
-        finished (D028) nor archived (D012): its done cleared, and on a one-ask item its block's answer
-        with it, an answer of Pilot's it replaced not restored (decision 6); a
+        """Undo of a done prose item but an archive question (DB 265) while no
+        session has consumed it, its Done Cause offers it (DB 164, F14.1) and
+        its project is neither finished (D028) nor archived (D012): its done
+        cleared, and on a one-ask item its block's answer with it, an answer
+        of Pilot's it replaced not restored (decision 6); a
         registered document's write-back of that close with it, so that its
         next close writes it again (F65.1); and the job its close placed, held
         before its brief, withdrawn, its work item done `withdrawn`, so that
@@ -421,6 +436,54 @@ class RecordService:
             item.done_by_user_id = user.id
         if items:
             self.view_service.timeline_moved(project)
+
+    def close_archive_question(
+        self,
+        project: Project,
+        user: User,
+        answer: str,
+        *,
+        note: str | None = None,
+    ) -> Item | None:
+        """The project's open archive question, if it has one, answered
+        `answer`, Archive or Keep, by `user`, with `note`, its done
+        `answered`: the menu's Archive closes it as its Archive and Reopen as
+        its Keep (DB 265). Returns the question it closed.
+
+        In the caller's transaction, which holds the project's row shared, as
+        a change of its standing does (`ProjectService._locked`), so that no
+        other close runs beside it. The question's document row is held, not
+        the project's: a change that stops the project's sessions never
+        upgrades its hold on the row, which a send holding its chat's Session
+        waits on for its inserts."""
+        document = self.db.scalars(
+            select(Document)
+            .join(Item, Item.id == Document.id)
+            .where(
+                Item.project_id == project.id,
+                Item.kind_code == ARCHIVE_QUESTION,
+                Item.done_at.is_(None),
+            )
+            .with_for_update(of=Document)
+            .execution_options(populate_existing=True)
+        ).one_or_none()
+        if document is None:
+            return None
+        question = self.db.get_one(Item, document.id)
+        at = _now()
+        with _refusal_as_invalid():
+            text = dsl.write_answer(
+                _published(document),
+                ARCHIVE_BLOCK,
+                answer=answer,
+                by=user.handle,
+                at=at,
+                via=dsl.AnswerChannel(AnswerChannel.APP.value),
+                note=_value(note),
+            )
+        self.document_service.publish(document, text)
+        self._mark(project, question, document, ANSWERED, user, at)
+        return question
 
     def autopilot_yes(self, project: Project, user: User) -> None:
         """The switch's Yes (F4.2; DB decisions 7, 58), in the caller's
@@ -623,6 +686,8 @@ class RecordService:
         """Why a prose item takes no undo now, or none."""
         if item.done_at is None:
             return "the item is not done"
+        if item.kind_code == ARCHIVE_QUESTION:
+            return "an archive question offers no undo"
         if item.consumed_at is not None:
             return "a session has taken the item's answers"
         if not self.db.get_one(DoneCause, item.done_cause_code).undo_offered:

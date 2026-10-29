@@ -149,9 +149,9 @@ class TestTestDataService:
         assert counts == {
             "users": 2,
             "projects": 4,
-            "items": 11,
-            "documents": 18,
-            "blocks": 13,
+            "items": 12,
+            "documents": 19,
+            "blocks": 14,
             "plan tasks": 10,
             "plan notes": 3,
             "attachments": 1,
@@ -252,7 +252,15 @@ class TestTestDataService:
         ]
         assert _members(session, bikes) == [ben.id, ada.id]
         assert {task["status"] for task in _plan(container, bikes)["tasks"]} == {"done"}
-        assert [item.kind_code for item in _items(session, bikes)] == ["opening"]
+        assert [item.kind_code for item in _items(session, bikes)] == [
+            "opening",
+            "archive_question",
+        ]
+        (question,) = _items(session, bikes)[1:]
+        assert (question.done_at, question.created_by_user_id) == (
+            None,
+            _user(session, "agent").id,
+        )
 
     def test_an_archived_project_as_it_was_left(
         self, counts: dict[str, int], container: ServiceContainer, session: DbSession
@@ -292,9 +300,11 @@ class TestTestDataService:
             "document",
             "review",
         ]
-        assert {item.kind_code for item in items} == set(
-            session.scalars(select(ItemKind.code).where(ItemKind.form == "prose"))
-        )
+        # A finish puts the one prose kind the recipes lack: the bike log's.
+        bikes = _items(session, _project(session, test_data_service.FINISHED_SLUG))
+        assert {item.kind_code for item in items} | {
+            item.kind_code for item in bikes
+        } == set(session.scalars(select(ItemKind.code).where(ItemKind.form == "prose")))
         assert items[0].created_by_user_id == _user(session, "ada").id
         assert {item.created_by_session_id for item in items[1:]} == {run.id}
         assert run.environment_id == test_data_service.ENVIRONMENT_ID
@@ -518,7 +528,7 @@ class TestTestDataService:
                 ), path
                 saved.append(path)
 
-        assert len(saved) == 18
+        assert len(saved) == 19
 
     def test_a_plan_with_a_fault_seeds_nothing(
         self,

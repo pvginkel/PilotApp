@@ -167,7 +167,7 @@ test.describe('Finish', () => {
     await expect(projectHead.dialog('finish').lines).toHaveText([PILOT_LINE]);
   });
 
-  test('confirmed, finishes the project with auto pilot off and its open items closed; it moves under Finished, no toast', async ({
+  test('confirmed, finishes the project with auto pilot off, its open items closed and its archive question put; it moves under Finished, no toast', async ({
     page,
     people,
     projects,
@@ -188,12 +188,16 @@ test.describe('Finish', () => {
     await expect(projectHead.dialog('finish').root).toHaveCount(0);
     await expect(projectHead.finished).toHaveText('Finished');
     const head = await projects.head(id);
-    expect([head.state, head.autopilot, head.open_items]).toEqual(['finished', false, 0]);
+    expect([head.state, head.autopilot, head.open_items]).toEqual(['finished', false, 1]);
+    const { items } = await projects.timeline(id);
+    expect(items.filter((item) => item.done === null).map((item) => item.kind)).toEqual(['opening', 'archive_question']);
 
     const finishedAt = (await projects.list()).find((project) => project.id === id)!.finished_at!;
     const day = await page.evaluate((at) => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' }).format(new Date(at)), finishedAt);
     const finished = projectList.group('finished').root;
-    await expect(projectList.tab(name, finished).getByTestId('projects.tab.status')).toHaveText(`Finished ${day}`);
+    // The tab's badge counts the archive question, its one open item.
+    await expect(projectList.tab(name, finished).getByTestId('projects.tab.status')).toHaveText(`Finished ${day}1`);
+    await expect(projectList.badge(name)).toHaveText('1');
     await expect(projectList.tab(name, projectList.mine)).toHaveCount(0);
     await expect(page.getByTestId('app-shell.toast.item')).toHaveCount(0);
   });

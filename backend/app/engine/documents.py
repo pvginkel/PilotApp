@@ -37,16 +37,30 @@ from app.models.reference import (
     AnswerChannel,
     BlockKind,
     DocumentRole,
+    UserKind,
     VersionCause,
 )
 
 OPENING = "opening"
+ARCHIVE_QUESTION = "archive_question"
 CONFIRMATION = "confirmation"
 DOCUMENT = "document"
 REVIEW = "review"
 PROSE = "prose"
 
 _FILE_SLUG_LENGTH = 60
+
+ARCHIVE_TITLE = "Archive the project?"
+ARCHIVE = "Archive"
+KEEP = "Keep"
+ARCHIVE_BLOCK = "D1"
+
+_ARCHIVE_TEXT = dsl.with_title(
+    f"```decision id={ARCHIVE_BLOCK}\noptions:\n  - {ARCHIVE}\n  - {KEEP}\n```\n",
+    ARCHIVE_TITLE,
+)
+"""The archive question's text at its birth: one decision block offering
+Archive and Keep (DB 263)."""
 
 
 @dataclass(frozen=True)
@@ -89,10 +103,15 @@ class DocumentService:
         text: str = "",
     ) -> Item:
         """A prose item of Pilot's own that `session` added, of a prose kind
-        but the opening, the title it was added with written into its text's
-        front matter where that gives none (DB decision 50)."""
+        but the opening and the archive question, the title it was added with
+        written into its text's front matter where that gives none (DB
+        decision 50)."""
         item_kind = self.db.get(ItemKind, kind)
-        if item_kind is None or item_kind.form != PROSE or kind == OPENING:
+        if (
+            item_kind is None
+            or item_kind.form != PROSE
+            or kind in (OPENING, ARCHIVE_QUESTION)
+        ):
             raise InvalidOperationException(
                 f"add a {kind} item to project {project.id}",
                 f"{kind} is not a kind of prose item Pilot adds",
@@ -115,6 +134,32 @@ class DocumentService:
             title,
             text,
             None,
+        )
+
+    def bear_archive_question(self, project: Project) -> Item:
+        """The archive question (F5.6; DB 263, 264), born after a finish by
+        Pilot and by no session: "Archive the project?", its one decision
+        block offering Archive and Keep. Its kind is fixed at birth and kept
+        on every publish.
+
+        The caller holds the project's row shared, as a change of its
+        standing does, which every other birth's `next_seq` waits on: its
+        `seq` is taken under that hold, so that a finish holding the
+        project's sessions never upgrades it."""
+        pilot = self.db.scalars(
+            select(User).where(User.kind_code == UserKind.AGENT)
+        ).one()
+        return self._bear_item(
+            project,
+            Item(
+                kind_code=ARCHIVE_QUESTION,
+                title=ARCHIVE_TITLE,
+                created_by_user_id=pilot.id,
+            ),
+            ARCHIVE_TITLE,
+            _ARCHIVE_TEXT,
+            None,
+            seq=self._last_seq(project) + 1,
         )
 
     def register(
@@ -304,12 +349,15 @@ class DocumentService:
         until the transaction ends: births in one project take their `seq`
         one at a time."""
         self.lock_project(project)
+        return self._last_seq(project) + 1
+
+    def _last_seq(self, project: Project) -> int:
         return (
             self.db.scalar(
                 select(func.max(Item.seq)).where(Item.project_id == project.id)
             )
             or 0
-        ) + 1
+        )
 
     def lock_project(self, project: Project) -> None:
         """Hold the project's row until the transaction ends, the lock
@@ -345,10 +393,13 @@ class DocumentService:
         title: str,
         text: str,
         session_id: uuid.UUID | None,
+        *,
+        seq: int | None = None,
     ) -> Item:
         """`item` born with `text`, its file named by `title`, the title it
-        was added with."""
-        seq = self.next_seq(project)
+        was added with, at `seq`, else at `next_seq`'s."""
+        if seq is None:
+            seq = self.next_seq(project)
         item.id = uuid.uuid4()
         item.project_id = project.id
         item.seq = seq
@@ -538,7 +589,10 @@ def _write_block(
 def _kind(item: Item, blocks: tuple[dsl.Block, ...]) -> str:
     """One block gives its kind, a confirmation block makes a confirmation,
     several give `document`, none keeps the kind declared at birth (DB
-    decision 2): a non-draft document never loses a block."""
+    decision 2): a non-draft document never loses a block. An archive
+    question keeps its kind whatever its blocks (DB 264)."""
+    if item.kind_code == ARCHIVE_QUESTION:
+        return item.kind_code
     if len(blocks) > 1:
         return DOCUMENT
     if len(blocks) == 1:

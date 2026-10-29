@@ -1019,18 +1019,18 @@ class TestTimeline:
         transition = container.project_service().transition
         transition(ADA, project.id, TransitionKind.FINISHED)
 
-        _opening, finished = _items(container, project)
+        _opening, finished, _question = _items(container, project)
         with pytest.raises(InvalidOperationException) as refused:
             container.record_service().undo(item)
         transition(ADA, project.id, TransitionKind.REOPENED)
-        _opening, reopened = _items(container, project)
+        _opening, reopened, _question = _items(container, project)
 
         assert finished["done"]["undo"] is False
         assert refused.value.cause == "the project is finished"
         assert item.done_cause_code == "answered"
         assert reopened["done"]["undo"] is True
 
-    def test_finish_makes_a_done_line_of_every_item_but_the_opening(
+    def test_finish_makes_a_done_line_of_every_item_but_the_opening_then_asks(
         self,
         container: ServiceContainer,
         session: DbSession,
@@ -1044,8 +1044,13 @@ class TestTimeline:
 
         timeline = container.timeline_service().timeline(project.id)
 
-        opening, notice = timeline.model_dump(mode="json")["items"]
+        opening, notice, question = timeline.model_dump(mode="json")["items"]
         assert opening["done"] is None
+        assert (question["kind"], question["title"], question["done"]) == (
+            "archive_question",
+            "Archive the project?",
+            None,
+        )
         assert notice["done"] == {
             "at": notice["done"]["at"],
             "cause": "finished",

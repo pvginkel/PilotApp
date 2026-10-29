@@ -1,11 +1,12 @@
 /**
  * Each kind's icon and label (F12.1): one icon for a decision and a question, one each for an
  * action, a notice, work, the card wait (a ticket) and the timed wait (the hourglass); a shield for
- * a confirmation, a book for a review and a speech bubble for the opening. A document carries its
- * most common block's icon and "Document · N".
+ * a confirmation, a book for a review, a speech bubble for the opening and the archive box for the
+ * archive question (F5.6). A document carries its most common block's icon and "Document · N".
  */
 
 import {
+  Archive,
   BookOpen,
   FileText,
   Hand,
@@ -34,6 +35,7 @@ const KINDS: Record<TimelineItem['kind'], Kind> = {
   notice: { label: 'Notice', icon: Info },
   document: { label: 'Document', icon: FileText },
   review: { label: 'Review', icon: BookOpen },
+  archive_question: { label: 'Question', icon: Archive },
   work: { label: 'Work', icon: Terminal },
   card_wait: { label: 'Wait', icon: Ticket },
   timed_wait: { label: 'Wait', icon: Hourglass },

@@ -39,4 +39,4 @@ class TestLoadTestDataHook:
         assert TreeHashMoved("recipe-box/project.md", draft_hash) in engine_events
         out = capsys.readouterr().out
         assert "   - 4 projects\n" in out
-        assert "   - 11 items\n" in out
+        assert "   - 12 items\n" in out

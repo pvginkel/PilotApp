@@ -527,6 +527,8 @@ class TestDataService:
             TransitionKind.AUTOPILOT_OFF,
         )
         bikes.state_code = ProjectState.FINISHED
+        # Every finish puts its archive question (DB 263).
+        self.document_service.bear_archive_question(bikes)
 
         album = self._project(ada, ARCHIVED_SLUG, now)
         self.document_service.bear_draft(album, ALBUM_DRAFT)

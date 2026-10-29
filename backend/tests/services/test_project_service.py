@@ -14,7 +14,7 @@ import pytest
 from dependency_injector import providers
 from flask import Flask
 from psycopg.errors import LockNotAvailable
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy import text as sql
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session as DbSession
@@ -29,7 +29,7 @@ from app.engine.bus import (
     TreeHashMoved,
     WorkMoved,
 )
-from app.engine.paths import TIMELINE, tree_path
+from app.engine.paths import TIMELINE, sha256_hex, tree_path
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.extensions import db
 from app.models import (
@@ -127,6 +127,32 @@ def _transitions(
 
 def _standing(project: Project) -> tuple[ProjectState, bool, bool]:
     return project.state_code, project.archived, project.autopilot
+
+
+def _questions(session: DbSession, project: Project) -> list[Item]:
+    """The project's archive questions, in their order."""
+    return list(
+        session.scalars(
+            select(Item)
+            .where(Item.project_id == project.id, Item.kind_code == "archive_question")
+            .order_by(Item.seq)
+        )
+    )
+
+
+def _question(session: DbSession, project: Project) -> Document:
+    """The project's one archive question's document."""
+    (question,) = _questions(session, project)
+    return session.get_one(Document, question.id)
+
+
+def _published(document: Document) -> str:
+    assert document.published_text is not None
+    return document.published_text
+
+
+def _answer(session: DbSession, question: Item) -> Block:
+    return session.scalars(select(Block).where(Block.document_id == question.id)).one()
 
 
 def _memberships(
@@ -1838,12 +1864,15 @@ class TestTransition:
             if transition[0] is TransitionKind.FINISHED
         ]
         items = session.scalars(
-            select(Item).where(Item.project_id == made.id, Item.kind_code != "opening")
+            select(Item).where(
+                Item.project_id == made.id,
+                Item.kind_code.not_in(["opening", "archive_question"]),
+            )
         )
         assert [
             (item.done_at, item.done_cause_code, item.done_by_user_id) for item in items
         ] == [(at, "finished", person.id)] * 2
-        assert service.head(ADA, made.id).open_items == 0
+        assert service.head(ADA, made.id).open_items == 1
 
     @pytest.mark.parametrize("kind", [TransitionKind.FINISHED, TransitionKind.ARCHIVED])
     def test_finish_and_archive_stop_every_running_starting_or_held_session(
@@ -2212,9 +2241,10 @@ class TestTransition:
         assert raised.value.message == f"Project {unknown} was not found"
 
     @pytest.mark.parametrize("open_items", [0, 2])
-    def test_a_transition_moves_the_timeline_once(
+    def test_a_finish_moves_its_question_and_the_timeline_to_its_last_hash(
         self,
         container: ServiceContainer,
+        session: DbSession,
         engine_events: list[EngineEvent],
         environment: Environment,
         open_items: int,
@@ -2235,13 +2265,25 @@ class TestTransition:
                 ADA, made.id, TransitionKind.FINISHED
             )
 
-        assert engine_events == [
+        question = _question(session, made)
+        timeline = tree_path(made, TIMELINE)
+        moves = [event for event in engine_events if isinstance(event, TreeHashMoved)]
+        assert moves[-1] == TreeHashMoved(
+            timeline, container.view_service().timeline(made).hash
+        )
+        assert (
             TreeHashMoved(
-                tree_path(made, TIMELINE),
-                container.view_service().timeline(made).hash,
-            ),
-            ProjectChanged(made.id),
-        ]
+                tree_path(made, question.path), sha256_hex(_published(question))
+            )
+            in moves
+        )
+        assert {move.path for move in moves} == {
+            timeline,
+            tree_path(made, question.path),
+        }
+        assert [
+            event for event in engine_events if not isinstance(event, TreeHashMoved)
+        ] == [ProjectChanged(made.id)]
 
     @pytest.mark.parametrize(
         ("spec", "kind"),
@@ -2432,6 +2474,139 @@ class TestTransition:
 
         assert engine_events == []
         assert container.project_service().head(ADA, made.id).project.archived is False
+
+
+@pytest.mark.usefixtures("person")
+class TestArchiveQuestion:
+    """After any finish, one question of the server's, "Archive the
+    project?", the finished project's one open item: Archive archives the
+    project, Keep keeps it finished; the menu's Archive and Reopen close it
+    while it is open (F5.6; DB 263 to 265)."""
+
+    def test_finish_puts_it_after_closing_the_open_items(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        made = _make(
+            container, name="Camp", open_items=2, environment_id=environment.id
+        )
+        service = container.project_service()
+        pilot = session.scalars(select(User).where(User.handle == "agent")).one()
+
+        service.transition(ADA, made.id, TransitionKind.FINISHED)
+
+        (question,) = _questions(session, made)
+        last = session.scalars(
+            select(func.max(Item.seq)).where(Item.project_id == made.id)
+        ).one()
+        assert (question.seq, question.title, question.done_at) == (
+            last,
+            "Archive the project?",
+            None,
+        )
+        assert (question.created_by_user_id, question.created_by_session_id) == (
+            pilot.id,
+            None,
+        )
+        open_items = session.scalars(
+            select(Item.id).where(
+                Item.project_id == made.id,
+                Item.done_at.is_(None),
+                Item.kind_code != "opening",
+            )
+        ).all()
+        assert open_items == [question.id]
+        assert service.head(ADA, made.id).open_items == 1
+
+    def test_pilots_finish_puts_it_too(
+        self, container: ServiceContainer, session: DbSession
+    ) -> None:
+        made = _make(container, name="Camp")
+        pilot = session.scalars(select(User).where(User.handle == "agent")).one()
+
+        container.project_service().transition_as(
+            pilot, made.id, TransitionKind.FINISHED
+        )
+
+        (question,) = _questions(session, made)
+        assert (question.done_at, question.created_by_user_id) == (None, pilot.id)
+
+    def test_the_badge_counts_it_for_the_members(
+        self, container: ServiceContainer, session: DbSession
+    ) -> None:
+        made = _make(container, name="Camp")
+        service = container.project_service()
+
+        service.transition(ADA, made.id, TransitionKind.FINISHED)
+
+        (tab,) = service.tabs(ADA, archived=False)
+        assert tab.badge == Badge(1, False)
+
+    def test_reopen_closes_it_as_its_keep_by_the_caller_with_no_undo(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        made = _make(container, name="Camp")
+        service = container.project_service()
+        service.transition(ADA, made.id, TransitionKind.FINISHED)
+        (question,) = _questions(session, made)
+
+        service.transition(ADA, made.id, TransitionKind.REOPENED)
+
+        assert (question.done_cause_code, question.done_by_user_id) == (
+            "answered",
+            person.id,
+        )
+        assert _answer(session, question).answer == "Keep"
+        assert _standing(made) == (ProjectState.OPEN, False, False)
+        assert container.record_service().offers_undo(question) is False
+
+    def test_the_menus_archive_closes_it_as_its_archive_by_the_caller(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        made = _make(container, name="Camp")
+        service = container.project_service()
+        service.transition(ADA, made.id, TransitionKind.FINISHED)
+        (question,) = _questions(session, made)
+
+        service.transition(ADA, made.id, TransitionKind.ARCHIVED)
+
+        assert (question.done_cause_code, question.done_by_user_id) == (
+            "answered",
+            person.id,
+        )
+        assert _answer(session, question).answer == "Archive"
+        assert _standing(made) == (ProjectState.FINISHED, True, False)
+
+    def test_bring_back_puts_none_and_a_second_finish_another(
+        self, container: ServiceContainer, session: DbSession
+    ) -> None:
+        made = _make(container, name="Camp")
+        service = container.project_service()
+        service.transition(ADA, made.id, TransitionKind.FINISHED)
+        service.transition(ADA, made.id, TransitionKind.ARCHIVED)
+
+        service.transition(ADA, made.id, TransitionKind.BROUGHT_BACK)
+
+        (archived,) = _questions(session, made)
+        assert archived.done_at is not None
+        service.transition(ADA, made.id, TransitionKind.REOPENED)
+        service.transition(ADA, made.id, TransitionKind.FINISHED)
+        first, second = _questions(session, made)
+        assert (first.id, first.done_cause_code) == (archived.id, "answered")
+        assert second.done_at is None
+
+    @pytest.mark.parametrize("state", ["draft", "open", "finished"])
+    def test_an_archive_without_a_finish_puts_none(
+        self, container: ServiceContainer, session: DbSession, state: str
+    ) -> None:
+        made = _make(container, name="Camp", state=state)
+
+        container.project_service().transition(ADA, made.id, TransitionKind.ARCHIVED)
+
+        assert _questions(session, made) == []
+        assert made.archived is True
 
 
 @pytest.mark.usefixtures("person")
@@ -2640,3 +2815,55 @@ class TestStandingRowLock:
         assert isinstance(raised.value.orig, LockNotAvailable)
         with scoped_session(container) as session:
             assert session.get_one(Project, project_id).state_code is ProjectState.OPEN
+
+    @pytest.mark.parametrize(
+        ("before", "kind", "done_cause"),
+        [
+            ([], TransitionKind.FINISHED, None),
+            ([TransitionKind.FINISHED], TransitionKind.ARCHIVED, "answered"),
+            ([TransitionKind.FINISHED], TransitionKind.REOPENED, "answered"),
+        ],
+    )
+    def test_the_archive_questions_birth_and_close_keep_the_row_shared(
+        self,
+        committed_app: Flask,
+        before: list[TransitionKind],
+        kind: TransitionKind,
+        done_cause: str | None,
+    ) -> None:
+        """Finish bears the question and Archive and Reopen close it while
+        they hold the project's sessions, so none upgrades its shared hold on
+        the row: a key-share holder, as an insert naming the project is,
+        keeps none waiting."""
+        container = committed_app.container
+        with scoped_session(container) as session:
+            session.add(
+                User(
+                    kind_code=UserKind.PERSON,
+                    subject=ADA.subject,
+                    handle="ada",
+                    name="Ada Example",
+                    avatar_slot=1,
+                )
+            )
+            session.flush()
+            project_id = _make(container, name="Camp").id
+        for earlier in before:
+            with scoped_session(container):
+                container.project_service().transition(ADA, project_id, earlier)
+        with committed_app.app_context():
+            engine = db.engine
+
+        with engine.connect() as holder:
+            holder.execute(
+                sql("SELECT id FROM projects WHERE id = :id FOR KEY SHARE"),
+                {"id": project_id},
+            )
+            with scoped_session(container) as session:
+                session.execute(sql("SET LOCAL lock_timeout = '200ms'"))
+                container.project_service().transition(ADA, project_id, kind)
+            holder.rollback()
+
+        with scoped_session(container) as session:
+            (question,) = _questions(session, session.get_one(Project, project_id))
+            assert question.done_cause_code == done_cause

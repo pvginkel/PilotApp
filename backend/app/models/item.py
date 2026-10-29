@@ -31,8 +31,8 @@ class Item(db.Model):  # type: ignore[name-defined]
     A Prose Item's Document has the Item's id. For a Prose Item, `kind_code`,
     `title`, `plan_task_id`, `urgent` and `for_user_id` are caches of its
     Document's published text, rebuilt on every publish (DB §7.4); the
-    opening's are set at its birth. A Prose Item's `title` is none while its
-    text gives none (DB 223).
+    opening's are set at its birth, and an archive question's `kind_code` (DB
+    264). A Prose Item's `title` is none while its text gives none (DB 223).
     """
 
     __tablename__ = "items"
@@ -47,11 +47,12 @@ class Item(db.Model):  # type: ignore[name-defined]
             ["plan_tasks.project_id", "plan_tasks.task_id"],
         ),
         CheckConstraint("seq >= 1", name="ck_items_seq"),
-        # The opening is a person's words; every other Item a Session's (DB
-        # assertion 161).
+        # The opening is a person's words and an archive question Pilot's;
+        # every other Item a Session's (DB assertion 161).
         CheckConstraint(
             "(created_by_user_id IS NULL) <> (created_by_session_id IS NULL)"
-            " AND (created_by_user_id IS NULL OR kind_code = 'opening')",
+            " AND (created_by_user_id IS NULL"
+            " OR kind_code IN ('opening', 'archive_question'))",
             name="ck_items_created_by",
         ),
         CheckConstraint(

@@ -4,7 +4,7 @@
  * item's block answered in its place (F19.1, F20, F21) and a notice's Read under its text (F23),
  * and Pilot's dots at its end while Pilot writes it (F35); a confirmation is a card of its own
  * (F22), a short document stands inline (F24.1), and a larger one and a review leave a card
- * (F24.2, F25.1). A registered document whose writer Pilot asked says so under its title (F86.8).
+ * (F24.2, F25.1); the archive question is its two buttons (F5.6). A registered document whose writer Pilot asked says so under its title (F86.8).
  * Its attachments follow its text (F17.5). An urgent one is tinted (F10.1), and one
  * whose latest save is held shows its last published text with a dashed border, a concept (F78), and
  * a registered document awaiting its read is muted (F85.1). A
@@ -25,6 +25,7 @@ import { Fold } from '@/components/shared/fold';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Markdown } from '@/components/shared/markdown';
 import { Time } from '@/components/shared/time';
+import { ArchiveQuestion } from '@/components/timeline/archive-question';
 import { Attachments, LineAttachments } from '@/components/timeline/attachments';
 import { Block } from '@/components/timeline/block';
 import { Confirmation } from '@/components/timeline/confirmation';
@@ -80,6 +81,7 @@ export function Item({ item, fresh, onFlashed }: ItemProps) {
 function OpenItem({ item }: { item: TimelineItem }) {
   if (item.kind === 'work') return <WorkItem item={item} />;
   if (item.kind === 'confirmation') return <Confirmation item={item} />;
+  if (item.kind === 'archive_question') return <ArchiveQuestion item={item} />;
   if (isCard(item)) return <DocumentCard item={item} />;
   if (item.kind === 'document') return <InlineDocument item={item} />;
   return (
@@ -154,7 +156,7 @@ function ItemText({ body, ask }: { body: BodyPart[]; ask: ReactNode }) {
 }
 
 /** One ask in an item of its own: its line shows the person's answer under its title. */
-const ONE_ASK = new Set<TimelineItem['kind']>(['decision', 'confirmation', 'question', 'action']);
+const ONE_ASK = new Set<TimelineItem['kind']>(['decision', 'confirmation', 'question', 'action', 'archive_question']);
 
 interface Said {
   by: TimelineUser;

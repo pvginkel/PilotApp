@@ -2130,7 +2130,7 @@
                 "type": "null"
               }
             ],
-            "description": "The opening's author (F18.1); null for every other item"
+            "description": "The opening's author (F18.1), and Pilot for an archive question, the server's at a finish (F5.6); null for every other item"
           },
           "awaiting_read": {
             "description": "Whether it is a registered document whose file has not been read yet: it is read at the end of the turn that registered it, and until then it has no text, `body` is null, and it takes no close (F85.1)",
@@ -2262,6 +2262,7 @@
               "notice",
               "document",
               "review",
+              "archive_question",
               "work",
               "card_wait",
               "timed_wait"
@@ -7310,7 +7311,7 @@
                 "type": "null"
               }
             ],
-            "description": "The opening's author (F18.1); null for every other item"
+            "description": "The opening's author (F18.1), and Pilot for an archive question, the server's at a finish (F5.6); null for every other item"
           },
           "awaiting_read": {
             "description": "Whether it is a registered document whose file has not been read yet: it is read at the end of the turn that registered it, and until then it has no text, `body` is null, and it takes no close (F85.1)",
@@ -7442,6 +7443,7 @@
               "notice",
               "document",
               "review",
+              "archive_question",
               "work",
               "card_wait",
               "timed_wait"

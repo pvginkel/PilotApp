@@ -15,7 +15,13 @@ from sqlalchemy.orm import Session
 
 from app.engine.attachments import AttachService
 from app.engine.bus import EngineBus, ManifestChanged, ProjectChanged
-from app.engine.documents import OPENING, DocumentService
+from app.engine.documents import (
+    ARCHIVE,
+    ARCHIVE_BLOCK,
+    KEEP,
+    OPENING,
+    DocumentService,
+)
 from app.engine.record import RecordService, autopilot_may_take
 from app.engine.views import ViewService
 from app.exceptions import InvalidOperationException, RecordNotFoundException
@@ -207,6 +213,10 @@ its project is archived (DB decision 60)."""
 _STOPS = (TransitionKind.FINISHED, TransitionKind.ARCHIVED, TransitionKind.REOPENED)
 """The transitions that stop the project's running, starting and held
 Sessions: in a finished project its read-only chat alone runs (F5.5)."""
+
+_QUESTION_CLOSES = {TransitionKind.ARCHIVED: ARCHIVE, TransitionKind.REOPENED: KEEP}
+"""The transitions that close the project's open archive question, with the
+answer each gives it (DB 265)."""
 
 
 class ProjectService:
@@ -400,8 +410,11 @@ class ProjectService:
         caller's Yes through `autopilot` (F4.2; DB decisions 7, 58).
         Finish is followed at its instant by `autopilot_off` while auto pilot
         is on and by `resumed` while the project is paused (DB 171), stops
-        every session of the project that
-        runs, starts or is held, and closes the open items unanswered (F5.1).
+        every session of the project that runs, starts or is held, closes the
+        open items unanswered (F5.1), and then puts the archive question, the
+        finished project's one open item (F5.6; DB 263). Archive closes an
+        open archive question as its Archive and Reopen as its Keep, by the
+        caller (DB 265).
         Archive stops them too (F128.1), and nothing of either starts after
         it. Finish, Reopen and Archive close the project's open chat,
         `finished`, `reopened` and `archived`, after its sessions are stopped,
@@ -440,6 +453,29 @@ class ProjectService:
         """
         self._transition(self._locked(project_id), user, kind)
 
+    def archive_by_its_question(
+        self, person: User, question: Item, local_id: str, note: str | None
+    ) -> None:
+        """Archive on the archive question (F5.6; DB 265): the question
+        answered Archive by `person`, with `note`, and the project archived by
+        them in the same act, with every effect of the menu's Archive
+        (F128.1), under the project's row as every change of its standing.
+
+        Raises:
+            RecordNotFoundException: the question has no block `local_id`.
+            InvalidOperationException: the question is done, or the project's
+                standing does not allow Archive (DB 170).
+        """
+        project = self._locked(question.project_id)
+        operation = f"answer block {local_id} of item {question.id}"
+        if local_id != ARCHIVE_BLOCK:
+            raise RecordNotFoundException("Block", f"{question.id}/{local_id}")
+        self.db.refresh(question)
+        if question.done_at is not None:
+            raise InvalidOperationException(operation, "the item is done")
+        self.record_service.close_archive_question(project, person, ARCHIVE, note=note)
+        self._transition(project, person, TransitionKind.ARCHIVED)
+
     def _transition(
         self,
         project: Project,
@@ -456,6 +492,11 @@ class ProjectService:
             raise InvalidOperationException(_operation(project, kind), refusal)
         at = datetime.now(UTC)
         paused = project.paused
+        if kind in _QUESTION_CLOSES:
+            # Before the archived flag, which refuses every close (D012).
+            self.record_service.close_archive_question(
+                project, person, _QUESTION_CLOSES[kind]
+            )
         self._write(project, person, at, kind)
         # Before the closes, which lock the Items after their Sessions.
         if kind in _STOPS:
@@ -468,6 +509,7 @@ class ProjectService:
             if project.paused:
                 self._write(project, person, at, TransitionKind.RESUMED)
             self.record_service.close_unanswered(project, person, at)
+            self.document_service.bear_archive_question(project)
         if kind is TransitionKind.AUTOPILOT_ON and autopilot_yes:
             self.record_service.autopilot_yes(project, person)
         if project.paused != paused:
@@ -646,8 +688,11 @@ class ProjectService:
     def _locked(self, project_id: uuid.UUID, *, exclusive: bool = False) -> Project:
         """The project, its row held until the transaction ends, so that two
         changes of its standing never interleave, read as the lock found it;
-        `exclusive` for a change that closes items, as a close holds it
-        (`RecordService._closing`).
+        `exclusive` for a change whose closes hold it so
+        (`RecordService._closing`), the switch's Yes. A change that stops the
+        project's sessions holds it shared, and closes its archive question
+        under the question's document row alone
+        (`RecordService.close_archive_question`).
 
         Raises:
             RecordNotFoundException: no project has the id.

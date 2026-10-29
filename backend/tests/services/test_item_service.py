@@ -6,11 +6,14 @@ import uuid
 
 import pilot_dsl as dsl
 import pytest
+from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.exceptions import InvalidOperationException, RecordNotFoundException
-from app.models import Document, Item, Project, User
+from app.models import Document, Item, Project, ProjectTransition, User
+from app.models.reference import ProjectState, TransitionKind
+from app.schemas.testing_record import InventedProjectCreateSchema
 from app.services.auth_service import AuthContext
 from app.services.container import ServiceContainer
 
@@ -463,3 +466,109 @@ class TestItemServiceUndo:
             container.item_service().undo(item.id)
 
         assert refused.value.cause == "the item is not done"
+
+
+def _finished(session: DbSession, container: ServiceContainer) -> tuple[Project, Item]:
+    """An open project of ada's finished by her, and its archive question."""
+    made = container.test_data_service().project(
+        InventedProjectCreateSchema.model_validate({"name": "Camp", "members": ["ada"]})
+    )
+    container.project_service().transition(ADA, made.id, TransitionKind.FINISHED)
+    question = session.scalars(
+        select(Item).where(
+            Item.project_id == made.id, Item.kind_code == "archive_question"
+        )
+    ).one()
+    return made, question
+
+
+def _transitions(session: DbSession, project: Project) -> list[tuple[str, object]]:
+    return [
+        (transition.kind_code, transition.by_user_id)
+        for transition in session.scalars(
+            select(ProjectTransition)
+            .where(ProjectTransition.project_id == project.id)
+            .order_by(ProjectTransition.at, ProjectTransition.id)
+        )
+    ]
+
+
+@pytest.mark.usefixtures("person")
+class TestItemServiceArchiveQuestion:
+    """The archive question's Archive archives the project by the person who
+    answered, in the same act; its Keep keeps it finished (DB 265)."""
+
+    def test_archive_answers_it_and_archives_the_project_by_the_caller(
+        self, session: DbSession, container: ServiceContainer, person: User
+    ) -> None:
+        made, question = _finished(session, container)
+
+        container.item_service().answer(ADA, question.id, "D1", "Archive", None)
+
+        assert (question.done_cause_code, question.done_by_user_id) == (
+            "answered",
+            person.id,
+        )
+        assert _block(session, question, "D1").answer == "Archive"
+        assert (made.state_code, made.archived) == (ProjectState.FINISHED, True)
+        assert _transitions(session, made)[-1] == (
+            TransitionKind.ARCHIVED,
+            person.id,
+        )
+
+    def test_keep_answers_it_and_the_project_stays_finished(
+        self, session: DbSession, container: ServiceContainer, person: User
+    ) -> None:
+        made, question = _finished(session, container)
+        before = _transitions(session, made)
+
+        container.item_service().answer(ADA, question.id, "D1", "Keep", None)
+
+        assert (question.done_cause_code, question.done_by_user_id) == (
+            "answered",
+            person.id,
+        )
+        assert (made.state_code, made.archived) == (ProjectState.FINISHED, False)
+        assert _transitions(session, made) == before
+
+    def test_archive_on_an_answered_question_is_refused_and_archives_nothing(
+        self, session: DbSession, container: ServiceContainer
+    ) -> None:
+        made, question = _finished(session, container)
+        container.item_service().answer(ADA, question.id, "D1", "Keep", None)
+        before = _transitions(session, made)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.item_service().answer(ADA, question.id, "D1", "Archive", None)
+
+        assert refused.value.cause == "the item is done"
+        assert made.archived is False
+        assert _transitions(session, made) == before
+
+    def test_archive_on_a_block_the_question_lacks_is_not_found(
+        self, session: DbSession, container: ServiceContainer
+    ) -> None:
+        made, question = _finished(session, container)
+
+        with pytest.raises(RecordNotFoundException) as missing:
+            container.item_service().answer(ADA, question.id, "D9", "Archive", None)
+
+        assert missing.value.message == f"Block {question.id}/D9 was not found"
+        assert (question.done_at, made.archived) == (None, False)
+
+    def test_archive_keeps_its_note(
+        self, session: DbSession, container: ServiceContainer
+    ) -> None:
+        _made, question = _finished(session, container)
+
+        container.item_service().answer(
+            ADA, question.id, "D1", "Archive", "Done with it."
+        )
+
+        block = _block(session, question, "D1")
+        assert (block.answer, block.by, block.note, block.via) == (
+            "Archive",
+            "ada",
+            "Done with it.",
+            "app",
+        )
