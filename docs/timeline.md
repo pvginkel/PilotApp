@@ -12,12 +12,15 @@ attachments and the side panel are [`documents.md`](documents.md)'s.
 
 ## Reading it
 
-**`GET /api/projects/<id>/timeline`** answers the timeline whole, `{finished_at, items,
+**`GET /api/projects/<id>/timeline`** answers the timeline whole, `{finished_at, items, ready_after,
 unhung_attachments}`, and `404` for an unknown project. `finished_at` is the latest `finished`
-transition's time while the project is finished, else null. `unhung_attachments` are a draft's
-attachments hung on no item, by batch and then file name, in an item's attachments' shape: what its
-definition chat attached, which Create project hangs on the opening, so none past Create
-([`documents.md`](documents.md)). `items` are every item, by `seq`, each with:
+transition's time while the project is finished, else null. `ready_after` is the setup's work item,
+its latest Retry's where it was retried, once it is done at its turn's end, while the project stands
+paused by the pause Create wrote (D083, [`projects.md`](projects.md)); else null.
+`unhung_attachments` are a draft's attachments hung on no item, by batch and then file name, in an
+item's attachments' shape: what its definition chat attached, which Create project hangs on the
+opening, so none past Create ([`documents.md`](documents.md)). `items` are every item, by `seq`,
+each with:
 
 - `id`, `seq`, `kind` (an item kind's code) and `form` (`prose`, `work` or `wait`);
 - `title`, null for a registered document whose text gives none or that has no text, and
@@ -56,21 +59,35 @@ definition chat attached, which Create project hangs on the opening, so none pas
   ([`documents.md`](documents.md));
 - `asked_writer_about`: the local ids of the blocks Pilot asked a registered document's writer
   about, in the document's order (`ask_writer`, [`mcp.md`](mcp.md)); empty on every other item;
+- `clarifications`: Pilot's questions to a registered document's writer and the writer's reply, one
+  per pre-ruling pass that asked about its blocks, in the order first asked, which is one in
+  practice ([`round-trip.md`](round-trip.md)); empty on every other item. Each is `{asked_at,
+  questions, reply, replied_at, split}`: `asked_at` when the pass first asked about the document;
+  `questions` in their blocks' order, each `{block, question, asked_at, heading, reply}`, the local
+  id, the words verbatim, the heading the writer was asked to answer it under, and its part of the
+  reply, null until the reply comes and where the reply does not keep that heading or holds nothing
+  under it; `reply`, the run's turn's final text whole, which may answer another document's
+  questions too, and `replied_at`, both null until it comes; `split`, whether every question has
+  its part, so the reply is shown per block, else whole;
 - `work`, a work item's status, its Session as its line shows it, null for every other kind
   ([`work.md`](work.md)).
 
 A block is `{id, kind, confirmation, because, proposal, default, check, options, answer, by, at,
-note, via, done, deferral, section}`. `id` is its local id; `because` is a confirmation's reason,
-`{code, name, description}`, the grants table's name and the line the agent reads, not the card's
-words; `options` are `{label, text, recommended}` in order; `via` is `app` for a person's answer
-whose text names no channel; `in_chat` is where in a chat the answer was recorded, `{chat, seq}`,
-the chat's id and the number in its records of the `server` record placing the latest `answered`
-effect on the block, read through the session's records route ([`sessions.md`](sessions.md)), and
-null unless `via` is `chat` and that effect's call ran in a chat; `deferral` is `{to, title}` while
-`answer` is `deferred`, `title` the task's title live from the plan and null for `to: plan`, the
-project's end; `section` is the block's own section, `{heading}`, the heading's text, or null. A
-person or Pilot, wherever one is named, is `{kind, handle, name, initials, avatar_slot}`, Pilot
-`kind: agent` with no slot.
+note, via, done, claim, deferral, writer_asked, section}`. `id` is its local id; `because` is a
+confirmation's reason, `{code, name, description, asks_under_autopilot}`, the grants table's name
+and the line the agent reads, not the card's words, and whether it asks under auto pilot too;
+`options` are `{label, text, recommended}` in order; `via` is `app` for a person's answer whose text
+names no channel; `in_chat` is where in a chat the answer was recorded, `{chat, seq}`, the chat's id
+and the number in its records of the `server` record placing the latest `answered` effect on the
+block, read through the session's records route ([`sessions.md`](sessions.md)), and null unless
+`via` is `chat` and that effect's call ran in a chat; `claim` is an action Pilot claimed and has not
+done, `{work}`, the work item that does it, `{id, title}`, the one named for it last, or null while
+none is ([`engine.md`](engine.md)), and null on every other block; `writer_asked` is whether Pilot
+asked the registered document's writer about the block; `deferral` is `{to, title}` while `answer`
+is `deferred`, `title` the task's title live from the plan and null for `to: plan`, the project's
+end; `section` is the block's own section, `{heading}`, the heading's text, or null. A person or
+Pilot, wherever one is named, is `{kind, handle, name, initials, avatar_slot}`, Pilot `kind: agent`
+with no slot.
 
 ## Answering it
 
@@ -87,7 +104,9 @@ the app, answering `204` with no body:
 | `POST undo` | | Undo of a done item's answer or mark, whoever gave it |
 
 An answer or a Done on a one-ask item is the item's done. Neither body takes `to` or `via`, and
-neither takes another key (`400`): the page never defers. An unknown item answers `404` "Item <id>
+neither takes another key (`400`): the page never defers. The archive question takes `Archive` or
+`Keep` alone, and its Archive archives the project in the same act ([`projects.md`](projects.md));
+its Undo is refused. An unknown item answers `404` "Item <id>
 was not found", and a block the item lacks, any block of a work item or of the opening, `404`
 "Block <item>/<block> was not found". A caller who has not chosen a handle, and every refusal of the
 record, an archived project's close or Undo among them, "its project is archived" (D012), answer
@@ -127,6 +146,10 @@ timeline's place ([`chats.md`](chats.md)).
 - **Anchored to its end.** It opens at its end and stays there as items arrive or its height
   changes, until the reader scrolls more than 48px away from it. An item that arrives after the
   first read flashes once.
+- **The ready line.** While `ready_after` names the setup's work item, one line stands right under
+  its line, before the items the setup placed after it: Pilot's avatar and "The project is ready —
+  resume the project to start it." (`rows.ts`'s `ready` row). It has nothing to press, and it goes
+  at the first resume ([`projects.md`](projects.md)).
 - **The opening** (`opening.tsx`) is a bubble beside its author's avatar, "<who> started this
   project · <time>" over it, "You" for the signed-in person and the full name for the other; its
   words verbatim, folding with Show more, and its attachments under them. It has no head and is
@@ -135,7 +158,8 @@ timeline's place ([`chats.md`](chats.md)).
   its attachments; a document and a review draw as [below](#documents-and-reviews). The head
   (`item-head.tsx`) is the kind's icon and label (`kinds.ts`; a confirmation's is "Confirm", a
   document's "Document · N" with its most common block's icon), the time, the full stamp as its
-  tooltip, the Urgent chip and "for <full name>" while it is for someone, and at its end Discuss,
+  tooltip, a confirmation's auto pilot mark (below) and reason line, the Urgent chip and "for
+  <full name>" while it is for someone, and at its end Discuss,
   quoting the item into the chat ([`chats.md`](chats.md)). The text's prose is GFM
   (`Markdown`, [`ui.md`](ui.md)); the prose before the first block folds past 13.5em with Show
   more, the ask stands in that block's place, and the prose after it shows whole. A concept has a
@@ -146,10 +170,23 @@ timeline's place ([`chats.md`](chats.md)).
   after a one-ask item's or a notice's text, at a confirmation card's end, in the opening's bubble,
   after an inline document's text and on a card. A chip opens the attachment in the overlay
   ([`documents.md`](documents.md)).
-- **Pilot asked the writer.** An open registered document whose writer Pilot asked about its
-  blocks says so with Pilot's avatar, "Pilot asked the writer about D2 and D4", the blocks by their
-  local ids (`writer-asked.tsx`): inline under its title, on a card under its summary, on a one-ask
-  item under its title, and on a confirmation under its controls. A done line shows nothing of it.
+- **Pilot asked the writer.** An open registered document whose writer Pilot asked about its blocks
+  says so with Pilot's avatar, "Pilot asked the writer about D2 and D4", the blocks by their local
+  ids (`writer-asked.tsx`): inline under its title, on a card under its summary, on a one-ask item
+  under its title, and on a confirmation under its controls; a document's asked block says "Pilot
+  asked the writer" in its own head, with Pilot's avatar. A done line shows nothing of it. The
+  writer's reply is the overlay's ([`documents.md`](documents.md)).
+- **The auto pilot mark** (`autopilot-mark.tsx`) stands on an open confirmation the switch would
+  answer while the project's auto pilot is off: its reason does not ask under auto pilot
+  (`because.asks_under_autopilot` false), it is unanswered and its item open (`may-take.ts`). It is
+  Pilot's mark with a filled bolt cut out at its foot, bare, in the time's grey, at a kind icon's
+  size, its hover "Auto pilot will handle this for you": after the time in a confirmation card's
+  head, and beside the kind in a confirmation block's head, inline and in the overlay. A document's
+  card carries it as a chip last among its counts, "N auto pilot may take", hovering "Auto pilot
+  will handle these for you" (or "this" for one). It goes once the block is answered or auto pilot
+  turns on, and comes back when it turns off; the handbook's, the project document's and a draft's
+  blocks never carry it. Turning auto pilot on while any stands asks first
+  ([`projects.md`](projects.md)).
 - **Pilot writing.** While a session's turn saves an item's text (`writing`), Pilot's avatar and
   three dots, one at a time brightening, end the open item, every kind but the opening. The save
   that makes the turn the text's writer and the turn's end each raise `project_changed`, so the
@@ -172,12 +209,13 @@ answer moves the count, so a document stays as it stands while it is answered.
   place as a one-ask item's is ([below](#answering-inline)), its own head naming its kind; its
   attachments; Pilot's dots; and the segment bar beside *Send answers*, the bar empty where it has no
   block.
-- **A card** is its head over a box: the title, the summary, the count chips, the segment bar, or
-  "N min read" (`read_minutes`) for a text with no block, as every review is, the attachments, and
+- **A card** is its head over a box: the title, the summary, the count chips, the segment bar, or "N
+  min read" (`read_minutes`) for a text with no block, as every review is, the attachments, and
   Open, which reads Continue while the document is *Unsent*, beside Reviewed on a review; Pilot's
-  dots follow the box. The chips count the blocks by kind, a confirmation as a decision, but for
-  Pilot's answers: "N settled by Pilot", and "N deferred" for its deferrals; a count of none has no
-  chip. Open goes to the document's address, which opens it in the overlay
+  dots follow the box. The chips count the blocks by kind, a confirmation as a decision, an action
+  Pilot claimed among the actions while it is open, but for Pilot's answers: "N settled by Pilot",
+  and "N deferred" for its deferrals; a count of none has no chip. The auto pilot chip comes last.
+  Open goes to the document's address, which opens it in the overlay
   ([`documents.md`](documents.md)); none of the text shows on the card. Reviewed (`POST reviewed`)
   makes the review a done line.
 - **A registered document with no text**, awaiting its read or after one that failed, is a review's
@@ -188,20 +226,21 @@ answer moves the count, so a document stays as it stands while it is answered.
   failed, a warning chip beside the name reads *Did not load*, since only that state waits on the
   person's Reviewed. Its text, once read, gives it its title and its blocks live, on a review's
   card as any other.
-- **The segment bar**: a segment per block, filled once the block is answered, its tooltip what the
+- **The segment bar**: a segment per block, filled once the block is answered, a claim only once
+  its action is done, its tooltip what the
   block asks, its section's heading, else its kind, and whether it is answered. Inline, a segment
   scrolls to its block, which flashes; on a card it opens the overlay at the block's address.
 
 **Unsent and Send answers** (D026, D033). A document reads *Unsent* while it has an answer and no
 Done: a person's answer or Pilot's, an action's Done among them. A deferral alone is no answer here,
-since it asks nothing of the person, and neither is a recommendation; a held save, `concept`, has
-nothing to do with it (`isUnsent`). The document's Done is *Send answers*, which fixes the answers
-and sends them back while the work goes on (`POST done`). It enables once every unanswered block has
-a recommendation; with any block unanswered it asks first, in a dialog, "Send with the
-recommendations?", a line per unanswered block, "<ask> · <answer>", a proposal's answer "Agree:
-<proposal>" and a confirmation's "Yes: <proposal>", whose Confirm sends, the record answering each
-block with its recommendation. An action's Done keeps its name, and a one-ask item, its answer being
-its done, has neither.
+since it asks nothing of the person, and neither is a recommendation or a claim not yet done; a held
+save, `concept`, has nothing to do with it (`isUnsent`). The document's Done is *Send answers*,
+which fixes the answers and sends them back while the work goes on (`POST done`). It enables once
+every unanswered block has a recommendation; with any block unanswered it asks first, in a dialog,
+"Send with the recommendations?", a line per unanswered block, "<ask> · <answer>", a proposal's
+answer "Agree: <proposal>" and a confirmation's "Yes: <proposal>", whose Confirm sends, the record
+answering each block with its recommendation. An action's Done keeps its name, and a one-ask item,
+its answer being its done, has neither.
 
 ***Edited <time>*** (D032), Pilot's mark and the clock in a document's head, says that Pilot changed
 the document in a turn after the first text it was shown with (`edited_at`). No read is recorded:
@@ -238,13 +277,20 @@ answers*.
 - **An action** (`action.tsx`): without options, a paste-back field, "What to paste back, if
   anything", over Done; with options, a button each, the first primary, and Other…, whose console
   sends its words as the answer. The paste-back goes as the note of the Done, the option or the
-  words.
+  words. An action Pilot claimed is open until its `done`: while nothing saves it reads Pilot's
+  avatar, "Pilot does it" and " · " the work item that does it, linked to its address, with the
+  claim's note under it, over the controls, which stay a person's; a person's Done is answered as
+  any person's is.
 - **A confirmation** (`confirmation.tsx`) is a card: its head with the reason line, plain words by
-  the reason's code with the ground as its tooltip ("Auto pilot off", "Always asks: cannot be
-  undone", and so on; a code without words of its own shows `because.name`); the title and the
-  proposal beside the check, Yes, and the cross, No, which opens a console for the reason that
-  sends empty too, "Send No"; and Details, which unfolds the prose, and Less. Inside a document a
-  confirmation is a block, its proposal beside the same Yes and No.
+  the reason's code with the ground as its tooltip (`item-head.tsx`'s `WHY`: "Auto pilot off",
+  "Always asks: cannot be undone", and so on; a code without words of its own shows `because.name`);
+  the title and the proposal beside the check, Yes, and the cross, No, which opens a console for the
+  reason that sends empty too, "Send No"; and Details, which unfolds the prose, and Less. Inside a
+  document a confirmation is a block, its proposal beside the same Yes and No. A standing grant, a
+  permission meant to outlast the project or reach past it, is a reason of its own,
+  `standing-grant`, which asks under auto pilot too, so the switch never answers it (D086): "Always
+  asks: a lasting permission", its tooltip "The permission would outlast the project or reach past
+  it; Pilot asks even under auto pilot".
 - **A notice** has Read.
 
 A console (`console.tsx`) is the growing text field with Send and a cross, Cancel, inside its
@@ -293,9 +339,12 @@ project, and an Undo before then withdraws that job ([`work.md`](work.md)).
   "Withdrawn by an Undo" under its title.
 
 **Finished.** Finish closes every open item but the opening, so a finished project's timeline is its
-opening and done lines, and ends in "Finished · <stamp>", "22 Oct 2026, 14:05". No line offers
-Undo while the project is finished, a line answered before Finish included (D028); Reopen brings it
-back.
+opening and done lines, and ends in "Finished · <stamp>", "22 Oct 2026, 14:05". Under that divider
+stands the archive question its latest finish put (`archive-question.tsx`;
+[`projects.md`](projects.md)): open, its head "Question" with the archive box, "Archive the
+project?", and two buttons, Archive, primary, and Keep, both disabled from a click until the answer
+is read back; answered, its done line, the answer under its title. No line offers Undo while the
+project is finished, a line answered before Finish included (D028); Reopen brings it back.
 
 **Archived.** An archived project takes Bring back alone (D012), so its timeline reads as it was
 left: every close of an open item stands disabled, not hidden, as a work item's Resume does
@@ -340,8 +389,12 @@ has the testing endpoints they call). A text with one block makes its item that 
 spec's document carries two blocks or more. The `timeline` page object
 (`tests/support/page-objects/timeline-page.ts`) opens a project's timeline (`open`), or an
 address (`openAt`), and reads its items, blocks, segments, cards, settled lines, attachments,
-banners and done lines, their Discuss and *In the chat*, and an item's line that Pilot asked its
+banners and done lines, their Discuss and *In the chat*, an item's line that Pilot asked its
 writer (`item(id).writerAsked`,
-pinned in `frontend/tests/work/registered.spec.ts`); `slowNetwork`
+pinned in `frontend/tests/work/registered.spec.ts`), a block's head that says so, a claimed action's
+line and its work item's link (`writerAsked`, `claim`, `claimWork`, pinned in
+`tests/work/clarification.spec.ts` and `claimed.spec.ts`), the auto pilot marks and chip
+(`autopilotMark`, `autopilotChip`, `tests/timeline/autopilot-mark.spec.ts`), the archive question's
+buttons (`archiveQuestion`, `archive-question.spec.ts`) and the ready line (`ready`); `slowNetwork`
 (`tests/support/network.ts`) holds a write on its way, to see what shows while it saves. A spec
 asserting a live update waits for the stream first (`deploymentSse.ensureConnected()`).

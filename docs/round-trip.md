@@ -15,6 +15,7 @@ throughout: the controller's file routes read and write its share, never its pod
 | `WriteBackService` (`backend/app/services/write_back_service.py`) | the write-back of a closed document, the job `write-back` |
 | `RecordService` (`backend/app/engine/record.py`) | the closes, the release of the continuation, Undo ([`engine.md`](engine.md)) |
 | `SessionStartService.continue_run` (`backend/app/services/session_start_service.py`) | the continuation's placement and start ([`sessions.md`](sessions.md)) |
+| `ClarificationService` (`backend/app/services/clarification_service.py`) | the clarification run placed at a pass's end, and the writer's reply recorded; `SessionStartService.clarify` places and starts it |
 
 ## A registered document
 
@@ -66,9 +67,51 @@ transaction, under the Project's row it holds (`JobService.worker_turn_ended`,
 is placed once per run: the reads the startup reconcile resumes after a restart place it when they
 settle, and none places a second; none is placed in a finished or an archived project. Its
 pre-ruling pass, PilotProjects' `pre-rule` skill, may answer blocks as Pilot, defer them to a plan
-task, and give an item of kind `document` it settled or deferred whole Pilot's own Done, cause
-`settled`, which closes it as a person's Done does, its write-back and its continuation included;
-Done takes no item of another kind, so a one-block document it answered stays open for a person.
+task, claim an action a work item of Pilot's does (below), ask the writer about a block it cannot
+read (below), and give a document it settled or deferred whole Pilot's own Done, cause `settled`,
+which closes it as a person's Done does, its write-back and its continuation included: an item of
+kind `document`, or a registered document of one block, which has its block's kind, once that block
+is answered, deferred, or claimed and done ([`engine.md`](engine.md)).
+
+**A claimed action** (D085). An action Pilot may run under the grants, the pass claims: it adds the
+work item that does it, the block named in its `claims` ([`mcp.md`](mcp.md)), then answers the
+block `Pilot does it`, `by: agent`, the note naming the work item. The block stays open, Pilot's:
+its document waits on no person while every open block of it is such a claim, out of the badge, and
+its line and the overlay name and link the work item ([`timeline.md`](timeline.md)). The job after
+that work item's turn names the claimed actions in its brief ([`work.md`](work.md)), and the plan
+skill writes each action's `done`, `by: agent`, the paste-back its note; its document then closes by
+Pilot's own Done where that was its last open block, and the write-back and the continuation follow
+as for any close. A run that fails leaves the claim standing and the block open, and a person's Done
+on it meanwhile closes it as any Done does.
+
+**Asking the writer.** The pass asks a registered document's writer about a block it cannot read
+through `ask_writer` ([`mcp.md`](mcp.md)): a question a block, recorded as a Writer Question of the
+pass's Turn and named on the document's line. When the pass's job ends, idle after its last turn or
+failed, having asked, the relay places one **clarification run** in that transaction
+(`ClarificationService.pass_ended`), which puts every question the pass asked to the writer of the
+run whose turn it took, whichever run's document a question names; a Stop places none. It is a work
+item (`SessionStartService.clarify`) titled `Clarify <paths>`, the asked documents' source paths,
+at the project's next place, on the run's plan task, with no trigger item, its role a
+`clarification_runs` row naming the pass ([`record.md`](record.md)); it resumes the run's
+conversation in the run's environment, never reset, as the continuation does, through the gate. Its
+first Turn groups the questions by document, `Pilot asks about <path>:` and `- <local id>:
+<question>` a block, then ``Answer each under a heading per block id (`## D2`, `## D4`); register
+nothing, start nothing; then end your turn.``, a heading `## <path> <local id>` where two asked
+documents share a local id. Its turn's final text, at its idle end, is the writer's `reply`, with
+`replied_at`, which moves the timeline; a turn that ends with no text records none. The reply is
+split per block under the headings asked for, a heading matched outside a fence at its level and by
+its text, its part running to the next heading of the same or a higher level, and shown whole where
+any heading is missing (`reply_parts`): the document's `clarifications`, the overlay's section
+([`documents.md`](documents.md)). The job after the run's turn is briefed with it, *the writer
+answered* ([`work.md`](work.md)), and asks nothing: `ask_writer` is refused there, and in a pass
+whose run another pass asked about, so a Retry of a pass that asked asks nothing: one round per
+worker turn. A clarification run that fails gets no job; its questions stand beside
+the asks, the document open for the operator.
+
+While another Session runs or starts on the conversation in its environment, the run's
+continuation among them, the clarification run is held, its line "Waiting for the run before it",
+and so is a continuation behind a clarification run: each waits for the other's turn to end
+(`start_gate.carried`, [`sessions.md`](sessions.md)).
 
 ## The close and the write-back
 
@@ -123,7 +166,8 @@ skill's to leave unstarted (D076).
 - **Undo goes** from every document of the run in that transaction: each is consumed by the
   continuation (`consumed_at`, `consumed_session_id`), and `ProjectChanged` moves the timeline
   (D047). It goes whether the continuation starts at once or is held: while the project is paused,
-  the slot is full or the controller does not answer, Undo is gone though nothing has been sent.
+  the slot is full, the controller does not answer or a clarification run holds the conversation,
+  Undo is gone though nothing has been sent.
 - **Through the gate**, as every start ([`sessions.md`](sessions.md)): `held` while the gate is
   closed for it, else `starting`. Under a pause the person's answers go through, Done and the
   write-back included, and the continuation is held, its line saying "Paused", until the project
@@ -159,6 +203,9 @@ documents is open, the continuation's Session holds it as any Session holds its 
   the continuation, the slot's lock and an Environment's.
 - A Resume of a continuation: the Project's row shared, its Session's, the Documents it carries, the
   slot's lock, then an Environment's.
+- A pass's turn end that places its clarification run: the Project's row `FOR UPDATE`, then the
+  pass's Session's, as a worker's turn end takes them; the conversation is read under the slot's
+  lock.
 
 ## Testing it
 
@@ -166,7 +213,8 @@ The backend's tests are `backend/tests/services/test_turn_end_read_service.py` (
 refusals, the outage, startup, Finish racing a read, the lock order), `test_write_back_service.py`
 (each close, a stopped environment, the order, the refusals, the retries, Undo, the outage,
 startup, Undo racing a write, the lock order), `test_session_start_service.py` (`TestContinueRun`,
-`TestRunContinuation`), `test_environment_service.py` (the binding) and
+`TestRunContinuation`, `TestClarify`), `test_clarification_service.py` and `test_relay_service.py`
+(`TestClarificationRun`), `test_environment_service.py` (the binding) and
 `test_project_event_service.py` (a second connection hears the release); and
 `backend/tests/engine/test_record.py` (`TestRecordServiceRelease`, `TestRecordServiceRetryWriteBacks`,
 `TestResumeMessage`, `TestRecordServiceReleaseLocks`, `TestRecordServiceWriteBackOwed`) and
@@ -179,4 +227,5 @@ run playing a line naming its conversation first so that its continuation resume
 with `removeFile`, or a broken text, fails its read; once the read has published the document, the
 file removed and `<path>/notes.md` written in its place makes the path a folder, so its write-back
 is refused `409 not-a-file`. `fileText` reads what was written back, and `projects.reviewed` closes a
-review over the API while the session log stands open.
+review over the API while the session log stands open. `clarification.spec.ts` plays the
+clarification run, its held continuation and its reply, and `claimed.spec.ts` a claimed action.

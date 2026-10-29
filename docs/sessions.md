@@ -15,8 +15,8 @@ on in [`jobs.md`](jobs.md).
 
 | Service | Does |
 |---|---|
-| `SessionStartService` (`session_start_service.py`) | a work item placed by repository, or a run's continuation, its Session written `held` or `starting` through the gate and brought up by its start loop in an environment of Pilot's own; a brain session's start, a chat's or a job's, brought up in the store, a job briefed as it leaves the gate; Stop and Resume |
-| `start_gate.py` | `held_reason`, the gate every start passes, and `WorkSlots`, its slot |
+| `SessionStartService` (`session_start_service.py`) | a work item placed by repository, a run's continuation or a clarification run, its Session written `held` or `starting` through the gate and brought up by its start loop in an environment of Pilot's own; a brain session's start, a chat's or a job's, brought up in the store, a job briefed as it leaves the gate; Stop and Resume |
+| `start_gate.py` | `held_reason`, the gate every start passes, and `WorkSlots`, its slot; `setups` and `carried`, the setup the pause lets through and the conversation another run holds |
 | `session_scope.py` | `scoped_create`, what each create of a Session is handed |
 | `RelayService` (`relay_service.py`) | the send of a Turn, the relay of each turn into the records, and the interrupt of a turn stopped under it |
 | `SessionRecordService` (`session_record_service.py`) | the records' one writer and the one read function |
@@ -26,7 +26,8 @@ on in [`jobs.md`](jobs.md).
 
 All are in `backend/app/services/`. The brain's `add_item` places a work item ([`mcp.md`](mcp.md)),
 and so does the record's testing route (below); the close that leaves none of a run's registered
-documents open places the run's continuation ([`round-trip.md`](round-trip.md)); Create project
+documents open places the run's continuation, and a pre-ruling pass's end its clarification run
+([`round-trip.md`](round-trip.md)); Create project
 places the setup, a job of Pilot's own, and a worker's turn end and a person's close of an item of
 Pilot's own place the jobs after them ([`work.md`](work.md)). A person's Resume carries a stopped
 or failed worker's run on, a person's Retry places a fresh job for a failed or stopped one, and
@@ -54,19 +55,22 @@ and with `RecordNotFoundException` for no such Project or a task not in the plan
 is read under the lock its Item's birth takes, `next_seq`'s `FOR UPDATE`, so a start and a Finish
 or an Archive never interleave, and two starts of one project go one after the other.
 
-Then the gate decides its state. **The gate** (`held_reason(paused=, kind_code=, unreachable=,
-filled=, queued=)`) holds a start while its project is paused ([`projects.md`](projects.md)), a
-Chat's never for the pause; while the controller is unreachable ([`controller.md`](controller.md));
-a work item's alone, while no slot is free; and a job's alone, while another job of its project is
-before it (below). Where more than one holds, the pause is read first, then the outage, then the
-slot, then the queue. A start the gate holds is `held`: its Turn 1 unsent, a job's not yet written
-(below), no `server` record, no current line, and no loop run for it. One it lets through is
-`starting`, takes its slot, and has its loop run once the transaction commits. A `starting` Session
-that has an Environment already, a Resume's, has the environment's shutdown timer cleared in the
-same transaction, and gets the `server` record `{"type": "starting", "text": "Starting <environment
-name>…"}`, in no Turn, and the current line from it, unless it has its controller session or its
-rename is still to make (the start loop, below). The record reads "Preparing <environment name>…"
-for an environment of Pilot's own on a new conversation, created or reset.
+Then the gate decides its state. **The gate** (`held_reason(paused=, kind_code=, setup=,
+unreachable=, filled=, queued=, conversing=)`) holds a start while its project is paused
+([`projects.md`](projects.md)), a Chat's never for the pause, nor the setup's, a Retry's included
+(`setups`), which runs under the pause Create writes; while the controller is unreachable
+([`controller.md`](controller.md)); a work item's alone, while no slot is free; a job's alone, while
+another job of its project is before it (below); and a work item's alone, while another Session runs
+or starts on the conversation it resumes (below). Where more than one holds, the pause is read
+first, then the outage, then the slot, then the queue, then the conversation. A start the gate holds
+is `held`: its Turn 1 unsent, a job's not yet written (below), no `server` record, no current line,
+and no loop run for it. One it lets through is `starting`, takes its slot, and has its loop run once
+the transaction commits. A `starting` Session that has an Environment already, a Resume's, has the
+environment's shutdown timer cleared in the same transaction, and gets the `server` record `{"type":
+"starting", "text": "Starting <environment name>…"}`, in no Turn, and the current line from it,
+unless it has its controller session or its rename is still to make (the start loop, below). The
+record reads "Preparing <environment name>…" for an environment of Pilot's own on a new
+conversation, created or reset.
 
 **The slot.** `WorkSlots` (`start_gate.py`, the container's `work_slots`) counts the Sessions of
 kind `work` that are `running` or `starting`; a Chat's and a job's count for none. No slot is free
@@ -91,6 +95,16 @@ reads run at once. A job's end, its Session leaving `starting` or `running`, ask
 once its transaction commits (`WorkSlots.left`); its follow-up turn keeps it `running`, and so keeps
 its place ([`chats.md`](chats.md)).
 
+**The conversation.** A work item that resumes a conversation, a run's continuation or a
+clarification run, is held, `held_reason` `conversation`, its line "Waiting for the run before it",
+while another Session `running` or `starting` carries that conversation in the same Environment
+(`carried`), so that two runs of one conversation never both go on: a continuation waits for the
+clarification run's turn to end, and a clarification run for the continuation's. The Environment is
+part of the match, the conversation's own ([`round-trip.md`](round-trip.md)). It is read under the
+slot's lock, and the Session is written `held` before the gate reads it, so the two never both
+start; a Resume reads it for its own Session as a start does. A fresh start has no conversation and
+is never held so.
+
 **A job's brief** is written as the job moves to `starting`, not at its placement: its first Turn,
 composed from the record as it then stands (`BriefService.job`, [`work.md`](work.md)), and its
 Work's `autopilot` set from the project's switch then. A job the gate lets through at its placement
@@ -106,7 +120,8 @@ continuation locks the documents it carries after its Session's, before the slot
 holds its Project's row `FOR SHARE` before its Session's: its brief writes the Session's row a second
 time, whose foreign key's check then takes the Project's row, which an Item's birth holds
 exclusively. A worker's turn end holds its Project's row `FOR UPDATE` before its Session's, as it
-may place the job after its turn (below). The start loop's transactions lock no Project row, so no
+may place the job after its turn (below), and so does a pass's, the job after a worker's turn, as
+it may place its clarification run. The start loop's transactions lock no Project row, so no
 controller call is made while one is locked.
 
 **The start loop.** Once a `starting` Session's transaction commits, the loop `start:<session id>`
@@ -208,6 +223,13 @@ Session in the run's environment from its placement on, with the run's conversat
 `start_work`'s does, and refuses as it does in a finished or an archived project, which refuses
 the close. Its environment is never reset: the
 conversation goes on in the tree as the run left it ([`round-trip.md`](round-trip.md)).
+
+**A clarification run.** `clarify(db, project, pass_id, run_id, title, message)` places the work
+item that puts the questions the job `pass_id` asked to the writer of the work item `run_id`,
+resuming its conversation as `continue_run` does, in the caller's transaction, the pass's turn
+end's, which holds the project's row: titled `title`, with no trigger Item, its `clarification_runs`
+row naming the pass ([`record.md`](record.md)). It refuses as `continue_run` does in a finished or
+an archived project.
 
 **The testing route.** The record's `POST /api/testing/projects/<id>/work`, open on every stage but
 `prd`, places a work item through `start_work` ([`projects.md`](projects.md)), and the fleet's live

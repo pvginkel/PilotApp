@@ -12,7 +12,7 @@ commits.
 |---|---|
 | `DocumentService` (`documents.py`) | the births, a worker's registration and its read, `publish()`, the document's row lock, versions, the turn's end |
 | `IngestService` (`ingest.py`) | an agent's save of a path of the tree; the faults of a text Pilot's own item is to be born with |
-| `RecordService` (`record.py`) | a person's answer, Done, undo, Read, Reviewed; Finish's close; a work item placed and done; a run's continuation released; the job after a close of an item of Pilot's own placed, and withdrawn by its Undo |
+| `RecordService` (`record.py`) | a person's answer, Done, undo, Read, Reviewed; Finish's close and the archive question's; the switch's Yes; a work item placed and done, and named for the claimed actions it does; a run's continuation released; the job after a close of an item of Pilot's own placed, and withdrawn by its Undo |
 | `PlanService` (`plan.py`) | `plan.json`, rendered and saved; the deferrals without a home |
 | `TreeService` (`tree.py`) | what a path names, the bytes it must hold, its tree hash; the manifest |
 | `ViewService` (`views.py`) | `reference.json`, `timeline.json` and `chat.md` ([`chats.md`](chats.md)) |
@@ -44,6 +44,12 @@ version 1 cut, cause `born`; a worker's is registered (below):
 - `bear_opening(project, title, user, text)`: the opening, the words of the person who started the
   project, taken as written: at Create project, the first message to its definition chat. The record
   reads nothing from its text: it has no blocks, and its kind, title and caches stay as it was born.
+- `bear_archive_question(project)`: the archive question, after a finish
+  ([`projects.md`](projects.md)), of the kind `archive_question`, created by Pilot and by no
+  session: "Archive the project?", one decision, `D1`, offering Archive and Keep. Its caller holds
+  the project's row `FOR NO KEY UPDATE`, as a change of its standing does, and its `seq` is taken
+  under that hold, the one every other birth's `next_seq` waits on. `bear_item` refuses its kind as
+  it refuses the opening.
 
 The births, and a work item's placing, take the Item's `seq` from
 `DocumentService.next_seq(project)`, under the project's row lock until the transaction ends
@@ -100,7 +106,8 @@ every cache in the same transaction:
 - the document's blocks, rewritten in place by local id; a block the text lost is deleted with its
   options, and a block's options are rewritten only when they changed;
 - for a prose item but the opening, its kind (a single block gives its kind, `confirmation` for a
-  confirmation; several make it a `document`; with none it keeps its kind), its title, the text's
+  confirmation; several make it a `document`; with none it keeps its kind; an archive question keeps
+  its kind whatever its blocks), its title, the text's
   alone and none while the text gives none, its task (`step`), `urgent`, its addressee (`for`) and
   its document's summary. The opening's text rebuilds nothing;
 - for the draft, the project's name: its title, or none.
@@ -171,36 +178,41 @@ project's row lock its `parse` Save Errors go, in every environment, with `Error
 `RecordService`'s writes each take the document's row lock first, so that a write and an ingest of
 one document never interleave. Every close takes the project's row before it, so that it
 serialises with Archive and reads the archive as it stands: an archived project's item takes no
-close and no Undo (D012). A close of a registered document takes the row `FOR UPDATE`, the lock
-order of the start that places a continuation, so that it serialises with Finish, with an Undo and
-with the close of another document of its run; any other close holds it shared, as an Undo does.
+close and no Undo (D012). An item's close takes the row `FOR UPDATE`, the lock order of the start
+that places a continuation or a job, so that it serialises with Finish, with an Undo and with every
+other close; a close in the draft holds it shared, as an Undo does, and the archive question's
+close holds its document's row alone (below).
 A write that touches the text splices it into the published text and publishes it, while the
 path's latest save is held too: the tree keeps the agent's save then, and the next clean save's
 merge carries the write to the file.
 
 - `answer(document, local_id, user, answer, *, via=AnswerChannel.APP, note=None, to=None)`: a
-  person's answer to a block, `deferred` with `to` naming a task in the plan or `plan`. It
-  replaces the block's answer, Pilot's included. An answer to the one block of a one-ask item, an
-  item with a single block, marks the item done, cause `answered`, at the answer's time. Outside
-  the draft, a person's answer freezes its block against the agent's next saves
-  ([`block-dsl.md`](block-dsl.md)), and so does an action's Done.
+  person's answer to a block, `deferred` with `to` naming a task in the plan or `plan`. It replaces
+  the block's answer, Pilot's included. An answer to the one block of a one-ask item, an item with a
+  single block, marks the item done, cause `answered`, at the answer's time. Outside the draft, a
+  person's answer freezes its block against the agent's next saves ([`block-dsl.md`](block-dsl.md)),
+  and so does an action's Done. An archive question takes `Archive` or `Keep` alone; its Archive is
+  `ProjectService.archive_by_its_question`'s, which answers it and archives the project in one act.
 - `done_action(document, local_id, user, *, note=None)`: Done on an action without options; on a
   one-ask item it is the item's done as well.
 - `undo(item)`: clears a done prose item's mark while no session has taken its answers, its done
   cause offers undo and its project is neither finished (D028) nor archived (D012); a registered
   document's `written_back_at` and `write_back_refused_at` go with it, so that its next close writes
   it again; and the job its close placed, while it is still held before its brief, is withdrawn
-  (below).
-  On cause `answered` it also takes out the answer lines of the block the person answered, which
-  unfreezes the block. It holds the project's row shared before the document's, so Finish and
-  Reopen, which change the project's state under its row lock, never interleave with it, and locks
-  that job's Session before it reads the item again, so that the job's brief, which consumes the
-  item under that lock, and the Undo never both take effect.
+  (below). An archive question offers none. On cause `answered` it also takes out the answer lines
+  of the block the person answered, which unfreezes the block. It holds the project's row shared
+  before the document's, so Finish and Reopen, which change the project's state under its row lock,
+  never interleave with it, and locks that job's Session before it reads the item again, so that the
+  job's brief, which consumes the item under that lock, and the Undo never both take effect.
   `offers_undo(item)` says whether `undo` would take the item now, by the same rule.
 - `done(item, user)`: Done on a document. A person's first answers every unanswered block that
   has a recommendation with it, `via: recommended`, and is refused while a block has neither an
-  answer nor a recommendation; its cause is `marked`. Pilot's is refused while any block is
-  unanswered; its cause is `settled`. Then a `done` version is cut and the item marked done.
+  answer nor a recommendation, a claimed action not yet done among them; its cause is `marked`.
+  Pilot's is refused while any block is unanswered, a claim counting only once its action is done
+  ([`block-dsl.md`](block-dsl.md)); its cause is `settled`. Pilot's also takes a registered
+  document of one block, whose item has its block's kind, once that block is answered, deferred, or
+  claimed and done; a person's Done on one, and Pilot's on a one-block item of its own, stay refused
+  by its kind. Then a `done` version is cut and the item marked done.
 - `read(item, user)` on a notice and `reviewed(item, user)` on a review: the item's mark, cause
   `marked`, the text untouched.
 - `close_unanswered(project, user, at)`: Finish's close ([`projects.md`](projects.md)). Every open
@@ -209,19 +221,50 @@ merge carries the write to the file.
   owes no write-back and continues nothing. It takes the row lock of each open
   prose item's document first, in id order, so a write to one of them waits for the close or finds
   its item done.
+- `close_archive_question(project, user, answer)`: the project's open archive question, if it has
+  one, answered `Archive` or `Keep` by `user`, its done `answered`: the menu's Archive closes it as
+  its Archive and Reopen as its Keep. It holds the question's document row alone, under the hold of
+  the project's row its caller took `FOR NO KEY UPDATE`, so that a change that stops the project's
+  sessions never takes the row `FOR UPDATE`, which a chat's send under way, holding its Session,
+  would deadlock with.
+- `autopilot_yes(project, user)`: the switch's Yes ([`projects.md`](projects.md)), under the
+  project's row held `FOR UPDATE`: the documents of the confirmations it answers locked in id order,
+  the confirmations read again within them, and each answered `Yes` by `user`, `via: autopilot`,
+  through `answer`, so each does what a person's answer does. `autopilot_may_take(project)` is the
+  query of those confirmations, in timeline order: unanswered confirmation blocks of the project's
+  open items whose reason does not ask under auto pilot. The head's count and the dialog read it.
+
+**A claimed action** (D085) is an action of a registered document the pre-ruling pass answered
+`Pilot does it`, `by: agent`, and whose `done` is not yet written: open, Pilot's, until then
+([`block-dsl.md`](block-dsl.md)). The work item that does it is the record's, not only its note's:
+the pass names the block in the `claims` of that work item's `add_item` ([`mcp.md`](mcp.md)), the
+work item first and the claim after it, and each naming is a Claim Assignment
+([`record.md`](record.md)). `claimable(project, block_ids, operation)` checks the named blocks
+before the work item starts, each document's row locked in id order after the project's: a block
+of another project's item, or one its document lacks, is a `RecordNotFoundException`; an item that
+is no registered document, is done or has not been read yet, a block that is no action or is
+answered, a claim not yet done excepted, and a block named twice are refused. `give(project, work,
+blocks)` writes one row each once the work item is placed. A block named again later keeps its
+earlier rows, and the one whose work item has the highest `seq` stands (`claims.standing()`); a
+claimed action whose rows are none has no work item named. `claims.claimed()` is the claim as a
+query's condition on a block. A claimed action stays out of the badge while its document has no
+other open block ([`projects.md`](projects.md)), and keeps a person's controls: a person who closes
+it meanwhile is answered as any person's answer is. A run that fails leaves the claim
+standing and the block open.
 
 Each refuses with `InvalidOperationException`, its message saying why: Pilot as the actor of an
 answer, an action's Done, Read or Reviewed, since Pilot answers in the file with `by: agent`; any
 write on a done item; a blank answer; `deferred` without `to`, `to` without `deferred`, or a `to`
 naming neither `plan` nor a task in the plan; an answer to an action without options other than a
 deferral; Done on an action with options or on a block that is no action; Done on an item that is
-not a `document`, Read on one that is not a notice, Reviewed on one that is not a review; any
-close of a registered document awaiting its read ("its file has not been read yet"); any close
-of an archived project's item ("its project is archived", D012); undo of an item that is no prose
-item, is not done, has been consumed, was done by a cause that offers none, or is of a finished or
-an archived project. A block the text does not have is a `RecordNotFoundException`,
-and the opening has none, nor a registered document whose read failed: an answer or a Done on
-either is refused so.
+not a `document`, Pilot's on a registered document of one block excepted, Read on one that is not
+a notice, Reviewed on one that is not a review; any close of a registered document awaiting its
+read ("its file has not been read yet"); any close of an archived project's item ("its project is
+archived", D012); an answer but Archive or Keep to an archive question; undo of an item that is no
+prose item, is an archive question, is not done, has been consumed, was done by a cause that offers
+none, or is of a finished or an archived project. A block the text does not have is a
+`RecordNotFoundException`, and the opening has none, nor a registered document whose read failed:
+an answer or a Done on either is refused so.
 
 The close of a registered document by anything but Finish, a one-ask answer, an action's Done that
 closes it, Done or Reviewed, emits `WriteBackOwed` for the Session that registered it while its text
@@ -235,17 +278,18 @@ document of the run consumed by it, `consumed_at` and `consumed_session_id`, wit
 Resume of a continuation, clears `write_back_refused_at` on the documents it carries, each owed
 again with its `WriteBackOwed`.
 
-**The job after an item of Pilot's own.** A person's close of an item a session of Pilot's own added,
-one whose Session Kind's surface is `pilot-store` (a chat's or a job's), places the job after it in
-the close's transaction, through the port `Jobs` (`JobService.item_done`, [`work.md`](work.md)):
-an answer that marks a one-ask item done, an action's Done that does, Done and Reviewed. A notice's
-Read, Pilot's own Done, Finish's close, a registered document's close and an item a worker's session
-added place none. Every close of an item holds its project's row `FOR UPDATE`, a close in the draft
-alone holding it shared. The job's brief consumes the item, which takes its Undo
-([`sessions.md`](sessions.md)). An Undo before that, while the job is held behind the project's other
-jobs or by the pause, withdraws it (`JobService.withdraw`): its Session `stopped` by no one, with no
-Turn, and its Item done at the Undo, cause `withdrawn`, by no one, which offers no undo. An Undo that
-finds the job briefed meanwhile is refused, the item consumed.
+**The job after an item of Pilot's own.** A person's close of an item a session of Pilot's own
+added, one whose Session Kind's surface is `pilot-store` (a chat's or a job's), places the job after
+it in the close's transaction, through the port `Jobs` (`JobService.item_done`,
+[`work.md`](work.md)): an answer that marks a one-ask item done, an action's Done that does, Done
+and Reviewed. A notice's Read, Pilot's own Done, Finish's close, a registered document's close, an
+item a worker's session added and the archive question, which no session added, place none. Every
+close of an item holds its project's row `FOR UPDATE`, a close in the draft alone holding it shared.
+The job's brief consumes the item, which takes its Undo ([`sessions.md`](sessions.md)). An Undo
+before that, while the job is held behind the project's other jobs or by the pause, withdraws it
+(`JobService.withdraw`): its Session `stopped` by no one, with no Turn, and its Item done at the
+Undo, cause `withdrawn`, by no one, which offers no undo. An Undo that finds the job briefed
+meanwhile is refused, the item consumed.
 
 The writes but the close, which takes its caller's time, record their times to the second; they
 trim every value and read a blank note as none.

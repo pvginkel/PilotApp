@@ -100,13 +100,23 @@ At a document's address (`DocumentOverlay`, read by `useItemDocument`):
 
 - **The head**: the title, and under it the project's name, the step, the segment bar, *Done* or
   *Unsent*, and *Edited <time>*.
-- **The body**: the summary as its lead, the attachments, then the text as an inline document draws
-  it, every block answered in place and every settled section collapsed, and Pilot's dots while a
-  turn saves it. A segment scrolls the body to its block, which flashes, its section opened first.
+- **The body**: the summary as its lead, the attachments, then Pilot's questions to the writer
+  (below), then the text as an inline document draws it, every block answered in place and every
+  settled section collapsed, a claimed action reading "Pilot does it" and its work item
+  ([`timeline.md`](timeline.md)), and Pilot's dots while a turn saves it. A segment scrolls the body
+  to its block, which flashes, its section opened first.
 - **The foot**: on a done item, "Done · <stamp>", then " · Pilot", or the other person's name, where
   the signed-in person did not do it; on an open review, Reviewed; on an open document, *Send
   answers*, which closes the overlay once the record holds the answers, each disabled while the
   project is archived (D012); on an open one-ask item or notice, nothing.
+
+**Pilot asked the writer** (`clarification.tsx`). Over a registered document's text stands a
+section per pre-ruling pass that asked its writer about its blocks, the item's `clarifications`
+([`timeline.md`](timeline.md)): Pilot's avatar and "Pilot asked the writer · <stamp>", the stamp
+when the pass first asked, then each question after its block's local id. Once the reply comes, each
+question's part stands under it where the reply kept every heading asked for (`split`), else the
+reply whole under the questions, as Markdown. Until then, and where the run's turn ended with no
+text, the questions stand alone.
 
 A registered document with no text, awaiting its read at the end of the run that registered it or
 after one that failed ([`round-trip.md`](round-trip.md)), draws its head, titled by its file's
@@ -270,7 +280,8 @@ A spec hangs files on an item with `projects.attach(itemId, files)`, or on nothi
 endpoints ([`projects.md`](projects.md)), on a project made with a session. The `overlay` fixture
 (`tests/support/page-objects/overlay-page.ts`) opens a document's address (`open`), the handbook or
 the project document (`openProjectDocument`), and reads the overlay's head, body, foot and
-attachment view, its head's Discuss among them; the `panel` fixture (`panel-page.ts`) reads the
+attachment view, its head's Discuss among them, and its clarification sections (`clarification(n)`,
+pinned in `tests/work/clarification.spec.ts`); the `panel` fixture (`panel-page.ts`) reads the
 panel, its Documents tab and a draft's Draft tab (`draft`, `draftBlock(id)`), and the `chat` fixture
 its Chat tab ([`chats.md`](chats.md)). On the default 1280px viewport the panel stands open, on the
 Chat tab, a draft's on the Draft tab. A draft's page draws no timeline, so `timeline.open()`, which

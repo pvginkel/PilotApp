@@ -81,6 +81,8 @@ or better and its hue gold in each theme.
 In `src/components/shared/`:
 
 - `Avatar({who, size?})`: a person `{name, initials, slot}`, or `'pilot'`; `size` is `sm` or `xs`.
+- `PILOT_MARK` (`pilot-mark.ts`): the paths of Pilot's mark, which Pilot's avatar draws and the
+  timeline's auto pilot mark cuts its bolt out of ([`timeline.md`](timeline.md)).
 - `Menu` and `MenuItem`, and `Popover`: each closes on a press outside it and on Esc
   (`src/hooks/use-dismiss.ts`).
 - `Dialog`, a modal dialog on Radix's (`@radix-ui/react-dialog`, not the template's wrapper) that a

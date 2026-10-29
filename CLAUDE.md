@@ -10,7 +10,8 @@ its work items, its documents in the overlay and the side panel, on the record's
 behind it (`backend/app/engine/`), the sync of the store's tree, the server's jobs on the KubeCoder
 controller, Pilot's MCP server with the worker's round trip, the project's chat in the side panel,
 with the brain's tools, a new project: the plus, its definition chat and draft, Create project and
-its setup, and Pilot's jobs after a worker's turn and an item of its own done. Every green build of
+its setup, Pilot's jobs after a worker's turn and an item of its own done, the pass's claims and its
+questions to the writer, the switch's dialog and the archive question. Every green build of
 `main` deploys itself to the dev stage at `https://pilot-dev.home`, and production at
 `https://pilot.ginbov.nl` runs what the operator promotes from there
 ([`docs/deployment.md`](docs/deployment.md)). Version 1 is built from the design record in
@@ -207,6 +208,7 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
   its line and its session log, and Pilot's own work: its jobs, their briefs, Retry.
 - [`docs/mcp.md`](docs/mcp.md), [`docs/round-trip.md`](docs/round-trip.md),
   [`docs/chats.md`](docs/chats.md): Pilot's MCP server, handed to every session it creates, the
-  worker's tools and the brain's; a registered document's read at the run's end, its write-back and
-  the run's continuation; a project's chat and a draft's definition chat, its start in the store,
-  its brief, its Stop, its close, `chat.md`, and its Chat tab, composer, Discuss and *In the chat*.
+  worker's tools and the brain's; a registered document's read at the run's end, a claimed action,
+  the clarification run, its write-back and the run's continuation; a project's chat and a draft's
+  definition chat, its start in the store, its brief, its Stop, its close, `chat.md`, and its Chat
+  tab, composer, Discuss and *In the chat*.

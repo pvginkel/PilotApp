@@ -37,8 +37,9 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
 **The timeline and its documents**
 
 - `items`: an entry on a project's timeline, numbered by `seq` from 1 within the project, of an
-  item kind. The opening is a person's (`created_by_user_id`); every other item was added by a
-  Session (`created_by_session_id`). Its done is `done_at` with `done_cause_code`, and
+  item kind. The opening is a person's (`created_by_user_id`) and an archive question Pilot's,
+  by no session; every other item was added by a Session (`created_by_session_id`;
+  `ck_items_created_by`). Its done is `done_at` with `done_cause_code`, and
   `done_by_user_id` when a user did it; `consumed_at` with `consumed_session_id` is a session
   taking its answers: a registered document's, the continuation of the run that registered it, from
   its placement ([`round-trip.md`](round-trip.md)).
@@ -105,6 +106,14 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   project, and a job retries one at most (`ck_work_retried_by`, `uq_work_retried_by_id`). Its keys
   reach its Item and its Session through the one project. A `work`-kind Session may stand with no
   `work` row, as the seed's idle session and a testing project's do.
+- `claim_assignments`: a claimed action given to a work item, the `work` and the `block`, both the
+  key, one row each time a work item is named for the block; never changed, and of a block's rows
+  the one whose work item has the highest `seq` stands ([`engine.md`](engine.md)).
+- `clarification_runs`: the role of a work item that puts a pre-ruling pass's questions to the
+  writer, sharing its id with its `work` row: `pass_id`, the pass's job, one run a pass
+  (`uq_clarification_runs_pass_id`), never the run itself (`ck_clarification_runs_pass`); and
+  `reply`, the run's turn's final text, with `replied_at`, set together
+  (`ck_clarification_runs_reply`) ([`round-trip.md`](round-trip.md)).
 - `turns`: a message sent to a session and the reply it produced, numbered by `seq` from 1 within
   the session: its `message`, what was sent; its `author_user_id` (none for the server's own, such
   as a start's brief) and its `words`, the person's own, verbatim with their quote tags, which a
@@ -144,9 +153,9 @@ added by a revision and nowhere else.
 
 | Table | Rows |
 |---|---|
-| `item_kinds` (`name`, `form`, `icon`) | prose: `opening`, `decision`, `confirmation`, `question`, `action`, `notice`, `document`, `review`; work: `work`; wait: `card_wait`, `timed_wait` |
+| `item_kinds` (`name`, `form`, `icon`) | prose: `opening`, `decision`, `confirmation`, `question`, `action`, `notice`, `document`, `review`, `archive_question`; work: `work`; wait: `card_wait`, `timed_wait` |
 | `done_causes` (`name`, `undo_offered`) | undo offered: `answered`, `marked`, `settled`; not: `turn_ended`, `finished`, `withdrawn` (a job an Undo of its trigger item withdrew before its brief, which never ran) |
-| `confirmation_reasons` (`name`, `asks_under_autopilot`, `description`) | asked only while auto pilot is off: `auto-pilot-off`, `rider`; asked under auto pilot too: `irreversible`, `product-hold`, `self-approval` |
+| `confirmation_reasons` (`name`, `asks_under_autopilot`, `description`) | asked only while auto pilot is off: `auto-pilot-off`, `rider`; asked under auto pilot too: `irreversible`, `product-hold`, `self-approval`, `standing-grant` |
 | `session_kinds` (`name`, `surface`, `on_timeline`) | `chat` (`pilot-store`, not on the timeline), `work` (`pilot-work`), `job` (`pilot-store`) |
 
 A confirmation reason's `description` is the line `reference.json` gives the agent, which picks a
@@ -164,7 +173,8 @@ to it ([`engine.md`](engine.md)):
 - the project's `name`, the draft's title.
 
 The opening's text is read for nothing: it has no `blocks`, and its item keeps the kind, title and
-caches it was born with.
+caches it was born with. An archive question keeps the kind it was born with too; its block and its
+other caches are read as any item's.
 
 The project's `state_code`, `archived`, `autopilot` and `paused` are caches of its transitions,
 written with each one ([`projects.md`](projects.md)). A session's `turns`, `turn_started_at` and
@@ -216,7 +226,7 @@ is a record the engine could have produced, and its times are those of the run:
   and by Pilot, deferred to a task and to the plan, and done; an attachment; and a plan whose notes
   point at blocks, one of its tasks removed;
 - the finished project `bike-log`, `Bike repair log`, ben's and ada's, both its steps done, auto
-  pilot turned off as it finished;
+  pilot turned off as it finished, its archive question open under the end;
 - the archived project `photo-album`, `Photo album`, ada's, one step in progress and one not
   started.
 

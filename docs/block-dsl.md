@@ -129,6 +129,11 @@ Every kind also takes the answer lines:
 A block whose `by` names a person holds the record's answer; one with `by: agent`, or with no
 `by`, holds the agent's.
 
+**A claim** is an action answered `Pilot does it` (`pilot_dsl.CLAIM`) by `agent` with no `done`
+line: Pilot does it, and the action stays open and Pilot's until its `done` is written
+(`Block.claimed`). A block is answered (`Block.answered`) by an `answer`, `deferred` included, or a
+`done`, and a claim only once its `done` is written ([`engine.md`](engine.md)).
+
 **Values are read as written.** A body is YAML read with no implicit typing, so every scalar is
 the string written: `answer: Yes` matches the option `- Yes`, and `answer: 2` is `"2"`. Values are
 trimmed, and an empty one is absent.

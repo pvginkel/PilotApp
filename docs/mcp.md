@@ -173,7 +173,8 @@ and a controller that does not answer or refuses for a reason of its own a `502`
   `question`, `action`, `notice`, `document`, `review` or `work`; `card_wait` and `timed_wait` are
   refused, "Pilot takes no waits yet"), `title`, `step` and `attachments`, then a prose item's
   `markdown`, `urgent`, `for` and `summary`, or a work item's `repo` (`owner/Name`), `cwd`, `brief`,
-  `agent`, `model` and `reasoning_effort`. A field the kind does not take, and a work item without
+  `agent`, `model`, `reasoning_effort` and `claims`, the blocks' ids, `<item id>/<local id>`, of
+  the claimed actions it does. A field the kind does not take, and a work item without
   its `title`, `repo`, `cwd` or `brief`, are refused. A prose item is born in the record with its
   file, empty without `markdown` (`bear_item`, [`engine.md`](engine.md)): the call's `title` written
   into its front matter where that gives none, and `step`, `urgent`, `for` and `summary` where it
@@ -189,6 +190,13 @@ and a controller that does not answer or refuses for a reason of its own a `502`
   ask the operator first for this session.`, then `- The project's handbook:` and the handbook
   verbatim, each line that holds. `state` is its Session's, `starting` or `held`, and `held` why the
   gate holds it, `paused`, `controller_unreachable` or `slot`, for the brain to say so. Each of
+  `claims` names the work item for a claimed action, an open action of a registered document of the
+  project, checked before the start and written after it, so a refused claim starts nothing: each
+  stays open and Pilot's until its `done`, its line naming the work item named for it last, and the
+  job after that work item's turn names it for its `done` ([`engine.md`](engine.md)). A claim's item
+  not of the project, or a block its document lacks, is a `404`; an item that is no registered
+  document, is done or not yet read, a block that is no action or is answered, and one named twice,
+  a `409`. Each of
   `attachments` is an attachment of the project by its id, hung on the new item, or outside
   material, `<environment>:<path>`, copied in as `attach_file` copies it, a batch per source, every
   source's files under the caps of one call, hung in their order. The effect is "Added · <kind's
@@ -210,7 +218,11 @@ and a controller that does not answer or refuses for a reason of its own a `502`
   having no item.
 - **`mark(item, mark, for?)`**, `POST …/marks`, answers `200` `{effect}`: `done` on a document,
   with its recommendations, `read` on a notice, `reviewed` on a review, for the person `for` names;
-  without `for`, Pilot's own Done on a document it settled whole, and `read` and `reviewed` refused.
+  without `for`, Pilot's own Done on a document it settled whole, and on a registered document of
+  one block, whatever its kind, once that block is answered or deferred, a claimed action counting
+  once its `done` is written; `read` and `reviewed` refused. A registered document's Done writes its
+  answers back and continues its run once none of the run's documents is open
+  ([`round-trip.md`](round-trip.md)).
   "Marked done · <title>", "Marked read · …", "Marked reviewed · …".
 - **`stop_work(item)`**, `POST …/stops`, answers `200` `{effect}`: the work item's Session stopped
   by Pilot as a Stop stops one ([`sessions.md`](sessions.md)), refused for an item that is no work
@@ -222,10 +234,14 @@ and a controller that does not answer or refuses for a reason of its own a `502`
   the rest, whose turn the interrupt ends once the call commits.
 - **`ask_writer(block, question)`**, `POST …/writer-questions`, answers `201` `{blocks}`: the
   pre-ruling pass's question to the writer of a registered document about one of its blocks, the
-  block's id naming its document, stored verbatim as a Writer Question of the job's Turn in flight,
+  block's id, `<item id>/<local id>`, naming its document as `answer`'s does, with no argument of
+  its own for the document (D084), stored verbatim as a Writer Question of the job's Turn in flight,
   once a block. A chat's call is a `403`; a blank question, an item that is no registered document
   or is done, a block answered or asked about already, and a call in the job after a clarification
-  run or in a pass whose run another pass asked about, one round per worker turn, are refused. It
+  run or in a pass whose run another pass asked about, one round per worker turn, are refused: "the
+  writer has answered the questions of the pass before it: this pass asks nothing" and "another pass
+  of the same run asked its writer already: one round per worker turn". When the pass's job ends,
+  its questions go to the writer in one clarification run ([`round-trip.md`](round-trip.md)). It
   changes no ask, so it writes no effect: the document's line says that Pilot asked its writer
   ([`timeline.md`](timeline.md)), `blocks` the local ids it is asked about in the document's order,
   and each question is counted, `pilot_pass_questions_total{project}`.

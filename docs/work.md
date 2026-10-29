@@ -11,8 +11,10 @@ record's testing route `POST /api/testing/projects/<id>/work` places one so, on 
 `prd` ([`projects.md`](projects.md)). The app places one itself as a run's continuation:
 the close that leaves none of the documents a work item's run registered open places the work item
 that continues its conversation, titled as the run, on its plan task while the plan still has it,
-after the answered items ([`round-trip.md`](round-trip.md)). Create project, a worker's turn end and
-a person's close of an item of Pilot's own place the jobs of Pilot's own ([below](#pilots-own-work)).
+after the answered items, and the end of a pre-ruling pass that asked the writer places the
+clarification run that puts its questions to the run's writer, on that run's conversation
+([`round-trip.md`](round-trip.md)). Create project, a worker's turn end and a person's close of an
+item of Pilot's own place the jobs of Pilot's own ([below](#pilots-own-work)).
 
 ## Its status
 
@@ -34,7 +36,8 @@ for the live event:
   Turn's, a start's the Session's;
 - `autopilot`: the switch's setting its start was briefed under;
 - `held_reason`: why the gate holds it as the gate reads now, `paused`, `controller_unreachable`,
-  `slot` or, a job's, `queue`; null unless `held`, and while the gate has opened for it and its
+  `slot`, a job's `queue`, or a worker's run's `conversation`, another run on the conversation it
+  resumes; null unless `held`, and while the gate has opened for it and its
   release is under way;
 - `held_running`: while it is held for a slot, the running work items of the maximum that closed
   the gate, across every project or its project's own ([`sessions.md`](sessions.md)); else null;
@@ -82,8 +85,8 @@ An open work item (`WorkItem`, `frontend/src/components/timeline/work.tsx`) is:
   15 s on the browser's clock.
 - **Its title.**
 - **Its one line** (`workLine()`, `frontend/src/lib/utils/status-labels.ts`): a held item's reason,
-  "Paused", "Waiting for the controller", "Waiting for a slot · N running" or "Waiting for the job
-  before it"; else its current line
+  "Paused", "Waiting for the controller", "Waiting for a slot · N running", "Waiting for the job
+  before it" or "Waiting for the run before it"; else its current line
   in the chat's working cue (`WorkingCue`), the server's own words while it starts ("Preparing
   <environment>", "Starting <environment>", "Creating the session", the trailing "…" left out) or
   its environment restarts, "Thinking", "Writing", "Working" or "Waiting for the <type> agent", with
@@ -127,7 +130,8 @@ at its trigger's instant:
 - its Item is next on the timeline.
 
 It starts through the gate as a chat does (`start_brain`, [`sessions.md`](sessions.md)): held while
-its project is paused, and while another job of its project is before it, so that a project's jobs
+its project is paused, the setup's never, a Retry's included, and while another job of its project
+is before it, so that a project's jobs
 run one at a time in the order their triggers came, the chat beside them; taking no slot; boxed to
 the project's folder with `pilot-store` handed to it, and its create made again for a bounded time
 while that folder is not on disk. Its brief is composed as it leaves the gate, from the record as it
@@ -139,21 +143,23 @@ they stop every session. One job is placed per trigger, never one for several.
 **The triggers.** Three place a job:
 
 - **The setup**: Create project places it after the opening, titled "Setting up the project",
-  trigger `setup` ([`projects.md`](projects.md)).
+  trigger `setup`, and the setup runs under the pause Create writes, so the work items it places
+  are held, each "Paused", until a person resumes the project ([`projects.md`](projects.md)).
 - **A worker's turn ended**, trigger `worker_turn_ended`, its trigger item the run: after every
-  worker's turn that ends neither interrupted nor in error, a continuation's included, whether or
-  not it registered documents, once the turn-end read has settled every document the run registered
-  ([`round-trip.md`](round-trip.md)). A run that registered nothing has it placed in its turn end's
-  own transaction; one that did, in the transaction of the read that leaves none of its documents
-  awaiting it, a failed read settling too. It is titled `Pre-ruling <places>`, each registered
-  document's place `<folder>/<seq>` in the order registered, joined "a, b and c", or "Deciding what
-  is next" for a run that registered nothing. One per run, and none in a finished or archived
-  project; a Stop, a failed turn or an environment stopped under the session places none.
+  worker's turn that ends neither interrupted nor in error, a continuation's and a clarification
+  run's included, whether or not it registered documents, once the turn-end read has settled every
+  document the run registered ([`round-trip.md`](round-trip.md)). A run that registered nothing has
+  it placed in its turn end's own transaction; one that did, in the transaction of the read that
+  leaves none of its documents awaiting it, a failed read settling too. It is titled `Pre-ruling
+  <places>`, each registered document's place `<folder>/<seq>` in the order registered, joined "a, b
+  and c", or "Deciding what is next" for a run that registered nothing. One per run, and none in a
+  finished or archived project; a Stop, a failed turn or an environment stopped under the session
+  places none.
 - **An item of Pilot's own is done**, trigger `item_done`, its trigger item the item, titled
   "Deciding what is next": a person's close of an item a session of Pilot's own added, a chat's or a
   job's, in the close's transaction ([`engine.md`](engine.md)): answered, Done, an action's Done,
-  Reviewed. A notice's Read, Pilot's own Done, Finish's close, a registered document's close and an
-  item a worker's session added place none.
+  Reviewed. A notice's Read, Pilot's own Done, Finish's close, a registered document's close, an
+  item a worker's session added and the archive question, which no session added, place none.
 
 **The briefs** (`BriefService.job`), each Markdown, its blocks a blank line apart, a line that does
 not hold left out, open with the skill line and the frame, `Pilot's brief · <kind> · project
@@ -161,7 +167,8 @@ not hold left out, open with the skill line and the frame, `Pilot's brief · <ki
 where the project has none, then the switch's line, as the chat's brief words
 it, and, for a trigger that came while the project was paused, `Paused <stamp> to <stamp>: this
 job's trigger happened while the project was paused; the record moved on meanwhile.`, that pause
-from its start to the resume that let the job go on. Then by trigger:
+from its start to the resume that let the job go on, which the setup's never carries, since the
+pause holds no setup. Then by trigger:
 
 - **The setup**: `/plan`, kind `the setup`; `The project was created <stamp> from draft-<number>;
   its folder is now /work/Projects/<slug>.`, `The draft: project.md (the opening item <id> holds
@@ -174,8 +181,26 @@ from its start to the resume that let the job go on. Then by trigger:
   `Registered this run, in the order registered:` and a line per document, `- <path> (<item id>) —
   published` or `— read failed: <reason>`, or `Registered nothing this run.`; then `Attached on the
   work item: 1 file (timeline.json lists it).` or `<N> files (timeline.json lists them).` where some
-  are; then every open plan note by summary and the deferrals
-  without a home, as the chat's brief has them ([`chats.md`](chats.md)).
+  are; then, where the work item was given claimed actions, its standing naming theirs, `The claimed
+  actions given to this work item, as they stand:` and a line per action in timeline order, `-
+  <path> (<item id>) <local id> open, claimed`, `… open, its claim gone`, or its close as the record
+  holds it, a person's Done meanwhile included; then every open plan note by summary and the
+  deferrals without a home, as the chat's brief has them ([`chats.md`](chats.md)).
+- **The writer answered**, the job after a clarification run's turn, trigger `worker_turn_ended`,
+  its trigger item the run ([`round-trip.md`](round-trip.md)): `/pre-rule`, kind `the writer
+  answered`; `The clarification run: "<title>" (<id>), of the work item "<title>" (<id>)[, task
+  <id>]; its turn ended <stamp>.`, the work item whose conversation it resumed; then per document
+  the pass asked about, in timeline order, `Asked <stamp> on <path> (<item id>):`, a line per
+  question, `- <local id>: <question>`, the block named `<local id> "<heading>"` where it has a
+  section of its own, and the writer's answer as the document records it: `The writer's answer, as
+  recorded on the document:` and `- <local id>: <part>` per block, its further lines indented two
+  spaces; or `The writer's answer, as recorded on the document, whole — the reply did not keep the
+  asked headings:` and the reply quoted, `> ` a line; or `The writer's answer: none — the run's turn
+  ended with no text.`. Then the files attached on the run and what it registered, as a worker's
+  turn's brief has them, and `This pass asks nothing: what is still unclear is the operator's, the
+  clarification beside the ask.`, after `Registered this run: nothing.` where it registered nothing;
+  then the open notes and the deferrals without a home. The pass it briefs asks the writer nothing
+  ([`mcp.md`](mcp.md)).
 - **An item of Pilot's own is done**: `/plan`, kind `an item of yours is done`; `The item: <path>
   (<item id>), <kind> "<title>"[, task <id>] — <close>.`, the close as the record holds it: a
   one-ask item's block answered or done, by whom and when, its channel and its note as given (a
@@ -282,11 +307,12 @@ The status, its event and the routes are pinned in `backend/tests/services/test_
 `backend/tests/api/test_sessions.py` and `test_testing_record.py`. The browser suites are
 `frontend/tests/work/`: `harness.spec.ts`, `timeline.spec.ts`, `stop-resume.spec.ts`,
 `session-log.spec.ts`, `switch-warning.spec.ts` and `registered.spec.ts`, the round trip of a
-registered document ([`round-trip.md`](round-trip.md)). Pilot's jobs are pinned in
+registered document ([`round-trip.md`](round-trip.md)), with `clarification.spec.ts`, the
+clarification run and its reply, and `claimed.spec.ts`, a claimed action. Pilot's jobs are pinned in
 `backend/tests/services/test_job_service.py` (their placement, the queue, the triggers, the
 withdrawal and Retry), `test_start_gate.py`, `test_brief_service.py` and
-`backend/tests/models/test_work.py` (`retried_by`); the setup's line, its queue's and Retry's in
-`frontend/tests/projects/create-project.spec.ts`, and a withdrawn job's in
+`backend/tests/models/test_work.py` (`retried_by`); the setup's line, its queue's and Retry's, and
+the pause at Create, in `frontend/tests/projects/create-project.spec.ts`, and a withdrawn job's in
 `frontend/tests/timeline/undo.spec.ts`.
 
 Each Playwright backend's controller is the fake it serves itself
@@ -311,24 +337,27 @@ at the worker's start for the backend's first outage, its fleet stream's refused
 The fleet stream reconnects on the supervisor's backoff, up to 30 s, so a spec whose outage must end
 sets a timeout of its own.
 
-`projects.startWork(project, {title, brief, cwd, step?})` places a work item by `projects.repo`, a
-repository of the spec's own (`example/Example-<unique>`), so that its start takes no environment an
-earlier spec of the worker left free, and answers its id; `projects.environment(project, item)`
-waits for the environment its start took or created and answers its `{id, name}`, the name the
-project's slug (`slugOf(project)`, the testing route's), `-2` for a second at once;
-`projects.work(project, item)` reads its `work`, `projects.records(session, after?)` its records,
-and `projects.stop(id)` and `projects.resume(id)` call the routes as the signed-in person;
-`projects.register(work, path, toolUseId?)` and `projects.workerAttach(work, path, {to?,
-toolUseId?})` make its worker's calls, each its effect while its turn is in flight, and
-`projects.askWriter(document, [{block, question}])` the pass's question
-([`projects.md`](projects.md)). The `sessionLog` fixture's `steps` reads a reply's steps in order
-and `effects` the effects standing on their own. The `timeline` page object's `item(id).work` reads
-the open item (`environment`, `running`, `line`, whose `data-state` is the Session's state, `cue`,
-`step`, `sessionLog`, `stop`, `resume`, `stopConfirm`, `retry`), and the `sessionLog` fixture the log
-(`sessionLogAddress()`) and its head's `discuss`. A spec placing an item in a project while a work
-item's start there still writes waits for that item to run first. The backends run with
-`WORK_PARALLELISM_MAX` 10000 and `PROJECT_PARALLELISM_MAX` 3 (`loadAppBackendEnv()`,
-[`controller.md`](controller.md), which also gives them their store, [`chats.md`](chats.md)): a
-worker's specs share a backend and leave work items running, each in projects of its own, so the
-slot across every project never closes, and a project's fourth running or starting work item is held
-for a slot.
+Every project Create opens is paused, so a spec that creates one and starts work in it resumes it
+first (`projects.transition(id, 'resumed')`). `projects.startWork(project, {title, brief, cwd,
+step?, claims?})` places a work item by `projects.repo`, a repository of the spec's own
+(`example/Example-<unique>`), so that its start takes no environment an earlier spec of the worker
+left free, and answers its id; `projects.environment(project, item)` waits for the environment its
+start took or created and answers its `{id, name}`, the name the project's slug (`slugOf(project)`,
+the testing route's), `-2` for a second at once; `projects.work(project, item)` reads its `work`,
+`projects.records(session, after?)` its records, and `projects.stop(id)` and `projects.resume(id)`
+call the routes as the signed-in person; `projects.register(work, path, toolUseId?)` and
+`projects.workerAttach(work, path, {to?, toolUseId?})` make its worker's calls, each its effect
+while its turn is in flight, `projects.askWriter(document, [{block, question}])` the pass's
+question, and `projects.clarify(document, reply?)` its clarification run, ended with the reply, or
+with none started in the writer's environment, where `controller.finish(env, <its session>,
+'success', reply)` ends it ([`projects.md`](projects.md)). The `sessionLog` fixture's `steps` reads
+a reply's steps in order and `effects` the effects standing on their own. The `timeline` page
+object's `item(id).work` reads the open item (`environment`, `running`, `line`, whose `data-state`
+is the Session's state, `cue`, `step`, `sessionLog`, `stop`, `resume`, `stopConfirm`, `retry`), and
+the `sessionLog` fixture the log (`sessionLogAddress()`) and its head's `discuss`. A spec placing an
+item in a project while a work item's start there still writes waits for that item to run first. The
+backends run with `WORK_PARALLELISM_MAX` 10000 and `PROJECT_PARALLELISM_MAX` 3
+(`loadAppBackendEnv()`, [`controller.md`](controller.md), which also gives them their store,
+[`chats.md`](chats.md)): a worker's specs share a backend and leave work items running, each in
+projects of its own, so the slot across every project never closes, and a project's fourth running
+or starting work item is held for a slot.

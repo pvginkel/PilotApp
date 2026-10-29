@@ -10,8 +10,9 @@ it and the side panel beside it, with the project's handbook and project documen
 
 A project starts as a draft, from the plus beside the list's head. It takes shape in its definition
 chat ([`chats.md`](chats.md)) and in its draft, `project.md`, in the side panel's Draft tab
-([`documents.md`](documents.md)). Create project opens it, and places its setup, Pilot's first
-background job ([`work.md`](work.md)). The dev seed and the record's testing endpoints (below) make
+([`documents.md`](documents.md)). Create project opens it, places its setup, Pilot's first
+background job ([`work.md`](work.md)), and pauses it, so that its work waits for a person's resume
+once its plan is ready. The dev seed and the record's testing endpoints (below) make
 projects too.
 
 ## Reading them
@@ -25,19 +26,25 @@ projects too.
   removed steps not counted, `in_progress` the titles of the steps in progress in the plan's order.
   `badge` is `{count, urgent}`: `count` the project's open items waiting on the caller, which are
   its prose items but the opening, a notice only while it is urgent and a registered document only
-  once its turn-end read is made, and a work item whose session stopped or failed, a job of Pilot's
-  own only until it is retried, never a wait and never an item for another person (before the caller
-  has a handle, every item for someone is another's); `urgent` whether one of them is urgent.
+  once its turn-end read is made, and none whose open blocks are all actions Pilot claimed, which
+  are Pilot's until their `done` ([`engine.md`](engine.md)); a work item whose session stopped or
+  failed, a job of Pilot's own only until it is retried; never a wait and never an item for another
+  person (before the caller has a handle, every item for someone is another's); `urgent` whether one
+  of them is urgent.
 - **`GET /api/projects/<id>`** answers the project's head: `{id, name, ticket, repo, state,
   archived, autopilot, status, member, members, progress, tasks, notes, running_work, open_items,
-  create_refusal}`. A member is `{handle, name, initials, avatar_slot}`, in the order they joined; a
-  task is a step, `{id, title, status, notes}`, with its open notes; `notes` are the plan's own; a
-  note is `{id, summary, content}`. `running_work` is `[{id, title}]`, in timeline order, the work
-  items whose session runs, starts or is held, which Finish and Archive stop. `open_items` counts
-  the project's open items but the opening, which is never done (D016), and those, which Finish
-  closes unanswered. `create_refusal` is why Create project cannot be pressed now (below), null when
-  it can, and the project's standing for one that is archived or past its draft. An archived project
-  reads as it was left. An unknown id answers `404`.
+  autopilot_may_take, create_refusal}`. A member is `{handle, name, initials, avatar_slot}`, in the
+  order they joined; a task is a step, `{id, title, status, notes}`, with its open notes; `notes`
+  are the plan's own; a note is `{id, summary, content}`. `running_work` is `[{id, title}]`, in
+  timeline order, the work items whose session runs, starts or is held, which Finish and Archive
+  stop. `open_items` counts the project's open items but the opening, which is never done (D016),
+  and those, which Finish closes unanswered; a finished project's is its archive question, while it
+  is open (below). `autopilot_may_take` counts the open confirmations the switch would answer: the
+  unanswered confirmation blocks of the project's open items whose reason does not ask under auto
+  pilot, whether auto pilot is on or off ([`timeline.md`](timeline.md)). `create_refusal` is why
+  Create project cannot be pressed now (below), null when it can, and the project's standing for one
+  that is archived or past its draft. An archived project reads as it was left. An unknown id
+  answers `404`.
 
 **The status** (`project_status()` in `project_service.py`) is one for every viewer, derived on
 each read and never stored: `paused`, or `pausing` while a Session of the project, a Chat's too, is
@@ -56,23 +63,26 @@ its draft, `project.md`, born empty ([`engine.md`](engine.md)), and no transitio
 ([`sync.md`](sync.md)), which its definition chat's start waits for ([`chats.md`](chats.md)). A
 caller who has not chosen a handle is a `409`.
 
-**`POST /api/projects/<id>/transitions`** `{kind}` makes a transition as the caller, now, and
-answers `201` with the head as it then stands. A transition is a `project_transitions` row, and the
-project's cache it changes (`state_code`, `archived`, `autopilot` or `paused`) is written with it:
+**`POST /api/projects/<id>/transitions`** `{kind, answer_confirmations?}` makes a transition as the
+caller, now, and answers `201` with the head as it then stands. A transition is a
+`project_transitions` row, and the project's cache it changes (`state_code`, `archived`, `autopilot`
+or `paused`) is written with it:
 
 | `kind` | Allowed on | Also |
 |---|---|---|
 | `opened` | a draft whose `create_refusal` is null | Create project (below) |
-| `finished` | an open project | every session of the project running, starting or held stopped, as Stop stops one ([`sessions.md`](sessions.md)), and its open chat closed, `finished` ([`chats.md`](chats.md)); while auto pilot is on, `autopilot_off`, and while it is paused, `resumed`, each at the same instant, by the same person; then every open item but the opening closed unanswered |
-| `reopened` | a finished project | every session of the project running, starting or held stopped, which in a finished project is its read-only chat's alone, and its open chat closed, `reopened`, so that the next message starts one that writes (D068); auto pilot stays off and the project is not paused: a finished project's never are |
-| `archived` | a draft, an open or a finished project | every session of the project running, starting or held stopped, and its open chat closed, `archived` ([`chats.md`](chats.md)), so an archived project has no chat open; auto pilot and the pause are kept, so Bring back returns the project as it was |
+| `finished` | an open project | every session of the project running, starting or held stopped, as Stop stops one ([`sessions.md`](sessions.md)), and its open chat closed, `finished` ([`chats.md`](chats.md)); while auto pilot is on, `autopilot_off`, and while it is paused, `resumed`, each at the same instant, by the same person; then every open item but the opening closed unanswered, and the archive question put (below) |
+| `reopened` | a finished project | every session of the project running, starting or held stopped, which in a finished project is its read-only chat's alone, and its open chat closed, `reopened`, so that the next message starts one that writes (D068); an open archive question closed as its Keep; auto pilot stays off and the project is not paused: a finished project's never are |
+| `archived` | a draft, an open or a finished project | every session of the project running, starting or held stopped, and its open chat closed, `archived` ([`chats.md`](chats.md)), so an archived project has no chat open; an open archive question closed as its Archive; auto pilot and the pause are kept, so Bring back returns the project as it was |
 | `brought_back` | an archived project | nothing started: the next message starts a chat |
-| `autopilot_on` | an open project with auto pilot off | |
+| `autopilot_on` | an open project with auto pilot off | with `answer_confirmations` true, the switch's Yes: each open confirmation it would answer, the head's `autopilot_may_take`, answered `Yes` by the caller, `via: autopilot`, in timeline order, as the caller's own answer is, each doing what that answer does ([`work.md`](work.md), [`round-trip.md`](round-trip.md)) |
 | `autopilot_off` | a project with auto pilot on | |
 | `paused` | an open project that is not paused | every start in it but a Chat's held at the gate ([`sessions.md`](sessions.md)); a running turn runs out |
 | `resumed` | a paused project | once it commits, the gate opens for its held starts |
 
-An archived project takes `brought_back` alone. Any other `kind` is a `400`.
+An archived project takes `brought_back` alone. Any other `kind` is a `400`, and so is
+`answer_confirmations` with a kind but `autopilot_on`. A confirmation answered meanwhile is left as
+it was answered, and one added after the Yes is not answered.
 A transition that the project's standing does not allow is a `409`, and so is any write by a caller
 who has not chosen a handle ([`sign-in.md`](sign-in.md)). The refusal's reason is the error
 envelope's `error`, worded to be shown: "Cannot finish Recipe box because it is a draft", "Cannot
@@ -88,7 +98,8 @@ slug the one the draft's front matter names, and in the same transaction:
   ([`timeline.md`](timeline.md));
 - the draft as it stands is copied onto the opening, source `draft`, and then every attachment hung
   on nothing, by batch and then file name ([`documents.md`](documents.md));
-- the setup is placed after the opening ([`work.md`](work.md));
+- Pilot pauses the project, `paused` by the agent, right after `opened` and at its instant (D083);
+- the setup is placed after the opening and let through the pause ([`work.md`](work.md));
 - the definition chat closes, `created`, so the next message starts the project's chat
   ([`chats.md`](chats.md)).
 
@@ -103,6 +114,19 @@ The head's `create_refusal` gives each reason but the last. Two Creates racing t
 the record's unique index, a `409`. Past Create the store's ingest reads `project.md` under the
 handbook's rules ([`engine.md`](engine.md)).
 
+**A new project is paused once its plan is ready** (D083). Its setup runs under Create's pause, a
+Retry of it too, writes the plan and places the first work items as it would in a running project,
+and the gate holds their starts, each line "Paused" ([`sessions.md`](sessions.md)); the status reads
+*pausing* while the setup's turn runs and *paused* once it ends. A person's resume, the status
+icon's, releases them as it releases any paused project's held starts, and a resume while the setup
+runs cancels the pause under way, so the work items it places start. While the project is open, not
+archived, paused by that pause, Pilot's `paused` the transition after `opened` with no `resumed`
+since, and its setup is done, its latest Retry's where it was retried, the timeline stands one line
+under the setup: "The project is ready — resume the project to start it."
+([`timeline.md`](timeline.md)). It has nothing to press and is not in the badge, and the first
+resume takes it away for good. A person's pause never shows it, so a project opened before Create
+paused one shows none. Every project Create opens is paused so; no setting turns it off.
+
 Finish's close is the engine's `RecordService.close_unanswered` ([`engine.md`](engine.md)): each
 open item but the opening is marked done at the transition's instant, by the person who finished,
 with the done cause `finished`, which offers no undo; the project's sessions are stopped and its
@@ -110,6 +134,20 @@ chat closed before it. Once a project is finished nothing of it starts but its c
 only; once it is archived nothing does, its chat included ([`chats.md`](chats.md)), and none of its
 items takes a close or an Undo ([`timeline.md`](timeline.md), D012). Pilot finishes
 a project through `finish` the same way, as Pilot ([`mcp.md`](mcp.md)).
+
+**The archive question.** After the close, every finish, the dialog's and Pilot's `finish` alike,
+puts one item of the kind `archive_question` (`DocumentService.bear_archive_question`), the finished
+project's one open item: titled "Archive the project?", its text one decision, `D1`, that offers
+Archive and Keep, created by Pilot and by no session, so its close places no job
+([`work.md`](work.md)). Its kind is fixed at its birth and kept on every publish. It is answered
+through the item's answer route ([`timeline.md`](timeline.md)), Archive or Keep and nothing else:
+Archive answers it and archives the project by the person who answered, in the same act, with every
+effect of the menu's Archive (`ProjectService.archive_by_its_question`), and Keep closes it. It
+takes no Undo, refused by its kind. The menu's Archive and Reopen close an open one first, as its
+Archive and as its Keep, by whoever made the transition. Finish, Archive and Reopen keep their hold
+on the project's row at `FOR NO KEY UPDATE` while they stop its sessions: the question's birth takes
+its place under that hold and its close holds the question's document row alone, so that a chat's
+send under way never deadlocks with them.
 
 **`POST /api/projects/<id>/membership`** joins the project as the caller (`201`), and **`DELETE`**
 on the same path leaves it (`200`), each answering the head. Joining opens a `project_members`
@@ -119,15 +157,16 @@ not a member leaving. A project may be left with no members. Pilot is never a me
 is found by the token's subject, and Pilot's row has none.
 
 The `editor` role is the whole of the check: anyone who holds it changes any project. Every change
-holds the project's row first (`FOR NO KEY UPDATE`), so two changes of one project never
-interleave. A transition emits a `TreeHashMoved` of the project's `timeline.json`, which shows its
-state, `archived` and `autopilot` ([`projection.md`](projection.md)); a pause and a resume, which
-the store's tree does not show, emit `ProjectChanged` alone, and so do a join and a leave, which
-move no file. A transition that moves the pause, Finish's resume among them, moves the reason on
-the project's held work items' lines ([`work.md`](work.md)).
-Archive and Bring back emit `ManifestChanged` too: the project's folder leaves the store's tree, or
-comes back to it as the record renders it, once the transition commits ([`sync.md`](sync.md)). So
-does Create project, whose folder moves from `draft-<number>` to its slug.
+holds the project's row first (`FOR NO KEY UPDATE`), so two changes of one project never interleave;
+the switch's Yes holds it `FOR UPDATE`, as a close holds it, and then each answered confirmation's
+document row, in id order. A transition emits a `TreeHashMoved` of the project's `timeline.json`,
+which shows its state, `archived` and `autopilot` ([`projection.md`](projection.md)); a pause and a
+resume, which the store's tree does not show, emit `ProjectChanged` alone, and so do a join and a
+leave, which move no file. A transition that moves the pause, Finish's resume among them, moves the
+reason on the project's held work items' lines ([`work.md`](work.md)). Archive and Bring back emit
+`ManifestChanged` too: the project's folder leaves the store's tree, or comes back to it as the
+record renders it, once the transition commits ([`sync.md`](sync.md)). So does Create project, whose
+folder moves from `draft-<number>` to its slug.
 
 ## The project list
 
@@ -206,6 +245,17 @@ the side panel open.
   Pilot: it sets it up and starts the plan". Pressed, it makes the `opened` transition (above) and
   stays pending until every query is read again. The head then reads the open project's, and the
   route draws the timeline in the definition chat's place.
+- **The auto pilot switch** flips at once with a transition by the person, `autopilot_off` or
+  `autopilot_on`, and stays pending until every query is read again. Turned on while the head's
+  `autopilot_may_take` is above 0, it asks first, in a modal dialog (`autopilot-dialog.tsx`):
+  "Answer what auto pilot would take?", the lines "N open confirmations ask only because auto pilot
+  is off." ("One open confirmation …" for one), "Yes answers them Yes for you, and Pilot goes
+  ahead." and "No leaves them open for you to answer.", the note "Auto pilot turns on either way.",
+  and No, which takes the focus, beside Yes. Yes sends `autopilot_on` with `answer_confirmations`;
+  No, Esc and a click beside the dialog send `autopilot_on` alone, so the next turn-on asks again.
+  While the write is pending both buttons are disabled and Esc sends nothing. The dialog closes once
+  the head is read again, and goes without an answer once the head shows auto pilot on, the project
+  finished or archived, as another session may leave it.
 - **The Draft tab's toggle**, a draft's, opens the side panel on its Draft tab, or closes it where
   that tab shows ([`documents.md`](documents.md)).
 - **The warning triangle** stands after the switch while a work item runs, starts or is held whose
@@ -278,22 +328,25 @@ answers only in testing mode ([`sign-in.md`](sign-in.md)).
   `paused`, `members` (handles, at least one, the first the creator, joining in that order),
   `ticket`, `repo`, `tasks`, `notes`, `environment_id`, `open_items` and `opening`. The transitions
   to that standing are made at one instant by the first member, and the plan is saved through the
-  engine. A project past the draft is born with its opening first: the first member's words,
-  `opening` (by default "An invented project, started for a test."), verbatim, titled by its name or
-  "New project", and with its handbook, empty; its project document is `# <name>`. With an
-  `environment_id`, an idle work session of the project there adds `open_items` open notices. A
-  finished project with auto pilot on, a paused project that is not open, a member named twice, open
-  items without an environment and a plan with a fault are each a `400`; a handle that is no
-  person's, `agent` included, and an unknown environment a `404`.
-- `POST /api/testing/projects/<id>/work` `{repo, title, brief, cwd, step?}` places a work item by
-  the repository `repo`, `owner/Name`, its session to run in `cwd`, and starts its session through
-  the gate, as every work item's starts ([`sessions.md`](sessions.md)): once the request commits,
-  its start takes or creates an environment of Pilot's own from the repository on the stage's own
-  controller. It answers `201` `{id}`, the item's, its Work's and its Session's. `step` is the id of
-  a plan task it serves. An unknown project or a step not in the plan is a `404`; no controller
-  configured, or a finished or an archived project, a `409`. A work item is created by its own
-  Session, so once one has started, the routes below that act by the project's session started
-  last act by it.
+  engine: a project made so is paused only where `paused` says so, never by Create's pause, and a
+  finished one has no archive question. A project past the draft is born with its opening first: the
+  first member's words, `opening` (by default "An invented project, started for a test."), verbatim,
+  titled by its name or "New project", and with its handbook, empty; its project document is `#
+  <name>`. With an `environment_id`, an idle work session of the project there adds `open_items`
+  open notices. A finished project with auto pilot on, a paused project that is not open, a member
+  named twice, open items without an environment and a plan with a fault are each a `400`; a handle
+  that is no person's, `agent` included, and an unknown environment a `404`.
+- `POST /api/testing/projects/<id>/work` `{repo, title, brief, cwd, step?, claims?}` places a work
+  item by the repository `repo`, `owner/Name`, its session to run in `cwd`, and starts its session
+  through the gate, as every work item's starts ([`sessions.md`](sessions.md)): once the request
+  commits, its start takes or creates an environment of Pilot's own from the repository on the
+  stage's own controller. It answers `201` `{id}`, the item's, its Work's and its Session's. `step`
+  is the id of a plan task it serves. `claims` names it for claimed actions by their blocks' ids, as
+  a pass's `add_item` does ([`mcp.md`](mcp.md)). An unknown project, a step not in the plan, a
+  claim's item not of the project or a block its document lacks is a `404`; a claim the record
+  refuses, no controller configured, or a finished or an archived project, a `409`. A work item is
+  created by its own Session, so once one has started, the routes below that act by the project's
+  session started last act by it.
 - `POST /api/testing/projects/<id>/items` `{kind, title, text, by_pilot?}` adds a prose item as
   Pilot adds one, born through the engine's `bear_item` by the project's session started last, and
   answers `201` `{id}`. `kind` is a prose kind but the opening; the text, front matter and blocks
@@ -316,7 +369,8 @@ answers only in testing mode ([`sign-in.md`](sign-in.md)).
   `409`.
 - `POST /api/testing/items/<id>/done`, no body, marks a document Done as Pilot does one it settled
   or deferred whole, by the project's session, and answers `204`: cause `settled`, a `done` Version
-  cut. An unknown item is a `404`; a project with no session, an item that is no document or is
+  cut, a registered document of one block taken as Pilot's `mark` takes it ([`mcp.md`](mcp.md)). An
+  unknown item is a `404`; a project with no session, an item Pilot's Done does not take or one
   done, and a block unanswered a `409`.
 - `POST /api/testing/items/<id>/attachments` `{files: [{title, filename, content_type, content}]}`,
   `content` base64, hangs the files on the item as the project's session attaches them in one call,
@@ -352,6 +406,14 @@ answers only in testing mode ([`sign-in.md`](sign-in.md)).
   they are asked, nothing started. It answers `201` `{blocks}`, the blocks its writer is asked
   about; an unknown item or block is a `404`, and an item that is no registered document or is
   done, or a block answered or asked about already, a `409`.
+- `POST /api/testing/items/<id>/clarification` `{reply?}` places the clarification run of the pass
+  that asked about the registered document `<id>` (`writer-questions` first), on the conversation of
+  the run that registered it, as a pass's end places it ([`round-trip.md`](round-trip.md)), and
+  answers `201` `{id}`, the run's. The pass that asked stands as a done job's line; with a `reply`,
+  so does the run, its turn ended with the reply, nothing started; with none, the run starts through
+  the gate and its turn's end records the reply. An unknown item is a `404`; an item whose writer was asked
+  nothing, a pass with its clarification run already, and, with no reply, a finished or an archived
+  project, a `409`.
 - `POST /api/testing/projects/<id>/chat/answers` `{block, value, for, note?, to?, tool_use_id?}`
   records the person `for` names' answer to the block `<item id>/<local id>`, or a draft's
   `project.md/<local id>` in its definition chat, through the project's
@@ -368,15 +430,16 @@ project document that changes its text or takes it for the session, and a turn's
 document it lets go. The frontend suite's `projects` fixture (`frontend/tests/support/projects.ts`)
 wraps them (`make`, `makeWithSession`, `makeDraft`, which answers `{id, folder}`, `place`, `save`,
 `saveProjectDocument`, `endTurn`, `doneByPilot`, `attach`, `attachToDraft`, `draft`, `register`,
-`workerAttach`, `askWriter`, `list`, `head`, `transition`, the item writes of
+`workerAttach`, `askWriter`, `clarify`, `list`, `head`, `transition`, the item writes of
 [`timeline.md`](timeline.md), and the work item's of [`work.md`](work.md)), and the page objects
 `projectList` and `projectHead` drive the screens: `projectList.newProject` is the plus and
 `created()` waits for its draft, `projectList.statusIcon(name)` reads a tab's icon, its status and
 its glyphs, and `projectList.written(id, kind)` waits for its pause or resume to be written;
-`projectHead.autopilotWarning` is the triangle, `discussButton` and `discussDot` are Discuss and its
-dot, `createButton` is Create project and `create()` presses it and waits for its success, and
-`memberAvatars` and `membersMore` are the members and their count. The status and the pause are
-pinned in `tests/projects/project-status.spec.ts`; the plus in `new-project.spec.ts`, Create project
-in `create-project.spec.ts` and the tight head in `project-head.spec.ts`. Each Playwright worker's
-database is a clone of the dev seed ([`record.md`](record.md)), so every spec's list holds the
-seed's projects beside its own.
+`projectHead.autopilotWarning` is the triangle, `autopilotDialog` the switch's dialog,
+`discussButton` and `discussDot` are Discuss and its dot, `createButton` is Create project and
+`create()` presses it and waits for its success, and `memberAvatars` and `membersMore` are the
+members and their count. The status and the pause are pinned in
+`tests/projects/project-status.spec.ts`, the switch's dialog in `autopilot.spec.ts`; the plus in
+`new-project.spec.ts`, Create project and its pause in `create-project.spec.ts` and the tight head
+in `project-head.spec.ts`. Each Playwright worker's database is a clone of the dev seed
+([`record.md`](record.md)), so every spec's list holds the seed's projects beside its own.
