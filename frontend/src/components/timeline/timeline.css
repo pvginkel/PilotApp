@@ -98,6 +98,10 @@
   .item-head .kind .icon { position: relative; top: calc(0.5em - 0.5cap); }
   .item.urgent .item-head .kind { color: hsl(var(--urgent-text)); }
   .item-head .sep { opacity: 0.75; }
+  /* The auto pilot mark (autopilot-mark.tsx), in the time's grey, centred on the text's capitals
+     as a kind's icon is. */
+  .ap-may { display: inline-flex; align-items: baseline; color: hsl(var(--muted-foreground)); cursor: help; }
+  .item-head .ap-may .icon, .block-head .ap-may .icon { position: relative; top: calc(0.5em - 0.5cap); }
   .item-head .grow { flex: 1; }
   .item-head .btn { align-self: center; }
   .chip.for { background: hsl(330 60% 50% / 0.12); color: hsl(330 55% 38%); }

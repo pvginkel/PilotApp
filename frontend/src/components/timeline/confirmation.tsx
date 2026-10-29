@@ -1,7 +1,8 @@
 /**
  * A confirmation (F22): Pilot's ask for the go on one act. Its item is a compact yellow card: the
- * head with its reason line, whose tooltip says the ground (F22.1); the title and the proposal
- * beside a check, Yes, and a cross, No (F22.2); No opening a console for the reason, which may stay
+ * head with the auto pilot mark while the switch would answer it (F4.4) and its reason line, whose
+ * tooltip says the ground (F22.1); the title and the proposal beside a check, Yes, and a cross, No
+ * (F22.2); No opening a console for the reason, which may stay
  * empty and is the note (F22.3); the prose folded under Details, which Less folds again (F22.4).
  * The check and the cross, with No's console, are the block's controls inside a document too
  * (F22.7). The answer given, or being saved, stays coloured. On the card the row is the block, and
@@ -20,12 +21,13 @@ import { Attachments } from '@/components/timeline/attachments';
 import { Console } from '@/components/timeline/console';
 import { blockKey, useBlockFlash } from '@/components/timeline/flash';
 import { ItemHead } from '@/components/timeline/item-head';
+import { autopilotMayTake } from '@/components/timeline/may-take';
 import { Note } from '@/components/timeline/note';
 import { Deferral, DEFERRED } from '@/components/timeline/said';
 import { WriterAsked } from '@/components/timeline/writer-asked';
 import { PilotWriting } from '@/components/timeline/writing';
 import { useAnswer, type Answer } from '@/hooks/use-answer';
-import { useArchived } from '@/hooks/use-projects';
+import { useArchived, useAutopilotOff } from '@/hooks/use-projects';
 import { blocksOf, isProse, titleOf, type Block, type TimelineItem } from '@/hooks/use-timeline';
 import { cn } from '@/lib/utils';
 
@@ -39,13 +41,14 @@ export function Confirmation({ item }: { item: TimelineItem }) {
   const { answer, saving } = useAnswer(item.id, block.id);
   const flash = useBlockFlash(item.id, block.id);
   const archived = useArchived(projectId);
+  const autopilotOff = useAutopilotOff(projectId);
   const [details, setDetails] = useState(false);
   // The API gives every prose item but the opening its text.
   const prose = item.body!.filter(isProse);
   const deferred = saving === null && block.answer === DEFERRED;
   return (
     <div className="item-body">
-      <ItemHead item={item} because={block.because} />
+      <ItemHead item={item} because={block.because} mayTake={autopilotMayTake(item, block, autopilotOff)} />
       <ConfirmControls
         field={blockKey(item.id, block.id)}
         block={block}

@@ -57,3 +57,8 @@ export function useProjectHead(id: string) {
 export function useArchived(id: string): boolean {
   return useGetProjectsByProjectId({ path: { project_id: id } }, { refetchOnMount: false }).data?.archived ?? false;
 }
+
+/** Whether the project's auto pilot is off, from the head as useArchived reads it; false until it is read. */
+export function useAutopilotOff(id: string): boolean {
+  return useGetProjectsByProjectId({ path: { project_id: id } }, { refetchOnMount: false }).data?.autopilot === false;
+}

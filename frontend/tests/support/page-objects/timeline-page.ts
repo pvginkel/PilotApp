@@ -93,6 +93,8 @@ export class TimelinePage {
       time: root.getByTestId('timeline.item.time'),
       urgent: root.getByTestId('timeline.item.urgent'),
       why: root.getByTestId('timeline.item.why'),
+      /** A confirmation card's auto pilot mark (F4.4). */
+      autopilotMark: root.getByTestId('timeline.item.autopilot-mark'),
       forUser: root.getByTestId('timeline.item.for'),
       title: root.getByTestId('timeline.item.title'),
       text: root.getByTestId('timeline.item.text'),
@@ -162,6 +164,8 @@ export class TimelinePage {
         root: root.getByTestId('timeline.item.card'),
         summary: root.getByTestId('timeline.item.summary'),
         counts: root.getByTestId('timeline.item.count'),
+        /** The auto pilot chip beside the counts (F4.4). */
+        autopilotChip: root.getByTestId('timeline.item.autopilot-chip'),
         readTime: root.getByTestId('timeline.item.read-time'),
         /** A registered document's "Loads when the turn ends" awaiting its read, and *Did not load* after it failed. */
         loads: root.getByTestId('timeline.item.loads'),
@@ -258,6 +262,8 @@ export function blockParts(page: Page, root: Locator) {
     head: root.getByTestId('timeline.block.head'),
     discuss: root.getByTestId('timeline.block.discuss'),
     kind: root.getByTestId('timeline.block.kind'),
+    /** A confirmation block's auto pilot mark (F4.4). */
+    autopilotMark: root.getByTestId('timeline.block.autopilot-mark'),
     toggle: root.getByTestId('timeline.block.toggle'),
     answered: root.getByTestId('timeline.block.answered'),
     /** *In the chat*, on an answer given in the chat. */

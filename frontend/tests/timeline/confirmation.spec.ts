@@ -69,6 +69,7 @@ test.describe('A confirmation', () => {
       ['irreversible', 'Always asks: cannot be undone', 'Pilot asks for an act that cannot be undone, even under auto pilot'],
       ['product-hold', 'Always asks: you held this back', 'You held this back; Pilot asks even under auto pilot'],
       ['self-approval', 'Always asks: overrules a check', 'Going ahead would overrule a hold or a failed check; Pilot asks even under auto pilot'],
+      ['standing-grant', 'Always asks: a lasting permission', 'The permission would outlast the project or reach past it; Pilot asks even under auto pilot'],
     ] as const;
     const placed = [];
     for (const [code] of grounds) {

@@ -10,8 +10,8 @@
  * Confirm sends, the record answering them with their recommendation (F32.5).
  *
  * A larger one, and every review (F25.1), leaves a card: its head, its title, its summary (F34),
- * its count chips (F24.2), its segment bar, or for a text with no block "N min read", its
- * attachments, Open, which reads Continue while the document reads *Unsent*, and on a review
+ * its count chips (F24.2) and the auto pilot chip, counting the confirmations the switch would
+ * answer (F4.4), its segment bar, or for a text with no block "N min read", its attachments, Open, which reads Continue while the document reads *Unsent*, and on a review
  * Reviewed (F25.2); Pilot's dots end it while Pilot writes. Open opens the overlay at the document's address, and a segment opens
  * it at its block's (F33, F97). A registered document has no text until its file is read at its
  * run's end, nor after a read that failed: a review whose card titles it by its file's name, and
@@ -30,16 +30,18 @@ import { ConfirmDialog } from '@/components/shared/dialog';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Markdown } from '@/components/shared/markdown';
 import { Attachments } from '@/components/timeline/attachments';
+import { AutopilotChip } from '@/components/timeline/autopilot-mark';
 import { Block } from '@/components/timeline/block';
 import { askOf, countsOf, isUnsent, readOf, recommendationOf, type Counts } from '@/components/timeline/document-state';
 import { blockKey, GoToContext } from '@/components/timeline/flash';
 import { Edited, ItemHead } from '@/components/timeline/item-head';
+import { autopilotMayTake } from '@/components/timeline/may-take';
 import { isSettled, piecesOf, SectionsContext } from '@/components/timeline/sections';
 import { SettledLines } from '@/components/timeline/settled';
 import { WriterAsked } from '@/components/timeline/writer-asked';
 import { PilotWriting } from '@/components/timeline/writing';
 import { useReviewed, useSend } from '@/hooks/use-marks';
-import { useArchived } from '@/hooks/use-projects';
+import { useArchived, useAutopilotOff } from '@/hooks/use-projects';
 import { blocksOf, isAnswered, titleOf, type Block as BlockData, type TimelineItem } from '@/hooks/use-timeline';
 import { cn } from '@/lib/utils';
 
@@ -78,6 +80,7 @@ export function DocumentCard({ item }: { item: TimelineItem }) {
   const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
   const navigate = useNavigate();
   const blocks = blocksOf(item);
+  const autopilotOff = useAutopilotOff(projectId);
   const read = readOf(item);
   const params = { projectId, documentId: item.id };
   const openAt = (itemId: string, blockId: string) =>
@@ -103,7 +106,7 @@ export function DocumentCard({ item }: { item: TimelineItem }) {
           </p>
         )}
         <WriterAsked item={item} />
-        <CountChips counts={countsOf(item)} />
+        <CountChips counts={countsOf(item)} autopilot={blocks.filter((block) => autopilotMayTake(item, block, autopilotOff)).length} />
         {item.body !== null && (
           <div className="progress">
             {blocks.length > 0 ? (
@@ -143,10 +146,10 @@ const COUNTED: [keyof Counts, (count: number) => string][] = [
   ['deferred', (count) => `${count} deferred`],
 ];
 
-/** A chip for each count but none. */
-function CountChips({ counts }: { counts: Counts }) {
+/** A chip for each count but none, then the auto pilot chip unless it counts none. */
+function CountChips({ counts, autopilot }: { counts: Counts; autopilot: number }) {
   const shown = COUNTED.filter(([key]) => counts[key] > 0);
-  if (shown.length === 0) return null;
+  if (shown.length === 0 && autopilot === 0) return null;
   return (
     <div className="counts" data-testid="timeline.item.counts">
       {shown.map(([key, words]) => (
@@ -154,6 +157,7 @@ function CountChips({ counts }: { counts: Counts }) {
           {words(counts[key])}
         </span>
       ))}
+      {autopilot > 0 && <AutopilotChip count={autopilot} />}
     </div>
   );
 }

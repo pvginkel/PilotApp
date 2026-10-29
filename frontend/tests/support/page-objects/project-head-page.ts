@@ -6,7 +6,7 @@ type Act = 'join' | 'leave' | 'finish' | 'reopen' | 'archive' | 'bring-back';
 type Ask = Exclude<Act, 'join' | 'leave'>;
 
 /**
- * A project's head (F2), auto pilot's switch and its warning triangle (F4), the plan popover its
+ * A project's head (F2), auto pilot's switch, its dialog and its warning triangle (F4), the plan popover its
  * step button opens (F3), Discuss and its unread dot (F2.3, F39.2, F43), the Documents button
  * (F2.3), the handbook's button (F129.4), the plan's notes (F2.7), the members and the count they
  * fold to in a tight head (F2.5), a draft's Create project and
@@ -22,6 +22,8 @@ export class ProjectHeadPage {
   readonly finished: Locator;
   readonly autopilot: Locator;
   readonly autopilotWarning: Locator;
+  /** The switch's question as it turns on while confirmations it would take are open (F4.2). */
+  readonly autopilotDialog: { root: Locator; backdrop: Locator; title: Locator; lines: Locator; note: Locator; no: Locator; yes: Locator };
   readonly step: Locator;
   readonly ring: Locator;
   readonly plan: Locator;
@@ -52,6 +54,15 @@ export class ProjectHeadPage {
     this.finished = page.getByTestId('project.finished');
     this.autopilot = page.getByTestId('project.autopilot');
     this.autopilotWarning = page.getByTestId('project.autopilot.warning');
+    this.autopilotDialog = {
+      root: page.getByTestId('project.autopilot-dialog'),
+      backdrop: page.getByTestId('project.autopilot-dialog.backdrop'),
+      title: page.getByTestId('project.autopilot-dialog.title'),
+      lines: page.getByTestId('project.autopilot-dialog.line'),
+      note: page.getByTestId('project.autopilot-dialog.note'),
+      no: page.getByTestId('project.autopilot-dialog.no'),
+      yes: page.getByTestId('project.autopilot-dialog.yes'),
+    };
     this.step = page.getByTestId('project.step');
     this.ring = page.getByTestId('project.step.ring');
     this.plan = page.getByTestId('project.plan');

@@ -1,8 +1,9 @@
 /**
  * An open item's head (F12): its kind's icon and label, its time with the full stamp as tooltip, a
- * confirmation's reason line with its tooltip (F22.1), and the Urgent and "for <user>" chips (F10.1,
- * F107); after them what a document's head adds; at its end Discuss, quoting the item (F39.1). A document Pilot changed in a turn after the text
- * it was first shown with says so, *Edited <time>* beside Pilot's mark (F28.7).
+ * confirmation's auto pilot mark (F4.4) and its reason line with its tooltip (F22.1), and the
+ * Urgent and "for <user>" chips (F10.1, F107); after them what a document's head adds; at its end
+ * Discuss, quoting the item (F39.1). A document Pilot changed in a turn after the text it was first
+ * shown with says so, *Edited <time>* beside Pilot's mark (F28.7).
  */
 
 import type { ReactNode } from 'react';
@@ -11,6 +12,7 @@ import { DiscussButton } from '@/components/chat/discuss-button';
 import { quoteOfItem } from '@/components/chat/discuss-quotes';
 import { Avatar } from '@/components/shared/avatar';
 import { Time } from '@/components/shared/time';
+import { AutopilotMark } from '@/components/timeline/autopilot-mark';
 import { kindOf } from '@/components/timeline/kinds';
 import type { Block, TimelineItem } from '@/hooks/use-timeline';
 
@@ -41,6 +43,10 @@ const WHY: Partial<Record<string, { label: string; tooltip: string }>> = {
     label: 'Always asks: overrules a check',
     tooltip: 'Going ahead would overrule a hold or a failed check; Pilot asks even under auto pilot',
   },
+  'standing-grant': {
+    label: 'Always asks: a lasting permission',
+    tooltip: 'The permission would outlast the project or reach past it; Pilot asks even under auto pilot',
+  },
 };
 
 /** A reason a migration adds after these reads as the record names it until it has its words here. */
@@ -52,11 +58,13 @@ interface ItemHeadProps {
   item: TimelineItem;
   /** The ground a confirmation asks on. */
   because?: Block['because'];
+  /** A confirmation's auto pilot mark stands after the time (autopilot-mark.tsx). */
+  mayTake?: boolean;
   /** What a document's head adds after the chips. */
   children?: ReactNode;
 }
 
-export function ItemHead({ item, because = null, children }: ItemHeadProps) {
+export function ItemHead({ item, because = null, mayTake = false, children }: ItemHeadProps) {
   const { icon: Icon, label } = kindOf(item);
   const why = because === null ? null : whyOf(because);
   return (
@@ -67,6 +75,12 @@ export function ItemHead({ item, because = null, children }: ItemHeadProps) {
       </span>
       <span className="sep">·</span>
       <Time at={item.created_at} format="clock" testId="timeline.item.time" />
+      {mayTake && (
+        <>
+          <span className="sep">·</span>
+          <AutopilotMark testId="timeline.item.autopilot-mark" />
+        </>
+      )}
       {why !== null && (
         <>
           <span className="sep">·</span>

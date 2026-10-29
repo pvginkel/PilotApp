@@ -2,8 +2,9 @@
  * A block (F31), in a panel of its own under the prose that asks, in a one-ask item and in a
  * document alike: a decision's options, a question's field, an action's paste-back and buttons, a
  * confirmation's check and cross. Its head names its kind in a document, where the item's head does
- * not; answered, the head has a chevron where it opens, Answered, and when and by whom, Pilot's
- * mark on a block Pilot settled (F31.1, F31.3), *In the chat* before them on an answer given in the
+ * not, the auto pilot mark beside it on a confirmation the switch would answer (F4.4); answered,
+ * the head has a chevron where it opens, Answered, and when and by whom, Pilot's mark on a block
+ * Pilot settled (F31.1, F31.3), *In the chat* before them on an answer given in the
  * chat, going to its message (F42.3). An answer that is not a person's, and every
  * answer in a done item, reads closed: the answer only, which opens, as the chevron does, to the
  * block's controls, live while the item is not done (F31.2). In a document its head ends in
@@ -26,16 +27,18 @@ import { quoteOfBlock, quoteOfDraftBlock } from '@/components/chat/discuss-quote
 import { InChatButton } from '@/components/chat/in-chat-button';
 import { Time } from '@/components/shared/time';
 import { ActionAnswer } from '@/components/timeline/action';
+import { AutopilotMark } from '@/components/timeline/autopilot-mark';
 import { ConfirmControls, Proposal } from '@/components/timeline/confirmation';
 import { DecisionOptions } from '@/components/timeline/decision';
 import { blockKey, useBlockFlash } from '@/components/timeline/flash';
 import { blockKindOf } from '@/components/timeline/kinds';
+import { autopilotMayTake } from '@/components/timeline/may-take';
 import { Note } from '@/components/timeline/note';
 import { QuestionAnswer } from '@/components/timeline/question';
 import { Deferral, DEFERRED } from '@/components/timeline/said';
 import { UserAvatar } from '@/components/timeline/user-avatar';
 import { useAnswer, useDraftAnswer, type Answering } from '@/hooks/use-answer';
-import { useArchived } from '@/hooks/use-projects';
+import { useArchived, useAutopilotOff } from '@/hooks/use-projects';
 import { isAnswered, type Block as BlockData, type TimelineItem } from '@/hooks/use-timeline';
 import type { QuoteRef } from '@/lib/chat/quotes';
 import { cn } from '@/lib/utils';
@@ -52,12 +55,14 @@ export function Block({ item, block, solo = false }: BlockProps) {
   const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
   const answering = useAnswer(item.id, block.id);
   const archived = useArchived(projectId);
+  const autopilotOff = useAutopilotOff(projectId);
   const flash = useBlockFlash(item.id, block.id);
   return (
     <BlockPanel
       field={blockKey(item.id, block.id)}
       block={block}
       solo={solo}
+      mayTake={autopilotMayTake(item, block, autopilotOff)}
       answering={answering}
       settled={item.done !== null}
       disabled={archived}
@@ -77,6 +82,7 @@ export function DocumentBlock({ document, block }: { document: string; block: Bl
       field={blockKey(document, block.id)}
       block={block}
       solo={false}
+      mayTake={false}
       answering={null}
       settled={false}
       disabled
@@ -103,6 +109,7 @@ export function DraftBlock({ projectId, block, title, flash }: DraftBlockProps) 
       field={blockKey(`${projectId}/project.md`, block.id)}
       block={block}
       solo={false}
+      mayTake={false}
       answering={answering}
       settled={false}
       disabled={archived}
@@ -124,6 +131,8 @@ interface BlockPanelProps {
   field: string;
   block: BlockData;
   solo: boolean;
+  /** Its head carries the auto pilot mark. */
+  mayTake: boolean;
   /** How it takes an answer; none where it is read only. */
   answering: Answering | null;
   /** Its item is done. */
@@ -135,7 +144,7 @@ interface BlockPanelProps {
   flash: Flash | null;
 }
 
-function BlockPanel({ field, block, solo, answering, settled, disabled, quote, flash }: BlockPanelProps) {
+function BlockPanel({ field, block, solo, mayTake, answering, settled, disabled, quote, flash }: BlockPanelProps) {
   const [opened, setOpened] = useState(false);
   const saving = answering?.saving ?? null;
   const answer = answering?.answer ?? unanswerable;
@@ -210,6 +219,7 @@ function BlockPanel({ field, block, solo, answering, settled, disabled, quote, f
       {(answered || !solo) && (
         <BlockHead
           block={block}
+          mayTake={mayTake}
           answered={answered}
           closed={closed}
           onToggle={closable && answering !== null ? () => setOpened(!opened) : null}
@@ -226,6 +236,7 @@ function BlockPanel({ field, block, solo, answering, settled, disabled, quote, f
 
 interface BlockHeadProps {
   block: BlockData;
+  mayTake: boolean;
   answered: boolean;
   closed: boolean;
   /** Toggles a closed answer open and closed again; none where it stays as it is. */
@@ -233,7 +244,7 @@ interface BlockHeadProps {
   quote: QuoteRef | null;
 }
 
-function BlockHead({ block, answered, closed, onToggle, quote }: BlockHeadProps) {
+function BlockHead({ block, mayTake, answered, closed, onToggle, quote }: BlockHeadProps) {
   const { icon: Icon, label } = blockKindOf(block);
   const toggle = closed ? 'Show every option' : 'Show only the answer';
   return (
@@ -242,6 +253,7 @@ function BlockHead({ block, answered, closed, onToggle, quote }: BlockHeadProps)
         <Icon className="icon" aria-hidden="true" />
         {label}
       </span>
+      {mayTake && <AutopilotMark testId="timeline.block.autopilot-mark" />}
       {onToggle !== null && (
         <button
           type="button"

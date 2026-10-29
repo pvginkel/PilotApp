@@ -1,6 +1,7 @@
 /**
- * A project's head (F2): its name, ticket and repo, linked (F2.1); auto pilot's switch, its
- * warning triangle while work briefed under the other setting runs (F4.3), or the Finished chip
+ * A project's head (F2): its name, ticket and repo, linked (F2.1); auto pilot's switch, asking in
+ * its dialog as it turns on while confirmations it would take are open (F4.2), its warning
+ * triangle while work briefed under the other setting runs (F4.3), or the Finished chip
  * once finished (F2.6, F4.1); the step button and its plan (F2.2, F3); the members
  * (F2.5); Discuss, toggling the side panel's Chat tab with nothing quoted and carrying the unread
  * dot (F2.3, F39.2, F43), the Documents button, toggling its Documents tab, and the handbook,
@@ -22,6 +23,7 @@ import { useCallback, useLayoutEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { Archive, FileText, Files, Flag, MessagesSquare, NotebookText, Plus, TriangleAlert } from 'lucide-react';
+import { AutopilotDialog } from '@/components/projects/autopilot-dialog';
 import { NotesButton } from '@/components/projects/plan-notes';
 import { StepButton } from '@/components/projects/plan-popover';
 import { ProjectMenu } from '@/components/projects/project-menu';
@@ -213,12 +215,17 @@ function CreateButton({ project }: { project: Project }) {
 
 const AUTOPILOT_FORM = 'project.autopilot';
 
-/** Each flip is a transition on the record, by the person, when they flip it (F4.1). */
+/**
+ * Each flip is a transition on the record, by the person, when they flip it (F4.1). Turning it on
+ * while confirmations it would have taken are open asks first in its dialog, whose answer turns it
+ * on (F4.2).
+ */
 function Autopilot({ project }: { project: Project }) {
   const queryClient = useQueryClient();
   // The flip stays pending until every query is read again, the head included: until then, a
   // second flip would ask for the same change.
   const flip = usePostProjectsTransitionsByProjectId({ onSuccess: () => queryClient.invalidateQueries() });
+  const [asking, setAsking] = useState(false);
   if (project.state === 'finished') {
     return (
       <span className="chip finished-chip" data-testid="project.finished">
@@ -227,17 +234,25 @@ function Autopilot({ project }: { project: Project }) {
       </span>
     );
   }
-  const toggle = () => {
-    if (flip.isPending) return;
-    const kind = project.autopilot ? 'autopilot_off' : 'autopilot_on';
-    trackFormSubmit(AUTOPILOT_FORM, { kind });
+  const send = (kind: 'autopilot_on' | 'autopilot_off', answerConfirmations = false) => {
+    const fields = { kind, answer_confirmations: answerConfirmations };
+    trackFormSubmit(AUTOPILOT_FORM, fields);
     flip.mutate(
-      { path: { project_id: project.id }, body: { kind } },
+      { path: { project_id: project.id }, body: answerConfirmations ? fields : { kind } },
       {
-        onSuccess: () => trackFormSuccess(AUTOPILOT_FORM, { kind }),
-        onError: () => trackFormError(AUTOPILOT_FORM, { kind }),
+        onSuccess: () => {
+          trackFormSuccess(AUTOPILOT_FORM, fields);
+          setAsking(false);
+        },
+        onError: () => trackFormError(AUTOPILOT_FORM, fields),
       },
     );
+  };
+  const toggle = () => {
+    if (flip.isPending) return;
+    if (project.autopilot) send('autopilot_off');
+    else if (project.autopilot_may_take > 0) setAsking(true);
+    else send('autopilot_on');
   };
   return (
     <>
@@ -257,6 +272,13 @@ function Autopilot({ project }: { project: Project }) {
         Auto pilot
       </button>
       <BriefedOtherwise project={project} />
+      {asking && (
+        <AutopilotDialog
+          count={project.autopilot_may_take}
+          pending={flip.isPending}
+          onAnswer={(answerConfirmations) => send('autopilot_on', answerConfirmations)}
+        />
+      )}
     </>
   );
 }
