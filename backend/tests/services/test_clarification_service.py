@@ -701,6 +701,37 @@ class TestClarifications:
         assert (on_cut_over.reply, on_cut_over.split) == (reply, False)
         assert found[drain.id][0].split
 
+    def test_one_document_read_alone_reads_its_passs_every_question(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """The overlay reads one document of a pass that asked across two:
+        the local id they share still named by its path, and the reply split
+        as the pass's headings have it (TimelineService.item_document)."""
+        asking, cut_over, _ = self._asked(session, container, project, environment)
+        reply = (
+            f"## D1\nThe Friday after the freeze.\n## {CUT_OVER} Q1\nAn hour.\n"
+            f"## {DRAIN} Q1\nThe v1 broker's."
+        )
+        self._replied(session, container, project, environment, asking, reply)
+
+        found = on_documents(session, [cut_over.id])
+
+        assert set(found) == {cut_over.id}
+        [on_cut_over] = found[cut_over.id]
+        assert dict(on_cut_over.headings) == {
+            _block_id(session, cut_over, "D1"): "## D1",
+            _block_id(session, cut_over, "Q1"): f"## {CUT_OVER} Q1",
+        }
+        assert dict(on_cut_over.parts) == {
+            _block_id(session, cut_over, "D1"): "The Friday after the freeze.",
+            _block_id(session, cut_over, "Q1"): "An hour.",
+        }
+        assert on_cut_over.split
+
     def test_one_per_pass_in_the_order_first_asked_and_none_where_none_asked(
         self,
         session: DbSession,
