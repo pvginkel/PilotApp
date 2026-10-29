@@ -90,7 +90,7 @@ pass's Turn and named on the document's line. When the pass's job ends, idle aft
 failed, having asked, the relay places one **clarification run** in that transaction
 (`ClarificationService.pass_ended`), which puts every question the pass asked to the writer of the
 run whose turn it took, whichever run's document a question names; a Stop places none. It is a work
-item (`SessionStartService.clarify`) titled `Clarify <paths>`, the asked documents' source paths,
+item (`SessionStartService.clarify`) titled `Clarify <names>`, the asked documents' file names,
 at the project's next place, on the run's plan task, with no trigger item, its role a
 `clarification_runs` row naming the pass ([`record.md`](record.md)); it resumes the run's
 conversation in the run's environment, never reset, as the continuation does, through the gate. Its

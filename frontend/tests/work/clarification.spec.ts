@@ -150,7 +150,7 @@ test.describe('Pilot asking the writer', () => {
     const section = overlay.clarification();
     await expect(section.question('D2').text).toHaveText(STOVE);
     await expect(section.replies).toHaveCount(0);
-    await expect(timeline.item(clarifying).title).toHaveText(`Clarify ${KIT_PATH}`);
+    await expect(timeline.item(clarifying).title).toHaveText('Clarify kit.md');
 
     for (const [block, answer] of [
       ['D1', 'Dome'],

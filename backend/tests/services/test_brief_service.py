@@ -975,7 +975,7 @@ class TestWriterAnswered:
             asking,
             "Answers below.\n\n## D2\nThe OpenAPI cache.\n\n## D4\nThe old loader,"
             "\nkept until the client is regenerated.\n\n## Q1\nAn hour.",
-            "Clarify /work/Soup/cut-over.md",
+            "Clarify cut-over.md",
         )
         run = session.get_one(Item, session.get_one(Work, asking.id).trigger_item_id)
         cut_over = registered["/work/Soup/cut-over.md"]
@@ -989,7 +989,7 @@ class TestWriterAnswered:
             " /work/Projects/soup-club · 2026-10-26T11:05:40Z\n\n"
             "Auto pilot: off — the granted column asks for this session"
             " (rules/grants.md).\n\n"
-            'The clarification run: "Clarify /work/Soup/cut-over.md"'
+            'The clarification run: "Clarify cut-over.md"'
             f' ({clarifying.id}), of the work item "Fixing the stock" ({run.id}),'
             " task fix; its turn ended 2026-10-26T09:40:00Z.\n"
             f"Asked 2026-10-26T09:31:00Z on {path} ({cut_over.id}):\n"
@@ -1031,7 +1031,7 @@ class TestWriterAnswered:
             opened,
             asking,
             "## D2\nThe OpenAPI cache.\n\nThe shim is the old loader.",
-            "Clarify /work/Soup/cut-over.md",
+            "Clarify cut-over.md",
         )
 
         group = briefs.job(opened, _after(clarifying), AT, LATER).split("\n\n")[3]
@@ -1104,7 +1104,7 @@ class TestWriterAnswered:
             asking,
             "## /work/Soup/cut-over.md Q1\nAn hour.\n## /work/Soup/drain.md Q1\n"
             "The v1 broker's.",
-            "Clarify /work/Soup/cut-over.md and /work/Soup/drain.md",
+            "Clarify cut-over.md and drain.md",
         )
         notes = (
             container.document_service()

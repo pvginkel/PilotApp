@@ -4116,7 +4116,7 @@ class TestClarificationRun:
             "conv-camp",
         )
         assert session.get_one(Item, clarifying.id).title == (
-            f"Clarify {CUT_OVER} and {DRAIN}"
+            "Clarify cut-over.md and drain.md"
         )
         [first] = _turns(session, clarifying)
         assert first.message == (
@@ -4196,7 +4196,7 @@ class TestClarificationRun:
         clarifying.conversation_id = "conv-camp"
         session.flush()
         container.record_service().place_work(
-            project, clarifying, f"Clarify {CUT_OVER}"
+            project, clarifying, "Clarify cut-over.md"
         )
         session.add(ClarificationRun(id=clarifying.id, pass_id=asking.id))
         session.flush()
@@ -4243,7 +4243,7 @@ class TestClarificationRun:
         clarifying.conversation_id = "conv-camp"
         session.flush()
         container.record_service().place_work(
-            project, clarifying, f"Clarify {CUT_OVER}"
+            project, clarifying, "Clarify cut-over.md"
         )
         session.add(ClarificationRun(id=clarifying.id, pass_id=asking.id))
         session.flush()

@@ -1970,7 +1970,7 @@ class TestClarify:
         ) == ("work", environment.id, "conv-camp", "writer", SessionState.IDLE)
         item = session.get_one(Item, run.id)
         assert (item.title, item.done_at) == (
-            f"Clarify {REGISTERED}",
+            "Clarify refinement.md",
             clarification.replied_at,
         )
         [turn] = session.scalars(select(Turn).where(Turn.session_id == run.id))
@@ -2035,7 +2035,7 @@ class TestClarify:
             SessionState.STARTING,
         )
         item = session.get_one(Item, run.id)
-        assert (item.title, item.done_at) == (f"Clarify {REGISTERED}", None)
+        assert (item.title, item.done_at) == ("Clarify refinement.md", None)
         [turn] = session.scalars(select(Turn).where(Turn.session_id == run.id))
         assert (
             turn.message.startswith(f"Pilot asks about {REGISTERED}:"),

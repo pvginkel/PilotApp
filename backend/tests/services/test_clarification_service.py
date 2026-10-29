@@ -353,12 +353,12 @@ class TestTitle:
     @pytest.mark.parametrize(
         ("paths", "named"),
         [
-            ([CUT_OVER, CUT_OVER], f"Clarify {CUT_OVER}"),
-            ([CUT_OVER, DRAIN], f"Clarify {CUT_OVER} and {DRAIN}"),
-            ([CUT_OVER, DRAIN, SURVEY], f"Clarify {CUT_OVER}, {DRAIN} and {SURVEY}"),
+            ([CUT_OVER, CUT_OVER], "Clarify cut-over.md"),
+            ([CUT_OVER, DRAIN], "Clarify cut-over.md and drain.md"),
+            ([CUT_OVER, DRAIN, SURVEY], "Clarify cut-over.md, drain.md and survey.md"),
         ],
     )
-    def test_it_names_the_asked_documents_paths(
+    def test_it_names_the_asked_documents_files(
         self, paths: list[str], named: str
     ) -> None:
         assert title([_asked(path, "D1", n) for n, path in enumerate(paths)]) == named
@@ -398,7 +398,7 @@ class TestPassEnded:
         [first] = session.scalars(select(Turn).where(Turn.session_id == clarifying.id))
         assert first.message == message(asked(session, asking.id))
         item = session.get_one(Item, clarifying.id)
-        assert item.title == f"Clarify {CUT_OVER} and {DRAIN}"
+        assert item.title == "Clarify cut-over.md and drain.md"
         work = session.get_one(Work, clarifying.id)
         # The pass is its role's (DB decision 63).
         assert (work.trigger_code, work.trigger_item_id) == (None, None)

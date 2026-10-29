@@ -6286,7 +6286,7 @@ class TestClarify:
         item = session.get_one(Item, clarifying.id)
         assert (item.kind_code, item.title, item.plan_task_id, item.seq) == (
             "work",
-            f"Clarify {REFINEMENT}",
+            "Clarify refinement.md",
             "camp",
             session.get_one(Item, asking.id).seq + 1,
         )

@@ -19,6 +19,7 @@ from collections import Counter
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
 from sqlalchemy import ColumnElement, select
@@ -41,8 +42,9 @@ from app.models.reference import WorkTrigger
 if TYPE_CHECKING:
     from app.services.session_start_service import SessionStartService
 
-TITLE = "Clarify {paths}"
-"""The clarification run's title: the asked documents' paths (design 3 §6.4)."""
+TITLE = "Clarify {names}"
+"""The clarification run's title: the asked documents' file names (design 3
+§6.4)."""
 
 ASKS = "Pilot asks about {path}:"
 """The head of an asked document's questions in the run's first turn."""
@@ -319,11 +321,15 @@ def message(questions: Sequence[Asked]) -> str:
 
 
 def title(questions: Sequence[Asked]) -> str:
-    """The run's title, naming the asked documents' paths in their order."""
-    paths = list(dict.fromkeys(each.path for each in questions))
-    if len(paths) == 1:
-        return TITLE.format(paths=paths[0])
-    return TITLE.format(paths=f"{', '.join(paths[:-1])} and {paths[-1]}")
+    """The run's title, naming the asked documents by their files' names in
+    their order, as the timeline names a registered document."""
+    names = [
+        PurePosixPath(path).name
+        for path in dict.fromkeys(each.path for each in questions)
+    ]
+    if len(names) == 1:
+        return TITLE.format(names=names[0])
+    return TITLE.format(names=f"{', '.join(names[:-1])} and {names[-1]}")
 
 
 class ClarificationService:

@@ -2160,7 +2160,7 @@ class TestCreateClarification:
         ] == [("Q1", "The north shore."), ("Q2", "Lake Ilm.")]
         assert clarification["split"] is True
         run_line = _timeline_item(client, str(project.id), str(run_id))
-        assert run_line["title"] == f"Clarify {REGISTERED}"
+        assert run_line["title"] == "Clarify refinement.md"
         assert run_line["done"]["cause"] == "turn_ended"
 
     def test_an_unknown_item_is_not_found(self, client: FlaskClient) -> None:
@@ -2206,7 +2206,7 @@ class TestCreateClarification:
         clarification = session.get_one(ClarificationRun, run_id)
         assert (clarification.reply, clarification.replied_at) == (None, None)
         run_line = _timeline_item(client, str(project.id), str(run_id))
-        assert (run_line["title"], run_line["done"]) == (f"Clarify {REGISTERED}", None)
+        assert (run_line["title"], run_line["done"]) == ("Clarify refinement.md", None)
         [line] = _timeline_item(client, str(project.id), str(document.id))[
             "clarifications"
         ]
