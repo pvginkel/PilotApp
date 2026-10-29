@@ -164,4 +164,38 @@ test.describe('Auto pilot turning on', () => {
     await expect(timeline.item(confirmation).root).toHaveAttribute('data-state', 'done');
     expect((await projects.block(id, confirmation)).via).toBe('autopilot');
   });
+
+  test('goes once another session turns auto pilot on or finishes the project, and stays gone after a Reopen', async ({
+    page,
+    people,
+    projects,
+    projectHead,
+    timeline,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Elsewhere'), members: [me.handle!] });
+    const confirmation = await projects.place(id, { kind: 'confirmation', title: 'Ship 1.2?', text: confirming('auto-pilot-off') });
+    await timeline.open(id);
+    const dialog = projectHead.autopilotDialog;
+
+    await projectHead.autopilot.click();
+    await expect(dialog.root).toBeVisible();
+    await projects.transition(id, 'autopilot_on');
+    await expect(projectHead.autopilot).toHaveAttribute('aria-checked', 'true');
+    await expect(dialog.root).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(timeline.item(confirmation).confirm.yes).toBeEnabled();
+    expect(await projects.head(id)).toMatchObject({ autopilot: true, autopilot_may_take: 1 });
+
+    await projectHead.autopilot.click();
+    await expect(projectHead.autopilot).toHaveAttribute('aria-checked', 'false');
+    await projectHead.autopilot.click();
+    await expect(dialog.root).toBeVisible();
+    await projects.transition(id, 'finished');
+    await expect(projectHead.finished).toBeVisible();
+    await expect(dialog.root).toHaveCount(0);
+    await projects.transition(id, 'reopened');
+    await expect(projectHead.autopilot).toHaveAttribute('aria-checked', 'false');
+    await expect(dialog.root).toHaveCount(0);
+  });
 });
