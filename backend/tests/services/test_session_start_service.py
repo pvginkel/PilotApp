@@ -6328,6 +6328,10 @@ class TestClarify:
         assert continues.held(session, project, continuation) == Held(
             HeldReason.CONVERSATION
         )
+        # The release loop, run on any slot's change, holds it while the run
+        # still runs.
+        _release(continues)
+        assert _read(session, continuation.id).state_code == SessionState.HELD
 
         clarifying.state_code = SessionState.IDLE
         session.flush()
@@ -6364,6 +6368,10 @@ class TestClarify:
         assert _held_reason(session, continues, clarifying) is HeldReason.CONVERSATION
         # It holds the run's environment from its placement on (DB 240).
         assert clarifying.environment_id == RUN_ENV
+        # The release loop, run on any slot's change, holds it while the
+        # continuation still runs.
+        _release(continues)
+        assert _read(session, clarifying.id).state_code == SessionState.HELD
 
         continuation.state_code = SessionState.IDLE
         session.flush()
