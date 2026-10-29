@@ -10,7 +10,7 @@
  * "Finished · <stamp>", every item but the opening done by Finish (F5.3), and under it the archive
  * question its latest finish put, open or as its done line (F5.6). A new project paused by its
  * Create has, once its setup is done, Pilot's line under the setup saying it is ready to resume,
- * with nothing to press, gone at the resume (P-74).
+ * with nothing to press, gone at the resume (D083).
  *
  * Opened at an item's address, the timeline goes to the item and flashes it; at a block's, to the
  * block, its collapsed section opened (F31.5), or to its item where its line or its card stands for

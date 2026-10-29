@@ -4,7 +4,7 @@
  * serving none starts no divider and ends no step: the next item of the same step starts none. No
  * divider falls between consecutive work items: a run of them stands under its last member's
  * date and step dividers, placed before the run (F9.1). The ready line stands right under the item
- * the timeline names for it, the setup's (P-74).
+ * the timeline names for it, the setup's (D083).
  */
 
 import type { TimelineItem } from '@/hooks/use-timeline';

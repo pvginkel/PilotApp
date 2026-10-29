@@ -14,7 +14,7 @@
  * a running or done job offers none (D2). Create pauses the new project, its setup let through: it
  * is pausing while the setup runs, a work item placed meanwhile held, "Paused", and paused once the
  * setup's turn ends, Pilot's line under the setup saying the project is ready, gone at the status
- * icon's resume, which lets the held work item go on (P-74).
+ * icon's resume, which lets the held work item go on (D083).
  */
 
 import type { Page } from '@playwright/test';

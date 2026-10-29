@@ -678,7 +678,7 @@ class TimelineSchema(BaseModel):
             'resume the project to start it." stands: while the project is open '
             "and paused by the pause Create project wrote, Pilot's `paused` right "
             "after `opened` with no `resumed` since, and its setup, its latest "
-            "Retry's where it was retried, is done at its turn's end (P-74); null "
+            "Retry's where it was retried, is done at its turn's end (D083); null "
             "otherwise, a person's pause included"
         )
     )

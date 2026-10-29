@@ -887,7 +887,7 @@ class TimelineService:
 
     def _ready_after(self, project: Project) -> uuid.UUID | None:
         """The setup's work item while the project is paused by Create's pause
-        and its setup is done (`TimelineSchema.ready_after`; P-74); None
+        and its setup is done (`TimelineSchema.ready_after`; D083); None
         otherwise. Pilot pauses a project at its Create alone, and a resume
         ends that pause for good."""
         if (

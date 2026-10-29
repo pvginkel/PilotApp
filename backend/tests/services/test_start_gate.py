@@ -110,7 +110,7 @@ class TestHeldReason:
         self, paused: bool, unreachable: bool, queued: bool, held: Held | None
     ) -> None:
         """Create project's pause holds every start but the setup's, a
-        Retry's included (P-74)."""
+        Retry's included (D083)."""
         assert (
             held_reason(
                 paused=paused,
@@ -356,7 +356,7 @@ def _jobs(
 
 class TestSetups:
     """The jobs the pause holds not: the setup's, a Retry's among them
-    (P-74)."""
+    (D083)."""
 
     def test_the_setups_and_their_retries_and_no_other_job_or_work_item(
         self, container: ServiceContainer, session: DbSession, person: User

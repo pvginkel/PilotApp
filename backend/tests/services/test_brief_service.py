@@ -493,7 +493,7 @@ class TestSetup:
     ) -> None:
         """Paused at Create's instant by Pilot, its trigger's, and still
         paused, or resumed and paused again by a person before a Retry: the
-        pause holds no setup, whose brief is the one with no pause (P-74)."""
+        pause holds no setup, whose brief is the one with no pause (D083)."""
         container.document_service().bear_opening(
             opened, "Ada Example started this project", person, "Soup?"
         )
@@ -1157,7 +1157,7 @@ class TestJobPause:
     """A job whose trigger came while its project was paused carries the
     pause it came in, its interval and that the record moved on (design 3
     §5.2; F141.4; V11). The setup carries none: the pause holds it not
-    (P-74)."""
+    (D083)."""
 
     @pytest.fixture
     def job(

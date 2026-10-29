@@ -13,7 +13,7 @@ import { waitTestEvent } from '../helpers';
  * and a done line's indicator of them (F17.5, F13.6), Pilot's dots (F35), the
  * urgent banners and the "N open above" chip
  * (F10.2, F11), a finished timeline's end (F5.3) with the archive question under it (F5.6), a new
- * project's ready line under its setup (P-74), and where it stands scrolled; opened at its
+ * project's ready line under its setup (D083), and where it stands scrolled; opened at its
  * project's address or at an item's or a block's under it (F97). A work item open shows its env
  * chip, "running N min", its one line — the working cue and the latest step — its Session log
  * (F26), and Stop with its question or Resume (F67).
@@ -33,7 +33,7 @@ export class TimelinePage {
   readonly openAbove: Locator;
   readonly finishedEnd: Locator;
   readonly finishedTime: Locator;
-  /** Pilot's line under a new project's setup while Create's pause holds its work (P-74). */
+  /** Pilot's line under a new project's setup while Create's pause holds its work (D083). */
   readonly ready: Locator;
   /** *Send answers*' dialog over unanswered recommended blocks. */
   readonly sendDialog: { root: Locator; lines: Locator; note: Locator; cancel: Locator; confirm: Locator };

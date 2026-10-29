@@ -963,7 +963,7 @@ class TestRetrySession:
     ) -> None:
         """The new job, held behind another job of its project, is at the
         project's next place; the line answered names it. The pause holds no
-        setup (P-74)."""
+        setup (D083)."""
         job = _job(container, session, project, project_session, SessionState.FAILED)
         ahead = models.Session(
             project_id=project.id,

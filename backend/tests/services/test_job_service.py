@@ -230,7 +230,7 @@ class TestSetup:
         by_pilot: bool,
     ) -> None:
         """Create's pause, Pilot's at its instant, and a person's alike: the
-        setup goes on as a Chat does (P-74)."""
+        setup goes on as a Chat does (D083)."""
         pilot = session.scalars(
             select(User).where(User.kind_code == UserKind.AGENT)
         ).one()

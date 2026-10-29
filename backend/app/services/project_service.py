@@ -527,7 +527,7 @@ class ProjectService:
         """Create project (F48), by `person`, now, under the project's row: the
         draft opened, `opened`, its slug the one its front matter names (DB
         decision 1), then paused by Pilot (`paused`, DB Project Transition;
-        P-74), so that its work waits for a person's resume once its plan is
+        D083), so that its work waits for a person's resume once its plan is
         ready, its setup let through (`setups`); the handbook born empty
         beside the draft (F129.2); the opening first on the timeline, the
         first message to the definition chat verbatim by its author (F18),

@@ -195,7 +195,7 @@ class BriefService:
         and the project's, the draft, the opening that holds the words that
         started it, and the plan, empty. No notes: its plan holds none. No
         pause line: the pause holds no setup (`setups`), and Create's pauses
-        the project it opens (P-74)."""
+        the project it opens (D083)."""
         opening = self.db.scalars(
             select(Item.id).where(
                 Item.project_id == project.id, Item.kind_code == OPENING

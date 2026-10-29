@@ -1468,7 +1468,7 @@ def _status(container: ServiceContainer, project: Project) -> ProjectStatus | No
 class TestCreateProjectPaused:
     """Every new project is paused by Pilot at Create, its setup let through:
     its work items wait for a person's resume, and the timeline says the
-    project is ready once the setup's turn ends (P-74; D1, D2)."""
+    project is ready once the setup's turn ends (D083; D1, D2)."""
 
     @pytest.mark.usefixtures("starts")
     def test_pilot_pauses_it_right_after_opened_at_creates_instant(
