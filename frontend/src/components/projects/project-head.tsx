@@ -226,9 +226,9 @@ function Autopilot({ project }: { project: Project }) {
   // second flip would ask for the same change.
   const flip = usePostProjectsTransitionsByProjectId({ onSuccess: () => queryClient.invalidateQueries() });
   const [asking, setAsking] = useState(false);
-  // The dialog asks only while auto pilot is off on an open project: turned on or finished by
-  // another session, the server refuses each of its answers.
-  if (asking && (project.autopilot || project.state === 'finished')) setAsking(false);
+  // The dialog asks only while auto pilot is off on an open, unarchived project: turned on,
+  // finished or archived by another session, the server refuses each of its answers.
+  if (asking && (project.autopilot || project.state === 'finished' || project.archived)) setAsking(false);
   if (project.state === 'finished') {
     return (
       <span className="chip finished-chip" data-testid="project.finished">

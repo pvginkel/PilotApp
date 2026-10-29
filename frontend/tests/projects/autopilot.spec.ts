@@ -198,4 +198,28 @@ test.describe('Auto pilot turning on', () => {
     await expect(projectHead.autopilot).toHaveAttribute('aria-checked', 'false');
     await expect(dialog.root).toHaveCount(0);
   });
+
+  test('goes once another session archives the project, and stays gone after a Bring back', async ({
+    people,
+    projects,
+    projectHead,
+    timeline,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Archived'), members: [me.handle!] });
+    const confirmation = await projects.place(id, { kind: 'confirmation', title: 'Ship 1.2?', text: confirming('auto-pilot-off') });
+    await timeline.open(id);
+    const dialog = projectHead.autopilotDialog;
+
+    await projectHead.autopilot.click();
+    await expect(dialog.root).toBeVisible();
+    await projects.transition(id, 'archived');
+    await expect(projectHead.archived).toBeVisible();
+    await expect(dialog.root).toHaveCount(0);
+    await projects.transition(id, 'brought_back');
+    await expect(projectHead.archived).toHaveCount(0);
+    await expect(dialog.root).toHaveCount(0);
+    expect(await projects.head(id)).toMatchObject({ autopilot: false, autopilot_may_take: 1 });
+    await expect(timeline.item(confirmation).confirm.yes).toBeEnabled();
+  });
 });
