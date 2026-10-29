@@ -961,11 +961,22 @@ class TestRetrySession:
         project: Project,
         project_session: models.Session,
     ) -> None:
-        """The new job, held while the project is paused, is at the project's
-        next place; the line answered names it."""
+        """The new job, held behind another job of its project, is at the
+        project's next place; the line answered names it. The pause holds no
+        setup (P-74)."""
         job = _job(container, session, project, project_session, SessionState.FAILED)
-        project.paused = True
+        ahead = models.Session(
+            project_id=project.id,
+            kind_code="job",
+            cwd="/work/PilotProjects",
+            token_hash=uuid.uuid4().hex,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(ahead)
         session.flush()
+        container.record_service().place_work(
+            project, ahead, "Deciding what is next", trigger=WorkTrigger.ITEM_DONE
+        )
         sign_in(client, SUBJECT)
 
         response = client.post(f"/api/sessions/{job.id}/retry")
