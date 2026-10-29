@@ -214,6 +214,8 @@
   .in-chat:hover { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
   .in-chat .icon { position: relative; top: calc(0.5em - 0.5cap); }
   .block-head .who .in-chat { margin-right: 4px; }
+  /* That Pilot asked the writer about the block (F52.2), Pilot's mark before the words. */
+  .block-head .asked { display: inline-flex; align-self: center; align-items: center; gap: 6px; line-height: 20px; }
   .block-controls { padding: 6px 14px 12px; }
   .block.solo .block-controls { padding-top: 12px; }
   .block.solo .block-head + .block-controls { padding-top: 6px; }
@@ -304,6 +306,12 @@
   .answer .said { white-space: pre-wrap; }
   .answer .said.boxed { padding: 6px 10px; border-radius: 6px; background: hsl(var(--muted)); }
   .block-controls > .answer + * { margin-top: 10px; }
+
+  /* An action Pilot claimed (F21.6): Pilot's mark, its words and the work item that does it. */
+  .claimed { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .claimed .sep { color: hsl(var(--muted-foreground)); }
+  .claimed-work { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+  .claimed-work:hover { color: hsl(var(--primary-strong)); }
 
   /* An action's paste-back over its buttons: the field's parent, kept in view as it grows. */
   .paste-back { scroll-margin-bottom: 24px; }

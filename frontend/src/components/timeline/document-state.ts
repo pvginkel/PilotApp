@@ -6,7 +6,7 @@
 
 import { blockKindOf } from '@/components/timeline/kinds';
 import { DEFERRED } from '@/components/timeline/said';
-import { blocksOf, type Block, type TimelineItem } from '@/hooks/use-timeline';
+import { blocksOf, isAnswered, type Block, type TimelineItem } from '@/hooks/use-timeline';
 
 /** Up to this many words of its own, a document stands inline; past it, it leaves a card. */
 const INLINE_WORDS = 150;
@@ -17,7 +17,10 @@ export function isCard(item: TimelineItem): boolean {
   return item.kind === 'review' || (item.kind === 'document' && item.word_count! > INLINE_WORDS);
 }
 
-/** What a card counts: the blocks still the person's to answer or not, by kind, and what Pilot settled and deferred. */
+/**
+ * What a card counts: the blocks still the person's to answer or not, by kind, an action Pilot claimed
+ * among them while it is open (F21.6), and what Pilot settled and deferred.
+ */
 export interface Counts {
   decision: number;
   question: number;
@@ -30,7 +33,7 @@ export function countsOf(item: TimelineItem): Counts {
   const counts: Counts = { decision: 0, question: 0, action: 0, settled: 0, deferred: 0 };
   for (const block of blocksOf(item)) {
     if (block.answer === DEFERRED) counts.deferred += 1;
-    else if (block.by?.kind === 'agent') counts.settled += 1;
+    else if (isAnswered(block) && block.by?.kind === 'agent') counts.settled += 1;
     else counts[block.kind] += 1;
   }
   return counts;
@@ -38,15 +41,11 @@ export function countsOf(item: TimelineItem): Counts {
 
 /**
  * Whether a document reads *Unsent* (D026): it has an answer, a person's or Pilot's, an action's
- * Done among them, and no Done. A deferral is no answer here, nor is a recommendation. `concept` is
- * a held save (F78), never this.
+ * Done among them, and no Done. A deferral is no answer here, nor is a recommendation or a claim
+ * not yet done. `concept` is a held save (F78), never this.
  */
 export function isUnsent(item: TimelineItem): boolean {
-  return (
-    item.kind === 'document' &&
-    item.done === null &&
-    blocksOf(item).some((block) => block.done !== null || (block.answer !== null && block.answer !== DEFERRED))
-  );
+  return item.kind === 'document' && item.done === null && blocksOf(item).some((block) => isAnswered(block) && block.answer !== DEFERRED);
 }
 
 /**

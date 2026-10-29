@@ -25,6 +25,7 @@ from app.config import STAGES, Settings, Stage, default_stage
 from app.config import Environment as SettingsEnvironment
 from app.models import (
     Attachment,
+    ClarificationRun,
     Document,
     DocumentVersion,
     Environment,
@@ -2169,6 +2170,52 @@ class TestCreateClarification:
 
         assert response.status_code == 404
 
+    @pytest.mark.usefixtures("controller_client", "fake_controller")
+    def test_with_no_reply_the_run_is_placed_to_start_through_the_gate(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        supervise: Supervise,
+        session: Session,
+        project: Project,
+        document: Item,
+    ) -> None:
+        clear_after_commit_callbacks()
+        container.session_start_service.override(
+            providers.Object(_starts(container, supervise, controller_configured=True))
+        )
+        try:
+            client.post(
+                _writer_questions_path(document.id),
+                json={"questions": [{"block": "Q1", "question": "Which site?"}]},
+            )
+
+            response = client.post(_clarification_path(document.id), json={})
+            again = client.post(_clarification_path(document.id), json={})
+        finally:
+            container.session_start_service.reset_last_overriding()
+            clear_after_commit_callbacks()
+
+        assert response.status_code == 201
+        run_id = uuid.UUID(response.get_json()["id"])
+        run = session.get_one(models.Session, run_id)
+        assert (run.conversation_id, run.state_code) == (
+            "conv-camp",
+            SessionState.STARTING,
+        )
+        clarification = session.get_one(ClarificationRun, run_id)
+        assert (clarification.reply, clarification.replied_at) == (None, None)
+        run_line = _timeline_item(client, str(project.id), str(run_id))
+        assert (run_line["title"], run_line["done"]) == (f"Clarify {REGISTERED}", None)
+        [line] = _timeline_item(client, str(project.id), str(document.id))[
+            "clarifications"
+        ]
+        assert (line["reply"], [each["block"] for each in line["questions"]]) == (
+            None,
+            ["Q1"],
+        )
+        assert again.status_code == 409
+
     def test_a_document_asked_nothing_or_replied_to_already_conflicts(
         self, client: FlaskClient, document: Item
     ) -> None:
@@ -2193,11 +2240,13 @@ class TestCreateClarification:
             "because its writer was asked nothing"
         )
         assert again.get_json()["error"].endswith(
-            "because the writer has replied to the pass that asked already"
+            "because the pass that asked has its clarification run already"
         )
 
-    @pytest.mark.parametrize("body", [{}, {"reply": ""}], ids=["none", "an-empty-one"])
-    def test_a_body_with_no_reply_is_invalid(
+    @pytest.mark.parametrize(
+        "body", [{"reply": ""}, {"reply": 7}], ids=["an-empty-one", "no-text"]
+    )
+    def test_a_reply_that_is_no_text_is_invalid(
         self, client: FlaskClient, document: Item, body: dict[str, Any]
     ) -> None:
         response = client.post(_clarification_path(document.id), json=body)

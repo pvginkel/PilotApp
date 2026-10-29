@@ -253,8 +253,8 @@ export function settledParts(within: Locator, blockId: string) {
 
 /**
  * An open item's block, its head, its answer; a decision's options, a question's field and Send,
- * an action's paste-back, Done and its options as buttons; Other and its console; a confirmation
- * block's check and cross, and No's console.
+ * an action's paste-back, Done and its options as buttons, and Pilot's claim on it; Other and its
+ * console; a confirmation block's check and cross, and No's console.
  */
 export function blockParts(page: Page, root: Locator) {
   return {
@@ -264,6 +264,11 @@ export function blockParts(page: Page, root: Locator) {
     kind: root.getByTestId('timeline.block.kind'),
     /** A confirmation block's auto pilot mark (F4.4). */
     autopilotMark: root.getByTestId('timeline.block.autopilot-mark'),
+    /** "Pilot asked the writer", in the head of a block Pilot asked a registered document's writer about (F52.2). */
+    writerAsked: root.getByTestId('timeline.block.writer-asked'),
+    /** An action Pilot claimed: "Pilot does it", its note, and the work item that does it (F21.6). */
+    claim: root.getByTestId('timeline.block.claim'),
+    claimWork: root.getByTestId('timeline.block.claim.work'),
     toggle: root.getByTestId('timeline.block.toggle'),
     answered: root.getByTestId('timeline.block.answered'),
     /** *In the chat*, on an answer given in the chat. */

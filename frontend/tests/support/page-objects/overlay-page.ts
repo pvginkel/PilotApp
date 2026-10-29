@@ -8,7 +8,8 @@ import { blockParts, settledParts } from './timeline-page';
  * address (F97); its head with the title, the project, the step, the segment bar, *Unsent* or
  * *Done* and *Edited <time>*; its body with the summary, the prose and the blocks, the sections
  * Pilot settled as their lines, its attachments, Pilot's dots, or "The document did not load"; its
- * foot; maximize, the cross and the backdrop. Showing an attachment (F28.5), its head is its title
+ * foot; maximize, the cross and the backdrop; over the text, Pilot's questions to a registered
+ * document's writer and the reply (F52.2). Showing an attachment (F28.5), its head is its title
  * over "Attachment of “<item>”" and, opened from the document, Back; its body the attachment by
  * its type. Showing the handbook or the project document (F129.4, F37.4), its head is the title over
  * the project and what it is; its body the prose and Pilot's dots, or *Empty*.
@@ -49,6 +50,8 @@ export class OverlayPage {
   readonly reviewed: Locator;
   /** The body's attachments' chips. */
   readonly attachments: Locator;
+  /** Pilot's questions to the writer and the reply, a section per pass that asked (F52.2). */
+  readonly clarifications: Locator;
   /** An attachment shown: its view, by its type in `data-view`, and its parts. */
   readonly attachment: {
     root: Locator;
@@ -93,6 +96,7 @@ export class OverlayPage {
     this.send = this.foot.getByTestId('timeline.item.send');
     this.reviewed = this.root.getByTestId('overlay.reviewed');
     this.attachments = this.body.getByTestId('timeline.attachment');
+    this.clarifications = this.body.getByTestId('overlay.clarification');
     const attachment = this.root.getByTestId('overlay.attachment');
     this.attachment = {
       root: attachment,
@@ -136,6 +140,34 @@ export class OverlayPage {
   /** A block in the body, by its id. */
   blockAt(blockId: string) {
     return blockParts(this.page, this.root.locator(`[data-testid="timeline.block"][data-block-id="${blockId}"]`));
+  }
+
+  /**
+   * The section of the pass that asked the writer `nth` (F52.2): its head and its stamp, its
+   * questions, each by its block's id with its words and its part of the reply, and the reply whole.
+   */
+  clarification(nth = 0) {
+    const root = this.clarifications.nth(nth);
+    const questions = root.getByTestId('overlay.clarification.question');
+    return {
+      root,
+      head: root.getByTestId('overlay.clarification.head'),
+      time: root.getByTestId('overlay.clarification.time'),
+      questions,
+      question: (blockId: string) => {
+        const question = root.locator(`[data-testid="overlay.clarification.question"][data-block="${blockId}"]`);
+        return {
+          root: question,
+          block: question.getByTestId('overlay.clarification.block'),
+          text: question.getByTestId('overlay.clarification.text'),
+          reply: question.getByTestId('overlay.clarification.reply'),
+        };
+      },
+      /** The reply whole, under the questions, where it did not keep the headings asked for. */
+      reply: root.locator(':scope > [data-testid="overlay.clarification.reply"]'),
+      /** Every reply in the section, a question's part or the whole. */
+      replies: root.getByTestId('overlay.clarification.reply'),
+    };
   }
 
   /** A settled section's line in the body, by its block's id. */

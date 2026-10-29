@@ -946,15 +946,18 @@ class TestDataService:
         self.db.flush()
         return asked
 
-    def clarify(self, item_id: uuid.UUID, reply: str) -> AgentSession:
-        """The writer's `reply` to the questions a pre-ruling pass asked about
-        the registered document's blocks (`ask_writer`), as the pass's
-        clarification run records it (F52.2; DB 254, 255). A spec's pass,
-        which has no work item, is given one: the job after the turn of the
-        run that registered the document, done. The run is placed on that
+    def clarify(self, item_id: uuid.UUID, reply: str | None) -> AgentSession:
+        """The clarification run of the pre-ruling pass that asked about the
+        registered document's blocks (`ask_writer`), with the writer's
+        `reply`, or placed to run with none (F52.2; DB 254, 255). A spec's
+        pass, which has no work item, is given one: the job after the turn of
+        the run that registered the document, done. The run is placed on that
         run's conversation and in its environment, titled and its first Turn
-        written as the pass's end places it, and its turn ended with `reply`,
-        its work item done. No controller call is made, and no job follows.
+        written as the pass's end places it. With `reply`, its turn is ended
+        with it and its work item done: no controller call is made, and no
+        job follows. With none, it is placed as the pass's end places it
+        (`SessionStartService.clarify`), through the gate, its start run once
+        this commits, its turn's end recording the reply.
 
         Returns:
             The clarification run's Session
@@ -962,12 +965,13 @@ class TestDataService:
         Raises:
             RecordNotFoundException: no item has the id.
             InvalidOperationException: its writer was asked nothing, or the
-                pass that asked has its clarification run already.
+                pass that asked has its clarification run already; with no
+                `reply`, the project is finished or archived.
         """
         item = self.db.get(Item, item_id)
         if item is None:
             raise RecordNotFoundException("Item", str(item_id))
-        operation = f"record the writer's reply on item {item_id}"
+        operation = f"place the clarification run of item {item_id}"
         pass_id = self.db.scalars(
             select(Turn.session_id)
             .join(WriterQuestion, WriterQuestion.turn_id == Turn.id)
@@ -980,7 +984,7 @@ class TestDataService:
             raise InvalidOperationException(operation, "its writer was asked nothing")
         if self.db.scalar(select(exists().where(ClarificationRun.pass_id == pass_id))):
             raise InvalidOperationException(
-                operation, "the writer has replied to the pass that asked already"
+                operation, "the pass that asked has its clarification run already"
             )
         project = self.db.get_one(Project, item.project_id)
         # A registered document is a worker's run's (F85.1).
@@ -998,6 +1002,16 @@ class TestDataService:
             )
             self.record_service.work_done(pass_id, now)
         questions = asked(self.db, pass_id)
+        if reply is None:
+            self.document_service.lock_project(project)
+            return self.session_start_service.clarify(
+                self.db,
+                project,
+                pass_id,
+                writer.id,
+                title(questions),
+                message(questions),
+            )
         run = AgentSession(
             project_id=project.id,
             environment_id=writer.environment_id,

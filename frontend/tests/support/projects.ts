@@ -17,7 +17,9 @@
  * worker's `register_document` registers it (/api/testing/items/<id>/registrations), and a file or
  * a folder attached as its `attach_file` attaches it (/api/testing/items/<id>/worker-attachments),
  * each the effect of the call a tool-use id names; a registered document's writer is asked about
- * its blocks as the pre-ruling pass's `ask_writer` asks (/api/testing/items/<id>/writer-questions).
+ * its blocks as the pre-ruling pass's `ask_writer` asks (/api/testing/items/<id>/writer-questions),
+ * and the pass's clarification run placed, with the writer's reply or to run
+ * (/api/testing/items/<id>/clarification).
  */
 
 import { expect, type Page } from '@playwright/test';
@@ -252,6 +254,20 @@ export class Projects {
       data: { questions },
     });
     expect(response.status(), await response.text()).toBe(201);
+  }
+
+  /**
+   * The clarification run of the pass that asked about the registered document's blocks, on the
+   * conversation of the run that registered it: with the writer's `reply`, its turn ended with it
+   * and nothing started; with none, started through the gate as the pass's end starts it, its
+   * turn's end recording the reply. Answers its work item's id.
+   */
+  async clarify(documentId: string, reply?: string): Promise<string> {
+    const response = await this.page.request.post(`${this.backendUrl}/api/testing/items/${documentId}/clarification`, {
+      data: { reply },
+    });
+    expect(response.status(), await response.text()).toBe(201);
+    return ((await response.json()) as { id: string }).id;
   }
 
   /** The environment a work item's start took or created, once it has one, as its row stands. */

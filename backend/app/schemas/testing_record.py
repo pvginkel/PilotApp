@@ -263,15 +263,17 @@ class InventedWriterQuestionsSchema(BaseModel):
 
 
 class InventedClarificationCreateSchema(BaseModel):
-    """The writer's reply to the questions a pre-ruling pass asked about a
-    registered document's blocks."""
+    """The clarification run of the pre-ruling pass that asked about a
+    registered document's blocks, with the writer's reply or to run."""
 
-    reply: str = Field(
+    reply: str | None = Field(
+        default=None,
         min_length=1,
         description=(
             "The reply, the clarification run's turn's final text, verbatim: "
             "split per block under the headings it was asked for, `## <local "
-            "id>`, or not"
+            "id>`, or not; none to place the run to start through the gate, "
+            "its turn's end recording the reply"
         ),
         examples=["## D2\nThe OpenAPI cache the frontend reads."],
     )

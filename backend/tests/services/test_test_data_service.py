@@ -5,11 +5,13 @@ import base64
 import hashlib
 import json
 import uuid
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pilot_dsl as dsl
 import pytest
+from dependency_injector import providers
 from flask import Flask
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
@@ -68,8 +70,11 @@ from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerClient
 from app.services.session_record_service import read_records
 from app.startup import load_test_data_hook
+from app.utils.after_commit import clear_after_commit_callbacks
 from tests.support.chats import ChatWriter, open_chat
 from tests.support.fake_controller import ServedFakeController
+from tests.support.starts import configured_starts
+from tests.support.supervisor import Supervise
 
 
 @pytest.fixture
@@ -1873,6 +1878,26 @@ class TestAskWriter:
 
 
 class TestClarify:
+    @pytest.fixture(autouse=True)
+    def _no_callbacks(self) -> Iterator[None]:
+        clear_after_commit_callbacks()
+        yield
+        clear_after_commit_callbacks()
+
+    @pytest.fixture
+    def starts(
+        self, container: ServiceContainer, supervise: Supervise
+    ) -> Iterator[None]:
+        """The start a run with no reply is placed through, its loops never
+        run."""
+        container.session_start_service.override(
+            providers.Object(configured_starts(container, supervise))
+        )
+        try:
+            yield
+        finally:
+            container.session_start_service.reset_override()
+
     @pytest.fixture
     def document(
         self,
@@ -1968,8 +1993,65 @@ class TestClarify:
             service.clarify(document.id, "The south shore.")
 
         assert raised.value.cause == (
-            "the writer has replied to the pass that asked already"
+            "the pass that asked has its clarification run already"
         )
+
+    @pytest.mark.usefixtures("starts")
+    def test_with_no_reply_the_passs_run_is_placed_to_start_through_the_gate(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        environment: Environment,
+        document: Item,
+    ) -> None:
+        service = container.test_data_service()
+        service.ask_writer(
+            document.id,
+            [InventedWriterQuestionSchema(block="Q2", question="Which lake?")],
+        )
+
+        run = service.clarify(document.id, None)
+
+        [clarification] = session.scalars(select(ClarificationRun))
+        assert (clarification.id, clarification.reply, clarification.replied_at) == (
+            run.id,
+            None,
+            None,
+        )
+        assert session.get_one(Item, clarification.pass_id).done_at is not None
+        assert (run.environment_id, run.conversation_id, run.state_code) == (
+            environment.id,
+            "conv-camp",
+            SessionState.STARTING,
+        )
+        item = session.get_one(Item, run.id)
+        assert (item.title, item.done_at) == (f"Clarify {REGISTERED}", None)
+        [turn] = session.scalars(select(Turn).where(Turn.session_id == run.id))
+        assert (turn.message.startswith(f"Pilot asks about {REGISTERED}:"), turn.ended_at) == (
+            True,
+            None,
+        )
+
+    @pytest.mark.usefixtures("starts")
+    def test_with_no_reply_an_archived_project_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        document: Item,
+    ) -> None:
+        service = container.test_data_service()
+        service.ask_writer(
+            document.id,
+            [InventedWriterQuestionSchema(block="Q2", question="Which lake?")],
+        )
+        project.archived = True
+        session.flush()
+
+        with pytest.raises(InvalidOperationException) as raised:
+            service.clarify(document.id, None)
+
+        assert raised.value.cause == "its project is archived"
 
 
 class TestAnswerInChat:

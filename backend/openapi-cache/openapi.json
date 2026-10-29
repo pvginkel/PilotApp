@@ -1326,21 +1326,26 @@
         "type": "object"
       },
       "InventedClarificationCreateSchema.6d6b324": {
-        "description": "The writer's reply to the questions a pre-ruling pass asked about a\nregistered document's blocks.",
+        "description": "The clarification run of the pre-ruling pass that asked about a\nregistered document's blocks, with the writer's reply or to run.",
         "properties": {
           "reply": {
-            "description": "The reply, the clarification run's turn's final text, verbatim: split per block under the headings it was asked for, `## <local id>`, or not",
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The reply, the clarification run's turn's final text, verbatim: split per block under the headings it was asked for, `## <local id>`, or not; none to place the run to start through the gate, its turn's end recording the reply",
             "examples": [
               "## D2\nThe OpenAPI cache the frontend reads."
             ],
-            "minLength": 1,
-            "title": "Reply",
-            "type": "string"
+            "title": "Reply"
           }
         },
-        "required": [
-          "reply"
-        ],
         "title": "InventedClarificationCreateSchema",
         "type": "object"
       },
@@ -12192,7 +12197,7 @@
     },
     "/api/testing/items/{item_id}/clarification": {
       "post": {
-        "description": "Returns:     201: The clarification run's work item     400: The body is invalid, or the stage is prd     404: No item has the id     409: Its writer was asked nothing, or the pass that asked has its         reply already: the reason",
+        "description": "Returns:     201: The clarification run's work item     400: The body is invalid, or the stage is prd     404: No item has the id     409: Its writer was asked nothing, or the pass that asked has its         clarification run already, or with no reply the project is         finished or archived: the reason",
         "operationId": "post__api_testing_items_{item_id}_clarification",
         "parameters": [
           {
@@ -12263,7 +12268,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Record the writer's reply to the questions asked about the registered document's blocks (`writer-questions`), as the clarification run of the pass that asked records it (F52.2): the run placed on the conversation of the run that registered the document, its turn ended with the reply, nothing started; the document's clarification shows it.",
+        "summary": "Place the clarification run of the pass that asked about the registered document's blocks (`writer-questions`) on the conversation of the run that registered the document (F52.2): with a reply, its turn ended with it, nothing started, the document's clarification showing it; with none, started through the gate as the pass's end starts it, its turn's end recording the reply.",
         "tags": [],
         "x-required-role": "editor"
       }

@@ -7,8 +7,9 @@ the end of its turn; and a work item placed by repository, started in an
 environment of Pilot's own the stage's own controller creates, named for the
 claimed actions it does, and the
 documents and the material its session registers and attaches there, each with
-its effect; a pre-ruling pass's questions to a registered document's writer;
-and a person's answer the brain records through the project's open chat, with
+its effect; a pre-ruling pass's questions to a registered document's writer,
+and its clarification run, with the writer's reply or to run; and a person's
+answer the brain records through the project's open chat, with
 its effect.
 Nothing in the UI places a work item, which the brain adds (F66).
 
@@ -591,18 +592,20 @@ def create_clarification(
     item_id: uuid.UUID,
     test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
 ) -> Any:
-    """Record the writer's reply to the questions asked about the registered
-    document's blocks (`writer-questions`), as the clarification run of the
-    pass that asked records it (F52.2): the run placed on the conversation of
-    the run that registered the document, its turn ended with the reply,
-    nothing started; the document's clarification shows it.
+    """Place the clarification run of the pass that asked about the
+    registered document's blocks (`writer-questions`) on the conversation of
+    the run that registered the document (F52.2): with a reply, its turn
+    ended with it, nothing started, the document's clarification showing it;
+    with none, started through the gate as the pass's end starts it, its
+    turn's end recording the reply.
 
     Returns:
         201: The clarification run's work item
         400: The body is invalid, or the stage is prd
         404: No item has the id
         409: Its writer was asked nothing, or the pass that asked has its
-            reply already: the reason
+            clarification run already, or with no reply the project is
+            finished or archived: the reason
     """
     data = InventedClarificationCreateSchema.model_validate(request.get_json())
     run = test_data_service.clarify(item_id, data.reply)

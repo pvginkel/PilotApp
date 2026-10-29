@@ -69,6 +69,18 @@
   .sheet .attachments { margin: 0 0 14px; }
   .lead { margin-bottom: 18px; padding: 10px 14px; border-radius: var(--radius); background: hsl(var(--primary-muted) / 0.6); font-size: 14.5px; }
 
+  /* Pilot's questions to a registered document's writer and the reply, over its text
+     (clarification.tsx): each question after its block's id, the writer's words set in under it. */
+  .clarification { margin: 0 0 18px; padding: 10px 14px 12px; border: 1px solid hsl(var(--border)); border-radius: var(--radius); background: hsl(var(--muted) / 0.35); font-size: 14px; }
+  .clarification h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font-size: 13px; font-weight: 600; color: hsl(var(--muted-foreground)); }
+  .clarification-questions { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; }
+  .clarification .asked { display: flex; align-items: baseline; gap: 8px; margin: 0; }
+  .clarification .block-id { flex: none; font-weight: 600; color: hsl(var(--primary-muted-foreground)); }
+  .clarification .reply { margin-top: 6px; padding-left: 12px; border-left: 2px solid hsl(var(--border)); }
+  .clarification .reply .prose { font-size: 14px; }
+  .clarification .reply .prose :is(h1, h2, h3, h4, h5, h6) { margin: 0.6em 0 0.3em; font-size: 1em; }
+  .clarification-questions + .reply { margin-top: 12px; }
+
   /* A document's prose and its blocks in the body. */
   .sheet-doc > .prose + .prose { margin-top: 0.7em; }
   .sheet-doc > .block { margin: 14px 0 26px; }

@@ -2,13 +2,18 @@
  * An action answered inline (F21): a paste-back field and Done (F21.1); or its options as buttons,
  * the first the primary, and Other, whose console sends the words as the answer (F21.2). What was
  * pasted back is the note under the Done, the option or the words. Answered, it reads Done or the
- * option, the words boxed, the note under it (F21.5).
+ * option, the words boxed, the note under it (F21.5). Claimed by Pilot and not yet done, it reads
+ * "Pilot does it", linking the work item that does it, the claim's note under it, over a person's
+ * controls (F21.6).
  */
 
 import { useState } from 'react';
+import { Link, useParams } from '@tanstack/react-router';
 import { Check } from 'lucide-react';
+import { Avatar } from '@/components/shared/avatar';
 import { TextField } from '@/components/shared/text-field';
 import { Console } from '@/components/timeline/console';
+import { Note } from '@/components/timeline/note';
 import { DEFERRED, Said } from '@/components/timeline/said';
 import type { Answer, Saving, Sent } from '@/hooks/use-answer';
 import type { Block } from '@/hooks/use-timeline';
@@ -33,9 +38,39 @@ export function ActionAnswer({ field, block, saving, closed, live, disabled = fa
   const said = saidOf(block, saving);
   return (
     <>
-      {said !== null && <Said {...said} />}
+      {saving === null && block.claim !== null ? <Claimed block={block} work={block.claim.work} /> : said !== null && <Said {...said} />}
       {live && !closed && <ActionControls field={field} block={block} disabled={disabled} onAnswer={onAnswer} onDone={onDone} />}
     </>
+  );
+}
+
+type ClaimedWork = NonNullable<Block['claim']>['work'];
+
+/** Pilot's claim: "Pilot does it", the work item that does it, where one is named, its link (F21.6). */
+function Claimed({ block, work }: { block: Block; work: ClaimedWork }) {
+  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  return (
+    <div className="answer" data-testid="timeline.block.claim">
+      <div className="claimed">
+        <Avatar who="pilot" size="xs" />
+        <span>Pilot does it</span>
+        {work !== null && (
+          <>
+            <span className="sep">·</span>
+            <Link
+              to="/projects/$projectId/items/$itemId"
+              params={{ projectId, itemId: work.id }}
+              className="claimed-work"
+              title="Go to the work item that does it"
+              data-testid="timeline.block.claim.work"
+            >
+              {work.title}
+            </Link>
+          </>
+        )}
+      </div>
+      {block.note !== null && <Note text={block.note} />}
+    </div>
   );
 }
 

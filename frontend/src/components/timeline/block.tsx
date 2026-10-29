@@ -2,7 +2,8 @@
  * A block (F31), in a panel of its own under the prose that asks, in a one-ask item and in a
  * document alike: a decision's options, a question's field, an action's paste-back and buttons, a
  * confirmation's check and cross. Its head names its kind in a document, where the item's head does
- * not, the auto pilot mark beside it on a confirmation the switch would answer (F4.4); answered,
+ * not, the auto pilot mark beside it on a confirmation the switch would answer (F4.4), then, where
+ * Pilot asked the registered document's writer about it, "Pilot asked the writer" (F52.2); answered,
  * the head has a chevron where it opens, Answered, and when and by whom, Pilot's mark on a block
  * Pilot settled (F31.1, F31.3), *In the chat* before them on an answer given in the
  * chat, going to its message (F42.3). An answer that is not a person's, and every
@@ -14,7 +15,8 @@
  * address, it flashes (F97). In an archived project its controls stand disabled, which the API
  * refuses until Bring back (D012). A block of a project's own document, the handbook or
  * `project.md`, has no item, and in the overlay reads only (D1): every answer closed, with no
- * chevron and no Discuss, and an unanswered block open, its controls standing disabled. A draft's
+ * chevron and no Discuss, and an unanswered block open, its controls standing disabled. An action
+ * Pilot claimed is open until its Done, its controls a person's (F21.6). A draft's
  * block in the Draft tab is answered in place, as a document's is (F47.4), its Discuss quoting it
  * into the definition chat (F39.1).
  */
@@ -25,6 +27,7 @@ import { Check, ChevronDown, ChevronUp } from 'lucide-react';
 import { DiscussButton } from '@/components/chat/discuss-button';
 import { quoteOfBlock, quoteOfDraftBlock } from '@/components/chat/discuss-quotes';
 import { InChatButton } from '@/components/chat/in-chat-button';
+import { Avatar } from '@/components/shared/avatar';
 import { Time } from '@/components/shared/time';
 import { ActionAnswer } from '@/components/timeline/action';
 import { AutopilotMark } from '@/components/timeline/autopilot-mark';
@@ -220,6 +223,7 @@ function BlockPanel({ field, block, solo, mayTake, answering, settled, disabled,
         <BlockHead
           block={block}
           mayTake={mayTake}
+          writerAsked={block.writer_asked && !solo}
           answered={answered}
           closed={closed}
           onToggle={closable && answering !== null ? () => setOpened(!opened) : null}
@@ -237,6 +241,8 @@ function BlockPanel({ field, block, solo, mayTake, answering, settled, disabled,
 interface BlockHeadProps {
   block: BlockData;
   mayTake: boolean;
+  /** Pilot asked the writer about it; a one-ask item's line says so instead (writer-asked.tsx). */
+  writerAsked: boolean;
   answered: boolean;
   closed: boolean;
   /** Toggles a closed answer open and closed again; none where it stays as it is. */
@@ -244,7 +250,7 @@ interface BlockHeadProps {
   quote: QuoteRef | null;
 }
 
-function BlockHead({ block, mayTake, answered, closed, onToggle, quote }: BlockHeadProps) {
+function BlockHead({ block, mayTake, writerAsked, answered, closed, onToggle, quote }: BlockHeadProps) {
   const { icon: Icon, label } = blockKindOf(block);
   const toggle = closed ? 'Show every option' : 'Show only the answer';
   return (
@@ -254,6 +260,12 @@ function BlockHead({ block, mayTake, answered, closed, onToggle, quote }: BlockH
         {label}
       </span>
       {mayTake && <AutopilotMark testId="timeline.block.autopilot-mark" />}
+      {writerAsked && (
+        <span className="asked" data-testid="timeline.block.writer-asked">
+          <Avatar who="pilot" size="xs" />
+          Pilot asked the writer
+        </span>
+      )}
       {onToggle !== null && (
         <button
           type="button"

@@ -64,8 +64,11 @@ export function hungAt(timeline: Timeline, path: string): Hung | undefined {
   return hungIn(timeline).find(({ attachment }) => attachment.batch === Number(batch) && attachment.filename === filename.join('/'));
 }
 
-/** Whether the record counts the block answered: an answer, a deferral included, or an action's Done. */
-export const isAnswered = (block: Block) => block.answer !== null || block.done !== null;
+/**
+ * Whether the record counts the block answered: an answer, a deferral included, or an action's Done;
+ * never an action Pilot claimed and has not done, which stays open (F21.6; DB 154).
+ */
+export const isAnswered = (block: Block) => block.claim === null && (block.answer !== null || block.done !== null);
 
 /** The line's title: a registered document's file name while its text gives none (F35). */
 export function titleOf(item: TimelineItem): string {
