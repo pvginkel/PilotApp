@@ -28,6 +28,7 @@ from app.engine.bus import EngineEvent, ProjectChanged, WorkMoved
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import (
     Chat,
+    ClarificationRun,
     Document,
     DocumentVersion,
     Environment,
@@ -59,6 +60,7 @@ from app.services.environment_service import SHUTDOWN_TIMER, EnvironmentService
 from app.services.fake_controller import FakeControllerProblem, FinishOutcome
 from app.services.job_service import NEXT_TITLE
 from app.services.pilot_server import PilotServer, token_hash
+from app.services.pilot_store_service import Brain
 from app.services.relay_service import (
     CONTINUE,
     ENVIRONMENT_STOPPED,
@@ -3997,3 +3999,255 @@ def _row_committed(container: ServiceContainer) -> Environment:
         row = _row(db)
         db.expunge(row)
         return row
+
+
+CUT_OVER = "/work/Example/docs/cut-over.md"
+DRAIN = "/work/Example/docs/drain.md"
+CUT_OVER_TEXT = """The cut-over.
+
+```decision id=D1
+options:
+  - Friday
+  - Monday
+```
+"""
+DRAIN_TEXT = """The drain.
+
+```question id=Q1
+```
+"""
+REPLY = "## D1\nThe Friday after the freeze.\n\n## Q1\nThe v1 broker's."
+
+
+def _done_run(
+    db: DbSession, container: ServiceContainer, project: Project
+) -> tuple[models.Session, Item, Item]:
+    """A worker's run in the environment, its turn ended on its conversation
+    and its work item done, and the two documents it registered, read."""
+    _environment_row(db)
+    run = _agent_session(db, project, None)
+    run.conversation_id = "conv-camp"
+    run.turns = 1
+    db.flush()
+    records = container.record_service()
+    records.place_work(project, run, "Cutting over", repo="example/Example")
+    records.work_done(run.id, datetime.now(UTC))
+    documents = container.document_service()
+    registered = []
+    for path, text in ((CUT_OVER, CUT_OVER_TEXT), (DRAIN, DRAIN_TEXT)):
+        item = documents.register(project, run, path).item
+        documents.publish_read(db.get_one(Document, item.id), text, run.id)
+        registered.append(item)
+    clear_after_commit_callbacks()
+    return run, registered[0], registered[1]
+
+
+def _pass_of(
+    db: DbSession,
+    container: ServiceContainer,
+    project: Project,
+    run: models.Session,
+    controller_session: str | None,
+) -> models.Session:
+    """The job after the run's turn, the pre-ruling pass, on the headless
+    session `controller_session`."""
+    job = _agent_session(db, project, controller_session)
+    job.kind_code = "job"
+    db.flush()
+    container.record_service().place_work(
+        project,
+        job,
+        "Pre-ruling docs/2",
+        trigger=WorkTrigger.WORKER_TURN_ENDED,
+        trigger_item_id=run.id,
+    )
+    return job
+
+
+def _clarifications(db: DbSession, asking: models.Session) -> list[ClarificationRun]:
+    return list(
+        db.scalars(
+            select(ClarificationRun)
+            .where(ClarificationRun.pass_id == asking.id)
+            .execution_options(populate_existing=True)
+        )
+    )
+
+
+class TestClarificationRun:
+    """The pass's questions go to the writer as one clarification run when its
+    job ends, failed too, a Stop placing none; the run's turn's final text is
+    its reply; a failed run gets no job (design 3 §6.4; DB 254 to 256; V07)."""
+
+    @pytest.mark.parametrize(
+        ("outcome", "state"),
+        [("success", SessionState.IDLE), ("error", SessionState.FAILED)],
+    )
+    def test_a_pass_asking_across_two_documents_gets_one_run_with_every_question(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        project: Project,
+        outcome: FinishOutcome,
+        state: SessionState,
+    ) -> None:
+        run, cut_over, drain = _done_run(session, container, project)
+        asking = _pass_of(session, container, project, run, controller_session)
+        _send(relays, session, asking, "/pre-rule")
+        brain = Brain(asking.id, project.id, "job")
+        container.pilot_store_service().ask_writer(
+            brain, f"{drain.id}/Q1", "Whose broker?"
+        )
+        container.pilot_store_service().ask_writer(
+            brain, f"{cut_over.id}/D1", "Which Friday?"
+        )
+        _turn_of(fake_controller, controller_session, raw_turn("turn_text"), outcome)
+
+        _relay(relays, asking)
+
+        assert asking.state_code is state
+        [clarification] = _clarifications(session, asking)
+        clarifying = session.get_one(models.Session, clarification.id)
+        assert (clarifying.kind_code, clarifying.conversation_id) == (
+            "work",
+            "conv-camp",
+        )
+        assert session.get_one(Item, clarifying.id).title == (
+            f"Clarify {CUT_OVER} and {DRAIN}"
+        )
+        [first] = _turns(session, clarifying)
+        assert first.message == (
+            f"Pilot asks about {CUT_OVER}:\n"
+            "- D1: Which Friday?\n"
+            "\n"
+            f"Pilot asks about {DRAIN}:\n"
+            "- Q1: Whose broker?\n"
+            "\n"
+            "Answer each under a heading per block id (`## D1`, `## Q1`); register"
+            " nothing, start nothing; then end your turn."
+        )
+
+    def test_a_pass_asking_nothing_gets_none(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        project: Project,
+    ) -> None:
+        run, _, _ = _done_run(session, container, project)
+        asking = _pass_of(session, container, project, run, controller_session)
+        _send(relays, session, asking, "/pre-rule")
+        _turn_of(fake_controller, controller_session, raw_turn("turn_text"))
+
+        _relay(relays, asking)
+
+        assert asking.state_code is SessionState.IDLE
+        assert _clarifications(session, asking) == []
+
+    @pytest.mark.parametrize("stop", ["interrupted", "stopped"])
+    def test_a_pass_stopped_after_asking_gets_none(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        project: Project,
+        person: User,
+        stop: str,
+    ) -> None:
+        """A Stop places none (DB 254): an interrupt with no one's Stop, or a
+        person's under the turn."""
+        run, cut_over, _ = _done_run(session, container, project)
+        asking = _pass_of(session, container, project, run, controller_session)
+        _send(relays, session, asking, "/pre-rule")
+        container.pilot_store_service().ask_writer(
+            Brain(asking.id, project.id, "job"), f"{cut_over.id}/D1", "Which Friday?"
+        )
+        if stop == "stopped":
+            _stopped(asking, person)
+            session.flush()
+        _turn_of(
+            fake_controller, controller_session, raw_turn("turn_text"), "interrupted"
+        )
+
+        _relay(relays, asking)
+
+        assert asking.state_code is SessionState.STOPPED
+        assert _clarifications(session, asking) == []
+
+    def test_its_turns_final_text_is_its_reply(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        project: Project,
+    ) -> None:
+        run, _, _ = _done_run(session, container, project)
+        asking = _pass_of(session, container, project, run, None)
+        clarifying = _agent_session(session, project, controller_session)
+        clarifying.conversation_id = "conv-camp"
+        session.flush()
+        container.record_service().place_work(
+            project, clarifying, f"Clarify {CUT_OVER}"
+        )
+        session.add(ClarificationRun(id=clarifying.id, pass_id=asking.id))
+        session.flush()
+        turn = _send(relays, session, clarifying, "Pilot asks about …")
+        _turn_of(
+            fake_controller, controller_session, raw_turn("turn_text"), result=REPLY
+        )
+
+        _relay(relays, clarifying)
+
+        [clarification] = _clarifications(session, asking)
+        assert (clarification.reply, clarification.replied_at) == (
+            REPLY,
+            turn.ended_at,
+        )
+        assert len(_jobs_after(session, clarifying.id)) == 1
+
+    @pytest.mark.parametrize("outcome", ["error", "ended", "interrupted"])
+    def test_a_failed_run_has_no_reply_and_gets_no_job(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        project: Project,
+        outcome: FinishOutcome,
+    ) -> None:
+        """A run whose turn failed or was interrupted gets no job, as any run
+        (DB 256); its questions stand beside the asks."""
+        run, _, _ = _done_run(session, container, project)
+        asking = _pass_of(session, container, project, run, None)
+        clarifying = _agent_session(session, project, controller_session)
+        clarifying.conversation_id = "conv-camp"
+        session.flush()
+        container.record_service().place_work(
+            project, clarifying, f"Clarify {CUT_OVER}"
+        )
+        session.add(ClarificationRun(id=clarifying.id, pass_id=asking.id))
+        session.flush()
+        _send(relays, session, clarifying, "Pilot asks about …")
+        _turn_of(
+            fake_controller,
+            controller_session,
+            raw_turn("turn_text"),
+            outcome,
+            result=REPLY,
+        )
+
+        _relay(relays, clarifying)
+
+        [clarification] = _clarifications(session, asking)
+        assert (clarification.reply, clarification.replied_at) == (None, None)
+        assert _jobs_after(session, clarifying.id) == []

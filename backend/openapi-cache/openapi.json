@@ -343,12 +343,13 @@
         "type": "object"
       },
       "AddedSchema.4ff8b5e.HeldReason": {
-        "description": "Why the gate holds a start (design 2 §13.4, §13.5; F26.1, F143.4,\nF59.2): its project paused, the controller unreachable, a work item's no\nslot free, or a job's another job of its project before it. Read at\ndisplay, never stored (decision 53).",
+        "description": "Why the gate holds a start (design 2 §13.4, §13.5; F26.1, F143.4,\nF59.2; DB 183): its project paused, the controller unreachable, a work\nitem's no slot free, a job's another job of its project before it, or a\nwork item's another run on its conversation until that run's turn ends.\nRead at display, never stored (decision 53).",
         "enum": [
           "paused",
           "controller_unreachable",
           "slot",
-          "queue"
+          "queue",
+          "conversation"
         ],
         "title": "HeldReason",
         "type": "string"
@@ -2995,12 +2996,13 @@
         "type": "object"
       },
       "ItemDocumentSchema.1fdd8ae.HeldReason": {
-        "description": "Why the gate holds a start (design 2 §13.4, §13.5; F26.1, F143.4,\nF59.2): its project paused, the controller unreachable, a work item's no\nslot free, or a job's another job of its project before it. Read at\ndisplay, never stored (decision 53).",
+        "description": "Why the gate holds a start (design 2 §13.4, §13.5; F26.1, F143.4,\nF59.2; DB 183): its project paused, the controller unreachable, a work\nitem's no slot free, a job's another job of its project before it, or a\nwork item's another run on its conversation until that run's turn ends.\nRead at display, never stored (decision 53).",
         "enum": [
           "paused",
           "controller_unreachable",
           "slot",
-          "queue"
+          "queue",
+          "conversation"
         ],
         "title": "HeldReason",
         "type": "string"
@@ -6776,12 +6778,13 @@
         "type": "object"
       },
       "TimelineSchema.1fdd8ae.HeldReason": {
-        "description": "Why the gate holds a start (design 2 §13.4, §13.5; F26.1, F143.4,\nF59.2): its project paused, the controller unreachable, a work item's no\nslot free, or a job's another job of its project before it. Read at\ndisplay, never stored (decision 53).",
+        "description": "Why the gate holds a start (design 2 §13.4, §13.5; F26.1, F143.4,\nF59.2; DB 183): its project paused, the controller unreachable, a work\nitem's no slot free, a job's another job of its project before it, or a\nwork item's another run on its conversation until that run's turn ends.\nRead at display, never stored (decision 53).",
         "enum": [
           "paused",
           "controller_unreachable",
           "slot",
-          "queue"
+          "queue",
+          "conversation"
         ],
         "title": "HeldReason",
         "type": "string"
@@ -7972,12 +7975,13 @@
         "type": "object"
       },
       "WorkSchema.1fdd8ae.HeldReason": {
-        "description": "Why the gate holds a start (design 2 §13.4, §13.5; F26.1, F143.4,\nF59.2): its project paused, the controller unreachable, a work item's no\nslot free, or a job's another job of its project before it. Read at\ndisplay, never stored (decision 53).",
+        "description": "Why the gate holds a start (design 2 §13.4, §13.5; F26.1, F143.4,\nF59.2; DB 183): its project paused, the controller unreachable, a work\nitem's no slot free, a job's another job of its project before it, or a\nwork item's another run on its conversation until that run's turn ends.\nRead at display, never stored (decision 53).",
         "enum": [
           "paused",
           "controller_unreachable",
           "slot",
-          "queue"
+          "queue",
+          "conversation"
         ],
         "title": "HeldReason",
         "type": "string"
@@ -8172,7 +8176,7 @@
       },
       "WriterQuestionRequestSchema.4ff8b5e": {
         "additionalProperties": false,
-        "description": "A question to a registered document's writer about one of its blocks.",
+        "description": "A question to a registered document's writer about one of its blocks,\nthe block's id naming the document.",
         "properties": {
           "block": {
             "description": "The block's id, `<item id>/<local id>` (TD §4.9)",
@@ -8180,15 +8184,6 @@
               "0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15/D1"
             ],
             "title": "Block",
-            "type": "string"
-          },
-          "document": {
-            "description": "The registered document's item id",
-            "examples": [
-              "0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15"
-            ],
-            "format": "uuid",
-            "title": "Document",
             "type": "string"
           },
           "question": {
@@ -8202,7 +8197,6 @@
           }
         },
         "required": [
-          "document",
           "block",
           "question"
         ],
@@ -13904,7 +13898,7 @@
     },
     "/tools/pilot-store/writer-questions": {
       "post": {
-        "description": "Returns:     201: The document's blocks its writer is asked about     400: The body is not a document's id, a block's id and a question     401: No bearer, or one no session has     403: The bearer's session is not a job's, or has no turn running     404: The document is not of the session's project, or has no such         block     409: The question is blank, the item is no registered document or is         done, or the block is not of it, is answered or was asked about         already: the reason",
+        "description": "Returns:     201: The document's blocks its writer is asked about     400: The body is not a block's id and a question     401: No bearer, or one no session has     403: The bearer's session is not a job's, or has no turn running     404: The block's item is not of the session's project, or its         document has no such block     409: The question is blank, the item is no registered document or is         done, the block is answered or was asked about already, or the         pass asks nothing, one round per worker turn: the reason",
         "operationId": "post__tools_pilot-store_writer-questions",
         "parameters": [],
         "requestBody": {
@@ -13979,7 +13973,7 @@
             "description": "Conflict"
           }
         },
-        "summary": "`ask_writer(document, block, question)` (F86.8, D059): the pre-ruling pass's question to a registered document's writer about one of its blocks, recorded with the pass's turn.",
+        "summary": "`ask_writer(block, question)` (F86.8, D059): the pre-ruling pass's question to a registered document's writer about one of its blocks, the block's id naming its document, recorded with the pass's turn.",
         "tags": []
       }
     },

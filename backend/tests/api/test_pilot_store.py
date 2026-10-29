@@ -685,8 +685,8 @@ class TestFinish:
 
 
 class TestAskWriter:
-    """`POST /tools/pilot-store/writer-questions`: `ask_writer(document, block,
-    question)`."""
+    """`POST /tools/pilot-store/writer-questions`: `ask_writer(block,
+    question)`, the block's id naming its document (R8)."""
 
     def test_a_question_is_201_with_the_blocks_asked(
         self,
@@ -701,11 +701,7 @@ class TestAskWriter:
 
         response = client.post(
             WRITER_QUESTIONS,
-            json={
-                "document": str(item.id),
-                "block": f"{item.id}/Q2",
-                "question": "Which lake?",
-            },
+            json={"block": f"{item.id}/Q2", "question": "Which lake?"},
             headers=_bearer(),
         )
 
@@ -717,13 +713,14 @@ class TestAskWriter:
     @pytest.mark.parametrize(
         "body",
         [
-            {"document": "{item}", "block": "Q2", "question": "Which lake?"},
-            {"document": "{item}", "block": "{item}/Q2", "question": ""},
-            {"block": "{item}/Q2", "question": "Which lake?"},
+            {"block": "Q2", "question": "Which lake?"},
+            {"block": "{item}/Q2", "question": ""},
+            {"question": "Which lake?"},
+            {"document": "{item}", "block": "{item}/Q2", "question": "Which lake?"},
         ],
-        ids=["a-local-id", "an-empty-question", "no-document"],
+        ids=["a-local-id", "an-empty-question", "no-block", "a-document"],
     )
-    def test_a_body_that_is_not_a_document_a_block_and_a_question_is_400(
+    def test_a_body_that_is_not_a_block_and_a_question_is_400(
         self,
         client: FlaskClient,
         session: DbSession,
@@ -756,11 +753,7 @@ class TestAskWriter:
 
         response = client.post(
             WRITER_QUESTIONS,
-            json={
-                "document": str(item.id),
-                "block": f"{item.id}/Q2",
-                "question": "Which lake?",
-            },
+            json={"block": f"{item.id}/Q2", "question": "Which lake?"},
             headers=_bearer(),
         )
 
@@ -782,11 +775,7 @@ class TestAskWriter:
         def ask(local_id: str) -> Any:
             return client.post(
                 WRITER_QUESTIONS,
-                json={
-                    "document": str(item.id),
-                    "block": f"{item.id}/{local_id}",
-                    "question": "Which?",
-                },
+                json={"block": f"{item.id}/{local_id}", "question": "Which?"},
                 headers=_bearer(),
             )
 

@@ -220,14 +220,15 @@ and a controller that does not answer or refuses for a reason of its own a `502`
   Finish finishes it ([`projects.md`](projects.md)), refused but in an open project. Its effect,
   "Finished · <project>", is written first: the transition then stops the brain's own Session among
   the rest, whose turn the interrupt ends once the call commits.
-- **`ask_writer(document, block, question)`**, `POST …/writer-questions`, answers `201` `{blocks}`:
-  the pre-ruling pass's question to the writer of a registered document about one of its blocks,
-  stored verbatim as a Writer Question of the job's Turn in flight, once a block. A chat's call is a
-  `403`; a blank question, an item that is no registered document or is done, a block not of it,
-  answered or asked about already are refused. It changes no ask, so it writes no effect: the
-  document's line says that Pilot asked its writer ([`timeline.md`](timeline.md)), `blocks` the
-  local ids it is asked about in the document's order, and each question is counted,
-  `pilot_pass_questions_total{project}`.
+- **`ask_writer(block, question)`**, `POST …/writer-questions`, answers `201` `{blocks}`: the
+  pre-ruling pass's question to the writer of a registered document about one of its blocks, the
+  block's id naming its document, stored verbatim as a Writer Question of the job's Turn in flight,
+  once a block. A chat's call is a `403`; a blank question, an item that is no registered document
+  or is done, a block answered or asked about already, and a call in the job after a clarification
+  run or in a pass whose run another pass asked about, one round per worker turn, are refused. It
+  changes no ask, so it writes no effect: the document's line says that Pilot asked its writer
+  ([`timeline.md`](timeline.md)), `blocks` the local ids it is asked about in the document's order,
+  and each question is counted, `pilot_pass_questions_total{project}`.
 
 ## Effects
 

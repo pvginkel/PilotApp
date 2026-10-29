@@ -355,15 +355,13 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
 
     @mcp.tool()
     async def ask_writer(
-        document: Annotated[
-            uuid.UUID, Field(description="The registered document's item id")
-        ],
         block: Annotated[
             str,
             Field(
                 pattern=BLOCK_ID,
                 description=(
-                    "The block's id, `<item id>/<local id>`, a block of `document`"
+                    "The block's id, `<item id>/<local id>`, its item a"
+                    " registered document"
                 ),
             ),
         ],
@@ -379,17 +377,16 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
         """Ask the writer of a registered document about one of its blocks
         that you cannot read and the record does not answer: what it asks,
         which option the writer means, what a thing it names is. Only the
-        pre-ruling pass asks, once a block. The question is recorded on the
-        document with your turn, and the document's line says that Pilot asked
-        its writer. A document that is no registered document of your project
-        or is done, a block not of it, answered or asked about already, or a
-        call from the chat is refused with the reason, and nothing is
-        recorded. Answers `{blocks}`, the document's blocks its writer is
-        asked about."""
+        pre-ruling pass asks, once a block, in one round per worker turn: the
+        pass's questions go to the writer together when its turn ends, and
+        the pass after the writer's answer, or a retry of a pass that asked,
+        asks nothing. The question is recorded on the document with your
+        turn, and the document's line says that Pilot asked its writer. A
+        block whose item is no registered document of your project or is
+        done, one answered or asked about already, a call from the chat, or a
+        call in a pass that asks nothing is refused with the reason, and
+        nothing is recorded. Answers `{blocks}`, the document's blocks its
+        writer is asked about."""
         return await api.ask_writer(
-            _authorization(ctx),
-            _tool_use_id(ctx),
-            document=document,
-            block=block,
-            question=question,
+            _authorization(ctx), _tool_use_id(ctx), block=block, question=question
         )

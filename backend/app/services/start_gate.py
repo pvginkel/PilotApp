@@ -4,22 +4,26 @@ F59.2; DB 229, 243).
 A start is held while its project is paused, a Chat's never (F141.4), while
 the controller is unreachable; a work item's alone while no slot is free: the
 work items running or starting across every Project number the cross-project
-maximum, or those of its Project the per-project one; and a job's alone while
-another job of its Project is before it (`queued`). Where more than one
-holds, the pause comes first, then the outage, which is the gold bar's, then
-the slot, then the queue. The halt is slice 016's condition.
+maximum, or those of its Project the per-project one; a job's alone while
+another job of its Project is before it (`queued`); and a work item's alone
+while another Session runs or starts on the conversation it resumes, in
+its Environment (`carried`; DB 183): a run's continuation and its clarification run each
+wait for the other's turn to end. Where more than one holds, the pause comes
+first, then the outage, which is the gold bar's, then the slot, then the
+queue, then the conversation. The halt is slice 016's condition.
 
 The slot is counted under one app-wide lock (`WorkSlots.lock`), so two starts
-never both take its last place. A work item's start and its end move the
-count: its end may open the gate, and either may move a held work item's
-count. A job's end may open the gate for its Project's next job.
+never both take its last place, and the conversation is read under it, so two
+runs of one conversation never both start. A work item's start and its end
+move the count: its end may open the gate, and either may move a held work
+item's count. A job's end may open the gate for its Project's next job.
 """
 
 import uuid
 from collections.abc import Callable, Collection
 from dataclasses import dataclass
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from app.models import Item
@@ -64,12 +68,14 @@ def held_reason(
     unreachable: bool,
     filled: int | None,
     queued: bool,
+    conversing: bool,
 ) -> Held | None:
     """Why the gate holds a start of a Session of `kind_code` in a project
     `paused` or not, the controller `unreachable` or not, where `filled`
     running work items leave a work item no slot (`WorkSlots.filled`), None
-    while one is free, and a job is `queued` behind another of its project or
-    not; None while the gate is open."""
+    while one is free, a job is `queued` behind another of its project or
+    not, and another Session carries the conversation a work item resumes
+    (`conversing`) or not; None while the gate is open."""
     if paused and kind_code != CHAT_KIND:
         return Held(HeldReason.PAUSED)
     if unreachable:
@@ -78,7 +84,55 @@ def held_reason(
         return Held(HeldReason.SLOT, filled)
     if kind_code == JOB_KIND and queued:
         return Held(HeldReason.QUEUE)
+    if kind_code == WORK_KIND and conversing:
+        return Held(HeldReason.CONVERSATION)
     return None
+
+
+def carried(db: Session, session: AgentSession) -> bool:
+    """Whether another Session runs or starts now on the conversation the
+    work item `session` resumes, in its Environment, which holds the
+    conversation (DB 183), so that `session` waits for that Session's turn to
+    end; never for no conversation, a fresh start's."""
+    if session.conversation_id is None:
+        return False
+    return bool(
+        db.scalar(
+            select(
+                exists().where(
+                    AgentSession.conversation_id == session.conversation_id,
+                    AgentSession.environment_id == session.environment_id,
+                    AgentSession.id != session.id,
+                    AgentSession.state_code.in_(COUNTED),
+                )
+            )
+        )
+    )
+
+
+def conversing(db: Session, session_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
+    """The work items among `session_ids` whose conversation another Session
+    runs or starts on now (`carried`), as a screen reads them."""
+    if not session_ids:
+        return set()
+    other = aliased(AgentSession)
+    return set(
+        db.scalars(
+            select(AgentSession.id).where(
+                AgentSession.id.in_(list(session_ids)),
+                AgentSession.kind_code == WORK_KIND,
+                select(other.id)
+                .where(
+                    other.conversation_id == AgentSession.conversation_id,
+                    other.environment_id == AgentSession.environment_id,
+                    other.id != AgentSession.id,
+                    other.state_code.in_(COUNTED),
+                )
+                .correlate(AgentSession)
+                .exists(),
+            )
+        )
+    )
 
 
 def queued(db: Session, session_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:

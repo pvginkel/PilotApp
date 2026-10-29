@@ -930,7 +930,7 @@ class TestDataService:
         asked: list[str] = []
         for asking in questions:
             asked = self.pilot_store_service.ask_writer(
-                brain, item.id, f"{item.id}/{asking.block}", asking.question
+                brain, f"{item.id}/{asking.block}", asking.question
             )
         turn.ended_at = now
         session.state_code = SessionState.IDLE

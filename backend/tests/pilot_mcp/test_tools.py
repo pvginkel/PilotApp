@@ -746,17 +746,18 @@ class TestAskWriter:
         result = await call(
             mcp_app,
             "ask_writer",
-            {
-                "document": str(item.id),
-                "block": f"{item.id}/Q2",
-                "question": "Which lake?",
-            },
+            {"block": f"{item.id}/Q2", "question": "Which lake?"},
             path=STORE_PATH,
         )
 
         assert result.structuredContent == {"blocks": ["Q2"]}
         [(request, _)] = routes.calls
         assert str(request.url) == f"{API_URL}/tools/pilot-store/writer-questions"
+        # The block's id names its document (R8).
+        assert json.loads(request.content) == {
+            "block": f"{item.id}/Q2",
+            "question": "Which lake?",
+        }
         [question] = session.scalars(select(WriterQuestion))
         assert question.question == "Which lake?"
         assert read_records(session, job.id, limit=10) == []
@@ -776,11 +777,7 @@ class TestAskWriter:
         result = await call(
             mcp_app,
             "ask_writer",
-            {
-                "document": str(item.id),
-                "block": f"{item.id}/Q2",
-                "question": "Which lake?",
-            },
+            {"block": f"{item.id}/Q2", "question": "Which lake?"},
             path=STORE_PATH,
         )
 

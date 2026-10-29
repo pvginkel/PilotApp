@@ -1,6 +1,7 @@
 """The gate every start passes (design 2 §13.4, §13.5; F141.4, F141.5, F143.4,
-F59.2; DB 229, 243): its conditions in their order, the slot's count, its
-lock and its open event, and a project's queue of jobs."""
+F59.2; DB 183, 229, 243): its conditions in their order, the slot's count, its
+lock and its open event, a project's queue of jobs, and the runs of one
+conversation."""
 
 import uuid
 from collections.abc import Iterator
@@ -11,52 +12,75 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
 from app.database import scoped_session
-from app.models import Project, User
+from app.models import Environment, Project, User
 from app.models import Session as AgentSession
 from app.models.reference import SessionState, WorkTrigger
 from app.schemas.timeline import HeldReason
 from app.services.container import ServiceContainer
-from app.services.start_gate import SLOT_LOCK, Held, WorkSlots, held_reason, queued
+from app.services.start_gate import (
+    SLOT_LOCK,
+    Held,
+    WorkSlots,
+    carried,
+    conversing,
+    held_reason,
+    queued,
+)
 from app.utils import after_commit as after_commit_module
 from app.utils.after_commit import clear_after_commit_callbacks
 
 UNREACHABLE = HeldReason.CONTROLLER_UNREACHABLE
+CONVERSATION = HeldReason.CONVERSATION
 
 
 class TestHeldReason:
     @pytest.mark.parametrize(
-        ("paused", "kind_code", "unreachable", "filled", "queued", "held"),
+        (
+            "paused",
+            "kind_code",
+            "unreachable",
+            "filled",
+            "queued",
+            "conversing",
+            "held",
+        ),
         [
-            (False, "work", False, None, False, None),
-            (True, "work", False, None, False, Held(HeldReason.PAUSED)),
-            (False, "work", True, None, False, Held(UNREACHABLE)),
-            (False, "work", False, 3, False, Held(HeldReason.SLOT, 3)),
-            (False, "job", False, None, True, Held(HeldReason.QUEUE)),
+            (False, "work", False, None, False, False, None),
+            (True, "work", False, None, False, False, Held(HeldReason.PAUSED)),
+            (False, "work", True, None, False, False, Held(UNREACHABLE)),
+            (False, "work", False, 3, False, False, Held(HeldReason.SLOT, 3)),
+            (False, "job", False, None, True, False, Held(HeldReason.QUEUE)),
+            (False, "work", False, None, False, True, Held(CONVERSATION)),
             # The pause comes first, then the outage, the gold bar's, then the
-            # slot, then the queue.
-            (True, "work", True, 3, False, Held(HeldReason.PAUSED)),
-            (False, "work", True, 3, False, Held(UNREACHABLE)),
-            (True, "job", False, None, False, Held(HeldReason.PAUSED)),
-            (True, "job", True, None, True, Held(HeldReason.PAUSED)),
-            (False, "job", True, None, True, Held(UNREACHABLE)),
+            # slot, then the queue, then the conversation.
+            (True, "work", True, 3, False, True, Held(HeldReason.PAUSED)),
+            (False, "work", True, 3, False, True, Held(UNREACHABLE)),
+            (False, "work", False, 3, False, True, Held(HeldReason.SLOT, 3)),
+            (True, "job", False, None, False, False, Held(HeldReason.PAUSED)),
+            (True, "job", True, None, True, False, Held(HeldReason.PAUSED)),
+            (False, "job", True, None, True, False, Held(UNREACHABLE)),
             # A Chat is never held for the pause, and is for the outage.
-            (True, "chat", False, None, False, None),
-            (True, "chat", True, None, False, Held(UNREACHABLE)),
-            (False, "chat", True, None, False, Held(UNREACHABLE)),
-            # The slot is a work item's alone, the queue a job's.
-            (False, "chat", False, 3, False, None),
-            (False, "job", False, 3, False, None),
-            (False, "work", False, None, True, None),
-            (False, "chat", False, None, True, None),
+            (True, "chat", False, None, False, False, None),
+            (True, "chat", True, None, False, False, Held(UNREACHABLE)),
+            (False, "chat", True, None, False, False, Held(UNREACHABLE)),
+            # The slot and the conversation are a work item's alone, the
+            # queue a job's.
+            (False, "chat", False, 3, False, False, None),
+            (False, "job", False, 3, False, False, None),
+            (False, "work", False, None, True, False, None),
+            (False, "chat", False, None, True, False, None),
+            (False, "job", False, None, False, True, None),
+            (False, "chat", False, None, False, True, None),
         ],
     )
-    def test_the_gate_holds_for_the_pause_the_outage_the_slot_and_the_queue(
+    def test_the_gate_holds_for_the_pause_the_outage_the_slot_the_queue_and_the_conversation(
         self,
         paused: bool,
         kind_code: str,
         unreachable: bool,
         filled: int | None,
         queued: bool,
+        conversing: bool,
         held: Held | None,
     ) -> None:
         assert (
@@ -66,6 +90,7 @@ class TestHeldReason:
                 unreachable=unreachable,
                 filled=filled,
                 queued=queued,
+                conversing=conversing,
             )
             == held
         )
@@ -366,3 +391,118 @@ class TestQueued:
         container.record_service().place_work(camp, run, "Renaming the badge")
 
         assert queued(session, [run.id]) == set()
+
+
+def _on(
+    db: DbSession,
+    project: Project,
+    conversation: str | None,
+    environment: Environment,
+    *states: SessionState,
+) -> list[AgentSession]:
+    """A work item's Session on the conversation in the environment, in each
+    of `states`."""
+    runs = _sessions(db, project, SessionState.HELD, len(states))
+    for run, state in zip(runs, states, strict=True):
+        run.conversation_id = conversation
+        run.environment_id = environment.id
+        run.state_code = state
+    db.flush()
+    return runs
+
+
+def _elsewhere(db: DbSession) -> Environment:
+    other = Environment(id="example-elsewhere", name="Elsewhere-1", exempt=False)
+    db.add(other)
+    db.flush()
+    return other
+
+
+class TestCarried:
+    """A work item resuming a conversation waits while another Session runs
+    or starts on it in its Environment (DB 183)."""
+
+    @pytest.mark.parametrize(
+        ("state", "carrying"),
+        [
+            (SessionState.RUNNING, True),
+            (SessionState.STARTING, True),
+            (SessionState.HELD, False),
+            (SessionState.IDLE, False),
+            (SessionState.STOPPED, False),
+            (SessionState.FAILED, False),
+        ],
+    )
+    def test_another_session_carries_it_while_it_runs_or_starts(
+        self,
+        session: DbSession,
+        person: User,
+        environment: Environment,
+        state: SessionState,
+        carrying: bool,
+    ) -> None:
+        camp = _project(session, person)
+        resuming, other = _on(
+            session, camp, "conv-camp", environment, SessionState.HELD, state
+        )
+
+        assert carried(session, resuming) is carrying
+        # A Session never waits for itself.
+        assert carried(session, other) is False
+
+    def test_another_conversation_another_environment_or_none_is_never_carried(
+        self, session: DbSession, person: User, environment: Environment
+    ) -> None:
+        camp = _project(session, person)
+        _on(session, camp, "conv-camp", _elsewhere(session), SessionState.RUNNING)
+        _on(session, camp, "conv-site", environment, SessionState.RUNNING)
+        _on(session, camp, None, environment, SessionState.RUNNING)
+        resuming, fresh = _on(
+            session,
+            camp,
+            "conv-camp",
+            environment,
+            SessionState.HELD,
+            SessionState.HELD,
+        )
+        fresh.conversation_id = None
+        session.flush()
+
+        assert carried(session, resuming) is False
+        assert carried(session, fresh) is False
+
+
+class TestConversing:
+    def test_the_work_items_another_session_of_their_conversation_runs_or_starts_on(
+        self, session: DbSession, person: User, environment: Environment
+    ) -> None:
+        camp = _project(session, person)
+        held, running = _on(
+            session,
+            camp,
+            "conv-camp",
+            environment,
+            SessionState.HELD,
+            SessionState.RUNNING,
+        )
+        (alone,) = _on(session, camp, "conv-site", environment, SessionState.HELD)
+        (fresh,) = _on(session, camp, None, environment, SessionState.HELD)
+        (apart,) = _on(
+            session, camp, "conv-camp", _elsewhere(session), SessionState.HELD
+        )
+
+        assert conversing(
+            session, [held.id, running.id, alone.id, fresh.id, apart.id]
+        ) == {held.id}
+
+    def test_a_job_is_never_conversing(
+        self, session: DbSession, person: User, environment: Environment
+    ) -> None:
+        camp = _project(session, person)
+        (job,) = _sessions(session, camp, SessionState.HELD, kind_code="job")
+        job.conversation_id = "conv-camp"
+        job.environment_id = environment.id
+        _on(session, camp, "conv-camp", environment, SessionState.RUNNING)
+
+        assert conversing(session, [job.id]) == set()
+        assert conversing(session, []) == set()

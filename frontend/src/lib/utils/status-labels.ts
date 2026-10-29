@@ -110,7 +110,7 @@ export function planStep(status: TaskStatus): PlanStep {
 }
 
 /**
- * Why the gate holds a work item's start, as its line says it (F26.1, F141.5, F143.4, F59.2);
+ * Why the gate holds a work item’s start, as its line says it (F26.1, F141.5, F143.4, F59.2; DB 183);
  * `running`, the work items that leave it no slot, counted while no slot is free.
  */
 export function heldReasonLabel(reason: HeldReason, running: number | null): string {
@@ -124,6 +124,8 @@ export function heldReasonLabel(reason: HeldReason, running: number | null): str
       return `Waiting for a slot · ${running!} running`;
     case 'queue':
       return 'Waiting for the job before it';
+    case 'conversation':
+      return 'Waiting for the run before it';
     default: {
       const unknown: never = reason;
       return String(unknown);

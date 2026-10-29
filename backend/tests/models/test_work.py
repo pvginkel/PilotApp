@@ -1,11 +1,20 @@
-"""Work: what a row must hold."""
+"""Work and Clarification Run: what a row must hold."""
 
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.orm import Session as DbSession
 
-from app.models import Environment, Item, Project, Session, User, Work
+from app.models import (
+    ClarificationRun,
+    Environment,
+    Item,
+    Project,
+    Session,
+    User,
+    Work,
+)
 from app.models.reference import SessionState, WorkTrigger
 from tests.support.database import violated_constraint
 
@@ -471,3 +480,108 @@ class TestRetriedBy:
         session.get_one(Work, second).retried_by_id = retry
 
         assert violated_constraint(session) == "uq_work_retried_by_id"
+
+
+class TestClarificationRun:
+    """The role of a worker's run that puts a pass's questions to the writer,
+    naming the pass and holding the reply (DB decision 63; 252, 253, 255)."""
+
+    def test_a_run_clarifies_a_pass_and_holds_the_reply_with_its_time(
+        self,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        project_session: Session,
+    ) -> None:
+        passed = _job(session, project, environment, project_session, seq=2)
+        run = _job(
+            session, project, environment, project_session, seq=3, kind_code="work"
+        )
+        at = datetime(2026, 9, 24, 14, 21, tzinfo=UTC)
+        session.add(
+            ClarificationRun(
+                id=run, pass_id=passed, reply="## D1\nThe lake.", replied_at=at
+            )
+        )
+        session.flush()
+        session.expire_all()
+
+        clarification = session.get_one(ClarificationRun, run)
+        assert (
+            clarification.pass_id,
+            clarification.reply,
+            clarification.replied_at,
+        ) == (
+            passed,
+            "## D1\nThe lake.",
+            at,
+        )
+
+    @pytest.mark.parametrize(
+        ("reply", "replied_at"),
+        [("## D1\nThe lake.", None), (None, datetime(2026, 9, 24, tzinfo=UTC))],
+    )
+    def test_its_reply_and_its_time_are_written_together(
+        self,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        project_session: Session,
+        reply: str | None,
+        replied_at: datetime | None,
+    ) -> None:
+        passed = _job(session, project, environment, project_session, seq=2)
+        run = _job(
+            session, project, environment, project_session, seq=3, kind_code="work"
+        )
+        session.add(
+            ClarificationRun(id=run, pass_id=passed, reply=reply, replied_at=replied_at)
+        )
+
+        assert violated_constraint(session) == "ck_clarification_runs_reply"
+
+    def test_a_run_never_clarifies_itself(
+        self,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        project_session: Session,
+    ) -> None:
+        run = _job(
+            session, project, environment, project_session, seq=2, kind_code="work"
+        )
+        session.add(ClarificationRun(id=run, pass_id=run))
+
+        assert violated_constraint(session) == "ck_clarification_runs_pass"
+
+    def test_a_pass_is_clarified_once(
+        self,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        project_session: Session,
+    ) -> None:
+        passed = _job(session, project, environment, project_session, seq=2)
+        first = _job(
+            session, project, environment, project_session, seq=3, kind_code="work"
+        )
+        second = _job(
+            session, project, environment, project_session, seq=4, kind_code="work"
+        )
+        session.add(ClarificationRun(id=first, pass_id=passed))
+        session.flush()
+        session.add(ClarificationRun(id=second, pass_id=passed))
+
+        assert violated_constraint(session) == "uq_clarification_runs_pass_id"
+
+    def test_it_is_a_works_role(
+        self,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        project_session: Session,
+    ) -> None:
+        passed = _job(session, project, environment, project_session, seq=2)
+        session.add(ClarificationRun(id=uuid.uuid4(), pass_id=passed))
+
+        assert violated_constraint(session) == "clarification_runs_id_fkey"

@@ -23,6 +23,7 @@ from app.services.brief_service import BriefService
 from app.services.chat_close_service import ChatCloseService
 from app.services.chat_read_service import ChatReadService
 from app.services.chat_service import ChatService
+from app.services.clarification_service import ClarificationService
 from app.services.condition_service import ConditionService
 from app.services.controller_client import ControllerClient
 from app.services.controller_outage import ControllerOutage
@@ -495,6 +496,11 @@ class ServiceContainer(containers.DeclarativeContainer):
         session_start_service=session_start_service,
         brain_model=app_config.provided.brain_model,
         brain_reasoning_effort=app_config.provided.brain_reasoning_effort,
+    )
+    # The clarification run a pass's questions place, and its reply (DB
+    # decision 63), at the turn ends the relay records
+    clarification_service = providers.Factory(
+        ClarificationService, db=db_session, session_start_service=session_start_service
     )
     project_service = providers.Factory(
         ProjectService,

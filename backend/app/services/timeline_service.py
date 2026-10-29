@@ -94,6 +94,7 @@ from app.services.start_gate import (
     WORK_KIND,
     Held,
     WorkSlots,
+    conversing,
     held_reason,
     queued,
 )
@@ -219,7 +220,8 @@ def work_status(
     Session's: a turn's failure is its Turn's, a start's the Session's (DB
     Session `error?`). A held one's reason is the gate's as it reads now, the
     slot's with the count that closed it (`slots`), a job's queue read for
-    it (`queued`). A stopped one's stop is
+    it (`queued`), a work item's conversation for it (`conversing`). A
+    stopped one's stop is
     when and by whom, a Resume keeping both on the Session (DB Session
     `stopped_at?`, `stopped_by?`); one no one stopped has the cause its
     environment's stop under it left as its last record. One whose start has
@@ -280,6 +282,15 @@ def work_status(
             if session.state_code is SessionState.HELD and session.kind_code == JOB_KIND
         ],
     )
+    resuming = conversing(
+        db,
+        [
+            session.id
+            for session, *_ in rows
+            if session.state_code is SessionState.HELD
+            and session.kind_code == WORK_KIND
+        ],
+    )
     held: dict[uuid.UUID, Held] = {}
     for session, _, _, _, paused, *_ in rows:
         if session.state_code is not SessionState.HELD:
@@ -290,6 +301,7 @@ def work_status(
             unreachable=unreachable,
             filled=filled.get(session.project_id),
             queued=session.id in behind,
+            conversing=session.id in resuming,
         )
         if reason is not None:
             held[session.id] = reason

@@ -106,6 +106,7 @@ from app.engine.views import ViewService
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import (
     Chat,
+    ClarificationRun,
     Document,
     Environment,
     Item,
@@ -142,6 +143,7 @@ from app.services.start_gate import (
     WORK_KIND,
     Held,
     WorkSlots,
+    carried,
     held_reason,
     queued,
 )
@@ -431,7 +433,13 @@ class SessionStartService:
         the gate holds no longer."""
         if session.state_code is not SessionState.HELD:
             return None
-        return self._held(db, project, session.kind_code, queued=_queued(db, session))
+        return self._held(
+            db,
+            project,
+            session.kind_code,
+            queued=_queued(db, session),
+            session=session,
+        )
 
     def start_brain(
         self, db: Session, project: Project, session: AgentSession, operation: str
@@ -482,17 +490,8 @@ class SessionStartService:
         """The conversation of the work item `run_id`, its run ended and every
         document it registered closed, continued as a new work item (decision
         44, F26.7), in the caller's transaction, which holds the project's row
-        exclusively: titled as the run, at the project's next place, after
-        the answered items, on the run's plan task while the plan still has
-        it, none once it was removed, its trigger the Item `released` whose
-        close released it, and no Work Trigger. Its Session is in the run's
-        environment from its placement on, held or not, so the environment is
-        never free between the two (DB 240, §13.5), and continues the run's
-        conversation, never reset (DB 241), on the run's cwd, agent, model and
-        effort, its first Turn `message`; its Work keeps the run's repository.
-        It passes the gate as `start_work`'s does: `held` while the gate is
-        closed for it, else `starting`, its start run once this commits. No
-        controller call is made.
+        exclusively: titled as the run, its trigger the Item `released` whose
+        close released it, as `_resume_conversation` places it.
 
         Returns:
             The continuation's Session
@@ -500,21 +499,92 @@ class SessionStartService:
         Raises:
             InvalidOperationException: The project is archived
         """
-        refusal = _closed(project)
-        if refusal is not None:
-            raise InvalidOperationException(
-                f"continue {_work_named(db, run_id)}", refusal
-            )
-        run = db.get_one(AgentSession, run_id)
-        item = db.get_one(Item, run_id)
-        title = item.title
+        title = db.get_one(Item, run_id).title
         # A work item is titled at its placement.
         assert title is not None
+        session = self._resume_conversation(
+            db,
+            project,
+            run_id,
+            title,
+            message,
+            released.id,
+            f"continue {_work_named(db, run_id)}",
+        )
+        logger.info("Session %s continues session %s", session.id, run_id)
+        return session
+
+    def clarify(
+        self,
+        db: Session,
+        project: Project,
+        pass_id: uuid.UUID,
+        run_id: uuid.UUID,
+        title: str,
+        message: str,
+    ) -> AgentSession:
+        """The conversation of the work item `run_id` resumed by its
+        clarification run (DB decision 63, 254), which puts the questions the
+        job `pass_id` asked about its documents to their writer, in the
+        caller's transaction, which holds the project's row exclusively:
+        titled `title`, with no trigger Item, the pass its role's, as
+        `_resume_conversation` places it.
+
+        Returns:
+            The clarification run's Session
+
+        Raises:
+            InvalidOperationException: The project is finished or archived
+        """
+        session = self._resume_conversation(
+            db, project, run_id, title, message, None, f"place {title}"
+        )
+        db.add(ClarificationRun(id=session.id, pass_id=pass_id))
+        db.flush()
+        logger.info(
+            "Session %s clarifies session %s on session %s's conversation",
+            session.id,
+            pass_id,
+            run_id,
+        )
+        return session
+
+    def _resume_conversation(
+        self,
+        db: Session,
+        project: Project,
+        run_id: uuid.UUID,
+        title: str,
+        message: str,
+        trigger_item_id: uuid.UUID | None,
+        operation: str,
+    ) -> AgentSession:
+        """A new work item `title` on the conversation of the work item
+        `run_id`, its trigger Item `trigger_item_id`, and no Work Trigger, in
+        the caller's transaction, which holds the project's row exclusively:
+        at the project's next place, on the run's plan task while the plan
+        still has it, none once it was removed. Its Session is in the run's
+        environment from its placement on, held or not, so the environment is
+        never free between the two (DB 240, §13.5), and continues the run's
+        conversation, never reset (DB 241), on the run's cwd, agent, model and
+        effort, its first Turn `message`; its Work keeps the run's repository.
+        It passes the gate as `start_work`'s does, and waits while another
+        Session runs or starts on the conversation (DB 183): `held` while the
+        gate is closed for it, else `starting`, its start run once this
+        commits. No controller call is made.
+
+        Raises:
+            InvalidOperationException: The project is finished or archived,
+                refused as `operation`
+        """
+        refusal = _closed(project)
+        if refusal is not None:
+            raise InvalidOperationException(operation, refusal)
+        run = db.get_one(AgentSession, run_id)
         record = self._container.record_service()
-        task = item.plan_task_id
+        task = db.get_one(Item, run_id).plan_task_id
         if task is not None and not record.in_the_plan(project, task):
             task = None
-        held = self._held(db, project, WORK_KIND, queued=False)
         now = datetime.now(UTC)
         session = AgentSession(
             project_id=project.id,
@@ -526,7 +596,7 @@ class SessionStartService:
             model=run.model,
             reasoning_effort=run.reasoning_effort,
             token_hash=unheld_token_hash(),
-            state_code=SessionState.STARTING if held is None else SessionState.HELD,
+            state_code=SessionState.HELD,
             turns=1,
             turn_started_at=now,
         )
@@ -534,24 +604,22 @@ class SessionStartService:
         db.flush()
         db.add(Turn(session_id=session.id, seq=1, message=message, started_at=now))
         db.flush()
+        held = self._held(db, project, WORK_KIND, queued=False, session=session)
+        if held is None:
+            session.state_code = SessionState.STARTING
         record.place_work(
             project,
             session,
             title,
             task,
             repo=db.get_one(Work, run_id).repo,
-            trigger_item_id=released.id,
+            trigger_item_id=trigger_item_id,
         )
         if held is None:
             self._begin(db, session)
         else:
             after_commit(_HeldWritten(self))
-        logger.info(
-            "Session %s continues session %s%s",
-            session.id,
-            run_id,
-            "" if held is None else f", held: {held.reason}",
-        )
+            logger.info("Session %s is held at its start: %s", session.id, held.reason)
         return session
 
     def run(self, session_id: uuid.UUID, handle: LoopHandle) -> None:
@@ -849,7 +917,13 @@ class SessionStartService:
         session.error = None
         session.current_line = None
         self._container.record_service().retry_write_backs(session_id)
-        held = self._held(db, project, session.kind_code, queued=False)
+        held = self._held(
+            db,
+            project,
+            session.kind_code,
+            queued=False,
+            session=session,
+        )
         if session.conversation_id is None:
             self._fresh(db, session)
         if held is None:
@@ -904,7 +978,13 @@ class SessionStartService:
             return
         project = db.get_one(Project, session.project_id, populate_existing=True)
         if (
-            self._held(db, project, session.kind_code, queued=_queued(db, session))
+            self._held(
+                db,
+                project,
+                session.kind_code,
+                queued=_queued(db, session),
+                session=session,
+            )
             is not None
         ):
             self._moved(session)
@@ -1393,23 +1473,35 @@ class SessionStartService:
         logger.warning("Session %s failed to start: %s", session_id, reason)
 
     def _held(
-        self, db: Session, project: Project, kind_code: str, *, queued: bool
+        self,
+        db: Session,
+        project: Project,
+        kind_code: str,
+        *,
+        queued: bool,
+        session: AgentSession | None = None,
     ) -> Held | None:
         """Why the gate holds a start of a Session of `kind_code` in
-        `project` now, a job's `queued` behind another of its project or not;
-        None while it is open. A work item's counts the slot under the slot's
-        lock (`WorkSlots.lock`), held to the transaction's end, so the next
-        start's count sees the Session this one moves to `starting`."""
+        `project` now, a job's `queued` behind another of its project or not,
+        a work item's `session` when it is written already; None while it is
+        open. A work item's counts the slot under the slot's lock
+        (`WorkSlots.lock`), held to the transaction's end, so the next start's
+        count sees the Session this one moves to `starting`, and reads under
+        it whether another Session carries the conversation `session`
+        resumes (`carried`)."""
         filled = None
+        conversing = False
         if kind_code == WORK_KIND:
             self._slots.lock(db)
             filled = self._slots.filled(db, [project.id]).get(project.id)
+            conversing = session is not None and carried(db, session)
         return held_reason(
             paused=project.paused,
             kind_code=kind_code,
             unreachable=self._outage.holds,
             filled=filled,
             queued=queued,
+            conversing=conversing,
         )
 
     def _brief(

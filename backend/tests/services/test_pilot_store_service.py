@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 from dependency_injector import providers
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
@@ -29,6 +29,7 @@ from app.models import (
     Block,
     Chat,
     ClaimAssignment,
+    ClarificationRun,
     Document,
     Effect,
     Environment,
@@ -318,6 +319,28 @@ def _work(
     db.add(Turn(session_id=run.id, seq=1, message="Pitch it.", started_at=now))
     container.record_service().place_work(project, run, "Pitching the tent")
     return run
+
+
+def _pass(
+    db: DbSession,
+    container: ServiceContainer,
+    project: Project,
+    environment: Environment,
+    run: models.Session,
+    *,
+    token: str = TOKEN,
+) -> models.Session:
+    """The job after the turn of the worker's run `run`, the pre-ruling pass,
+    its turn in flight, its bearer `token`."""
+    job = _brain(db, project, environment, "job", token=token)
+    container.record_service().place_work(
+        project,
+        job,
+        "Pre-ruling camp/2",
+        trigger=WorkTrigger.WORKER_TURN_ENDED,
+        trigger_item_id=run.id,
+    )
+    return job
 
 
 def _plan_task(project: Project, task_id: str) -> PlanTask:
@@ -1338,10 +1361,10 @@ class TestPilotStoreServiceAskWriter:
         service = _service(container)
 
         first = service.ask_writer(
-            _admitted(job), item.id, f"{item.id}/Q2", "Which lake? The north one?"
+            _admitted(job), f"{item.id}/Q2", "Which lake? The north one?"
         )
         second = service.ask_writer(
-            _admitted(job), item.id, f"{item.id}/Q1", "What does 'the site' mean?"
+            _admitted(job), f"{item.id}/Q1", "What does 'the site' mean?"
         )
 
         assert (first, second) == (["Q2"], ["Q1", "Q2"])
@@ -1377,7 +1400,7 @@ class TestPilotStoreServiceAskWriter:
         engine_events.clear()
 
         with scoped_session(container):
-            _service(container).ask_writer(brain, item_id, f"{item_id}/Q1", "Which?")
+            _service(container).ask_writer(brain, f"{item_id}/Q1", "Which?")
 
         assert ProjectChanged(project_id) in engine_events
 
@@ -1392,9 +1415,7 @@ class TestPilotStoreServiceAskWriter:
         item = _registered(session, container, project, environment)
 
         with pytest.raises(AuthorizationException) as refused:
-            _service(container).ask_writer(
-                _admitted(chat), item.id, f"{item.id}/Q1", "Which?"
-            )
+            _service(container).ask_writer(_admitted(chat), f"{item.id}/Q1", "Which?")
 
         assert refused.value.message == (
             f"Cannot ask the writer about block {item.id}/Q1 because session"
@@ -1412,9 +1433,7 @@ class TestPilotStoreServiceAskWriter:
         item = _registered(session, container, project, environment)
 
         with pytest.raises(InvalidOperationException) as refused:
-            _service(container).ask_writer(
-                _admitted(job), item.id, f"{item.id}/Q1", "  \n"
-            )
+            _service(container).ask_writer(_admitted(job), f"{item.id}/Q1", "  \n")
 
         assert refused.value.message.endswith("because the question is blank")
 
@@ -1429,32 +1448,10 @@ class TestPilotStoreServiceAskWriter:
         item = _bear(container, project, job, "decision", "Which tent?", DECISION)
 
         with pytest.raises(InvalidOperationException) as refused:
-            _service(container).ask_writer(
-                _admitted(job), item.id, f"{item.id}/D1", "Which?"
-            )
+            _service(container).ask_writer(_admitted(job), f"{item.id}/D1", "Which?")
 
         assert refused.value.message.endswith(
             f"because item {item.id} is no registered document"
-        )
-
-    def test_a_block_of_another_document_is_refused(
-        self,
-        session: DbSession,
-        container: ServiceContainer,
-        project: Project,
-        environment: Environment,
-    ) -> None:
-        job = _brain(session, project, environment, "job")
-        item = _registered(session, container, project, environment)
-        other = _bear(container, project, job, "decision", "Which tent?", DECISION)
-
-        with pytest.raises(InvalidOperationException) as refused:
-            _service(container).ask_writer(
-                _admitted(job), item.id, f"{other.id}/D1", "Which?"
-            )
-
-        assert refused.value.message.endswith(
-            f"because it is no block of document {item.id}"
         )
 
     def test_a_block_the_document_does_not_hold_is_not_found(
@@ -1468,9 +1465,7 @@ class TestPilotStoreServiceAskWriter:
         item = _registered(session, container, project, environment)
 
         with pytest.raises(RecordNotFoundException) as refused:
-            _service(container).ask_writer(
-                _admitted(job), item.id, f"{item.id}/Q9", "Which?"
-            )
+            _service(container).ask_writer(_admitted(job), f"{item.id}/Q9", "Which?")
 
         assert refused.value.message == f"Block {item.id}/Q9 was not found"
 
@@ -1489,9 +1484,7 @@ class TestPilotStoreServiceAskWriter:
         )
 
         with pytest.raises(InvalidOperationException) as refused:
-            _service(container).ask_writer(
-                _admitted(job), item.id, f"{item.id}/Q1", "Which?"
-            )
+            _service(container).ask_writer(_admitted(job), f"{item.id}/Q1", "Which?")
 
         assert refused.value.message.endswith("because block Q1 is answered")
 
@@ -1505,10 +1498,10 @@ class TestPilotStoreServiceAskWriter:
         job = _brain(session, project, environment, "job")
         item = _registered(session, container, project, environment)
         service = _service(container)
-        service.ask_writer(_admitted(job), item.id, f"{item.id}/Q1", "Which?")
+        service.ask_writer(_admitted(job), f"{item.id}/Q1", "Which?")
 
         with pytest.raises(InvalidOperationException) as refused:
-            service.ask_writer(_admitted(job), item.id, f"{item.id}/Q1", "And?")
+            service.ask_writer(_admitted(job), f"{item.id}/Q1", "And?")
 
         assert refused.value.message.endswith(
             "because its writer was asked about block Q1 already"
@@ -1529,9 +1522,7 @@ class TestPilotStoreServiceAskWriter:
         )
 
         with pytest.raises(InvalidOperationException) as refused:
-            _service(container).ask_writer(
-                _admitted(job), item.id, f"{item.id}/Q1", "Which?"
-            )
+            _service(container).ask_writer(_admitted(job), f"{item.id}/Q1", "Which?")
 
         assert refused.value.message.endswith("because the document is done")
 
@@ -1548,9 +1539,7 @@ class TestPilotStoreServiceAskWriter:
         job = _brain(session, project, environment, "job")
 
         with pytest.raises(RecordNotFoundException) as refused:
-            _service(container).ask_writer(
-                _admitted(job), theirs.id, f"{theirs.id}/Q1", "Which?"
-            )
+            _service(container).ask_writer(_admitted(job), f"{theirs.id}/Q1", "Which?")
 
         assert refused.value.message == f"Item {theirs.id} was not found"
 
@@ -1567,12 +1556,93 @@ class TestPilotStoreServiceAskWriter:
         item = _registered(session, container, project, environment)
 
         with pytest.raises(AuthorizationException) as refused:
-            _service(container).ask_writer(
-                _admitted(job), item.id, f"{item.id}/Q1", "Which?"
-            )
+            _service(container).ask_writer(_admitted(job), f"{item.id}/Q1", "Which?")
 
         assert refused.value.message == (
             f"Cannot call pilot-store because session {job.id} has no turn running"
+        )
+        assert list(session.scalars(select(WriterQuestion))) == []
+
+    def test_a_retry_of_a_pass_that_asked_asks_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """One round per worker turn: a pass whose run another pass asked
+        about, a Retry of it, keeping its trigger item, asks nothing (DB
+        254)."""
+        run = _work(session, container, project, SessionState.IDLE)
+        item = _registered(session, container, project, environment)
+        first = _pass(session, container, project, environment, run, token="first")
+        service = _service(container)
+        service.ask_writer(_admitted(first), f"{item.id}/Q1", "Which?")
+        retry = _pass(session, container, project, environment, run)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            service.ask_writer(_admitted(retry), f"{item.id}/Q2", "Which lake?")
+
+        assert refused.value.message.endswith(
+            "because another pass of the same run asked its writer already:"
+            " one round per worker turn"
+        )
+        assert session.scalar(select(func.count()).select_from(WriterQuestion)) == 1
+
+    def test_a_pass_of_another_run_asks(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        item = _registered(session, container, project, environment)
+        first = _pass(
+            session,
+            container,
+            project,
+            environment,
+            _work(session, container, project, SessionState.IDLE),
+            token="first",
+        )
+        service = _service(container)
+        service.ask_writer(_admitted(first), f"{item.id}/Q1", "Which?")
+        other = _pass(
+            session,
+            container,
+            project,
+            environment,
+            _work(session, container, project, SessionState.IDLE),
+        )
+
+        assert service.ask_writer(_admitted(other), f"{item.id}/Q2", "Which lake?") == [
+            "Q1",
+            "Q2",
+        ]
+
+    def test_the_pass_after_a_clarification_run_asks_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """One round per worker turn: the job after the writer answered, its
+        trigger item the clarification run, asks nothing (DB 256)."""
+        run = _work(session, container, project, SessionState.IDLE)
+        item = _registered(session, container, project, environment)
+        asking = _pass(session, container, project, environment, run, token="first")
+        clarifying = _work(session, container, project, SessionState.IDLE)
+        session.add(ClarificationRun(id=clarifying.id, pass_id=asking.id))
+        session.flush()
+        after = _pass(session, container, project, environment, clarifying)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _service(container).ask_writer(_admitted(after), f"{item.id}/Q1", "Which?")
+
+        assert refused.value.message.endswith(
+            "because the writer has answered the questions of the pass before it:"
+            " this pass asks nothing"
         )
         assert list(session.scalars(select(WriterQuestion))) == []
 

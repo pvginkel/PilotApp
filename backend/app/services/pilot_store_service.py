@@ -44,6 +44,7 @@ from app.models import (
     Attachment,
     Block,
     Chat,
+    ClarificationRun,
     Document,
     Item,
     ItemKind,
@@ -543,14 +544,15 @@ class PilotStoreService:
         )
         return line
 
-    def ask_writer(
-        self, brain: Brain, document_id: uuid.UUID, block_id: str, question: str
-    ) -> list[str]:
+    def ask_writer(self, brain: Brain, block_id: str, question: str) -> list[str]:
         """The pre-ruling pass's `question` to the writer of the registered
-        document `document_id` about its unanswered block `block_id`,
-        recorded as a Writer Question of the job's Turn in flight, once a
-        block (F86.8; DB assertion 250), the document's line saying so and the
-        question counted. No Effect: the call changes no ask.
+        document whose unanswered block `block_id` names, recorded as a
+        Writer Question of the job's Turn in flight, once a block (F86.8; DB
+        assertion 250), the document's line saying so and the question
+        counted. No Effect: the call changes no ask. One round per worker
+        turn: the job after a clarification run asks nothing (DB 256), nor
+        does a pass whose run another pass asked about, a Retry of a pass
+        that asked (DB 254).
 
         Returns:
             The local ids of the document's blocks its writer is asked about,
@@ -559,11 +561,11 @@ class PilotStoreService:
         Raises:
             AuthorizationException: the brain is a chat's, or its turn has
                 ended.
-            RecordNotFoundException: the document is not of the brain's
-                project, or has no such block.
-            InvalidOperationException: the question is blank, the item is no
-                registered document or is done, or the block is not of it, is
-                answered or was asked about already.
+            RecordNotFoundException: the block's item is not of the brain's
+                project, or its document has no such block.
+            InvalidOperationException: the question is blank, the job asks
+                nothing, the item is no registered document or is done, or the
+                block is answered or was asked about already.
         """
         operation = f"ask the writer about block {block_id}"
         if brain.kind_code != JOB:
@@ -574,16 +576,15 @@ class PilotStoreService:
         if not question.strip():
             raise InvalidOperationException(operation, "the question is blank")
         project = self._project(brain)
-        item = self._item(brain, document_id)
+        refusal = self._asks_nothing(brain)
+        if refusal is not None:
+            raise InvalidOperationException(operation, refusal)
+        item_id, local_id = _parts(block_id)
+        item = self._item(brain, item_id)
         document = self.db.get(Document, item.id)
         if document is None or document.source_path is None:
             raise InvalidOperationException(
                 operation, f"item {item.id} is no registered document"
-            )
-        item_id, local_id = _parts(block_id)
-        if item_id != item.id:
-            raise InvalidOperationException(
-                operation, f"it is no block of document {item.id}"
             )
         self.document_service.lock(document)
         if item.done_at is not None:
@@ -612,6 +613,37 @@ class PilotStoreService:
         PASS_QUESTIONS_TOTAL.labels(project=str(project.id)).inc()
         self.view_service.timeline_moved(project)
         return writer_asked(self.db, [item.id])[item.id]
+
+    def _asks_nothing(self, brain: Brain) -> str | None:
+        """Why the job asks its writer nothing, one round per worker turn;
+        None while it may ask. Its trigger item is the run whose turn it
+        takes: a clarification run's (DB 256), or one another pass of it
+        asked about already (DB 254)."""
+        run_id = self.db.scalar(
+            select(Work.trigger_item_id).where(Work.id == brain.session_id)
+        )
+        if run_id is None:
+            return None
+        if self.db.get(ClarificationRun, run_id) is not None:
+            return (
+                "the writer has answered the questions of the pass before it:"
+                " this pass asks nothing"
+            )
+        if self.db.scalar(
+            select(
+                exists().where(
+                    WriterQuestion.turn_id == Turn.id,
+                    Turn.session_id == Work.id,
+                    Work.trigger_item_id == run_id,
+                    Work.id != brain.session_id,
+                )
+            )
+        ):
+            return (
+                "another pass of the same run asked its writer already:"
+                " one round per worker turn"
+            )
+        return None
 
     def _prose(
         self,

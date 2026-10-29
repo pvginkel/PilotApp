@@ -31,14 +31,16 @@ ItemKindCode = Literal[
 
 class HeldReason(StrEnum):
     """Why the gate holds a start (design 2 §13.4, §13.5; F26.1, F143.4,
-    F59.2): its project paused, the controller unreachable, a work item's no
-    slot free, or a job's another job of its project before it. Read at
-    display, never stored (decision 53)."""
+    F59.2; DB 183): its project paused, the controller unreachable, a work
+    item's no slot free, a job's another job of its project before it, or a
+    work item's another run on its conversation until that run's turn ends.
+    Read at display, never stored (decision 53)."""
 
     PAUSED = "paused"
     CONTROLLER_UNREACHABLE = "controller_unreachable"
     SLOT = "slot"
     QUEUE = "queue"
+    CONVERSATION = "conversation"
 
 
 class StopCause(StrEnum):

@@ -68,7 +68,7 @@ from app.engine.views import ViewService
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import Environment, Project, Turn, Work
 from app.models import Session as AgentSession
-from app.models.reference import RecordKind, SessionState
+from app.models.reference import RecordKind, SessionState, WorkTrigger
 from app.schemas.timeline import StopCause
 from app.services.brief_service import is_follow_up
 from app.services.chat_close_service import ChatCloseService
@@ -98,7 +98,7 @@ from app.services.session_record_service import (
 )
 from app.services.session_scope import scoped_create
 from app.services.session_stream_service import SessionStreamService
-from app.services.start_gate import WORK_KIND, WorkSlots
+from app.services.start_gate import JOB_KIND, WORK_KIND, WorkSlots
 from app.services.supervisor import LoopHandle, Supervisor
 from app.services.turn_end_read_service import TurnEndReadService
 from app.services.work_status import work_moved
@@ -974,8 +974,10 @@ class RelayService:
         stays `running` with the follow-up turn (`_follow_up`), a job's work
         item done at that turn's end, not this one's. A worker's done run
         that registered nothing has the job after its turn placed here
-        (`TurnEndReadService.run_ended`): a worker's turn end locks its
-        project's row before its Session's, the start's lock order. After the
+        (`TurnEndReadService.run_ended`), and a pass that asked its writer its
+        clarification run (`ClarificationService.pass_ended`): a worker's and
+        a pass's turn end lock their project's row before their Session's,
+        the start's lock order. After the
         commit, a work item's slot opens, the documents its done run
         registered are read, and the environment's shutdown timer is armed if
         nothing runs there.
@@ -988,7 +990,7 @@ class RelayService:
         record."""
         with scoped_session(self._container) as db:
             records = self._records(db)
-            _lock_workers_project(db, opening.session_id)
+            _lock_placing_project(db, opening.session_id)
             session = records.lock_session(opening.session_id)
             ended = _in_flight(db, opening.turn_id)
             if ended:
@@ -1049,7 +1051,9 @@ class RelayService:
         ended in error, else `idle`, its work item done (§9.2; DB Session
         State; decision 44) unless the follow-up turn `follows_up`: a job's
         is done at its last turn's end (design 3 §5.1). A worker's done run
-        has its documents read, the job after its turn following them."""
+        has its documents read, the job after its turn following them, and a
+        clarification run's reply recorded; a pass's last turn ended `idle`
+        or `failed` puts the questions it asked to the writer (DB 254, 255)."""
         work = db.get(Work, session.id) is not None
         if frame.interrupted:
             session.state_code = SessionState.STOPPED
@@ -1057,12 +1061,18 @@ class RelayService:
             session.stopped_by_user_id = None
         elif work and frame.is_error:
             session.state_code = SessionState.FAILED
+            if session.kind_code == JOB_KIND:
+                self._container.clarification_service().pass_ended(session)
         else:
             session.state_code = SessionState.IDLE
             if work and not follows_up:
                 self._container.record_service().work_done(session.id, at)
+                clarifications = self._container.clarification_service()
                 if session.kind_code == WORK_KIND:
+                    clarifications.replied(session, frame.result, at)
                     self._reads.run_ended(db, session)
+                else:
+                    clarifications.pass_ended(session)
 
     def _follow_up(self, db: Session, session: AgentSession, held: list[str]) -> None:
         """Under the Session's lock, its turn ended `idle` with its saves of
@@ -1096,11 +1106,17 @@ _RELAYED = (SessionState.RUNNING, SessionState.STOPPED)
 """The states in which a Session's turn in flight is relayed."""
 
 
-def _lock_workers_project(db: Session, session_id: uuid.UUID) -> None:
-    """A worker's Session's project's row, locked until the transaction ends
-    and read as the lock found it; any other Session's is not locked."""
+def _lock_placing_project(db: Session, session_id: uuid.UUID) -> None:
+    """The project's row of a Session whose turn's end may place a work item,
+    locked until the transaction ends and read as the lock found it: a
+    worker's, whose done run places the job after its turn, and a pass's, the
+    job after a worker's turn, whose end places its clarification run; any
+    other Session's is not locked."""
     session = db.get_one(AgentSession, session_id)
-    if session.kind_code == WORK_KIND:
+    if session.kind_code == WORK_KIND or (
+        db.scalar(select(Work.trigger_code).where(Work.id == session_id))
+        is WorkTrigger.WORKER_TURN_ENDED
+    ):
         db.scalars(
             select(Project)
             .where(Project.id == session.project_id)

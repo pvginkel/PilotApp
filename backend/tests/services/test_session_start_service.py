@@ -33,7 +33,19 @@ from app import models
 from app.database import scoped_session
 from app.engine.bus import EngineEvent, ProjectChanged, WorkMoved
 from app.exceptions import InvalidOperationException, RecordNotFoundException
-from app.models import Document, Environment, Item, PlanTask, Project, Turn, User, Work
+from app.models import (
+    Block,
+    ClarificationRun,
+    Document,
+    Environment,
+    Item,
+    PlanTask,
+    Project,
+    Turn,
+    User,
+    Work,
+    WriterQuestion,
+)
 from app.models.reference import (
     ProjectState,
     RecordKind,
@@ -6152,3 +6164,240 @@ class TestRunBrain:
         _run(boxing, run)
         assert _read(session, run.id).state_code == SessionState.RUNNING
         assert fake.sent == [BRIEF]
+
+
+def _pass(
+    db: DbSession,
+    container: ServiceContainer,
+    project: Project,
+    run: models.Session,
+    *questions: tuple[Item, str, str],
+) -> models.Session:
+    """The job after the run's turn, the pre-ruling pass, its turn in flight
+    having asked the writer `questions`: a document, its block's local id and
+    the question each."""
+    now = datetime.now(UTC)
+    job = models.Session(
+        project_id=project.id,
+        kind_code="job",
+        cwd="/work/PilotProjects",
+        token_hash=uuid.uuid4().hex,
+        state_code=SessionState.RUNNING,
+        turns=1,
+        turn_started_at=now,
+    )
+    db.add(job)
+    db.flush()
+    turn = Turn(session_id=job.id, seq=1, message="/pre-rule", started_at=now)
+    db.add(turn)
+    container.record_service().place_work(
+        project,
+        job,
+        "Pre-ruling docs/2",
+        trigger=WorkTrigger.WORKER_TURN_ENDED,
+        trigger_item_id=run.id,
+    )
+    for document, local_id, question in questions:
+        block = db.scalars(
+            select(Block).where(
+                Block.document_id == document.id, Block.local_id == local_id
+            )
+        ).one()
+        db.add(WriterQuestion(turn_id=turn.id, block_id=block.id, question=question))
+    db.flush()
+    clear_after_commit_callbacks()
+    return job
+
+
+def _clarifying(db: DbSession, asking: models.Session) -> models.Session:
+    """The Session of the clarification run of the pass `asking`."""
+    run_id = db.scalars(
+        select(ClarificationRun.id).where(ClarificationRun.pass_id == asking.id)
+    ).one()
+    return _read(db, run_id)
+
+
+def _released(db: DbSession, closed: Item) -> models.Session:
+    """The Session of the work item whose run the close of `closed`
+    continued."""
+    return _read(
+        db, db.scalars(select(Work.id).where(Work.trigger_item_id == closed.id)).one()
+    )
+
+
+def _held_reason(
+    db: DbSession, starts: SessionStartService, run: models.Session
+) -> HeldReason | None:
+    """Why the held Session's line says the gate holds it."""
+    return work_status(db, [run.id], unreachable=False, slots=starts._slots)[
+        run.id
+    ].held_reason
+
+
+@pytest.mark.usefixtures("continues")
+class TestClarify:
+    """A pass that asked its writer places its clarification run on the run's
+    conversation through the gate, and the run's continuation and it wait for
+    each other's turn to end, in either order (DB decision 63; 183, 241,
+    254)."""
+
+    def test_it_is_placed_in_the_runs_environment_on_its_conversation_never_reset(
+        self,
+        container: ServiceContainer,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        session.add(_plan_task(project, "camp"))
+        session.flush()
+        run = _ended_run(session, container, fake, project, "camp")
+        refinement = _read_at_its_end(
+            session, container, fake, project, run, REFINEMENT, REFINEMENT_TEXT
+        )
+        asking = _pass(session, container, project, run, (refinement, "D1", "Which?"))
+
+        container.clarification_service().pass_ended(asking)
+
+        clarifying = _clarifying(session, asking)
+        assert clarifying.state_code == SessionState.STARTING
+        assert (
+            clarifying.environment_id,
+            clarifying.conversation_id,
+            clarifying.controller_session,
+            clarifying.cwd,
+            clarifying.agent,
+            clarifying.model,
+            clarifying.reasoning_effort,
+        ) == (RUN_ENV, CONVERSATION, None, CWD, "writer", "opus", "high")
+        (turn,) = _turns(session, clarifying.id)
+        assert turn.message == (
+            f"Pilot asks about {REFINEMENT}:\n"
+            "- D1: Which?\n"
+            "\n"
+            "Answer each under a heading per block id (`## D1`); register nothing,"
+            " start nothing; then end your turn."
+        )
+        work = session.get_one(Work, clarifying.id)
+        assert (work.trigger_item_id, work.trigger_code, work.repo) == (
+            None,
+            None,
+            REPO,
+        )
+        item = session.get_one(Item, clarifying.id)
+        assert (item.kind_code, item.title, item.plan_task_id, item.seq) == (
+            "work",
+            f"Clarify {REFINEMENT}",
+            "camp",
+            session.get_one(Item, asking.id).seq + 1,
+        )
+        # Its environment is the run's, never reset: started, not prepared.
+        assert _server(session, clarifying.id) == [(None, STARTING_ENV)]
+        # The document stays as it was, its blocks the operator's.
+        assert session.get_one(Item, refinement.id).done_at is None
+        assert fake.calls == []
+
+    def test_a_document_closed_while_it_runs_has_the_continuation_wait_for_its_turns_end(
+        self,
+        container: ServiceContainer,
+        continues: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        run = _ended_run(session, container, fake, project)
+        refinement = _read_at_its_end(
+            session, container, fake, project, run, REFINEMENT, REFINEMENT_TEXT
+        )
+        asking = _pass(session, container, project, run, (refinement, "D1", "Which?"))
+        container.clarification_service().pass_ended(asking)
+        clarifying = _clarifying(session, asking)
+        clarifying.state_code = SessionState.RUNNING
+        session.flush()
+
+        container.record_service().answer(
+            session.get_one(Document, refinement.id), "D1", person, "The lake"
+        )
+
+        continuation = _released(session, refinement)
+        assert continuation.state_code == SessionState.HELD
+        assert continuation.conversation_id == CONVERSATION
+        assert _held_reason(session, continues, continuation) is (
+            HeldReason.CONVERSATION
+        )
+        assert continues.held(session, project, continuation) == Held(
+            HeldReason.CONVERSATION
+        )
+
+        clarifying.state_code = SessionState.IDLE
+        session.flush()
+        _release(continues)
+
+        assert _read(session, continuation.id).state_code == SessionState.STARTING
+
+    def test_with_every_document_closed_while_the_pass_runs_it_waits_for_the_continuations_turn_end(
+        self,
+        container: ServiceContainer,
+        continues: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        run = _ended_run(session, container, fake, project)
+        refinement = _read_at_its_end(
+            session, container, fake, project, run, REFINEMENT, REFINEMENT_TEXT
+        )
+        asking = _pass(session, container, project, run, (refinement, "D1", "Which?"))
+        container.record_service().answer(
+            session.get_one(Document, refinement.id), "D1", person, "The lake"
+        )
+        continuation = _released(session, refinement)
+        assert continuation.state_code == SessionState.STARTING
+        continuation.state_code = SessionState.RUNNING
+        session.flush()
+
+        container.clarification_service().pass_ended(asking)
+
+        clarifying = _clarifying(session, asking)
+        assert clarifying.state_code == SessionState.HELD
+        assert _held_reason(session, continues, clarifying) is HeldReason.CONVERSATION
+        # It holds the run's environment from its placement on (DB 240).
+        assert clarifying.environment_id == RUN_ENV
+
+        continuation.state_code = SessionState.IDLE
+        session.flush()
+        _release(continues)
+
+        assert _read(session, clarifying.id).state_code == SessionState.STARTING
+
+    def test_a_resume_of_a_stopped_continuation_waits_for_it_too(
+        self,
+        container: ServiceContainer,
+        continues: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        run = _ended_run(session, container, fake, project)
+        refinement = _read_at_its_end(
+            session, container, fake, project, run, REFINEMENT, REFINEMENT_TEXT
+        )
+        asking = _pass(session, container, project, run, (refinement, "D1", "Which?"))
+        container.record_service().answer(
+            session.get_one(Document, refinement.id), "D1", person, "The lake"
+        )
+        continuation = _released(session, refinement)
+        continuation.state_code = SessionState.STOPPED
+        for turn in _turns(session, continuation.id):
+            turn.ended_at = datetime.now(UTC)
+        session.flush()
+        container.clarification_service().pass_ended(asking)
+        _clarifying(session, asking).state_code = SessionState.RUNNING
+        session.flush()
+
+        resumed = continues.resume(session, continuation.id)
+
+        assert resumed.state_code == SessionState.HELD
+        assert _held_reason(session, continues, resumed) is HeldReason.CONVERSATION

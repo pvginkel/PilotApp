@@ -330,25 +330,23 @@ def ask_writer(
         ServiceContainer.pilot_store_service
     ],
 ) -> Any:
-    """`ask_writer(document, block, question)` (F86.8, D059): the pre-ruling
-    pass's question to a registered document's writer about one of its
-    blocks, recorded with the pass's turn.
+    """`ask_writer(block, question)` (F86.8, D059): the pre-ruling pass's
+    question to a registered document's writer about one of its blocks, the
+    block's id naming its document, recorded with the pass's turn.
 
     Returns:
         201: The document's blocks its writer is asked about
-        400: The body is not a document's id, a block's id and a question
+        400: The body is not a block's id and a question
         401: No bearer, or one no session has
         403: The bearer's session is not a job's, or has no turn running
-        404: The document is not of the session's project, or has no such
-            block
+        404: The block's item is not of the session's project, or its
+            document has no such block
         409: The question is blank, the item is no registered document or is
-            done, or the block is not of it, is answered or was asked about
-            already: the reason
+            done, the block is answered or was asked about already, or the
+            pass asks nothing, one round per worker turn: the reason
     """
     body = WriterQuestionRequestSchema.model_validate(request.get_json())
-    blocks = pilot_store_service.ask_writer(
-        g.brain, body.document, body.block, body.question
-    )
+    blocks = pilot_store_service.ask_writer(g.brain, body.block, body.question)
     return WriterQuestionsSchema(blocks=blocks).model_dump(mode="json"), 201
 
 

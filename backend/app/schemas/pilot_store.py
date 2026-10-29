@@ -185,14 +185,11 @@ class StopRequestSchema(BaseModel):
 
 
 class WriterQuestionRequestSchema(BaseModel):
-    """A question to a registered document's writer about one of its blocks."""
+    """A question to a registered document's writer about one of its blocks,
+    the block's id naming the document."""
 
     model_config = ConfigDict(extra="forbid")
 
-    document: uuid.UUID = Field(
-        description="The registered document's item id",
-        examples=["0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15"],
-    )
     block: BlockId
     question: str = Field(
         min_length=1,

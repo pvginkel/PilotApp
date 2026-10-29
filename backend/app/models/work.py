@@ -1,15 +1,18 @@
-"""Work (DB §2.2), the subtype of Item and of Session, and Claim Assignment.
+"""Work (DB §2.2), the subtype of Item and of Session, Claim Assignment, and
+Clarification Run, a role of a Work (DB §2.3).
 
 `work` is the extension table keyed by the id a Work's Item and Session share
 (DB §7.3).
 """
 
 import uuid
+from datetime import datetime
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    DateTime,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
@@ -108,3 +111,31 @@ class ClaimAssignment(db.Model):  # type: ignore[name-defined]
     block_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("blocks.id"), primary_key=True
     )
+
+
+class ClarificationRun(db.Model):  # type: ignore[name-defined]
+    """The role of a Work that puts one pre-ruling pass's Writer Questions to
+    the writer, resuming the worker's conversation (DB decision 63).
+    `pass_id` is the pass, the job whose Turns asked them, clarified once (DB
+    253); `reply` the run's turn's final text and `replied_at` its end,
+    written together once, at the end of the turn that brought one (DB 255).
+
+    That the run is a worker's run of the pass's Project and the pass a job
+    after a worker's turn (DB 254) is the server's at the placement: no key
+    reaches either Session Kind from this row.
+    """
+
+    __tablename__ = "clarification_runs"
+    __table_args__ = (
+        # A pass's one run (DB 253).
+        Index("uq_clarification_runs_pass_id", "pass_id", unique=True),
+        CheckConstraint("pass_id <> id", name="ck_clarification_runs_pass"),
+        CheckConstraint(
+            "(reply IS NULL) = (replied_at IS NULL)", name="ck_clarification_runs_reply"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(ForeignKey("work.id"), primary_key=True)
+    pass_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("work.id"))
+    reply: Mapped[str | None] = mapped_column(Text)
+    replied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

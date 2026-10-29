@@ -381,11 +381,10 @@ class PilotStoreApi(_Routes):
         authorization: str,
         tool_use_id: str | None,
         *,
-        document: uuid.UUID,
         block: str,
         question: str,
     ) -> Asked:
-        body = {"document": str(document), "block": block, "question": question}
+        body = {"block": block, "question": question}
         answer = await self._post("writer-questions", authorization, tool_use_id, body)
         return Asked.model_validate(answer)
 
