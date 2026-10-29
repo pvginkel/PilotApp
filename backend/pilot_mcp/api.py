@@ -32,6 +32,9 @@ _REPO = r"^[^/\s]+/[^/\s]+$"
 _ATTACHMENT = r"^([0-9A-Fa-f-]{36}|[^:\s/]+:/.*)$"
 """An attachment's id, or a source."""
 
+BLOCK_ID = r"^[0-9A-Fa-f-]{36}/\S+$"
+"""A block's id (TD §4.9), `<item id>/<local id>`."""
+
 
 class NewItem(BaseModel):
     """An item to add, in `timeline.json`'s shape."""
@@ -146,6 +149,15 @@ class NewItem(BaseModel):
         default=None,
         min_length=1,
         description="A work item's reasoning effort, where given",
+    )
+    claims: list[Annotated[str, Field(pattern=BLOCK_ID)]] = Field(
+        default_factory=list,
+        description=(
+            "The actions of workers' documents a work item does that you"
+            " claimed, by their blocks' ids, `<item id>/<local id>`: each"
+            " block's line names this work item, and the job after its turn"
+            " names them for their `done`"
+        ),
     )
 
 

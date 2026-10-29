@@ -119,6 +119,21 @@ def _chat_answers_path(project_id: uuid.UUID | str) -> str:
 
 WORK_REPO = "example/Camp"
 
+CUT_OVER = """# The cut-over
+
+```action id=A1
+answer: Pilot does it
+by: agent
+at: 2026-10-20T09:00:00Z
+```
+
+```decision id=D1
+options:
+  - Dome
+  - Tunnel
+```
+"""
+
 WORK = {
     "repo": WORK_REPO,
     "title": "Building the camp",
@@ -1507,6 +1522,79 @@ class TestCreateWork:
         response = client.post(_work_path(project_id), json={**WORK, **changes})
 
         assert response.status_code == 400
+        assert self._work_items(session) == []
+
+    @staticmethod
+    def _cut_over(
+        session: Session, container: ServiceContainer, project_id: str
+    ) -> uuid.UUID:
+        """A document a worker of the project registered, read at its run's
+        end: an action Pilot claimed, and a decision."""
+        project = session.get_one(Project, uuid.UUID(project_id))
+        session.add(Environment(id="example-camp-1", name="Camp-1", exempt=False))
+        worker = models.Session(
+            project_id=project.id,
+            environment_id="example-camp-1",
+            kind_code="work",
+            cwd="/work/Camp",
+            token_hash="9" * 64,
+            state_code=SessionState.IDLE,
+        )
+        session.add(worker)
+        session.flush()
+        documents = container.document_service()
+        item = documents.register(project, worker, "/work/Camp/cut-over.md").item
+        documents.publish_read(session.get_one(Document, item.id), CUT_OVER, worker.id)
+        return item.id
+
+    def test_it_names_the_claimed_actions_the_work_item_does(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        served: None,
+        session: Session,
+    ) -> None:
+        project_id = _make(client)
+        document_id = self._cut_over(session, container, project_id)
+
+        response = client.post(
+            _work_path(project_id), json={**WORK, "claims": [f"{document_id}/A1"]}
+        )
+
+        assert response.status_code == 201, response.get_json()
+        blocks = [
+            part["block"]
+            for part in _timeline_item(client, project_id, str(document_id))["body"]
+            if part["type"] == "block"
+        ]
+        assert [block["claim"] for block in blocks] == [
+            {"work": {"id": response.get_json()["id"], "title": WORK["title"]}},
+            None,
+        ]
+
+    @pytest.mark.parametrize(
+        ("claim", "status"),
+        [("D1", 409), ("A9", 404), ("A1 A2", 400)],
+        ids=["no-action", "no-block", "no-block-id"],
+    )
+    def test_a_claim_the_record_refuses_places_nothing(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        served: None,
+        session: Session,
+        claim: str,
+        status: int,
+    ) -> None:
+        project_id = _make(client)
+        document_id = self._cut_over(session, container, project_id)
+
+        response = client.post(
+            _work_path(project_id),
+            json={**WORK, "claims": [f"{document_id}/{claim}"]},
+        )
+
+        assert response.status_code == status
         assert self._work_items(session) == []
 
     def test_an_unknown_project_is_not_found(

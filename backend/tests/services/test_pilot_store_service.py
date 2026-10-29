@@ -17,6 +17,7 @@ from app import models
 from app.database import scoped_session
 from app.engine.attachments import MAX_CALL_FILES, MAX_CALL_SIZE, copied
 from app.engine.bus import EngineEvent, ProjectChanged
+from app.engine.claims import standing
 from app.exceptions import (
     AuthenticationException,
     AuthorizationException,
@@ -27,6 +28,7 @@ from app.models import (
     Attachment,
     Block,
     Chat,
+    ClaimAssignment,
     Document,
     Effect,
     Environment,
@@ -143,6 +145,40 @@ default: The lake
 """
 
 REGISTERED = "/work/Example/docs/survey.md"
+
+CUT_OVER = """Two actions for the cut-over.
+
+```action id=A1
+answer: Pilot does it
+by: agent
+at: 2026-10-12T09:30:00Z
+note: Rotating the CI token, its own work item
+```
+
+```action id=A2
+```
+
+```decision id=D1
+options:
+  - Dome
+  - Tunnel
+```
+"""
+
+ONE_BLOCK_SETTLED = """```question id=Q1
+answer: deferred
+by: agent
+at: 2026-10-12T09:30:00Z
+to: plan
+```
+"""
+
+ONE_BLOCK_CLAIMED = """```action id=A1
+answer: Pilot does it
+by: agent
+at: 2026-10-12T09:30:00Z
+```
+"""
 
 REGISTERED_TEXT = """Two asks about the camp.
 
@@ -1061,6 +1097,47 @@ class TestPilotStoreServiceMark:
 
         assert not_mine.value.message == f"Item {theirs.id} was not found"
         assert no_person.value.message == "Person nobody was not found"
+
+    def test_without_for_done_takes_a_registered_document_of_one_block_settled(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, project, environment, "job")
+        item = _registered(session, container, project, environment, ONE_BLOCK_SETTLED)
+        assert item.kind_code == "question"
+
+        line = _service(container).mark(
+            _admitted(run), item.id, "done", None, TOOL_USE_ID
+        )
+
+        assert (item.done_cause_code, item.done_by_user_id) == (
+            "settled",
+            _pilot(session).id,
+        )
+        assert (line.verb, line.label) == ("Marked done", "survey.md")
+
+    def test_without_for_an_action_claimed_and_not_yet_done_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, project, environment, "job")
+        item = _registered(session, container, project, environment, ONE_BLOCK_CLAIMED)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _service(container).mark(_admitted(run), item.id, "done", None, None)
+
+        assert refused.value.message.endswith(
+            "Pilot marks done only a document it settled whole, and these blocks"
+            " are unanswered: A1"
+        )
+        assert item.done_at is None
+        assert _effects(session) == []
 
 
 class TestPilotStoreServiceStopWork:
@@ -2074,6 +2151,146 @@ class TestPilotStoreServiceAddWork:
             f"Cannot place a work item of {REPO} because its project is finished"
         )
         assert _effects(session) == []
+
+    def test_a_work_item_is_named_for_the_claimed_actions_it_does(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, project, environment, "job")
+        document = _registered(session, container, project, environment, CUT_OVER)
+
+        added = _starting(container, starts).add_item(
+            _admitted(run),
+            _added(
+                kind="work",
+                title="Rotating the CI token",
+                repo=REPO,
+                cwd="/work/Example",
+                brief=BRIEF,
+                claims=[f"{document.id}/A1", f"{document.id}/A2"],
+            ),
+            TOOL_USE_ID,
+        )
+        clear_after_commit_callbacks()
+
+        assert _claims(session) == [
+            (added.item.id, _block(session, document, "A1").id),
+            (added.item.id, _block(session, document, "A2").id),
+        ]
+        assert _block(session, document, "A1").answer == "Pilot does it"
+
+    def test_a_retrys_work_item_names_the_block_again_the_earlier_kept(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, project, environment, "job")
+        document = _registered(session, container, project, environment, CUT_OVER)
+        service = _starting(container, starts)
+
+        def rotating(title: str) -> Item:
+            return service.add_item(
+                _admitted(run),
+                _added(
+                    kind="work",
+                    title=title,
+                    repo=REPO,
+                    cwd="/work/Example",
+                    brief=BRIEF,
+                    claims=[f"{document.id}/A1"],
+                ),
+                TOOL_USE_ID,
+            ).item
+
+        first = rotating("Rotating the CI token and the runners")
+        retry = rotating("Rotating the CI token")
+        clear_after_commit_callbacks()
+
+        a1 = _block(session, document, "A1").id
+        assert sorted(_claims(session)) == sorted([(first.id, a1), (retry.id, a1)])
+        assert session.execute(standing()).all() == [(a1, retry.id)]
+
+    @pytest.mark.parametrize(
+        ("claim", "refusal"),
+        [
+            pytest.param(
+                "D1",
+                InvalidOperationException,
+                id="no-action",
+            ),
+            pytest.param("A9", RecordNotFoundException, id="no-block"),
+        ],
+    )
+    def test_a_claim_the_record_refuses_starts_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        project: Project,
+        environment: Environment,
+        claim: str,
+        refusal: type[Exception],
+    ) -> None:
+        run = _brain(session, project, environment, "job")
+        document = _registered(session, container, project, environment, CUT_OVER)
+
+        with pytest.raises(refusal):
+            _starting(container, starts).add_item(
+                _admitted(run),
+                _added(
+                    kind="work",
+                    title="Rotating the CI token",
+                    repo=REPO,
+                    cwd="/work/Example",
+                    brief=BRIEF,
+                    claims=[f"{document.id}/{claim}"],
+                ),
+                TOOL_USE_ID,
+            )
+
+        assert session.scalars(select(Work)).all() == []
+        assert _claims(session) == []
+        assert _effects(session) == []
+
+    def test_a_prose_item_takes_no_claims(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, project, environment, "job")
+        document = _registered(session, container, project, environment, CUT_OVER)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _service(container).add_item(
+                _admitted(run),
+                _added(kind="notice", title="Rotating", claims=[f"{document.id}/A1"]),
+                TOOL_USE_ID,
+            )
+
+        assert refused.value.message == (
+            "Cannot add a notice item because a notice item takes no `claims`"
+        )
+
+
+def _claims(db: DbSession) -> list[tuple[uuid.UUID, int]]:
+    """Every Claim Assignment, its Work's and its Block's ids."""
+    return [
+        (claim.work_id, claim.block_id)
+        for claim in db.scalars(
+            select(ClaimAssignment).order_by(
+                ClaimAssignment.work_id, ClaimAssignment.block_id
+            )
+        )
+    ]
 
 
 class TestPilotStoreServiceAddItemAttachments:

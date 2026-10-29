@@ -17,8 +17,9 @@ from datetime import datetime
 
 import pilot_dsl as dsl
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
+from app.engine.claims import standing
 from app.engine.documents import OPENING, REVIEW
 from app.engine.paths import draft_folder
 from app.engine.plan import PlanService
@@ -26,7 +27,9 @@ from app.engine.record import ANSWERED
 from app.engine.views import utc_time
 from app.models import (
     Attachment,
+    Block,
     Chat,
+    ClaimAssignment,
     Document,
     Item,
     ItemAttachment,
@@ -209,8 +212,9 @@ class BriefService:
         `/pre-rule`, then the work item's line, the documents the run
         registered in the order registered, each published or its read failed
         with the reason the read recorded, else that it registered nothing,
-        and the files attached on the work item; then every open note and the
-        deferrals without a home, the pass's (F57.4)."""
+        the files attached on the work item, and the claimed actions it was
+        given (`_given`); then every open note and the deferrals without a
+        home, the pass's (F57.4)."""
         lines = [self._run_line(run_id)]
         registered = self.db.execute(
             select(Item.id, Document.path, Document.read_failed_at)
@@ -242,6 +246,7 @@ class BriefService:
         )
         if attached:
             lines.append(f"Attached on the work item: {_files(attached)}.")
+        lines.extend(self._given(run_id))
         return _frame(
             PRE_RULE_SKILL,
             "a worker's turn ended",
@@ -306,6 +311,50 @@ class BriefService:
                 *(f"- {_block_line(block, closer)}" for block in blocks),
             ]
         )
+
+    def _given(self, run_id: uuid.UUID) -> list[str]:
+        """The claimed actions whose standing Claim Assignment names the run
+        `run_id` (DB 260), for their `done` (design 3 §6.5), in timeline
+        order, each as its block reads now: open while still claimed, else as
+        its close reads, a person's Done meanwhile among them; none where the
+        run was given none."""
+        latest = (
+            standing()
+            .where(
+                ClaimAssignment.block_id.in_(
+                    select(ClaimAssignment.block_id).where(
+                        ClaimAssignment.work_id == run_id
+                    )
+                )
+            )
+            .subquery()
+        )
+        document_item = aliased(Item)
+        rows = self.db.execute(
+            select(Document.id, Document.path, Document.published_text, Block.local_id)
+            .join(Block, Block.document_id == Document.id)
+            .join(latest, latest.c.block_id == Block.id)
+            .join(document_item, document_item.id == Document.id)
+            .where(latest.c.work_id == run_id)
+            .order_by(document_item.seq, Block.position)
+        ).all()
+        if not rows:
+            return []
+        lines = ["The claimed actions given to this work item, as they stand:"]
+        for document_id, path, text, local_id in rows:
+            # A claimed action is a block of a registered document read.
+            assert text is not None
+            block = next(
+                block for block in dsl.parse(text).blocks if block.local_id == local_id
+            )
+            if block.claimed:
+                said = f"{local_id} open, claimed"
+            elif not block.answered:
+                said = f"{local_id} open, its claim gone"
+            else:
+                said = _block_line(block, dsl.AGENT)
+            lines.append(f"- {path} ({document_id}) {said}")
+        return lines
 
     def _run_line(self, run_id: uuid.UUID) -> str:
         """The work item's line: its title and id, the plan's task it serves,

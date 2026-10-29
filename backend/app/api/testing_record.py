@@ -4,7 +4,8 @@ standing, with members, a plan, their opening and open items, the items a
 project's session adds, an agent's saves of them and of the project's draft
 and handbook, the files it attaches, a draft's on no item, Pilot's Done, and
 the end of its turn; and a work item placed by repository, started in an
-environment of Pilot's own the stage's own controller creates, and the
+environment of Pilot's own the stage's own controller creates, named for the
+claimed actions it does, and the
 documents and the material its session registers and attaches there, each with
 its effect; a pre-ruling pass's questions to a registered document's writer;
 and a person's answer the brain records through the project's open chat, with
@@ -22,7 +23,6 @@ from typing import Any
 from dependency_injector.wiring import Provide, inject
 from flask import Blueprint, request
 from spectree import Response as SpectreeResponse
-from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.engine.ingest import Ingested
@@ -53,7 +53,6 @@ from app.schemas.testing_record import (
     InventedWriterQuestionsSchema,
 )
 from app.services.container import ServiceContainer
-from app.services.session_start_service import SessionStartService
 from app.services.test_data_service import TestDataService
 from app.utils.flask_error_handlers import build_error_response
 from app.utils.spectree_config import api
@@ -212,32 +211,33 @@ def create_item(
 @inject
 def create_work(
     project_id: uuid.UUID,
-    session_starts: SessionStartService = Provide[
-        ServiceContainer.session_start_service
-    ],
-    db: Session = Provide[ServiceContainer.db_session],
+    test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
 ) -> Any:
     """Place a work item on the project's timeline by repository, and start
     its session as every work item's starts: once the request commits, its
     start creates an environment of Pilot's own from the repository on the
-    stage's own controller.
+    stage's own controller. It is named for the claimed actions `claims`
+    gives, as a pass's `add_item` names them (F21.6).
 
     Returns:
         201: The work item's id, its Work's and its Session's
         400: The body is invalid, or the stage is prd
-        404: No project has the id, or its plan has no task of the step
-        409: No controller is configured, or the project is finished or
-            archived
+        404: No project has the id, its plan has no task of the step, a
+            claim's item is not of the project, or its document has no such
+            block
+        409: A claim that is not an open action of a registered document of
+            the project, no controller is configured, or the project is
+            finished or archived: the reason
     """
     data = InventedWorkCreateSchema.model_validate(request.get_json())
-    work = session_starts.start_work(
-        db,
+    work = test_data_service.work(
         project_id,
         data.repo,
         title=data.title,
         brief=data.brief,
         cwd=data.cwd,
-        plan_task_id=data.step,
+        step=data.step,
+        claims=data.claims,
     )
     return InventedItemSchema(id=work.id).model_dump(mode="json"), 201
 

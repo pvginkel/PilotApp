@@ -91,7 +91,15 @@ WAITS = ("card_wait", "timed_wait")
 """The kinds of item `add_item` is given that are not prose (TD §4.5)."""
 
 PROSE_FIELDS = ("markdown", "urgent", "for", "summary")
-WORK_FIELDS = ("repo", "cwd", "brief", "agent", "model", "reasoning_effort")
+WORK_FIELDS = (
+    "repo",
+    "cwd",
+    "brief",
+    "agent",
+    "model",
+    "reasoning_effort",
+    "claims",
+)
 NEEDED_FOR_WORK = ("title", "repo", "cwd", "brief")
 """The fields of `add_item`'s item that one form takes alone, by their names
 on the wire, and those a work item needs."""
@@ -223,17 +231,22 @@ class PilotStoreService:
         (F29.2, F86.6). A work item is started on add by its repository, as
         every work item's start is, its brief followed by the server's trailer
         (F66, §5.4), on the brain's placement (F61.1); its Session `held` or
-        `starting`, as the gate leaves it (F141.4).
+        `starting`, as the gate leaves it (F141.4); named for the claimed
+        actions its `claims` give, each an open action of a registered
+        document of the project (F21.6; DB 261).
 
         Raises:
-            RecordNotFoundException: an attachment or the plan's task is not
-                of the brain's project, or an outside source's environment
-                is not the controller's.
+            RecordNotFoundException: an attachment, the plan's task or a
+                claim's item is not of the brain's project, a claim's
+                document has no such block, or an outside source's
+                environment is not the controller's.
             InvalidOperationException: a wait, which Pilot does not take yet;
                 a field the item's kind does not take, or one it needs,
                 missing; a prose text that holds faults, each with its line;
                 material that cannot be copied or over the caps of one call,
-                nothing attached; the start a work item takes refused.
+                nothing attached; a claim the record refuses
+                (`RecordService.claimable`); the start a work item takes
+                refused.
             ExternalServiceException: the controller did not answer, or
                 refused for a reason of its own.
         """
@@ -249,7 +262,9 @@ class PilotStoreService:
         state: Literal["starting", "held"] | None = None
         held: Held | None = None
         if item.kind == WORK:
+            claimed = self.record_service.claimable(project, item.claims, operation)
             added = self._work(project, item)
+            self.record_service.give(project, self.db.get_one(Work, added.id), claimed)
             started = self.db.get_one(AgentSession, added.id)
             # The gate leaves a work item's start `held` or `starting`.
             state = "held" if started.state_code is SessionState.HELD else "starting"
@@ -440,8 +455,9 @@ class PilotStoreService:
         """`mark` on the item for the person whose handle is `person` (F86.3):
         Done on a document, with its recommendations, Read on a notice,
         Reviewed on a review, as the record marks them. Without `person`,
-        Pilot's own Done on a document it settled whole (DB decision 42). The
-        call `tool_use_id`'s effect is "Marked <mark> · <title>".
+        Pilot's own Done on a document it settled whole (DB decision 42), or
+        on a registered document of one block it settled. The call
+        `tool_use_id`'s effect is "Marked <mark> · <title>".
 
         Raises:
             RecordNotFoundException: the item is not of the brain's project,

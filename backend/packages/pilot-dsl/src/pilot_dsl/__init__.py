@@ -3,6 +3,8 @@ nothing of the database, Flask or the app, and takes what it validates against
 as values."""
 
 from pilot_dsl.document import (
+    AGENT,
+    CLAIM,
     AnswerChannel,
     Block,
     BlockKind,
@@ -15,7 +17,6 @@ from pilot_dsl.document import (
     Span,
 )
 from pilot_dsl.reader import (
-    AGENT,
     ANSWER_KEYS,
     DEFERRED,
     PLAN,
@@ -43,6 +44,7 @@ from pilot_dsl.writer import (
 __all__ = [
     "AGENT",
     "ANSWER_KEYS",
+    "CLAIM",
     "DEFERRED",
     "PLAN",
     "AnswerChannel",

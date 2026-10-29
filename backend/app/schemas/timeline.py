@@ -179,6 +179,29 @@ class ChatPlaceSchema(BaseModel):
     )
 
 
+class ClaimedWorkSchema(BaseModel):
+    """The work item a claimed action is given to: the one its latest naming
+    names (DB 260)."""
+
+    id: uuid.UUID = Field(description="The work item's id, its line's address")
+    title: str = Field(
+        description="The work item's title, as its line shows it",
+        examples=["Rotating the CI token"],
+    )
+
+
+class ClaimSchema(BaseModel):
+    """An action Pilot claimed and has not done (F21.6): open, Pilot's, waiting
+    on no person."""
+
+    work: ClaimedWorkSchema | None = Field(
+        description=(
+            "The work item that does it, the latest named for it on its "
+            "`add_item`; null while none is"
+        )
+    )
+
+
 class BlockSchema(BaseModel):
     """An ask in its item's text, with its definition and its answer (F30, F31)."""
 
@@ -223,6 +246,12 @@ class BlockSchema(BaseModel):
         )
     )
     done: datetime | None = Field(description="When the action was marked Done")
+    claim: ClaimSchema | None = Field(
+        description=(
+            "Pilot does it: the action's claim, `answer: Pilot does it`, `by` "
+            "Pilot, until its Done; null for every other block"
+        )
+    )
     deferral: DeferralSchema | None = Field(
         description="Where a deferred block went; null unless `answer` is `deferred`"
     )

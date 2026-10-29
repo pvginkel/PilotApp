@@ -19,6 +19,7 @@ from pydantic import Field
 from starlette.requests import Request
 
 from pilot_mcp.api import (
+    BLOCK_ID,
     SOURCE,
     Added,
     Asked,
@@ -54,9 +55,6 @@ def _tool_use_id(ctx: Call) -> str | None:
     value = None if meta is None else (meta.model_extra or {}).get(TOOL_USE_ID_META)
     return value if isinstance(value, str) else None
 
-
-BLOCK_ID = r"^[0-9A-Fa-f-]{36}/\S+$"
-"""A block's id (TD §4.9), `<item id>/<local id>`."""
 
 ANSWERED_BLOCK = r"^(?:[0-9A-Fa-f-]{36}|project\.md)/\S+$"
 """A block `answer` takes: a block's id, or `project.md/<local id>`, a block of
@@ -164,12 +162,15 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
         environment Pilot makes from `repo`, on your placement, its first turn
         your `brief` followed by Pilot's own lines; `state` answers whether it
         is `starting` or `held` at the gate, and `held` why — say so to the
-        person. A wait, a field the kind does not take or one it needs
-        missing, a text with no title or with faults, an attachment or a plan
-        task not of your project, material that cannot be copied, or a start
-        the project refuses is refused with the reason, each fault with its
-        line, and nothing is added. Answers `{id, path, state, held,
-        effect}`."""
+        person. A work item that does actions you claimed names them in
+        `claims`: each stays open and yours until its `done`, its line naming
+        this work item, the latest that names it. A wait, a field the kind
+        does not take or one it needs missing, a text with no title or with
+        faults, an attachment or a plan task not of your project, material
+        that cannot be copied, a claim that is not an open action of a
+        registered document of your project, or a start the project refuses
+        is refused with the reason, each fault with its line, and nothing is
+        added. Answers `{id, path, state, held, effect}`."""
         return await api.add_item(_authorization(ctx), _tool_use_id(ctx), item)
 
     @mcp.tool()
@@ -313,12 +314,16 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
         document, its unanswered blocks answered with their recommendations as
         Done answers them; `read` on a notice; `reviewed` on a review. Without
         `for`, the mark is your own, and only `done`, on a document you settled
-        whole, every block of it answered. An item not of your project, a
+        whole, every block of it answered, and on a registered document of one
+        block, whatever its kind, once that block is answered or deferred: a
+        claimed action counts once its `done` is written. A registered
+        document's Done writes its answers back and resumes its worker once
+        none of its run's documents is open. An item not of your project, a
         `for` that names no person, a mark its kind does not take, an item
         that is done, a document with a block neither answered nor
-        recommended, or, without `for`, one with a block unanswered is refused
-        with the reason, and nothing is marked. Answers `{effect}`, the call's
-        effect line."""
+        recommended, or, without `for`, one with a block unanswered or a
+        claimed action not yet done is refused with the reason, and nothing is
+        marked. Answers `{effect}`, the call's effect line."""
         return await api.mark(
             _authorization(ctx), _tool_use_id(ctx), item=item, mark=mark, person=for_
         )

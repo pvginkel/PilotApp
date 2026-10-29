@@ -268,6 +268,17 @@ _NEW_ITEM = {
         "reasoning_effort": _text_field(
             "Reasoning Effort", "A work item's reasoning effort, where given"
         ),
+        "claims": {
+            "description": (
+                "The actions of workers' documents a work item does that you"
+                " claimed, by their blocks' ids, `<item id>/<local id>`: each"
+                " block's line names this work item, and the job after its turn"
+                " names them for their `done`"
+            ),
+            "items": {"pattern": r"^[0-9A-Fa-f-]{36}/\S+$", "type": "string"},
+            "title": "Claims",
+            "type": "array",
+        },
     },
     "required": ["kind"],
     "title": "NewItem",
@@ -345,12 +356,16 @@ STORE_SURFACE = {
         " minted with it. A work item is started on add in an environment Pilot"
         " makes from `repo`, on your placement, its first turn your `brief`"
         " followed by Pilot's own lines; `state` answers whether it is `starting`"
-        " or `held` at the gate, and `held` why — say so to the person. A wait, a"
-        " field the kind does not take or one it needs missing, a text with no"
-        " title or with faults, an attachment or a plan task not of your project,"
-        " material that cannot be copied, or a start the project refuses is"
-        " refused with the reason, each fault with its line, and nothing is added."
-        " Answers `{id, path, state, held, effect}`.",
+        " or `held` at the gate, and `held` why — say so to the person. A work"
+        " item that does actions you claimed names them in `claims`: each stays"
+        " open and yours until its `done`, its line naming this work item, the"
+        " latest that names it. A wait, a field the kind does not take or one it"
+        " needs missing, a text with no title or with faults, an attachment or a"
+        " plan task not of your project, material that cannot be copied, a claim"
+        " that is not an open action of a registered document of your project,"
+        " or a start the project refuses is refused with the reason, each fault"
+        " with its line, and nothing is added. Answers `{id, path, state, held,"
+        " effect}`.",
     ),
     "attach_file": (
         {
@@ -492,11 +507,16 @@ STORE_SURFACE = {
         " its unanswered blocks answered with their recommendations as Done"
         " answers them; `read` on a notice; `reviewed` on a review. Without `for`,"
         " the mark is your own, and only `done`, on a document you settled whole,"
-        " every block of it answered. An item not of your project, a `for` that"
-        " names no person, a mark its kind does not take, an item that is done, a"
-        " document with a block neither answered nor recommended, or, without"
-        " `for`, one with a block unanswered is refused with the reason, and"
-        " nothing is marked. Answers `{effect}`, the call's effect line.",
+        " every block of it answered, and on a registered document of one block,"
+        " whatever its kind, once that block is answered or deferred: a claimed"
+        " action counts once its `done` is written. A registered document's Done"
+        " writes its answers back and resumes its worker once none of its run's"
+        " documents is open. An item not of your project, a `for` that names no"
+        " person, a mark its kind does not take, an item that is done, a document"
+        " with a block neither answered nor recommended, or, without `for`, one"
+        " with a block unanswered or a claimed action not yet done is refused with"
+        " the reason, and nothing is marked. Answers `{effect}`, the call's effect"
+        " line.",
     ),
     "stop_work": (
         {

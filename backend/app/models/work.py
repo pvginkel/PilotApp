@@ -1,4 +1,4 @@
-"""Work (DB §2.2), the subtype of Item and of Session.
+"""Work (DB §2.2), the subtype of Item and of Session, and Claim Assignment.
 
 `work` is the extension table keyed by the id a Work's Item and Session share
 (DB §7.3).
@@ -7,8 +7,10 @@
 import uuid
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
+    ForeignKey,
     ForeignKeyConstraint,
     Index,
     Text,
@@ -82,3 +84,27 @@ class Work(db.Model):  # type: ignore[name-defined]
     repo: Mapped[str | None] = mapped_column(Text)
     autopilot: Mapped[bool] = mapped_column(Boolean)
     retried_by_id: Mapped[uuid.UUID | None]
+
+
+class ClaimAssignment(db.Model):  # type: ignore[name-defined]
+    """One naming of a claimed action Block by the Work that does it, written
+    when `add_item` adds the Work and never changed (DB decision 64). Of a
+    Block's namings, the one whose Work's Item has the highest `seq` stands
+    (DB 260).
+
+    That the Work is a worker's run of the Block's Project, and the Block an
+    open action of a registered document of it (DB 261), is the server's
+    check at the `add_item`: no key reaches the Block's Project from this
+    row.
+    """
+
+    __tablename__ = "claim_assignments"
+    __table_args__ = (
+        # A claimed Block's latest naming (DB 260).
+        Index("ix_claim_assignments_block_id", "block_id"),
+    )
+
+    work_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("work.id"), primary_key=True)
+    block_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("blocks.id"), primary_key=True
+    )

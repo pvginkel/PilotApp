@@ -15,6 +15,7 @@ from sqlalchemy import ColumnElement, and_, exists, func, or_, select
 from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import Session, aliased
 
+from app.engine.claims import claimed, standing
 from app.engine.documents import OPENING, PROSE, awaiting_read, awaits_read
 from app.engine.paths import tree_path
 from app.engine.record import MARKED, NOTICE, SETTLED, RecordService
@@ -23,6 +24,7 @@ from app.models import (
     Attachment,
     Block,
     Chat,
+    ClaimAssignment,
     ConfirmationReason,
     Document,
     DocumentVersion,
@@ -61,6 +63,8 @@ from app.schemas.timeline import (
     BlockSchema,
     BodyPartSchema,
     ChatPlaceSchema,
+    ClaimedWorkSchema,
+    ClaimSchema,
     ConfirmationReasonSchema,
     CurrentLineSchema,
     DeferralSchema,
@@ -141,10 +145,12 @@ def waiting_on_a_member() -> ColumnElement[bool]:
 
 def _waiting() -> ColumnElement[bool]:
     """F94.5's set, whoever an item is for: open; a prose item but the
-    opening, a notice only when it is urgent (F23.2, F10.3), and a registered
+    opening, a notice only when it is urgent (F23.2, F10.3), a registered
     document only once its turn-end read is made, since none takes a close
-    before it (review 7); a work item stopped or failed, a job only until it
-    is retried; never a wait (F27.5)."""
+    before it (review 7), and none whose open blocks are all actions Pilot
+    claimed, which are Pilot's until their `done` (DB 262); a work item
+    stopped or failed, a job only until it is retried; never a wait
+    (F27.5)."""
     form = (
         select(ItemKind.form)
         .where(ItemKind.code == Item.kind_code)
@@ -169,6 +175,22 @@ def _waiting() -> ColumnElement[bool]:
         .correlate(Item)
         .exists()
     )
+    claims = (
+        select(Block.id)
+        .where(Block.document_id == Item.id, claimed())
+        .correlate(Item)
+        .exists()
+    )
+    unanswered = (
+        select(Block.id)
+        .where(
+            Block.document_id == Item.id,
+            Block.answer.is_(None),
+            Block.done_at.is_(None),
+        )
+        .correlate(Item)
+        .exists()
+    )
     return and_(
         Item.done_at.is_(None),
         or_(
@@ -177,6 +199,7 @@ def _waiting() -> ColumnElement[bool]:
                 Item.kind_code != OPENING,
                 or_(Item.kind_code != NOTICE, Item.urgent),
                 ~unread,
+                or_(~claims, unanswered),
             ),
             and_(form == WORK, state.in_(_STOPPED), ~retried),
         ),
@@ -499,6 +522,7 @@ class TimelineService:
             project,
             self._users(set(), _answerers([parts])),
             self._chat_places({document.id: parts}),
+            {},
         )
         return ProjectDocumentSchema(
             title=dsl.parse(text).title,
@@ -545,6 +569,7 @@ class TimelineService:
                 _answerers(bodies.values()),
             ),
             self._chat_places(bodies),
+            self._claims(bodies),
         )
         held = set(
             self.db.scalars(
@@ -643,10 +668,12 @@ class TimelineService:
         project: Project,
         users: dict[uuid.UUID | str, User],
         places: dict[tuple[uuid.UUID, str], ChatPlaceSchema],
+        claims: dict[tuple[uuid.UUID, str], ClaimedWorkSchema],
     ) -> "_Reader":
         return _Reader(
             users=users,
             places=places,
+            claims=claims,
             tasks=dict(
                 self.db.execute(
                     select(PlanTask.task_id, PlanTask.title).where(
@@ -712,6 +739,55 @@ class TimelineService:
             )
             for row in placed
         }
+
+    def _claims(
+        self, bodies: Mapping[uuid.UUID, Iterable[dsl.Prose | dsl.Block]]
+    ) -> dict[tuple[uuid.UUID, str], ClaimedWorkSchema]:
+        """The work item each action of `bodies` that Pilot claimed and has
+        not done is given to, by its standing Claim Assignment (DB 260),
+        keyed by its document's id and its local id; a claim no work item is
+        named for is left out."""
+        claims = {
+            (document_id, part.local_id)
+            for document_id, parts in bodies.items()
+            for part in parts
+            if isinstance(part, dsl.Block) and part.claimed
+        }
+        if not claims:
+            return {}
+        latest = (
+            standing()
+            .where(
+                ClaimAssignment.block_id.in_(
+                    select(Block.id).where(
+                        Block.document_id.in_({key[0] for key in claims})
+                    )
+                )
+            )
+            .subquery()
+        )
+        given: dict[tuple[uuid.UUID, str], ClaimedWorkSchema] = {}
+        for document_id, local_id, work_id, title in self.db.execute(
+            select(
+                Block.document_id, Block.local_id, ClaimAssignment.work_id, Item.title
+            )
+            .join(ClaimAssignment, ClaimAssignment.block_id == Block.id)
+            .join(
+                latest,
+                and_(
+                    latest.c.block_id == ClaimAssignment.block_id,
+                    latest.c.work_id == ClaimAssignment.work_id,
+                ),
+            )
+            .join(Item, Item.id == ClaimAssignment.work_id)
+        ):
+            # A work item is born titled (DB decision 50).
+            assert title is not None
+            if (document_id, local_id) in claims:
+                given[(document_id, local_id)] = ClaimedWorkSchema(
+                    id=work_id, title=title
+                )
+        return given
 
     def _edited(self, document_ids: list[uuid.UUID]) -> dict[uuid.UUID, datetime]:
         """Each document's *Edited <time>* (F28.7, the planning's ruling): the
@@ -805,6 +881,7 @@ class _Reader:
 
     users: dict[uuid.UUID | str, User]
     places: dict[tuple[uuid.UUID, str], ChatPlaceSchema]
+    claims: dict[tuple[uuid.UUID, str], ClaimedWorkSchema]
     tasks: dict[str, str]
     reasons: dict[str, ConfirmationReason]
 
@@ -857,6 +934,11 @@ class _Reader:
             via=None if block.via is None else AnswerChannel(block.via),
             in_chat=self.places.get((document_id, block.local_id)),
             done=block.done,
+            claim=(
+                ClaimSchema(work=self.claims.get((document_id, block.local_id)))
+                if block.claimed
+                else None
+            ),
             deferral=(
                 DeferralSchema(
                     to=block.to,

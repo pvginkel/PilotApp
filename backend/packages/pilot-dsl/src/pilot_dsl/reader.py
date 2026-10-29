@@ -17,6 +17,7 @@ from enum import StrEnum
 import yaml
 
 from pilot_dsl.document import (
+    AGENT,
     AnswerChannel,
     Block,
     BlockKind,
@@ -28,9 +29,6 @@ from pilot_dsl.document import (
     Section,
     Span,
 )
-
-AGENT = "agent"
-"""Pilot's handle (decision 18): a `by: agent` line is the agent's own."""
 
 PLAN = "plan"
 """`to: plan` defers a block to the plan itself (decision 47)."""

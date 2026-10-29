@@ -1,8 +1,9 @@
 """The record's own writes (design 1 §6.4, F32.4): a person's answer, Done on
 an action, undo, Done on a document, Read and Reviewed; Finish's close of the
 open items (F5.1); the switch's Yes to the confirmations it answers (F4.2);
-and a work item's place and its done at its turn's end
-(DB Work, decision 44).
+a work item's place and its done at its turn's end (DB Work, decision 44);
+and the claimed actions a work item is named for at its `add_item` (DB
+decision 64).
 
 Each is a write of the caller's transaction, under the document's row lock
 (TD §8.5), a close and an Undo under its project's row first, and refused
@@ -23,7 +24,7 @@ withdraws the job (`Jobs`).
 """
 
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Protocol
@@ -46,6 +47,7 @@ from app.engine.views import ViewService
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import (
     Block,
+    ClaimAssignment,
     ConfirmationReason,
     Document,
     DoneCause,
@@ -334,8 +336,11 @@ class RecordService:
         """Done on a document (F32.5): first every unanswered block that has a
         recommendation answered with it, `user`'s, `via: recommended`; then
         a `done` Document Version of the published text and the item's mark.
-        Refused while a block has neither. Pilot's Done is on a document it
-        settled whole, every block answered (decision 42)."""
+        Refused while a block has neither, a claimed action not yet done
+        among them (DB 154). Pilot's Done is on a document it settled whole,
+        every block answered (decision 42), and on a registered document of
+        one block, which takes its block's kind, once that block is answered,
+        deferred, or claimed and done."""
         if self.db.get_one(ItemKind, item.kind_code).form != PROSE:
             raise InvalidOperationException(
                 f"mark item {item.id} done",
@@ -346,13 +351,15 @@ class RecordService:
         operation = f"mark {tree_path(project, document.path)} done"
         _not_archived(project, operation)
         _not_awaiting_read(item, document, operation)
-        if item.kind_code != DOCUMENT:
+        blocks = _blocks(item, document)
+        pilots = user.kind_code is UserKind.AGENT
+        one_block = document.source_path is not None and len(blocks) == 1
+        if item.kind_code != DOCUMENT and not (pilots and one_block):
             raise InvalidOperationException(
                 operation, f"a {item.kind_code} item is not done by Done"
             )
         _not_done(item, operation)
-        blocks = dsl.parse(_published(document)).blocks
-        if user.kind_code is UserKind.AGENT:
+        if pilots:
             cause = SETTLED
             unready = [block for block in blocks if not block.answered]
             problem = (
@@ -493,6 +500,78 @@ class RecordService:
         self.db.flush()
         self.view_service.timeline_moved(project)
         return work
+
+    def claimable(
+        self, project: Project, block_ids: Sequence[str], operation: str
+    ) -> list[Block]:
+        """The Blocks `block_ids`, each `<item id>/<local id>`, that a work
+        item added to `project` may be named for as the claimed actions it
+        does (DB 261): open actions, a claim not yet done among them, of open
+        registered documents of the project, each document's row held until
+        the transaction ends, in the caller's, which holds the project's row.
+
+        Raises:
+            RecordNotFoundException: an item is not of the project, or its
+                document has no such block.
+            InvalidOperationException: a block is named twice; an item is no
+                registered document, is done, or has not been read yet; a
+                block is no action, or is answered.
+        """
+        named: list[tuple[Item, Document, str]] = []
+        for block_id in block_ids:
+            item_id, _, local_id = block_id.partition("/")
+            item = self.db.get(Item, uuid.UUID(item_id))
+            if item is None or item.project_id != project.id:
+                raise RecordNotFoundException("Item", item_id)
+            document = self.db.get(Document, item.id)
+            if document is None or document.source_path is None:
+                raise InvalidOperationException(
+                    operation,
+                    f"item {item.id} is no registered document: Pilot claims an"
+                    " action of a worker's document",
+                )
+            named.append((item, document, local_id))
+        documents = {document.id: document for _, document, _ in named}
+        for document_id in sorted(documents):
+            self.document_service.lock(documents[document_id])
+        blocks: list[Block] = []
+        for item, document, local_id in named:
+            path = tree_path(project, document.path)
+            _not_awaiting_read(item, document, operation)
+            if item.done_at is not None:
+                raise InvalidOperationException(operation, f"{path} is done")
+            block = _block(document, _blocks(item, document), local_id)
+            if block.kind is not dsl.BlockKind.ACTION:
+                raise InvalidOperationException(
+                    operation,
+                    f"block {local_id} of {path} is a {block.kind}, not an action",
+                )
+            if block.answered:
+                raise InvalidOperationException(
+                    operation, f"action {local_id} of {path} is answered"
+                )
+            row = self.db.scalars(
+                select(Block).where(
+                    Block.document_id == document.id, Block.local_id == local_id
+                )
+            ).one()
+            if row in blocks:
+                raise InvalidOperationException(
+                    operation, f"it names action {local_id} of {path} twice"
+                )
+            blocks.append(row)
+        return blocks
+
+    def give(self, project: Project, work: Work, blocks: Sequence[Block]) -> None:
+        """The work item `work` named for the claimed actions `blocks`, which
+        `claimable` gave, one Claim Assignment each, never changed: of a
+        Block's namings the latest stands, the earlier kept (DB 260)."""
+        self.db.add_all(
+            ClaimAssignment(work_id=work.id, block_id=block.id) for block in blocks
+        )
+        self.db.flush()
+        if blocks:
+            self.view_service.timeline_moved(project)
 
     def work_done(self, work_id: uuid.UUID, at: datetime) -> None:
         """The work item done at `at`, its turn's end, by no one, its Done

@@ -208,6 +208,75 @@ to: plan
 
 NOTICE = "---\ntitle: The palette\n---\n\nBlue and green.\n"
 
+CLAIMED = """---
+title: Cut-over plan
+---
+
+```decision id=D1
+options:
+  - Dome
+  - Tunnel
+answer: Dome
+by: agent
+at: 2026-10-12T09:30:00Z
+```
+
+```action id=A1
+answer: Pilot does it
+by: agent
+at: 2026-10-12T09:30:00Z
+note: Rotating the CI token
+```
+"""
+
+CLAIMED_ACTION = """---
+title: Rotate the CI token
+---
+
+```action id=A1
+answer: Pilot does it
+by: agent
+at: 2026-10-12T09:30:00Z
+```
+"""
+
+SETTLED_ONE_BLOCK = {
+    "answered": """---
+title: Which tent?
+---
+
+```decision id=D1
+options:
+  - Dome
+  - Tunnel
+answer: Dome
+by: agent
+at: 2026-10-12T09:30:00Z
+```
+""",
+    "deferred": """---
+title: Where to camp?
+---
+
+```question id=Q1
+answer: deferred
+by: agent
+at: 2026-10-12T09:30:00Z
+to: plan
+```
+""",
+    "claimed-and-done": """---
+title: Rotate the CI token
+---
+
+```action id=A1
+done: 2026-10-12T10:30:00Z
+by: agent
+note: Rotated; the runners took the new token
+```
+""",
+}
+
 
 def _z(moment: datetime | None) -> str:
     assert moment is not None
@@ -913,6 +982,35 @@ class TestRecordServiceDoneAction:
         )
         assert document.published_text == ACTION
 
+    def test_a_persons_done_on_an_action_pilot_claimed_closes_it_as_any_done(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        item, document = _registered(
+            session, container, project, project_session, CLAIMED_ACTION
+        )
+
+        with scoped_session(container):
+            container.record_service().done_action(
+                document, "A1", person, note="Rotated it myself"
+            )
+
+        assert _done(item) == (item.done_at, "answered", person.id)
+        [block] = pilot_dsl.parse(document.published_text or "").blocks
+        assert (block.done, block.by, block.answer, block.note) == (
+            item.done_at,
+            "ada",
+            None,
+            "Rotated it myself",
+        )
+        assert not block.claimed
+        assert _owed_events(engine_events) == [WriteBackOwed(project_session.id)]
+
 
 class TestRecordServiceUndo:
     def test_undo_clears_a_one_ask_items_answer(
@@ -1542,6 +1640,131 @@ class TestRecordServiceDone:
 
         assert refused.value.cause == "the item is done"
         assert len(_versions(session, document)) == 2
+
+    def test_pilots_done_is_refused_while_an_action_it_claimed_is_not_done(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        item, document = _registered(
+            session, container, project, project_session, CLAIMED
+        )
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.record_service().done(item, _agent(session))
+
+        assert refused.value.cause == (
+            "Pilot marks done only a document it settled whole, and these blocks"
+            " are unanswered: A1"
+        )
+        assert _done(item) == (None, None, None)
+        assert document.published_text == CLAIMED
+
+    def test_a_persons_done_is_refused_while_a_claimed_action_has_no_recommendation(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        item, _ = _registered(session, container, project, project_session, CLAIMED)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.record_service().done(item, person)
+
+        assert refused.value.cause == (
+            "these blocks have neither an answer nor a recommendation: A1"
+        )
+
+    @pytest.mark.parametrize(
+        ("settled", "kind"),
+        [
+            ("answered", "decision"),
+            ("deferred", "question"),
+            ("claimed-and-done", "action"),
+        ],
+    )
+    def test_pilots_done_takes_a_registered_document_of_one_block_it_settled(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        project_session: models.Session,
+        settled: str,
+        kind: str,
+    ) -> None:
+        run = _ended_run(container, project, project_session)
+        item, document = _registered(
+            session, container, project, run, SETTLED_ONE_BLOCK[settled]
+        )
+        assert item.kind_code == kind
+        agent = _agent(session)
+
+        with scoped_session(container):
+            container.record_service().done(item, agent)
+
+        assert _done(item) == (item.done_at, "settled", agent.id)
+        assert _owed_events(engine_events) == [WriteBackOwed(run.id)]
+        (continuation,) = _continuations(session, project)
+        assert continuation.trigger_item_id == item.id
+        assert item.consumed_session_id == continuation.id
+
+    def test_pilots_done_is_refused_on_a_one_block_document_still_claimed(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        item, _ = _registered(
+            session, container, project, project_session, CLAIMED_ACTION
+        )
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.record_service().done(item, _agent(session))
+
+        assert refused.value.cause == (
+            "Pilot marks done only a document it settled whole, and these blocks"
+            " are unanswered: A1"
+        )
+
+    def test_a_one_block_item_not_registered_or_a_persons_done_is_refused_by_kind(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        pilots, _ = _bear(
+            session,
+            container,
+            project,
+            project_session,
+            "decision",
+            "Which tent?",
+            SETTLED_ONE_BLOCK["answered"],
+        )
+        registered, _ = _registered(
+            session,
+            container,
+            project,
+            project_session,
+            SETTLED_ONE_BLOCK["deferred"],
+        )
+        records = container.record_service()
+
+        with pytest.raises(InvalidOperationException) as not_registered:
+            records.done(pilots, _agent(session))
+        with pytest.raises(InvalidOperationException) as a_persons:
+            records.done(registered, person)
+
+        assert not_registered.value.cause == "a decision item is not done by Done"
+        assert a_persons.value.cause == "a question item is not done by Done"
 
 
 class TestRecordServiceMarks:
@@ -4372,3 +4595,193 @@ class TestRecordServiceAutopilotYes:
         (work,) = _continuations(session, project)
         assert item.consumed_session_id == work.id
         assert _first_message(session, work) == CONTINUED.format(paths=REGISTERED_PATH)
+
+
+def _work_item(
+    session: DbSession,
+    container: ServiceContainer,
+    project: Project,
+    title: str = "Rotating the CI token",
+) -> Work:
+    """A worker's run placed as a work item of `project`."""
+    run = models.Session(
+        project_id=project.id,
+        kind_code="work",
+        cwd="/work/Example",
+        token_hash=f"hash-{uuid.uuid4()}",
+        state_code=SessionState.RUNNING,
+    )
+    session.add(run)
+    session.flush()
+    return container.record_service().place_work(
+        project, run, title, repo="example/Example"
+    )
+
+
+class TestRecordServiceClaims:
+    """The claimed actions a work item is named for at its `add_item`: open
+    actions of registered documents of its project (DB 261), one Claim
+    Assignment each, never changed (DB 260; decision 64)."""
+
+    def test_open_actions_a_claim_among_them_are_given_to_the_work_item(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        claimed, _ = _registered(session, container, project, project_session, CLAIMED)
+        unclaimed, _ = _registered(
+            session, container, project, project_session, ACTION, SURVEY_PATH
+        )
+        records = container.record_service()
+        blocks = records.claimable(
+            project, [f"{unclaimed.id}/A1", f"{claimed.id}/A1"], "add a work item"
+        )
+        work = _work_item(session, container, project)
+
+        records.give(project, work, blocks)
+
+        assert [(block.document_id, block.local_id) for block in blocks] == [
+            (unclaimed.id, "A1"),
+            (claimed.id, "A1"),
+        ]
+        assert sorted(
+            session.scalars(
+                select(models.ClaimAssignment.block_id).where(
+                    models.ClaimAssignment.work_id == work.id
+                )
+            )
+        ) == sorted(block.id for block in blocks)
+
+    def test_with_none_named_nothing_is_given(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+    ) -> None:
+        records = container.record_service()
+        work = _work_item(session, container, project)
+
+        records.give(project, work, records.claimable(project, [], "add a work item"))
+
+        assert session.scalars(select(models.ClaimAssignment)).all() == []
+
+    @pytest.mark.parametrize(
+        ("name", "cause"),
+        [
+            pytest.param(
+                "decision",
+                "block D1 of {path} is a decision, not an action",
+                id="no-action",
+            ),
+            pytest.param(
+                "done",
+                "action A1 of {path} is answered",
+                id="action-done",
+            ),
+            pytest.param(
+                "deferred",
+                "action A1 of {path} is answered",
+                id="action-deferred",
+            ),
+            pytest.param("twice", "it names action A1 of {path} twice", id="twice"),
+        ],
+    )
+    def test_a_block_that_is_no_open_action_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        name: str,
+        cause: str,
+    ) -> None:
+        texts = {
+            "decision": CLAIMED,
+            "done": SETTLED_ONE_BLOCK["claimed-and-done"],
+            "deferred": (
+                "```action id=A1\nanswer: deferred\nby: agent\n"
+                "at: 2026-10-12T09:30:00Z\nto: plan\n```\n"
+            ),
+            "twice": ACTION,
+        }
+        item, document = _registered(
+            session, container, project, project_session, texts[name]
+        )
+        local_id = "D1" if name == "decision" else "A1"
+        named = [f"{item.id}/{local_id}"]
+        if name == "twice":
+            named.append(f"{str(item.id).upper()}/A1")
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.record_service().claimable(project, named, "add a work item")
+
+        assert refused.value.message == (
+            "Cannot add a work item because "
+            + cause.format(path=tree_path(project, document.path))
+        )
+
+    def test_an_item_no_registered_document_done_or_unread_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        pilots, _ = _bear(
+            session,
+            container,
+            project,
+            project_session,
+            "action",
+            "Rotate the CI token",
+            ACTION,
+        )
+        done, done_document = _registered(
+            session, container, project, project_session, ACTION
+        )
+        container.record_service().done_action(done_document, "A1", person)
+        unread = (
+            container.document_service()
+            .register(project, project_session, SURVEY_PATH)
+            .item
+        )
+        records = container.record_service()
+
+        refusals = []
+        for item in (pilots, done, unread):
+            with pytest.raises(InvalidOperationException) as refused:
+                records.claimable(project, [f"{item.id}/A1"], "add a work item")
+            refusals.append(refused.value.cause)
+
+        assert refusals == [
+            f"item {pilots.id} is no registered document: Pilot claims an action"
+            " of a worker's document",
+            f"{tree_path(project, done_document.path)} is done",
+            "its file has not been read yet: it is read at the end of the turn"
+            " that registered it",
+        ]
+
+    def test_an_item_of_another_project_or_a_block_it_lacks_is_not_found(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        other = Project(created_by_user_id=person.id)
+        session.add(other)
+        session.flush()
+        mine, _ = _registered(session, container, project, project_session, ACTION)
+        records = container.record_service()
+
+        with pytest.raises(RecordNotFoundException) as not_theirs:
+            records.claimable(other, [f"{mine.id}/A1"], "add a work item")
+        with pytest.raises(RecordNotFoundException) as no_block:
+            records.claimable(project, [f"{mine.id}/A9"], "add a work item")
+
+        assert not_theirs.value.message == f"Item {mine.id} was not found"
+        assert no_block.value.message == f"Block {mine.id}/A9 was not found"

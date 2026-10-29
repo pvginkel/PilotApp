@@ -18,7 +18,7 @@ from pydantic import (
 )
 
 from app.models.reference import ProjectState, TaskStatus
-from app.schemas.pilot_store import AnswerRequestSchema
+from app.schemas.pilot_store import AnswerRequestSchema, BlockId
 
 OPENING_WORDS = "An invented project, started for a test."
 """The opening of a project made without words of its own."""
@@ -290,6 +290,15 @@ class InventedWorkCreateSchema(BaseModel):
         default=None,
         description="The id of the plan's task it works on; none for none",
         examples=["build"],
+    )
+    claims: list[BlockId] = Field(
+        default_factory=list,
+        description=(
+            "The claimed actions it does, by their blocks' ids: open actions of "
+            "registered documents of the project, as a pass's `add_item` names "
+            "them"
+        ),
+        examples=[["0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15/A1"]],
     )
 
 

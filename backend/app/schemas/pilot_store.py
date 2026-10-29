@@ -285,6 +285,14 @@ class AddItemRequestSchema(BaseModel):
         description="A work item's reasoning effort",
         examples=["high"],
     )
+    claims: list[BlockId] = Field(
+        default_factory=list,
+        description=(
+            "The claimed actions a work item does, by their blocks' ids: open"
+            " actions of registered documents of the project (DB decision 64)"
+        ),
+        examples=[["0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15/A1"]],
+    )
 
 
 class AttachRequestSchema(BaseModel):

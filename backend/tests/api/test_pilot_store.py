@@ -18,6 +18,7 @@ from app.models import (
     Attachment,
     Block,
     Chat,
+    ClaimAssignment,
     Document,
     Effect,
     Environment,
@@ -77,6 +78,24 @@ REGISTERED_TEXT = """Two asks about the camp.
 ```
 """
 
+CLAIM = "answer: Pilot does it\nby: agent\nat: 2026-10-12T09:30:00Z\n"
+
+ONE_BLOCK = {
+    "settled": "```question id=Q1\nanswer: deferred\nby: agent\n"
+    "at: 2026-10-12T09:30:00Z\nto: plan\n```\n",
+    "claimed": f"```action id=A1\n{CLAIM}```\n",
+}
+
+CUT_OVER = f"""```action id=A1
+{CLAIM}```
+
+```decision id=D1
+options:
+  - Dome
+  - Tunnel
+```
+"""
+
 
 def _bearer(token: str = TOKEN) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
@@ -121,6 +140,7 @@ def _registered(
     container: ServiceContainer,
     project: Project,
     environment: Environment,
+    text: str = REGISTERED_TEXT,
 ) -> Item:
     worker = models.Session(
         project_id=project.id,
@@ -134,7 +154,7 @@ def _registered(
     db.flush()
     documents = container.document_service()
     item = documents.register(project, worker, "/work/Example/survey.md").item
-    documents.publish_read(db.get_one(Document, item.id), REGISTERED_TEXT, worker.id)
+    documents.publish_read(db.get_one(Document, item.id), text, worker.id)
     return item
 
 
@@ -461,6 +481,30 @@ class TestMark:
         assert response.get_json() == {"effect": "Marked read · The lake is open"}
         session.refresh(item)
         assert item.done_by_user_id == person.id
+
+    @pytest.mark.parametrize(("text", "status"), [("settled", 200), ("claimed", 409)])
+    def test_pilots_own_done_takes_a_one_block_document_it_settled_and_no_claim(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        text: str,
+        status: int,
+    ) -> None:
+        _brain(session, project, environment, "job")
+        item = _registered(session, container, project, environment, ONE_BLOCK[text])
+
+        response = client.post(
+            MARKS, json={"item": str(item.id), "mark": "done"}, headers=_bearer()
+        )
+
+        assert response.status_code == status
+        if status == 200:
+            assert response.get_json() == {"effect": "Marked done · survey.md"}
+        else:
+            assert _error(response).endswith("these blocks are unanswered: A1")
 
     @pytest.mark.parametrize(
         "body",
@@ -842,6 +886,7 @@ class TestAddItem:
             {"kind": "notice", "title": "Camp", "attachments": ["e:/a", "e:/a"]},
             {"kind": "work", "repo": "Example"},
             {"kind": "notice", "title": "Camp", "cards": ["MD-8"]},
+            {**WORK, "claims": ["A1"]},
         ],
     )
     def test_a_body_that_is_not_an_item_is_400(
@@ -876,6 +921,37 @@ class TestAddItem:
         assert _error(response) == (
             "Cannot add a card_wait item because Pilot takes no waits yet"
         )
+
+    @pytest.mark.parametrize(("claim", "status"), [("A1", 201), ("D1", 409)])
+    def test_a_work_item_names_the_claimed_actions_it_does(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        started: SessionStartService,
+        project: Project,
+        environment: Environment,
+        claim: str,
+        status: int,
+    ) -> None:
+        _brain(session, project, environment, "job")
+        document = _registered(session, container, project, environment, CUT_OVER)
+        session.commit()
+
+        response = client.post(
+            ITEMS,
+            json={**WORK, "claims": [f"{document.id}/{claim}"]},
+            headers=_bearer(),
+        )
+
+        assert response.status_code == status
+        named = session.scalars(select(ClaimAssignment)).all()
+        if status == 201:
+            [assignment] = named
+            assert str(assignment.work_id) == response.get_json()["id"]
+        else:
+            assert _error(response).endswith("is a decision, not an action")
+            assert named == []
 
     def test_a_text_with_a_fault_is_409_and_a_task_not_in_the_plan_404(
         self,

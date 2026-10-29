@@ -15,7 +15,9 @@ from app import models
 from app.engine.views import ViewService
 from app.models import (
     Attachment,
+    Block,
     Chat,
+    ClaimAssignment,
     Document,
     Environment,
     Item,
@@ -530,6 +532,29 @@ WORKER_ENV = "example-soup-3f2a1c"
 ENDED = datetime(2026, 10, 26, 9, 29, 50, tzinfo=UTC)
 LAST_WORDS = "Fixed the stock.\n\n  Registered the notes; ending the turn.\n"
 STOCK = "# The stock\n\nLeek, not onion.\n"
+CUT_OVER = """# The cut-over
+
+```action id=A1
+answer: Pilot does it
+by: agent
+at: 2026-10-26T09:00:00Z
+```
+
+```action id=A2
+done: 2026-10-26T09:10:00Z
+by: ada
+note: Salted it myself
+```
+
+```action id=A3
+answer: Pilot does it
+by: agent
+at: 2026-10-26T09:00:00Z
+```
+
+```action id=A4
+```
+"""
 
 
 def _worker_run(
@@ -683,6 +708,65 @@ class TestWorkerTurnEnded:
             " its turn ended 2026-10-26T09:29:50Z.\n"
             "Registered nothing this run."
         ]
+
+    def test_the_claimed_actions_it_was_given_are_named_as_they_stand(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        project_session: models.Session,
+    ) -> None:
+        """Each action whose latest naming is this run, open while it is
+        still claimed, else as its close reads; one a retry named since is
+        the retry's (DB 260; design 3 §6.5)."""
+        documents = container.document_service()
+        cut_over = documents.register(
+            opened, project_session, "/work/Soup/cut-over.md"
+        ).item
+        documents.publish_read(
+            session.get_one(Document, cut_over.id), CUT_OVER, project_session.id
+        )
+        run = _worker_run(session, container, opened, None)
+        retry = models.Session(
+            project_id=opened.id,
+            kind_code="work",
+            cwd="/work/Soup",
+            token_hash="8" * 64,
+            state_code=SessionState.STARTING,
+        )
+        session.add(retry)
+        session.flush()
+        container.record_service().place_work(opened, retry, "Salting it again")
+        blocks = dict(
+            session.execute(
+                select(Block.local_id, Block.id).where(Block.document_id == cut_over.id)
+            ).all()
+        )
+        session.add_all(
+            [
+                *(
+                    ClaimAssignment(work_id=run.id, block_id=blocks[local_id])
+                    for local_id in ("A1", "A2", "A3", "A4")
+                ),
+                ClaimAssignment(work_id=retry.id, block_id=blocks["A3"]),
+            ]
+        )
+        session.flush()
+        _turn_ended(session, container, run, "")
+
+        path = session.get_one(Document, cut_over.id).path
+        assert briefs.job(opened, _after(run), AT, AT).split("\n\n")[3] == (
+            f'The work item: "Fixing the stock" ({run.id}), repository'
+            " example/Soup, environment example-soup-3f2a1c, session claude-7;"
+            " its turn ended 2026-10-26T09:29:50Z.\n"
+            "Registered nothing this run.\n"
+            "The claimed actions given to this work item, as they stand:\n"
+            f"- {path} ({cut_over.id}) A1 open, claimed\n"
+            f'- {path} ({cut_over.id}) A2 done (by ada), pasted back: "Salted it'
+            ' myself"\n'
+            f"- {path} ({cut_over.id}) A4 open, its claim gone"
+        )
 
     def test_a_trigger_in_a_pause_carries_it_after_the_switch(
         self,

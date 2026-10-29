@@ -50,6 +50,7 @@ from app.models import (
     ProjectTransition,
     Turn,
     User,
+    Work,
 )
 from app.models import Session as AgentSession
 from app.models.reference import (
@@ -71,6 +72,7 @@ from app.services.people_service import PeopleService
 from app.services.pilot_store_service import JOB, Brain, PilotStoreService
 from app.services.pilot_work_service import PilotWorkService, Worker
 from app.services.session_scope import STORE_REPO
+from app.services.session_start_service import SessionStartService
 
 SLUG = "recipe-box"
 """The open project's slug; the draft beside it has none."""
@@ -370,6 +372,7 @@ class TestDataService:
         attach_service: AttachService,
         pilot_work_service: PilotWorkService,
         pilot_store_service: PilotStoreService,
+        session_start_service: SessionStartService,
     ) -> None:
         self.db = db
         self.document_service = document_service
@@ -381,6 +384,7 @@ class TestDataService:
         self.attach_service = attach_service
         self.pilot_work_service = pilot_work_service
         self.pilot_store_service = pilot_store_service
+        self.session_start_service = session_start_service
 
     def load_all(self) -> dict[str, int]:
         """Seed the record into an empty database, in the caller's
@@ -844,6 +848,46 @@ class TestDataService:
         """
         worker = self._worker(item_id, f"attach {path}")
         return self.pilot_work_service.attach_file(worker, path, to, tool_use_id)
+
+    def work(
+        self,
+        project_id: uuid.UUID,
+        repo: str,
+        *,
+        title: str,
+        brief: str,
+        cwd: str,
+        step: str | None,
+        claims: Sequence[str],
+    ) -> Work:
+        """A work item placed by repository `repo` and its session started,
+        as every work item's start is, named for the claimed actions
+        `claims`, by their blocks' ids, as a pass's `add_item` names them
+        (F21.6; DB 261).
+
+        Raises:
+            RecordNotFoundException: no project has the id, its plan has no
+                task `step`, a claim's item is not of the project, or its
+                document has no such block.
+            InvalidOperationException: the record refuses a claim; no
+                controller is configured, or the project is finished or
+                archived.
+        """
+        project = self.db.get(Project, project_id)
+        if project is None:
+            raise RecordNotFoundException("Project", str(project_id))
+        claimed = self.record_service.claimable(project, claims, "add a work item")
+        work = self.session_start_service.start_work(
+            self.db,
+            project_id,
+            repo,
+            title=title,
+            brief=brief,
+            cwd=cwd,
+            plan_task_id=step,
+        )
+        self.record_service.give(project, work, claimed)
+        return work
 
     def ask_writer(
         self, item_id: uuid.UUID, questions: Sequence[InventedWriterQuestionSchema]

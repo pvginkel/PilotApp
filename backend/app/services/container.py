@@ -558,6 +558,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         attach_service=attach_service,
         pilot_work_service=pilot_work_service,
         pilot_store_service=pilot_store_service,
+        session_start_service=session_start_service,
     )
 
 

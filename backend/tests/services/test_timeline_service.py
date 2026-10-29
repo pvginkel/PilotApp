@@ -16,6 +16,7 @@ from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import (
     Attachment,
     Block,
+    ClaimAssignment,
     Document,
     DocumentVersion,
     DoneCause,
@@ -144,6 +145,51 @@ title: Pack the stove
 """
 
 NOTICE = "---\ntitle: The site opens in May\n---\n\nThe site opens in May.\n"
+
+CLAIM = "answer: Pilot does it\nby: agent\nat: 2026-10-12T09:30:00Z\n"
+
+CLAIMED_ONLY = f"""```decision id=D1
+options:
+  - Dome
+  - Tunnel
+answer: Dome
+by: agent
+at: 2026-10-12T09:30:00Z
+```
+
+```action id=A1
+{CLAIM}```
+
+```action id=A2
+{CLAIM}```
+"""
+
+CLAIMED_AND_OPEN = f"""```action id=A1
+{CLAIM}```
+
+```action id=A2
+```
+"""
+
+SETTLED_BY_PILOT = """```decision id=D1
+options:
+  - Dome
+  - Tunnel
+answer: Dome
+by: agent
+at: 2026-10-12T09:30:00Z
+```
+"""
+
+DONE_BY_PILOT = f"""```action id=A1
+{CLAIM}```
+
+```action id=A2
+done: 2026-10-12T10:30:00Z
+by: agent
+note: Rotated
+```
+"""
 
 DEFERRED = """---
 title: Camp plan
@@ -707,6 +753,7 @@ class TestTimeline:
                     "via": None,
                     "in_chat": None,
                     "done": None,
+                    "claim": None,
                     "deferral": None,
                     "section": None,
                 },
@@ -2236,6 +2283,21 @@ def _answered_in_chat(
     return record
 
 
+def _registered(
+    container: ServiceContainer,
+    session: DbSession,
+    project: Project,
+    run: models.Session,
+    name: str,
+    text: str,
+) -> Item:
+    """A document `run` registered as `<name>.md`, read at its run's end."""
+    documents = container.document_service()
+    item = documents.register(project, run, f"/work/Camp/docs/{name}.md").item
+    documents.publish_read(_document(session, item), text, run.id)
+    return item
+
+
 def _blocks(entry: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """The entry's blocks by their local ids."""
     return {
@@ -2243,6 +2305,71 @@ def _blocks(entry: dict[str, Any]) -> dict[str, dict[str, Any]]:
         for part in entry["body"]
         if part["type"] == "block"
     }
+
+
+@pytest.mark.usefixtures("person")
+class TestClaims:
+    """An action Pilot claimed and has not done, and the work item its latest
+    naming gives it to, by its title and its address (F21.6; DB 260)."""
+
+    def test_a_claimed_action_names_the_work_item_of_its_latest_naming(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        run = _run(session, project, environment)
+        document = _registered(
+            container, session, project, run, "cut-over", DONE_BY_PILOT
+        )
+        first = _work(session, project, environment, SessionState.FAILED)
+        retry = _work(session, project, environment, SessionState.RUNNING)
+        retry.title = "Rotating the CI token"
+        blocks = {
+            block.local_id: block.id
+            for block in session.scalars(
+                select(Block).where(Block.document_id == document.id)
+            )
+        }
+        session.add_all(
+            [
+                ClaimAssignment(work_id=first.id, block_id=blocks["A1"]),
+                ClaimAssignment(work_id=first.id, block_id=blocks["A2"]),
+                ClaimAssignment(work_id=retry.id, block_id=blocks["A1"]),
+            ]
+        )
+        session.flush()
+
+        line = next(
+            entry
+            for entry in _items(container, project)
+            if entry["id"] == str(document.id)
+        )
+
+        for read in (_blocks(line), _blocks(_read(container, document))):
+            assert read["A1"]["claim"] == {
+                "work": {"id": str(retry.id), "title": "Rotating the CI token"}
+            }
+            assert read["A1"]["answer"] == "Pilot does it"
+            assert read["A2"]["claim"] is None
+
+    def test_a_claim_no_work_item_is_named_for_names_none(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        run = _run(session, project, environment)
+        document = _registered(
+            container, session, project, run, "cut-over", CLAIMED_AND_OPEN
+        )
+
+        blocks = _blocks(_read(container, document))
+
+        assert blocks["A1"]["claim"] == {"work": None}
+        assert blocks["A2"]["claim"] is None
 
 
 @pytest.mark.usefixtures("person")
@@ -3002,6 +3129,21 @@ class TestBadges:
         _wait(session, project, _run(session, project, environment))
 
         assert self._badges(container, person, project) == {}
+
+    def test_a_document_whose_open_blocks_are_all_claimed_waits_on_no_one(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        project = _make(container)
+        run = _run(session, project, environment)
+        _registered(container, session, project, run, "claimed", CLAIMED_ONLY)
+        _registered(container, session, project, run, "another", CLAIMED_AND_OPEN)
+        _registered(container, session, project, run, "settled", SETTLED_BY_PILOT)
+
+        assert self._badges(container, person, project) == {project.id: Badge(2, False)}
 
     def test_each_project_counts_its_own(
         self,

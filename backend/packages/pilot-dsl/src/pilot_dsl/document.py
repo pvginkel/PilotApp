@@ -8,6 +8,13 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 
+AGENT = "agent"
+"""Pilot's handle (decision 18): a `by: agent` line is the agent's own."""
+
+CLAIM = "Pilot does it"
+"""The answer by which the pre-ruling pass claims an action Pilot may run under
+the grants (F21.6): the action stays open and Pilot's until its `done`."""
+
 
 class BlockKind(StrEnum):
     """The grammar's block kinds; their values are Block Kind's (DB §2.4)."""
@@ -90,9 +97,21 @@ class Block:
     section: Section | None = None
 
     @property
+    def claimed(self) -> bool:
+        """An action Pilot claimed, `answer: Pilot does it`, `by: agent`, and
+        has not done (DB 262)."""
+        return (
+            self.kind is BlockKind.ACTION
+            and self.answer == CLAIM
+            and self.by == AGENT
+            and self.done is None
+        )
+
+    @property
     def answered(self) -> bool:
-        """An `answer`, `deferred` included, or `done` (DB Block)."""
-        return self.answer is not None or self.done is not None
+        """An `answer`, `deferred` included, or `done`; a claim only once it is
+        done (DB 154)."""
+        return self.done is not None or (self.answer is not None and not self.claimed)
 
 
 @dataclass(frozen=True)
