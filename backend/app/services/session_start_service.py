@@ -146,6 +146,7 @@ from app.services.start_gate import (
     carried,
     held_reason,
     queued,
+    setups,
 )
 from app.services.supervisor import LoopHandle, Supervisor
 from app.services.work_status import work_moved
@@ -449,9 +450,10 @@ class SessionStartService:
         closed for it, else `starting`, its start run once this commits. A
         Chat's, its Turn to send written by the caller, is never held for the
         pause and takes no slot. A job's, placed with no Turn, waits its turn
-        behind its project's jobs before it; going at once, it is briefed at
-        its trigger's instant, its Session's `created_at` (`_brief`). No
-        controller call is made.
+        behind its project's jobs before it, held for the pause but the
+        setup's (`setups`); going at once, it is briefed at its trigger's
+        instant, its Session's `created_at` (`_brief`). No controller call is
+        made.
 
         Raises:
             InvalidOperationException: No controller or no store environment
@@ -463,7 +465,9 @@ class SessionStartService:
             raise InvalidOperationException(
                 operation, "no store environment is configured"
             )
-        held = self._held(db, project, session.kind_code, queued=_queued(db, session))
+        held = self._held(
+            db, project, session.kind_code, queued=_queued(db, session), session=session
+        )
         if held is None:
             session.state_code = SessionState.STARTING
             if _unbriefed(session):
@@ -1483,8 +1487,9 @@ class SessionStartService:
     ) -> Held | None:
         """Why the gate holds a start of a Session of `kind_code` in
         `project` now, a job's `queued` behind another of its project or not,
-        a work item's `session` when it is written already; None while it is
-        open. A work item's counts the slot under the slot's lock
+        a work item's or a job's `session` when it is written already, a
+        setup's let through the pause (`setups`); None while it is open. A
+        work item's counts the slot under the slot's lock
         (`WorkSlots.lock`), held to the transaction's end, so the next start's
         count sees the Session this one moves to `starting`, and reads under
         it whether another Session carries the conversation `session`
@@ -1498,6 +1503,9 @@ class SessionStartService:
         return held_reason(
             paused=project.paused,
             kind_code=kind_code,
+            setup=session is not None
+            and kind_code == JOB_KIND
+            and session.id in setups(db, [session.id]),
             unreachable=self._outage.holds,
             filled=filled,
             queued=queued,

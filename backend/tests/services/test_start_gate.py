@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
 from app.database import scoped_session
-from app.models import Environment, Project, User
+from app.models import Environment, Project, User, Work
 from app.models import Session as AgentSession
 from app.models.reference import SessionState, WorkTrigger
 from app.schemas.timeline import HeldReason
@@ -25,6 +25,7 @@ from app.services.start_gate import (
     conversing,
     held_reason,
     queued,
+    setups,
 )
 from app.utils import after_commit as after_commit_module
 from app.utils.after_commit import clear_after_commit_callbacks
@@ -87,10 +88,38 @@ class TestHeldReason:
             held_reason(
                 paused=paused,
                 kind_code=kind_code,
+                setup=False,
                 unreachable=unreachable,
                 filled=filled,
                 queued=queued,
                 conversing=conversing,
+            )
+            == held
+        )
+
+    @pytest.mark.parametrize(
+        ("paused", "unreachable", "queued", "held"),
+        [
+            (True, False, False, None),
+            (False, False, False, None),
+            (True, True, True, Held(UNREACHABLE)),
+            (True, False, True, Held(HeldReason.QUEUE)),
+        ],
+    )
+    def test_the_setup_is_never_held_for_the_pause_its_other_holds_standing(
+        self, paused: bool, unreachable: bool, queued: bool, held: Held | None
+    ) -> None:
+        """Create project's pause holds every start but the setup's, a
+        Retry's included (P-74)."""
+        assert (
+            held_reason(
+                paused=paused,
+                kind_code="job",
+                setup=True,
+                unreachable=unreachable,
+                filled=None,
+                queued=queued,
+                conversing=False,
             )
             == held
         )
@@ -307,18 +336,54 @@ class TestLeft:
 
 
 def _jobs(
-    container: ServiceContainer, db: DbSession, project: Project, *states: SessionState
+    container: ServiceContainer,
+    db: DbSession,
+    project: Project,
+    *states: SessionState,
+    trigger: WorkTrigger = WorkTrigger.SETUP,
 ) -> list[AgentSession]:
-    """A job of the project's in each of `states`, placed in that order, as
-    their rows have them."""
+    """A job of the project's of `trigger` in each of `states`, placed in that
+    order, as their rows have them."""
     runs = _sessions(db, project, SessionState.HELD, len(states), kind_code="job")
     for run, state in zip(runs, states, strict=True):
         container.record_service().place_work(
-            project, run, "Setting up the project", trigger=WorkTrigger.SETUP
+            project, run, "Setting up the project", trigger=trigger
         )
         run.state_code = state
     db.flush()
     return runs
+
+
+class TestSetups:
+    """The jobs the pause holds not: the setup's, a Retry's among them
+    (P-74)."""
+
+    def test_the_setups_and_their_retries_and_no_other_job_or_work_item(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        camp = _project(session, person)
+        failed, retry = _jobs(
+            container, session, camp, SessionState.FAILED, SessionState.HELD
+        )
+        session.get_one(Work, failed.id).retried_by_id = retry.id
+        (other,) = _jobs(
+            container,
+            session,
+            camp,
+            SessionState.HELD,
+            trigger=WorkTrigger.ITEM_DONE,
+        )
+        (run,) = _sessions(session, camp, SessionState.HELD)
+        container.record_service().place_work(camp, run, "Renaming the badge")
+        session.flush()
+
+        assert setups(session, [failed.id, retry.id, other.id, run.id]) == {
+            failed.id,
+            retry.id,
+        }
+
+    def test_of_none_none(self, session: DbSession) -> None:
+        assert setups(session, []) == set()
 
 
 class TestQueued:

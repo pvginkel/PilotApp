@@ -1,14 +1,15 @@
 """The gate every start passes (design 2 §13.4, §13.5, D11; F141.5, F143.4,
 F59.2; DB 229, 243).
 
-A start is held while its project is paused, a Chat's never (F141.4), while
-the controller is unreachable; a work item's alone while no slot is free: the
-work items running or starting across every Project number the cross-project
-maximum, or those of its Project the per-project one; a job's alone while
-another job of its Project is before it (`queued`); and a work item's alone
-while another Session runs or starts on the conversation it resumes, in
-its Environment (`carried`; DB 183): a run's continuation and its clarification run each
-wait for the other's turn to end. Where more than one holds, the pause comes
+A start is held while its project is paused, a Chat's never (F141.4), nor
+the setup's, a Retry's included, which runs under the pause Create project
+writes (P-74); while the controller is unreachable; a work item's alone while
+no slot is free: the work items running or starting across every Project
+number the cross-project maximum, or those of its Project the per-project
+one; a job's alone while another job of its Project is before it (`queued`);
+and a work item's alone while another Session runs or starts on the
+conversation it resumes, in its Environment (`carried`; DB 183): a run's
+continuation and its clarification run each wait for the other's turn to end. Where more than one holds, the pause comes
 first, then the outage, which is the gold bar's, then the slot, then the
 queue, then the conversation. The halt is slice 016's condition.
 
@@ -26,9 +27,9 @@ from dataclasses import dataclass
 from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.orm import Session, aliased
 
-from app.models import Item
+from app.models import Item, Work
 from app.models import Session as AgentSession
-from app.models.reference import SessionState
+from app.models.reference import SessionState, WorkTrigger
 from app.schemas.timeline import HeldReason
 from app.utils.after_commit import after_commit
 
@@ -65,18 +66,20 @@ def held_reason(
     *,
     paused: bool,
     kind_code: str,
+    setup: bool,
     unreachable: bool,
     filled: int | None,
     queued: bool,
     conversing: bool,
 ) -> Held | None:
     """Why the gate holds a start of a Session of `kind_code` in a project
-    `paused` or not, the controller `unreachable` or not, where `filled`
-    running work items leave a work item no slot (`WorkSlots.filled`), None
-    while one is free, a job is `queued` behind another of its project or
-    not, and another Session carries the conversation a work item resumes
-    (`conversing`) or not; None while the gate is open."""
-    if paused and kind_code != CHAT_KIND:
+    `paused` or not, a job the `setup` or not (`setups`), the controller
+    `unreachable` or not, where `filled` running work items leave a work item
+    no slot (`WorkSlots.filled`), None while one is free, a job is `queued`
+    behind another of its project or not, and another Session carries the
+    conversation a work item resumes (`conversing`) or not; None while the
+    gate is open."""
+    if paused and kind_code != CHAT_KIND and not setup:
         return Held(HeldReason.PAUSED)
     if unreachable:
         return Held(HeldReason.CONTROLLER_UNREACHABLE)
@@ -87,6 +90,21 @@ def held_reason(
     if kind_code == WORK_KIND and conversing:
         return Held(HeldReason.CONVERSATION)
     return None
+
+
+def setups(db: Session, session_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
+    """The setups among `session_ids` (F49), a Retry's included: the jobs of
+    the Work Trigger `setup`, which the pause holds not."""
+    if not session_ids:
+        return set()
+    return set(
+        db.scalars(
+            select(Work.id).where(
+                Work.id.in_(list(session_ids)),
+                Work.trigger_code == WorkTrigger.SETUP,
+            )
+        )
+    )
 
 
 def carried(db: Session, session: AgentSession) -> bool:

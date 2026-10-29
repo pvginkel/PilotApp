@@ -6314,6 +6314,19 @@
             "title": "Items",
             "type": "array"
           },
+          "ready_after": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The setup's work item, under which the line \"The project is ready — resume the project to start it.\" stands: while the project is open and paused by the pause Create project wrote, Pilot's `paused` right after `opened` with no `resumed` since, and its setup, its latest Retry's where it was retried, is done at its turn's end (P-74); null otherwise, a person's pause included",
+            "title": "Ready After"
+          },
           "unhung_attachments": {
             "description": "The attachments hung on no item, by batch and file name: a draft's material, attached in its definition chat, until Create project hangs it on the opening (F36.6, F46.3); none past Create",
             "items": {
@@ -6326,6 +6339,7 @@
         "required": [
           "finished_at",
           "items",
+          "ready_after",
           "unhung_attachments"
         ],
         "title": "TimelineSchema",

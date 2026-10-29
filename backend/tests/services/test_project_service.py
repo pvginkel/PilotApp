@@ -65,6 +65,7 @@ from app.models.reference import (
 )
 from app.schemas.projects import ProjectStatus
 from app.schemas.testing_record import InventedProjectCreateSchema
+from app.schemas.timeline import HeldReason
 from app.services.auth_service import AuthContext
 from app.services.chat_close_service import CLOSED
 from app.services.container import ServiceContainer
@@ -1156,7 +1157,7 @@ class TestCreateProject:
 
         _create(container, draft.id)
 
-        ((kind, at, by),) = _transitions(session, draft)
+        ((kind, at, by), _) = _transitions(session, draft)
         assert (kind, by) == (TransitionKind.OPENED, person.id)
         assert started <= at <= datetime.now(UTC)
         assert (draft.state_code, draft.slug, draft.name) == (
@@ -1264,7 +1265,7 @@ class TestCreateProject:
         _create(container, draft.id)
 
         session.refresh(chat)
-        ((_, at, _),) = _transitions(session, draft)
+        ((_, at, _), _) = _transitions(session, draft)
         assert (chat.close_cause_code, chat.closed_at) == (CloseCause.CREATED, at)
         assert _last_record(session, session.get_one(models.Session, chat.id)) == (
             RecordKind.SERVER,
@@ -1364,7 +1365,7 @@ class TestCreateProjectSetup:
 
         _create(container, draft.id)
 
-        ((_, at, _),) = _transitions(session, draft)
+        ((_, at, _), _) = _transitions(session, draft)
         (turn,) = session.scalars(
             select(Turn).where(Turn.session_id == _setup(session, draft).id)
         )
@@ -1421,6 +1422,230 @@ class TestCreateProjectSetup:
         assert raised.value.message == (
             "Cannot create Camp site because no controller is configured"
         )
+
+
+def _pilot(db: DbSession) -> User:
+    return db.scalars(select(User).where(User.kind_code == UserKind.AGENT)).one()
+
+
+def _turn_ended(container: ServiceContainer, db: DbSession, job: Item) -> None:
+    """The job's turn ended well, as the relay ends it: its Session idle, its
+    work item done `turn_ended`."""
+    db.get_one(models.Session, job.id).state_code = SessionState.IDLE
+    container.record_service().work_done(job.id, datetime.now(UTC))
+    db.flush()
+
+
+def _setup_running(db: DbSession, project: Project) -> models.Session:
+    """The setup's start sent: its Session `running`."""
+    job = db.get_one(models.Session, _setup(db, project).id)
+    job.state_code = SessionState.RUNNING
+    db.flush()
+    return job
+
+
+def _placed(starts: SessionStartService, db: DbSession, project: Project) -> Work:
+    """A work item the setup places, as its `add_item` of one starts it."""
+    return starts.start_work(
+        db,
+        project.id,
+        "example/Camp",
+        title="Pitching the tents",
+        brief="Pitch the tents.",
+        cwd="/work/Camp",
+    )
+
+
+def _ready_after(container: ServiceContainer, project: Project) -> uuid.UUID | None:
+    return container.timeline_service().timeline(project.id).ready_after
+
+
+def _status(container: ServiceContainer, project: Project) -> ProjectStatus | None:
+    return container.project_service().head(ADA, project.id).status
+
+
+@pytest.mark.usefixtures("person")
+class TestCreateProjectPaused:
+    """Every new project is paused by Pilot at Create, its setup let through:
+    its work items wait for a person's resume, and the timeline says the
+    project is ready once the setup's turn ends (P-74; D1, D2)."""
+
+    @pytest.mark.usefixtures("starts")
+    def test_pilot_pauses_it_right_after_opened_at_creates_instant(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> None:
+        draft = _drafted(container, session, person)
+
+        _create(container, draft.id)
+
+        (opened, paused) = _transitions(session, draft)
+        assert opened == (TransitionKind.OPENED, opened[1], person.id)
+        assert paused == (TransitionKind.PAUSED, opened[1], _pilot(session).id)
+        assert (draft.state_code, draft.paused) == (ProjectState.OPEN, True)
+
+    def test_the_setup_runs_its_work_items_held_and_the_line_shows_once_its_turn_ends_gone_at_the_resume(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        starts: SessionStartService,
+    ) -> None:
+        draft = _drafted(container, session, person)
+        _create(container, draft.id)
+        setup = _setup(session, draft)
+        assert session.get_one(models.Session, setup.id).state_code is (
+            SessionState.STARTING
+        )
+        assert (
+            starts.held(session, draft, session.get_one(models.Session, setup.id))
+            is None
+        )
+
+        _setup_running(session, draft)
+        work = _placed(starts, session, draft)
+
+        run = session.get_one(models.Session, work.id)
+        held = starts.held(session, draft, run)
+        assert run.state_code is SessionState.HELD
+        assert held is not None and held.reason is HeldReason.PAUSED
+        assert _status(container, draft) is ProjectStatus.PAUSING
+        assert _ready_after(container, draft) is None
+
+        _turn_ended(container, session, setup)
+
+        assert _status(container, draft) is ProjectStatus.PAUSED
+        assert _ready_after(container, draft) == setup.id
+        assert container.timeline_service().badges(person, [draft.id]) == {}
+
+        container.project_service().transition(ADA, draft.id, TransitionKind.RESUMED)
+
+        assert _ready_after(container, draft) is None
+        assert starts.held(session, draft, run) is None
+        starts.release(LoopHandle("start:held"))
+        assert (
+            session.get_one(models.Session, work.id, populate_existing=True).state_code
+            is SessionState.STARTING
+        )
+
+    def test_a_resume_during_the_setup_cancels_the_pause_and_its_work_items_start(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        starts: SessionStartService,
+    ) -> None:
+        draft = _drafted(container, session, person)
+        _create(container, draft.id)
+        setup = _setup(session, draft)
+        _setup_running(session, draft)
+
+        container.project_service().transition(ADA, draft.id, TransitionKind.RESUMED)
+
+        assert _status(container, draft) is ProjectStatus.RUNNING
+        work = _placed(starts, session, draft)
+        assert session.get_one(models.Session, work.id).state_code is (
+            SessionState.STARTING
+        )
+        _turn_ended(container, session, setup)
+        assert draft.paused is False
+        assert _ready_after(container, draft) is None
+
+    def test_a_failed_setup_and_its_retry_under_the_pause(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        starts: SessionStartService,
+    ) -> None:
+        """The failed setup shows no line; its Retry goes on under the pause,
+        briefed as the setup is, and once its turn ends the line stands under
+        it, the Retry's."""
+        draft = _drafted(container, session, person)
+        _create(container, draft.id)
+        failed = _setup_running(session, draft)
+        failed.state_code = SessionState.FAILED
+        failed.error = "API error"
+        (brief,) = session.scalars(select(Turn).where(Turn.session_id == failed.id))
+        brief.ended_at = failed.turn_ended_at = datetime.now(UTC)
+        session.flush()
+        assert _ready_after(container, draft) is None
+
+        retried = container.job_service(session_start_service=starts).retry(failed.id)
+
+        retry = session.get_one(models.Session, retried.id)
+        assert (retry.state_code, draft.paused) == (SessionState.STARTING, True)
+        (turn,) = session.scalars(select(Turn).where(Turn.session_id == retry.id))
+        assert turn.message.startswith("/plan\n\nPilot's brief · the setup ·")
+        assert "paused" not in turn.message
+        assert _ready_after(container, draft) is None
+
+        _turn_ended(container, session, session.get_one(Item, retry.id))
+
+        assert _ready_after(container, draft) == retry.id
+
+    def test_a_new_project_resumed_and_paused_again_by_hand_shows_no_line(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        starts: SessionStartService,
+    ) -> None:
+        draft = _drafted(container, session, person)
+        _create(container, draft.id)
+        _turn_ended(container, session, _setup(session, draft))
+        assert _ready_after(container, draft) is not None
+
+        container.project_service().transition(ADA, draft.id, TransitionKind.RESUMED)
+        container.project_service().transition(ADA, draft.id, TransitionKind.PAUSED)
+
+        assert (draft.paused, _status(container, draft)) == (
+            True,
+            ProjectStatus.PAUSED,
+        )
+        assert _ready_after(container, draft) is None
+
+    def test_a_project_opened_before_and_paused_by_hand_shows_no_line(
+        self, container: ServiceContainer, session: DbSession
+    ) -> None:
+        """Opened and paused by a person, its setup done: no pause of
+        Create's, no line, and its open standing untouched."""
+        camp = _make(container, name="Camp", paused=True)
+        job = models.Session(
+            project_id=camp.id,
+            kind_code="job",
+            cwd=STORE_REPO,
+            token_hash=uuid.uuid4().hex * 2,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(job)
+        session.flush()
+        container.record_service().place_work(
+            camp, job, SETUP_TITLE, trigger=WorkTrigger.SETUP
+        )
+        _turn_ended(container, session, session.get_one(Item, job.id))
+
+        assert [kind for kind, _, _ in _transitions(session, camp)] == [
+            TransitionKind.OPENED,
+            TransitionKind.PAUSED,
+        ]
+        assert _ready_after(container, camp) is None
+
+    @pytest.mark.usefixtures("starts")
+    @pytest.mark.parametrize("kind", [TransitionKind.FINISHED, TransitionKind.ARCHIVED])
+    def test_a_finished_or_archived_project_shows_no_line(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        kind: TransitionKind,
+    ) -> None:
+        draft = _drafted(container, session, person)
+        _create(container, draft.id)
+        _turn_ended(container, session, _setup(session, draft))
+
+        container.project_service().transition(ADA, draft.id, kind)
+
+        assert _ready_after(container, draft) is None
 
 
 @pytest.mark.usefixtures("person")

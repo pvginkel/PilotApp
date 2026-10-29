@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session, aliased
 from app.engine.claims import claimed, standing
 from app.engine.documents import OPENING, PROSE, awaiting_read, awaits_read
 from app.engine.paths import tree_path
-from app.engine.record import MARKED, NOTICE, SETTLED, RecordService
+from app.engine.record import MARKED, NOTICE, SETTLED, TURN_ENDED, RecordService
 from app.exceptions import RecordNotFoundException
 from app.models import (
     Attachment,
@@ -54,7 +54,9 @@ from app.models.reference import (
     RecordKind,
     SessionState,
     TransitionKind,
+    UserKind,
     VersionCause,
+    WorkTrigger,
 )
 from app.schemas.links import EnvironmentNameSchema
 from app.schemas.timeline import (
@@ -239,6 +241,7 @@ def work_status(
             Environment.name,
             Work.autopilot,
             Project.paused,
+            Work.trigger_code,
             stopper,
             retry.id,
             retry.created_at,
@@ -295,12 +298,13 @@ def work_status(
         ],
     )
     held: dict[uuid.UUID, Held] = {}
-    for session, _, _, _, paused, *_ in rows:
+    for session, _, _, _, paused, trigger, *_ in rows:
         if session.state_code is not SessionState.HELD:
             continue
         reason = held_reason(
             paused=paused,
             kind_code=session.kind_code,
+            setup=trigger is WorkTrigger.SETUP,
             unreachable=unreachable,
             filled=filled.get(session.project_id),
             queued=session.id in behind,
@@ -345,6 +349,7 @@ def work_status(
             env_id,
             name,
             autopilot,
+            _,
             _,
             stopped_by,
             retry_id,
@@ -456,6 +461,7 @@ class TimelineService:
         ).all()
         return TimelineSchema(
             finished_at=self._finished_at(project),
+            ready_after=self._ready_after(project),
             items=self._items(
                 project,
                 [(item, document, form) for item, document, form in rows],
@@ -877,6 +883,49 @@ class TimelineService:
             cause=cast(DoneCauseCode, item.done_cause_code),
             by=reader.user(item.done_by_user_id),
             undo=self.record_service.offers_undo(item),
+        )
+
+    def _ready_after(self, project: Project) -> uuid.UUID | None:
+        """The setup's work item while the project is paused by Create's pause
+        and its setup is done (`TimelineSchema.ready_after`; P-74); None
+        otherwise. Pilot pauses a project at its Create alone, and a resume
+        ends that pause for good."""
+        if (
+            project.state_code is not ProjectState.OPEN
+            or project.archived
+            or not project.paused
+        ):
+            return None
+        since_opened = self.db.execute(
+            select(ProjectTransition.kind_code, User.kind_code)
+            .join(User, User.id == ProjectTransition.by_user_id)
+            .where(
+                ProjectTransition.project_id == project.id,
+                ProjectTransition.id
+                >= select(ProjectTransition.id)
+                .where(
+                    ProjectTransition.project_id == project.id,
+                    ProjectTransition.kind_code == TransitionKind.OPENED,
+                )
+                .scalar_subquery(),
+            )
+            .order_by(ProjectTransition.id)
+        ).all()
+        if (
+            len(since_opened) < 2
+            or tuple(since_opened[1]) != (TransitionKind.PAUSED, UserKind.AGENT)
+            or any(kind is TransitionKind.RESUMED for kind, _ in since_opened)
+        ):
+            return None
+        return self.db.scalar(
+            select(Item.id)
+            .join(Work, Work.id == Item.id)
+            .where(
+                Item.project_id == project.id,
+                Work.trigger_code == WorkTrigger.SETUP,
+                Work.retried_by_id.is_(None),
+                Item.done_cause_code == TURN_ENDED,
+            )
         )
 
     def _finished_at(self, project: Project) -> datetime | None:

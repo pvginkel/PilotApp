@@ -646,6 +646,7 @@ class TestGetTimeline:
                     "work": None,
                 },
             ],
+            "ready_after": None,
             "unhung_attachments": [],
         }
 

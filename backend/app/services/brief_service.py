@@ -193,7 +193,9 @@ class BriefService:
         """The setup's (F49), triggered at Create project's instant, which
         opened the project and took its slug: `/plan`, then the draft's folder
         and the project's, the draft, the opening that holds the words that
-        started it, and the plan, empty. No notes: its plan holds none."""
+        started it, and the plan, empty. No notes: its plan holds none. No
+        pause line: the pause holds no setup (`setups`), and Create's pauses
+        the project it opens (P-74)."""
         opening = self.db.scalars(
             select(Item.id).where(
                 Item.project_id == project.id, Item.kind_code == OPENING
@@ -204,7 +206,7 @@ class BriefService:
             "the setup",
             project,
             at,
-            [_switch(project), self._trigger_paused(project, triggered)],
+            [_switch(project)],
             [
                 f"The project was created {utc_time(triggered)} from"
                 f" {draft_folder(project)}; its folder is now"

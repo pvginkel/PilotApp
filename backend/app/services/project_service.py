@@ -48,6 +48,7 @@ from app.models.reference import (
     SessionState,
     TaskStatus,
     TransitionKind,
+    UserKind,
 )
 from app.schemas.projects import ProjectStatus
 from app.services.auth_service import AuthContext
@@ -525,10 +526,13 @@ class ProjectService:
     def _create(self, project: Project, person: User) -> None:
         """Create project (F48), by `person`, now, under the project's row: the
         draft opened, `opened`, its slug the one its front matter names (DB
-        decision 1); the handbook born empty beside the draft (F129.2); the
-        opening first on the timeline, the first message to the definition
-        chat verbatim by its author (F18), the draft as it stands copied onto
-        it, then every attachment hung on nothing (F18.1, F36.6); the setup
+        decision 1), then paused by Pilot (`paused`, DB Project Transition;
+        P-74), so that its work waits for a person's resume once its plan is
+        ready, its setup let through (`setups`); the handbook born empty
+        beside the draft (F129.2); the opening first on the timeline, the
+        first message to the definition chat verbatim by its author (F18),
+        the draft as it stands copied onto it, then every attachment hung on
+        nothing (F18.1, F36.6); the setup
         after it, Pilot's first background job (F49), whose session is
         created once the project's new folder is on disk; and the definition
         chat closed, `created` (F48.2, F130.2), so that the next message
@@ -554,6 +558,7 @@ class ProjectService:
         # In the flush that opens it: `ck_projects_draft_slug`.
         project.slug = creation.slug
         self.db.flush()
+        self._write(project, self._pilot(), at, TransitionKind.PAUSED)
         self.document_service.bear_handbook(project)
         opening = self.document_service.bear_opening(
             project,
@@ -567,6 +572,11 @@ class ProjectService:
         self.chat_close_service.close_open(self.db, project, CloseCause.CREATED, at)
         self.view_service.timeline_moved(project)
         self.engine_bus.emit(ManifestChanged())
+
+    def _pilot(self) -> User:
+        return self.db.scalars(
+            select(User).where(User.kind_code == UserKind.AGENT)
+        ).one()
 
     def _creation(self, project: Project) -> _Creation | str:
         """What Create project takes from the project, or why it is refused

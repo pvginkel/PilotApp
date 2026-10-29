@@ -9,11 +9,11 @@ the brain's model and effort, boxed to the project's folder and handed
 `pilot-store` (`scoped_create`), created at that instant, and its Work, of its
 Work Trigger, in no repository, its Item next on the timeline. It starts
 through the gate (`SessionStartService.start_brain`): held while its project
-is paused, and while another job of its project is before it, one at a time
-in the order their triggers came (F59.2), taking no slot (DB 243); its create
-made again for a bounded time while its project's folder is not on disk
-(F50). Its brief is composed as it leaves the queue or the pause, from the
-record as it then stands (F59, F141.4). Its work item is done once its last
+is paused, the setup's never (`setups`), and while another job of its project
+is before it, one at a time in the order their triggers came (F59.2), taking
+no slot (DB 243); its create made again for a bounded time while its
+project's folder is not on disk (F50). Its brief is composed as it leaves the
+queue or the pause, from the record as it then stands (F59, F141.4). Its work item is done once its last
 turn ends, a follow-up turn included (`RelayService`), and its project's next
 job goes on then; a person's Stop and Resume do not take it (F26.3).
 
@@ -87,9 +87,9 @@ class JobService:
 
     def setup(self, project: Project, at: datetime, operation: str) -> Work:
         """The setup (F49), placed at Create project's instant `at` in its
-        transaction, which opened the project and holds its row, its work
-        item after the opening; briefed from the draft and Create's instant
-        (`BriefService.job`).
+        transaction, which opened and paused the project and holds its row,
+        its work item after the opening, let through the pause; briefed from
+        the draft and Create's instant (`BriefService.job`).
 
         Raises:
             InvalidOperationException: No controller or no store environment

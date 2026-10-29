@@ -44,6 +44,7 @@ from app.models.reference import (
     SessionState,
     TaskStatus,
     TransitionKind,
+    UserKind,
     WorkTrigger,
 )
 from app.services.brief_service import FOLLOW_UP_END, BriefService, is_follow_up
@@ -479,6 +480,34 @@ class TestSetup:
             " it).\n"
             "The plan: plan.json, empty."
         )
+
+    @pytest.mark.parametrize("resumed", [False, True])
+    def test_under_a_pause_it_composes_with_no_pause_line(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        person: User,
+        resumed: bool,
+    ) -> None:
+        """Paused at Create's instant by Pilot, its trigger's, and still
+        paused, or resumed and paused again by a person before a Retry: the
+        pause holds no setup, whose brief is the one with no pause (P-74)."""
+        container.document_service().bear_opening(
+            opened, "Ada Example started this project", person, "Soup?"
+        )
+        unpaused = briefs.job(opened, SETUP, AT, LATER)
+        pilot = session.scalars(
+            select(User).where(User.kind_code == UserKind.AGENT)
+        ).one()
+        _transition(session, opened, pilot, TransitionKind.PAUSED, AT)
+        if resumed:
+            _transition(session, opened, person, TransitionKind.RESUMED, RESUMED_AT)
+            _transition(session, opened, person, TransitionKind.PAUSED, LATER)
+
+        assert briefs.job(opened, SETUP, AT, LATER) == unpaused
+        assert "paused" not in unpaused
 
     def test_composed_later_its_stamp_and_switch_are_then_its_creation_creates(
         self,
@@ -1127,39 +1156,41 @@ PAUSE_LINE = (
 class TestJobPause:
     """A job whose trigger came while its project was paused carries the
     pause it came in, its interval and that the record moved on (design 3
-    §5.2; F141.4; V11)."""
+    §5.2; F141.4; V11). The setup carries none: the pause holds it not
+    (P-74)."""
 
     @pytest.fixture
-    def opening(
-        self, container: ServiceContainer, opened: Project, person: User
-    ) -> Item:
-        return container.document_service().bear_opening(
-            opened, "Ada Example started this project", person, "Soup?"
-        )
+    def job(
+        self, session: DbSession, container: ServiceContainer, opened: Project
+    ) -> Work:
+        """The job after a worker's turn, as the brief reads it."""
+        run = _worker_run(session, container, opened, None)
+        _turn_ended(session, container, run, LAST_WORDS)
+        return _after(run)
 
-    @pytest.mark.usefixtures("opening")
     def test_a_trigger_in_a_pause_carries_it_after_the_switch(
         self,
         session: DbSession,
         briefs: BriefService,
         opened: Project,
         person: User,
+        job: Work,
     ) -> None:
         _transition(session, opened, person, TransitionKind.PAUSED, PAUSED_AT)
         _transition(session, opened, person, TransitionKind.RESUMED, RESUMED_AT)
 
-        assert briefs.job(opened, SETUP, AT, LATER).split("\n\n")[2] == (
+        assert briefs.job(opened, job, AT, LATER).split("\n\n")[2] == (
             "Auto pilot: off — the granted column asks for this session"
             f" (rules/grants.md).\n{PAUSE_LINE}"
         )
 
-    @pytest.mark.usefixtures("opening")
     def test_of_two_pauses_it_names_the_one_its_trigger_came_in(
         self,
         session: DbSession,
         briefs: BriefService,
         opened: Project,
         person: User,
+        job: Work,
     ) -> None:
         early = datetime(2026, 10, 26, 8, 0, 0, tzinfo=UTC)
         _transition(session, opened, person, TransitionKind.PAUSED, early)
@@ -1179,7 +1210,7 @@ class TestJobPause:
             RESUMED_AT.replace(minute=7),
         )
 
-        assert PAUSE_LINE in briefs.job(opened, SETUP, AT, LATER)
+        assert PAUSE_LINE in briefs.job(opened, job, AT, LATER)
 
     @pytest.mark.parametrize(
         ("paused", "resumed"),
@@ -1190,7 +1221,6 @@ class TestJobPause:
             (AT.replace(minute=45), RESUMED_AT),
         ],
     )
-    @pytest.mark.usefixtures("opening")
     def test_a_trigger_outside_a_pause_carries_none(
         self,
         session: DbSession,
@@ -1199,11 +1229,12 @@ class TestJobPause:
         person: User,
         paused: datetime,
         resumed: datetime,
+        job: Work,
     ) -> None:
         _transition(session, opened, person, TransitionKind.PAUSED, paused)
         _transition(session, opened, person, TransitionKind.RESUMED, resumed)
 
-        assert "Paused" not in briefs.job(opened, SETUP, AT, LATER)
+        assert "Paused" not in briefs.job(opened, job, AT, LATER)
 
 
 CONFIRM = """---

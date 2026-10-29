@@ -342,6 +342,8 @@
   .item-head .edited .avatar { align-self: center; }
   /* That Pilot asked a registered document's writer (F86.8), Pilot's mark before the words. */
   .writer-asked { display: flex; align-items: center; gap: 6px; font-size: 13.5px; }
+  /* Pilot's line under a new project's setup while Create's pause holds its work (P-74). */
+  .project-ready { display: flex; align-items: center; gap: 6px; margin: 10px 0; font-size: 13.5px; color: hsl(var(--muted-foreground)); }
 
   /* A section Pilot settled, one line until opened (F31.5): its mark, its heading, the answer, the
      note a muted line under them; each clipped to its line, consecutive ones one tight list. */

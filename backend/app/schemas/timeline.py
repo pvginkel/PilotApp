@@ -672,6 +672,16 @@ class TimelineSchema(BaseModel):
         )
     )
     items: list[TimelineItemSchema] = Field(description="The items, in their order")
+    ready_after: uuid.UUID | None = Field(
+        description=(
+            "The setup's work item, under which the line \"The project is ready — "
+            'resume the project to start it." stands: while the project is open '
+            "and paused by the pause Create project wrote, Pilot's `paused` right "
+            "after `opened` with no `resumed` since, and its setup, its latest "
+            "Retry's where it was retried, is done at its turn's end (P-74); null "
+            "otherwise, a person's pause included"
+        )
+    )
     unhung_attachments: list[AttachmentSchema] = Field(
         description=(
             "The attachments hung on no item, by batch and file name: a draft's "

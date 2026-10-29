@@ -19,7 +19,7 @@ from werkzeug.wrappers import Request, Response
 
 from app import models
 from app.database import scoped_session
-from app.engine.views import ViewService
+from app.engine.views import ViewService, utc_time
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import Item, Project, ProjectTransition, Turn, User, Work
 from app.models.reference import (
@@ -218,26 +218,64 @@ class TestSetup:
             [f"PILOT_PROJECT={FOLDER}", f"PILOT_SESSION={job.id}"],
         )
 
-    def test_it_is_held_while_the_project_is_paused_its_brief_not_yet_composed(
+    @pytest.mark.parametrize("by_pilot", [True, False])
+    def test_the_pause_holds_it_not_its_brief_composed_at_once(
         self,
         container: ServiceContainer,
         session: DbSession,
         starts: SessionStartService,
         opened: Project,
         opening: Item,
+        person: User,
+        by_pilot: bool,
     ) -> None:
-        opened.paused = True
-        session.flush()
+        """Create's pause, Pilot's at its instant, and a person's alike: the
+        setup goes on as a Chat does (P-74)."""
+        pilot = session.scalars(
+            select(User).where(User.kind_code == UserKind.AGENT)
+        ).one()
+        _transition(
+            session, opened, pilot if by_pilot else person, TransitionKind.PAUSED, AT
+        )
 
         job = _setup(container, starts, opened)
 
-        assert job.state_code is SessionState.HELD
-        held = starts.held(session, opened, job)
-        assert held is not None and held.reason is HeldReason.PAUSED
-        assert (job.turns, job.turn_started_at) == (0, None)
-        assert (
-            session.scalars(select(Turn).where(Turn.session_id == job.id)).all() == []
+        assert job.state_code is SessionState.STARTING
+        assert starts.held(session, opened, job) is None
+        turn = _brief(container, job)
+        assert (job.turns, turn.started_at) == (1, AT)
+        assert "paused" not in turn.message
+        status = work_status(session, [job.id], unreachable=False, slots=starts._slots)
+        assert status[job.id].held_reason is None
+
+    def test_under_the_pause_the_outage_and_the_queue_still_hold_it(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        opening: Item,
+        person: User,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        first = _setup(container, starts, opened)
+        _transition(session, opened, person, TransitionKind.PAUSED, PAUSED_AT)
+        controller_outage.call_unanswered()
+
+        second = _setup(container, starts, opened, LATER)
+
+        assert second.state_code is SessionState.HELD
+        assert starts.held(session, opened, second) == Held(
+            HeldReason.CONTROLLER_UNREACHABLE
         )
+        controller_outage.probe_answered()
+        assert starts.held(session, opened, second) == Held(HeldReason.QUEUE)
+        status = work_status(
+            session, [second.id], unreachable=False, slots=starts._slots
+        )[second.id]
+        assert status.held_reason is HeldReason.QUEUE
+        _in(session, first, SessionState.IDLE)
+        assert starts.held(session, opened, second) is None
 
     def test_it_takes_no_slot(
         self,
@@ -341,10 +379,6 @@ LATER = datetime(2026, 10, 27, 9, 35, 40, tzinfo=UTC)
 
 PAUSED_AT = datetime(2026, 10, 27, 9, 0, 0, tzinfo=UTC)
 RESUMED_AT = datetime(2026, 10, 27, 10, 15, 0, tzinfo=UTC)
-PAUSE_LINE = (
-    "Paused 2026-10-27T09:00:00Z to 2026-10-27T10:15:00Z: this job's trigger"
-    " happened while the project was paused; the record moved on meanwhile."
-)
 
 
 def _transition(
@@ -401,6 +435,7 @@ class TestQueue:
         )[second.id]
         assert (status.held_reason, status.held_running) == (HeldReason.QUEUE, None)
 
+    @pytest.mark.usefixtures("placing")
     def test_a_job_held_before_it_holds_it_up_and_one_after_it_none(
         self,
         container: ServiceContainer,
@@ -411,8 +446,8 @@ class TestQueue:
         person: User,
     ) -> None:
         _transition(session, opened, person, TransitionKind.PAUSED, PAUSED_AT)
-        first = _setup(container, starts, opened)
-        second = _setup(container, starts, opened, LATER)
+        first = _item_done(session, container, opened, person)
+        second = _item_done(session, container, opened, person)
 
         _transition(session, opened, person, TransitionKind.RESUMED, RESUMED_AT)
 
@@ -474,6 +509,7 @@ class TestQueue:
 
         assert job.state_code is SessionState.STARTING
 
+    @pytest.mark.usefixtures("placing")
     def test_the_pause_and_the_outage_come_before_the_queue(
         self,
         container: ServiceContainer,
@@ -487,7 +523,7 @@ class TestQueue:
         _setup(container, starts, opened)
         _transition(session, opened, person, TransitionKind.PAUSED, PAUSED_AT)
         controller_outage.call_unanswered()
-        second = _setup(container, starts, opened, LATER)
+        second = _item_done(session, container, opened, person)
 
         assert starts.held(session, opened, second) == Held(HeldReason.PAUSED)
         _transition(session, opened, person, TransitionKind.RESUMED, RESUMED_AT)
@@ -503,6 +539,7 @@ class TestQueueRelease:
     composed then from the record as it stands (F59, F59.2, F141.4; V11,
     V23)."""
 
+    @pytest.mark.usefixtures("placing")
     def test_released_only_the_earliest_job_goes_on_whatever_the_loops_order(
         self,
         container: ServiceContainer,
@@ -515,8 +552,9 @@ class TestQueueRelease:
         """The release visits held Sessions in `created_at` order; the queue's
         is the timeline's, the order the jobs were placed in."""
         _transition(session, opened, person, TransitionKind.PAUSED, PAUSED_AT)
-        first = _setup(container, starts, opened)
-        second = _setup(container, starts, opened, AT - timedelta(minutes=1))
+        first = _item_done(session, container, opened, person)
+        second = _item_done(session, container, opened, person)
+        second.created_at = first.created_at - timedelta(minutes=1)
         _transition(session, opened, person, TransitionKind.RESUMED, RESUMED_AT)
 
         _release(starts)
@@ -530,6 +568,7 @@ class TestQueueRelease:
         assert second.turns == 0
         assert first.turns == 1
 
+    @pytest.mark.usefixtures("placing")
     def test_a_job_triggered_while_paused_is_briefed_at_the_resume_with_the_pause(
         self,
         container: ServiceContainer,
@@ -539,9 +578,11 @@ class TestQueueRelease:
         opening: Item,
         person: User,
     ) -> None:
-        _transition(session, opened, person, TransitionKind.PAUSED, PAUSED_AT)
-        job = _setup(container, starts, opened)
-        _transition(session, opened, person, TransitionKind.RESUMED, RESUMED_AT)
+        paused_at = datetime.now(UTC)
+        _transition(session, opened, person, TransitionKind.PAUSED, paused_at)
+        job = _item_done(session, container, opened, person)
+        resumed_at = datetime.now(UTC)
+        _transition(session, opened, person, TransitionKind.RESUMED, resumed_at)
 
         _release(starts)
 
@@ -550,11 +591,13 @@ class TestQueueRelease:
         turn = _brief(container, job)
         assert (job.turns, job.turn_started_at) == (1, turn.started_at)
         assert turn.message == container.brief_service().job(
-            opened, session.get_one(Work, job.id), AT, turn.started_at
+            opened, session.get_one(Work, job.id), job.created_at, turn.started_at
         )
         assert turn.message.split("\n\n")[2] == (
             "Auto pilot: off — the granted column asks for this session"
-            f" (rules/grants.md).\n{PAUSE_LINE}"
+            f" (rules/grants.md).\nPaused {utc_time(paused_at)} to"
+            f" {utc_time(resumed_at)}: this job's trigger happened while the"
+            " project was paused; the record moved on meanwhile."
         )
 
     def test_when_a_job_ends_the_next_goes_on_briefed_and_switched_as_it_then_is(
@@ -960,6 +1003,14 @@ def _pilots(
         project, "question", "When to taste", chat, QUESTION
     )
     return db.get_one(models.Document, item.id)
+
+
+def _item_done(
+    db: DbSession, container: ServiceContainer, project: Project, person: User
+) -> models.Session:
+    """The job after the person's close of a question of Pilot's own,
+    placed now (`placing`): one of no setup, which the pause holds."""
+    return _closed(container, _pilots(db, container, project), person)
 
 
 def _closed(

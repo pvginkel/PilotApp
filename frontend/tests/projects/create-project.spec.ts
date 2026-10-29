@@ -11,7 +11,10 @@
  * waits its turn behind it, its line saying so, and goes on once the setup's turn ends (F59.2).
  * Failed, it offers Retry where a worker's Resume is: a fresh setup at the project's next place,
  * the failed line staying with its session log, saying it was retried and offering Retry no more;
- * a running or done job offers none (D2).
+ * a running or done job offers none (D2). Create pauses the new project, its setup let through: it
+ * is pausing while the setup runs, a work item placed meanwhile held, "Paused", and paused once the
+ * setup's turn ends, Pilot's line under the setup saying the project is ready, gone at the status
+ * icon's resume, which lets the held work item go on (P-74).
  */
 
 import type { Page } from '@playwright/test';
@@ -263,6 +266,8 @@ test.describe('The setup', () => {
     const started = await chats.opening(id, slug);
     await projectHead.create();
     const session = await started();
+    // Create pauses the project; resumed, the worker's start is not held.
+    await projects.transition(id, 'resumed');
     const work = await projects.startWork(id, { title: 'Surveying the camp', brief: 'Survey the camp.', cwd: '/work/Example' });
     await expect.poll(async () => (await projects.work(id, work)).state).toBe('running');
     const { id: environment } = await projects.environment(id, work);
@@ -334,5 +339,51 @@ test.describe('The setup', () => {
     await expect(retry.root).toHaveAttribute('data-state', 'done');
     await expect(retry.work.retry).toHaveCount(0);
     await expect(setup.work.retry).toHaveCount(0);
+  });
+});
+
+test.describe('The pause at Create', () => {
+  test('pausing while the setup runs, a work item placed meanwhile held; paused once its turn ends, the ready line under the setup, gone at the resume, which lets the work item go on', async ({
+    page,
+    people,
+    projects,
+    projectHead,
+    projectList,
+    controller,
+    chats,
+    definitionChat,
+    timeline,
+  }) => {
+    const me = await people.signIn();
+    const { id, title, slug } = await drafted({ page, projects, projectHead, controller, chats, definitionChat }, me.handle!);
+    const started = await chats.opening(id, slug);
+    await projectHead.create();
+    const session = await started();
+    const setupId = (await projects.timeline(id)).items.find((item) => item.work?.pilots_own)!.id;
+    const setup = timeline.item(setupId);
+    await expect(setup.work.running).toBeVisible();
+    const icon = projectList.statusIcon(title);
+    await expect(icon.root).toHaveAttribute('data-status', 'pausing');
+
+    const workId = await projects.startWork(id, { title: 'Pitching the tents', brief: 'Pitch the tents.', cwd: '/work/Example' });
+    const work = timeline.item(workId);
+    await expect(work.work.line).toHaveAttribute('data-state', 'held');
+    await expect(work.work.cue).toHaveText('Paused');
+    await expect(timeline.ready).toHaveCount(0);
+
+    await controller.finish(chats.store, session, 'success', 'The plan is written.');
+    await expect(setup.root).toHaveAttribute('data-state', 'done');
+    await expect(icon.root).toHaveAttribute('data-status', 'paused');
+    await expect(timeline.ready).toHaveText('The project is ready — resume the project to start it.');
+    await expect(timeline.ready.getByRole('button')).toHaveCount(0);
+    await expect(setup.root.locator('xpath=following-sibling::*[1]')).toHaveAttribute('data-testid', 'timeline.ready');
+    expect((await projects.list()).find((tab) => tab.id === id)!.badge.count).toBe(0);
+
+    const resumed = projectList.written(id, 'resumed');
+    await icon.root.click();
+    await resumed;
+    await expect(timeline.ready).toHaveCount(0);
+    await expect(work.work.running).toBeVisible();
+    expect((await projects.timeline(id)).ready_after).toBeNull();
   });
 });
