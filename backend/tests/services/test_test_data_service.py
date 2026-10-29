@@ -2027,7 +2027,10 @@ class TestClarify:
         item = session.get_one(Item, run.id)
         assert (item.title, item.done_at) == (f"Clarify {REGISTERED}", None)
         [turn] = session.scalars(select(Turn).where(Turn.session_id == run.id))
-        assert (turn.message.startswith(f"Pilot asks about {REGISTERED}:"), turn.ended_at) == (
+        assert (
+            turn.message.startswith(f"Pilot asks about {REGISTERED}:"),
+            turn.ended_at,
+        ) == (
             True,
             None,
         )
