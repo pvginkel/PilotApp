@@ -3,7 +3,8 @@
  * read on its own: as Done fixed it where Done did, else as it stands (F13.3), and read again as
  * the timeline is. Its head holds its title, the project, the step, the segment bar, *Unsent* or
  * *Done* (D026), and *Edited <time>* with Pilot's mark (F28.2, F28.7); its body the summary as its
- * lead, then its prose with every block answered in place, then Pilot's dots while it writes
+ * lead, then its prose with every block answered in place, an open archive question's Archive and
+ * Keep in its block's place (F5.6), then Pilot's dots while it writes
  * (F28.3), and over the text, where Pilot asked a registered document's writer about its blocks,
  * the questions and the writer's reply (F52.2). *Edited* and the dots tell of the text as it
  * stands, so a document read as Done fixed it has neither; its foot "Done · <stamp> · <who>", naming who did it unless it was the person, or
@@ -26,6 +27,7 @@ import { Clarifications } from '@/components/overlay/clarification';
 import { DidNotLoad, Overlay } from '@/components/overlay/overlay';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Time } from '@/components/shared/time';
+import { ArchiveAnswers } from '@/components/timeline/archive-question';
 import { Attachments } from '@/components/timeline/attachments';
 import { DocumentParts, SegmentBar, SendAnswers, UnsentChip } from '@/components/timeline/document';
 import { isUnsent } from '@/components/timeline/document-state';
@@ -150,7 +152,8 @@ function Body({ item }: { item: ItemDocument }) {
       <Attachments item={item} inDocument />
       <Clarifications item={item} />
       <div className="sheet-doc" data-testid="overlay.document">
-        <DocumentParts item={item} />
+        {/* An open archive question is answered Archive or Keep alone, as the timeline draws it (F5.6). */}
+        {item.kind === 'archive_question' && item.done === null ? <ArchiveAnswers item={item} /> : <DocumentParts item={item} />}
       </div>
       {item.writing && !asDone(item) && <PilotWriting />}
     </>

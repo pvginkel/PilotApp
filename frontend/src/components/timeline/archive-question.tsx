@@ -16,36 +16,43 @@ const ARCHIVE = 'Archive';
 const KEEP = 'Keep';
 
 export function ArchiveQuestion({ item }: { item: TimelineItem }) {
-  const [block] = blocksOf(item);
-  const { answer, saving } = useAnswer(item.id, block.id);
   return (
     <div className="item-body">
       <ItemHead item={item} />
       <div className="item-title" data-testid="timeline.item.title">
         <LinkedText text={titleOf(item)} />
       </div>
-      <div className="item-actions">
-        <button
-          type="button"
-          className="btn btn-primary"
-          onClick={() => answer(ARCHIVE)}
-          disabled={saving !== null}
-          data-testid="timeline.archive-question.archive"
-        >
-          <Archive className="icon" aria-hidden="true" />
-          {ARCHIVE}
-        </button>
-        <button
-          type="button"
-          className="btn btn-soft"
-          onClick={() => answer(KEEP)}
-          disabled={saving !== null}
-          data-testid="timeline.archive-question.keep"
-        >
-          <Check className="icon" aria-hidden="true" />
-          {KEEP}
-        </button>
-      </div>
+      <ArchiveAnswers item={item} />
+    </div>
+  );
+}
+
+/** The open question's Archive and Keep, which answer its one block: on the timeline and in the overlay alike. */
+export function ArchiveAnswers({ item }: { item: TimelineItem }) {
+  const [block] = blocksOf(item);
+  const { answer, saving } = useAnswer(item.id, block.id);
+  return (
+    <div className="item-actions">
+      <button
+        type="button"
+        className="btn btn-primary"
+        onClick={() => answer(ARCHIVE)}
+        disabled={saving !== null}
+        data-testid="timeline.archive-question.archive"
+      >
+        <Archive className="icon" aria-hidden="true" />
+        {ARCHIVE}
+      </button>
+      <button
+        type="button"
+        className="btn btn-soft"
+        onClick={() => answer(KEEP)}
+        disabled={saving !== null}
+        data-testid="timeline.archive-question.keep"
+      >
+        <Check className="icon" aria-hidden="true" />
+        {KEEP}
+      </button>
     </div>
   );
 }

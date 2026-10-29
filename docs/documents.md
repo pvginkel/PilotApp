@@ -103,7 +103,8 @@ At a document's address (`DocumentOverlay`, read by `useItemDocument`):
 - **The body**: the summary as its lead, the attachments, then Pilot's questions to the writer
   (below), then the text as an inline document draws it, every block answered in place and every
   settled section collapsed, a claimed action reading "Pilot does it" and its work item
-  ([`timeline.md`](timeline.md)), and Pilot's dots while a turn saves it. A segment scrolls the body
+  ([`timeline.md`](timeline.md)), an open archive question its Archive and Keep alone, as the
+  timeline draws them, and Pilot's dots while a turn saves it. A segment scrolls the body
   to its block, which flashes, its section opened first.
 - **The foot**: on a done item, "Done · <stamp>", then " · Pilot", or the other person's name, where
   the signed-in person did not do it; on an open review, Reviewed; on an open document, *Send
