@@ -48,15 +48,21 @@ class HeldReason(StrEnum):
 
 
 class StopCause(StrEnum):
-    """Why a work item stopped when its environment was stopped under its
-    turn, a stop made elsewhere (design 2 §9.6; F71): it settled `stopped`,
-    it settled `deleting`, the controller has it no longer, or it settled
-    `error`. The `server` record that ended the turn holds it."""
+    """Why a work item stopped when no person did. A stop made elsewhere, its
+    environment stopped under its turn (design 2 §9.6; F71): it settled
+    `stopped`, it settled `deleting`, the controller has it no longer, or it
+    settled `error`; the `server` record that ended the turn holds it. A
+    usage halt's hard stop, its nudge owed (F135.6; DB 269): the halt that
+    holds it, the week's or the five-hour's, or neither once both lifted,
+    read at display (decision 66)."""
 
     ENVIRONMENT_STOPPED = "environment_stopped"
     ENVIRONMENT_DELETING = "environment_deleting"
     ENVIRONMENT_GONE = "environment_gone"
     ENVIRONMENT_ERROR = "environment_error"
+    WEEK_HALT = "week_halt"
+    FIVE_HOUR_HALT = "five_hour_halt"
+    USAGE_LIMIT = "usage_limit"
 
 
 ItemForm = Literal["prose", "work", "wait"]
@@ -465,16 +471,20 @@ class WorkSchema(BaseModel):
     )
     stopped_by: UserSchema | None = Field(
         description=(
-            "Who stopped it, by Stop, Finish or Archive; null when no one of "
-            "Pilot's did, and unless `state` is `stopped` (F69.2)"
+            "Who stopped it, by Stop, Finish or Archive, or Pilot, through its "
+            "tool or a usage halt's hard stop; null when no one of Pilot's "
+            "did, and unless `state` is `stopped` (F69.2, F135.6)"
         )
     )
     stopped_cause: StopCause | None = Field(
         description=(
-            "Why it stopped when its environment was stopped under it, a stop "
-            "made elsewhere, which its stopped line and its session log's tail "
-            "say: stopped, being deleted, gone, or in error; null when someone "
-            "stopped it, and unless `state` is `stopped` (F26.1, F69.2, F71)"
+            "Why it stopped, which its stopped line and its session log's "
+            "tail say: its environment stopped under it, a stop made "
+            "elsewhere, stopped, being deleted, gone, or in error; or a usage "
+            "halt's hard stop, by Pilot, its nudge owed, the halt that holds "
+            "it now, the week's or the five-hour's, or `usage_limit` once "
+            "neither does; null when someone stopped it otherwise, and unless "
+            "`state` is `stopped` (F26.1, F69.2, F71, F135.6)"
         )
     )
     retried: RetriedSchema | None = Field(

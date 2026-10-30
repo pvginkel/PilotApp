@@ -600,6 +600,13 @@ class TestTabs:
         _run(container, session, pausing, environment, SessionState.RUNNING, "chat")
         paused = _make(container, name="Paused", paused=True)
         _run(container, session, paused, environment, SessionState.STOPPED)
+        # A usage halt's hard stop's: its nudge owed, it waits on no one (DB
+        # 225, 269).
+        hard_stopped = _make(container, name="Hard stopped")
+        _run(
+            container, session, hard_stopped, environment, SessionState.STOPPED
+        ).nudge_owed_at = datetime.now(UTC)
+        session.flush()
         draft = _make(container, name="Draft", state="draft")
         finished = _make(container, name="Finished", state="finished")
 
@@ -613,6 +620,7 @@ class TestTabs:
             quiet.id: ProjectStatus.IDLE,
             pausing.id: ProjectStatus.PAUSING,
             paused.id: ProjectStatus.PAUSED,
+            hard_stopped.id: ProjectStatus.IDLE,
             draft.id: None,
             finished.id: None,
         }

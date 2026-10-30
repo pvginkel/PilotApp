@@ -31,5 +31,8 @@ export function loadAppBackendEnv(backendUrl: string): NodeJS.ProcessEnv {
     // /api/testing/notification-bridge in testing mode
     // (backend/app/api/testing_notification_bridge.py); tests/support/notification-bridge.ts drives it.
     NOTIFICATION_BRIDGE_URL: `${backendUrl}/api/testing/notification-bridge`,
+    // The five-hour halt stops every running work item (tests/work/hard-stop.spec.ts); the week's
+    // keeps its default, the cooperative stop.
+    FIVE_HOUR_HALT: 'hard_stop',
   };
 }

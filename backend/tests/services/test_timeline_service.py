@@ -3,7 +3,7 @@ person (F8, F12, F13, F18, F31, F78, F1.4)."""
 
 import base64
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, get_args
 
 import pytest
@@ -11,6 +11,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
+from app.app_config import HaltSetting
 from app.engine.paths import tree_path
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import (
@@ -31,7 +32,9 @@ from app.models import (
     SaveError,
     SessionRecord,
     Turn,
+    UsageReading,
     User,
+    WindowShare,
     Work,
     WriterQuestion,
 )
@@ -45,6 +48,7 @@ from app.models.reference import (
     RecordKind,
     SessionState,
     TransitionKind,
+    UsageWindow,
     VersionCause,
     WorkTrigger,
 )
@@ -68,9 +72,22 @@ from app.services.timeline_service import Badge, work_status
 from app.services.usage_halts import UsageHalts
 from tests.support.chats import ChatWriter, open_chat
 
+ENVIRONMENT_CAUSES = [
+    StopCause.ENVIRONMENT_STOPPED,
+    StopCause.ENVIRONMENT_DELETING,
+    StopCause.ENVIRONMENT_GONE,
+    StopCause.ENVIRONMENT_ERROR,
+]
+"""The causes of a stop made elsewhere, which its `server` record holds."""
+
 SLOTS = WorkSlots(work_max=3, project_max=3)
 HALTS = UsageHalts(
-    week_limit=0.9, week_allowance=0.05, week_second_limit=0.98, five_hour_limit=0.75
+    week_limit=0.9,
+    week_allowance=0.05,
+    week_second_limit=0.98,
+    five_hour_limit=0.75,
+    week_halt=HaltSetting.COOPERATIVE_STOP,
+    five_hour_halt=HaltSetting.COOPERATIVE_STOP,
 )
 """The slot of the defaults: the work items these tests place leave it room."""
 
@@ -427,6 +444,40 @@ def _stop_record(
         RecordKind.SERVER,
         payload={"type": ENVIRONMENT_STOPPED, "cause": cause, "reason": "invented"},
         turn_id=turn.id,
+    )
+    session.flush()
+
+
+def _hard_stopped(
+    session: DbSession, project: Project, environment: Environment
+) -> Item:
+    """A work item a usage halt's hard stop stopped: by Pilot, its nudge owed
+    (DB 269)."""
+    stopped = _work(session, project, environment, SessionState.STOPPED)
+    run = session.get_one(models.Session, stopped.id)
+    run.stopped_at = run.nudge_owed_at = datetime(2026, 10, 24, 9, 5, tzinfo=UTC)
+    run.stopped_by_user_id = _pilot(session).id
+    session.flush()
+    return stopped
+
+
+def _usage(session: DbSession, *, week: float, five_hour: float) -> None:
+    """A fresh Usage Reading recorded now with these shares."""
+    now = datetime.now(UTC)
+    reading = UsageReading(taken_at=now, received_at=now, stale=False)
+    session.add(reading)
+    session.flush()
+    session.add_all(
+        WindowShare(
+            reading_id=reading.id,
+            window_code=window,
+            share=share,
+            resets_at=now + timedelta(days=1),
+        )
+        for window, share in (
+            (UsageWindow.SEVEN_DAY, week),
+            (UsageWindow.FIVE_HOUR, five_hour),
+        )
     )
     session.flush()
 
@@ -2280,7 +2331,7 @@ class TestWorkStatus:
 
         assert (work.stopped_at, work.stopped_by) == (None, None)
 
-    @pytest.mark.parametrize("cause", list(StopCause))
+    @pytest.mark.parametrize("cause", ENVIRONMENT_CAUSES)
     def test_one_its_environment_stopped_names_the_cause(
         self,
         container: ServiceContainer,
@@ -2365,6 +2416,58 @@ class TestWorkStatus:
         )[held.id]
 
         assert work.stopped_cause is None
+
+    @pytest.mark.parametrize(
+        ("week", "five_hour", "cause"),
+        [
+            (0.95, 0.1, StopCause.WEEK_HALT),
+            (0.5, 0.8, StopCause.FIVE_HOUR_HALT),
+            (0.95, 0.8, StopCause.WEEK_HALT),
+            (0.5, 0.1, StopCause.USAGE_LIMIT),
+        ],
+    )
+    def test_one_the_hard_stop_stopped_names_the_halt_that_holds_now(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        week: float,
+        five_hour: float,
+        cause: StopCause,
+    ) -> None:
+        """Decision 66 keeps no cause: the window is read at display, the
+        week's first, as a held start's is; neither once both lifted."""
+        project = _make(container)
+        stopped = _hard_stopped(session, project, environment)
+        _usage(session, week=week, five_hour=five_hour)
+
+        work = work_status(
+            session, [stopped.id], unreachable=False, halts=HALTS, slots=SLOTS
+        )[stopped.id]
+
+        assert work.stopped_cause == cause
+        assert work.stopped_by is not None
+        assert (work.stopped_by.kind, work.stopped_by.handle) == ("agent", "agent")
+        assert work.stopped_at == datetime(2026, 10, 24, 9, 5, tzinfo=UTC)
+
+    def test_one_pilot_stopped_through_its_tool_names_no_cause(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        """The brain's `stop_work`: by Pilot, no nudge owed."""
+        project = _make(container)
+        stopped = _hard_stopped(session, project, environment)
+        session.get_one(models.Session, stopped.id).nudge_owed_at = None
+        _usage(session, week=0.95, five_hour=0.1)
+
+        work = work_status(
+            session, [stopped.id], unreachable=False, halts=HALTS, slots=SLOTS
+        )[stopped.id]
+
+        assert work.stopped_cause is None
+        assert work.stopped_by is not None and work.stopped_by.kind == "agent"
 
     def test_the_service_reads_one_work_item(
         self,
@@ -3316,6 +3419,24 @@ class TestBadges:
         )
 
         assert self._badges(container, person, project) == {project.id: Badge(2, True)}
+
+    def test_a_work_item_the_hard_stop_stopped_waits_on_no_one(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        """DB 225, 269: its nudge resumes it; one Pilot stopped through its
+        tool, no nudge owed, waits."""
+        project = _make(container)
+        _hard_stopped(session, project, environment)
+        assert self._badges(container, person, project) == {}
+
+        tooled = _hard_stopped(session, project, environment)
+        session.get_one(models.Session, tooled.id).nudge_owed_at = None
+        session.flush()
+        assert self._badges(container, person, project) == {project.id: Badge(1, False)}
 
     def test_a_failed_or_stopped_job_waits_until_it_is_retried(
         self,

@@ -7,10 +7,10 @@
  * from the first record while it is open (F40.3), one reply per turn, each ended one closing on
  * its time; it sticks to the end while it grows, and only the reader's own scrolling lets go
  * (F69.2). Its tail is the working cue while the session is held, starts or runs, else how it
- * ended: "Stopped by you · <time>", by whom else, the environment stopped under it, "The turn
- * ended · <time>", or "Failed" under the error (F69.2, F125). The tail follows the item's state as
- * the timeline reads it, live, so that a Resume carries the log on. An address that names no work
- * item of the project reads "The session log did not load".
+ * ended: "Stopped by you · <time>", by whom else, by Pilot at the usage limit, the environment
+ * stopped under it, "The turn ended · <time>", or "Failed" under the error (F69.2, F125, F135.6).
+ * The tail follows the item's state as the timeline reads it, live, so that a Resume carries the
+ * log on. An address that names no work item of the project reads "The session log did not load".
  */
 
 import { useMemo, useRef, type RefObject } from 'react';

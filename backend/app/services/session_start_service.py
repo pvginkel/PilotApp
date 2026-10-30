@@ -69,7 +69,9 @@ roll's overlap (§8.1) changes nothing the first has written.
 A work item's Stop ends its Session where it is (F67.1): a turn in flight is
 interrupted after the commit, and a start held or under way ends, nothing of it
 sent afterwards. Finish and Archive stop every Session of the project so (F5.1,
-F128.1), and Reopen a finished project's chat (F5.5). Its Resume writes a server-own Turn, "continue", or the ended Turn's
+F128.1), and Reopen a finished project's chat (F5.5); a usage halt's hard stop
+every running work item, by Pilot, its nudge owed (F135.6; DB 269). Its Resume
+writes a server-own Turn, "continue", or the ended Turn's
 message while the Session has no conversation (R15's rule), and passes the gate
 as a start does (F67.2): `held`, or `starting`, its loop sending the Turn to
 its controller session, or to one created anew, its environment started again,
@@ -117,7 +119,13 @@ from app.models import (
     Work,
 )
 from app.models import Session as AgentSession
-from app.models.reference import ProjectState, RecordKind, SessionState, WorkTrigger
+from app.models.reference import (
+    ProjectState,
+    RecordKind,
+    SessionState,
+    UserKind,
+    WorkTrigger,
+)
 from app.services.controller_client import (
     ControllerClient,
     ControllerEnvironment,
@@ -164,6 +172,10 @@ START_JOB = "start"
 
 RELEASE_KEY = "held"
 """The key of the start job's loop that moves the held Sessions on."""
+
+HARD_STOP_KEY = "hard-stop"
+"""The key of the start job's loop that stops the running work items under a
+usage halt's hard stop."""
 
 PROBE_TIMER = "controller-probe"
 
@@ -761,18 +773,56 @@ class SessionStartService:
         none yet (`_brief`), its loop run once that commits. One the gate
         still holds has its work item's line told again: a halt's turn, the
         outage's, the slot's count or a job's end, which asked for the run,
-        may have moved its reason."""
+        may have moved its reason. So has each work item the hard stop
+        stopped, its nudge owed: a halt's turn may have moved the halt its
+        line names (decision 66)."""
         with scoped_session(self._container) as db:
             held = db.scalars(
                 select(AgentSession.id)
                 .where(AgentSession.state_code == SessionState.HELD)
                 .order_by(AgentSession.created_at, AgentSession.id)
             ).all()
+            for halt_stopped in db.scalars(
+                select(AgentSession).where(
+                    AgentSession.kind_code == WORK_KIND,
+                    AgentSession.state_code == SessionState.STOPPED,
+                    AgentSession.nudge_owed_at.is_not(None),
+                )
+            ):
+                self._moved(halt_stopped)
         for session_id in held:
             if handle.stopping:
                 return
             with scoped_session(self._container) as db:
                 self._release_one(db, session_id)
+
+    def hard_stop(self) -> None:
+        """A usage halt whose setting is the hard stop holds: every running
+        work item stopped on a loop of its own (F135.6). A call while that
+        loop runs has it run once more."""
+        self._supervisor.start_loop(
+            START_JOB, self.stop_halted, key=HARD_STOP_KEY, again=True
+        )
+
+    def stop_halted(self, handle: LoopHandle) -> None:
+        """The hard stop's loop's run: each work item's Session `running`, in
+        `created_at` order, stopped by Pilot as a Stop stops one, its nudge
+        owed (DB 269, 232), each in a transaction of its own, under its lock
+        while it still runs and a hard-stop halt still holds."""
+        with scoped_session(self._container) as db:
+            running = db.scalars(
+                select(AgentSession.id)
+                .where(
+                    AgentSession.kind_code == WORK_KIND,
+                    AgentSession.state_code == SessionState.RUNNING,
+                )
+                .order_by(AgentSession.created_at, AgentSession.id)
+            ).all()
+        for session_id in running:
+            if handle.stopping:
+                return
+            with scoped_session(self._container) as db:
+                self._stop_halted(db, session_id)
 
     def stop(self, db: Session, session_id: uuid.UUID, person: User) -> AgentSession:
         """`person`'s Stop of a work item, in the caller's transaction (F67.1):
@@ -1050,6 +1100,16 @@ class SessionStartService:
         self._moved(session, state=True)
         self._slots.left(session, before)
         logger.info("Session %s stopped by %s, %s", session.id, person.handle, before)
+
+    def _stop_halted(self, db: Session, session_id: uuid.UUID) -> None:
+        session = self._records(db).lock_session(session_id)
+        if session.state_code != SessionState.RUNNING or not self._halts.stopping(db):
+            return
+        pilot = db.scalars(select(User).where(User.kind_code == UserKind.AGENT)).one()
+        now = datetime.now(UTC)
+        self._stop(db, session, pilot, now)
+        session.nudge_owed_at = now
+        logger.info("Session %s stopped at the usage limit, its nudge owed", session_id)
 
     def _fresh(self, db: Session, session: AgentSession) -> None:
         """A Resume with no conversation to continue, a fresh start (review

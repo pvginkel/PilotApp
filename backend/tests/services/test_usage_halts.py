@@ -1,8 +1,9 @@
 """The usage halts (design 4 §6, *The halts*; F135.1, F135.4, F135.8; DB 266):
 the week's and the five-hour's, decided from the latest Usage Reading at their
 limits, a window left out holding none, a five-hour limit of 0 none, a stale
-window lifted one minute past its reset; when each began; and their watcher,
-which tells of a turn at a recorded reading and on its timer."""
+window lifted one minute past its reset; when each began; whether a hard-stop
+halt holds; and their watcher, which tells of a turn at a recorded reading and
+on its timer, and asks for the hard stop while one holds and a work item runs."""
 
 import json
 from collections.abc import Generator, Iterator
@@ -15,8 +16,17 @@ from dependency_injector import providers
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.models import QuotaOverrule, UsageReading, User, WindowShare
-from app.models.reference import OverruleKind, UsageWindow
+from app.app_config import HaltSetting
+from app.models import (
+    Environment,
+    Project,
+    QuotaOverrule,
+    UsageReading,
+    User,
+    WindowShare,
+)
+from app.models import Session as AgentSession
+from app.models.reference import OverruleKind, ProjectState, SessionState, UsageWindow
 from app.services import usage_halts as usage_halts_module
 from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerUsageReading
@@ -31,9 +41,28 @@ FIVE_HOUR = UsageWindow.FIVE_HOUR
 ALLOWANCE = OverruleKind.ALLOWANCE
 RUN_OUT = OverruleKind.RUN_OUT
 
-HALTS = UsageHalts(
-    week_limit=0.9, week_allowance=0.05, week_second_limit=0.98, five_hour_limit=0.75
-)
+COOPERATIVE = HaltSetting.COOPERATIVE_STOP
+HARD = HaltSetting.HARD_STOP
+
+
+def _halts(
+    *,
+    five_hour_limit: float = 0.75,
+    week_halt: HaltSetting = COOPERATIVE,
+    five_hour_halt: HaltSetting = COOPERATIVE,
+) -> UsageHalts:
+    """The halts at the default limits and settings, but those given."""
+    return UsageHalts(
+        week_limit=0.9,
+        week_allowance=0.05,
+        week_second_limit=0.98,
+        five_hour_limit=five_hour_limit,
+        week_halt=week_halt,
+        five_hour_halt=five_hour_halt,
+    )
+
+
+HALTS = _halts()
 
 RECEIVED_AT = datetime(2026, 10, 8, 9, tzinfo=UTC)
 WEEK_RESETS_AT = datetime(2026, 10, 9, 7, tzinfo=UTC)
@@ -178,15 +207,7 @@ class TestHolding:
     def test_a_five_hour_limit_of_0_holds_none(self, session: Session) -> None:
         _record(session, week=0.5, five_hour=1.3)
 
-        assert (
-            UsageHalts(
-                week_limit=0.9,
-                week_allowance=0.05,
-                week_second_limit=0.98,
-                five_hour_limit=0,
-            ).holding(session)
-            == ()
-        )
+        assert _halts(five_hour_limit=0).holding(session) == ()
 
     def test_a_lower_share_lifts_the_halt_a_lower_one_still_over_holds_it(
         self, session: Session
@@ -251,6 +272,62 @@ class TestHolding:
         clock.at = FIVE_HOUR_RESETS_AT + timedelta(minutes=1)
 
         assert HALTS.holding(session) == (WEEK,)
+
+
+class TestStopping:
+    """Whether a halt whose setting is the hard stop holds (F135.6; DB 269)."""
+
+    @pytest.mark.parametrize(
+        ("week", "five_hour", "stopping"),
+        [
+            (0.95, 0.1, True),
+            (0.5, 0.8, False),
+            (0.95, 0.8, True),
+            (0.5, 0.1, False),
+        ],
+    )
+    def test_only_a_hard_stop_halt_that_holds_stops(
+        self, session: Session, week: float, five_hour: float, stopping: bool
+    ) -> None:
+        _record(session, week=week, five_hour=five_hour)
+
+        assert _halts(week_halt=HARD).stopping(session) is stopping
+
+    @pytest.mark.parametrize("setting", [COOPERATIVE, HaltSetting.NO_NEW_WORK])
+    def test_a_halt_of_another_setting_stops_nothing(
+        self, session: Session, setting: HaltSetting
+    ) -> None:
+        _record(session, week=0.95, five_hour=0.8)
+
+        halts = _halts(week_halt=setting, five_hour_halt=setting)
+        assert halts.stopping(session) is False
+
+    def test_the_five_hours_hard_stop_stops_at_its_limit(
+        self, session: Session
+    ) -> None:
+        _record(session, week=0.95, five_hour=0.8)
+
+        assert _halts(five_hour_halt=HARD).stopping(session) is True
+
+    def test_none_stops_before_the_first_reading(self, session: Session) -> None:
+        assert _halts(week_halt=HARD, five_hour_halt=HARD).stopping(session) is False
+
+    def test_an_overrule_that_holds_lifts_the_weeks_hard_stop(
+        self, session: Session, person: User
+    ) -> None:
+        _record(session, week=0.95, five_hour=0.1)
+        _overrule(session, person)
+
+        assert _halts(week_halt=HARD).stopping(session) is False
+
+    def test_stops_reads_each_windows_setting(self) -> None:
+        halts = _halts(five_hour_halt=HARD)
+
+        assert (halts.stops([WEEK]), halts.stops([FIVE_HOUR]), halts.stops([])) == (
+            False,
+            True,
+            False,
+        )
 
 
 class TestHalts:
@@ -537,13 +614,18 @@ class TestEndSpent:
 
 
 class _Gate:
-    """The session start, as the watcher asks it again."""
+    """The session start, as the watcher asks it again and for the hard
+    stop."""
 
     def __init__(self) -> None:
         self.released = 0
+        self.hard_stops = 0
 
     def release_held(self) -> None:
         self.released += 1
+
+    def hard_stop(self) -> None:
+        self.hard_stops += 1
 
 
 def _reading(
@@ -632,6 +714,42 @@ def watcher(
         usage_service=usage,
         usage_halts=HALTS,
     )
+
+
+@pytest.fixture
+def hard_watcher(
+    container: ServiceContainer, supervisor: Supervisor, usage: UsageService
+) -> UsageWatcher:
+    """A watcher of its own whose week's halt is the hard stop and whose
+    five-hour halt the cooperative stop."""
+    return UsageWatcher(
+        container=container,
+        supervisor=supervisor,
+        usage_service=usage,
+        usage_halts=_halts(week_halt=HARD),
+    )
+
+
+def _session(db: Session, person: User, kind: str, state: SessionState) -> None:
+    """A Session of `kind` in `state`, in a project and an environment of its
+    own."""
+    project = Project(
+        created_by_user_id=person.id, state_code=ProjectState.OPEN, slug=kind
+    )
+    environment = Environment(id=f"env-{kind}-{state}", name=kind, exempt=False)
+    db.add_all([project, environment])
+    db.flush()
+    db.add(
+        AgentSession(
+            project_id=project.id,
+            environment_id=environment.id,
+            kind_code=kind,
+            cwd="/work/Example",
+            token_hash=f"{kind}-{state}".ljust(64, "0"),
+            state_code=state,
+        )
+    )
+    db.flush()
 
 
 @pytest.fixture
@@ -861,6 +979,99 @@ class TestUsageWatcher:
         session.refresh(made)
         assert made.ended_at == clock.at
         assert gate.released == 0
+
+    def test_a_hard_stop_halt_turned_on_while_a_work_item_runs_asks_for_the_hard_stop(
+        self,
+        session: Session,
+        person: User,
+        usage: UsageService,
+        hard_watcher: UsageWatcher,
+        gate: _Gate,
+        halt_files: _HaltFiles,
+    ) -> None:
+        _session(session, person, "work", SessionState.RUNNING)
+
+        usage.receive(_reading(0.95))
+
+        assert (gate.hard_stops, gate.released, halt_files.requested) == (1, 1, 1)
+
+    def test_while_it_holds_each_decision_asks_again_for_a_work_item_still_running(
+        self,
+        session: Session,
+        person: User,
+        usage: UsageService,
+        hard_watcher: UsageWatcher,
+        gate: _Gate,
+        halt_files: _HaltFiles,
+    ) -> None:
+        """A work item the gate let through before the halt turned on is
+        stopped at the next decision: the hard stop holds while the halt does,
+        not at its turn alone."""
+        usage.receive(_reading(0.95))
+        assert gate.hard_stops == 0
+        _session(session, person, "work", SessionState.RUNNING)
+
+        hard_watcher.run_timer(session)
+        usage.receive(_reading(0.96, minutes=10))
+
+        assert (gate.hard_stops, gate.released) == (2, 1)
+
+    @pytest.mark.parametrize(
+        ("kind", "state"),
+        [
+            ("work", SessionState.STARTING),
+            ("work", SessionState.HELD),
+            ("work", SessionState.STOPPED),
+            ("work", SessionState.IDLE),
+            ("chat", SessionState.RUNNING),
+            ("job", SessionState.RUNNING),
+        ],
+    )
+    def test_with_no_work_item_running_none_is_asked(
+        self,
+        session: Session,
+        person: User,
+        usage: UsageService,
+        hard_watcher: UsageWatcher,
+        gate: _Gate,
+        kind: str,
+        state: SessionState,
+    ) -> None:
+        _session(session, person, kind, state)
+
+        usage.receive(_reading(0.95))
+
+        assert (gate.hard_stops, gate.released) == (0, 1)
+
+    def test_a_halt_of_the_cooperative_stop_asks_for_none(
+        self,
+        session: Session,
+        person: User,
+        usage: UsageService,
+        hard_watcher: UsageWatcher,
+        gate: _Gate,
+    ) -> None:
+        _session(session, person, "work", SessionState.RUNNING)
+
+        usage.receive(_reading(0.5, 0.8))
+
+        assert (gate.hard_stops, gate.released) == (0, 1)
+
+    def test_an_overrule_made_lifts_the_hard_stop(
+        self,
+        session: Session,
+        person: User,
+        usage: UsageService,
+        hard_watcher: UsageWatcher,
+        gate: _Gate,
+    ) -> None:
+        usage.receive(_reading(0.95))
+        _overrule(session, person, made_at=datetime.now(UTC))
+        _session(session, person, "work", SessionState.RUNNING)
+
+        hard_watcher.overruled()
+
+        assert (gate.hard_stops, gate.released) == (0, 2)
 
     def test_its_timer_runs_on_the_schedulers_tick_from_startup(
         self,

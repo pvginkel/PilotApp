@@ -16,18 +16,26 @@ limit; at or over it run-out, its target the wall. An overrule ends at the
 first reading at or over its target, or lower than the reading before it, or
 when a stale reading's week is a minute past its `resets_at` (DB 268).
 
+Each window's halt setting says what its halt does to the work items
+(F135.6): every setting holds their starts; the cooperative stop writes the
+halt file where one runs (`HaltFileService`); the hard stop stops every one
+running, as Stop stops one, by Pilot, its nudge owed (DB 269).
+
 The watcher decides them again at each recorded reading, which the usage
 service hands it once its commit is done, at each overrule made, and at each
 tick of the scheduler, whose timer finds a stale window's minute passed: the
 one clock in the design. Each decision first ends the overrule a reading has
 spent. At a halt's turn the gate is asked again, the halt files are swept and
 every person's connections hear the conditions; at a reading while a halt
-holds, and at an overrule's end, they hear them too. Each process decides
-from the same readings; the halts it last told of are its own.
+holds, and at an overrule's end, they hear them too. At every decision while
+a hard-stop halt holds and a work item runs, the hard stop is asked for: one
+the gate let through before the halt is stopped at the next. Each process
+decides from the same readings; the halts it last told of are its own.
 """
 
 import logging
 import threading
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -36,8 +44,11 @@ from typing import TYPE_CHECKING
 from sqlalchemy import and_, func, select, update
 from sqlalchemy.orm import Session
 
+from app.app_config import HaltSetting
 from app.models import QuotaOverrule, UsageReading, WindowShare
-from app.models.reference import OverruleKind, UsageWindow
+from app.models import Session as AgentSession
+from app.models.reference import OverruleKind, SessionState, UsageWindow
+from app.services.start_gate import WORK_KIND
 from app.services.supervisor import Supervisor
 from app.services.usage_service import Usage, UsageService, latest, recorded
 
@@ -101,8 +112,8 @@ def overrule(db: Session) -> QuotaOverrule | None:
 
 
 class UsageHalts:
-    """The halts' limits, the halts that hold at them, and the week's
-    overrule (DB 266, 179, 268)."""
+    """The halts' limits and settings, the halts that hold at them, and the
+    week's overrule (DB 266, 179, 268, 269)."""
 
     def __init__(
         self,
@@ -111,6 +122,8 @@ class UsageHalts:
         week_allowance: float,
         week_second_limit: float,
         five_hour_limit: float,
+        week_halt: HaltSetting,
+        five_hour_halt: HaltSetting,
     ) -> None:
         """The halts at these limits.
 
@@ -124,10 +137,18 @@ class UsageHalts:
                 (WEEK_SECOND_LIMIT)
             five_hour_limit: The five-hour share at or over which the
                 five-hour halt holds; 0 holds none (FIVE_HOUR_LIMIT)
+            week_halt: What the week's halt does to the work items
+                (WEEK_HALT)
+            five_hour_halt: What the five-hour halt does to them
+                (FIVE_HOUR_HALT)
         """
         self._limits = {
             UsageWindow.SEVEN_DAY: week_limit,
             UsageWindow.FIVE_HOUR: five_hour_limit,
+        }
+        self._settings = {
+            UsageWindow.SEVEN_DAY: week_halt,
+            UsageWindow.FIVE_HOUR: five_hour_halt,
         }
         self._allowance = week_allowance
         self._second_limit = week_second_limit
@@ -143,6 +164,18 @@ class UsageHalts:
         while both hold; None while neither does."""
         holding = self.holding(db)
         return holding[0] if holding else None
+
+    def stopping(self, db: Session) -> bool:
+        """Whether a halt whose setting is the hard stop holds now: every
+        running work item is to be stopped (F135.6; DB 269)."""
+        return self.stops(self.holding(db))
+
+    def stops(self, windows: Iterable[UsageWindow]) -> bool:
+        """Whether the halt of one of `windows` has the hard stop for its
+        setting."""
+        return any(
+            self._settings[window] is HaltSetting.HARD_STOP for window in windows
+        )
 
     def halts(self, db: Session) -> list[Halt]:
         """Each halt that holds now, the week's first, with the share it holds
@@ -388,6 +421,8 @@ class UsageWatcher:
                 logger.info("%s lifted: held work items go on", _WORDS[window])
         turned = holding != told or made
         effects = []
+        if self._halts.stops(holding) and _work_runs(db):
+            effects.append(self._container.session_start_service().hard_stop)
         if turned:
             effects.append(self._container.session_start_service().release_held)
             effects.append(self._container.halt_file_service().request)
@@ -399,3 +434,19 @@ class UsageWatcher:
                 effect()
             except Exception:
                 logger.exception("Usage halt effect %r failed", effect)
+
+
+def _work_runs(db: Session) -> bool:
+    """Whether a work item's Session is `running`."""
+    return bool(
+        db.scalar(
+            select(
+                select(AgentSession.id)
+                .where(
+                    AgentSession.kind_code == WORK_KIND,
+                    AgentSession.state_code == SessionState.RUNNING,
+                )
+                .exists()
+            )
+        )
+    )

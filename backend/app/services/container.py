@@ -249,6 +249,8 @@ class ServiceContainer(containers.DeclarativeContainer):
         week_allowance=app_config.provided.week_allowance,
         week_second_limit=app_config.provided.week_second_limit,
         five_hour_limit=app_config.provided.five_hour_limit,
+        week_halt=app_config.provided.week_halt,
+        five_hour_halt=app_config.provided.five_hour_halt,
     )
     usage_watcher = providers.Singleton(
         UsageWatcher,

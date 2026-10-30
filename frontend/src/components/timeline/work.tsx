@@ -5,7 +5,8 @@
  * F12). Under its title is its one line (F26.2): the server's own words while its session comes
  * up, or comes back while its environment restarts; the working state and the latest step while
  * it runs; why the gate holds its start; "Stopped · <time>" with the cause of a stop made
- * elsewhere; the error a failed start or a turn ended in error left, shown as a stopped one is
+ * elsewhere, or a usage halt's hard stop's "Stopped at the week’s limit · <time>" and its like
+ * (F135.6); the error a failed start or a turn ended in error left, shown as a stopped one is
  * (F125). Its Session log opens the session's records in the overlay (F26.3, F69). Stop, while it
  * runs, starts or is held, asks first in its actions' place, Esc dismissing the question; Resume,
  * once it stopped or failed, carries it on (F67), disabled while the project is archived, as its
@@ -304,7 +305,7 @@ function Line({ work }: { work: Work }) {
         <div className="work-line ended" {...shared}>
           <Square className="icon" aria-hidden="true" />
           <span>
-            Stopped
+            {line.text}
             {line.at !== null && (
               <>
                 {' · '}

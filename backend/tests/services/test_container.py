@@ -14,7 +14,7 @@ from flask import Flask
 from sqlalchemy.orm import Session
 
 from app import create_app
-from app.app_config import AppSettings
+from app.app_config import AppSettings, HaltSetting
 from app.config import Settings
 from app.database import scoped_session
 from app.engine.bus import ProjectChanged
@@ -486,6 +486,69 @@ class TestHaltFileWiring:
             coordinator.shutdown()
 
 
+class TestHardStopWiring:
+    def test_a_reading_at_the_weeks_limit_stops_the_running_work_item_by_pilot(
+        self, committed_app: Flask, fake_controller: ServedFakeController
+    ) -> None:
+        """The fleet stream's reading, the watcher's decision, the start
+        service's loop: the work item stopped, its nudge owed (F135.6)."""
+        container = committed_app.container
+        container.app_config.override(
+            AppSettings(
+                controller_url=fake_controller.url,
+                scheduler_tick_seconds=0.05,
+                week_halt=HaltSetting.HARD_STOP,
+            )
+        )
+        client = client_of(container, fake_controller)
+        fake_controller.add_environment("env-a", status="running")
+        name = client.create_headless_session("env-a", HeadlessCreateRequest()).name
+        with scoped_session(container) as db:
+            person = User(
+                kind_code=UserKind.PERSON,
+                subject="subject-ada",
+                handle="ada",
+                name="Ada Example",
+                avatar_slot=1,
+            )
+            db.add_all([person, Environment(id="env-a", name="A", exempt=False)])
+            db.flush()
+            project = Project(
+                created_by_user_id=person.id, state_code=ProjectState.OPEN, slug="camp"
+            )
+            db.add(project)
+            db.flush()
+            run = AgentSession(
+                project_id=project.id,
+                environment_id="env-a",
+                kind_code="work",
+                cwd="/work/Example",
+                controller_session=name,
+                token_hash="1" * 64,
+                state_code=SessionState.IDLE,
+            )
+            db.add(run)
+            db.flush()
+            run_id = run.id
+        relays = container.relay_service()
+        assert isinstance(container.fleet_consumer(), FleetConsumer)
+        assert isinstance(container.usage_watcher(), UsageWatcher)
+        assert isinstance(container.session_start_service(), SessionStartService)
+        coordinator = container.lifecycle_coordinator()
+
+        coordinator.fire_startup()
+        try:
+            with scoped_session(container) as db:
+                relays.send(db, run_id, "Rename the badge")
+            fake_controller.usage(seven_day=0.95, five_hour=0.1)
+            wait_until(
+                lambda: _stopped_owed(container, run_id),
+                "the work item stopped, its nudge owed",
+            )
+        finally:
+            coordinator.shutdown()
+
+
 class TestRelayWatchdogWiring:
     def test_the_watchdogs_timer_runs_from_startup(
         self, committed_app: Flask, fake_controller: ServedFakeController
@@ -881,6 +944,12 @@ def _retry_ticks() -> float:
 def _state(container: ServiceContainer, run_id: uuid.UUID) -> SessionState:
     with scoped_session(container) as db:
         return db.get_one(AgentSession, run_id).state_code
+
+
+def _stopped_owed(container: ServiceContainer, run_id: uuid.UUID) -> bool:
+    with scoped_session(container) as db:
+        run = db.get_one(AgentSession, run_id)
+        return run.state_code == SessionState.STOPPED and run.nudge_owed_at is not None
 
 
 def _turns_ended(container: ServiceContainer, run_id: uuid.UUID) -> int | None:

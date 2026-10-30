@@ -54,6 +54,7 @@ from app.models.reference import (
     RecordKind,
     SessionState,
     TransitionKind,
+    UsageWindow,
     UserKind,
     VersionCause,
     WorkTrigger,
@@ -110,7 +111,15 @@ WAIT = "wait"
 
 _STOPPED = (SessionState.STOPPED, SessionState.FAILED)
 """The states in which a work item waits on a person: stopped, or failed to
-start (F1.4, F125)."""
+start (F1.4, F125), unless its nudge is owed (DB 225, 269)."""
+
+_HALT_STOPS = {
+    UsageWindow.SEVEN_DAY: StopCause.WEEK_HALT,
+    UsageWindow.FIVE_HOUR: StopCause.FIVE_HOUR_HALT,
+    None: StopCause.USAGE_LIMIT,
+}
+"""A hard-stopped work item's cause by the halt that holds a work item now,
+the week's first: none once both lifted (decision 66)."""
 
 _WORDS_A_MINUTE = 230
 """The reading speed of a review's "N min read" (F25.1)."""
@@ -156,8 +165,9 @@ def waiting() -> ColumnElement[bool]:
     document only once its turn-end read is made, since none takes a close
     before it (review 7), and none whose open blocks are all actions Pilot
     claimed, which are Pilot's until their `done` (DB 262); a work item
-    stopped or failed, a job only until it is retried; never a wait
-    (F27.5)."""
+    stopped or failed, a job only until it is retried, and neither while its
+    nudge is owed: one a usage halt's hard stop stopped (DB 225, 269); never a
+    wait (F27.5)."""
     form = (
         select(ItemKind.form)
         .where(ItemKind.code == Item.kind_code)
@@ -179,6 +189,12 @@ def waiting() -> ColumnElement[bool]:
     retried = (
         select(Work.id)
         .where(Work.id == Item.id, Work.retried_by_id.is_not(None))
+        .correlate(Item)
+        .exists()
+    )
+    owed = (
+        select(AgentSession.id)
+        .where(AgentSession.id == Item.id, AgentSession.nudge_owed_at.is_not(None))
         .correlate(Item)
         .exists()
     )
@@ -208,7 +224,7 @@ def waiting() -> ColumnElement[bool]:
                 ~unread,
                 or_(~claims, unanswered),
             ),
-            and_(form == WORK, state.in_(_STOPPED), ~retried),
+            and_(form == WORK, state.in_(_STOPPED), ~retried, ~owed),
         ),
     )
 
@@ -232,7 +248,9 @@ def work_status(
     stopped one's stop is
     when and by whom, a Resume keeping both on the Session (DB Session
     `stopped_at?`, `stopped_by?`); one no one stopped has the cause its
-    environment's stop under it left as its last record. One whose start has
+    environment's stop under it left as its last record, and one a usage
+    halt's hard stop stopped, its nudge owed, the halt that holds a work
+    item now (`halts`; decision 66). One whose start has
     no environment yet has none (DB 107). A job's is Pilot's own (F59.1); a
     retried one's names the job its Retry placed, created at the press."""
     stopper = aliased(User)
@@ -271,18 +289,23 @@ def work_status(
         if failed
         else {}
     )
-    causes = {
-        session.id: _stop_cause(db, session.id)
-        for session, *_ in rows
-        if session.state_code is SessionState.STOPPED
-        and session.stopped_by_user_id is None
-    }
+    stopped = [
+        session for session, *_ in rows if session.state_code is SessionState.STOPPED
+    ]
+    hard_stopped = [
+        session.id for session in stopped if session.nudge_owed_at is not None
+    ]
     waiting = {
         session.project_id
         for session, *_ in rows
         if session.state_code is SessionState.HELD and session.kind_code == WORK_KIND
     }
-    halted = halts.halted(db) if waiting else None
+    halted = halts.halted(db) if waiting or hard_stopped else None
+    causes = dict.fromkeys(hard_stopped, _HALT_STOPS[halted]) | {
+        session.id: _stop_cause(db, session.id)
+        for session in stopped
+        if session.stopped_by_user_id is None
+    }
     filled = slots.filled(db, waiting) if waiting else {}
     behind = queued(
         db,

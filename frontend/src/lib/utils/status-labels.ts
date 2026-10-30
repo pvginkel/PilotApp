@@ -3,7 +3,7 @@
  * (F1.2), derived from the record, never written by the brain (database.md decision 15), a tab's
  * status icon (F1.3, F141.1), and a step's standing in the plan popover (F3.1). How a work item's session reads: its one line on the
  * timeline (F26.1, F26.2, F125), why the gate holds its start (F26.1), why it stopped when no one
- * stopped it (F71), its session log's tail (F69.2), and a job's line withdrawn by an Undo (F14.1). How a condition that holds all work reads
+ * of the app's people stopped it (F71, F135.6), its session log's tail (F69.2), and a job's line withdrawn by an Undo (F14.1). How a condition that holds all work reads
  * on the gold bar (F125, F135.7), and the week's halt's overrule (F135.2).
  */
 
@@ -245,27 +245,40 @@ export function overruleWords(kind: OverruleKind, target: number | null): Overru
   }
 }
 
+/** A stop no one of the app's people made, as its line and its session log's tail say it. */
+type StopWords =
+  /** A usage halt's hard stop (F135.6): its line's words, for the halt that holds it now. */
+  | { kind: 'halt'; line: string }
+  /** Its environment stopped under it or settled in error, a stop made elsewhere (F71). */
+  | { kind: 'elsewhere'; cause: string };
+
 /**
- * Why a work item stopped when its environment was stopped under it or settled in error, a stop
- * made elsewhere (F26.1, F71); null for any other stop.
+ * Why a work item stopped when no one of the app's people stopped it (F26.1, F69.2): a usage halt's
+ * hard stop, or a stop made elsewhere; null for any other stop.
  */
-function stopCause(work: Work): string | null {
+function stopWords(work: Work): StopWords | null {
   const cause = work.stopped_cause;
   if (cause === null) return null;
   // A stop made elsewhere is its environment's: a Session stopped under its turn has one.
-  const environment = work.environment!.name;
+  const environment = () => work.environment!.name;
   switch (cause) {
+    case 'week_halt':
+      return { kind: 'halt', line: 'Stopped at the week’s limit' };
+    case 'five_hour_halt':
+      return { kind: 'halt', line: 'Stopped at the five-hour limit' };
+    case 'usage_limit':
+      return { kind: 'halt', line: 'Stopped at the usage limit' };
     case 'environment_stopped':
-      return `${environment} was stopped`;
+      return { kind: 'elsewhere', cause: `${environment()} was stopped` };
     case 'environment_deleting':
-      return `${environment} is being deleted`;
+      return { kind: 'elsewhere', cause: `${environment()} is being deleted` };
     case 'environment_gone':
-      return `${environment} is gone`;
+      return { kind: 'elsewhere', cause: `${environment()} is gone` };
     case 'environment_error':
-      return `${environment} is in error`;
+      return { kind: 'elsewhere', cause: `${environment()} is in error` };
     default: {
       const unknown: never = cause;
-      return String(unknown);
+      return { kind: 'elsewhere', cause: String(unknown) };
     }
   }
 }
@@ -278,9 +291,11 @@ interface WorkCue {
   step: string | null;
 }
 
-/** "Stopped · <time>", and the cause of a stop made elsewhere. */
+/** "Stopped · <time>", or a usage halt's hard stop's words before it, and the cause of a stop made elsewhere. */
 interface WorkStopped {
   kind: 'stopped';
+  /** "Stopped", or "Stopped at the week’s limit" and its like (F135.6). */
+  text: string;
   at: string | null;
   cause: string | null;
 }
@@ -301,8 +316,9 @@ const cue = (activity: Activity, step: string | null = null): WorkCue => ({ kind
 /**
  * A work item's one line (F26.1, F26.2): why the gate holds its start; the current line as the
  * chat words its cue, or that it starts, or waits for Pilot, before its session gives one;
- * "Stopped · <time>" with a stop made elsewhere's cause; the error it failed on. Null once its
- * turn ended, when its done line stands for it.
+ * "Stopped · <time>" with a stop made elsewhere's cause, or a usage halt's hard stop's "Stopped at
+ * the week’s limit · <time>" and its like (F135.6); the error it failed on. Null once its turn
+ * ended, when its done line stands for it.
  */
 export function workLine(work: Work): WorkLine | null {
   const line = work.current_line;
@@ -314,8 +330,15 @@ export function workLine(work: Work): WorkLine | null {
       return line === null ? cue(STARTING) : lineCue(line);
     case 'running':
       return line === null ? cue(WAITING) : lineCue(line);
-    case 'stopped':
-      return { kind: 'stopped', at: work.stopped_at, cause: stopCause(work) };
+    case 'stopped': {
+      const words = stopWords(work);
+      return {
+        kind: 'stopped',
+        text: words?.kind === 'halt' ? words.line : 'Stopped',
+        at: work.stopped_at,
+        cause: words?.kind === 'elsewhere' ? words.cause : null,
+      };
+    }
     case 'failed':
       return { kind: 'failed', error: work.error };
     case 'idle':
@@ -374,9 +397,9 @@ interface LogTail {
 }
 
 /**
- * A session log's tail once its work runs no turn (F69.2): "Stopped by you", by whom else, or the
- * environment stopped under it, at the stop; "The turn ended" or "Failed", at `endedAt`. Null
- * while it is held, starts or runs, when the working cue is the tail.
+ * A session log's tail once its work runs no turn (F69.2): "Stopped by you", by whom else, by Pilot
+ * at the usage limit (F135.6), or the environment stopped under it, at the stop; "The turn ended"
+ * or "Failed", at `endedAt`. Null while it is held, starts or runs, when the working cue is the tail.
  */
 export function sessionLogTail(work: Work, selfHandle: string, endedAt: string | null): LogTail | null {
   switch (work.state) {
@@ -388,8 +411,16 @@ export function sessionLogTail(work: Work, selfHandle: string, endedAt: string |
     case 'ended':
       return { mark: 'ended', text: 'The turn ended', at: endedAt };
     case 'stopped': {
+      const words = stopWords(work);
       const by = work.stopped_by;
-      const text = by !== null ? (by.handle === selfHandle ? 'Stopped by you' : `Stopped by ${by.name}`) : (stopCause(work) ?? 'Stopped');
+      const text =
+        words?.kind === 'halt'
+          ? 'Stopped by Pilot at the usage limit'
+          : by !== null
+            ? by.handle === selfHandle
+              ? 'Stopped by you'
+              : `Stopped by ${by.name}`
+            : (words?.cause ?? 'Stopped');
       return { mark: 'stopped', text, at: work.stopped_at };
     }
     case 'failed':

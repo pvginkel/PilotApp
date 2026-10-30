@@ -4,7 +4,7 @@ F88.1, F125, F143.1; decision 38; DB 240; V05, V15, V19), and the work item it
 is (DB Work, decision 3); the gate every start passes, the held start and its
 release (§13.4, §8.2; F141.5; DB 229, 230; V16, V24); the conversation of a run
 whose documents are all closed continued as a new work item (decision 44;
-F26.7, F65; DB 241).
+F26.7, F65; DB 241); a usage halt's hard stop (F135.6; DB 269).
 
 The start's write and its loop's run are on the test's session: the run is
 called as its loop calls it. `TestStartLoop` and `TestHeldLoop` run the loops
@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session as DbSession
 from werkzeug.wrappers import Request, Response
 
 from app import models
+from app.app_config import HaltSetting
 from app.database import scoped_session
 from app.engine.bus import EngineEvent, ProjectChanged, WorkMoved
 from app.exceptions import InvalidOperationException, RecordNotFoundException
@@ -58,7 +59,7 @@ from app.models.reference import (
     UserKind,
     WorkTrigger,
 )
-from app.schemas.timeline import HeldReason
+from app.schemas.timeline import HeldReason, StopCause
 from app.services.auth_service import AuthContext
 from app.services.chat_close_service import ChatCloseService
 from app.services.container import ServiceContainer
@@ -79,6 +80,7 @@ from app.services.pilot_server import PilotServer, token_hash
 from app.services.relay_service import CONTINUE, SEND_FAILED, SESSION_GONE, RelayService
 from app.services.session_record_service import StoredRecord, read_records
 from app.services.session_start_service import (
+    HARD_STOP_KEY,
     NOT_PILOTS,
     RELEASE_KEY,
     START_FAILED,
@@ -4671,6 +4673,244 @@ class TestStopLoop:
         assert run.state_code == SessionState.STOPPED
         assert run.current_line is None
         with scoped_session(container) as db:
+            assert db.get_one(Item, work_id).done_at is None
+
+
+HARD_HALTS = UsageHalts(
+    week_limit=0.9,
+    week_allowance=0.05,
+    week_second_limit=0.98,
+    five_hour_limit=0.75,
+    week_halt=HaltSetting.HARD_STOP,
+    five_hour_halt=HaltSetting.COOPERATIVE_STOP,
+)
+"""The halts at the default limits, the week's the hard stop."""
+
+
+@pytest.fixture
+def hard_starts(
+    container: ServiceContainer, fake: _Recording, supervise: Supervise
+) -> SessionStartService:
+    """The session starts on HARD_HALTS; no loop of theirs ever runs."""
+    return _services(container, supervise, halts=HARD_HALTS)[0]
+
+
+def _hard_stop(starts: SessionStartService) -> None:
+    """The hard stop's loop's run, as its loop calls it."""
+    starts.stop_halted(LoopHandle(f"{START_JOB}:{HARD_STOP_KEY}"))
+
+
+def _pilot_id(db: DbSession) -> uuid.UUID:
+    return db.scalars(select(User.id).where(User.kind_code == UserKind.AGENT)).one()
+
+
+class TestHardStop:
+    """A usage halt's hard stop: every running work item stopped as Stop
+    stops one, by Pilot, the conversation kept, its nudge owed (F135.6; DB
+    269; V14)."""
+
+    def test_a_running_work_item_is_stopped_by_pilot_its_nudge_owed(
+        self,
+        hard_starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        run = _running(hard_starts, session, project)
+        env_id = _env(session, run.id)
+        name, conversation = run.controller_session, run.conversation_id
+        _usage(session, week=0.95, five_hour=0.1)
+        engine_events.clear()
+        before = datetime.now(UTC)
+
+        _hard_stop(hard_starts)
+
+        stopped = _read(session, run.id)
+        assert stopped.state_code == SessionState.STOPPED
+        assert stopped.stopped_by_user_id == _pilot_id(session)
+        assert stopped.stopped_at is not None and stopped.stopped_at >= before
+        assert stopped.nudge_owed_at == stopped.stopped_at
+        assert stopped.current_line is None
+        # The conversation kept: its controller session, its turn left to the
+        # relay the interrupt ends.
+        assert (stopped.controller_session, stopped.conversation_id) == (
+            name,
+            conversation,
+        )
+        (brief,) = _turns(session, run.id)
+        assert brief.ended_at is None
+        assert name is not None and fake.session(env_id, name).status == "busy"
+        assert _row(session, env_id).stop_due_at is not None
+        assert _moves(engine_events) == [
+            WorkMoved(project.id, run.id),
+            ProjectChanged(project.id),
+        ]
+
+    def test_only_the_running_work_items_are_stopped(
+        self,
+        container: ServiceContainer,
+        hard_starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """A chat's and a job's go on (F135); a work item starting or held
+        has sent no turn, and the gate holds it from here."""
+        running = _running(hard_starts, session, project)
+        starting = _start_work(hard_starts, session, project)
+        chat = _chat(session, project, environment, SessionState.RUNNING)
+        job = _job(container, session, project, environment, SessionState.RUNNING)
+        _usage(session, week=0.95, five_hour=0.1)
+        held = _held(hard_starts, session, project)
+
+        _hard_stop(hard_starts)
+
+        assert {
+            run_id: _read(session, run_id).state_code
+            for run_id in (running.id, starting.id, chat.id, job.id, held.id)
+        } == {
+            running.id: SessionState.STOPPED,
+            starting.id: SessionState.STARTING,
+            chat.id: SessionState.RUNNING,
+            job.id: SessionState.RUNNING,
+            held.id: SessionState.HELD,
+        }
+        assert [
+            run_id
+            for run_id in (starting.id, chat.id, job.id, held.id)
+            if _read(session, run_id).nudge_owed_at is not None
+        ] == []
+
+    @pytest.mark.parametrize(
+        ("week", "five_hour"),
+        [(0.5, 0.1), (0.5, 0.8)],
+        ids=["no halt", "the cooperative stop's"],
+    )
+    def test_no_hard_stop_halt_holding_stops_nothing(
+        self,
+        hard_starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        week: float,
+        five_hour: float,
+    ) -> None:
+        """Read again under the Session's lock: a halt lifted, or an
+        overrule made, since the loop was asked for stops nothing."""
+        run = _running(hard_starts, session, project)
+        _usage(session, week=week, five_hour=five_hour)
+
+        _hard_stop(hard_starts)
+
+        after = _read(session, run.id)
+        assert (after.state_code, after.nudge_owed_at) == (SessionState.RUNNING, None)
+
+    def test_the_week_halts_cooperative_stop_stops_nothing(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        run = _running(starts, session, project)
+        _usage(session, week=0.95, five_hour=0.8)
+
+        _hard_stop(starts)
+
+        assert _read(session, run.id).state_code == SessionState.RUNNING
+
+    def test_its_line_is_told_again_at_each_release_and_a_persons_stop_is_not(
+        self,
+        hard_starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        """The halt its line names is read at display (decision 66): a
+        halt's turn, which asks for the release, may move it."""
+        halted = _running(hard_starts, session, project)
+        by_a_person = _running(hard_starts, session, project)
+        hard_starts.stop(session, by_a_person.id, person)
+        clear_after_commit_callbacks()
+        _usage(session, week=0.95, five_hour=0.1)
+        _hard_stop(hard_starts)
+        _usage(session, week=0.5, five_hour=0.8)
+        heard = len(engine_events)
+
+        _release(hard_starts)
+
+        assert _moves(engine_events[heard:]) == [WorkMoved(project.id, halted.id)]
+        status = work_status(
+            session,
+            [halted.id],
+            unreachable=False,
+            halts=hard_starts._halts,
+            slots=hard_starts._slots,
+        )[halted.id]
+        assert status.stopped_cause == StopCause.FIVE_HOUR_HALT
+
+    def test_a_loop_told_to_stop_stops_no_more(
+        self,
+        hard_starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        run = _running(hard_starts, session, project)
+        _usage(session, week=0.95, five_hour=0.1)
+        handle = LoopHandle(f"{START_JOB}:{HARD_STOP_KEY}")
+        handle._request_stop()
+
+        hard_starts.stop_halted(handle)
+
+        assert _read(session, run.id).state_code == SessionState.RUNNING
+
+
+class TestHardStopLoop:
+    """The hard stop's loop, from its ask to the turn its interrupt ends,
+    on a database of its own (F135.6, F67.1)."""
+
+    def test_a_running_work_item_ends_its_turn_interrupted_stopped_by_pilot(
+        self,
+        committed_app: Flask,
+        committed_fake: _Recording,
+        supervise: Supervise,
+    ) -> None:
+        container = committed_app.container
+        starts, _, coordinator = _services(container, supervise, halts=HARD_HALTS)
+        project_id = _committed_project(container)
+        coordinator.fire_startup()
+        work_id = _committed_work(starts, container, project_id)
+        wait_until(
+            lambda: _committed(container, work_id).state_code == SessionState.RUNNING,
+            "the brief sent",
+        )
+        env_id = _committed_env(container, work_id)
+        name = _committed(container, work_id).controller_session
+        assert name is not None
+        committed_fake.play(env_id, name, raw_turn("turn_text")[:3])
+        with scoped_session(container) as db:
+            _usage(db, week=0.95, five_hour=0.1)
+
+        starts.hard_stop()
+
+        def interrupted() -> bool:
+            with scoped_session(container) as db:
+                return all(turn.ended_at for turn in _turns(db, work_id))
+
+        wait_until(interrupted, "the stopped turn ended")
+        result = committed_fake.session(env_id, name).result
+        assert result is not None and result["interrupted"]
+        run = _committed(container, work_id)
+        assert run.state_code == SessionState.STOPPED
+        assert run.nudge_owed_at is not None
+        assert run.controller_session == name
+        with scoped_session(container) as db:
+            assert run.stopped_by_user_id == _pilot_id(db)
             assert db.get_one(Item, work_id).done_at is None
 
 
