@@ -1,8 +1,9 @@
-"""Session, Turn, Session Record, Effect and Writer Question: what a row must
-hold."""
+"""Session, Turn, Token Count, Session Record, Effect and Writer Question: what
+a row must hold."""
 
 import hashlib
 from datetime import UTC, datetime
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import select, text
@@ -18,6 +19,7 @@ from app.models import (
     Project,
     Session,
     SessionRecord,
+    TokenCount,
     Turn,
     User,
     WriterQuestion,
@@ -28,6 +30,7 @@ from app.models.reference import (
     EffectKind,
     RecordKind,
     SessionState,
+    TokenKind,
 )
 from tests.support.database import violated_constraint
 
@@ -311,6 +314,77 @@ class TestTurn:
 
         assert quoting.quote_block_id is None
         assert quoting.words == "Fix the client for v4."
+
+    def test_a_turn_has_no_cost_until_its_result_line_gives_one(
+        self, session: DbSession, turn: Turn
+    ) -> None:
+        assert turn.cost is None
+
+    def test_its_cost_keeps_the_figure_the_line_gives_exactly(
+        self, session: DbSession, turn: Turn
+    ) -> None:
+        turn.cost = Decimal("0.0023345450000000004")
+        session.flush()
+        session.expire(turn)
+
+        assert turn.cost == Decimal("0.0023345450000000004")
+
+
+class TestTokenCount:
+    def test_a_turn_is_counted_per_kind(self, session: DbSession, turn: Turn) -> None:
+        session.add_all(
+            TokenCount(turn_id=turn.id, token_kind_code=kind, tokens=tokens)
+            for kind, tokens in zip(TokenKind, (6, 31_400, 0, 820), strict=True)
+        )
+        session.flush()
+
+        counts = session.execute(
+            select(TokenCount.token_kind_code, TokenCount.tokens).where(
+                TokenCount.turn_id == turn.id
+            )
+        ).all()
+        assert dict(counts) == {
+            TokenKind.INPUT: 6,
+            TokenKind.CACHE_WRITE: 31_400,
+            TokenKind.CACHE_READ: 0,
+            TokenKind.OUTPUT: 820,
+        }
+
+    def test_a_count_passes_what_an_int_holds(
+        self, session: DbSession, turn: Turn
+    ) -> None:
+        count = TokenCount(
+            turn_id=turn.id, token_kind_code=TokenKind.CACHE_READ, tokens=2**40
+        )
+        session.add(count)
+        session.flush()
+        session.expire(count)
+
+        assert count.tokens == 2**40
+
+    def test_a_turn_has_at_most_one_count_per_kind(
+        self, session: DbSession, turn: Turn
+    ) -> None:
+        session.add_all(
+            TokenCount(turn_id=turn.id, token_kind_code=TokenKind.OUTPUT, tokens=tokens)
+            for tokens in (820, 821)
+        )
+
+        assert (
+            violated_constraint(session) == "token_counts_turn_id_token_kind_code_key"
+        )
+
+    def test_a_count_counts_a_turn(self, session: DbSession) -> None:
+        session.add(TokenCount(turn_id=404, token_kind_code=TokenKind.INPUT, tokens=6))
+
+        assert violated_constraint(session) == "token_counts_turn_id_fkey"
+
+    def test_a_count_is_never_negative(self, session: DbSession, turn: Turn) -> None:
+        session.add(
+            TokenCount(turn_id=turn.id, token_kind_code=TokenKind.INPUT, tokens=-1)
+        )
+
+        assert violated_constraint(session) == "ck_token_counts_tokens"
 
 
 class TestSessionRecord:

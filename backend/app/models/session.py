@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
@@ -13,6 +14,7 @@ from sqlalchemy import (
     Identity,
     Index,
     Integer,
+    Numeric,
     Text,
     UniqueConstraint,
     func,
@@ -26,9 +28,11 @@ from app.models.reference import (
     EFFECT_KIND,
     RECORD_KIND,
     SESSION_STATE,
+    TOKEN_KIND,
     EffectKind,
     RecordKind,
     SessionState,
+    TokenKind,
 )
 
 
@@ -136,6 +140,25 @@ class Turn(db.Model):  # type: ignore[name-defined]
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     error: Mapped[str | None] = mapped_column(Text)
+    cost: Mapped[Decimal | None] = mapped_column(Numeric)
+    """US dollars, as the turn's `result` line reports them, notional on a
+    subscription; none without one (DB 275)."""
+
+
+class TokenCount(db.Model):  # type: ignore[name-defined]
+    """The tokens of one kind one Turn used, as the turn's `result` line
+    reports them, summed over every model it called (DB 272, 273, 275)."""
+
+    __tablename__ = "token_counts"
+    __table_args__ = (
+        UniqueConstraint("turn_id", "token_kind_code"),
+        CheckConstraint("tokens >= 0", name="ck_token_counts_tokens"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    turn_id: Mapped[int] = mapped_column(ForeignKey("turns.id"))
+    token_kind_code: Mapped[TokenKind] = mapped_column(TOKEN_KIND)
+    tokens: Mapped[int] = mapped_column(BigInteger)
 
 
 class SessionRecord(db.Model):  # type: ignore[name-defined]

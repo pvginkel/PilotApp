@@ -12,7 +12,8 @@ controller session's last recorded offset and takes each frame in order:
 - Every other line, a blank or non-JSON one included, is a `claude` record, in
   a transaction of its own that rebuilds the Session's current line. A line at
   or below the last recorded offset of the same controller session is one the
-  record has, and is skipped (§9.4).
+  record has, and is skipped (§9.4). A `result` line `claude` prints writes the
+  Turn's tokens and cost in the same transaction (`token_counts`).
 - The `result` frame, and nothing else, ends the Turn and the run.
 
 A stream that drops, or stays silent past the client's read timeout, raises, and
@@ -113,6 +114,7 @@ from app.services.session_scope import scoped_create
 from app.services.session_stream_service import SessionStreamService
 from app.services.start_gate import JOB_KIND, WORK_KIND, WorkSlots
 from app.services.supervisor import LoopHandle, Supervisor
+from app.services.token_counts import count_tokens
 from app.services.turn_end_read_service import TurnEndReadService
 from app.services.work_status import work_moved
 from app.utils.after_commit import after_commit
@@ -941,6 +943,7 @@ class RelayService:
             raw_offset=frame.offset,
             controller_session=opening.controller_session,
         )
+        count_tokens(db, opening.turn_id, payload)
         if session.state_code == SessionState.RUNNING:
             line = after_line(session.current_line, payload, record.at)
             if line != session.current_line:

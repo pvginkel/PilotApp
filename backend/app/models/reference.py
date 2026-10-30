@@ -1,7 +1,7 @@
 """The reference entities (DB §2.4).
 
 A reference entity with a fact about the category is a table: Item Kind, Done
-Cause, Confirmation Reason and Session Kind. The other twenty-one are PostgreSQL
+Cause, Confirmation Reason and Session Kind. The other twenty-two are PostgreSQL
 enums (DB §7.2). The revisions are the one place a value is added, a table's
 rows included.
 """
@@ -171,6 +171,17 @@ class UsageWindow(StrEnum):
     SEVEN_DAY = "seven_day"
 
 
+class TokenKind(StrEnum):
+    """A kind of token a Turn's model calls count, as `claude`'s `result` line
+    names them: read fresh, written to the prompt cache, read from it, written
+    by the model."""
+
+    INPUT = "input"
+    CACHE_WRITE = "cache_write"
+    CACHE_READ = "cache_read"
+    OUTPUT = "output"
+
+
 def _enum_type(enum_class: type[StrEnum], name: str) -> Enum:
     # The database holds the values, not the member names.
     return Enum(
@@ -202,6 +213,7 @@ TASK_STATUS = _enum_type(TaskStatus, "task_status")
 NOTIFICATION_PRIORITY = _enum_type(NotificationPriority, "notification_priority")
 CONDITION = _enum_type(Condition, "condition")
 USAGE_WINDOW = _enum_type(UsageWindow, "usage_window")
+TOKEN_KIND = _enum_type(TokenKind, "token_kind")
 
 # Autogenerate compares no enum type, so the schema tests check these against
 # the database's.
@@ -227,6 +239,7 @@ ENUM_TYPES = (
     NOTIFICATION_PRIORITY,
     CONDITION,
     USAGE_WINDOW,
+    TOKEN_KIND,
 )
 
 

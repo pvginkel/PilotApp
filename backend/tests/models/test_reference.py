@@ -22,8 +22,8 @@ class TestEnumTypes:
 
         assert dict(rows) == {enum.name: list(enum.enums) for enum in ENUM_TYPES}
 
-    def test_the_enums_are_db_s_twenty_one(self) -> None:
-        """With the four tables, 25 of the reference entities of DB §2.4."""
+    def test_the_enums_are_db_s_twenty_two(self) -> None:
+        """With the four tables, 26 of the reference entities of DB §2.4."""
         assert {enum.name for enum in ENUM_TYPES} == {
             "user_kind",
             "overrule_kind",
@@ -46,6 +46,7 @@ class TestEnumTypes:
             "notification_priority",
             "condition",
             "usage_window",
+            "token_kind",
         }
 
 

@@ -10,6 +10,7 @@ import time
 import uuid
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from queue import Empty
 from typing import Any, Literal
 
@@ -35,6 +36,7 @@ from app.models import (
     Environment,
     Item,
     Project,
+    TokenCount,
     Turn,
     UsageReading,
     User,
@@ -47,6 +49,7 @@ from app.models.reference import (
     ProjectState,
     RecordKind,
     SessionState,
+    TokenKind,
     UsageWindow,
     UserKind,
     VersionCause,
@@ -1489,6 +1492,155 @@ class TestRelay:
 
         assert not any("/response?" in call for call in fake_controller.calls)
         assert _records(session, idle.id) == []
+
+
+def _spent(db: DbSession, turn: Turn) -> tuple[dict[TokenKind, int], Decimal | None]:
+    """The Turn's Token Counts by kind, and its cost."""
+    counts = db.execute(
+        select(TokenCount.token_kind_code, TokenCount.tokens).where(
+            TokenCount.turn_id == turn.id
+        )
+    ).all()
+    return dict(counts), turn.cost
+
+
+def _tokens(
+    input_tokens: int, cache_write: int, cache_read: int, output: int
+) -> dict[TokenKind, int]:
+    return {
+        TokenKind.INPUT: input_tokens,
+        TokenKind.CACHE_WRITE: cache_write,
+        TokenKind.CACHE_READ: cache_read,
+        TokenKind.OUTPUT: output,
+    }
+
+
+class TestRelayTokens:
+    """Each Turn keeps the tokens its run used per kind and the cost it
+    reports, from `claude`'s `result` line, written as the line is recorded:
+    `modelUsage` summed over every model, sub-agents included (F135.9; DB
+    272, 273, 275; V17)."""
+
+    @pytest.mark.parametrize("kind", ["work", "job", "chat"])
+    def test_every_session_kinds_turn_keeps_its_result_lines_counts_and_cost(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        idle: models.Session,
+        kind: str,
+    ) -> None:
+        idle.kind_code = kind
+        session.flush()
+        turn = _send(relays, session, idle)
+        _turn_of(fake_controller, controller_session, raw_turn("turn_text"))
+
+        _relay(relays, idle)
+
+        assert _spent(session, turn) == (_tokens(3, 350, 1200, 11), Decimal("0.0021"))
+
+    def test_a_sub_agents_calls_count_with_the_main_threads(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        idle: models.Session,
+    ) -> None:
+        turn = _send(relays, session, idle)
+        _turn_of(fake_controller, controller_session, raw_turn("turn_subagent"))
+
+        _relay(relays, idle)
+
+        assert _spent(session, turn) == (
+            _tokens(12, 2150, 2400, 49),
+            Decimal("0.0043"),
+        )
+
+    def test_each_turn_keeps_its_own_runs_alone(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        idle: models.Session,
+    ) -> None:
+        first = _send(relays, session, idle)
+        _turn_of(fake_controller, controller_session, raw_turn("turn_text"))
+        _relay(relays, idle)
+        second = _send(relays, session, idle)
+        _turn_of(fake_controller, controller_session, raw_turn("turn_tool"))
+
+        _relay(relays, idle)
+
+        assert _spent(session, first) == (_tokens(3, 350, 1200, 11), Decimal("0.0021"))
+        assert _spent(session, second) == (_tokens(6, 350, 2400, 35), Decimal("0.0034"))
+
+    def test_a_runs_last_result_line_stands(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        idle: models.Session,
+    ) -> None:
+        """A backgrounded task wakes the run again after a `result` line; each
+        line carries the run's figures so far."""
+        lines = raw_turn("turn_text")
+        earlier = {
+            **json.loads(lines[-1]),
+            "total_cost_usd": 0.0011,
+            "modelUsage": {"claude-example-1": {"inputTokens": 2, "outputTokens": 5}},
+        }
+        turn = _send(relays, session, idle)
+        _turn_of(
+            fake_controller,
+            controller_session,
+            [*lines[:-1], json.dumps(earlier), lines[-1]],
+        )
+
+        _relay(relays, idle)
+
+        assert _spent(session, turn) == (_tokens(3, 350, 1200, 11), Decimal("0.0021"))
+
+    def test_a_turn_at_the_wall_spent_nothing(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        idle: models.Session,
+    ) -> None:
+        turn = _send(relays, session, idle)
+        _turn_of(
+            fake_controller, controller_session, raw_turn("turn_wall"), "error", LIMIT
+        )
+
+        _relay(relays, idle)
+
+        assert _spent(session, turn) == (_tokens(0, 0, 0, 0), Decimal("0"))
+
+    def test_a_turn_cut_before_claude_printed_its_result_line_keeps_none(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        idle: models.Session,
+    ) -> None:
+        lines = [
+            line
+            for line in raw_turn("turn_text")
+            if json.loads(line)["type"] != "result"
+        ]
+        turn = _send(relays, session, idle)
+        _turn_of(fake_controller, controller_session, lines, "interrupted", "")
+
+        _relay(relays, idle)
+
+        assert turn.ended_at is not None
+        assert _spent(session, turn) == ({}, None)
 
 
 class _Creating(ServedFakeController):
