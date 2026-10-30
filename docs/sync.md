@@ -260,7 +260,10 @@ that still bears them is not read again. A file whose ctime is less than 2 s bef
 at every walk and its hash not kept, since a write within the clock's tick of the one read can leave
 the stat as it was. The reconcile's walk keeps and uses the same hashes. `go test -run '^$' -bench .
 ./internal/sidecar` measures a lock and a release of a folder of 200 documents and four 16 MiB
-attachments.
+attachments. A stray file, one the server answered `404`, keeps with its note the hash of the bytes
+refused, and the flush sends it no more while it holds them. An edit sends it again; a `change` for
+its path that the record answers ends the note, so the next flush sends it; a restart forgets the
+hash; and the reconcile sends every stray file up.
 
 **The release's text** is the folder's whole list: each Save Error as `<path>:<line>: <message>`
 (`<path>: <message>` without a line); then each local note on a path of the folder as `<path>:
@@ -271,7 +274,7 @@ each as `- <block> in <document> (<title>), to: <to>`. The local notes are what 
 a file that the server holds no Save Error for:
 
 - ``not a document of the record — files are born through `add_item` ``, on a file the server
-  answered `404`, kept until the file is taken by a put, written down, deleted or gone;
+  answered `404`, kept until the file is taken by a put, fetched from the record, deleted or gone;
 - `a read-only view; re-projected`, on a view whose write was undone, printed by one release; a
   view at the tree's root, outside every project folder, is re-projected and printed by none.
 

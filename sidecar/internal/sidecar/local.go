@@ -152,10 +152,11 @@ func (s *Sidecar) hookCall(w http.ResponseWriter, r *http.Request) (hookCall, st
 }
 
 // flush sends up every file of folder whose bytes are not those it last
-// synced, and waits, until flushCap after the call or ctx's end, for each to
-// be read after the call and sent, or found in sync. Those that were not by
-// then, or whose send came to nothing, it leaves unsent as the saves of the
-// session that held the lock as it read them, and answers in path order.
+// synced, but a stray file still holding the bytes the server refused, and
+// waits, until flushCap after the call or ctx's end, for each to be read
+// after the call and sent, or found in sync. Those that were not by then, or
+// whose send came to nothing, it leaves unsent as the saves of the session
+// that held the lock as it read them, and answers in path order.
 func (s *Sidecar) flush(ctx context.Context, folder string) []string {
 	disk, err := s.tree.walk(folder)
 	if err != nil {
@@ -165,7 +166,7 @@ func (s *Sidecar) flush(ctx context.Context, folder string) []string {
 	holder := s.tree.writers.holder(folder)
 	settling := map[string]<-chan string{}
 	for path, hash := range disk {
-		if synced, _ := s.tree.shadow.Hash(path); synced != hash {
+		if synced, _ := s.tree.shadow.Hash(path); synced != hash && !s.tree.notes.refused(path, hash) {
 			settling[path] = s.uploads.settle(path)
 		}
 	}

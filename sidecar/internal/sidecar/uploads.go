@@ -158,7 +158,7 @@ func (u *uploads) upload(path string) string {
 	case u.ctx.Err() != nil:
 		return ""
 	case errors.Is(err, protocol.ErrNotFound):
-		t.notes.keep(path, strayNote)
+		t.notes.stray(path, file.hash)
 		t.logger.Info("not a path of the record: left as it is", "path", path)
 		return file.hash
 	default:

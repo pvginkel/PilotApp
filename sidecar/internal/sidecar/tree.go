@@ -226,7 +226,9 @@ func (t *tree) unsynced(path string) (bool, fs.FileMode, error) {
 // is written with the view's mode. A file holding bytes that never synced
 // keeps them: they go up, and the answer carries the record's. A read-only
 // view the shadow holds sends nothing up (upload), so a write to it is
-// written over and noted as its revert is. The caller holds path.
+// written over and noted as its revert is. A path the record bears is no
+// stray: its note goes, so the next release's flush sends its bytes up. The
+// caller holds path.
 func (t *tree) download(ctx context.Context, path string) {
 	content, err := t.client.Get(ctx, path)
 	switch {
@@ -240,6 +242,7 @@ func (t *tree) download(ctx context.Context, path string) {
 		t.logger.Error("cannot fetch a file of the record", "path", path, "error", err)
 		return
 	}
+	t.notes.clear(path)
 	unsynced, mode, err := t.unsynced(path)
 	if err != nil {
 		t.logger.Error("cannot read a file of the tree", "path", path, "error", err)
@@ -268,7 +271,6 @@ func (t *tree) download(ctx context.Context, path string) {
 		t.logger.Error("cannot write a file of the record", "path", path, "error", err)
 		return
 	}
-	t.notes.clear(path)
 	if reverted {
 		t.notes.once(path, revertNote)
 		t.logger.Info("a read-only view was written: re-projected", "path", path)
@@ -357,18 +359,28 @@ type notes struct {
 	byPath map[string]note
 }
 
-// note is a local note: its text, and whether the check that prints it ends
-// it.
+// note is a local note: its text, whether the check that prints it ends it,
+// and on a stray file the hash of the bytes the server refused.
 type note struct {
-	text string
-	once bool
+	text    string
+	once    bool
+	refused string
 }
 
-// keep notes text on path until it is cleared.
-func (n *notes) keep(path, text string) {
+// stray notes path as a file the record never bore, whose bytes of hash the
+// server refused, until it is cleared.
+func (n *notes) stray(path, hash string) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	n.byPath[path] = note{text: text}
+	n.byPath[path] = note{text: strayNote, refused: hash}
+}
+
+// refused says whether path is noted as a stray file whose bytes of hash
+// the server refused.
+func (n *notes) refused(path, hash string) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return hash != "" && n.byPath[path].refused == hash
 }
 
 // once notes text on path until a check prints it.

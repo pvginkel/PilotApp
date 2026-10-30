@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -496,6 +497,86 @@ func TestAReleaseOfAStrayFilePrintsItsNoteAndLeavesIt(t *testing.T) {
 	}
 	if !holds(file, "mine") {
 		t.Fatal("a stray file was touched")
+	}
+}
+
+// strayed is a sidecar against s on a tree whose proj/notes.md, a stray
+// file, a release sent up and s refused, and the file's name.
+func strayed(t *testing.T, s *server) (started, string) {
+	t.Helper()
+	s.answering(func(put) answer { return answer{status: http.StatusNotFound} })
+	tree := t.TempDir()
+	running := start(t, s, tree, t.TempDir())
+	file := filepath.Join(tree, "proj", "notes.md")
+	running.lock(t, "proj", chat, os.Getpid())
+	write(t, file, "mine")
+	if got := running.release(t, "proj", chat); got != "proj/notes.md: "+strayNote+"\n" {
+		t.Fatalf("printed %q", got)
+	}
+	settle()
+	return running, file
+}
+
+func TestAReleaseSendsAStrayFileUpNoMoreWhileItHoldsTheBytesRefused(t *testing.T) {
+	s := newServer(t)
+	running, file := strayed(t, s)
+	sent := len(s.taken())
+
+	for range 2 {
+		running.lock(t, "proj", chat, os.Getpid())
+		if got := running.release(t, "proj", chat); got != "proj/notes.md: "+strayNote+"\n" {
+			t.Fatalf("printed %q", got)
+		}
+	}
+	settle()
+	if puts := s.taken(); len(puts) != sent {
+		t.Fatalf("took %v: the refused bytes sent again", puts[sent:])
+	}
+	if !holds(file, "mine") {
+		t.Fatal("a stray file was touched")
+	}
+}
+
+func TestAReleaseSendsAStrayFileUpAgainOnceItIsEdited(t *testing.T) {
+	s := newServer(t)
+	running, file := strayed(t, s)
+	sent := len(s.taken())
+
+	// The release comes inside the watch's debounce: what it sends up, it
+	// reads from disk.
+	running.lock(t, "proj", chat, os.Getpid())
+	write(t, file, "mine, edited")
+	if got := running.release(t, "proj", chat); got != "proj/notes.md: "+strayNote+"\n" {
+		t.Fatalf("printed %q", got)
+	}
+	puts := s.taken()[sent:]
+	if !slices.ContainsFunc(puts, func(taken put) bool { return taken.body == "mine, edited" }) {
+		t.Fatalf("took %v by the release's answer", puts)
+	}
+}
+
+func TestAReleaseSendsAStrayFileUpOnceTheRecordBearsItsPath(t *testing.T) {
+	s := newServer(t)
+	running, file := strayed(t, s)
+	s.answering(func(put) answer { return answer{} })
+	s.record("proj/notes.md", "the record's")
+	running.stream.send(t, change("proj/notes.md", "the record's"))
+	eventually(t, "the fetch", func() bool { return running.noted("proj/notes.md") == "" })
+	sent := len(s.taken())
+
+	running.lock(t, "proj", chat, os.Getpid())
+	if got := running.release(t, "proj", chat); got != "" {
+		t.Fatalf("printed %q", got)
+	}
+	puts := s.taken()[sent:]
+	if len(puts) != 1 || puts[0].body != "mine" || sessionOf(puts[0]) != chat {
+		t.Fatalf("took %v by the release's answer", puts)
+	}
+	if synced := running.synced("proj/notes.md"); synced != hashOf("mine") {
+		t.Fatalf("synced with %q", synced)
+	}
+	if !holds(file, "mine") {
+		t.Fatalf("the file holds %q", read(t, file))
 	}
 }
 
