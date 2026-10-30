@@ -1,29 +1,20 @@
 /**
- * A time as every screen shows it (F114): in the browser's time zone, the full stamp as its
- * tooltip. The record and the API hold it in UTC.
+ * A time as every screen shows it (F114), in a format of `formatTime()`'s, the full stamp as its
+ * tooltip.
  */
 
-const FORMATS = {
-  /** The day and the month, as a finished project's tab shows them. */
-  day: new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' }),
-  /** The hour and the minute, as the timeline shows them under its date dividers. */
-  clock: new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' }),
-  /** The date and the time, as a finished timeline's end divider shows them. */
-  stamp: new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }),
-};
-const FULL_STAMP = new Intl.DateTimeFormat('en-GB', { dateStyle: 'full', timeStyle: 'long' });
+import { formatTime, type TimeFormat } from '@/lib/utils/time-format';
 
 interface TimeProps {
   at: string;
-  format?: keyof typeof FORMATS;
+  format?: Exclude<TimeFormat, 'full'>;
   testId?: string;
 }
 
 export function Time({ at, format = 'day', testId }: TimeProps) {
-  const date = new Date(at);
   return (
-    <time dateTime={at} title={FULL_STAMP.format(date)} data-testid={testId}>
-      {FORMATS[format].format(date)}
+    <time dateTime={at} title={formatTime(at, 'full')} data-testid={testId}>
+      {formatTime(at, format)}
     </time>
   );
 }

@@ -160,17 +160,24 @@ interface ConditionLine {
   title: string;
   /** What it holds. */
   detail: string;
+  /** What holds in short, its badge's words, followed by the time it began. */
+  badge: string;
   icon: LucideIcon;
 }
 
-/** A condition that holds all work, as its line on the gold bar says it (F125). */
+/** A condition that holds all work, as its line and its badge on the gold bar say it (F125). */
 export function conditionLine(code: ConditionCode): ConditionLine {
   switch (code) {
     case 'outage':
-      return { title: 'The controller has been unreachable', detail: 'Nothing starts until it answers.', icon: ServerOff };
+      return {
+        title: 'The controller has been unreachable',
+        detail: 'Nothing starts until it answers.',
+        badge: 'Controller unreachable',
+        icon: ServerOff,
+      };
     default: {
       const unknown: never = code;
-      return { title: String(unknown), detail: '', icon: ServerOff };
+      return { title: String(unknown), detail: '', badge: String(unknown), icon: ServerOff };
     }
   }
 }

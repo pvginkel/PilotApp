@@ -1,11 +1,12 @@
 import type { Locator, Page } from '@playwright/test';
 import { waitForUiState } from '../helpers';
 
-/** The frame every screen sits in: the top bar and its profile menu, the gold bar, the side column, the keys list. */
+/** The frame every screen sits in: the top bar, its gold badges and its profile menu, the gold bar, the side column, the keys list. */
 export class ShellPage {
   readonly topBar: Locator;
   readonly brand: Locator;
   readonly drawerToggle: Locator;
+  readonly goldBadges: Locator;
   readonly app: Locator;
   readonly goldBar: Locator;
   readonly side: Locator;
@@ -26,6 +27,7 @@ export class ShellPage {
     this.topBar = page.getByTestId('app-shell.topbar');
     this.brand = this.topBar.locator('.brand');
     this.drawerToggle = page.getByTestId('shell.drawer-toggle');
+    this.goldBadges = page.getByTestId('shell.gold-badges');
     this.app = page.getByTestId('shell.app');
     this.goldBar = page.getByTestId('shell.gold-bar');
     this.side = page.getByTestId('shell.side');
@@ -43,7 +45,12 @@ export class ShellPage {
     this.keysBackdrop = page.getByTestId('shell.keys.backdrop');
   }
 
-  /** The gold bar's line for a condition, by its code: `outage`, the controller unreachable. */
+  /** The top bar's badge for a condition off a phone, by its code: `outage`, the controller unreachable. */
+  goldBadge(code: 'outage'): Locator {
+    return this.goldBadges.locator(`[data-testid="shell.gold-badges.badge"][data-condition="${code}"]`);
+  }
+
+  /** The gold bar's line for a condition on a phone, by its code: `outage`, the controller unreachable. */
   goldLine(code: 'outage'): Locator {
     return this.goldBar.locator(`[data-testid="shell.gold-bar.line"][data-condition="${code}"]`);
   }

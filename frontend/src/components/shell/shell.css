@@ -1,7 +1,6 @@
 /* The frame every screen sits in: the top bar, the gold bar, the side column and the centre, the
    drawer on a narrow window, the profile menu and the keys list (PilotAppSpecs
-   design/mockup/style.css, "Header", "Layout" and "Narrow screens"; the gold bar is not in the
-   mockup). */
+   design/mockup/style.css, "Header", "Layout", "The gold bar" and "Narrow screens"). */
 
 @layer components {
   /* ---- The top bar ---------------------------------------------------------------------- */
@@ -24,6 +23,28 @@
   .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 20px; }
   .logo { width: 32px; height: 32px; }
   .topbar .spacer { flex: 1; }
+  /* The gold bar off a phone: a badge per condition after Pilot's name, its full line its title.
+     The light theme's gold in both themes (app-theme.css), the top bar being the same blue in
+     both. */
+  .gold-badges { display: flex; gap: 8px; }
+  .gold-badge {
+    --gold: 45 93% 62%;
+    --gold-foreground: 36 85% 15%;
+    --gold-edge: 42 85% 46%;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    padding: 0 11px 0 9px;
+    border: 1px solid hsl(var(--gold-edge));
+    border-radius: var(--radius);
+    background: hsl(var(--gold));
+    color: hsl(var(--gold-foreground));
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .gold-badge .icon { width: 14px; height: 14px; }
   .topbar :focus-visible { outline-color: #fff; }
   .drawer-toggle {
     display: none;
@@ -61,7 +82,7 @@
 
   /* ---- The side column and the centre --------------------------------------------------- */
 
-  /* The gold bar over the side column, the centre beside both. */
+  /* The side column beside the centre; under the breakpoint the gold bar over both. */
   .app {
     position: relative;
     flex: 1;
@@ -81,11 +102,12 @@
     overflow-y: auto;
   }
 
-  /* Not positioned on a wide window: the overlay in it lies over the side column and the gold bar
-     too, placed on .app. */
+  /* Not positioned on a wide window: the overlay in it lies over the side column too, placed on
+     .app. */
   .centre { grid-area: 1 / 2 / 3 / 3; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 
-  /* ---- The gold bar: a line per condition that holds all work, none while nothing does --- */
+  /* ---- The gold bar on a phone: a line per condition that holds all work, none while nothing
+     does; off a phone the top bar's badges have them ----------------------------------------- */
 
   .gold-bar { grid-area: 1 / 1 / 2 / 2; min-width: 0; }
   .gold-line {
@@ -113,6 +135,7 @@
 
   @media (max-width: 900px) {
     .drawer-toggle { display: grid; place-items: center; }
+    .gold-badges { display: none; }
     .app { grid-template-columns: minmax(0, 1fr); }
     .centre { grid-area: 2 / 1 / 3 / 2; position: relative; }
     /* Hidden once it has slid out, so a closed drawer takes no focus. Placed in the centre's grid
@@ -134,5 +157,8 @@
     .drawer-scrim { position: absolute; grid-area: 2 / 1 / 3 / 2; inset: 0; z-index: 24; background: rgb(0 0 0 / 0.3); }
     .app:not([data-drawer="open"]) .drawer-scrim { display: none; }
   }
-  @media (min-width: 901px) { .drawer-scrim { display: none; } }
+  @media (min-width: 901px) {
+    .drawer-scrim { display: none; }
+    .gold-bar { display: none; }
+  }
 }

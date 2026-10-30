@@ -1,14 +1,17 @@
 /**
- * The top bar (F111): the drawer toggle on a narrow window, the logo on its tile and the name, and
- * the signed-in person's avatar, which opens the profile menu (F126). At the handle step it has
- * no drawer to toggle, and its menu no Profile.
+ * The top bar (F111): the drawer toggle on a narrow window, the logo on its tile and the name, the
+ * gold bar's badges after it off a phone, and the signed-in person's avatar, which opens the
+ * profile menu (F126). At the handle step it has no drawer to toggle, no badge, and its menu no
+ * Profile.
  */
 
 import { useNavigate } from '@tanstack/react-router';
 import { LogOut, Menu as MenuIcon, UserRound } from 'lucide-react';
 import { Avatar } from '@/components/shared/avatar';
 import { Menu, MenuItem } from '@/components/shared/menu';
+import { GoldBadges } from '@/components/shell/gold-bar';
 import { useAuthContext } from '@/contexts/auth-context';
+import type { Condition } from '@/hooks/use-conditions';
 import { isPerson, type Self } from '@/hooks/use-self';
 import { THEMES, type Theme } from '@/lib/browser-state';
 import { useTheme } from '@/lib/theme';
@@ -19,9 +22,11 @@ interface TopBarProps {
   self: Self | undefined;
   /** Null while the app is not open. */
   drawer: { open: boolean; toggle: () => void } | null;
+  /** What holds all work, none while the app is not open. */
+  conditions: Condition[];
 }
 
-export function TopBar({ self, drawer }: TopBarProps) {
+export function TopBar({ self, drawer, conditions }: TopBarProps) {
   return (
     <header className="topbar" data-testid="app-shell.topbar">
       {drawer && (
@@ -40,6 +45,7 @@ export function TopBar({ self, drawer }: TopBarProps) {
         <img className="logo" src="/logo.png" alt="" />
         Pilot
       </div>
+      <GoldBadges conditions={conditions} />
       <div className="spacer" />
       {self && <ProfileMenu self={self} />}
     </header>

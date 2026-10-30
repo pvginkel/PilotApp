@@ -13,7 +13,7 @@ import type { components } from '@/lib/api/generated/types';
 import { useUiStateInstrumentation } from '@/lib/test/ui-state';
 
 type Conditions = components['schemas']['ConditionsSchema.6c014b4'];
-type Condition = Conditions['conditions'][number];
+export type Condition = Conditions['conditions'][number];
 
 /** The server's event, `{"conditions": [{"code": …, "since": …}]}`. */
 const EVENT = 'conditions_changed';

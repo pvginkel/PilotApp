@@ -1,8 +1,8 @@
 /**
- * The frame every screen sits in: the top bar, the side column with the gold bar over the project
- * list, and the centre, where the child route shows. Under the mockup's breakpoint the side column
- * is a drawer over the centre (F98.3), opened from the top bar and closed by its scrim or by going
- * elsewhere, and the gold bar spans the window under the top bar.
+ * The frame every screen sits in: the top bar with the gold bar's badges, the side column with the
+ * project list, and the centre, where the child route shows. Under the mockup's breakpoint the side
+ * column is a drawer over the centre (F98.3), opened from the top bar and closed by its scrim or by
+ * going elsewhere, and the gold bar is its lines across the window under the top bar.
  * At a first sign-in the handle step stands in their place (F137): no screen opens before it.
  * Every text under the side column and the centre links through the link settings read here.
  */
@@ -15,6 +15,7 @@ import { ProjectColumn } from '@/components/projects/project-column';
 import { KeysList } from '@/components/shell/keys-list';
 import { LinksProvider } from '@/components/shared/linked-text';
 import { TopBar } from '@/components/shell/top-bar';
+import { useConditions } from '@/hooks/use-conditions';
 import { useProjectEvents } from '@/hooks/use-project-events';
 import { isPerson, PersonProvider, useSelf } from '@/hooks/use-self';
 import { useShellKeys } from '@/lib/keys';
@@ -39,6 +40,7 @@ function Shell() {
   const [keysList, setKeysList] = useState(false);
   useShellKeys(() => setKeysList(!keysList));
   useProjectEvents();
+  const conditions = useConditions();
   const person = self !== undefined && isPerson(self) ? self : null;
 
   return (
@@ -46,13 +48,14 @@ function Shell() {
       <TopBar
         self={self}
         drawer={person && { open: drawerOpen, toggle: () => setDrawerOn(drawerOpen ? null : pathname) }}
+        conditions={person ? conditions : []}
       />
       {self !== undefined && person === null && <HandleStep self={self} />}
       {person !== null && (
         <PersonProvider value={person}>
           <LinksProvider>
             <div className="app" data-drawer={drawerOpen ? 'open' : 'closed'} data-testid="shell.app">
-              <GoldBar />
+              <GoldBar conditions={conditions} />
               <nav className="tabs" aria-label="Projects" data-testid="shell.side">
                 <ProjectColumn />
               </nav>

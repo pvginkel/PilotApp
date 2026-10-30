@@ -1,6 +1,5 @@
-"""The conditions that hold all work, a line each on the gold bar over the
-project list (UC *The gold bar*; F125): read once, then followed by the
-`conditions_changed` event."""
+"""The conditions that hold all work, which the gold bar shows (UC *The gold
+bar*; F125): read once, then followed by the `conditions_changed` event."""
 
 from typing import Any
 

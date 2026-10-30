@@ -1,5 +1,5 @@
-"""Schemas for the conditions that hold all work, a line each on the gold bar
-over the project list (UC *The gold bar*; F125; DB Condition)."""
+"""Schemas for the conditions that hold all work, which the gold bar shows (UC
+*The gold bar*; F125; DB Condition)."""
 
 from datetime import datetime
 from enum import StrEnum
