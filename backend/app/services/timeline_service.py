@@ -130,7 +130,7 @@ def waiting_on(person: User | None) -> ColumnElement[bool]:
     addressed: ColumnElement[bool] = Item.for_user_id.is_(None)
     if person is not None:
         addressed = or_(addressed, Item.for_user_id == person.id)
-    return and_(_waiting(), addressed)
+    return and_(waiting(), addressed)
 
 
 def waiting_on_a_member() -> ColumnElement[bool]:
@@ -146,10 +146,10 @@ def waiting_on_a_member() -> ColumnElement[bool]:
         )
         .correlate(Item)
     )
-    return and_(_waiting(), member.exists())
+    return and_(waiting(), member.exists())
 
 
-def _waiting() -> ColumnElement[bool]:
+def waiting() -> ColumnElement[bool]:
     """F94.5's set, whoever an item is for: open; a prose item but the
     opening, a notice only when it is urgent (F23.2, F10.3), a registered
     document only once its turn-end read is made, since none takes a close

@@ -54,6 +54,9 @@ from app.services.session_record_service import SessionRecordService
 from app.services.session_start_service import SessionStartService
 from app.services.session_stream_service import SessionStreamService
 from app.services.sse_connection_manager import SSEConnectionManager
+from app.services.standing_notification_service import (
+    StandingNotificationService,
+)
 from app.services.start_gate import WorkSlots
 from app.services.supervisor import Supervisor
 from app.services.sync_service import SyncService
@@ -480,6 +483,11 @@ class ServiceContainer(containers.DeclarativeContainer):
         record_service=record_service,
         controller_outage=controller_outage,
         work_slots=work_slots,
+    )
+    # The standing notification each member of a project should see (F94.1,
+    # F94.2), its link on the stage's public address
+    standing_notification_service = providers.Factory(
+        StandingNotificationService, db=db_session, base_url=config.provided.baseurl
     )
     # An attachment's bytes, streamed (F28.5, F36)
     attachment_service = providers.Factory(
