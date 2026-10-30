@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session as DbSession
 from app import models
 from app.models import Turn, UsageReading, WindowShare
 from app.models.reference import RecordKind, UsageWindow
+from app.services import quota_wall
 from app.services.container import ServiceContainer
 from app.services.quota_wall import (
     confirmed,
@@ -194,6 +195,31 @@ class TestTurnShowsWall:
             turn_shows_wall(session, project_session.id, turn.id)
             for turn in (first, second, third)
         ] == [False, True, False]
+
+    def test_it_reads_every_page_of_a_turns_events(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project_session: models.Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A long turn gives an event at each point a window moves (design 4
+        §2): the one that turns a window to rejected comes after them."""
+        monkeypatch.setattr(quota_wall, "_PAGE", 2)
+        turn = _turn(session, project_session, 1)
+        records = container.session_record_service()
+        lines = [_event(), _event(), _event(), _event(seven_day="rejected")]
+        for offset, line in enumerate(lines, start=1):
+            records.append(
+                project_session.id,
+                RecordKind.CLAUDE,
+                payload=line,
+                turn_id=turn.id,
+                raw_offset=offset,
+                controller_session="claude-1",
+            )
+
+        assert turn_shows_wall(session, project_session.id, turn.id)
 
 
 def _reading(

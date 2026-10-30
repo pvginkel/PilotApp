@@ -26,15 +26,15 @@ stale reading's window counting as reset a minute past its `resets_at`
 
 import re
 import uuid
-from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import ColumnElement, SQLColumnExpression, func, or_, select
 from sqlalchemy.orm import Session, aliased
 
-from app.models import SessionRecord, UsageReading, WindowShare
+from app.models import UsageReading, WindowShare
 from app.models.reference import RecordKind
+from app.services.session_record_service import read_records
 from app.services.usage_halts import LIFT_AFTER, WALL
 from app.services.usage_service import latest
 
@@ -49,6 +49,9 @@ them."""
 
 _SIGNS = ("rate_limit_event", "result")
 """The `type`s of the lines that may show the wall."""
+
+_PAGE = 64
+"""The records one read of a Turn's lines of a sign takes."""
 
 
 def shows_wall(line: Any) -> bool:
@@ -80,15 +83,24 @@ def shows_wall(line: Any) -> bool:
 
 def turn_shows_wall(db: Session, session_id: uuid.UUID, turn_id: int) -> bool:
     """Whether the Turn's recorded stream shows the wall (`shows_wall`)."""
-    lines: Sequence[Any] = db.scalars(
-        select(SessionRecord.payload).where(
-            SessionRecord.session_id == session_id,
-            SessionRecord.turn_id == turn_id,
-            SessionRecord.kind_code == RecordKind.CLAUDE,
-            SessionRecord.payload["type"].astext.in_(_SIGNS),
-        )
-    ).all()
-    return any(shows_wall(line) for line in lines)
+    for sign in _SIGNS:
+        after = 0
+        while True:
+            page = read_records(
+                db,
+                session_id,
+                after=after,
+                turn_id=turn_id,
+                kind=RecordKind.CLAUDE,
+                payload_type=sign,
+                limit=_PAGE,
+            )
+            if any(shows_wall(stored.record.payload) for stored in page):
+                return True
+            if len(page) < _PAGE:
+                break
+            after = page[-1].record.seq
+    return False
 
 
 def confirmed(at: SQLColumnExpression[datetime | None]) -> ColumnElement[bool]:
