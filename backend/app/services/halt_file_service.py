@@ -6,27 +6,32 @@ runs there under either. Never for a job's Session or a chat's, so never into
 the store. Two projects sharing an environment share its file, and so do a
 halt and a pause.
 
-An Environment's `halt_requested_at` says the server wrote the file there.
-What is owed is read from the rows: an environment whose column is unset
-where the file is wanted, or set where it is not. Each such environment's
-file is brought in line by a loop of its own, `halt-file:<env id>`, under the
-Environment's row: the file written and the column set, or the file deleted
-and the column cleared, a file the controller no longer finds deleted. A call
-the controller does not answer, or refuses — its own work on the tree, a
-`409 conflict`, among the refusals — raises, and the loop runs again after
-its backoff, so an environment owed a write or a delete gets it once the
-controller answers.
+An Environment's `halt_requested_at` says the file may be there: it is set,
+and committed, before the write goes out, and cleared once the delete is
+answered, so that a write the controller made but whose answer never came is
+deleted once nothing holds the file. What is owed is read from the rows: an
+environment whose column is unset where the file is wanted, or set where it
+is not. Each such environment's file is brought in line by a loop of its own,
+`halt-file:<env id>`, under the Environment's row; a file the controller no
+longer finds counts as deleted. A call the controller does not answer, or
+refuses — its own work on the tree, a `409 conflict`, among the refusals —
+raises, and the loop runs again after its backoff. Each run writes the file
+where it is wanted, whatever the column says, so an environment owed a write
+or a delete gets it once the controller answers.
 
 A change of what holds the file asks for a sweep once it commits: a pause or
 a resume (`ProjectService`), a halt's turn (`UsageWatcher`), a work item's
 run's end (`WorkSlots`). The sweep, the loop `halt-file`, starts the loop of
-every environment owed. The timer does the same on every tick, its first a
-restart's reconcile, and finds a work item whose start the gate let through
-before a halt or a pause it now runs under.
+every environment owed. The timer does the same on every tick, and finds a
+work item whose start the gate let through before a halt or a pause it now
+runs under. The job's reconcile at STARTUP starts the loop of every
+environment owed or whose column is set: a process that ended during a call
+left the file's presence unknown there.
 """
 
 import logging
 from datetime import UTC, datetime
+from enum import Enum
 from functools import partial
 from typing import TYPE_CHECKING
 
@@ -55,6 +60,14 @@ HALT_FILE_JOB = "halt-file"
 TIMER = "halt-file"
 
 
+class _Step(Enum):
+    """What one pass of an environment's run did."""
+
+    MARKED = "marked"
+    WRITTEN = "written"
+    DELETED = "deleted"
+
+
 class HaltFileService:
     """Writes the halt file where a work item runs under a cooperative halt
     or its project's pause, and deletes it once none does."""
@@ -68,8 +81,8 @@ class HaltFileService:
         week_halt: HaltSetting,
         five_hour_halt: HaltSetting,
     ) -> None:
-        """Register the `halt-file` job and its timer, and hear each work
-        item's run's end.
+        """Register the `halt-file` job, its reconcile and its timer, and hear
+        each work item's run's end.
 
         Args:
             container: Gives each run its database session, and the client
@@ -88,7 +101,9 @@ class HaltFileService:
             UsageWindow.SEVEN_DAY: week_halt,
             UsageWindow.FIVE_HOUR: five_hour_halt,
         }
-        supervisor.register_job(HALT_FILE_JOB, needs_controller=True)
+        supervisor.register_job(
+            HALT_FILE_JOB, needs_controller=True, reconcile=self.reconcile
+        )
         supervisor.register_timer(TIMER, self.run_timer, needs_controller=True)
         work_slots.subscribe(self.request)
 
@@ -129,33 +144,47 @@ class HaltFileService:
             self._start_owed(db)
 
     def run_timer(self, db: Session) -> None:
-        """The timer's tick, and its reconcile: the loop of every environment
-        owed started."""
+        """The timer's tick: the loop of every environment owed started."""
         self._start_owed(db)
 
+    def reconcile(self, db: Session) -> None:
+        """The job's reconcile at STARTUP: the loop of every environment owed
+        or whose `halt_requested_at` is set started."""
+        requested = db.scalars(
+            select(Environment.id).where(Environment.halt_requested_at.is_not(None))
+        )
+        for env_id in sorted({*self.owed(db), *requested}):
+            self._start(env_id)
+
     def settle(self, env_id: str, handle: LoopHandle) -> None:
-        """An environment's loop's run: under its row, the halt file written
-        there and `halt_requested_at` set while a work item runs there under
-        a cooperative halt or its project's pause, or the file deleted and
-        the column cleared once none does; each in a transaction of its own,
-        read again after it until the column says what is wanted, so that a
-        change committed during the call, which the sweep read before this
-        commit, is taken too. Returns then, and when the loop is told to
-        stop.
+        """An environment's loop's run: under its row, while a work item runs
+        there under a cooperative halt or its project's pause,
+        `halt_requested_at` set and then the halt file written, or, once none
+        does, the file deleted and the column cleared; each in a transaction
+        of its own, read again after it until the column says what is wanted
+        and the file is written where it is, so that a change committed
+        during the call, which the sweep read before this commit, is taken
+        too. Returns then, and when the loop is told to stop.
 
         Raises:
             ExternalServiceException: The controller did not answer, or
                 refused the write or the delete
         """
+        written = False
         while not handle.stopping:
             with scoped_session(self._container) as db:
-                moved = self._bring_in_line(db, env_id)
-            if not moved:
+                step = self._bring_in_line(db, env_id, written=written)
+            if step is None:
                 return
+            written = step is _Step.WRITTEN
 
-    def _bring_in_line(self, db: Session, env_id: str) -> bool:
-        """The file written or deleted as what holds now asks, under the
-        Environment's row; whether either was."""
+    def _bring_in_line(
+        self, db: Session, env_id: str, *, written: bool
+    ) -> _Step | None:
+        """One step towards what holds now asks, under the Environment's
+        row: the column set before the file is written, the file written
+        unless this run has written it, or the file deleted and the column
+        cleared; None once nothing is left."""
         row = db.scalars(
             select(Environment)
             .where(Environment.id == env_id)
@@ -163,23 +192,29 @@ class HaltFileService:
             .execution_options(populate_existing=True)
         ).one()
         wanted = bool(db.scalar(select(_wanted(env_id, halting=self.halting(db)))))
-        if wanted == (row.halt_requested_at is not None):
-            return False
-        if wanted:
-            self._client().write_file(env_id, HALT_FILE, b"")
+        requested = row.halt_requested_at is not None
+        if wanted and not requested:
             row.halt_requested_at = datetime.now(UTC)
+            return _Step.MARKED
+        if wanted and not written:
+            self._client().write_file(env_id, HALT_FILE, b"")
             logger.info("Wrote the halt file into environment %s", env_id)
-        else:
+            return _Step.WRITTEN
+        if not wanted and requested:
             self._client().delete_file(env_id, HALT_FILE)
             row.halt_requested_at = None
             logger.info("Deleted the halt file from environment %s", env_id)
-        return True
+            return _Step.DELETED
+        return None
 
     def _start_owed(self, db: Session) -> None:
         for env_id in self.owed(db):
-            self._supervisor.start_loop(
-                HALT_FILE_JOB, partial(self.settle, env_id), key=env_id, again=True
-            )
+            self._start(env_id)
+
+    def _start(self, env_id: str) -> None:
+        self._supervisor.start_loop(
+            HALT_FILE_JOB, partial(self.settle, env_id), key=env_id, again=True
+        )
 
     def _client(self) -> ControllerClient:
         client: ControllerClient = self._container.controller_client()

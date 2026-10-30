@@ -407,7 +407,7 @@ class TestHaltFileServiceSettle:
         # One project resumed: the other's pause still holds the file.
         first.paused = False
         session.flush()
-        _settle(halt_files)
+        owed = halt_files.owed(session)
         kept = (_file(fake_controller), _requested(session))
         # The paused project's work item's turn ends: nothing holds it.
         second_run.state_code = SessionState.IDLE
@@ -415,7 +415,7 @@ class TestHaltFileServiceSettle:
         _settle(halt_files)
 
         assert written_at is not None
-        assert kept == (b"", written_at)
+        assert (owed, kept) == ([], (b"", written_at))
         assert (_file(fake_controller), _requested(session)) == (None, None)
         assert _calls(fake_controller) == [
             f"PUT /environments/{ENV}/file?path=%2Fwork%2F.quota-limit-halt-requested",
@@ -502,14 +502,16 @@ class TestHaltFileServiceSettle:
 
         assert _requested(session) is None
 
-    def test_an_environment_whose_column_says_what_is_wanted_is_left_alone(
+    def test_a_run_writes_the_file_wanted_whatever_the_column_says(
         self,
         session: DbSession,
         halt_files: HaltFileService,
         fake_controller: ServedFakeController,
         person: User,
     ) -> None:
+        # The column set where the file is wanted, its write unanswered.
         _environment(session, fake_controller, requested=True)
+        fake_controller.remove_file(ENV, HALT_FILE)
         _environment(session, fake_controller, OTHER)
         _run(session, _project(session, person, paused=True))
         written_at = _requested(session)
@@ -517,10 +519,13 @@ class TestHaltFileServiceSettle:
         _settle(halt_files)
         _settle(halt_files, OTHER)
 
-        assert _calls(fake_controller) == []
+        assert [call.split("?")[0] for call in _calls(fake_controller)] == [
+            f"PUT /environments/{ENV}/file"
+        ]
+        assert _file(fake_controller) == b""
         assert (_requested(session), _requested(session, OTHER)) == (written_at, None)
 
-    def test_a_call_the_controller_does_not_answer_raises_and_takes_nothing(
+    def test_a_call_the_controller_does_not_answer_raises_and_leaves_the_column_set(
         self,
         session: DbSession,
         halt_files: HaltFileService,
@@ -539,8 +544,79 @@ class TestHaltFileServiceSettle:
         with pytest.raises(ExternalServiceException):
             _settle(halt_files, OTHER)
 
-        assert (_requested(session), _requested(session, OTHER)) == (None, written_at)
-        assert _file(fake_controller, OTHER) == b""
+        assert _requested(session) is not None
+        assert _file(fake_controller) is None
+        assert (_requested(session, OTHER), _file(fake_controller, OTHER)) == (
+            written_at,
+            b"",
+        )
+
+    def test_a_write_whose_answer_never_came_is_deleted_once_nothing_holds_it(
+        self,
+        session: DbSession,
+        halt_files: HaltFileService,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        person: User,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _environment(session, fake_controller)
+        run = _run(session, _project(session, person, paused=True))
+        session.commit()
+        write = controller_client.write_file
+
+        def unanswered(env_id: str, path: str, data: bytes) -> str:
+            # The controller writes the file; its answer never arrives.
+            write(env_id, path, data)
+            raise ExternalServiceException("write the halt file", "timed out")
+
+        monkeypatch.setattr(controller_client, "write_file", unanswered)
+        with pytest.raises(ExternalServiceException):
+            _settle(halt_files)
+        monkeypatch.setattr(controller_client, "write_file", write)
+        left = _file(fake_controller)
+        run.state_code = SessionState.IDLE
+        session.commit()
+
+        owed = halt_files.owed(session)
+        _settle(halt_files)
+
+        assert (left, owed) == (b"", [ENV])
+        assert (_file(fake_controller), _requested(session)) == (None, None)
+
+    def test_a_delete_whose_answer_never_came_is_written_again_while_wanted(
+        self,
+        session: DbSession,
+        halt_files: HaltFileService,
+        controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        person: User,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _environment(session, fake_controller, requested=True)
+        run = _run(
+            session, _project(session, person, paused=True), state=SessionState.IDLE
+        )
+        session.commit()
+        delete = controller_client.delete_file
+
+        def unanswered(env_id: str, path: str) -> None:
+            # The controller deletes the file; its answer never arrives.
+            delete(env_id, path)
+            raise ExternalServiceException("delete the halt file", "timed out")
+
+        monkeypatch.setattr(controller_client, "delete_file", unanswered)
+        with pytest.raises(ExternalServiceException):
+            _settle(halt_files)
+        monkeypatch.setattr(controller_client, "delete_file", delete)
+        run.state_code = SessionState.RUNNING
+        session.commit()
+
+        # The loop's run after the one that raised.
+        _settle(halt_files)
+
+        assert _file(fake_controller) == b""
+        assert _requested(session) is not None
 
     def test_a_delete_during_a_bring_up_raises_until_it_settles(
         self,
@@ -733,3 +809,25 @@ class TestHaltFileServiceLoop:
         loop_log.wait_for(f"Deleted the halt file from environment {ENV}")
         wait_until(lambda: _committed_requested(container) is None, "the delete taken")
         assert _file(fake_controller) is None
+
+    def test_startup_writes_a_file_wanted_where_the_column_is_set(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        supervise: Supervise,
+        loop_log: LogWaiter,
+    ) -> None:
+        container = committed_app.container
+        # The column set, and the process gone before its write went out.
+        project_id, _ = _committed_rows(committed_app, fake_controller, requested=True)
+        with scoped_session(container) as db:
+            db.get_one(Project, project_id).paused = True
+        fake_controller.remove_file(ENV, HALT_FILE)
+        _, coordinator = _service(container, supervise, tick=60)
+
+        coordinator.fire_startup()
+
+        loop_log.wait_for(f"Wrote the halt file into environment {ENV}")
+        assert _file(fake_controller) == b""
+        assert _committed_requested(container) is not None
