@@ -99,7 +99,7 @@ from app.services.session_start_service import (
 from app.services.start_gate import Held, WorkSlots, queued
 from app.services.supervisor import LoopHandle
 from app.services.timeline_service import work_status
-from app.services.turn_end_read_service import TurnEndReadService
+from app.services.turn_end_read_service import READ_JOB, TurnEndReadService
 from app.services.usage_halts import UsageHalts
 from app.services.write_back_service import WRITE_BACK_REFUSED
 from app.utils import after_commit as after_commit_module
@@ -5094,6 +5094,41 @@ class TestNudge:
         assert (item.done_at, item.done_cause_code) == (nudged.ended_at, "turn_ended")
         [job] = _jobs_after(session, run.id)
         assert session.get_one(Item, job).title == NEXT_TITLE
+
+    def test_a_document_registered_in_the_halted_turn_is_read_at_the_nudges_normal_end(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        container: ServiceContainer,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        """V23: the run's documents are read at its first normal turn end,
+        one it registered in the turn that ended under the halt among them,
+        and the job after its turn waits for the read (decision 44; design 3
+        D2)."""
+        run = _running(starts, session, project)
+        run.conversation_id = "conv-1"
+        container.document_service().register(project, run, "/work/Example/notes.md")
+        _usage(session, week=0.95, five_hour=0.1)
+        _turn_ends(starts, fake, run, "success")
+        halted = _read(session, run.id)
+        assert halted.nudge_owed_at is not None
+        _usage(session, week=0.5, five_hour=0.1)
+        _nudge(starts)
+        clear_after_commit_callbacks()
+        _run(starts, _read(session, halted.id))
+
+        _turn_ends(starts, fake, _read(session, halted.id), "success")
+
+        item = session.get_one(Item, halted.id, populate_existing=True)
+        assert item.done_cause_code == "turn_ended"
+        # Its read loop waits for a STARTUP that never fires here, and a
+        # second request of it is none; the job after its turn waits for it.
+        assert not starts._supervisor.start_loop(
+            READ_JOB, lambda handle: None, key=str(halted.id)
+        )
+        assert _jobs_after(session, halted.id) == []
 
     def test_the_stale_fallback_lifts_the_halt_a_minute_past_its_reset(
         self,
