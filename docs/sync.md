@@ -254,6 +254,14 @@ get up in time is recorded as the save of the session that held the lock as the 
 those bytes go up as that session's whoever holds the lock by then; other bytes read there forget the
 record.
 
+**The flush** walks the folder after every writing tool call, so it reads only the files whose stat
+moved: each file's hash is kept with the size, mtime, ctime and inode it bore when read, and a file
+that still bears them is not read again. A file whose ctime is less than 2 s before the walk is read
+at every walk and its hash not kept, since a write within the clock's tick of the one read can leave
+the stat as it was. The reconcile's walk keeps and uses the same hashes. `go test -run '^$' -bench .
+./internal/sidecar` measures a lock and a release of a folder of 200 documents and four 16 MiB
+attachments.
+
 **The release's text** is the folder's whole list: each Save Error as `<path>:<line>: <message>`
 (`<path>: <message>` without a line); then each local note on a path of the folder as `<path>:
 <note>`; then `not yet checked: <path>` for each file the flush did not get up, and `not yet

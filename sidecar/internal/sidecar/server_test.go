@@ -66,7 +66,7 @@ type checkPost struct {
 // and each one accepted is handed to the test on streams. Two PUTs of one
 // path out at once fail the test.
 type server struct {
-	t       *testing.T
+	t       testing.TB
 	url     string
 	quit    chan struct{}
 	streams chan *stream
@@ -95,7 +95,7 @@ type stream struct {
 	dropped chan struct{}
 }
 
-func newServer(t *testing.T) *server {
+func newServer(t testing.TB) *server {
 	s := &server{
 		t:       t,
 		quit:    make(chan struct{}),
@@ -203,7 +203,7 @@ func (s *server) checked() []checkPost {
 }
 
 // accept is the change stream the server opens next.
-func (s *server) accept(t *testing.T) *stream {
+func (s *server) accept(t testing.TB) *stream {
 	t.Helper()
 	select {
 	case opened := <-s.streams:
@@ -439,7 +439,7 @@ func (l *logs) String() string {
 
 // newSidecar is a sidecar of tree and data against s, not yet running, and
 // what it logs.
-func newSidecar(t *testing.T, s *server, tree, data string) (*Sidecar, *logs) {
+func newSidecar(t testing.TB, s *server, tree, data string) (*Sidecar, *logs) {
 	t.Helper()
 	logged := &logs{out: t.Output()}
 	sidecar, err := New(configure(s, tree, data), slog.New(slog.NewTextHandler(logged, nil)))
@@ -451,7 +451,7 @@ func newSidecar(t *testing.T, s *server, tree, data string) (*Sidecar, *logs) {
 
 // run runs sidecar until the test ends, or until the stop it answers is
 // called.
-func run(t *testing.T, sidecar *Sidecar) func() {
+func run(t testing.TB, sidecar *Sidecar) func() {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error)
@@ -476,7 +476,7 @@ type started struct {
 
 // start runs a sidecar on tree and data against s, once its reconcile on
 // connect is done.
-func start(t *testing.T, s *server, tree, data string) started {
+func start(t testing.TB, s *server, tree, data string) started {
 	t.Helper()
 	sidecar, _ := newSidecar(t, s, tree, data)
 	before := len(s.manifests())
@@ -513,7 +513,7 @@ func configure(s *server, tree, data string) config.Config {
 	}
 }
 
-func eventually(t *testing.T, what string, cond func() bool) {
+func eventually(t testing.TB, what string, cond func() bool) {
 	t.Helper()
 	for deadline := time.Now().Add(5 * time.Second); !cond(); time.Sleep(5 * time.Millisecond) {
 		if time.Now().After(deadline) {

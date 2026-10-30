@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pvginkel/PilotApp/sidecar/internal/files"
 	"github.com/pvginkel/PilotApp/sidecar/internal/protocol"
@@ -33,13 +34,15 @@ const (
 const viewMode fs.FileMode = 0o444
 
 // tree is the store's tree as the sidecar keeps it: the files under its
-// root, the shadow of each as it last synced, the local notes on them, the
-// read-only views among them, the write lock of each project folder, the
-// saves its releases left unsent, and the server they sync with.
+// root, the shadow of each as it last synced, the hash its walks last read
+// of each, the local notes on them, the read-only views among them, the
+// write lock of each project folder, the saves its releases left unsent,
+// and the server they sync with.
 type tree struct {
 	root    string
 	client  *protocol.Client
 	shadow  *shadow.Store
+	hashes  *fileHashes
 	notes   *notes
 	logger  *slog.Logger
 	slots   chan struct{}
@@ -60,6 +63,7 @@ func newTree(root string, client *protocol.Client, store *shadow.Store, logger *
 		root:     root,
 		client:   client,
 		shadow:   store,
+		hashes:   newFileHashes(),
 		notes:    &notes{byPath: map[string]note{}},
 		logger:   logger,
 		slots:    make(chan struct{}, parallelCalls),
@@ -152,9 +156,12 @@ func (t *tree) hold(ctx context.Context, path string) (release func(), ok bool) 
 }
 
 // walk hashes every file of the tree under the directory of under, a path
-// from the tree's root or "" for the root, by path. A file it cannot read
-// is left out, as its upload leaves it: it costs its own path only.
+// from the tree's root or "" for the root, by path, reading only those whose
+// stamps moved since the last walk hashed them (fileHashes). A file it
+// cannot read is left out, as its upload leaves it: it costs its own path
+// only.
 func (t *tree) walk(under string) (map[string]string, error) {
+	since := time.Now()
 	hashes := map[string]string{}
 	err := filepath.WalkDir(t.name(under), func(name string, entry fs.DirEntry, err error) error {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -171,7 +178,7 @@ func (t *tree) walk(under string) (map[string]string, error) {
 			return err
 		}
 		path := filepath.ToSlash(rel)
-		content, err := os.ReadFile(name)
+		hash, err := t.hashes.hash(path, name, entry, since)
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil
 		}
@@ -179,9 +186,12 @@ func (t *tree) walk(under string) (map[string]string, error) {
 			t.logger.Error("cannot read a file of the tree", "path", path, "error", err)
 			return nil
 		}
-		hashes[path] = protocol.Hash(content)
+		hashes[path] = hash
 		return nil
 	})
+	if err == nil {
+		t.hashes.keep(under, hashes)
+	}
 	return hashes, err
 }
 

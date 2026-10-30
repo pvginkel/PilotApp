@@ -50,7 +50,7 @@ func (s started) post(route, body string) (int, string, string, error) {
 }
 
 // call is post, its error the test's.
-func (s started) call(t *testing.T, route, body string) (int, string, string) {
+func (s started) call(t testing.TB, route, body string) (int, string, string) {
 	t.Helper()
 	status, contentType, text, err := s.post(route, body)
 	if err != nil {
@@ -61,7 +61,7 @@ func (s started) call(t *testing.T, route, body string) (int, string, string) {
 
 // hook is the body of a hook's call for session in folder, a project
 // folder of the tree, with fields beside the project and the session.
-func (s started) hook(t *testing.T, folder, session string, fields map[string]any) string {
+func (s started) hook(t testing.TB, folder, session string, fields map[string]any) string {
 	t.Helper()
 	body := map[string]any{"project": filepath.Join(s.sidecar.tree.root, folder), "session": session}
 	maps.Copy(body, fields)
@@ -76,7 +76,7 @@ func (s started) hook(t *testing.T, folder, session string, fields map[string]an
 func pid(of int) map[string]any { return map[string]any{"pid": of} }
 
 // lock is a hook's lock of folder for session by pid, answered 200.
-func (s started) lock(t *testing.T, folder, session string, by int) {
+func (s started) lock(t testing.TB, folder, session string, by int) {
 	t.Helper()
 	if status, _, text := s.call(t, "/lock", s.hook(t, folder, session, pid(by))); status != http.StatusOK || text != "" {
 		t.Fatalf("lock answered %d %q", status, text)
@@ -103,7 +103,7 @@ func (s started) locking(t *testing.T, folder, session string) <-chan int {
 
 // release is a hook's release of the hold of folder session took by this
 // process, answered 200: its text.
-func (s started) release(t *testing.T, folder, session string) string {
+func (s started) release(t testing.TB, folder, session string) string {
 	t.Helper()
 	status, contentType, text := s.call(t, "/release", s.hook(t, folder, session, pid(os.Getpid())))
 	if status != http.StatusOK || contentType != "text/plain; charset=utf-8" {
@@ -114,7 +114,7 @@ func (s started) release(t *testing.T, folder, session string) string {
 
 // report is the release of a session that holds nothing: the check of
 // folder alone.
-func (s started) report(t *testing.T, folder string) string {
+func (s started) report(t testing.TB, folder string) string {
 	t.Helper()
 	return s.release(t, folder, "a-session-holding-nothing")
 }
