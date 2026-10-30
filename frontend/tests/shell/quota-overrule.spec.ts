@@ -157,9 +157,47 @@ test.describe('The week’s overrule', () => {
     await expect(shell.goldOverrule(shell.goldPopover)).toHaveText('Go on to 97%');
 
     await shell.goldOverrule(shell.goldPopover).click();
+    // The click closes the popover, whatever the answer: before the toast, whose dismissal is a
+    // press outside it.
+    await expect(shell.goldPopover).toHaveCount(0);
     await toastHelper.expectErrorToast(
       "Cannot add the week's allowance because the week's share is at the second limit, where only run-out is offered",
     );
     await expect(shell.goldBadge('week_halt')).toBeVisible();
+  });
+
+  test('says the target the server set, where the browser missed the reading that moved it', async ({
+    page,
+    backendUrl,
+    auth,
+    people,
+    controller,
+    conditions,
+    shell,
+    deploymentSse,
+    toastHelper,
+  }) => {
+    await people.signIn();
+    await controller.usage({ seven_day: 0.92, five_hour: 0.1 });
+    await shell.open('/profile');
+    await deploymentSse.ensureConnected();
+    await expect(shell.goldBadge('week_halt')).toHaveText(WEEK_BADGE);
+
+    // The stream goes down and stays down, as in the refusal's spec.
+    const refusal = await page.request.post(`${backendUrl}/api/testing/sse/force-callback-error?status=403`);
+    expect(refusal.status()).toBe(204);
+    await auth.forceError(500);
+    await page.evaluate(() => window.__sseForceReconnect!());
+    await toastHelper.expectErrorToast(/refresh the page/i);
+
+    // The week moves on under the second limit, the allowance's target with it: the browser does
+    // not hear it, and its button still says the old one.
+    await controller.usage({ seven_day: 0.93, five_hour: 0.1 });
+    await expect.poll(async () => (await conditions.read()).find((condition) => condition.code === 'week_halt')?.target).toBe(0.98);
+    await shell.goldBadge('week_halt').click();
+    await expect(shell.goldOverrule(shell.goldPopover)).toHaveText('Go on to 97%');
+
+    await shell.goldOverrule(shell.goldPopover).click();
+    await expect(page.getByTestId('app-shell.toast.item').getByText(goOnTo(98), { exact: true })).toBeVisible();
   });
 });
