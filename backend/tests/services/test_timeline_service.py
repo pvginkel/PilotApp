@@ -2190,6 +2190,7 @@ class TestWorkStatus:
             session,
             [held.id],
             unreachable=False,
+            halts=HALTS,
             slots=WorkSlots(work_max=work_max, project_max=project_max),
         )[held.id]
 
