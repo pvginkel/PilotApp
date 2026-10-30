@@ -55,10 +55,11 @@ test.describe("The profile page's notification token", () => {
     await expect(profile.save).toBeDisabled();
   });
 
-  test('a save sends its one-shot through the token, trimmed, and shows nothing of it after', async ({ page, people, shell, profile, bridge }) => {
+  test('a save sends its one-shot through the token, trimmed, and shows nothing of it after', async ({ page, people, shell, profile, bridge, deploymentSse }) => {
     await people.signIn();
     const phone = await bridge.register();
     await shell.open('/profile');
+    await deploymentSse.ensureConnected();
 
     await profile.saveToken(`  ${phone.token}\n`);
 
@@ -80,10 +81,11 @@ test.describe("The profile page's notification token", () => {
     await expect(profile.tokenField).toHaveValue('');
   });
 
-  test('a save waits on its one-shot, saying what it sends, however long the bridge takes', async ({ page, people, shell, profile, bridge }) => {
+  test('a save waits on its one-shot, saying what it sends, however long the bridge takes', async ({ page, people, shell, profile, bridge, deploymentSse }) => {
     await people.signIn();
     const phone = await bridge.register();
     await shell.open('/profile');
+    await deploymentSse.ensureConnected();
     await bridge.hold();
 
     await profile.tokenField.fill(phone.token);
@@ -102,9 +104,10 @@ test.describe("The profile page's notification token", () => {
     await expect(profile.tokenField).toBeEnabled();
   });
 
-  test('a token the bridge refuses fails the save, its reason under the field, and is not stored', async ({ people, shell, profile }) => {
+  test('a token the bridge refuses fails the save, its reason under the field, and is not stored', async ({ people, shell, profile, deploymentSse }) => {
     await people.signIn();
     await shell.open('/profile');
+    await deploymentSse.ensureConnected();
 
     await profile.saveToken(makeUnique('unknown-token', 16), 'error');
 
@@ -120,11 +123,12 @@ test.describe("The profile page's notification token", () => {
     await expect(profile.tokenField).toHaveAttribute('aria-invalid', 'false');
   });
 
-  test('another token replaces a set one through its own one-shot', async ({ people, shell, profile, bridge }) => {
+  test('another token replaces a set one through its own one-shot', async ({ people, shell, profile, bridge, deploymentSse }) => {
     await people.signIn();
     const first = await bridge.register();
     const second = await bridge.register();
     await shell.open('/profile');
+    await deploymentSse.ensureConnected();
     await profile.saveToken(first.token);
 
     await expect(profile.tokenField).toHaveAttribute('placeholder', 'Paste a token to replace it');
@@ -135,10 +139,11 @@ test.describe("The profile page's notification token", () => {
     expect(await bridge.oneShots(second.name)).toHaveLength(1);
   });
 
-  test('Clear drops the token at once', async ({ page, people, shell, profile, bridge }) => {
+  test('Clear drops the token at once', async ({ page, people, shell, profile, bridge, deploymentSse }) => {
     await people.signIn();
     const phone = await bridge.register();
     await shell.open('/profile');
+    await deploymentSse.ensureConnected();
     await profile.saveToken(phone.token);
 
     await profile.clearToken();
@@ -150,12 +155,13 @@ test.describe("The profile page's notification token", () => {
     await expect(profile.tokenState).toHaveText('No token is set.');
   });
 
-  test("a set token's standing notification reaches the bridge for a project the person is a member of, and Clear dismisses it", async ({ people, projects, shell, profile, bridge }) => {
+  test("a set token's standing notification reaches the bridge for a project the person is a member of, and Clear dismisses it", async ({ people, projects, shell, profile, bridge, deploymentSse }) => {
     const me = await people.signIn();
     const name = makeUnique('Tent');
     const projectId = await projects.make({ members: [me.handle!], name });
     const phone = await bridge.register();
     await shell.open('/profile');
+    await deploymentSse.ensureConnected();
 
     await profile.saveToken(phone.token);
 
@@ -182,10 +188,11 @@ test.describe("The profile page's alarms switch", () => {
     await expect(profile.alarms).toBeDisabled();
   });
 
-  test('turns off and on again with a token set, and stays as turned', async ({ page, people, shell, profile, bridge }) => {
+  test('turns off and on again with a token set, and stays as turned', async ({ page, people, shell, profile, bridge, deploymentSse }) => {
     await people.signIn();
     const phone = await bridge.register();
     await shell.open('/profile');
+    await deploymentSse.ensureConnected();
     await profile.saveToken(phone.token);
     await expect(profile.alarms).toBeEnabled();
 
