@@ -2472,6 +2472,135 @@ class TestRelayHaltedEnd:
         assert _jobs_after(session, clarifying.id) == ["Deciding what is next"]
 
 
+LIMIT = "Weekly limit reached ∙ resets Jan 4, 12am"
+
+
+def _wall_lines(sign: str) -> list[str]:
+    """The invented turn at the wall, its stream showing it by `sign`: its
+    `rate_limit_event` and its `result` line, the event alone, or the result's
+    limit error alone."""
+    dropped = {"both": None, "event": "result", "result": "rate_limit_event"}[sign]
+    return [
+        line for line in raw_turn("turn_wall") if json.loads(line)["type"] != dropped
+    ]
+
+
+class TestRelayWall:
+    """A work item's or a job's turn that ends in error, its stream showing
+    the quota wall, is `failed` with its nudge owed from its end, and a pass
+    puts no question to the writer then; a chat's never is (the ruling on the
+    wall; F135.3; DB 232, 254; V24, V25)."""
+
+    @pytest.mark.parametrize("sign", ["both", "event", "result"])
+    def test_a_work_items_turn_dead_at_the_wall_fails_its_nudge_owed(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        work_item: models.Session,
+        sign: str,
+    ) -> None:
+        turn = _send(relays, session, work_item)
+        opened = _opened(relays)
+        _turn_of(fake_controller, controller_session, _wall_lines(sign), "error", LIMIT)
+
+        _relay(relays, work_item)
+
+        assert work_item.state_code is SessionState.FAILED
+        assert work_item.nudge_owed_at == turn.ended_at is not None
+        assert turn.error == LIMIT
+        assert _item_done(session, work_item) == (None, None, None)
+        assert opened.calls == 1
+
+    def test_a_turn_that_ended_well_after_a_window_was_rejected_is_done_as_today(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        work_item: models.Session,
+    ) -> None:
+        turn = _send(relays, session, work_item)
+        _turn_of(fake_controller, controller_session, _wall_lines("event"))
+
+        _relay(relays, work_item)
+
+        assert (work_item.state_code, work_item.nudge_owed_at) == (
+            SessionState.IDLE,
+            None,
+        )
+        assert _item_done(session, work_item) == (turn.ended_at, "turn_ended", None)
+
+    def test_a_chats_turn_at_the_wall_is_never_flagged(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        idle: models.Session,
+    ) -> None:
+        """The ruling on a chat: the person sees its turn fail and sends
+        again."""
+        idle.kind_code = "chat"
+        session.flush()
+        _send(relays, session, idle)
+        _turn_of(
+            fake_controller, controller_session, raw_turn("turn_wall"), "error", LIMIT
+        )
+
+        _relay(relays, idle)
+
+        assert (idle.state_code, idle.nudge_owed_at) == (SessionState.IDLE, None)
+
+    @pytest.mark.parametrize(
+        ("outcome", "state"),
+        [("success", SessionState.IDLE), ("error", SessionState.FAILED)],
+    )
+    def test_a_pass_dead_at_the_wall_asks_its_writer_once_its_nudges_run_ends(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        project: Project,
+        outcome: FinishOutcome,
+        state: SessionState,
+    ) -> None:
+        """DB 254: one clarification run, placed at the end of the run the
+        nudge continues, whether that run ends well or fails."""
+        run, cut_over, _ = _done_run(session, container, project)
+        asking = _pass_of(session, container, project, run, controller_session)
+        walled = _send(relays, session, asking, "/pre-rule")
+        container.pilot_store_service().ask_writer(
+            Brain(asking.id, project.id, "job"), f"{cut_over.id}/D1", "Which Friday?"
+        )
+        _turn_of(
+            fake_controller, controller_session, raw_turn("turn_wall"), "error", LIMIT
+        )
+        _relay(relays, asking)
+        assert asking.state_code is SessionState.FAILED
+        assert asking.nudge_owed_at == walled.ended_at is not None
+        assert _clarifications(session, asking) == []
+
+        # The nudge's turn, as its send leaves the Session.
+        asking.nudge_owed_at = None
+        session.flush()
+        _send(relays, session, asking, "The subscription quota ran out.")
+        _turn_of(
+            fake_controller,
+            controller_session,
+            raw_turn("turn_text"),
+            outcome,
+            "The tests failed.",
+        )
+        _relay(relays, asking)
+
+        assert (asking.state_code, asking.nudge_owed_at) == (state, None)
+        assert len(_clarifications(session, asking)) == 1
+
+
 def _stopped(run: models.Session, person: User | None = None) -> datetime:
     """`run` stopped under its turn, as a Stop writes it; the stop's time."""
     at = datetime.now(UTC)

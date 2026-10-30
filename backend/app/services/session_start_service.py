@@ -92,6 +92,15 @@ resume ask for that loop; so do the job's reconcile, and the nudges' timer on
 every tick while one owed is held by nothing. A person's Resume clears the
 nudge owed: one continuation, never two.
 
+The nudge is owed too to a work item or a job whose turn died at the quota
+wall (`quota_wall`), `failed` from its turn's end: it goes once a reading
+confirmed the wall and there is quota again, a work item's with every usage
+halt lifted as well, and it is a job's one continuation, its queue read as
+its start's is. Before any nudge, the loop settles each wall a reading decided
+missed: its nudge owed no more, it is the failed end it is, and a pass's
+questions go to the writer then (DB 254). A job's continuation whose start
+fails puts them to the writer once its failure commits.
+
 The close that leaves no document of a work item's ended run open continues its
 conversation (`continue_run`; decision 44, F26.7): a new work item placed in the
 close's transaction, its Session in the run's environment from then on, never
@@ -110,7 +119,7 @@ from datetime import UTC, datetime
 from functools import partial
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Select, select
+from sqlalchemy import Select, literal, or_, select
 from sqlalchemy.orm import Session
 
 from app.core_exceptions import ExternalServiceException
@@ -151,6 +160,7 @@ from app.services.controller_outage import ControllerOutage
 from app.services.current_line import while_starting
 from app.services.environment_service import EnvironmentService
 from app.services.pilot_server import PilotServer, unheld_token_hash
+from app.services.quota_wall import confirmed, decided, quota_back
 from app.services.relay_service import CONTINUE, SESSION_GONE, RelayService
 from app.services.session_record_service import (
     SessionRecordService,
@@ -296,6 +306,16 @@ class _HeldWritten:
         # project's pause itself.
         if not self.starts._outage.holds:
             self.starts.release_held()
+
+
+@dataclass(frozen=True)
+class _ContinuationFailed:
+    # `after_commit()` runs a callback equal to one it holds once.
+    starts: "SessionStartService"
+    session_id: uuid.UUID
+
+    def __call__(self) -> None:
+        self.starts._continuation_failed(self.session_id)
 
 
 @dataclass(frozen=True)
@@ -868,11 +888,22 @@ class SessionStartService:
         self._supervisor.start_loop(START_JOB, self.nudge, key=NUDGE_KEY, again=True)
 
     def nudge(self, handle: LoopHandle) -> None:
-        """The nudges' loop's run: each Session whose nudge is owed and that
+        """The nudges' loop's run: first each Session at the quota wall that
+        a reading decided missed, settled as the failed end it is
+        (`_settle_missed`); then each Session whose nudge is owed and that
         nothing holds now, in the order they were owed, carried on by its
         nudge as a Resume carries one on, through the gate, its nudge then no
         longer owed (DB 232); each in a transaction of its own, read again
         under its locks."""
+        with scoped_session(self._container) as db:
+            missed = db.scalars(
+                _missed().order_by(AgentSession.nudge_owed_at, AgentSession.id)
+            ).all()
+        for session_id in missed:
+            if handle.stopping:
+                return
+            with scoped_session(self._container) as db:
+                self._settle_missed(db, session_id)
         with scoped_session(self._container) as db:
             owed = db.scalars(
                 self._nudgeable(db).order_by(
@@ -888,8 +919,11 @@ class SessionStartService:
     def run_nudge_timer(self, db: Session) -> None:
         """The nudges' tick (design 2 §8.2): their loop run while a nudge owed
         is held by nothing, one a reading's or a resume's ask missed, a
-        project brought back or a stopped turn's end among them."""
-        if db.scalar(select(self._nudgeable(db).exists())):
+        project brought back or a stopped turn's end among them, or while a
+        wall a reading decided missed is still owed one."""
+        if db.scalar(select(self._nudgeable(db).exists())) or db.scalar(
+            select(_missed().exists())
+        ):
             self.send_nudges()
 
     def stop(self, db: Session, session_id: uuid.UUID, person: User) -> AgentSession:
@@ -1141,21 +1175,34 @@ class SessionStartService:
     def _nudgeable(self, db: Session) -> Select[uuid.UUID]:
         """The Sessions whose nudge is owed and that nothing holds now: their
         work item open, their project neither finished, archived nor paused,
-        and, a work item's, no usage halt holding (DB 232, 266)."""
+        a setup let through the pause as the gate lets its start (F49), a
+        work item's with no usage halt holding, and one at the quota wall
+        with the wall confirmed by a reading and quota again (DB 232, 266;
+        `quota_wall`)."""
         query = (
             select(AgentSession.id)
             .join(Project, Project.id == AgentSession.project_id)
             .join(Item, Item.id == AgentSession.id)
+            .join(Work, Work.id == AgentSession.id)
             .where(
                 AgentSession.nudge_owed_at.is_not(None),
                 Item.done_at.is_(None),
                 Project.state_code != ProjectState.FINISHED,
                 Project.archived.is_(False),
-                Project.paused.is_(False),
+                or_(
+                    Project.paused.is_(False),
+                    Work.trigger_code == WorkTrigger.SETUP,
+                ),
+                or_(
+                    AgentSession.state_code != SessionState.FAILED,
+                    confirmed(AgentSession.nudge_owed_at),
+                ),
             )
         )
         if self._halts.halted(db) is not None:
             query = query.where(AgentSession.kind_code != WORK_KIND)
+        if not quota_back(db):
+            query = query.where(AgentSession.state_code != SessionState.FAILED)
         return query
 
     def _nudge_one(self, db: Session, session_id: uuid.UUID) -> None:
@@ -1168,9 +1215,13 @@ class SessionStartService:
         if (
             session.nudge_owed_at is None
             or _closed(project) is not None
-            or project.paused
+            or (project.paused and session.id not in setups(db, [session.id]))
             or db.get_one(Item, session_id, populate_existing=True).done_at is not None
             or (session.kind_code == WORK_KIND and self._halts.halted(db) is not None)
+            or (
+                session.state_code == SessionState.FAILED
+                and not _wall_lifted(db, session.nudge_owed_at)
+            )
             or _latest_turn(db, session_id).ended_at is None
         ):
             return
@@ -1189,8 +1240,9 @@ class SessionStartService:
         while the Session has no conversation (R15's rule, so a failed
         start's carries its brief, or while no Turn of the Session has gone
         out, so a continuation's carries its message), and the Session
-        through the gate (§13.4): `held` while it is closed, else
-        `starting`, its loop sending the Turn once this commits. Its `error`
+        through the gate (§13.4): `held` while it is closed, a job's behind
+        its project's jobs before it among them, else `starting`, its loop
+        sending the Turn once this commits. Its `error`
         is cleared, its nudge is owed no more, and a write-back the
         controller refused of a document it carries is owed again
         (`RecordService.retry_write_backs`). With no conversation it is a
@@ -1217,11 +1269,13 @@ class SessionStartService:
         session.current_line = None
         session.nudge_owed_at = None
         self._container.record_service().retry_write_backs(session.id)
+        # The queue counts a job behind the others while it is held.
+        session.state_code = SessionState.HELD
         held = self._held(
             db,
             project,
             session.kind_code,
-            queued=False,
+            queued=_queued(db, session),
             session=session,
         )
         if session.conversation_id is None:
@@ -1663,7 +1717,45 @@ class SessionStartService:
         self._moved(session, state=True)
         self._hand_to_timer(db, session)
         self._slots.left(session, SessionState.STARTING)
+        if session.kind_code == JOB_KIND and turn.seq > 1:
+            after_commit(_ContinuationFailed(self, session_id))
         logger.warning("Session %s failed to start: %s", session_id, reason)
+
+    def _continuation_failed(self, session_id: uuid.UUID) -> None:
+        """A job's continuation, its nudge's, failed to start, which ends
+        its run: its pass's questions put to the writer as a failed turn's end
+        puts them (DB 254), under its project's row and then its own."""
+        with scoped_session(self._container) as db:
+            unlocked = db.get_one(AgentSession, session_id)
+            # Before the Session's lock (the lock order): the clarification
+            # run's placement is an Item's birth.
+            _standing(db, unlocked.project_id, births=True)
+            session = self._records(db).lock_session(session_id)
+            self._container.clarification_service().pass_ended(session)
+
+    def _settle_missed(self, db: Session, session_id: uuid.UUID) -> None:
+        """A Session at the quota wall that a reading decided missed,
+        under its project's row and then its own, while it still is: the
+        failed end it is, its nudge owed no more and a pass's questions put
+        to the writer now (the ruling on the wall; DB 254)."""
+        unlocked = db.get_one(AgentSession, session_id)
+        # Before the Session's lock (the lock order): the clarification run's
+        # placement is an Item's birth.
+        _standing(db, unlocked.project_id, births=True)
+        session = self._records(db).lock_session(session_id)
+        if not db.scalar(
+            select(_missed().where(AgentSession.id == session_id).exists())
+        ):
+            return
+        session.nudge_owed_at = None
+        if session.kind_code == JOB_KIND:
+            self._container.clarification_service().pass_ended(session)
+        self._moved(session, state=True)
+        logger.info(
+            "Session %s: no reading confirmed the quota wall its turn ended at, "
+            "and it failed",
+            session_id,
+        )
 
     def _held(
         self,
@@ -1967,11 +2059,14 @@ def _standing(db: Session, project_id: uuid.UUID, *, births: bool) -> Project:
 
 def _nudge_words(db: Session, session: AgentSession) -> str:
     """The nudge the Session is owed (DB 232; decision 53): worded for the
-    stop when a usage halt's hard stop stopped it, for the pause when its
-    project was paused when it was found ended, as its Project Transitions
-    read at `nudge_owed_at`, else for the quota."""
+    stop when a usage halt's hard stop stopped it, for the quota when its
+    turn died at the quota wall, for the pause when its project was paused
+    when it was found ended, as its Project Transitions read at
+    `nudge_owed_at`, else for the quota."""
     if session.state_code == SessionState.STOPPED:
         return NUDGE_AFTER_A_STOP
+    if session.state_code == SessionState.FAILED:
+        return NUDGE
     last = db.scalar(
         select(ProjectTransition.kind_code)
         .where(
@@ -1985,6 +2080,24 @@ def _nudge_words(db: Session, session: AgentSession) -> str:
         .limit(1)
     )
     return NUDGE_AFTER_A_PAUSE if last is TransitionKind.PAUSED else NUDGE
+
+
+def _missed() -> Select[uuid.UUID]:
+    """The Sessions at the quota wall that a reading decided missed:
+    `failed` with their nudge owed, a reading received after the one at their
+    turn's end, and neither confirming the wall (`quota_wall`)."""
+    return select(AgentSession.id).where(
+        AgentSession.state_code == SessionState.FAILED,
+        AgentSession.nudge_owed_at.is_not(None),
+        decided(AgentSession.nudge_owed_at),
+        ~confirmed(AgentSession.nudge_owed_at),
+    )
+
+
+def _wall_lifted(db: Session, at: datetime) -> bool:
+    """Whether the quota wall a turn ended at `at` holds its nudge no more:
+    a reading confirmed it, and there is quota again."""
+    return quota_back(db) and bool(db.scalar(select(confirmed(literal(at)))))
 
 
 def _work_named(db: Session, session_id: uuid.UUID) -> str:

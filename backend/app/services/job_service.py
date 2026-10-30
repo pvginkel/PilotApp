@@ -199,10 +199,11 @@ class JobService:
             RecordNotFoundException: No Session has the id
             InvalidOperationException: The Session is no work item's, is a
                 worker's run, is done (an Undo's withdrawal among it), was
-                retried already, is neither failed nor stopped, has its
-                stopped turn still ending, or follows an item open again; its
-                project is finished or archived; or no controller or no store
-                environment is configured
+                retried already, waits for its nudge at the quota wall, is
+                neither failed nor stopped, has its stopped turn still ending,
+                or follows an item open again; its project is finished or
+                archived; or no controller or no store environment is
+                configured
         """
         found = self.db.get(AgentSession, session_id)
         if found is None:
@@ -253,6 +254,10 @@ class JobService:
             return "it is done"
         if work.retried_by_id is not None:
             return "it was retried already"
+        if job.nudge_owed_at is not None:
+            # Dead at the quota wall: not at its end until the run its nudge
+            # continues ends (D078).
+            return "it waits for its nudge at the quota wall"
         if job.state_code not in _RETRIABLE:
             return _RETRY_REFUSALS[job.state_code]
         if job.state_code is SessionState.STOPPED and (

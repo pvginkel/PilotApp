@@ -1508,6 +1508,30 @@ class TestRetryRefused:
             f"Cannot retry {SETUP_TITLE} because it was retried already"
         )
 
+    def test_a_job_waiting_for_its_nudge_at_the_quota_wall(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        opening: Item,
+    ) -> None:
+        """The ruling on a session dead at the wall: its nudge carries it on,
+        and Retry waits for the end of the run it continues (D078; V25)."""
+        failed = _ended(session, container, _setup(container, starts, opened))
+        failed.nudge_owed_at = failed.turn_ended_at
+        session.flush()
+
+        assert self._refusal(container, starts, failed.id) == (
+            f"Cannot retry {SETUP_TITLE} because it waits for its nudge at the "
+            "quota wall"
+        )
+
+        failed.nudge_owed_at = None
+        session.flush()
+        retry = _retry(container, starts, failed)
+        assert session.get_one(Work, failed.id).retried_by_id == retry.id
+
     def test_a_job_whose_work_item_is_done(
         self,
         container: ServiceContainer,

@@ -32,6 +32,10 @@ holds then, or its project's pause: the halt file's holders
 clarification run's reply recorded; the nudge carries it on once nothing
 holds it (`SessionStartService.send_nudges`), and it is done at its first
 normal turn end with neither holding (F135.3, F135.6, F141.3; DB 232).
+A work item's or a job's turn that ends in error with its stream showing the
+quota wall (`quota_wall`) is `failed` with its nudge owed from its end, and a
+job's pass puts no question to the writer then: a reading decides the wall,
+and the nudges' loop the rest (the ruling on the wall).
 
 A brain session's turn that ends with a save of its own still held (the
 engine's turn end, `DocumentService.turn_ended`) gets the Session the server's
@@ -99,6 +103,7 @@ from app.services.current_line import (
 )
 from app.services.environment_service import EnvironmentService
 from app.services.pilot_server import PilotServer
+from app.services.quota_wall import turn_shows_wall
 from app.services.session_record_service import (
     SessionRecordService,
     read_records,
@@ -1031,7 +1036,7 @@ class RelayService:
                 if following is None:
                     _refresh_turns(db, session, turn)
                     if before != SessionState.STOPPED:
-                        self._ended(db, session, frame, ended_at, follows_up)
+                        self._ended(db, session, turn, frame, ended_at, follows_up)
                     session.current_line = None
                 else:
                     session.current_line = at_send(None, following.started_at)
@@ -1051,22 +1056,26 @@ class RelayService:
         self,
         db: Session,
         session: AgentSession,
+        turn: Turn,
         frame: ResultFrame,
         at: datetime,
         follows_up: bool,
     ) -> None:
-        """The Session's state at its turn's end with no later Turn in flight:
-        `stopped` when interrupted, by no one, `failed` for a work item's turn
-        ended in error, else `idle`, its work item done (§9.2; DB Session
-        State; decision 44) unless the follow-up turn `follows_up`: a job's
-        is done at its last turn's end (design 3 §5.1). A worker's done run
-        has its documents read, the job after its turn following them, and a
-        clarification run's reply recorded; a pass's last turn ended `idle`
-        or `failed` puts the questions it asked to the writer (DB 254, 255).
-        A worker's run whose turn ends `idle` while the halt file is wanted
-        for it, a cooperative usage halt holding or its project paused, is
-        not done: its nudge is owed, and a clarification run's reply is
-        recorded now, as the turn's final text (DB 232, 255)."""
+        """The Session's state at its `turn`'s end with no later Turn in
+        flight: `stopped` when interrupted, by no one, `failed` for a work
+        item's turn ended in error, else `idle`, its work item done (§9.2; DB
+        Session State; decision 44) unless the follow-up turn `follows_up`: a
+        job's is done at its last turn's end (design 3 §5.1). A worker's done
+        run has its documents read, the job after its turn following them,
+        and a clarification run's reply recorded; a pass's last turn ended
+        `idle` or `failed` puts the questions it asked to the writer (DB 254,
+        255). A worker's run whose turn ends `idle` while the halt file is
+        wanted for it, a cooperative usage halt holding or its project
+        paused, is not done: its nudge is owed, and a clarification run's
+        reply is recorded now, as the turn's final text (DB 232, 255). One
+        `failed` whose turn's stream shows the quota wall has its nudge owed,
+        a pass asking nothing yet: it is not at its end (the ruling on the
+        wall)."""
         work = db.get(Work, session.id) is not None
         if frame.interrupted:
             session.state_code = SessionState.STOPPED
@@ -1074,7 +1083,14 @@ class RelayService:
             session.stopped_by_user_id = None
         elif work and frame.is_error:
             session.state_code = SessionState.FAILED
-            if session.kind_code == JOB_KIND:
+            if turn_shows_wall(db, session.id, turn.id):
+                session.nudge_owed_at = at
+                logger.info(
+                    "Session %s ended its turn at the quota wall, its nudge owed "
+                    "once a reading confirms it",
+                    session.id,
+                )
+            elif session.kind_code == JOB_KIND:
                 self._container.clarification_service().pass_ended(session)
         else:
             session.state_code = SessionState.IDLE

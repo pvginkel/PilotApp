@@ -166,8 +166,8 @@ def waiting() -> ColumnElement[bool]:
     before it (review 7), and none whose open blocks are all actions Pilot
     claimed, which are Pilot's until their `done` (DB 262); a work item
     stopped or failed, a job only until it is retried, and neither while its
-    nudge is owed: one a usage halt's hard stop stopped (DB 225, 269); never a
-    wait (F27.5)."""
+    nudge is owed: one a usage halt's hard stop stopped (DB 225, 269), or one
+    whose turn died at the quota wall; never a wait (F27.5)."""
     form = (
         select(ItemKind.form)
         .where(ItemKind.code == Item.kind_code)

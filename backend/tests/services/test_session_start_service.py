@@ -96,7 +96,7 @@ from app.services.session_start_service import (
     STARTING,
     SessionStartService,
 )
-from app.services.start_gate import Held, WorkSlots
+from app.services.start_gate import Held, WorkSlots, queued
 from app.services.supervisor import LoopHandle
 from app.services.timeline_service import work_status
 from app.services.turn_end_read_service import TurnEndReadService
@@ -5405,6 +5405,384 @@ class TestNudgeLoop:
             assert len(_jobs_after(db, work_id)) == 1
 
 
+LIMIT = "Weekly limit reached ∙ resets Jan 4, 12am"
+
+
+def _walled_end(
+    starts: SessionStartService,
+    fake: _Recording,
+    db: DbSession,
+    project: Project,
+    *,
+    week: float,
+    five_hour: float = 0.1,
+) -> models.Session:
+    """A work item whose turn died at the quota wall, a reading at `week`
+    and `five_hour` the one at its end: `failed`, its nudge owed from its
+    turn's end, on its conversation (the ruling on the wall)."""
+    run = _running(starts, db, project)
+    run.conversation_id = "conv-1"
+    _usage(db, week=week, five_hour=five_hour)
+    assert run.environment_id is not None and run.controller_session is not None
+    fake.play(run.environment_id, run.controller_session, raw_turn("turn_wall"))
+    _turn_ends(starts, fake, run, "error")
+    run = _read(db, run.id)
+    assert run.state_code == SessionState.FAILED
+    assert run.nudge_owed_at == _turns(db, run.id)[-1].ended_at is not None
+    clear_after_commit_callbacks()
+    return run
+
+
+def _streamed_wall(
+    container: ServiceContainer, db: DbSession, run: models.Session, name: str
+) -> None:
+    """The invented turn at the wall recorded as the Session's last Turn's
+    stream on its controller session `name`, as the relay records one."""
+    run.controller_session = name
+    turn = _turns(db, run.id)[-1]
+    offset = 0
+    for line in raw_turn("turn_wall"):
+        offset += len(line) + 1
+        payload = json.loads(line)
+        if payload["type"] != "stream_event":
+            container.session_record_service().append(
+                run.id,
+                RecordKind.CLAUDE,
+                payload=payload,
+                turn_id=turn.id,
+                raw_offset=offset,
+                controller_session=name,
+            )
+
+
+def _walled_job(
+    container: ServiceContainer,
+    db: DbSession,
+    project: Project,
+    environment: Environment,
+    *,
+    week: float,
+    trigger: WorkTrigger = WorkTrigger.SETUP,
+) -> models.Session:
+    """A job of `trigger` in the store whose turn died at the quota wall, a
+    reading at `week` the one at its end: `failed` on its conversation, its
+    nudge owed from its turn's end."""
+    _usage(db, week=week, five_hour=0.1)
+    job = _chat(db, project, environment, SessionState.FAILED)
+    job.kind_code = "job"
+    job.conversation_id = "conv-job"
+    db.flush()
+    container.record_service().place_work(
+        project, job, "Setting up the project", trigger=trigger
+    )
+    _streamed_wall(container, db, job, "pilot-job")
+    ended = datetime.now(UTC)
+    _turns(db, job.id)[0].ended_at = ended
+    job.turn_ended_at = job.nudge_owed_at = ended
+    db.flush()
+    clear_after_commit_callbacks()
+    return job
+
+
+class TestQuotaWall:
+    """A work item's or a job's turn that died at the quota wall is nudged
+    once a reading confirmed the wall — the one at its end or the next — and
+    there is quota again, a work item's once every halt lifted too; one no
+    reading confirms is the failed end it is; a person's Resume stands in for
+    the nudge (the ruling on the wall; F135.3; DB 232, 266; V04, V24, V25)."""
+
+    def test_a_wall_the_reading_at_its_end_confirms_is_nudged_once_there_is_quota(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        walled = _walled_end(starts, fake, session, project, week=1.0)
+        _nudge(starts)
+        assert _read(session, walled.id).nudge_owed_at is not None
+        assert len(_turns(session, walled.id)) == 1
+
+        _usage(session, week=0.5, five_hour=0.1)
+        _nudge(starts)
+
+        run = _read(session, walled.id)
+        assert (run.state_code, run.nudge_owed_at, run.error) == (
+            SessionState.STARTING,
+            None,
+            None,
+        )
+        _, nudged = _turns(session, run.id)
+        assert (nudged.message, nudged.author_user_id) == (NUDGE, None)
+        assert session.get_one(Item, run.id).done_at is None
+
+    def test_a_wall_the_next_reading_confirms_is_nudged_once_there_is_quota(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        walled = _walled_end(starts, fake, session, project, week=0.5)
+        _nudge(starts)
+        assert _read(session, walled.id).nudge_owed_at is not None
+
+        _usage(session, week=1.0, five_hour=0.1)
+        _nudge(starts)
+        assert _read(session, walled.id).nudge_owed_at is not None
+
+        _usage(session, week=0.5, five_hour=0.1)
+        _nudge(starts)
+
+        run = _read(session, walled.id)
+        assert (run.state_code, run.nudge_owed_at) == (SessionState.STARTING, None)
+        assert _turns(session, run.id)[-1].message == NUDGE
+
+    def test_a_wall_no_reading_confirms_is_the_failed_end_it_is(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        """The wall a per-model limit makes, which no reading shows (D071):
+        it waits on the person, for a Resume by hand (F125)."""
+        walled = _walled_end(starts, fake, session, project, week=0.5)
+        _usage(session, week=0.51, five_hour=0.1)
+        engine_events.clear()
+
+        _nudge(starts)
+
+        run = _read(session, walled.id)
+        assert (run.state_code, run.nudge_owed_at) == (SessionState.FAILED, None)
+        assert ProjectChanged(project.id) in _moves(engine_events)
+        _usage(session, week=1.0, five_hour=0.1)
+        _usage(session, week=0.1, five_hour=0.1)
+        _nudge(starts)
+        assert len(_turns(session, run.id)) == 1
+        assert _read(session, run.id).state_code == SessionState.FAILED
+
+    @pytest.mark.parametrize(
+        ("week", "five_hour"),
+        [(0.95, 0.1), (0.5, 0.8)],
+        ids=["the week's", "the five hours'"],
+    )
+    def test_a_work_items_waits_for_every_halt_to_lift(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        week: float,
+        five_hour: float,
+    ) -> None:
+        walled = _walled_end(starts, fake, session, project, week=1.0)
+        _usage(session, week=week, five_hour=five_hour)
+        _nudge(starts)
+        assert _read(session, walled.id).nudge_owed_at is not None
+
+        _usage(session, week=0.5, five_hour=0.1)
+        _nudge(starts)
+
+        assert _read(session, walled.id).state_code == SessionState.STARTING
+
+    def test_the_stale_fallback_counts_the_window_reset_a_minute_past_its_reset(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        """F135.8; DB 266."""
+        walled = _walled_end(starts, fake, session, project, week=1.0)
+        _stale(session, week=1.0, reset_ago=timedelta(seconds=30))
+        _nudge(starts)
+        assert _read(session, walled.id).nudge_owed_at is not None
+
+        _stale(session, week=1.0, reset_ago=timedelta(minutes=2))
+        _nudge(starts)
+
+        run = _read(session, walled.id)
+        assert (run.state_code, run.nudge_owed_at) == (SessionState.STARTING, None)
+        assert _turns(session, run.id)[-1].message == NUDGE
+
+    @pytest.mark.parametrize("week", [1.0, 0.5], ids=["owed", "undecided"])
+    def test_a_persons_resume_settles_it_and_no_nudge_follows(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        week: float,
+    ) -> None:
+        """DB 232: one continuation, never two."""
+        walled = _walled_end(starts, fake, session, project, week=week)
+
+        resumed = starts.resume(session, walled.id)
+
+        assert resumed.nudge_owed_at is None
+        assert resumed.state_code == (
+            SessionState.HELD if week >= 0.9 else SessionState.STARTING
+        )
+        clear_after_commit_callbacks()
+        _usage(session, week=1.0, five_hour=0.1)
+        _usage(session, week=0.1, five_hour=0.1)
+        _nudge(starts)
+        assert [turn.message for turn in _turns(session, walled.id)] == [
+            BRIEF,
+            CONTINUE,
+        ]
+
+    def test_a_jobs_nudge_is_its_continuation_under_a_halt_too(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """No halt holds a job (F135); its Resume it has none (F26.3)."""
+        job = _walled_job(container, session, project, environment, week=1.0)
+        _nudge(starts)
+        assert _read(session, job.id).state_code == SessionState.FAILED
+
+        _usage(session, week=0.95, five_hour=0.8)
+        _nudge(starts)
+
+        run = _read(session, job.id)
+        assert (run.state_code, run.nudge_owed_at) == (SessionState.STARTING, None)
+        _, nudged = _turns(session, run.id)
+        assert (nudged.message, run.controller_session, run.conversation_id) == (
+            NUDGE,
+            "pilot-job",
+            "conv-job",
+        )
+
+    def test_a_jobs_nudge_waits_its_turn_behind_its_projects_jobs(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """F59.2: a job carried on takes its place in its project's queue."""
+        job = _walled_job(container, session, project, environment, week=1.0)
+        _job(container, session, project, environment, SessionState.RUNNING)
+        _usage(session, week=0.5, five_hour=0.1)
+
+        _nudge(starts)
+
+        run = _read(session, job.id)
+        assert (run.state_code, run.nudge_owed_at) == (SessionState.HELD, None)
+        assert queued(session, [job.id]) == {job.id}
+
+    def test_the_pause_holds_a_jobs_nudge_but_a_setups(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        """The nudge goes as the gate lets the start: a setup through the
+        pause, any other job not (F49, F141.3)."""
+        setup = _walled_job(container, session, project, environment, week=1.0)
+        fired = _walled_job(
+            container,
+            session,
+            project,
+            environment,
+            week=1.0,
+            trigger=WorkTrigger.WAIT_FIRED,
+        )
+        _transition(session, project, person, TransitionKind.PAUSED)
+        _usage(session, week=0.5, five_hour=0.1)
+
+        _nudge(starts)
+
+        assert _read(session, setup.id).state_code == SessionState.STARTING
+        assert _read(session, fired.id).state_code == SessionState.FAILED
+        assert _read(session, fired.id).nudge_owed_at is not None
+
+
+class TestQuotaWallTimer:
+    """The nudges' tick asks for their loop while a wall's nudge goes, or
+    while a wall a reading decided missed is still owed one."""
+
+    def test_the_tick_asks_for_the_loop_once_a_reading_decides_or_lifts_it(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        asked = _nudges_asked(starts, monkeypatch)
+        missed = _walled_end(starts, fake, session, project, week=0.5)
+        starts.run_nudge_timer(session)
+        assert asked == []
+
+        _usage(session, week=0.51, five_hour=0.1)
+        starts.run_nudge_timer(session)
+        assert asked == [f"{START_JOB}:{NUDGE_KEY}"]
+
+        _nudge(starts)
+        assert _read(session, missed.id).nudge_owed_at is None
+        asked.clear()
+        starts.run_nudge_timer(session)
+        assert asked == []
+
+
+class TestQuotaWallLoop:
+    """The wall from a process's start, on a database of its own: the wait
+    for the deciding reading holds across a restart (V24)."""
+
+    def test_a_wall_decided_while_no_process_ran_is_nudged_at_the_next_start(
+        self,
+        committed_app: Flask,
+        committed_fake: _Recording,
+        supervise: Supervise,
+    ) -> None:
+        container = committed_app.container
+        starts, _, coordinator = _services(container, supervise)
+        project_id = _committed_project(container)
+        coordinator.fire_startup()
+        work_id = _committed_work(starts, container, project_id)
+        wait_until(
+            lambda: _committed(container, work_id).state_code == SessionState.RUNNING,
+            "the brief sent",
+        )
+        env_id = _committed_env(container, work_id)
+        name = _committed(container, work_id).controller_session
+        assert name is not None
+        with scoped_session(container) as db:
+            db.get_one(models.Session, work_id).conversation_id = "conv-1"
+            _usage(db, week=0.5, five_hour=0.1)
+        committed_fake.play(env_id, name, raw_turn("turn_wall"))
+        committed_fake.finish(env_id, name, "error", LIMIT)
+        wait_until(
+            lambda: _committed(container, work_id).nudge_owed_at is not None,
+            "the turn ended at the wall, its nudge owed",
+        )
+        coordinator.shutdown()
+        with scoped_session(container) as db:
+            _usage(db, week=1.0, five_hour=0.1)
+            _usage(db, week=0.1, five_hour=0.1)
+
+        starts, _, coordinator = _services(container, supervise)
+        coordinator.fire_startup()
+
+        wait_until(
+            lambda: _committed(container, work_id).state_code == SessionState.RUNNING,
+            "the nudge sent",
+        )
+        assert committed_fake.sent[-1] == NUDGE
+        assert _committed(container, work_id).nudge_owed_at is None
+
+
 class TestStartInAClosedProject:
     """Nothing of a finished or an archived project starts (F5.1, F128.1)."""
 
@@ -7330,3 +7708,90 @@ class TestClarify:
 
         assert resumed.state_code == SessionState.HELD
         assert _held_reason(session, continues, resumed) is HeldReason.CONVERSATION
+
+
+@pytest.mark.usefixtures("continues")
+class TestQuotaWallsPass:
+    """A pass whose turn died at the quota wall puts its questions to the
+    writer once, when the run its nudge continues ends, or when a reading
+    decides the wall missed (DB 254; the ruling on a session dead at the
+    wall; V25)."""
+
+    def _walled_pass(
+        self,
+        container: ServiceContainer,
+        fake: _Recording,
+        db: DbSession,
+        project: Project,
+    ) -> models.Session:
+        """The pass after a run's turn, asking its writer, `failed` at the
+        wall with its nudge owed, a reading at 0.5 the one at its end."""
+        run = _ended_run(db, container, fake, project)
+        refinement = _read_at_its_end(
+            db, container, fake, project, run, REFINEMENT, REFINEMENT_TEXT
+        )
+        asking = _pass(db, container, project, run, (refinement, "D1", "Which?"))
+        asking.conversation_id = "conv-pass"
+        _streamed_wall(container, db, asking, "pilot-pass")
+        _usage(db, week=0.5, five_hour=0.1)
+        ended = datetime.now(UTC)
+        _turns(db, asking.id)[0].ended_at = ended
+        asking.state_code = SessionState.FAILED
+        asking.turn_ended_at = asking.nudge_owed_at = ended
+        db.flush()
+        return asking
+
+    def test_a_reading_that_decides_the_wall_missed_asks_the_writer_then(
+        self,
+        container: ServiceContainer,
+        continues: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        asking = self._walled_pass(container, fake, session, project)
+        _nudge(continues)
+        assert (
+            session.scalars(
+                select(ClarificationRun).where(ClarificationRun.pass_id == asking.id)
+            ).all()
+            == []
+        )
+
+        _usage(session, week=0.51, five_hour=0.1)
+        _nudge(continues)
+
+        assert _read(session, asking.id).nudge_owed_at is None
+        assert _clarifying(session, asking).state_code == SessionState.STARTING
+
+    def test_a_continuation_that_fails_to_start_asks_the_writer_once_it_commits(
+        self,
+        container: ServiceContainer,
+        continues: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        asking = self._walled_pass(container, fake, session, project)
+        _usage(session, week=1.0, five_hour=0.1)
+        _usage(session, week=0.1, five_hour=0.1)
+        _nudge(continues)
+        clear_after_commit_callbacks()
+        nudged = _turns(session, asking.id)[-1]
+        assert (_read(session, asking.id).state_code, nudged.message) == (
+            SessionState.STARTING,
+            NUDGE,
+        )
+
+        continues._fail(session, asking.id, nudged.id, "refused", recorded=False)
+
+        assert "_ContinuationFailed" in _callbacks()
+        assert (
+            session.scalars(
+                select(ClarificationRun).where(ClarificationRun.pass_id == asking.id)
+            ).all()
+            == []
+        )
+        clear_after_commit_callbacks()
+        continues._continuation_failed(asking.id)
+        assert _clarifying(session, asking).state_code == SessionState.STARTING

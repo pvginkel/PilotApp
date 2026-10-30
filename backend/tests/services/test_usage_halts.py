@@ -879,6 +879,30 @@ class TestUsageWatcher:
 
         assert (turned_on, held, gate.nudged) == (1, 1, 2)
 
+    def test_a_reading_while_a_wall_owes_its_nudge_asks_for_the_nudges(
+        self,
+        session: Session,
+        person: User,
+        usage: UsageService,
+        watcher: UsageWatcher,
+        gate: _Gate,
+    ) -> None:
+        """A reading may confirm a turn's quota wall, decide it missed or
+        bring the quota back, whatever the halts do (the ruling on the wall;
+        V11)."""
+        usage.receive(_reading(0.5))
+        _session(session, person, "work", SessionState.FAILED)
+        usage.receive(_reading(0.6, minutes=10))
+        assert gate.nudged == 0
+
+        session.execute(update(AgentSession).values(nudge_owed_at=RECEIVED_AT))
+        usage.receive(_reading(0.7, minutes=20))
+        assert gate.nudged == 1
+
+        # A halt's turn asks once.
+        usage.receive(_reading(0.95, minutes=30))
+        assert gate.nudged == 2
+
     def test_a_reading_not_recorded_turns_nothing(
         self,
         usage: UsageService,

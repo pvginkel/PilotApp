@@ -57,7 +57,7 @@ type FinishOutcome = 'success' | 'error' | 'interrupted' | 'spawn-failure' | 'en
 /** How a call goes unanswered while the controller is down: its connection closed with no answer, or an ingress's `502` page. */
 type Unanswered = 'none' | 'ingress';
 /** The backend suite's invented turns, in `backend/tests/fixtures/raw/`. */
-type RawTurn = 'turn_text' | 'turn_tool' | 'turn_subagent';
+type RawTurn = 'turn_text' | 'turn_tool' | 'turn_subagent' | 'turn_wall';
 
 // The backend reads the controller answering again at its fleet stream's reconnect, whose
 // backoff doubles from 1 s to 30 s while the outage holds.

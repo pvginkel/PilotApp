@@ -44,10 +44,13 @@ type Actions = 'stop' | 'resume' | 'retry' | 'log';
 
 /**
  * The actions a session offers: a worker's Stop or Resume by its state, a job's Retry while it is
- * stopped or failed and not retried, else its session log alone.
+ * stopped or failed, not retried and owed no nudge — one whose turn died at the quota wall is not at
+ * its end until its nudge's run ends (D078) — else its session log alone.
  */
 function actionsOf(work: Work): Actions {
-  if (work.pilots_own) return RESUMABLE.includes(work.state) && work.retried === null ? 'retry' : 'log';
+  if (work.pilots_own) {
+    return RESUMABLE.includes(work.state) && work.retried === null && !work.nudge_owed ? 'retry' : 'log';
+  }
   return STOPPABLE.includes(work.state) ? 'stop' : RESUMABLE.includes(work.state) ? 'resume' : 'log';
 }
 

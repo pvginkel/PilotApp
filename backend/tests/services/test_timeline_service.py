@@ -3552,6 +3552,42 @@ class TestBadges:
         session.flush()
         assert self._badges(container, person, project) == {project.id: Badge(1, False)}
 
+    def test_a_work_item_or_a_job_dead_at_the_quota_wall_waits_on_no_one(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        """DB 225, 232 (V25): while its nudge is owed; once a reading decides
+        the wall missed, it waits on the person as any failed one."""
+        project = _make(container)
+        walled = [
+            _work(session, project, environment, SessionState.FAILED),
+            _job(session, project, environment, SessionState.FAILED),
+        ]
+        for item in walled:
+            session.get_one(models.Session, item.id).nudge_owed_at = datetime(
+                2026, 10, 30, 9, 5, tzinfo=UTC
+            )
+        session.flush()
+        assert self._badges(container, person, project) == {}
+        assert [
+            work.nudge_owed
+            for work in work_status(
+                session,
+                [item.id for item in walled],
+                unreachable=False,
+                halts=HALTS,
+                slots=SLOTS,
+            ).values()
+        ] == [True, True]
+
+        for item in walled:
+            session.get_one(models.Session, item.id).nudge_owed_at = None
+        session.flush()
+        assert self._badges(container, person, project) == {project.id: Badge(2, False)}
+
     def test_a_work_item_ended_under_a_halt_or_the_pause_waits_on_no_one(
         self,
         container: ServiceContainer,

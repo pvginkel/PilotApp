@@ -28,7 +28,9 @@ one clock in the design. Each decision first ends the overrule a reading has
 spent. At a halt's turn the gate is asked again, the halt files are swept,
 the nudges owed are sent where nothing holds them any more, and every
 person's connections hear the conditions; at a reading while a halt
-holds, and at an overrule's end, they hear them too. At every decision while
+holds, and at an overrule's end, they hear them too. At a reading while a
+turn that died at the quota wall owes its nudge, the nudges are sent too: the
+reading may decide the wall or bring the quota back (`quota_wall`). At every decision while
 a hard-stop halt holds and a work item runs, the hard stop is asked for: one
 the gate let through before the halt is stopped at the next. Each process
 decides from the same readings; the halts it last told of are its own.
@@ -428,6 +430,8 @@ class UsageWatcher:
             effects.append(self._container.session_start_service().release_held)
             effects.append(self._container.halt_file_service().request)
             effects.append(self._container.session_start_service().send_nudges)
+        elif recorded and _walled(db):
+            effects.append(self._container.session_start_service().send_nudges)
         if turned or spent is not None or (recorded and holding):
             effects.append(self._container.condition_service().tell)
         for effect in effects:
@@ -436,6 +440,23 @@ class UsageWatcher:
                 effect()
             except Exception:
                 logger.exception("Usage halt effect %r failed", effect)
+
+
+def _walled(db: Session) -> bool:
+    """Whether a Session is `failed` with its nudge owed: its turn died at
+    the quota wall."""
+    return bool(
+        db.scalar(
+            select(
+                select(AgentSession.id)
+                .where(
+                    AgentSession.nudge_owed_at.is_not(None),
+                    AgentSession.state_code == SessionState.FAILED,
+                )
+                .exists()
+            )
+        )
+    )
 
 
 def _work_runs(db: Session) -> bool:

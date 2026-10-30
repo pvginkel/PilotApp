@@ -347,12 +347,13 @@ class ClarificationService:
         self.view_service = view_service
 
     def pass_ended(self, session: AgentSession) -> None:
-        """The job `session` ended at its last turn's end, `idle` or `failed`,
-        in the caller's transaction, which holds its project's row
-        exclusively: a pass, the job after a worker's turn, whose Turns asked
-        the writer has every question put to the writer by one clarification
-        run placed now, on the conversation of the run whose turn it took (DB
-        254). A stopped end never reaches it."""
+        """The job `session` ended, `idle` or `failed` — at its last turn's
+        end, at the reading that decided its quota wall missed, or at its
+        continuation's failed start — in the caller's transaction, which holds
+        its project's row exclusively: a pass, the job after a worker's turn,
+        whose Turns asked the writer has every question put to the writer by
+        one clarification run placed now, on the conversation of the run
+        whose turn it took (DB 254). A stopped end never reaches it."""
         work = self.db.get_one(Work, session.id)
         if work.trigger_code is not WorkTrigger.WORKER_TURN_ENDED:
             return

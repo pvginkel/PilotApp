@@ -11,7 +11,8 @@
  * waits its turn behind it, its line saying so, and goes on once the setup's turn ends (F59.2).
  * Failed, it offers Retry where a worker's Resume is: a fresh setup at the project's next place,
  * the failed line staying with its session log, saying it was retried and offering Retry no more;
- * a running or done job offers none (D2). Create pauses the new project, its setup let through: it
+ * a running or done job offers none (D2). Dead at the quota wall, it offers none while its nudge is
+ * owed, and once a reading brings the quota back the nudge carries it on (F135.3; D078). Create pauses the new project, its setup let through: it
  * is pausing while the setup runs, a work item placed meanwhile held, "Paused", and paused once the
  * setup's turn ends, Pilot's line under the setup saying the project is ready, gone at the status
  * icon's resume, which lets the held work item go on (D083).
@@ -20,7 +21,7 @@
 import type { Page } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import type { Chats } from '../support/chats';
-import type { Controller } from '../support/controller';
+import { rawTurn, type Controller } from '../support/controller';
 import { makeUnique, makeUniqueToken } from '../support/helpers';
 import type { ChatPage } from '../support/page-objects/chat-page';
 import type { ProjectHeadPage } from '../support/page-objects/project-head-page';
@@ -40,6 +41,8 @@ const WORDS = 'Let us plan the summer trip by the lake.';
 const REPLY = 'I drafted the trip; where you sleep is still open.';
 const HOW = 'Hand the project to Pilot: it sets it up and starts the plan';
 const SETUP = 'Setting up the project';
+/** Claude's words at the week's wall, as the invented turn at the wall (`turn_wall`) ends. */
+const LIMIT = 'Weekly limit reached ∙ resets Jan 4, 12am';
 /** The title of the job after a worker's turn that registered nothing (backend/app/services/job_service.py). */
 const NEXT = 'Deciding what is next';
 
@@ -338,6 +341,43 @@ test.describe('The setup', () => {
     await controller.finish(chats.store, again, 'success', 'The plan is written.');
     await expect(retry.root).toHaveAttribute('data-state', 'done');
     await expect(retry.work.retry).toHaveCount(0);
+    await expect(setup.work.retry).toHaveCount(0);
+  });
+
+  test('dead at the quota wall, it offers no Retry while its nudge is owed; once there is quota again, the nudge carries it on, and it is done at that turn’s end', async ({
+    page,
+    people,
+    projects,
+    projectHead,
+    controller,
+    chats,
+    definitionChat,
+    timeline,
+  }) => {
+    const me = await people.signIn();
+    const { id, slug } = await drafted({ page, projects, projectHead, controller, chats, definitionChat }, me.handle!);
+    const started = await chats.opening(id, slug);
+    await projectHead.create();
+    const session = await started();
+    const setupId = (await projects.timeline(id)).items.find((item) => item.work?.pilots_own)!.id;
+    const setup = timeline.item(setupId);
+    await expect(setup.work.running).toBeVisible();
+
+    // The reading at its turn's end confirms the wall its stream shows.
+    await controller.usage({ seven_day: 1 });
+    await controller.play(chats.store, session, rawTurn('turn_wall'));
+    await controller.finish(chats.store, session, 'error', LIMIT);
+    await expect(setup.work.line).toHaveText(`Failed · ${LIMIT}`);
+    await expect(setup.work.retry).toHaveCount(0);
+    await expect(setup.work.resume).toHaveCount(0);
+    expect((await projects.work(id, setupId)).nudge_owed).toBe(true);
+
+    await controller.usage({ seven_day: 0.5 });
+    await expect(setup.work.running).toBeVisible();
+    await expect(setup.work.retry).toHaveCount(0);
+
+    await controller.finish(chats.store, session, 'success', 'The plan is written.');
+    await expect(setup.root).toHaveAttribute('data-state', 'done');
     await expect(setup.work.retry).toHaveCount(0);
   });
 });
