@@ -97,7 +97,10 @@ func (s *Sidecar) lock(w http.ResponseWriter, r *http.Request) {
 // it last synced goes up as the save of the session holding the lock (flush);
 // the server's check of the folder is asked; and then the hold is given
 // back, the pid's one or, with all, every one the session has. It answers
-// 200 with what the hook prints, whatever the session held.
+// 200 with what the hook prints, whatever the session held. With the query
+// check=false it asks no check and prints no note, so that the resets and
+// the notes printed once stay for the next release that reads them, and it
+// answers empty: the release of a stop whose answer reaches no agent.
 func (s *Sidecar) release(w http.ResponseWriter, r *http.Request) {
 	call, folder, ok := s.hookCall(w, r)
 	if !ok {
@@ -107,16 +110,27 @@ func (s *Sidecar) release(w http.ResponseWriter, r *http.Request) {
 		text(w, http.StatusBadRequest, "a release names the pid whose hold it gives back, or all\n")
 		return
 	}
+	checking := r.URL.Query().Get("check") != "false"
 	began := time.Now()
 	unchecked := s.flush(r.Context(), folder)
 	waited := time.Since(began)
-	answer, err := s.check(r.Context(), folder, waited)
+	var answer protocol.CheckAnswer
+	var err error
+	if checking {
+		answer, err = s.check(r.Context(), folder, waited)
+	}
 	if call.All {
 		s.tree.writers.releaseAll(folder, call.Session)
 	} else {
 		s.tree.writers.release(folder, call.Session, call.Pid)
 	}
 	if r.Context().Err() != nil {
+		return
+	}
+	if !checking {
+		s.logger.Info("released unchecked", "folder", folder, "session", call.Session, "waited", waited,
+			"unflushed", len(unchecked))
+		text(w, http.StatusOK, "")
 		return
 	}
 	if err != nil {

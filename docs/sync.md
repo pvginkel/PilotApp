@@ -242,7 +242,10 @@ project's whole list (D077):
   not its shadow's, as the save of the session holding the lock (the flush), and waits up to 5 s in
   all for them to be read and sent; asks the server's check of the folder, up to 5 s; then gives
   back the pid's hold, or with `all` every hold the session has. It answers `200` with the text for
-  the agent, whatever the session held: empty when there is nothing to tell.
+  the agent, whatever the session held: empty when there is nothing to tell. With the query
+  `?check=false` it flushes and gives back the same, but asks no check and prints no local note, and
+  answers empty: the resets and the notes printed once stay for the next release that reads them. A
+  sidecar older than the query ignores it and checks.
 
 **The lock** is one per project folder, held by one session at a time. It is re-entrant for its
 holder: the session takes it again at once from any pid, its sub-agents' calls included, and it goes
@@ -295,7 +298,8 @@ is no shell:
   <folder>/ (pilot-sync answered <status>: …)`. Its timeout is 20 s.
 - `Stop`, at the turn's end: `/release` with `"all": true`, so that no hold outlives its turn. Its
   check deletes the resets it reads, so a non-empty answer goes before the agent and keeps the turn
-  going, except on a stop that a stop hook already kept going.
+  going, except on a stop that a stop hook already kept going, whose answer would keep the turn
+  going for ever: that one posts `/release?check=false`, which leaves the resets for the next check.
 
 A session with no `PILOT_PROJECT`, none that Pilot's server created, takes no lock and posts
 nothing. A `reverted` error is reported once, to whichever session's release reads it; every other

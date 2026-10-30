@@ -254,6 +254,44 @@ func TestAReleaseOfAllGivesBackEveryHoldOfTheSession(t *testing.T) {
 	}
 }
 
+func TestAReleaseUncheckedFlushesAndGivesBackEveryHoldButAsksNoCheckAndPrintsNoNote(t *testing.T) {
+	s := newServer(t)
+	tree := t.TempDir()
+	view := filepath.Join(tree, "proj", "timeline.json")
+	s.view("proj/timeline.json", "[]")
+	running := start(t, s, tree, t.TempDir())
+	writeOver(t, view, `["edited"]`)
+	eventually(t, "the view reverted", func() bool { return holds(view, "[]") })
+
+	running.lock(t, "proj", chat, os.Getpid())
+	running.lock(t, "proj", chat, os.Getpid())
+	waiting := running.locking(t, "proj", job)
+	waits(t, waiting, "while the chat held the lock")
+	// The release comes inside the watch's debounce: what it sends up, it
+	// reads from disk.
+	write(t, filepath.Join(tree, "proj", "inbox", "1-a.md"), "written")
+	status, _, text := running.call(t, "/release?check=false",
+		running.hook(t, "proj", chat, map[string]any{"all": true}))
+	if status != http.StatusOK || text != "" {
+		t.Fatalf("answered %d %q", status, text)
+	}
+	granted(t, waiting, time.Second)
+	if puts := s.taken(); len(puts) != 1 || puts[0].body != "written" || sessionOf(puts[0]) != chat {
+		t.Fatalf("took %v by the release's answer", puts)
+	}
+	if checks := s.checked(); len(checks) != 0 {
+		t.Fatalf("posted %+v: the resets it reads are gone", checks)
+	}
+
+	// The note printed once is the next release's, which asks the check.
+	if got := running.report(t, "proj"); got != "proj/timeline.json: "+revertNote+"\n" {
+		t.Fatalf("printed %q", got)
+	}
+	if checks := s.checked(); len(checks) != 1 {
+		t.Fatalf("posted %d checks", len(checks))
+	}
+}
+
 func TestASaveWhileTheLockIsHeldIsTheHoldersAndNoneOtherwise(t *testing.T) {
 	s := newServer(t)
 	tree := t.TempDir()
