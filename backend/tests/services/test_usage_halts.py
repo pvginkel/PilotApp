@@ -23,7 +23,7 @@ from app.services.controller_client import ControllerUsageReading
 from app.services.sse_connection_manager import SSEConnection, SSEConnectionManager
 from app.services.supervisor import Supervisor
 from app.services.usage_halts import TIMER, Halt, UsageHalts, UsageWatcher
-from app.services.usage_service import UsageService
+from app.services.usage_service import Usage, UsageService
 from tests.support.supervisor import LogWaiter, Supervise, listening, wait_until
 
 WEEK = UsageWindow.SEVEN_DAY
@@ -251,6 +251,23 @@ class TestHalts:
         )
 
         assert [halt.since for halt in HALTS.halts(session)] == [again.received_at]
+
+    def test_a_reading_recorded_while_they_are_read_is_the_next_reads(
+        self, session: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        held = _record(session, week=0.95)
+        read = usage_halts_module.recorded
+
+        def overtaken(db: Session, reading_id: int) -> Usage:
+            figures = read(db, reading_id)
+            _record(session, week=0.1, received_at=RECEIVED_AT + timedelta(minutes=10))
+            return figures
+
+        monkeypatch.setattr(usage_halts_module, "recorded", overtaken)
+
+        assert HALTS.halts(session) == [
+            Halt(WEEK, 0.95, held.received_at, held.taken_at)
+        ]
 
     @pytest.mark.parametrize(
         ("next_after_reset", "since_first"),

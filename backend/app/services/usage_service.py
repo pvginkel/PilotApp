@@ -73,8 +73,15 @@ def latest(db: Session) -> Usage | None:
     reading = db.scalars(
         select(UsageReading).order_by(UsageReading.id.desc()).limit(1)
     ).first()
-    if reading is None:
-        return None
+    return None if reading is None else _usage(db, reading)
+
+
+def recorded(db: Session, reading_id: int) -> Usage:
+    """The figures of the Usage Reading `reading_id`."""
+    return _usage(db, db.get_one(UsageReading, reading_id))
+
+
+def _usage(db: Session, reading: UsageReading) -> Usage:
     shares = db.scalars(
         select(WindowShare).where(WindowShare.reading_id == reading.id)
     ).all()

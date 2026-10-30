@@ -24,14 +24,14 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from app.database import scoped_session
 from app.models import UsageReading, WindowShare
 from app.models.reference import UsageWindow
 from app.services.supervisor import Supervisor
-from app.services.usage_service import Usage, UsageService, latest
+from app.services.usage_service import Usage, UsageService, latest, recorded
 
 if TYPE_CHECKING:
     from app.services.container import ServiceContainer
@@ -100,14 +100,17 @@ class UsageHalts:
     def halts(self, db: Session) -> list[Halt]:
         """Each halt that holds now, the week's first, with the share it holds
         at, when it began and the age of the reading."""
-        usage = latest(db)
-        if usage is None:
+        # Each read up to the latest as this one reads it: a reading recorded
+        # between two statements is the next decision's.
+        reading_id = db.scalar(select(func.max(UsageReading.id)))
+        if reading_id is None:
             return []
+        usage = recorded(db, reading_id)
         return [
             Halt(
                 window,
                 usage.windows[window].share,
-                self._since(db, window),
+                self._since(db, window, reading_id),
                 usage.taken_at,
             )
             for window in self._holding(usage, datetime.now(UTC))
@@ -127,11 +130,12 @@ class UsageHalts:
             held.append(window)
         return tuple(held)
 
-    def _since(self, db: Session, window: UsageWindow) -> datetime:
-        """When the halt of `window`, which holds now, began: the receipt of
-        the earliest of the readings that held it over their time as the
-        latest, unbroken up to the latest — each at or over the limit, and a
-        stale one not past its minute when the next was received."""
+    def _since(self, db: Session, window: UsageWindow, through: int) -> datetime:
+        """When the halt of `window`, which the Usage Reading `through` holds,
+        began: the receipt of the earliest of the readings that held it over
+        their time as the latest, unbroken up to `through` — each at or over
+        the limit, and a stale one not past its minute when the next was
+        received."""
         limit = self._limits[window]
         result = db.execute(
             select(
@@ -147,6 +151,7 @@ class UsageHalts:
                     WindowShare.window_code == window,
                 ),
             )
+            .where(UsageReading.id <= through)
             .order_by(UsageReading.id.desc())
             .execution_options(yield_per=_PAGE)
         )
@@ -160,7 +165,7 @@ class UsageHalts:
                 since = received_at
         finally:
             result.close()
-        # The latest reading holds the halt.
+        # The reading `through` holds the halt.
         assert since is not None
         return since
 
