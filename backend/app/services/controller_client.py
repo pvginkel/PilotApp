@@ -53,6 +53,15 @@ EnvironmentStatus = Literal[
 ]
 HeadlessStatus = Literal["starting", "idle", "busy", "interrupting", "ended", "error"]
 EnvironmentWait = Literal["ready", "settled"]
+UsageWindowCode = Literal["five_hour", "seven_day"]
+StaleReason = Literal[
+    "no-reading-yet",
+    "no-credential",
+    "token-expired",
+    "token-rejected",
+    "rate-limited",
+    "endpoint-error",
+]
 
 
 class ControllerProblemType(StrEnum):
@@ -225,6 +234,27 @@ class HeadlessCreateRequest(_ControllerModel):
     non-empty list implies `sandbox`."""
 
 
+class ControllerUsageWindow(_ControllerModel):
+    """One window's figure in a usage reading."""
+
+    window: UsageWindowCode
+    share: float
+    """The window's use as a fraction, unclamped: it may pass 1."""
+    resets_at: datetime
+
+
+class ControllerUsageReading(_ControllerModel):
+    """The subscription's usage, as the controller's poll last read it."""
+
+    taken_at: datetime | None
+    """When the endpoint answered these figures; None before its first answer."""
+    stale: bool
+    """The latest poll got no answer: the figures are the last answer's."""
+    stale_reason: StaleReason | None
+    windows: list[ControllerUsageWindow]
+    """A window the endpoint left out is missing; empty before the first answer."""
+
+
 @dataclass(frozen=True)
 class FileContent:
     """A file as a read of it answered."""
@@ -302,7 +332,15 @@ class SessionsFrame:
     sessions: tuple[SessionView, ...]
 
 
-FleetFrame = StateFrame | GoneFrame | SessionsFrame
+@dataclass(frozen=True)
+class UsageFrame:
+    """The subscription's usage reading, whole: the seed on connect, then each
+    change of anything but its `takenAt`."""
+
+    reading: ControllerUsageReading
+
+
+FleetFrame = StateFrame | GoneFrame | SessionsFrame | UsageFrame
 
 
 @dataclass(frozen=True)
@@ -789,11 +827,13 @@ class ControllerClient:
         )
 
     def open_fleet_stream(self) -> ControllerStream[FleetFrame]:
-        """Every environment's `state`, `gone` and `sessions` frames as they come.
+        """Every environment's `state`, `gone` and `sessions` frames, and the
+        `usage` frames, as they come.
 
         The state channel opens with no snapshot: open the stream first, then
         list the environments, and apply the list before the frames that came
-        meanwhile. The other channels' frames are not Pilot's and are skipped.
+        meanwhile. The usage channel's first frame is the reading at the
+        connect. The other channels' frames are not Pilot's and are skipped.
         """
         operation = "read the controller's fleet stream"
         response = self._call(
@@ -922,6 +962,8 @@ def _fleet_frame(event: _Event, operation: str) -> FleetFrame | None:
     if event.name == "sessions":
         sessions = _parse(_SessionsData, event.data, operation)
         return SessionsFrame(sessions.env_id, tuple(sessions.sessions))
+    if event.name == "usage":
+        return UsageFrame(_parse(ControllerUsageReading, event.data, operation))
     # An `enrollment` frame carries the one secret of an enrolling machine's
     # handoff: it is skipped unread, never logged.
     return None

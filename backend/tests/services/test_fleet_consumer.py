@@ -1,6 +1,6 @@
 """The fleet consumer: the Environment rows kept current from the fleet stream
-(design 2 §13.1; F73.1), and the stream down the controller unreachable
-(§13.4). Each test runs it as the supervisor does, on a database of its own,
+(design 2 §13.1; F73.1), the stream down the controller unreachable (§13.4),
+and the usage readings recorded from it (design 4 §6; DB 274). Each test runs it as the supervisor does, on a database of its own,
 against the fake controller."""
 
 from collections.abc import Callable, Generator
@@ -13,7 +13,8 @@ from sqlalchemy import select
 from werkzeug.wrappers import Request, Response
 
 from app.database import scoped_session
-from app.models import Environment
+from app.models import Environment, UsageReading, WindowShare
+from app.models.reference import UsageWindow
 from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerClient, HeadlessCreateRequest
 from app.services.fleet_consumer import (
@@ -21,6 +22,7 @@ from app.services.fleet_consumer import (
     GONE,
     FleetConsumer,
 )
+from app.services.usage_service import READING_AGE
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
 from tests.support.fake_controller import ServedFakeController, client_of
 from tests.support.supervisor import (
@@ -33,11 +35,15 @@ from tests.support.supervisor import (
 
 CONSUMER_LOGGER = "app.services.fleet_consumer"
 SUPERVISOR_LOGGER = "app.services.supervisor"
+USAGE_LOGGER = "app.services.usage_service"
+
+TAKEN_AT = datetime(2026, 10, 8, 23, 40, tzinfo=UTC)
+WEEK_RESETS_AT = datetime(2026, 10, 9, 7, tzinfo=UTC)
 
 
 @pytest.fixture
 def fleet_log() -> Generator[LogWaiter]:
-    with listening(CONSUMER_LOGGER, SUPERVISOR_LOGGER) as waiter:
+    with listening(CONSUMER_LOGGER, SUPERVISOR_LOGGER, USAGE_LOGGER) as waiter:
         yield waiter
 
 
@@ -441,6 +447,191 @@ class TestFleetConsumer:
         coordinator.shutdown()
         assert fake_controller.calls == []
         assert metric_value(FLEET_STREAM_CONNECTED) == 0
+
+
+type Recorded = tuple[datetime, bool, dict[UsageWindow, float]]
+
+
+def _readings(container: ServiceContainer) -> list[Recorded]:
+    """The Usage Readings recorded, oldest first: when taken, whether stale,
+    and each window's share."""
+    with scoped_session(container) as db:
+        readings = db.scalars(select(UsageReading).order_by(UsageReading.id)).all()
+        shares = db.scalars(select(WindowShare)).all()
+        return [
+            (
+                reading.taken_at,
+                reading.stale,
+                {s.window_code: s.share for s in shares if s.reading_id == reading.id},
+            )
+            for reading in readings
+        ]
+
+
+def _recorded(container: ServiceContainer, count: int) -> list[Recorded]:
+    """Wait until `count` readings are recorded; the readings."""
+    wait_until(lambda: len(_readings(container)) >= count, f"{count} recorded")
+    return _readings(container)
+
+
+class TestUsageReadings:
+    def test_the_connects_seed_is_recorded_and_the_route_is_not_read(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        consume: Consume,
+    ) -> None:
+        fake_controller.usage(five_hour=0.08, seven_day=0.77, taken_at=TAKEN_AT)
+
+        consume()
+
+        assert _recorded(committed_app.container, 1) == [
+            (
+                TAKEN_AT,
+                False,
+                {UsageWindow.FIVE_HOUR: 0.08, UsageWindow.SEVEN_DAY: 0.77},
+            )
+        ]
+        assert "GET /usage" not in fake_controller.calls
+        assert metric_value(READING_AGE) == 0
+
+    def test_each_change_is_recorded_and_its_age_read(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        consume: Consume,
+    ) -> None:
+        container = committed_app.container
+        consume()
+        week = UsageWindow.SEVEN_DAY
+
+        fake_controller.usage(seven_day=0.9, taken_at=TAKEN_AT)
+        _recorded(container, 1)
+        # A poll that moves only `takenAt` pushes nothing.
+        fake_controller.usage(seven_day=0.9, taken_at=TAKEN_AT + timedelta(minutes=10))
+        fake_controller.usage_stale("token-expired")
+        _recorded(container, 2)
+        stale_age = metric_value(READING_AGE)
+        fake_controller.usage(seven_day=0.85, taken_at=TAKEN_AT + timedelta(minutes=20))
+
+        assert _recorded(container, 3) == [
+            (TAKEN_AT, False, {week: 0.9}),
+            (TAKEN_AT + timedelta(minutes=10), True, {week: 0.9}),
+            (TAKEN_AT + timedelta(minutes=20), False, {week: 0.85}),
+        ]
+        assert (
+            stale_age
+            >= (datetime.now(UTC) - (TAKEN_AT + timedelta(minutes=10))).total_seconds()
+            - 60
+        )
+        wait_until(lambda: metric_value(READING_AGE) == 0, "fresh again")
+
+    def test_a_restarted_controllers_seed_leaves_the_latest_as_it_is(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        consume: Consume,
+        fleet_log: LogWaiter,
+    ) -> None:
+        container = committed_app.container
+        week = UsageWindow.SEVEN_DAY
+        fake_controller.usage(seven_day=0.9, taken_at=TAKEN_AT)
+        consume(backoff=(0.1, 0.2))
+        _recorded(container, 1)
+
+        fake_controller.controller_restarted()
+
+        fleet_log.wait_for(r"Fleet stream connected.*", count=2)
+        fleet_log.wait_for(
+            r"Usage reading without figures \(no-reading-yet\): "
+            r"the latest recorded stands"
+        )
+        # Its first answer, the figures recorded already, is not recorded.
+        fake_controller.usage(seven_day=0.9, taken_at=TAKEN_AT + timedelta(hours=1))
+        fleet_log.wait_for(r"Usage reading taken at .*: unchanged since .*")
+        fake_controller.usage(seven_day=0.95, taken_at=TAKEN_AT + timedelta(hours=2))
+
+        assert _recorded(container, 2) == [
+            (TAKEN_AT, False, {week: 0.9}),
+            (TAKEN_AT + timedelta(hours=2), False, {week: 0.95}),
+        ]
+
+    def test_a_reconnects_seed_is_compared_with_the_last_recorded(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        consume: Consume,
+        fleet_log: LogWaiter,
+    ) -> None:
+        container = committed_app.container
+        week = UsageWindow.SEVEN_DAY
+        fake_controller.usage(seven_day=0.5, taken_at=TAKEN_AT)
+        consume(backoff=(0.5, 1.0))
+        _recorded(container, 1)
+
+        # Changed while the stream is down: the reconnect's seed brings it.
+        fake_controller.drop_streams()
+        fake_controller.usage(seven_day=0.6, taken_at=TAKEN_AT + timedelta(minutes=10))
+        missed = _recorded(container, 2)
+        # Unchanged since: the next reconnect's seed records nothing.
+        fake_controller.drop_streams()
+        fleet_log.wait_for(r"Usage reading taken at .*: unchanged since .*")
+        fake_controller.usage(seven_day=0.7, taken_at=TAKEN_AT + timedelta(minutes=20))
+
+        assert missed[1] == (TAKEN_AT + timedelta(minutes=10), False, {week: 0.6})
+        assert [shares[week] for _, _, shares in _recorded(container, 3)] == [
+            0.5,
+            0.6,
+            0.7,
+        ]
+
+    @pytest.mark.parametrize(
+        ("last_share", "recorded_shares"),
+        [(0.5, [0.5, 0.6]), (0.4, [0.4, 0.5, 0.6])],
+        ids=["the-same-figures", "other-figures"],
+    )
+    def test_after_a_restart_the_seed_is_compared_with_the_last_recorded(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        consume: Consume,
+        fleet_log: LogWaiter,
+        last_share: float,
+        recorded_shares: list[float],
+    ) -> None:
+        # The process before this one recorded the week at `last_share`.
+        container = committed_app.container
+        with scoped_session(container) as db:
+            reading = UsageReading(taken_at=TAKEN_AT, received_at=TAKEN_AT, stale=False)
+            db.add(reading)
+            db.flush()
+            db.add(
+                WindowShare(
+                    reading_id=reading.id,
+                    window_code=UsageWindow.SEVEN_DAY,
+                    share=last_share,
+                    resets_at=WEEK_RESETS_AT,
+                )
+            )
+        fake_controller.usage(
+            seven_day=0.5,
+            seven_day_resets_at=WEEK_RESETS_AT,
+            taken_at=TAKEN_AT + timedelta(hours=1),
+        )
+
+        consume()
+        fleet_log.wait_for(r"Usage reading (\d+ recorded|taken at .*: unchanged).*")
+        fake_controller.usage(seven_day=0.6, taken_at=TAKEN_AT + timedelta(hours=2))
+
+        recorded = _recorded(container, len(recorded_shares))
+        assert [shares[UsageWindow.SEVEN_DAY] for _, _, shares in recorded] == (
+            recorded_shares
+        )
 
 
 class _ListHook(ServedFakeController):

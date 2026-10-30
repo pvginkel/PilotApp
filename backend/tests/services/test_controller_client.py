@@ -6,6 +6,7 @@ import threading
 import time
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,8 @@ from app.services.controller_client import (
     ControllerProblem,
     ControllerProblemType,
     ControllerUnreachable,
+    ControllerUsageReading,
+    ControllerUsageWindow,
     EnvironmentStatus,
     FileContent,
     GoneFrame,
@@ -33,6 +36,7 @@ from app.services.controller_client import (
     ResultFrame,
     SessionsFrame,
     StateFrame,
+    UsageFrame,
 )
 from app.services.controller_outage import ControllerOutage
 from app.services.fake_controller import CLIENT_NAME, FinishOutcome
@@ -1374,8 +1378,10 @@ class TestControllerClient:
 
         with controller_client.open_fleet_stream() as stream:
             frames = iter(stream)
+            usage = next(frames)
             seeded = [next(frames), next(frames)]
 
+        assert isinstance(usage, UsageFrame)
         assert [(f.env_id, [s.name for s in f.sessions]) for f in seeded] == [  # type: ignore[union-attr]
             (ENV, [session_name]),
             ("env-2", []),
@@ -1386,6 +1392,7 @@ class TestControllerClient:
     ) -> None:
         with controller_client.open_fleet_stream() as stream:
             frames = iter(stream)
+            assert isinstance(next(frames), UsageFrame)
             fake_controller.add_environment(ENV, exempt=True)
             added = next(frames)
             controller_client.start_environment(ENV)
@@ -1410,6 +1417,7 @@ class TestControllerClient:
     ) -> None:
         with controller_client.open_fleet_stream() as stream:
             frames = iter(stream)
+            assert isinstance(next(frames), UsageFrame)
             env_id = controller_client.create_environment("example/Example").env_id
             created = [next(frames), next(frames)]
             controller_client.rename_environment(env_id, "example")
@@ -1462,13 +1470,88 @@ class TestControllerClient:
         assert isinstance(frame, StateFrame) and frame.environment.env_id == ENV
         assert caught.value.cause == "the controller ended the stream"
 
+    def test_the_fleet_streams_first_frame_is_the_usage_reading(
+        self, fake_controller: ServedFakeController, controller_client: ControllerClient
+    ) -> None:
+        fake_controller.add_environment(ENV)
+        fake_controller.usage(
+            five_hour=0.08,
+            seven_day=1.02,
+            five_hour_resets_at=datetime(2026, 10, 26, 21, tzinfo=UTC),
+            seven_day_resets_at=datetime(2026, 10, 29, 10, tzinfo=UTC),
+            taken_at=datetime(2026, 10, 26, 19, 51, 20, tzinfo=UTC),
+        )
+
+        with controller_client.open_fleet_stream() as stream:
+            frames = iter(stream)
+            usage, sessions = next(frames), next(frames)
+
+        assert usage == UsageFrame(
+            ControllerUsageReading(
+                taken_at=datetime(2026, 10, 26, 19, 51, 20, tzinfo=UTC),
+                stale=False,
+                stale_reason=None,
+                windows=[
+                    ControllerUsageWindow(
+                        window="five_hour",
+                        share=0.08,
+                        resets_at=datetime(2026, 10, 26, 21, tzinfo=UTC),
+                    ),
+                    ControllerUsageWindow(
+                        window="seven_day",
+                        share=1.02,
+                        resets_at=datetime(2026, 10, 29, 10, tzinfo=UTC),
+                    ),
+                ],
+            )
+        )
+        assert sessions == SessionsFrame(ENV, ())
+        assert "GET /usage" not in fake_controller.calls
+
+    def test_the_fleet_stream_carries_each_change_of_the_usage_reading(
+        self, fake_controller: ServedFakeController, controller_client: ControllerClient
+    ) -> None:
+        with controller_client.open_fleet_stream() as stream:
+            frames = iter(stream)
+            seed = next(frames)
+            fake_controller.usage(seven_day=0.4)
+            fresh = next(frames)
+            fake_controller.usage_stale("rate-limited")
+            stale = next(frames)
+
+        assert seed == UsageFrame(
+            ControllerUsageReading(
+                taken_at=None, stale=True, stale_reason="no-reading-yet", windows=[]
+            )
+        )
+        assert isinstance(fresh, UsageFrame) and isinstance(stale, UsageFrame)
+        assert [w.window for w in fresh.reading.windows] == ["seven_day"]
+        assert (stale.reading.stale, stale.reading.stale_reason) == (
+            True,
+            "rate-limited",
+        )
+        assert stale.reading.taken_at == fresh.reading.taken_at
+        assert stale.reading.windows == fresh.reading.windows
+
+    def test_a_usage_frame_of_another_shape_fails_the_stream(
+        self, health_service: HealthService
+    ) -> None:
+        body = [b'event: usage\ndata: {"takenAt":null,"stale":"often"}\n\n']
+        with _scripted("200 OK", [("Content-Type", "text/event-stream")], body) as url:
+            client = ControllerClient(url, "t", health_service, ControllerOutage())
+            with client.open_fleet_stream() as stream:
+                with pytest.raises(ExternalServiceException) as caught:
+                    next(iter(stream))
+
+        assert caught.value.cause.startswith("the controller's answer does not parse")
+
     def test_close_ends_the_fleet_stream_quietly(
         self, fake_controller: ServedFakeController, controller_client: ControllerClient
     ) -> None:
         stream = controller_client.open_fleet_stream()
         threading.Timer(0.3, stream.close).start()
 
-        assert list(stream) == []
+        assert [type(frame) for frame in stream] == [UsageFrame]
 
     # -- Files ----------------------------------------------------------------
 
@@ -2154,7 +2237,9 @@ class TestControllerTls:
 
         environments = client.list_environments().items
         with client.open_fleet_stream() as stream:
-            seed = next(iter(stream))
+            frames = iter(stream)
+            next(frames)
+            seed = next(frames)
         with app.app_context():
             body, _ = health_service.check_readyz()
 

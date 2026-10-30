@@ -10,7 +10,8 @@ reads, writes and lists the files of an environment's `/work`, whatever its
 status, as the controller does off its share. A boxed headless session keeps
 the worker's rules: its create refused for a folder not on that tree or a pod
 without the sandbox profile, and a turn failing at its spawn once a folder of
-its box is gone.
+its box is gone. It serves the subscription's usage reading as a test sets it,
+on its route and as the fleet stream's `usage` frame.
 
 A test drives it through its verbs, the public methods below: in process under
 pytest, and over HTTP as `POST /fake/<verb>`, the verb's name hyphenated and its
@@ -28,7 +29,8 @@ refused while the environment reads `provisioning` or `starting`, a bring-up
 under way, or `deleting`; a reset clears the tree, and a bring-up clones nothing
 into it. A box's roots on that tree are its cwd and its writable folders:
 `$HOME` and `/tmp`, writable roots of every box, are off it, so a read-only cwd
-meets no writable root but a listed folder.
+meets no writable root but a listed folder. The usage reading is the one a
+verb last set, with no poll behind it.
 """
 
 from __future__ import annotations
@@ -48,7 +50,7 @@ from datetime import UTC, datetime, timedelta
 from functools import partial
 from typing import TYPE_CHECKING, Any, Literal, get_args
 
-from pydantic import ValidationError, validate_call
+from pydantic import AwareDatetime, ValidationError, validate_call
 from werkzeug.exceptions import HTTPException
 from werkzeug.routing import Map, Rule
 from werkzeug.wrappers import Request, Response
@@ -60,6 +62,7 @@ from app.services.controller_client import (
     WAIT_MS_CAP,
     EnvironmentStatus,
     HeadlessStatus,
+    UsageWindowCode,
 )
 
 if TYPE_CHECKING:
@@ -123,6 +126,24 @@ CLIENT_NAME = "pilot"
 create records as the environment's `managedBy`."""
 
 _KEEPALIVE = b": keepalive\n\n"
+
+StaleCause = Literal[
+    "no-credential", "token-expired", "token-rejected", "rate-limited", "endpoint-error"
+]
+"""Why a poll that ran got no answer: the stale reasons but `no-reading-yet`."""
+
+_WINDOW_LENGTH: dict[UsageWindowCode, timedelta] = {
+    "five_hour": timedelta(hours=5),
+    "seven_day": timedelta(days=7),
+}
+
+_NO_READING_YET: dict[str, Any] = {
+    "takenAt": None,
+    "stale": True,
+    "staleReason": "no-reading-yet",
+    "windows": [],
+}
+"""The usage reading of a controller whose first poll has not answered."""
 
 _INGRESS_PAGE = (
     "<html><head><title>502 Bad Gateway</title></head>"
@@ -271,12 +292,15 @@ class FakeSession:
 @dataclass(eq=False)
 class _Subscriber:
     frames: list[bytes] = field(default_factory=list)
+    usage: bytes | None = None
+    """The usage channel's one slot, latest-wins, sent ahead of `frames`."""
 
 
 _ROUTES = Map(
     [
         Rule("/readyz", endpoint="readyz", methods=["GET"]),
         Rule("/stream", endpoint="fleet_stream", methods=["GET"]),
+        Rule("/usage", endpoint="usage", methods=["GET"]),
         Rule("/environments", endpoint="list_environments", methods=["GET"]),
         Rule("/environments", endpoint="create_environment", methods=["POST"]),
         Rule("/environments/<env_id>", endpoint="get_environment", methods=["GET"]),
@@ -359,10 +383,14 @@ class FakeController:
         self._unlisted_owners: set[str] = set()
         self._creates_settle_to: EnvironmentStatus | None = "running"
         self._last_pod_started_at = datetime.min.replace(tzinfo=UTC)
+        self._usage = dict(_NO_READING_YET)
+        # The endpoint's, which a restart of the controller leaves as they are.
+        self._window_resets: dict[str, str] = {}
         self.calls: list[str] = []
         self._endpoints: dict[str, Callable[..., Response]] = {
             "readyz": self._readyz,
             "fleet_stream": self._fleet_stream,
+            "usage": self._usage_reading,
             "list_environments": self._list_environments,
             "create_environment": self._create_environment,
             "get_environment": self._get_environment,
@@ -410,6 +438,9 @@ class FakeController:
             "publish-state": self.publish_state,
             "publish-sessions": self.publish_sessions,
             "drop-streams": self.drop_streams,
+            "usage": self.usage,
+            "usage-stale": self.usage_stale,
+            "controller-restarted": self.controller_restarted,
             "reset": self.reset,
         }
 
@@ -666,10 +697,70 @@ class FakeController:
             self._drops += 1
             self._changed.notify_all()
 
+    @validate_call
+    def usage(
+        self,
+        five_hour: float | None = None,
+        seven_day: float | None = None,
+        five_hour_resets_at: AwareDatetime | None = None,
+        seven_day_resets_at: AwareDatetime | None = None,
+        taken_at: AwareDatetime | None = None,
+    ) -> None:
+        """The poll got an answer, taken at `taken_at`, now by default: the
+        reading fresh, with each window given a share, a window given none
+        left out. A window resets at the time given, else at the one the last
+        answer served it with, a restart of the controller's between, else its
+        length past `taken_at`. A `usage` frame goes out unless only `takenAt`
+        moved."""
+        taken = (taken_at or datetime.now(UTC)).astimezone(UTC).replace(microsecond=0)
+        given: dict[UsageWindowCode, tuple[float | None, datetime | None]] = {
+            "five_hour": (five_hour, five_hour_resets_at),
+            "seven_day": (seven_day, seven_day_resets_at),
+        }
+        with self._changed:
+            windows: list[dict[str, Any]] = []
+            for window, (share, resets_at) in given.items():
+                if share is None:
+                    continue
+                if resets_at is not None:
+                    resets = _utc_second(resets_at)
+                else:
+                    resets = self._window_resets.get(window) or _utc_second(
+                        taken + _WINDOW_LENGTH[window]
+                    )
+                windows.append({"window": window, "share": share, "resetsAt": resets})
+            self._window_resets = {w["window"]: w["resetsAt"] for w in windows}
+            self._set_usage(
+                {
+                    "takenAt": _utc_second(taken),
+                    "stale": False,
+                    "staleReason": None,
+                    "windows": windows,
+                }
+            )
+
+    @validate_call
+    def usage_stale(self, reason: StaleCause = "token-expired") -> None:
+        """The latest poll got no answer, for `reason`: the reading stale, its
+        `takenAt` and windows the last answer's, none before the first."""
+        with self._changed:
+            self._set_usage({**self._usage, "stale": True, "staleReason": reason})
+
+    def controller_restarted(self) -> None:
+        """The controller restarted: every stream ends, and its usage reading
+        is `no-reading-yet`, the reconnect's seed, until a verb sets another."""
+        with self._changed:
+            self._usage = dict(_NO_READING_YET)
+            self._drops += 1
+            self._changed.notify_all()
+
     def reset(self) -> None:
         """Forget every environment, session and call, any outage, the node's
-        cap, every owner refused and how creates settle; drop every stream."""
+        cap, every owner refused, how creates settle and the usage reading;
+        drop every stream."""
         with self._changed:
+            self._usage = dict(_NO_READING_YET)
+            self._window_resets = {}
             self._unanswered = None
             self._node_capped = False
             self._unlisted_owners.clear()
@@ -1156,9 +1247,12 @@ class FakeController:
         )
 
     def _fleet_stream(self, request: Request) -> Response:
+        """Seeded with the usage reading, its first frame, and each
+        environment's session set."""
         with self._changed:
             subscriber = _Subscriber(
-                [self._sessions_frame(env_id) for env_id in self._environments]
+                [self._sessions_frame(env_id) for env_id in self._environments],
+                self._usage_frame(),
             )
             self._subscribers.append(subscriber)
             frames = self._fleet_frames(subscriber, self._drops)
@@ -1170,18 +1264,28 @@ class FakeController:
                 with self._changed:
                     self._changed.wait_for(
                         lambda: (
-                            subscriber.frames or self._closed or self._drops != drops
+                            subscriber.usage is not None
+                            or subscriber.frames
+                            or self._closed
+                            or self._drops != drops
                         ),
                         timeout=self._keepalive,
                     )
                     if self._closed or self._drops != drops:
                         return
                     frames = list(subscriber.frames)
+                    if subscriber.usage is not None:
+                        frames.insert(0, subscriber.usage)
                     subscriber.frames.clear()
+                    subscriber.usage = None
                 yield from frames or [_KEEPALIVE]
         finally:
             with self._changed:
                 self._subscribers.remove(subscriber)
+
+    def _usage_reading(self, request: Request) -> Response:
+        with self._changed:
+            return _json(self._usage)
 
     # -- State, under the lock ------------------------------------------------
 
@@ -1328,6 +1432,20 @@ class FakeController:
         for subscriber in self._subscribers:
             subscriber.frames.append(frame)
         self._changed.notify_all()
+
+    def _set_usage(self, reading: dict[str, Any]) -> None:
+        """Hold the reading; each subscriber's slot takes it when anything but
+        its `takenAt` changed."""
+        before, self._usage = self._usage, reading
+        if {**before, "takenAt": None} == {**reading, "takenAt": None}:
+            return
+        frame = self._usage_frame()
+        for subscriber in self._subscribers:
+            subscriber.usage = frame
+        self._changed.notify_all()
+
+    def _usage_frame(self) -> bytes:
+        return f"event: usage\ndata: {_compact(self._usage)}\n\n".encode()
 
     def _state_frame(self, environment: FakeEnvironment) -> bytes:
         data = _compact(environment.to_json())
@@ -1545,6 +1663,11 @@ def _headers_first(frames: Iterator[bytes]) -> Iterator[bytes]:
     controller does when a stream opens."""
     yield b""
     yield from frames
+
+
+def _utc_second(at: datetime) -> str:
+    """A time as the controller writes it: UTC, to the whole second."""
+    return at.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _past(deadline: float | None) -> bool:

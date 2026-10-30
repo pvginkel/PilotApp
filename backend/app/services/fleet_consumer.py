@@ -1,5 +1,6 @@
 """The fleet consumer: the Environment rows Pilot has, kept current from the
-controller's fleet stream (design 2 §8.2, §13.1).
+controller's fleet stream (design 2 §8.2, §13.1), and the subscription's usage
+readings handed to the usage service (design 4 §6).
 
 On every connect it subscribes to `/stream`, lists the environments, applies the
 list, and then the frames. It updates the rows that exist and creates none.
@@ -29,6 +30,7 @@ from app.services.controller_client import (
     SessionsFrame,
     SessionView,
     StateFrame,
+    UsageFrame,
 )
 from app.services.controller_outage import ControllerOutage
 from app.services.environment_service import GONE, reported_columns
@@ -49,7 +51,7 @@ FLEET_STREAM_CONNECTED = Gauge(
 
 class FleetConsumer:
     """Keeps the Environment rows current, and each environment's latest
-    state and session set."""
+    state and session set; hands on each usage reading."""
 
     def __init__(
         self,
@@ -161,6 +163,8 @@ class FleetConsumer:
             case SessionsFrame(env_id=env_id, sessions=sessions):
                 with self._lock:
                     self._sessions[env_id] = sessions
+            case UsageFrame(reading=reading):
+                self._container.usage_service().receive(reading)
 
 
 def _report(db: Session, environment: ControllerEnvironment, seen_at: datetime) -> None:

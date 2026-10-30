@@ -74,6 +74,7 @@ from app.services.testing_service import TestingService
 from app.services.testing_sync_service import TestingSyncService
 from app.services.timeline_service import TimelineService
 from app.services.turn_end_read_service import TurnEndReadService
+from app.services.usage_service import UsageService
 from app.services.write_back_service import WriteBackService
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
 from app.utils.temp_file_manager import TempFileManager
@@ -232,6 +233,10 @@ class ServiceContainer(containers.DeclarativeContainer):
         controller_outage=controller_outage,
     )
     register_for_background_startup(lambda c: c.fleet_consumer())
+    # The subscription's usage, which the fleet consumer hands it (design 4
+    # §6); built at startup so that its age gauge reads it from the first.
+    usage_service = providers.Singleton(UsageService, container=__self__)
+    register_for_background_startup(lambda c: c.usage_service())
     environment_service = providers.Singleton(
         EnvironmentService,
         container=__self__,

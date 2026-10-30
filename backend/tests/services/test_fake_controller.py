@@ -4,6 +4,8 @@ the real client, in `test_controller_client.py`."""
 
 import json
 import socket
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -17,6 +19,13 @@ from app.services.fake_controller import (
 
 TOKEN = "fake-token"
 BEARER = {"Authorization": f"Bearer {TOKEN}"}
+
+NO_READING_YET = {
+    "takenAt": None,
+    "stale": True,
+    "staleReason": "no-reading-yet",
+    "windows": [],
+}
 
 
 @pytest.fixture
@@ -83,6 +92,9 @@ class TestFakeController:
             "publish-state",
             "publish-sessions",
             "drop-streams",
+            "usage",
+            "usage-stale",
+            "controller-restarted",
             "reset",
         ],
     )
@@ -430,6 +442,7 @@ class TestFakeController:
         frames = iter(response.response)
         assert next(frames) == b""
         next(frames)
+        next(frames)
 
         fake.outage(answer="ingress")
 
@@ -452,10 +465,12 @@ class TestFakeController:
         fake.capped()
         fake.not_whitelisted("example")
         fake.settle_creates(None)
+        fake.usage(seven_day=0.5)
 
         fake.reset()
 
         assert fake.calls == []
+        assert http.get("/usage", headers=BEARER).get_json() == NO_READING_YET
         listing = http.get("/environments", headers=BEARER).get_json()
         assert listing == {"items": [], "unprojectable": []}
         created = _create(http, {"repo": "example/Example"})
@@ -469,6 +484,7 @@ class TestFakeController:
         response = http.get("/stream", headers=BEARER, buffered=False)
         frames = iter(response.response)
         assert next(frames) == b""
+        assert next(frames).startswith(b"event: usage\n")
         seed = next(frames)
 
         fake.publish_state("env-1")
@@ -484,6 +500,226 @@ class TestFakeController:
         environment = json.loads(exempt.removeprefix("event: state\ndata: "))
         assert environment["capabilities"] == {"capacityExempt": {"enabled": True}}
         assert sessions == seed.decode()
+
+    # -- The subscription's usage ---------------------------------------------
+
+    def test_the_usage_route_answers_no_reading_yet_at_the_start(
+        self, http: Client
+    ) -> None:
+        response = http.get("/usage", headers=BEARER)
+
+        assert response.status_code == 200
+        assert response.get_json() == NO_READING_YET
+
+    def test_the_usage_route_needs_the_bearer(self, http: Client) -> None:
+        assert http.get("/usage").status_code == 401
+
+    def test_a_reading_with_figures_is_served_as_the_controller_writes_it(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.usage(
+            five_hour=0.08,
+            seven_day=0.77,
+            five_hour_resets_at=datetime(2026, 10, 26, 21, tzinfo=UTC),
+            seven_day_resets_at=datetime(2026, 10, 29, 10, tzinfo=UTC),
+            taken_at=datetime(2026, 10, 26, 19, 51, 20, 500, tzinfo=UTC),
+        )
+
+        assert http.get("/usage", headers=BEARER).data == (
+            b'{"takenAt":"2026-10-26T19:51:20Z","stale":false,"staleReason":null,'
+            b'"windows":[{"window":"five_hour","share":0.08,'
+            b'"resetsAt":"2026-10-26T21:00:00Z"},{"window":"seven_day",'
+            b'"share":0.77,"resetsAt":"2026-10-29T10:00:00Z"}]}'
+        )
+
+    def test_a_window_given_no_share_is_left_out(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.usage(five_hour=0.3, seven_day=0.5)
+
+        fake.usage(seven_day=0.6)
+
+        windows = http.get("/usage", headers=BEARER).get_json()["windows"]
+        assert [(w["window"], w["share"]) for w in windows] == [("seven_day", 0.6)]
+
+    def test_a_windows_reset_is_its_length_past_the_answer_until_it_moves(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        taken = datetime(2026, 10, 26, 19, 51, 20, tzinfo=UTC)
+        fake.usage(five_hour=0.1, seven_day=0.5, taken_at=taken)
+        first = _resets(http)
+
+        fake.usage(five_hour=0.2, seven_day=0.6, taken_at=taken + timedelta(hours=1))
+        kept = _resets(http)
+        fake.usage(
+            five_hour=0.0,
+            seven_day=0.6,
+            five_hour_resets_at=datetime(2026, 10, 27, 2, tzinfo=UTC),
+        )
+
+        assert first == {
+            "five_hour": "2026-10-27T00:51:20Z",
+            "seven_day": "2026-11-02T19:51:20Z",
+        }
+        assert kept == first
+        assert _resets(http) == {**first, "five_hour": "2026-10-27T02:00:00Z"}
+
+    def test_a_windows_reset_outlives_a_controller_restart(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        taken = datetime(2026, 10, 26, 19, tzinfo=UTC)
+        fake.usage(five_hour=0.1, seven_day=0.5, taken_at=taken)
+        served = _resets(http)
+
+        fake.controller_restarted()
+        fake.usage(five_hour=0.2, seven_day=0.6, taken_at=taken + timedelta(hours=1))
+
+        assert _resets(http) == served
+
+    def test_a_window_left_out_resets_anew_when_it_is_back(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        taken = datetime(2026, 10, 26, 19, tzinfo=UTC)
+        fake.usage(five_hour=0.3, seven_day=0.5, taken_at=taken)
+        fake.usage(seven_day=0.5, taken_at=taken + timedelta(hours=6))
+
+        fake.usage(five_hour=0.1, seven_day=0.5, taken_at=taken + timedelta(hours=7))
+
+        assert _resets(http) == {
+            "five_hour": "2026-10-27T07:00:00Z",
+            "seven_day": "2026-11-02T19:00:00Z",
+        }
+
+    def test_a_stale_reading_keeps_the_last_answers_figures(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.usage(seven_day=0.5, taken_at=datetime(2026, 10, 26, 19, tzinfo=UTC))
+        answered = http.get("/usage", headers=BEARER).get_json()
+
+        fake.usage_stale("token-rejected")
+
+        assert http.get("/usage", headers=BEARER).get_json() == {
+            **answered,
+            "stale": True,
+            "staleReason": "token-rejected",
+        }
+
+    def test_a_poll_failing_before_the_first_answer_has_no_figures(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.usage_stale("no-credential")
+
+        assert http.get("/usage", headers=BEARER).get_json() == {
+            **NO_READING_YET,
+            "staleReason": "no-credential",
+        }
+
+    def test_usage_stale_takes_no_reason_but_a_failed_polls(
+        self, fake: FakeController
+    ) -> None:
+        with pytest.raises(ValidationError):
+            fake.usage_stale("no-reading-yet")  # type: ignore[arg-type]
+
+    def test_a_verb_takes_a_reset_in_utc_alone(self, http: Client) -> None:
+        naive = http.post(
+            "/fake/usage",
+            json={"seven_day": 0.5, "seven_day_resets_at": "2026-10-29T10:00:00"},
+        )
+        aware = http.post(
+            "/fake/usage",
+            json={"seven_day": 0.5, "seven_day_resets_at": "2026-10-29T11:00:00+01:00"},
+        )
+
+        assert naive.status_code == 422
+        assert aware.status_code == 204
+        assert _resets(http) == {"seven_day": "2026-10-29T10:00:00Z"}
+
+    def test_the_usage_seed_is_the_fleet_streams_first_frame(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.add_environment("env-1")
+        fake.usage(seven_day=0.5, taken_at=datetime(2026, 10, 26, 19, tzinfo=UTC))
+        reading = http.get("/usage", headers=BEARER).data
+        response = http.get("/stream", headers=BEARER, buffered=False)
+        frames = iter(response.response)
+
+        seeded = [next(frames), next(frames), next(frames)]
+        fake.close()
+        response.close()
+
+        assert seeded[0] == b""
+        assert seeded[1] == b"event: usage\ndata: " + reading + b"\n\n"
+        assert seeded[2].startswith(b"event: sessions\n")
+
+    def test_a_change_but_taken_ats_is_pushed(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        taken = datetime(2026, 10, 26, 19, tzinfo=UTC)
+        response = http.get("/stream", headers=BEARER, buffered=False)
+        frames = iter(response.response)
+        assert next(frames) == b""
+        next(frames)
+
+        fake.usage(seven_day=0.5, taken_at=taken)
+        fresh = next(frames)
+        fake.usage(seven_day=0.5, taken_at=taken + timedelta(minutes=10))
+        unchanged = next(frames)
+        fake.usage_stale()
+        stale = next(frames)
+        fake.usage(seven_day=0.5, taken_at=taken + timedelta(minutes=20))
+        fresh_again = next(frames)
+        fake.close()
+        response.close()
+
+        assert _usage(fresh)["windows"][0]["share"] == 0.5
+        assert unchanged == b": keepalive\n\n"
+        assert (_usage(stale)["stale"], _usage(stale)["takenAt"]) == (
+            True,
+            "2026-10-26T19:10:00Z",
+        )
+        assert _usage(fresh_again)["takenAt"] == "2026-10-26T19:20:00Z"
+
+    def test_the_usage_frame_is_latest_wins_and_goes_first(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.add_environment("env-1")
+        response = http.get("/stream", headers=BEARER, buffered=False)
+        frames = iter(response.response)
+        assert next(frames) == b""
+        next(frames)
+        next(frames)
+
+        fake.publish_state("env-1")
+        fake.usage(seven_day=0.5)
+        fake.usage(seven_day=0.6)
+        drained = [next(frames), next(frames), next(frames)]
+        fake.close()
+        response.close()
+
+        assert _usage(drained[0])["windows"][0]["share"] == 0.6
+        assert drained[1].startswith(b"event: state\n")
+        assert drained[2] == b": keepalive\n\n"
+
+    def test_a_controller_restart_ends_every_stream_and_seeds_no_reading_yet(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        fake.usage(seven_day=0.5)
+        response = http.get("/stream", headers=BEARER, buffered=False)
+        frames = iter(response.response)
+        assert next(frames) == b""
+        next(frames)
+
+        fake.controller_restarted()
+
+        assert list(frames) == []
+        response.close()
+        assert http.get("/usage", headers=BEARER).get_json() == NO_READING_YET
+        again = http.get("/stream", headers=BEARER, buffered=False)
+        reconnected = iter(again.response)
+        assert next(reconnected) == b""
+        assert _usage(next(reconnected)) == NO_READING_YET
+        fake.close()
+        again.close()
 
     # -- Pilot's own environments: the create, reset, rename and delete --------
 
@@ -649,6 +885,7 @@ class TestFakeController:
         stream = http.get("/stream", headers=BEARER, buffered=False)
         frames = iter(stream.response)
         assert next(frames) == b""
+        assert next(frames).startswith(b"event: usage\n")
         next(frames)
 
         response = http.post("/environments/env-1/reset", headers=BEARER)
@@ -721,6 +958,7 @@ class TestFakeController:
         stream = http.get("/stream", headers=BEARER, buffered=False)
         frames = iter(stream.response)
         assert next(frames) == b""
+        assert next(frames).startswith(b"event: usage\n")
         next(frames)
 
         http.post("/environments/env-1/rename", json={"name": ""}, headers=BEARER)
@@ -738,6 +976,7 @@ class TestFakeController:
         stream = http.get("/stream", headers=BEARER, buffered=False)
         frames = iter(stream.response)
         assert next(frames) == b""
+        assert next(frames).startswith(b"event: usage\n")
         next(frames)
 
         response = http.delete("/environments/env-1", headers=BEARER)
@@ -964,3 +1203,16 @@ def _state(frame: bytes) -> dict[str, object]:
     assert text.startswith("event: state\ndata: ")
     state: dict[str, object] = json.loads(text.removeprefix("event: state\ndata: "))
     return state
+
+
+def _resets(http: Client) -> dict[str, str]:
+    """Each window's `resetsAt` in the reading the route answers."""
+    reading = http.get("/usage", headers=BEARER).get_json()
+    return {window["window"]: window["resetsAt"] for window in reading["windows"]}
+
+
+def _usage(frame: bytes) -> Any:
+    """The reading a `usage` frame carries."""
+    event, _, data = frame.decode().partition("\ndata: ")
+    assert event == "event: usage"
+    return json.loads(data)

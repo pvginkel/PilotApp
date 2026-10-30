@@ -16,6 +16,7 @@ from app.services.controller_client import (
     RawFrame,
     ResultFrame,
     SessionsFrame,
+    UsageFrame,
 )
 from app.services.controller_outage import ControllerOutage
 from app.services.fake_controller import FakeController, FakeControllerProblem
@@ -66,6 +67,37 @@ class TestTestingControllerApi:
         assert [e["envId"] for e in listing.get_json()["items"]] == ["env-1"]
         assert refused.status_code == 401
 
+    def test_it_serves_the_usage_reading_its_verb_sets(
+        self, app: Flask, mounted: FakeController
+    ) -> None:
+        client = app.test_client()
+
+        answered = client.post(
+            f"{PREFIX}/fake/usage",
+            json={
+                "seven_day": 0.93,
+                "seven_day_resets_at": "2026-10-29T10:00:00Z",
+                "taken_at": "2026-10-26T19:51:20Z",
+            },
+        )
+        reading = client.get(
+            f"{PREFIX}/usage", headers={"Authorization": f"Bearer {TOKEN}"}
+        )
+
+        assert answered.status_code == 204
+        assert reading.get_json() == {
+            "takenAt": "2026-10-26T19:51:20Z",
+            "stale": False,
+            "staleReason": None,
+            "windows": [
+                {
+                    "window": "seven_day",
+                    "share": 0.93,
+                    "resetsAt": "2026-10-29T10:00:00Z",
+                }
+            ],
+        }
+
     def test_the_client_drives_a_turn_through_the_mount(
         self, app: Flask, mounted: FakeController, backend_url: str
     ) -> None:
@@ -79,8 +111,10 @@ class TestTestingControllerApi:
             ControllerOutage(),
         )
 
+        mounted.usage(seven_day=0.5)
         with client.open_fleet_stream() as fleet:
-            seed = next(iter(fleet))
+            frames = iter(fleet)
+            usage, seed = next(frames), next(frames)
         assert client.start_environment("env-1").started is True
         name = client.create_headless_session("env-1", HeadlessCreateRequest()).name
         client.send_message("env-1", name, "Check the badge.")
@@ -89,6 +123,8 @@ class TestTestingControllerApi:
         with client.open_response_stream("env-1", name, 0) as stream:
             frames = list(stream)
 
+        assert isinstance(usage, UsageFrame)
+        assert [w.share for w in usage.reading.windows] == [0.5]
         assert seed == SessionsFrame("env-1", ())
         assert frames[0] == RawFrame(7, "a line")
         assert isinstance(frames[1], ResultFrame)
