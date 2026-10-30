@@ -4,12 +4,17 @@ import { waitForUiState } from '../helpers';
 
 type ConditionCode = components['schemas']['ConditionsSchema.6c014b4.ConditionCode'];
 
-/** The frame every screen sits in: the top bar, its gold badges and its profile menu, the gold bar, the side column, the keys list. */
+/**
+ * The frame every screen sits in: the top bar, its gold badges, the week's halt's popover and its
+ * profile menu, the gold bar, the side column, the keys list.
+ */
 export class ShellPage {
   readonly topBar: Locator;
   readonly brand: Locator;
   readonly drawerToggle: Locator;
   readonly goldBadges: Locator;
+  /** The week's halt's popover off a phone, under its badge: its line, with the overrule. */
+  readonly goldPopover: Locator;
   readonly app: Locator;
   readonly goldBar: Locator;
   readonly side: Locator;
@@ -31,6 +36,7 @@ export class ShellPage {
     this.brand = this.topBar.locator('.brand');
     this.drawerToggle = page.getByTestId('shell.drawer-toggle');
     this.goldBadges = page.getByTestId('shell.gold-badges');
+    this.goldPopover = page.getByTestId('shell.gold-badges.popover');
     this.app = page.getByTestId('shell.app');
     this.goldBar = page.getByTestId('shell.gold-bar');
     this.side = page.getByTestId('shell.side');
@@ -56,6 +62,16 @@ export class ShellPage {
   /** The gold bar's line for a condition on a phone, by its code. */
   goldLine(code: ConditionCode): Locator {
     return this.goldBar.locator(`[data-testid="shell.gold-bar.line"][data-condition="${code}"]`);
+  }
+
+  /** A gold line's words, the phone's (`goldLine()`) or the popover's (`goldPopover`), without its button. */
+  goldText(line: Locator): Locator {
+    return line.getByTestId('shell.gold-line.text');
+  }
+
+  /** A gold line's overrule button, the phone's (`goldLine()`) or the popover's (`goldPopover`). */
+  goldOverrule(line: Locator): Locator {
+    return line.getByTestId('shell.gold-line.overrule');
   }
 
   /** Opens the app at `path`, once the signed-in person is read. */

@@ -3,8 +3,10 @@
  * or over the first limit, or the five-hour share at or over its limit, the gate holds a work item's
  * start, its line saying which halt, in its session log too; each halt that holds shows on the gold
  * bar after the outage's, the week's first, its line giving the share and the reading's age — a
- * badge in the top bar off a phone, a line on one. A reading under the limit lifts it, and the held
- * start goes on. The reading is the fake controller's, on the backend's fleet stream.
+ * badge in the top bar off a phone, the week's a button opening its line in a popover, the
+ * five-hour's and the outage's their line their title; a line on a phone. A reading under the limit
+ * lifts it, and the held start goes on. The reading is the fake controller's, on the backend's fleet
+ * stream.
  */
 
 import { test, expect } from '../support/fixtures';
@@ -69,12 +71,13 @@ test.describe('The usage halts', () => {
     await page.keyboard.press('Escape');
 
     await expect(shell.goldBadge('week_halt')).toHaveText(WEEK_BADGE);
-    await expect(shell.goldBadge('week_halt')).toHaveAttribute('title', weekLine(92));
     await expect(shell.goldBadge('five_hour_halt')).toHaveCount(0);
+    await shell.goldBadge('week_halt').click();
+    await expect(shell.goldText(shell.goldPopover)).toHaveText(weekLine(92));
 
     // A reading at or over the limit keeps it; its share moves on the bar.
     await controller.usage({ seven_day: 0.95, five_hour: 0.1 });
-    await expect(shell.goldBadge('week_halt')).toHaveAttribute('title', weekLine(95));
+    await expect(shell.goldText(shell.goldPopover)).toHaveText(weekLine(95));
     await expect(item.cue).toHaveText('Halted at the week’s limit');
 
     await controller.usage({ seven_day: 0.3, five_hour: 0.1 });
@@ -129,8 +132,13 @@ test.describe('The usage halts', () => {
       'week_halt',
       'five_hour_halt',
     ]);
-    await expect(shell.goldBadge('week_halt')).toHaveAttribute('title', weekLine(90));
     await expect(shell.goldBadge('five_hour_halt')).toHaveAttribute('title', fiveHourLine(75));
+    // The week's alone carries an overrule: its badge is a button, the others badges alone.
+    await expect(shell.goldBadges.getByRole('button')).toHaveCount(1);
+    await expect(shell.goldBadge('week_halt')).toHaveRole('button');
+    await shell.goldBadge('week_halt').click();
+    await expect(shell.goldText(shell.goldPopover)).toHaveText(weekLine(90));
+    await page.keyboard.press('Escape');
 
     await page.setViewportSize(PHONE);
     const lines = shell.goldBar.getByTestId('shell.gold-bar.line');
@@ -139,6 +147,8 @@ test.describe('The usage halts', () => {
       'week_halt',
       'five_hour_halt',
     ]);
-    await expect(shell.goldLine('week_halt')).toHaveText(weekLine(90));
+    await expect(shell.goldText(shell.goldLine('week_halt'))).toHaveText(weekLine(90));
+    await expect(shell.goldOverrule(shell.goldLine('week_halt'))).toBeVisible();
+    for (const code of ['outage', 'five_hour_halt'] as const) await expect(shell.goldOverrule(shell.goldLine(code))).toHaveCount(0);
   });
 });

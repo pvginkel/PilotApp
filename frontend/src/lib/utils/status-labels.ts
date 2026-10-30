@@ -4,7 +4,7 @@
  * status icon (F1.3, F141.1), and a step's standing in the plan popover (F3.1). How a work item's session reads: its one line on the
  * timeline (F26.1, F26.2, F125), why the gate holds its start (F26.1), why it stopped when no one
  * stopped it (F71), its session log's tail (F69.2), and a job's line withdrawn by an Undo (F14.1). How a condition that holds all work reads
- * on the gold bar (F125, F135.7).
+ * on the gold bar (F125, F135.7), and the week's halt's overrule (F135.2).
  */
 
 import { Circle, CircleCheck, CircleDashed, Hourglass, OctagonPause, Pause, ServerOff, UserRound, type LucideIcon } from 'lucide-react';
@@ -22,6 +22,7 @@ type HeldReason = components['schemas']['TimelineSchema.1fdd8ae.HeldReason'];
 type CurrentLine = components['schemas']['TimelineSchema.1fdd8ae.CurrentLineSchema'];
 type LineStep = NonNullable<CurrentLine['step']>;
 type Condition = components['schemas']['ConditionsSchema.6c014b4.ConditionSchema'];
+type OverruleKind = components['schemas']['ConditionsSchema.6c014b4.OverruleKind'];
 type DoneCause = components['schemas']['TimelineSchema.1fdd8ae.DoneSchema']['cause'];
 
 interface StepReading {
@@ -213,6 +214,33 @@ export function conditionLine(condition: Condition, today: string): ConditionLin
     default: {
       const unknown: never = code;
       return { title: String(unknown), detail: '', badge: String(unknown), icon: ServerOff };
+    }
+  }
+}
+
+interface OverruleWords {
+  /** The button's words. */
+  label: string;
+  /** What it does: the button's title, and its toast once made. */
+  does: string;
+}
+
+/**
+ * The overrule the week's halt offers, as its button and its toast say it (F135.2): the allowance,
+ * its target a fraction, or run-out, to the wall.
+ */
+export function overruleWords(kind: OverruleKind, target: number | null): OverruleWords {
+  switch (kind) {
+    case 'allowance': {
+      // The API gives the allowance its target.
+      const to = PERCENT.format(target!);
+      return { label: `Go on to ${to}`, does: `Work items go on until ${to} of the week’s quota is used.` };
+    }
+    case 'run_out':
+      return { label: 'Run it out', does: 'Work items go on until the week’s quota runs out.' };
+    default: {
+      const unknown: never = kind;
+      return { label: String(unknown), does: String(unknown) };
     }
   }
 }

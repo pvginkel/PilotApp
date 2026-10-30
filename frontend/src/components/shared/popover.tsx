@@ -1,6 +1,7 @@
 /**
  * A popover that drops from its button (the mockup's `.plan-pop`): it closes on a press outside
- * it, on Esc and on its button, and scrolls inside the window.
+ * it, on Esc, on its button, and on an action in it that calls `close`; it scrolls inside the
+ * window.
  */
 
 import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
@@ -15,7 +16,7 @@ interface PopoverProps {
   className: string;
   testId: string;
   trigger: (state: { open: boolean; toggle: () => void }) => ReactNode;
-  children: ReactNode;
+  children: ReactNode | ((close: () => void) => ReactNode);
 }
 
 /** The head's popovers stand in Esc's order where the plan does. */
@@ -37,7 +38,7 @@ export function Popover({ label, anchorClassName, className, testId, trigger, ch
       {trigger({ open, toggle: () => setOpen(!open) })}
       {open && (
         <div ref={pop} className={cn('popover', className)} role="dialog" aria-label={label} data-testid={testId}>
-          {children}
+          {typeof children === 'function' ? children(close) : children}
         </div>
       )}
     </div>

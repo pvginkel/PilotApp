@@ -23,9 +23,9 @@
   .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 20px; }
   .logo { width: 32px; height: 32px; }
   .topbar .spacer { flex: 1; }
-  /* The gold bar off a phone: a badge per condition after Pilot's name, its full line its title.
-     The light theme's gold in both themes (app-theme.css), the top bar being the same blue in
-     both. */
+  /* The gold bar off a phone: a badge per condition after Pilot's name, its full line its title,
+     or, where the condition has a button, its popover. The light theme's gold in both themes
+     (app-theme.css), the top bar being the same blue in both. */
   .gold-badges { display: flex; gap: 8px; }
   .gold-badge {
     --gold: 45 93% 62%;
@@ -40,12 +40,32 @@
     border-radius: var(--radius);
     background: hsl(var(--gold));
     color: hsl(var(--gold-foreground));
+    font: inherit;
     font-size: 13px;
     font-weight: 600;
     white-space: nowrap;
   }
   .gold-badge .icon { width: 14px; height: 14px; }
+  /* The week's halt's badge, which carries its overrule: a button, a chevron at its end. */
+  button.gold-badge { padding-right: 7px; cursor: pointer; }
+  button.gold-badge:hover, button.gold-badge[aria-expanded="true"] { background: hsl(45 93% 56%); }
+  .gold-badge .chev { margin-left: -2px; }
+  .gold-badge-wrap { display: flex; }
+  /* Its popover: the condition's line, as a phone shows it, with its button, in the theme's gold;
+     its rule parts it from the page under it, which the dark theme's gold is close to. */
+  .popover.gold-pop {
+    top: calc(100% + 8px);
+    right: auto;
+    left: 0;
+    z-index: 30;
+    width: 380px;
+    padding: 0;
+    border-color: hsl(var(--gold-edge));
+    overflow: hidden;
+  }
+  .gold-pop .gold-line { padding: 10px 14px; border-bottom: 0; }
   .topbar :focus-visible { outline-color: #fff; }
+  .gold-pop :focus-visible { outline-color: hsl(var(--gold-foreground)); }
   .drawer-toggle {
     display: none;
     padding: 0;
@@ -124,6 +144,31 @@
   .gold-line .icon { margin-top: 0.225em; }
   .gold-line p { margin: 0; }
   .gold-line strong { font-weight: 600; }
+  .gold-body { min-width: 0; }
+  /* A condition's button on its line (the week's halt's overrule): a button's shape, ruled in the
+     line's text colour, on a lighter gold. */
+  .gold-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+  .gold-btn {
+    display: inline-flex;
+    align-items: center;
+    height: 26px;
+    padding: 0 10px;
+    border: 1px solid hsl(var(--gold-foreground));
+    border-right-width: 2px;
+    border-bottom-width: 2px;
+    border-radius: var(--radius);
+    background: hsl(0 0% 100% / 0.35);
+    color: hsl(var(--gold-foreground));
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .gold-btn:hover:not(:disabled) { background: hsl(0 0% 100% / 0.6); }
+  .gold-btn:disabled { opacity: 0.45; cursor: default; }
+  :root[data-theme="dark"] .gold-btn { background: hsl(0 0% 100% / 0.06); }
+  :root[data-theme="dark"] .gold-btn:hover:not(:disabled) { background: hsl(0 0% 100% / 0.14); }
 
   /* ---- The keys list -------------------------------------------------------------------- */
 
