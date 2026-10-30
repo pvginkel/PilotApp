@@ -10,10 +10,19 @@ import { useUiStateInstrumentation } from '@/lib/test/ui-state';
 
 export type Self = components['schemas']['SelfResponseSchema.d1d9f70'];
 
-/** The signed-in person once their handle is chosen: on the record, with their avatar slot. */
-type Person = Self & { handle: string; name: string; avatar_slot: number };
+/**
+ * The signed-in person once their handle is chosen: on the record, with their avatar slot, whether
+ * they hold a notification token and where their alarms switch stands.
+ */
+type Person = Self & {
+  handle: string;
+  name: string;
+  avatar_slot: number;
+  notification_token_set: boolean;
+  alarms: boolean;
+};
 
-/** The API answers a person with a handle with their name on the record and their slot. */
+/** The API answers a person with a handle with all of these, as the record holds them. */
 export function isPerson(self: Self): self is Person {
   return self.handle !== null;
 }

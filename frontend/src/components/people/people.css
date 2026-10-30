@@ -14,4 +14,8 @@
   .profile-fields dd { margin: 2px 0 0; }
   .profile-fields .handle { font-weight: 600; }
   .profile-fields dd p { margin-top: 4px; font-size: 13px; }
+  .profile-fields dd + dt { margin-top: 18px; }
+  .profile-fields .field-row { margin-top: 6px; }
+  /* A refused token's reason, under the field it was typed in. */
+  .profile-fields .field-error { color: hsl(var(--destructive-text)); }
 }

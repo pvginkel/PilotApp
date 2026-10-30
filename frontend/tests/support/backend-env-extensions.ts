@@ -27,5 +27,9 @@ export function loadAppBackendEnv(backendUrl: string): NodeJS.ProcessEnv {
     WORK_PARALLELISM_MAX: String(UNBOUNDED_WORK),
     PROJECT_PARALLELISM_MAX: '3',
     STORE_ENVIRONMENT_ID: STORE_ENVIRONMENT,
+    // The backend's notification bridge is its own fake, mounted under
+    // /api/testing/notification-bridge in testing mode
+    // (backend/app/api/testing_notification_bridge.py); tests/support/notification-bridge.ts drives it.
+    NOTIFICATION_BRIDGE_URL: `${backendUrl}/api/testing/notification-bridge`,
   };
 }

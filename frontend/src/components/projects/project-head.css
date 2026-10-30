@@ -47,46 +47,6 @@
   .members .avatar { box-shadow: 0 0 0 2px hsl(var(--background)); }
   .members .avatar + .avatar { margin-left: -2px; }
 
-  /* Auto pilot: a switch, its knob moving right when it is on. */
-  .switch {
-    display: inline-flex;
-    align-items: baseline;
-    gap: 8px;
-    padding: 0;
-    border: 0;
-    background: none;
-    font: inherit;
-    font-size: 13px;
-    color: hsl(var(--muted-foreground));
-    white-space: nowrap;
-    cursor: pointer;
-  }
-  .switch .track {
-    position: relative;
-    top: 1px;
-    align-self: center;
-    width: 32px;
-    height: 18px;
-    border-radius: 999px;
-    background: hsl(var(--muted-foreground) / 0.35);
-    transition: background-color 0.15s;
-  }
-  .switch .knob {
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: #fff;
-    box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
-    transition: transform 0.15s;
-  }
-  .switch[aria-checked="true"] .track { background: hsl(var(--primary)); }
-  .switch[aria-checked="true"] .knob { transform: translateX(14px); }
-  .switch:disabled { opacity: 0.55; cursor: default; }
-  .switch:focus-visible { outline: none; }
-  .switch:focus-visible .track { box-shadow: 0 0 0 2px hsl(var(--ring)); }
   /* Beside the switch while work briefed under its other setting runs (F4.3). */
   .switch-warning { flex: none; margin-left: -6px; font-size: 14px; color: hsl(var(--warning-text)); }
 

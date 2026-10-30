@@ -1,9 +1,11 @@
 /**
  * The profile page (F134, opened from the profile menu, F126): who the person is and their
- * handle, shown and not editable (F137).
+ * handle, shown and not editable (F137); their notification token and, beside it, the alarms
+ * switch (F142.1).
  */
 
 import { createFileRoute } from '@tanstack/react-router';
+import { AlarmsSwitch, NotificationToken } from '@/components/people/profile-notifications';
 import { Avatar } from '@/components/shared/avatar';
 import { usePerson } from '@/hooks/use-self';
 
@@ -28,6 +30,14 @@ function Profile() {
               {person.handle}
             </span>
             <p>The short name that stands for you in Pilot&rsquo;s files. It cannot be changed.</p>
+          </dd>
+          <dt>Notification token</dt>
+          <dd>
+            <NotificationToken set={person.notification_token_set} />
+          </dd>
+          <dt>Alarms</dt>
+          <dd>
+            <AlarmsSwitch on={person.alarms} tokenSet={person.notification_token_set} />
           </dd>
         </dl>
       </section>
