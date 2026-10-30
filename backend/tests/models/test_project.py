@@ -8,7 +8,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.models import Project, ProjectMember, ProjectTransition, User
-from app.models.reference import ProjectState, TransitionKind
+from app.models.reference import NotificationPriority, ProjectState, TransitionKind
 from tests.support.database import violated_constraint
 
 
@@ -137,6 +137,103 @@ class TestProjectMember:
             select(ProjectMember.left_at).where(ProjectMember.user_id == person.id)
         ).all()
         assert sorted(memberships, key=lambda left_at: left_at is None) == [left, None]
+
+    def test_a_standing_notification_is_written(
+        self, session: Session, project: Project, person: User
+    ) -> None:
+        sent = datetime(2026, 10, 14, 15, 5, tzinfo=UTC)
+        member = ProjectMember(
+            project_id=project.id,
+            user_id=person.id,
+            joined_at=sent,
+            notification_priority_code=NotificationPriority.DEFAULT,
+            notification_text="Draft · Decision waiting: Pick the name",
+            notification_url=f"https://pilot.example.com/projects/{project.id}",
+            notification_sent_at=sent,
+        )
+        session.add(member)
+        session.flush()
+        session.refresh(member)
+
+        assert member.notification_priority_code == NotificationPriority.DEFAULT
+        assert member.notification_owed_at is None
+
+    def test_a_dismissed_notification_keeps_when_it_went_out(
+        self, session: Session, project: Project, person: User
+    ) -> None:
+        dismissed = datetime(2026, 10, 12, 11, 52, tzinfo=UTC)
+        member = ProjectMember(
+            project_id=project.id,
+            user_id=person.id,
+            joined_at=dismissed,
+            left_at=dismissed,
+            notification_sent_at=dismissed,
+        )
+        session.add(member)
+        session.flush()
+
+        assert member.notification_priority_code is None
+
+    def test_a_submit_never_sent_is_owed(
+        self, session: Session, project: Project, person: User
+    ) -> None:
+        owed = datetime(2026, 10, 14, 15, 5, tzinfo=UTC)
+        member = ProjectMember(
+            project_id=project.id,
+            user_id=person.id,
+            joined_at=owed,
+            notification_owed_at=owed,
+        )
+        session.add(member)
+        session.flush()
+
+        assert (member.notification_sent_at, member.notification_owed_at) == (
+            None,
+            owed,
+        )
+
+    # Each leaves one of the three out of a standing notification.
+    @pytest.mark.parametrize(
+        "missing",
+        ["notification_priority_code", "notification_text", "notification_url"],
+    )
+    def test_a_standing_notification_has_its_priority_text_and_url(
+        self, session: Session, project: Project, person: User, missing: str
+    ) -> None:
+        sent = datetime(2026, 10, 14, 15, 5, tzinfo=UTC)
+        values: dict[str, object] = {
+            "notification_priority_code": NotificationPriority.MIN,
+            "notification_text": "Draft",
+            "notification_url": f"https://pilot.example.com/projects/{project.id}",
+        }
+        del values[missing]
+        session.add(
+            ProjectMember(
+                project_id=project.id,
+                user_id=person.id,
+                joined_at=sent,
+                notification_sent_at=sent,
+                **values,
+            )
+        )
+
+        assert violated_constraint(session) == "ck_project_members_notification"
+
+    def test_a_standing_notification_was_sent(
+        self, session: Session, project: Project, person: User
+    ) -> None:
+        session.add(
+            ProjectMember(
+                project_id=project.id,
+                user_id=person.id,
+                joined_at=datetime(2026, 10, 14, 15, 5, tzinfo=UTC),
+                notification_priority_code=NotificationPriority.HIGH,
+                notification_text="Draft · Decision waiting: Pick the name",
+                notification_url=f"https://pilot.example.com/projects/{project.id}",
+            )
+        )
+
+        assert violated_constraint(session) == "ck_project_members_notification_sent"
 
 
 class TestProjectTransition:

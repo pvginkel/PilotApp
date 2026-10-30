@@ -19,5 +19,5 @@ from app.models.reference import (
 )
 from app.models.save_error import SaveError
 from app.models.session import Effect, Session, SessionRecord, Turn, WriterQuestion
-from app.models.user import User
+from app.models.user import Alarm, User
 from app.models.work import ClaimAssignment, ClarificationRun, Work

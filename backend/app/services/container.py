@@ -38,6 +38,7 @@ from app.services.item_service import ItemService
 from app.services.job_service import JobService
 from app.services.link_service import LinkService
 from app.services.metrics_service import MetricsService
+from app.services.notification_token_cipher import NotificationTokenCipher
 from app.services.oidc_client_service import OidcClientService
 from app.services.people_service import PeopleService
 from app.services.pilot_server import PilotServer
@@ -438,6 +439,11 @@ class ServiceContainer(containers.DeclarativeContainer):
     # The signed-in person on the record (F137), and what links in text (F93)
     people_service = providers.Factory(PeopleService, db=db_session)
     link_service = providers.Factory(LinkService, db=db_session)
+
+    # The person's bridge token, sealed at rest and opened to send (DB decision 17)
+    notification_token_cipher = providers.Singleton(
+        NotificationTokenCipher, secret_key=config.provided.secret_key
+    )
 
     # The projects as the signed-in person reads them (F1, F2, F3), and their
     # transitions and membership (F4.1, F5, F6, F127, F128)
