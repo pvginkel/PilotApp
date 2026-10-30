@@ -10,7 +10,8 @@ reasons (pvginkel/Notifications: the README, and
 `bridge/src/notification_bridge/api.py`, whose parse this ports). A
 registration shows, per sequence id, what its last submit carried and whether
 that submit alerted, by the bridge's priority rule (README § Priorities); it
-keeps the one-shots it took, and every call it took, in order.
+keeps the one-shots it took, and every call it took, in order, but for a call
+answered with a channel's error, which it keeps nothing of.
 
 A test drives it through its verbs, the public methods below: in process under
 pytest, and over HTTP as `POST /fake/<verb>`, the verb's name hyphenated and
@@ -97,8 +98,8 @@ class FakeNotification:
 
 @dataclass(frozen=True)
 class FakeCall:
-    """A call a registration took, answered `200`: a submit, a one-shot's
-    `sequence_id` None, or a dismiss, which never alerts."""
+    """A call a registration took with no channel error set: a submit, a
+    one-shot's `sequence_id` None, or a dismiss, which never alerts."""
 
     call: Literal["submit", "dismiss"]
     sequence_id: str | None
@@ -200,13 +201,15 @@ class FakeNotificationBridge:
 
     @validate_call
     def one_shots(self, name: str) -> list[FakeNotification]:
-        """The one-shots the registration took, in order."""
+        """The one-shots the registration took, in order; one answered with a
+        channel's error is not among them."""
         with self._changed:
             return list(self._registration(name).one_shots)
 
     @validate_call
     def calls(self, name: str) -> list[FakeCall]:
-        """Every call the registration took, in order."""
+        """Every call the registration took, in order; one answered with a
+        channel's error is not among them."""
         with self._changed:
             return list(self._registration(name).calls)
 
