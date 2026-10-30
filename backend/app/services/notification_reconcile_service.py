@@ -275,6 +275,11 @@ class NotificationReconcileService:
         once the transaction commits each is dismissed through `token`, tried
         once, off the request (F94.3, F134). What the bridge does not take is
         logged, counted, and stays on the phone."""
+        # The person's row first: a send's write-back holding it has committed
+        # before what stands is read (`_take`).
+        db.execute(
+            select(User.id).where(User.id == person.id).with_for_update(key_share=True)
+        )
         memberships = db.scalars(
             select(ProjectMember)
             .where(
@@ -449,15 +454,13 @@ class NotificationReconcileService:
         the person's token changed meanwhile. Whether their token was cleared
         during a submit that may have reached the phone, which its own
         dismiss then follows."""
-        memberships = db.scalars(
-            select(ProjectMember)
-            .where(ProjectMember.id.in_(due.membership_ids))
-            .order_by(ProjectMember.id)
-            .with_for_update(key_share=True)
-            .execution_options(populate_existing=True)
-        ).all()
+        # The person's row locked before the memberships', as the token's set
+        # and clear take it: a clear committed first is read here, and one
+        # after waits for this write, which its read of what stands then sees.
         sealed = db.scalar(
-            select(User.notification_token).where(User.id == due.person_id)
+            select(User.notification_token)
+            .where(User.id == due.person_id)
+            .with_for_update(read=True)
         )
         if sealed != due.sealed:
             NOTIFICATION_RECONCILES_TOTAL.labels(outcome="superseded").inc()
@@ -473,6 +476,13 @@ class NotificationReconcileService:
                 and due.notification is not None
                 and (failure is None or failure.outcome is BridgeOutcome.UNANSWERED)
             )
+        memberships = db.scalars(
+            select(ProjectMember)
+            .where(ProjectMember.id.in_(due.membership_ids))
+            .order_by(ProjectMember.id)
+            .with_for_update(key_share=True)
+            .execution_options(populate_existing=True)
+        ).all()
         now = datetime.now(UTC)
         if failure is not None:
             for membership in memberships:

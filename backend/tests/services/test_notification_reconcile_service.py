@@ -1001,6 +1001,46 @@ class TestNotificationReconcileServiceInFlight:
         assert bridge.shown("ada") == {}
         assert _last_sent(container, project_id) == (None, None, None)
 
+    @pytest.mark.parametrize("answered", [True, False])
+    def test_a_clear_committing_during_the_write_back_reads_what_it_wrote(
+        self,
+        container: ServiceContainer,
+        bridge: _Watched,
+        supervise: Supervise,
+        log: LogWaiter,
+        answered: bool,
+    ) -> None:
+        project_id = _project(container, environment_id=None)
+        _give_token(container, "ada", ADA_TOKEN)
+        service, _, coordinator = _service(container, supervise)
+        if not answered:
+            bridge.unreachable()
+        take = service._take
+        clears = []
+
+        def take_then_clear(*args: Any) -> bool:
+            cleared: bool = take(*args)
+            container.db_session().flush()
+            clears.append(in_thread(lambda: _clear(container, service, "ada")))
+            wait_until(
+                lambda: not clears[0].thread.is_alive() or lock_waits(container) == 1,
+                "the clear committed or waiting",
+            )
+            return cleared
+
+        with patch.object(service, "_take", side_effect=take_then_clear):
+            _reconcile(service, project_id)
+        clears[0].result()
+
+        assert _last_sent(container, project_id) == (None, None, None)
+        assert not _owed(container, project_id)
+        _reconcile(service, project_id)
+        bridge.unreachable(on=False)
+        coordinator.fire_startup()
+        log.wait_for(rf"Loop {NOTIFICATION_CLEAR_JOB}:1 ended")
+        assert bridge.shown("ada") == {}
+        assert [call.call for call in bridge.calls("ada")][-1] == "dismiss"
+
     def test_a_replace_during_a_submit_is_resubmitted_through_the_new_token(
         self, container: ServiceContainer, bridge: _Watched, supervise: Supervise
     ) -> None:
