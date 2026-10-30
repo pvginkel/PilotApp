@@ -94,7 +94,7 @@ class TestMakeQuotaOverrule:
         assert body == {
             "id": body["id"],
             "kind": "allowance",
-            "target": pytest.approx(0.96),
+            "target": 0.96,
             "made_at": body["made_at"],
         }
         assert client.get("/api/conditions").get_json() == {"conditions": []}

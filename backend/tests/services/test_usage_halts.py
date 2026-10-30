@@ -349,7 +349,7 @@ class TestOverrule:
     @pytest.mark.parametrize(
         ("week", "offer"),
         [
-            (0.9, Offer(ALLOWANCE, pytest.approx(0.95))),
+            (0.9, Offer(ALLOWANCE, 0.95)),
             # The target held to the second limit.
             (0.95, Offer(ALLOWANCE, 0.98)),
             (0.9799, Offer(ALLOWANCE, 0.98)),
@@ -436,6 +436,20 @@ class TestEndSpent:
         assert ended is (made if spent else None)
         session.refresh(made)
         assert made.ended_at == (clock.at if spent else None)
+
+    @pytest.mark.parametrize(
+        ("made_at", "target"), [(0.9, 0.95), (0.91, 0.96), (0.92, 0.97)]
+    )
+    def test_a_reading_at_the_allowances_offered_target_spends_it(
+        self, session: Session, person: User, made_at: float, target: float
+    ) -> None:
+        _record(session, week=made_at)
+        offer = HALTS.offer(session)
+        assert offer is not None
+        made = _overrule(session, person, target=offer.target)
+        _record(session, week=target, received_at=RECEIVED_AT + timedelta(minutes=10))
+
+        assert HALTS.end_spent(session) is made
 
     def test_a_run_out_made_at_the_wall_is_spent_at_once(
         self, session: Session, person: User

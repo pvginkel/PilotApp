@@ -30,6 +30,7 @@ import logging
 import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from sqlalchemy import and_, func, select, update
@@ -238,10 +239,11 @@ class UsageHalts:
 
     def _offer(self, share: float) -> Offer:
         if share < self._second_limit:
-            return Offer(
-                OverruleKind.ALLOWANCE,
-                min(share + self._allowance, self._second_limit),
-            )
+            # Summed in decimal: a share is a percent ÷ 100, and a binary sum
+            # can land a rounding error over the reading that reaches it
+            # (0.90 + 0.05 is 0.9500000000000001).
+            target = float(Decimal(repr(share)) + Decimal(repr(self._allowance)))
+            return Offer(OverruleKind.ALLOWANCE, min(target, self._second_limit))
         return Offer(OverruleKind.RUN_OUT, None)
 
     def _holding(

@@ -105,7 +105,7 @@ class TestMake:
             made = container.quota_overrule_service().make(ADA, ALLOWANCE)
 
         assert made.kind_code is ALLOWANCE
-        assert made.target == pytest.approx(0.96)
+        assert made.target == 0.96
         assert made.made_by_user_id == person.id
         assert before <= made.made_at <= datetime.now(UTC)
         assert made.ended_at is None
