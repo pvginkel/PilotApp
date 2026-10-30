@@ -46,8 +46,8 @@ COUNTED = (SessionState.RUNNING, SessionState.STARTING)
 """The states a work item holds a slot in."""
 
 SLOT_LOCK = 243
-"""The key of the slot's advisory lock: no other lock of the app's is
-advisory."""
+"""The key of the slot's advisory lock, the app's one advisory lock on a single
+key: a member's notification lock takes two (`notification_reconcile_service`)."""
 
 type SlotListener = Callable[[], None]
 

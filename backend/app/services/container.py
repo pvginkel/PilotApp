@@ -40,6 +40,9 @@ from app.services.job_service import JobService
 from app.services.link_service import LinkService
 from app.services.metrics_service import MetricsService
 from app.services.notification_bridge_client import NotificationBridgeClient
+from app.services.notification_reconcile_service import (
+    NotificationReconcileService,
+)
 from app.services.notification_token_cipher import NotificationTokenCipher
 from app.services.oidc_client_service import OidcClientService
 from app.services.people_service import PeopleService
@@ -489,6 +492,20 @@ class ServiceContainer(containers.DeclarativeContainer):
     standing_notification_service = providers.Factory(
         StandingNotificationService, db=db_session, base_url=config.provided.baseurl
     )
+    # Their reconcile with what each membership last sent, and its retry (F94.3,
+    # F94.4); its jobs and timer register on the supervisor, and it hears the
+    # engine's bus, when built, before STARTUP.
+    notification_reconcile_service = providers.Singleton(
+        NotificationReconcileService,
+        container=__self__,
+        supervisor=supervisor,
+        engine_bus=engine_bus,
+        notification_token_cipher=notification_token_cipher,
+        bridge_configured=providers.Callable(
+            lambda url: url is not None, app_config.provided.notification_bridge_url
+        ),
+    )
+    register_for_background_startup(lambda c: c.notification_reconcile_service())
     # An attachment's bytes, streamed (F28.5, F36)
     attachment_service = providers.Factory(
         AttachmentService, db=db_session, attachment_store=attachment_store

@@ -7,6 +7,7 @@ import threading
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from flask import Flask
@@ -16,8 +17,9 @@ from app import create_app
 from app.app_config import AppSettings
 from app.config import Settings
 from app.database import scoped_session
+from app.engine.bus import ProjectChanged
 from app.exceptions import ConfigurationError
-from app.models import Chat, Environment, Project, Turn, User
+from app.models import Chat, Environment, Project, ProjectMember, Turn, User
 from app.models import Session as AgentSession
 from app.models.reference import (
     ChatKind,
@@ -36,6 +38,10 @@ from app.services.container import (
 from app.services.controller_client import HeadlessCreateRequest
 from app.services.environment_service import EnvironmentService
 from app.services.fleet_consumer import FleetConsumer
+from app.services.notification_reconcile_service import (
+    NOTIFICATION_RETRY_TIMER,
+    NotificationReconcileService,
+)
 from app.services.pilot_server import token_hash
 from app.services.relay_service import RelayService
 from app.services.relay_watchdog import WATCHDOG_TIMER, RelayWatchdog
@@ -47,7 +53,10 @@ from tests.conftest_infrastructure import (
     _dispose_app,
 )
 from tests.support.fake_controller import ServedFakeController, client_of, raw_turn
-from tests.support.fake_notification_bridge import ServedFakeNotificationBridge
+from tests.support.fake_notification_bridge import (
+    ServedFakeNotificationBridge,
+    bridge_client_of,
+)
 from tests.support.supervisor import metric_value, wait_until
 from tests.support.tls import invent_ca
 
@@ -618,8 +627,83 @@ class TestSessionStartWiring:
             assert run.token_hash == token_hash(token.removeprefix("PILOT_TOKEN="))
 
 
+class TestNotificationReconcileWiring:
+    def test_with_a_bridge_it_reconciles_a_commit_and_retries_from_startup(
+        self,
+        committed_app: Flask,
+        fake_notification_bridge: ServedFakeNotificationBridge,
+    ) -> None:
+        container = committed_app.container
+        container.app_config.override(
+            AppSettings(
+                notification_bridge_url=fake_notification_bridge.url,
+                scheduler_tick_seconds=0.05,
+            )
+        )
+        bridge_client_of(container, fake_notification_bridge)
+        fake_notification_bridge.add_registration("ada", "token-of-ada")
+        service = container.notification_reconcile_service()
+        assert isinstance(service, NotificationReconcileService)
+        assert service is container.notification_reconcile_service()
+        ticks = _retry_ticks()
+        coordinator = container.lifecycle_coordinator()
+
+        coordinator.fire_startup()
+        try:
+            wait_until(lambda: _retry_ticks() >= ticks + 2, "two retry ticks")
+            with scoped_session(container) as db:
+                person = User(
+                    kind_code=UserKind.PERSON,
+                    subject="subject-ada",
+                    handle="ada",
+                    name="Ada Example",
+                    avatar_slot=1,
+                    notification_token=container.notification_token_cipher().seal(
+                        "token-of-ada"
+                    ),
+                )
+                db.add(person)
+                db.flush()
+                project = Project(created_by_user_id=person.id)
+                db.add(project)
+                db.flush()
+                db.add(
+                    ProjectMember(
+                        project_id=project.id,
+                        user_id=person.id,
+                        joined_at=datetime.now(UTC),
+                    )
+                )
+                container.engine_bus().emit(ProjectChanged(project.id))
+                project_id = str(project.id)
+            wait_until(
+                lambda: project_id in fake_notification_bridge.shown("ada"),
+                "the project's notification shown",
+            )
+        finally:
+            coordinator.shutdown()
+
+    def test_with_no_bridge_it_registers_nothing(self, committed_app: Flask) -> None:
+        container = committed_app.container
+        container.app_config.override(AppSettings())
+        supervisor = container.supervisor()
+
+        with (
+            patch.object(supervisor, "register_job") as register_job,
+            patch.object(supervisor, "register_timer") as register_timer,
+        ):
+            container.notification_reconcile_service()
+
+        register_job.assert_not_called()
+        register_timer.assert_not_called()
+
+
 def _watchdog_ticks() -> float:
     return metric_value(TIMER_RUNS_TOTAL, timer=WATCHDOG_TIMER, outcome="ok")
+
+
+def _retry_ticks() -> float:
+    return metric_value(TIMER_RUNS_TOTAL, timer=NOTIFICATION_RETRY_TIMER, outcome="ok")
 
 
 def _state(container: ServiceContainer, run_id: uuid.UUID) -> SessionState:
