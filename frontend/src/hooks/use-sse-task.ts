@@ -26,11 +26,16 @@ interface SSEProgressEvent {
 
 interface SSEResultEvent {
   event_type: 'task_completed';
+  /**
+   * The task's result, as its model dumps it; null when the task returned none. The backend sends
+   * a raised error as task_failed, so a result is a failure only where it says so itself, with
+   * `success` false or an `error_message`.
+   */
   data: {
-    success: boolean;
-    error_message: string | null;
+    success?: boolean;
+    error_message?: string | null;
     [key: string]: unknown;
-  };
+  } | null;
 }
 
 interface SSEErrorEvent {
@@ -195,9 +200,10 @@ export function useSSETask<T = unknown>(options: UseSSETaskOptions = {}): UseSSE
       }
 
       case 'task_completed': {
-        if (parsedEvent.data.success && !parsedEvent.data.error_message) {
-          setResult(parsedEvent.data as T);
-          onResult?.(parsedEvent.data as T);
+        const data = parsedEvent.data;
+        if (data?.success !== false && !data?.error_message) {
+          setResult(data as T);
+          onResult?.(data as T);
 
           if (isTestMode()) {
             const payload: Omit<SseTestEvent, 'timestamp'> = {
@@ -210,7 +216,7 @@ export function useSSETask<T = unknown>(options: UseSSETaskOptions = {}): UseSSE
             emitTestEvent(payload);
           }
         } else {
-          const errorMessage = parsedEvent.data.error_message || 'Task failed';
+          const errorMessage = data?.error_message || 'Task failed';
           setError(errorMessage);
           onError?.(errorMessage);
 
