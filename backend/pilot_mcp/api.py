@@ -203,10 +203,16 @@ class Added(BaseModel):
             " a prose item"
         )
     )
-    held: Literal["paused", "controller_unreachable", "slot"] | None = Field(
+    held: (
+        Literal[
+            "week_halt", "five_hour_halt", "paused", "controller_unreachable", "slot"
+        ]
+        | None
+    ) = Field(
         description=(
-            "Why a held work item waits: the project is paused, the controller"
-            " is unreachable, or no slot is free; none otherwise"
+            "Why a held work item waits: the week's or the five-hour usage halt"
+            " holds work items, the project is paused, the controller is"
+            " unreachable, or no slot is free; none otherwise"
         )
     )
     effect: str = Field(

@@ -3,13 +3,15 @@ where they address them, an API that does not answer, and an error answer that
 is not its envelope."""
 
 import socket
+from typing import get_args
 
 import httpx
 import pytest
 from mcp.server.fastmcp.exceptions import ToolError
 
 from app import models
-from pilot_mcp.api import PilotStoreApi, PilotWorkApi
+from app.schemas.timeline import HeldReason
+from pilot_mcp.api import Added, PilotStoreApi, PilotWorkApi
 from pilot_mcp.config import McpSettings
 from tests.support.pilot_mcp import API_URL, BEARER, ApiRoutes
 
@@ -18,6 +20,18 @@ def _closed_port() -> int:
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         return int(probe.getsockname()[1])
+
+
+def test_an_added_work_items_held_takes_every_reason_the_gate_holds_its_start() -> None:
+    """A new work item resumes no conversation and is no job: the gate holds
+    its start for every other reason."""
+    [reasons, _] = get_args(Added.model_fields["held"].annotation)
+
+    assert set(get_args(reasons)) == {
+        reason.value
+        for reason in HeldReason
+        if reason not in (HeldReason.QUEUE, HeldReason.CONVERSATION)
+    }
 
 
 @pytest.mark.anyio

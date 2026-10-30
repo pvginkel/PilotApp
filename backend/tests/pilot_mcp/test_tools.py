@@ -5,7 +5,7 @@ tool's error, its reason whole."""
 
 import json
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from dependency_injector import providers
@@ -23,9 +23,17 @@ from app.models import (
     Item,
     ItemAttachment,
     Turn,
+    UsageReading,
+    WindowShare,
     WriterQuestion,
 )
-from app.models.reference import AnswerChannel, ChatKind, ProjectState, SessionState
+from app.models.reference import (
+    AnswerChannel,
+    ChatKind,
+    ProjectState,
+    SessionState,
+    UsageWindow,
+)
 from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerClient
 from app.services.session_record_service import read_records
@@ -864,6 +872,55 @@ class TestAddItem:
             "Error executing tool add_item: Cannot add a timed_wait item because"
             " Pilot takes no waits yet"
         )
+
+    @pytest.mark.parametrize(
+        ("week", "five_hour", "held"),
+        [(0.95, 0.1, "week_halt"), (0.1, 0.8, "five_hour_halt")],
+    )
+    async def test_a_work_item_held_by_a_usage_halt_is_answered_held(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        session: DbSession,
+        brain: models.Session,
+        placing: None,
+        week: float,
+        five_hour: float,
+        held: str,
+    ) -> None:
+        now = datetime.now(UTC)
+        reading = UsageReading(taken_at=now, received_at=now, stale=False)
+        session.add(reading)
+        session.flush()
+        session.add_all(
+            WindowShare(
+                reading_id=reading.id,
+                window_code=window,
+                share=share,
+                resets_at=now + timedelta(days=1),
+            )
+            for window, share in (
+                (UsageWindow.SEVEN_DAY, week),
+                (UsageWindow.FIVE_HOUR, five_hour),
+            )
+        )
+        session.commit()
+        item = {
+            "kind": "work",
+            "title": "Rotating the CI token",
+            "repo": "example/Example",
+            "cwd": "/work/Example",
+            "brief": "Rotate the CI token.",
+        }
+
+        result = await call(mcp_app, "add_item", {"item": item}, path=STORE_PATH)
+
+        assert not result.isError
+        [(_, answer)] = routes.calls
+        assert answer.status_code == 201
+        assert result.structuredContent == answer.json()
+        assert answer.json()["state"] == "held"
+        assert answer.json()["held"] == held
 
     @pytest.mark.parametrize(
         "item",

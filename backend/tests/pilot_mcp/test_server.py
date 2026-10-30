@@ -331,13 +331,20 @@ STORE_SURFACE = {
                 "held": {
                     "anyOf": [
                         {
-                            "enum": ["paused", "controller_unreachable", "slot"],
+                            "enum": [
+                                "week_halt",
+                                "five_hour_halt",
+                                "paused",
+                                "controller_unreachable",
+                                "slot",
+                            ],
                             "type": "string",
                         },
                         {"type": "null"},
                     ],
                     "description": (
-                        "Why a held work item waits: the project is paused, the"
+                        "Why a held work item waits: the week's or the five-hour"
+                        " usage halt holds work items, the project is paused, the"
                         " controller is unreachable, or no slot is free; none"
                         " otherwise"
                     ),
