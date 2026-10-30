@@ -10,10 +10,14 @@
  * deletes and reads its files as the controller's file endpoints serve them.
  *
  * The controller unreachable is a state the backend holds, which the gold bar reads (GET
- * /api/conditions): `outage()` returns once the backend reads it as asked. The fake's verbs that
- * act on every environment hold across the worker's specs, so the fixture restores the controller
- * after a spec that changed it (`restore()`): every spec starts with the controller answering, the
- * node under its cap and a create settling `running`.
+ * /api/conditions): `outage()` returns once the backend reads it as asked. The subscription's usage
+ * is the reading the fake serves on the fleet stream, which the backend records: `usage()` returns
+ * once the backend's halts are the ones its shares make at the backend's default limits. The fake's
+ * verbs that act on every environment, and the reading the backend recorded last, hold across the
+ * worker's specs, so the fixture restores the controller after a spec that changed it
+ * (`restore()`): every spec starts with the controller answering, the node under its cap, a create
+ * settling `running` and the usage under the limits. The fake's own reset leaves the backend's
+ * reading as it is: its `no-reading-yet` changes no reading recorded.
  */
 
 import { readFileSync } from 'node:fs';
@@ -25,6 +29,27 @@ import { FAKE_CONTROLLER_TOKEN } from './backend-env-extensions';
 import { makeUnique } from './helpers';
 
 type Condition = components['schemas']['ConditionsSchema.6c014b4.ConditionSchema'];
+type ConditionCode = Condition['code'];
+
+/** A window's share of the subscription's quota, a fraction; a window given none is left out of the reading. */
+interface Shares {
+  five_hour?: number;
+  seven_day?: number;
+}
+
+// The backend's default limits (backend/app/app_config.py): the week's first limit, the five-hour limit.
+const WEEK_LIMIT = 0.9;
+const FIVE_HOUR_LIMIT = 0.75;
+
+const UNDER_THE_LIMITS: Shares = { five_hour: 0.1, seven_day: 0.1 };
+
+/** The halts the shares make at the backend's default limits, the week's first. */
+function haltsOf(shares: Shares): ConditionCode[] {
+  return [
+    ...((shares.seven_day ?? 0) >= WEEK_LIMIT ? (['week_halt'] as const) : []),
+    ...((shares.five_hour ?? 0) >= FIVE_HOUR_LIMIT ? (['five_hour_halt'] as const) : []),
+  ];
+}
 
 type EnvironmentStatus = 'provisioning' | 'starting' | 'running' | 'stopping' | 'stopped' | 'deleting' | 'error';
 /** How a turn ends: `claude`'s own result, a failed one, an interrupt, or the spawn failing or the session ending, which the worker alone reports. */
@@ -75,6 +100,13 @@ export class Conditions {
       .toBe(on);
   }
 
+  /** Returns once the usage halts the backend reads are `halts`, in their order. */
+  async halts(halts: ConditionCode[]): Promise<void> {
+    await expect
+      .poll(async () => (await this.read()).map((condition) => condition.code).filter((code) => code !== 'outage'))
+      .toEqual(halts);
+  }
+
   /** How many times the backend's fleet consumer has restarted its stream. */
   async fleetRestarts(): Promise<number> {
     const response = await this.request.get('/metrics');
@@ -98,6 +130,7 @@ export class Controller {
   private unanswered = false;
   private nodeCapped = false;
   private createsHeld = false;
+  private usageMoved = false;
 
   constructor(
     private readonly page: Page,
@@ -216,11 +249,23 @@ export class Controller {
     this.unanswered = on;
   }
 
+  /**
+   * The controller's poll answers with `shares`, taken now: its usage frame reaches the backend,
+   * which records it. Returns once the backend's halts are the ones the shares make.
+   */
+  async usage(shares: Shares): Promise<void> {
+    this.usageMoved = true;
+    await this.verb('usage', { ...shares });
+    await this.conditions.halts(haltsOf(shares));
+  }
+
   /** The controller as every spec starts with it, after a spec that changed it. */
   async restore(): Promise<void> {
     if (this.unanswered) await this.outage(false);
     if (this.nodeCapped) await this.capped(false);
     if (this.createsHeld) await this.settleCreates('running');
+    if (this.usageMoved) await this.usage(UNDER_THE_LIMITS);
+    this.usageMoved = false;
   }
 
   /** A verb of the fake's, which answers `204`, or `200` with what it returns. */

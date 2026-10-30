@@ -32,11 +32,14 @@ ItemKindCode = Literal[
 
 class HeldReason(StrEnum):
     """Why the gate holds a start (design 2 §13.4, §13.5; F26.1, F143.4,
-    F59.2; DB 183): its project paused, the controller unreachable, a work
-    item's no slot free, a job's another job of its project before it, or a
-    work item's another run on its conversation until that run's turn ends.
-    Read at display, never stored (decision 53)."""
+    F59.2, F135.1, F135.4; DB 183, 266): a work item's the week's or the
+    five-hour usage halt, its project paused, the controller unreachable, a
+    work item's no slot free, a job's another job of its project before it,
+    or a work item's another run on its conversation until that run's turn
+    ends. Read at display, never stored (decision 53)."""
 
+    WEEK_HALT = "week_halt"
+    FIVE_HOUR_HALT = "five_hour_halt"
     PAUSED = "paused"
     CONTROLLER_UNREACHABLE = "controller_unreachable"
     SLOT = "slot"
@@ -438,11 +441,12 @@ class WorkSchema(BaseModel):
     )
     held_reason: HeldReason | None = Field(
         description=(
-            "Why the gate holds its start, which its line says: its project "
+            "Why the gate holds its start, which its line says: a work "
+            "item's the week's or the five-hour usage halt, its project "
             "paused, the controller unreachable, no slot free, or, a job's, "
             "another job of its project before it; null unless `state` is "
             "`held`, and while the gate opens for it (F26.1, F141.5, F143.4, "
-            "F59.2)"
+            "F59.2, F135.1, F135.4)"
         )
     )
     held_running: int | None = Field(

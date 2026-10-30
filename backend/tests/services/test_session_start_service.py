@@ -42,7 +42,9 @@ from app.models import (
     PlanTask,
     Project,
     Turn,
+    UsageReading,
     User,
+    WindowShare,
     Work,
     WriterQuestion,
 )
@@ -52,6 +54,7 @@ from app.models.reference import (
     SessionState,
     TaskStatus,
     TransitionKind,
+    UsageWindow,
     UserKind,
     WorkTrigger,
 )
@@ -87,6 +90,7 @@ from app.services.start_gate import Held, WorkSlots
 from app.services.supervisor import LoopHandle
 from app.services.timeline_service import work_status
 from app.services.turn_end_read_service import TurnEndReadService
+from app.services.usage_halts import UsageHalts
 from app.services.write_back_service import WRITE_BACK_REFUSED
 from app.utils import after_commit as after_commit_module
 from app.utils.after_commit import clear_after_commit_callbacks
@@ -264,13 +268,15 @@ def _services(
     delete_after: timedelta = DELETE_AFTER,
     controller_configured: bool = True,
     outage: ControllerOutage | None = None,
+    halts: UsageHalts | None = None,
     work_max: int = 3,
     project_max: int = 3,
     mcp_url: str | None = None,
 ) -> tuple[SessionStartService, EnvironmentService, LifecycleCoordinator]:
     """The start's services on a supervisor of their own, on the client's
-    outage unless `outage` gives another, and on a slot of their own of
-    `work_max` and `project_max`, as a process of its own has; their creates
+    outage unless `outage` gives another, on the container's usage halts
+    unless `halts` gives others, and on a slot of their own of `work_max` and
+    `project_max`, as a process of its own has; their creates
     hand Pilot's MCP server at `mcp_url`, none when it is None. The start is
     the container's, which the job after a worker's turn starts through."""
     supervisor, coordinator = supervise(container)
@@ -309,6 +315,7 @@ def _services(
         relay_service=relays,
         controller_outage=outage or container.controller_outage(),
         work_slots=slots,
+        usage_halts=halts or container.usage_halts(),
         pilot_server=pilot_server,
         controller_configured=controller_configured,
         store_environment_id=STORE_ENVIRONMENT_ID,
@@ -775,9 +782,13 @@ class TestRun:
             "since": preparing.at.isoformat(),
             "text": "Preparing camp…",
         }
-        status = work_status(session, [run.id], unreachable=False, slots=starts._slots)[
-            run.id
-        ]
+        status = work_status(
+            session,
+            [run.id],
+            unreachable=False,
+            halts=starts._halts,
+            slots=starts._slots,
+        )[run.id]
         assert status.environment is not None
         assert (status.environment.id, status.environment.name) == (
             run.environment_id,
@@ -1582,9 +1593,13 @@ class TestRunTakes:
         assert fake.environment(env_id).name is None
         row = _row(session, env_id)
         assert row.name == env_id and row.delete_due_at is not None
-        chip = work_status(session, [first.id], unreachable=False, slots=starts._slots)[
-            first.id
-        ]
+        chip = work_status(
+            session,
+            [first.id],
+            unreachable=False,
+            halts=starts._halts,
+            slots=starts._slots,
+        )[first.id]
         assert chip.environment is not None and chip.environment.name == env_id
 
         # The shutdown timer stopped it, as the fleet reports.
@@ -1604,9 +1619,13 @@ class TestRunTakes:
         row = _row(session, env_id)
         assert (row.name, row.delete_due_at) == ("dune", None)
         # The env chip shows the row as it stands.
-        chip = work_status(session, [first.id], unreachable=False, slots=starts._slots)[
-            first.id
-        ]
+        chip = work_status(
+            session,
+            [first.id],
+            unreachable=False,
+            halts=starts._halts,
+            slots=starts._slots,
+        )[first.id]
         assert chip.environment is not None and chip.environment.name == "dune"
 
 
@@ -2183,7 +2202,11 @@ class TestStartThroughTheGate:
 
         assert session.get_one(Item, work.id).done_at is None
         status = work_status(
-            session, [work.id], unreachable=controller_outage.holds, slots=starts._slots
+            session,
+            [work.id],
+            unreachable=controller_outage.holds,
+            halts=starts._halts,
+            slots=starts._slots,
         )[work.id]
         assert (status.state, status.held_reason) == (SessionState.HELD, reason)
         assert status.current_line is None
@@ -2246,6 +2269,148 @@ class TestHeld:
 
         assert starts.held(session, project, starting) is None
         assert starts.held(session, project, held) is None
+
+
+def _usage(db: DbSession, *, week: float, five_hour: float) -> None:
+    """A fresh Usage Reading recorded now with these shares."""
+    now = datetime.now(UTC)
+    reading = UsageReading(taken_at=now, received_at=now, stale=False)
+    db.add(reading)
+    db.flush()
+    db.add_all(
+        WindowShare(
+            reading_id=reading.id,
+            window_code=window,
+            share=share,
+            resets_at=now + timedelta(days=1),
+        )
+        for window, share in (
+            (UsageWindow.SEVEN_DAY, week),
+            (UsageWindow.FIVE_HOUR, five_hour),
+        )
+    )
+    db.flush()
+
+
+class TestUsageHalt:
+    """The usage halts at the gate, its first condition, a work item's alone
+    (F135, F135.1, F135.4, F141.5; DB 266; V02, V12)."""
+
+    @pytest.mark.parametrize(
+        ("week", "five_hour", "reason"),
+        [
+            (0.9, 0.1, HeldReason.WEEK_HALT),
+            (0.5, 0.75, HeldReason.FIVE_HOUR_HALT),
+            (0.95, 0.8, HeldReason.WEEK_HALT),
+        ],
+    )
+    def test_a_work_items_start_is_held_its_line_saying_which_halt(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        week: float,
+        five_hour: float,
+        reason: HeldReason,
+    ) -> None:
+        _usage(session, week=week, five_hour=five_hour)
+
+        work = _held(starts, session, project)
+
+        run = _read(session, work.id)
+        assert starts.held(session, project, run) == Held(reason)
+        status = work_status(
+            session,
+            [work.id],
+            unreachable=False,
+            halts=starts._halts,
+            slots=starts._slots,
+        )[work.id]
+        assert status.held_reason == reason
+        assert fake.calls == []
+
+    def test_the_halt_comes_before_the_pause_and_the_outage(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        project.paused = True
+        session.flush()
+        controller_outage.call_unanswered()
+        _usage(session, week=0.95, five_hour=0.1)
+
+        run = _read(session, _held(starts, session, project).id)
+
+        assert starts.held(session, project, run) == Held(HeldReason.WEEK_HALT)
+
+    def test_a_work_items_resume_is_held(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        stopped = _stopped_item(starts, fake, session, project, person)
+        _usage(session, week=0.5, five_hour=0.8)
+
+        run = starts.resume(session, stopped.id)
+
+        assert run.state_code == SessionState.HELD
+        assert starts.held(session, project, run) == Held(HeldReason.FIVE_HOUR_HALT)
+
+    def test_a_chats_start_goes_on(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        _usage(session, week=1.2, five_hour=1.2)
+
+        assert _brain(starts, session, project).state_code == SessionState.STARTING
+
+    def test_a_held_jobs_and_chats_go_on_and_a_work_items_stays_held(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        controller_outage.call_unanswered()
+        work = _held(starts, session, project)
+        job = _job(container, session, project, environment, SessionState.HELD)
+        chat = _chat(session, project, environment, SessionState.HELD)
+        controller_outage.probe_answered()
+        _usage(session, week=0.95, five_hour=0.8)
+
+        _release(starts)
+
+        assert _read(session, work.id).state_code == SessionState.HELD
+        assert _read(session, job.id).state_code == SessionState.STARTING
+        assert _read(session, chat.id).state_code == SessionState.STARTING
+
+    def test_a_halt_lifted_by_a_reading_lets_the_held_start_go_on(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        _usage(session, week=0.95, five_hour=0.1)
+        work = _held(starts, session, project)
+        _usage(session, week=0.04, five_hour=0.1)
+
+        _release(starts)
+
+        assert _read(session, work.id).state_code == SessionState.STARTING
 
 
 class TestRunHeld:
@@ -4094,9 +4259,13 @@ class TestResume:
         assert run.state_code == SessionState.RUNNING
         assert [turn.message for turn in _turns(session, run.id)] == [BRIEF, CONTINUE]
         assert (
-            work_status(session, [run.id], unreachable=False, slots=starts._slots)[
-                run.id
-            ].error
+            work_status(
+                session,
+                [run.id],
+                unreachable=False,
+                halts=starts._halts,
+                slots=starts._slots,
+            )[run.id].error
             is None
         )
 
@@ -4122,9 +4291,13 @@ class TestResume:
         clear_after_commit_callbacks()
         _, resumed = _turns(session, run.id)
         assert (resumed.message, resumed.ended_at) == (CONTINUE, None)
-        status = work_status(session, [run.id], unreachable=True, slots=starts._slots)[
-            run.id
-        ]
+        status = work_status(
+            session,
+            [run.id],
+            unreachable=True,
+            halts=starts._halts,
+            slots=starts._slots,
+        )[run.id]
         assert status.held_reason == HeldReason.CONTROLLER_UNREACHABLE
         # Held in the environment it is bound to, its chip as the row stands.
         assert status.environment is not None
@@ -4154,9 +4327,13 @@ class TestResume:
         clear_after_commit_callbacks()
 
         assert run.state_code == SessionState.HELD
-        assert work_status(session, [run.id], unreachable=False, slots=starts._slots)[
-            run.id
-        ].held_reason == (HeldReason.PAUSED)
+        assert work_status(
+            session,
+            [run.id],
+            unreachable=False,
+            halts=starts._halts,
+            slots=starts._slots,
+        )[run.id].held_reason == (HeldReason.PAUSED)
 
     def test_a_controller_session_gone_is_created_anew_with_its_conversation(
         self,
@@ -4561,7 +4738,9 @@ def slotted(
 def _held_for(
     starts: SessionStartService, db: DbSession, work_id: uuid.UUID
 ) -> tuple[HeldReason | None, int | None]:
-    status = work_status(db, [work_id], unreachable=False, slots=starts._slots)[work_id]
+    status = work_status(
+        db, [work_id], unreachable=False, halts=starts._halts, slots=starts._slots
+    )[work_id]
     return status.held_reason, status.held_running
 
 
@@ -4648,7 +4827,11 @@ class TestSlot:
 
         assert _read(session, work.id).state_code == SessionState.HELD
         status = work_status(
-            session, [work.id], unreachable=True, slots=slotted._slots
+            session,
+            [work.id],
+            unreachable=True,
+            halts=slotted._halts,
+            slots=slotted._slots,
         )[work.id]
         assert (status.held_reason, status.held_running) == (
             HeldReason.CONTROLLER_UNREACHABLE,
@@ -4907,7 +5090,13 @@ class TestHeldLines:
 
         assert asked == ["start:held"]
         assert _read(session, held.id).state_code == SessionState.HELD
-        status = work_status(session, [held.id], unreachable=True, slots=starts._slots)
+        status = work_status(
+            session,
+            [held.id],
+            unreachable=True,
+            halts=starts._halts,
+            slots=starts._slots,
+        )
         assert status[held.id].held_reason == HeldReason.CONTROLLER_UNREACHABLE
         assert _moves(engine_events[heard:]) == [WorkMoved(project.id, held.id)]
 
@@ -5553,6 +5742,7 @@ class TestContinueRun:
             session,
             [continuation.id],
             unreachable=controller_outage.holds,
+            halts=starts._halts,
             slots=starts._slots,
         )[continuation.id]
         assert status.held_reason == reason
@@ -6229,9 +6419,9 @@ def _held_reason(
     db: DbSession, starts: SessionStartService, run: models.Session
 ) -> HeldReason | None:
     """Why the held Session's line says the gate holds it."""
-    return work_status(db, [run.id], unreachable=False, slots=starts._slots)[
-        run.id
-    ].held_reason
+    return work_status(
+        db, [run.id], unreachable=False, halts=starts._halts, slots=starts._slots
+    )[run.id].held_reason
 
 
 @pytest.mark.usefixtures("continues")

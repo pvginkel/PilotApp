@@ -748,8 +748,8 @@ class ProjectService:
 
     def _pause_moved(self, project: Project) -> None:
         """The project paused or resumed: its held work items' reasons moved
-        (`held_reason`, the pause read first), and on a resume the gate asked
-        again once the transaction commits (F141.5)."""
+        (`held_reason`), and on a resume the gate asked again once the
+        transaction commits (F141.5)."""
         for session in self.db.scalars(
             select(AgentSession).where(
                 AgentSession.project_id == project.id,

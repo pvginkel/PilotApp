@@ -5,10 +5,18 @@ infrastructure configuration in config.py.
 """
 
 import re
+from enum import StrEnum
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Self
 
-from pydantic import BaseModel, ConfigDict, Field, FilePath, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    FilePath,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.config import Sensitive, dump_config_for_logging
@@ -16,6 +24,16 @@ from app.config import Sensitive, dump_config_for_logging
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 _TICKET_ID_PATTERN = r"[A-Z][A-Z0-9_]*-[1-9][0-9]*"
+
+
+class HaltSetting(StrEnum):
+    """What a usage halt does to the work items, one setting per window
+    (F135.6): no new work, the cooperative stop or the hard stop. The gate
+    holds their starts under each."""
+
+    NO_NEW_WORK = "no_new_work"
+    COOPERATIVE_STOP = "cooperative_stop"
+    HARD_STOP = "hard_stop"
 
 
 class AppEnvironment(BaseSettings):
@@ -137,6 +155,56 @@ class AppEnvironment(BaseSettings):
         description=(
             "Work items running or starting in one project at which the gate "
             "holds its work items' starts; unset, WORK_PARALLELISM_MAX (F143.4)"
+        ),
+    )
+    WEEK_FIRST_LIMIT: float = Field(
+        default=0.90,
+        gt=0,
+        le=1,
+        description=(
+            "The week's share of the subscription's quota at or over which the "
+            "week's halt holds the work items, unless an overrule holds (F135.1)"
+        ),
+    )
+    WEEK_ALLOWANCE: float = Field(
+        default=0.05,
+        gt=0,
+        le=1,
+        description=(
+            "The share an allowance adds to the week's share as it stands, its "
+            "target, at most WEEK_SECOND_LIMIT (F135.2)"
+        ),
+    )
+    WEEK_SECOND_LIMIT: float = Field(
+        default=0.98,
+        gt=0,
+        le=1,
+        description=(
+            "The week's share at or over which the week's halt offers run-out in "
+            "place of the allowance; at least WEEK_FIRST_LIMIT (F135.2)"
+        ),
+    )
+    FIVE_HOUR_LIMIT: float = Field(
+        default=0.75,
+        ge=0,
+        le=1,
+        description=(
+            "The five-hour window's share of the quota at or over which the "
+            "five-hour halt holds the work items; 0 holds none (F135.4)"
+        ),
+    )
+    WEEK_HALT: HaltSetting = Field(
+        default=HaltSetting.COOPERATIVE_STOP,
+        description=(
+            "What the week's halt does to the work items: no_new_work, "
+            "cooperative_stop or hard_stop (F135.6)"
+        ),
+    )
+    FIVE_HOUR_HALT: HaltSetting = Field(
+        default=HaltSetting.COOPERATIVE_STOP,
+        description=(
+            "What the five-hour halt does to the work items: no_new_work, "
+            "cooperative_stop or hard_stop (F135.6)"
         ),
     )
     BRAIN_MODEL: str = Field(
@@ -270,6 +338,37 @@ class AppSettings(BaseModel):
     """The work items running or starting in one Project at which the gate
     holds its work items' starts (design 2 §13.5; F143.4)."""
 
+    week_first_limit: float = 0.90
+    """The week's share at or over which the week's halt holds the work items,
+    unless a Quota Overrule holds (F135.1; DB 266)."""
+
+    week_allowance: float = 0.05
+    """What an allowance adds to the week's share as it stands, its target at
+    most the second limit (F135.2; DB 179)."""
+
+    week_second_limit: float = 0.98
+    """The week's share at or over which the week's halt offers run-out, the
+    allowance no longer (F135.2)."""
+
+    five_hour_limit: float = 0.75
+    """The five-hour share at or over which the five-hour halt holds the work
+    items; 0 holds none (F135.4; DB 266)."""
+
+    week_halt: HaltSetting = HaltSetting.COOPERATIVE_STOP
+    """What the week's halt does to the work items (F135.6)."""
+
+    five_hour_halt: HaltSetting = HaltSetting.COOPERATIVE_STOP
+    """What the five-hour halt does to the work items (F135.6)."""
+
+    @model_validator(mode="after")
+    def _limits_in_order(self) -> Self:
+        if self.week_first_limit > self.week_second_limit:
+            raise ValueError(
+                "WEEK_FIRST_LIMIT must not be over WEEK_SECOND_LIMIT, the limit "
+                "the allowance stops at"
+            )
+        return self
+
     brain_model: str = "opus"
     """The model every brain session is created on, the chat's and every
     job's alike (design 3 §12; F139)."""
@@ -318,6 +417,12 @@ class AppSettings(BaseModel):
                 if env.PROJECT_PARALLELISM_MAX is None
                 else env.PROJECT_PARALLELISM_MAX
             ),
+            week_first_limit=env.WEEK_FIRST_LIMIT,
+            week_allowance=env.WEEK_ALLOWANCE,
+            week_second_limit=env.WEEK_SECOND_LIMIT,
+            five_hour_limit=env.FIVE_HOUR_LIMIT,
+            week_halt=env.WEEK_HALT,
+            five_hour_halt=env.FIVE_HOUR_HALT,
             brain_model=env.BRAIN_MODEL,
             brain_reasoning_effort=env.BRAIN_REASONING_EFFORT,
             chat_close_timeout_seconds=env.CHAT_CLOSE_TIMEOUT,

@@ -1,5 +1,6 @@
 """The gate every start passes (design 2 §13.4, §13.5; F141.4, F141.5, F143.4,
-F59.2; DB 183, 229, 243): its conditions in their order, the slot's count, its
+F59.2, F135; DB 183, 229, 243, 266): its conditions in their order, the usage
+halts a work item's alone, the slot's count, its
 lock and its open event, a project's queue of jobs, and the runs of one
 conversation."""
 
@@ -14,7 +15,7 @@ from sqlalchemy.orm import Session as DbSession
 from app.database import scoped_session
 from app.models import Environment, Project, User, Work
 from app.models import Session as AgentSession
-from app.models.reference import SessionState, WorkTrigger
+from app.models.reference import SessionState, UsageWindow, WorkTrigger
 from app.schemas.timeline import HeldReason
 from app.services.container import ServiceContainer
 from app.services.start_gate import (
@@ -32,6 +33,10 @@ from app.utils.after_commit import clear_after_commit_callbacks
 
 UNREACHABLE = HeldReason.CONTROLLER_UNREACHABLE
 CONVERSATION = HeldReason.CONVERSATION
+WEEK_HALT = HeldReason.WEEK_HALT
+FIVE_HOUR_HALT = HeldReason.FIVE_HOUR_HALT
+WEEK = UsageWindow.SEVEN_DAY
+FIVE_HOUR = UsageWindow.FIVE_HOUR
 
 
 class TestHeldReason:
@@ -86,6 +91,7 @@ class TestHeldReason:
     ) -> None:
         assert (
             held_reason(
+                halted=None,
                 paused=paused,
                 kind_code=kind_code,
                 setup=False,
@@ -93,6 +99,46 @@ class TestHeldReason:
                 filled=filled,
                 queued=queued,
                 conversing=conversing,
+            )
+            == held
+        )
+
+    @pytest.mark.parametrize(
+        ("halted", "kind_code", "paused", "unreachable", "filled", "held"),
+        [
+            (WEEK, "work", False, False, None, Held(WEEK_HALT)),
+            (FIVE_HOUR, "work", False, False, None, Held(FIVE_HOUR_HALT)),
+            # The halt comes first.
+            (WEEK, "work", True, True, 3, Held(WEEK_HALT)),
+            (FIVE_HOUR, "work", True, True, 3, Held(FIVE_HOUR_HALT)),
+            # A job's and a Chat's are never held for a halt (F135).
+            (WEEK, "job", False, False, None, None),
+            (FIVE_HOUR, "job", False, False, None, None),
+            (WEEK, "chat", False, False, None, None),
+            (FIVE_HOUR, "chat", False, False, None, None),
+            (WEEK, "job", True, False, None, Held(HeldReason.PAUSED)),
+            (WEEK, "chat", True, True, None, Held(UNREACHABLE)),
+        ],
+    )
+    def test_a_usage_halt_holds_a_work_items_start_first_and_never_a_jobs_or_a_chats(
+        self,
+        halted: UsageWindow,
+        kind_code: str,
+        paused: bool,
+        unreachable: bool,
+        filled: int | None,
+        held: Held | None,
+    ) -> None:
+        assert (
+            held_reason(
+                halted=halted,
+                paused=paused,
+                kind_code=kind_code,
+                setup=False,
+                unreachable=unreachable,
+                filled=filled,
+                queued=False,
+                conversing=False,
             )
             == held
         )
@@ -113,6 +159,7 @@ class TestHeldReason:
         Retry's included (D083)."""
         assert (
             held_reason(
+                halted=None,
                 paused=paused,
                 kind_code="job",
                 setup=True,

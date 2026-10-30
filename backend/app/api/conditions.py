@@ -1,5 +1,5 @@
 """The conditions that hold all work, which the gold bar shows (UC *The gold
-bar*; F125): read once, then followed by the `conditions_changed` event."""
+bar*; F125, F135.7): read once, then followed by the `conditions_changed` event."""
 
 from typing import Any
 
@@ -29,7 +29,8 @@ def get_conditions(
     condition_service: ConditionService = Provide[ServiceContainer.condition_service],
 ) -> Any:
     """Read the conditions that hold now: the controller unreachable, as this
-    server last met it.
+    server last met it, and the week's and the five-hour usage halts, as the
+    latest reading decides them.
 
     Returns:
         200: The conditions that hold; none while all work can go on

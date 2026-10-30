@@ -74,6 +74,7 @@ from app.services.testing_service import TestingService
 from app.services.testing_sync_service import TestingSyncService
 from app.services.timeline_service import TimelineService
 from app.services.turn_end_read_service import TurnEndReadService
+from app.services.usage_halts import UsageHalts, UsageWatcher
 from app.services.usage_service import UsageService
 from app.services.write_back_service import WriteBackService
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
@@ -237,6 +238,22 @@ class ServiceContainer(containers.DeclarativeContainer):
     # §6); built at startup so that its age gauge reads it from the first.
     usage_service = providers.Singleton(UsageService, container=__self__)
     register_for_background_startup(lambda c: c.usage_service())
+    # The usage halts, the gate's first condition (design 4 §6), and their
+    # watcher, which tells of their turns at each reading and on its timer,
+    # registered on the supervisor when built, before STARTUP.
+    usage_halts = providers.Singleton(
+        UsageHalts,
+        week_limit=app_config.provided.week_first_limit,
+        five_hour_limit=app_config.provided.five_hour_limit,
+    )
+    usage_watcher = providers.Singleton(
+        UsageWatcher,
+        container=__self__,
+        supervisor=supervisor,
+        usage_service=usage_service,
+        usage_halts=usage_halts,
+    )
+    register_for_background_startup(lambda c: c.usage_watcher())
     environment_service = providers.Singleton(
         EnvironmentService,
         container=__self__,
@@ -335,6 +352,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         relay_service=relay_service,
         controller_outage=controller_outage,
         work_slots=work_slots,
+        usage_halts=usage_halts,
         pilot_server=pilot_server,
         controller_configured=providers.Callable(
             lambda url: url is not None, app_config.provided.controller_url
@@ -495,6 +513,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         record_service=record_service,
         controller_outage=controller_outage,
         work_slots=work_slots,
+        usage_halts=usage_halts,
     )
     # The standing notification each member of a project should see (F94.1,
     # F94.2), its link on the stage's public address
@@ -540,6 +559,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         ConditionService,
         container=__self__,
         controller_outage=controller_outage,
+        usage_halts=usage_halts,
         sse_connection_manager=sse_connection_manager,
     )
     register_for_background_startup(lambda c: c.condition_service())

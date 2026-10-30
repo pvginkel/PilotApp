@@ -245,7 +245,13 @@ class TestSetup:
         turn = _brief(container, job)
         assert (job.turns, turn.started_at) == (1, AT)
         assert "paused" not in turn.message
-        status = work_status(session, [job.id], unreachable=False, slots=starts._slots)
+        status = work_status(
+            session,
+            [job.id],
+            unreachable=False,
+            halts=starts._halts,
+            slots=starts._slots,
+        )
         assert status[job.id].held_reason is None
 
     def test_under_the_pause_the_outage_and_the_queue_still_hold_it(
@@ -271,7 +277,11 @@ class TestSetup:
         controller_outage.probe_answered()
         assert starts.held(session, opened, second) == Held(HeldReason.QUEUE)
         status = work_status(
-            session, [second.id], unreachable=False, slots=starts._slots
+            session,
+            [second.id],
+            unreachable=False,
+            halts=starts._halts,
+            slots=starts._slots,
         )[second.id]
         assert status.held_reason is HeldReason.QUEUE
         _in(session, first, SessionState.IDLE)
@@ -431,7 +441,11 @@ class TestQueue:
         assert (second.turns, second.turn_started_at) == (0, None)
         assert starts.held(session, opened, second) == Held(HeldReason.QUEUE)
         status = work_status(
-            session, [second.id], unreachable=False, slots=starts._slots
+            session,
+            [second.id],
+            unreachable=False,
+            halts=starts._halts,
+            slots=starts._slots,
         )[second.id]
         assert (status.held_reason, status.held_running) == (HeldReason.QUEUE, None)
 
@@ -1159,7 +1173,11 @@ class TestItemDone:
         assert (withdrawn.state_code, withdrawn.turns) == (SessionState.STOPPED, 0)
         assert following.state_code is SessionState.STARTING
         status = work_status(
-            session, [withdrawn.id], unreachable=False, slots=starts._slots
+            session,
+            [withdrawn.id],
+            unreachable=False,
+            halts=starts._halts,
+            slots=starts._slots,
         )[withdrawn.id]
         assert (status.state, status.stopped_by, status.held_reason) == (
             SessionState.STOPPED,

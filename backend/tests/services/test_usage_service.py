@@ -18,7 +18,13 @@ from app.models import UsageReading, WindowShare
 from app.models.reference import UsageWindow
 from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerUsageReading
-from app.services.usage_service import READING_AGE, Usage, UsageService, WindowFigure
+from app.services.usage_service import (
+    READING_AGE,
+    Usage,
+    UsageService,
+    WindowFigure,
+    latest,
+)
 from tests.support.supervisor import LogWaiter, listening, metric_value, wait_until
 
 USAGE_LOGGER = "app.services.usage_service"
@@ -106,7 +112,7 @@ class TestUsageService:
     def test_latest_is_none_before_the_first_reading(
         self, usage: UsageService, session: Session
     ) -> None:
-        assert usage.latest(session) is None
+        assert latest(session) is None
 
     def test_a_first_reading_is_recorded_with_a_share_per_window(
         self, usage: UsageService, session: Session
@@ -125,7 +131,7 @@ class TestUsageService:
             (UsageWindow.FIVE_HOUR, 0.08, FIVE_HOUR_RESETS_AT),
             (UsageWindow.SEVEN_DAY, 0.77, WEEK_RESETS_AT),
         }
-        assert usage.latest(session) == _usage()
+        assert latest(session) == _usage()
 
     @pytest.mark.parametrize(
         "without_figures",
@@ -153,7 +159,7 @@ class TestUsageService:
         usage.receive(ControllerUsageReading.model_validate(without_figures))
 
         assert _count(session) == 1
-        assert usage.latest(session) == _usage(0.5)
+        assert latest(session) == _usage(0.5)
         assert usage_log.matching(r"Usage reading without figures.*") == [
             f"Usage reading without figures ({without_figures['staleReason']}): "
             "the latest recorded stands"
@@ -164,7 +170,7 @@ class TestUsageService:
     ) -> None:
         usage.receive(ControllerUsageReading.model_validate(NO_READING_YET))
 
-        assert usage.latest(session) is None
+        assert latest(session) is None
 
     def test_a_reading_moving_only_its_taken_at_is_not_recorded(
         self, usage: UsageService, session: Session, usage_log: LogWaiter
@@ -174,7 +180,7 @@ class TestUsageService:
         usage.receive(_reading(taken_at=TAKEN_AT + timedelta(minutes=10)))
 
         assert _count(session) == 1
-        assert usage.latest(session) == _usage()
+        assert latest(session) == _usage()
         assert usage_log.matching(r".*unchanged.*") == [
             "Usage reading taken at 2026-10-08T23:50:00+00:00: "
             "unchanged since the latest recorded"
@@ -214,7 +220,7 @@ class TestUsageService:
         usage.receive(changed)
 
         assert _count(session) == 2
-        assert usage.latest(session) == recorded
+        assert latest(session) == recorded
 
     def test_a_window_appearing_is_recorded(
         self, usage: UsageService, session: Session
@@ -224,9 +230,7 @@ class TestUsageService:
         usage.receive(_reading(taken_at=TAKEN_AT + timedelta(minutes=10)))
 
         assert _count(session) == 2
-        assert usage.latest(session) == _usage(
-            taken_at=TAKEN_AT + timedelta(minutes=10)
-        )
+        assert latest(session) == _usage(taken_at=TAKEN_AT + timedelta(minutes=10))
 
     def test_going_stale_and_fresh_again_are_each_recorded(
         self, usage: UsageService, session: Session, usage_log: LogWaiter
@@ -235,12 +239,12 @@ class TestUsageService:
         usage.receive(_reading())
 
         usage.receive(_reading(stale_reason="token-expired"))
-        stale = usage.latest(session)
+        stale = latest(session)
         usage.receive(_reading(taken_at=fresh_again_at))
 
         assert _count(session) == 3
         assert stale == _usage(stale=True)
-        assert usage.latest(session) == _usage(taken_at=fresh_again_at)
+        assert latest(session) == _usage(taken_at=fresh_again_at)
         # Why a reading is stale is the log's alone.
         stale_lines = usage_log.matching(
             r"Usage reading \d+ recorded, taken at 2026-10-08T23:40:00\+00:00: "
@@ -257,7 +261,7 @@ class TestUsageService:
         usage.receive(_reading(0.5, taken_at=TAKEN_AT - timedelta(minutes=10)))
 
         assert _count(session) == 1
-        assert usage.latest(session) == _usage()
+        assert latest(session) == _usage()
         usage_log.wait_for(r"Usage reading taken at .* is older .*: ignored")
 
     def test_a_reading_as_old_as_the_latest_with_other_figures_is_recorded(
@@ -268,7 +272,7 @@ class TestUsageService:
         usage.receive(_reading(0.78))
 
         assert _count(session) == 2
-        assert usage.latest(session) == _usage(0.78)
+        assert latest(session) == _usage(0.78)
 
     def test_after_a_restart_the_first_reading_is_compared_with_the_last_recorded(
         self, container: ServiceContainer, session: Session
@@ -282,9 +286,7 @@ class TestUsageService:
 
         assert unchanged == 1
         assert _count(session) == 2
-        assert restarted.latest(session) == _usage(
-            0.8, taken_at=TAKEN_AT + timedelta(hours=2)
-        )
+        assert latest(session) == _usage(0.8, taken_at=TAKEN_AT + timedelta(hours=2))
 
     def test_two_processes_receiving_one_reading_record_it_once(
         self, committed_app: Flask

@@ -38,8 +38,9 @@ controller during the start leaves the Session `failed` with its `error` and a
 `server` record saying so, its brief no longer in flight, and nothing is
 retried (F125).
 
-When the gate may have moved — the outage on or off, off at the probe's
-success or the fleet stream's reconnect; a work item's start, which takes its
+When the gate may have moved — a usage halt on or off, at a reading or a
+stale window's minute (`UsageWatcher`); the outage on or off, off at the
+probe's success or the fleet stream's reconnect; a work item's start, which takes its
 slot (`WorkSlots.took`); a work item's end, its turn's `result`, its Stop, its
 failure or a stop made elsewhere, which frees its slot (`WorkSlots.left`) —
 the held Sessions it opens for move to `starting` in `created_at` order, each
@@ -149,6 +150,7 @@ from app.services.start_gate import (
     setups,
 )
 from app.services.supervisor import LoopHandle, Supervisor
+from app.services.usage_halts import UsageHalts
 from app.services.work_status import work_moved
 from app.services.write_back_service import WRITE_BACK_REFUSED
 from app.utils.after_commit import after_commit
@@ -299,6 +301,7 @@ class SessionStartService:
         relay_service: RelayService,
         controller_outage: ControllerOutage,
         work_slots: WorkSlots,
+        usage_halts: UsageHalts,
         pilot_server: PilotServer,
         controller_configured: bool,
         store_environment_id: str,
@@ -323,6 +326,7 @@ class SessionStartService:
             controller_outage: The gate's outage, which the probe turns off
             work_slots: The gate's slot, whose count a work item's start and
                 its end move
+            usage_halts: The gate's usage halts, which hold work items alone
             pilot_server: Hands each headless create Pilot's MCP server, with
                 a token minted for it
             controller_configured: False refuses every start
@@ -339,6 +343,7 @@ class SessionStartService:
         self._relays = relay_service
         self._outage = controller_outage
         self._slots = work_slots
+        self._halts = usage_halts
         self._pilot_server = pilot_server
         self._controller_configured = controller_configured
         self._store = store_environment_id
@@ -754,9 +759,9 @@ class SessionStartService:
         gate is open for it, a work item's slot counted under the slot's
         lock, a job's queue read (`queued`) and its brief composed if it has
         none yet (`_brief`), its loop run once that commits. One the gate
-        still holds has its work item's line told again: the outage's turn,
-        the slot's count or a job's end, which asked for the run, may have
-        moved its reason."""
+        still holds has its work item's line told again: a halt's turn, the
+        outage's, the slot's count or a job's end, which asked for the run,
+        may have moved its reason."""
         with scoped_session(self._container) as db:
             held = db.scalars(
                 select(AgentSession.id)
@@ -1489,18 +1494,21 @@ class SessionStartService:
         `project` now, a job's `queued` behind another of its project or not,
         a work item's or a job's `session` when it is written already, a
         setup's let through the pause (`setups`); None while it is open. A
-        work item's counts the slot under the slot's lock
-        (`WorkSlots.lock`), held to the transaction's end, so the next start's
-        count sees the Session this one moves to `starting`, and reads under
-        it whether another Session carries the conversation `session`
-        resumes (`carried`)."""
+        work item's reads the usage halts (`UsageHalts.halted`), and counts
+        the slot under the slot's lock (`WorkSlots.lock`), held to the
+        transaction's end, so the next start's count sees the Session this
+        one moves to `starting`, and reads under it whether another Session
+        carries the conversation `session` resumes (`carried`)."""
+        halted = None
         filled = None
         conversing = False
         if kind_code == WORK_KIND:
+            halted = self._halts.halted(db)
             self._slots.lock(db)
             filled = self._slots.filled(db, [project.id]).get(project.id)
             conversing = session is not None and carried(db, session)
         return held_reason(
+            halted=halted,
             paused=project.paused,
             kind_code=kind_code,
             setup=session is not None

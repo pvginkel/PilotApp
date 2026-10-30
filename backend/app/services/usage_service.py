@@ -8,7 +8,8 @@ latest recorded and its figures or `stale` differ from that one's, as a Usage
 Reading with a Window Share per window (DB 274): after a restart, or a
 reconnect, the seed is compared with the last recorded. A reading with no
 figures, `no-reading-yet` from a controller just started, leaves the latest
-as it is. Why a reading is stale is the log's alone.
+as it is. Why a reading is stale is the log's alone. Each reading recorded is
+told to the listeners, the halts' watcher, once its commit is done.
 
 Two processes overlapping in a roll each receive every reading: the table's
 lock, held from the comparison to the commit, lets one of them record it.
@@ -17,7 +18,7 @@ lock, held from the comparison to the commit, lets one of them record it.
 import logging
 import math
 import threading
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -35,6 +36,8 @@ if TYPE_CHECKING:
     from app.services.container import ServiceContainer
 
 logger = logging.getLogger(__name__)
+
+type ReadingListener = Callable[[], None]
 
 READING_AGE = Gauge(
     "pilot_usage_reading_age_seconds",
@@ -64,11 +67,33 @@ class Usage:
     windows: Mapping[UsageWindow, WindowFigure]
 
 
+def latest(db: Session) -> Usage | None:
+    """The latest Usage Reading recorded, the one the halts read (DB 274);
+    None before the first."""
+    reading = db.scalars(
+        select(UsageReading).order_by(UsageReading.id.desc()).limit(1)
+    ).first()
+    if reading is None:
+        return None
+    shares = db.scalars(
+        select(WindowShare).where(WindowShare.reading_id == reading.id)
+    ).all()
+    return Usage(
+        reading.taken_at,
+        reading.stale,
+        {
+            share.window_code: WindowFigure(share.share, share.resets_at)
+            for share in shares
+        },
+    )
+
+
 class UsageService:
     """The usage readings received, recorded, and the latest held."""
 
     def __init__(self, container: "ServiceContainer") -> None:
-        """Hold no reading yet, and read the gauge from this instance.
+        """Hold no reading yet, with no listener, and read the gauge from
+        this instance.
 
         Args:
             container: Gives each reading's record its database session
@@ -76,31 +101,18 @@ class UsageService:
         self._container = container
         self._lock = threading.Lock()
         self._held: Usage | None = None
+        self._listeners: list[ReadingListener] = []
         READING_AGE.set_function(self._age)
 
-    def latest(self, db: Session) -> Usage | None:
-        """The latest Usage Reading recorded, the one the halts read (DB 274);
-        None before the first."""
-        reading = db.scalars(
-            select(UsageReading).order_by(UsageReading.id.desc()).limit(1)
-        ).first()
-        if reading is None:
-            return None
-        shares = db.scalars(
-            select(WindowShare).where(WindowShare.reading_id == reading.id)
-        ).all()
-        return Usage(
-            reading.taken_at,
-            reading.stale,
-            {
-                share.window_code: WindowFigure(share.share, share.resets_at)
-                for share in shares
-            },
-        )
+    def subscribe(self, listener: ReadingListener) -> None:
+        """Call `listener` once each reading this service records has
+        committed."""
+        self._listeners.append(listener)
 
     def receive(self, reading: ControllerUsageReading) -> None:
         """Record the reading the controller served when it is one to record,
-        and hold its figures unless they are older than the latest recorded."""
+        and hold its figures unless they are older than the latest recorded;
+        a reading recorded tells the listeners once its commit is done."""
         received_at = datetime.now(UTC)
         if reading.taken_at is None or not reading.windows:
             logger.info(
@@ -116,20 +128,21 @@ class UsageService:
                 for window in reading.windows
             },
         )
+        recorded: int | None = None
         with scoped_session(self._container) as db:
             db.execute(text("LOCK TABLE usage_readings IN EXCLUSIVE MODE"))
-            latest = self.latest(db)
-            if latest is not None and usage.taken_at < latest.taken_at:
+            last = latest(db)
+            if last is not None and usage.taken_at < last.taken_at:
                 logger.info(
                     "Usage reading taken at %s is older than the latest recorded, "
                     "taken at %s: ignored",
                     usage.taken_at.isoformat(),
-                    latest.taken_at.isoformat(),
+                    last.taken_at.isoformat(),
                 )
                 return
-            if latest is not None and (usage.stale, usage.windows) == (
-                latest.stale,
-                latest.windows,
+            if last is not None and (usage.stale, usage.windows) == (
+                last.stale,
+                last.windows,
             ):
                 logger.info(
                     "Usage reading taken at %s: unchanged since the latest recorded",
@@ -146,6 +159,9 @@ class UsageService:
                 )
         with self._lock:
             self._held = usage
+        if recorded is not None:
+            for listener in self._listeners:
+                listener()
 
     def _age(self) -> float:
         with self._lock:

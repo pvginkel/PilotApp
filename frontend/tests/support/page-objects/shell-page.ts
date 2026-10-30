@@ -1,5 +1,8 @@
 import type { Locator, Page } from '@playwright/test';
+import type { components } from '@/lib/api/generated/types';
 import { waitForUiState } from '../helpers';
+
+type ConditionCode = components['schemas']['ConditionsSchema.6c014b4.ConditionCode'];
 
 /** The frame every screen sits in: the top bar, its gold badges and its profile menu, the gold bar, the side column, the keys list. */
 export class ShellPage {
@@ -45,13 +48,13 @@ export class ShellPage {
     this.keysBackdrop = page.getByTestId('shell.keys.backdrop');
   }
 
-  /** The top bar's badge for a condition off a phone, by its code: `outage`, the controller unreachable. */
-  goldBadge(code: 'outage'): Locator {
+  /** The top bar's badge for a condition off a phone, by its code. */
+  goldBadge(code: ConditionCode): Locator {
     return this.goldBadges.locator(`[data-testid="shell.gold-badges.badge"][data-condition="${code}"]`);
   }
 
-  /** The gold bar's line for a condition on a phone, by its code: `outage`, the controller unreachable. */
-  goldLine(code: 'outage'): Locator {
+  /** The gold bar's line for a condition on a phone, by its code. */
+  goldLine(code: ConditionCode): Locator {
     return this.goldBar.locator(`[data-testid="shell.gold-bar.line"][data-condition="${code}"]`);
   }
 

@@ -193,6 +193,7 @@ def _starts(
         relay_service=relays,
         controller_outage=container.controller_outage(),
         work_slots=slots,
+        usage_halts=container.usage_halts(),
         pilot_server=pilot_server,
         controller_configured=controller_configured,
         store_environment_id=STORE_ENVIRONMENT_ID,

@@ -49,6 +49,8 @@ from app.services.relay_service import RelayService
 from app.services.relay_watchdog import WATCHDOG_TIMER, RelayWatchdog
 from app.services.session_start_service import SessionStartService
 from app.services.supervisor import TIMER_RUNS_TOTAL, Supervisor
+from app.services.usage_halts import TIMER as USAGE_TIMER
+from app.services.usage_halts import UsageWatcher
 from tests.conftest_infrastructure import (
     _clear_prometheus_registry,
     _create_test_app,
@@ -59,7 +61,7 @@ from tests.support.fake_notification_bridge import (
     ServedFakeNotificationBridge,
     bridge_client_of,
 )
-from tests.support.supervisor import metric_value, wait_until
+from tests.support.supervisor import listening, metric_value, wait_until
 from tests.support.tls import invent_ca
 
 
@@ -440,6 +442,36 @@ class TestRelayWatchdogWiring:
             wait_until(lambda: _watchdog_ticks() >= ticks + 2, "two watchdog ticks")
         finally:
             coordinator.shutdown()
+
+
+class TestUsageWatcherWiring:
+    def test_the_fleet_streams_reading_reaches_the_watcher_and_its_timer_runs_from_startup(
+        self, committed_app: Flask, fake_controller: ServedFakeController
+    ) -> None:
+        container = committed_app.container
+        container.app_config.override(
+            AppSettings(controller_url=fake_controller.url, scheduler_tick_seconds=0.05)
+        )
+        client_of(container, fake_controller)
+        assert isinstance(container.fleet_consumer(), FleetConsumer)
+        assert isinstance(container.usage_watcher(), UsageWatcher)
+        ticks = metric_value(TIMER_RUNS_TOTAL, timer=USAGE_TIMER, outcome="ok")
+        coordinator = container.lifecycle_coordinator()
+
+        with listening("app.services.usage_halts") as halts:
+            coordinator.fire_startup()
+            try:
+                fake_controller.usage(seven_day=0.95, five_hour=0.1)
+                halts.wait_for("The week's halt holds: .*")
+                wait_until(
+                    lambda: (
+                        metric_value(TIMER_RUNS_TOTAL, timer=USAGE_TIMER, outcome="ok")
+                        >= ticks + 2
+                    ),
+                    "two ticks of the halts' timer",
+                )
+            finally:
+                coordinator.shutdown()
 
 
 class TestChatCloseWiring:

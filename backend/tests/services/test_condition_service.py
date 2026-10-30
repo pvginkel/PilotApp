@@ -1,15 +1,19 @@
 """The conditions that hold all work, which the gold bar shows (UC *The gold
-bar*; F125; design 2 §13.4): read, and told to every person's connections at
-once when one turns. Read off test connections' queues."""
+bar*; F125, F135.7; design 2 §13.4): the outage and the usage halts, read, and
+told to every person's connections at once when one turns. Read off test
+connections' queues."""
 
 import json
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 from queue import Empty
 from typing import Any
 
 import pytest
+from sqlalchemy.orm import Session as DbSession
 
-from app.models import User
+from app.models import UsageReading, User, WindowShare
+from app.models.reference import UsageWindow
 from app.services.condition_service import ConditionService
 from app.services.container import ServiceContainer
 from app.services.controller_outage import ControllerOutage
@@ -28,7 +32,9 @@ def conditions(
     manager: SSEConnectionManager,
 ) -> ConditionService:
     """A service of its own, on the test's outage."""
-    return ConditionService(container, controller_outage, manager)
+    return ConditionService(
+        container, controller_outage, container.usage_halts(), manager
+    )
 
 
 @pytest.fixture
@@ -50,6 +56,30 @@ def _frames(connection: SSEConnection) -> list[dict[str, Any]]:
         queued.append(json.loads(frame.removeprefix("data: ")))
 
 
+def _usage(db: DbSession, *, week: float, five_hour: float) -> UsageReading:
+    """A fresh Usage Reading recorded now with these shares."""
+    now = datetime.now(UTC)
+    reading = UsageReading(
+        taken_at=now - timedelta(minutes=3), received_at=now, stale=False
+    )
+    db.add(reading)
+    db.flush()
+    db.add_all(
+        WindowShare(
+            reading_id=reading.id,
+            window_code=window,
+            share=share,
+            resets_at=now + timedelta(days=1),
+        )
+        for window, share in (
+            (UsageWindow.SEVEN_DAY, week),
+            (UsageWindow.FIVE_HOUR, five_hour),
+        )
+    )
+    db.flush()
+    return reading
+
+
 class TestConditionService:
     def test_none_holds_while_the_controller_answers(
         self, conditions: ConditionService
@@ -62,8 +92,63 @@ class TestConditionService:
         controller_outage.call_unanswered()
 
         assert conditions.conditions().model_dump() == {
-            "conditions": [{"code": "outage", "since": controller_outage.since}]
+            "conditions": [
+                {
+                    "code": "outage",
+                    "since": controller_outage.since,
+                    "share": None,
+                    "taken_at": None,
+                }
+            ]
         }
+
+    def test_the_halts_hold_after_the_outage_the_weeks_first_with_share_and_age(
+        self,
+        conditions: ConditionService,
+        controller_outage: ControllerOutage,
+        session: DbSession,
+    ) -> None:
+        controller_outage.call_unanswered()
+        reading = _usage(session, week=0.92, five_hour=0.8)
+
+        assert conditions.conditions().model_dump() == {
+            "conditions": [
+                {
+                    "code": "outage",
+                    "since": controller_outage.since,
+                    "share": None,
+                    "taken_at": None,
+                },
+                {
+                    "code": "week_halt",
+                    "since": reading.received_at,
+                    "share": 0.92,
+                    "taken_at": reading.taken_at,
+                },
+                {
+                    "code": "five_hour_halt",
+                    "since": reading.received_at,
+                    "share": 0.8,
+                    "taken_at": reading.taken_at,
+                },
+            ]
+        }
+
+    def test_a_halt_is_told_with_the_conditions(
+        self,
+        conditions: ConditionService,
+        manager: SSEConnectionManager,
+        connections: list[SSEConnection],
+        person: User,
+        session: DbSession,
+    ) -> None:
+        connections.append(manager.on_connect("ada-1", person.subject))
+        _usage(session, week=0.5, five_hour=0.8)
+
+        conditions.tell()
+
+        [frame] = _frames(connections[0])
+        assert [c["code"] for c in frame["payload"]["conditions"]] == ["five_hour_halt"]
 
     def test_every_persons_connections_hear_each_turn_at_once(
         self,
@@ -96,6 +181,8 @@ class TestConditionService:
                     {
                         "code": "outage",
                         "since": since.isoformat().replace("+00:00", "Z"),
+                        "share": None,
+                        "taken_at": None,
                     }
                 ]
             },

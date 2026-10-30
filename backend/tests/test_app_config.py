@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from app.app_config import AppEnvironment, AppSettings
+from app.app_config import AppEnvironment, AppSettings, HaltSetting
 
 
 class TestAppSettings:
@@ -209,6 +209,79 @@ class TestAppSettings:
         with pytest.raises(ValidationError, match=name):
             AppEnvironment.model_validate({name: 0})
 
+    def test_the_usage_limits_and_halt_settings_are_the_ruled_ones_by_default(
+        self,
+    ) -> None:
+        settings = AppSettings.load(AppEnvironment(_env_file=None))
+
+        assert (
+            settings.week_first_limit,
+            settings.week_allowance,
+            settings.week_second_limit,
+            settings.five_hour_limit,
+            settings.week_halt,
+            settings.five_hour_halt,
+        ) == (
+            0.90,
+            0.05,
+            0.98,
+            0.75,
+            HaltSetting.COOPERATIVE_STOP,
+            HaltSetting.COOPERATIVE_STOP,
+        )
+
+    def test_load_reads_the_usage_limits_and_halt_settings_from_the_environment(
+        self,
+    ) -> None:
+        settings = AppSettings.load(
+            AppEnvironment.model_validate(
+                {
+                    "WEEK_FIRST_LIMIT": "0.8",
+                    "WEEK_ALLOWANCE": "0.1",
+                    "WEEK_SECOND_LIMIT": "0.95",
+                    "FIVE_HOUR_LIMIT": "0",
+                    "WEEK_HALT": "hard_stop",
+                    "FIVE_HOUR_HALT": "no_new_work",
+                }
+            )
+        )
+
+        assert (
+            settings.week_first_limit,
+            settings.week_allowance,
+            settings.week_second_limit,
+            settings.five_hour_limit,
+            settings.week_halt,
+            settings.five_hour_halt,
+        ) == (0.8, 0.1, 0.95, 0.0, HaltSetting.HARD_STOP, HaltSetting.NO_NEW_WORK)
+
+    @pytest.mark.parametrize(
+        ("name", "value"),
+        [
+            ("WEEK_FIRST_LIMIT", 0),
+            ("WEEK_FIRST_LIMIT", 1.01),
+            ("WEEK_ALLOWANCE", 0),
+            ("WEEK_SECOND_LIMIT", 1.5),
+            ("FIVE_HOUR_LIMIT", -0.1),
+            ("FIVE_HOUR_LIMIT", 1.01),
+            ("WEEK_HALT", "pause"),
+            ("FIVE_HOUR_HALT", ""),
+        ],
+    )
+    def test_load_refuses_a_limit_out_of_range_or_an_unknown_halt_setting(
+        self, name: str, value: object
+    ) -> None:
+        with pytest.raises(ValidationError, match=name):
+            AppEnvironment.model_validate({name: value})
+
+    def test_load_refuses_a_first_limit_over_the_second(self) -> None:
+        with pytest.raises(ValidationError, match="WEEK_FIRST_LIMIT must not be over"):
+            AppSettings.load(
+                AppEnvironment.model_validate(
+                    {"WEEK_FIRST_LIMIT": 0.99, "WEEK_SECOND_LIMIT": 0.98}
+                )
+            )
+
     def test_the_brain_runs_on_opus_at_xhigh_by_default(self) -> None:
         settings = AppSettings.load(AppEnvironment(_env_file=None))
 
@@ -303,6 +376,12 @@ class TestAppSettings:
             "environment_delete_after_seconds": repr(604800.0),
             "work_parallelism_max": "3",
             "project_parallelism_max": "3",
+            "week_first_limit": "0.9",
+            "week_allowance": "0.05",
+            "week_second_limit": "0.98",
+            "five_hour_limit": "0.75",
+            "week_halt": repr(HaltSetting.COOPERATIVE_STOP),
+            "five_hour_halt": repr(HaltSetting.COOPERATIVE_STOP),
             "brain_model": repr("opus"),
             "brain_reasoning_effort": repr("xhigh"),
             "chat_close_timeout_seconds": repr(3300.0),
@@ -397,6 +476,12 @@ class TestAppSettings:
             "environment_delete_after_seconds": repr(604800.0),
             "work_parallelism_max": "3",
             "project_parallelism_max": "3",
+            "week_first_limit": "0.9",
+            "week_allowance": "0.05",
+            "week_second_limit": "0.98",
+            "five_hour_limit": "0.75",
+            "week_halt": repr(HaltSetting.COOPERATIVE_STOP),
+            "five_hour_halt": repr(HaltSetting.COOPERATIVE_STOP),
             "brain_model": repr("opus"),
             "brain_reasoning_effort": repr("xhigh"),
             "chat_close_timeout_seconds": repr(3300.0),

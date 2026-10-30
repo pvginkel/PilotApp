@@ -1,5 +1,6 @@
 /**
- * The gold bar (F125; UC *The gold bar*): what holds all work, a condition each. Off a phone a
+ * The gold bar (F125, F135.7; UC *The gold bar*): what holds all work, a condition each — the
+ * controller unreachable, the week's usage halt, the five-hour one. Off a phone a
  * badge per condition in the top bar, after Pilot's name, its full line its title; on a phone a
  * line per condition across the window under the top bar, the drawer opening under it. Each stands
  * while its condition holds and goes when it ends; nothing dismisses it. The time a condition began
@@ -23,7 +24,7 @@ export function GoldBadges({ conditions }: GoldProps) {
     // A live region from the first render on, so that a badge coming in is announced.
     <div className="gold-badges" role="status" aria-label="What holds all work" data-testid="shell.gold-badges">
       {conditions.map((condition) => {
-        const { title, detail, badge, icon: Icon } = conditionLine(condition.code);
+        const { title, detail, badge, icon: Icon } = conditionLine(condition, today);
         const since = formatTime(condition.since, clockFormat(condition.since, today));
         return (
           <span
@@ -49,7 +50,7 @@ export function GoldBar({ conditions }: GoldProps) {
     // A live region from the first render on, so that a line coming in is announced.
     <div className="gold-bar" role="status" aria-label="What holds all work" data-testid="shell.gold-bar">
       {conditions.map((condition) => {
-        const { title, detail, icon: Icon } = conditionLine(condition.code);
+        const { title, detail, icon: Icon } = conditionLine(condition, today);
         return (
           <div key={condition.code} className="gold-line" data-condition={condition.code} data-testid="shell.gold-bar.line">
             <Icon className="icon" aria-hidden="true" />

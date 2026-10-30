@@ -1,8 +1,13 @@
 """/api/conditions: the conditions that hold all work, a line each on the gold
-bar (UC *The gold bar*; F125; design 2 §13.4)."""
+bar (UC *The gold bar*; F125, F135.7; design 2 §13.4)."""
+
+from datetime import UTC, datetime, timedelta
 
 from flask.testing import FlaskClient
+from sqlalchemy.orm import Session
 
+from app.models import UsageReading, WindowShare
+from app.models.reference import UsageWindow
 from app.services.controller_outage import ControllerOutage
 
 CONDITIONS = "/api/conditions"
@@ -26,7 +31,42 @@ class TestGetConditions:
 
         assert body == {
             "conditions": [
-                {"code": "outage", "since": since.isoformat().replace("+00:00", "Z")}
+                {
+                    "code": "outage",
+                    "since": since.isoformat().replace("+00:00", "Z"),
+                    "share": None,
+                    "taken_at": None,
+                }
+            ]
+        }
+
+    def test_a_usage_halt_holds_while_the_latest_reading_is_at_its_limit(
+        self, client: FlaskClient, session: Session
+    ) -> None:
+        now = datetime(2026, 10, 8, 9, 30, tzinfo=UTC)
+        reading = UsageReading(taken_at=now, received_at=now, stale=False)
+        session.add(reading)
+        session.flush()
+        session.add(
+            WindowShare(
+                reading_id=reading.id,
+                window_code=UsageWindow.SEVEN_DAY,
+                share=0.9,
+                resets_at=now + timedelta(days=1),
+            )
+        )
+        session.flush()
+
+        body = client.get(CONDITIONS).get_json()
+
+        assert body == {
+            "conditions": [
+                {
+                    "code": "week_halt",
+                    "since": "2026-10-08T09:30:00Z",
+                    "share": 0.9,
+                    "taken_at": "2026-10-08T09:30:00Z",
+                }
             ]
         }
 

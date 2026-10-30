@@ -1,7 +1,9 @@
-"""The gate every start passes (design 2 §13.4, §13.5, D11; F141.5, F143.4,
-F59.2; DB 229, 243).
+"""The gate every start passes (design 2 §13.4, §13.5, §8.2, D11; F141.5,
+F143.4, F59.2, F135; DB 229, 243, 266).
 
-A start is held while its project is paused, a Chat's never (F141.4), nor
+A work item's start is held while a usage halt holds, the week's or the
+five-hour's (`UsageHalts`), a job's and a Chat's never. A start is held while
+its project is paused, a Chat's never (F141.4), nor
 the setup's, a Retry's included, which runs under the pause Create project
 writes (D083); while the controller is unreachable; a work item's alone while
 no slot is free: the work items running or starting across every Project
@@ -9,9 +11,10 @@ number the cross-project maximum, or those of its Project the per-project
 one; a job's alone while another job of its Project is before it (`queued`);
 and a work item's alone while another Session runs or starts on the
 conversation it resumes, in its Environment (`carried`; DB 183): a run's
-continuation and its clarification run each wait for the other's turn to end. Where more than one holds, the pause comes
-first, then the outage, which is the gold bar's, then the slot, then the
-queue, then the conversation. The halt is slice 016's condition.
+continuation and its clarification run each wait for the other's turn to
+end. Where more than one holds, the halt comes first, the week's before the
+five-hour's, then the pause, then the outage — the halts and the outage the
+gold bar's —, then the slot, then the queue, then the conversation.
 
 The slot is counted under one app-wide lock (`WorkSlots.lock`), so two starts
 never both take its last place, and the conversation is read under it, so two
@@ -29,7 +32,7 @@ from sqlalchemy.orm import Session, aliased
 
 from app.models import Item, Work
 from app.models import Session as AgentSession
-from app.models.reference import SessionState, WorkTrigger
+from app.models.reference import SessionState, UsageWindow, WorkTrigger
 from app.schemas.timeline import HeldReason
 from app.utils.after_commit import after_commit
 
@@ -44,6 +47,12 @@ JOB_KIND = "job"
 
 COUNTED = (SessionState.RUNNING, SessionState.STARTING)
 """The states a work item holds a slot in."""
+
+HALTED = {
+    UsageWindow.SEVEN_DAY: HeldReason.WEEK_HALT,
+    UsageWindow.FIVE_HOUR: HeldReason.FIVE_HOUR_HALT,
+}
+"""Why a work item's start is held, by the window whose halt holds it."""
 
 SLOT_LOCK = 243
 """The key of the slot's advisory lock, the app's one advisory lock on a single
@@ -64,6 +73,7 @@ class Held:
 
 def held_reason(
     *,
+    halted: UsageWindow | None,
     paused: bool,
     kind_code: str,
     setup: bool,
@@ -72,13 +82,16 @@ def held_reason(
     queued: bool,
     conversing: bool,
 ) -> Held | None:
-    """Why the gate holds a start of a Session of `kind_code` in a project
-    `paused` or not, a job the `setup` or not (`setups`), the controller
-    `unreachable` or not, where `filled` running work items leave a work item
-    no slot (`WorkSlots.filled`), None while one is free, a job is `queued`
-    behind another of its project or not, and another Session carries the
-    conversation a work item resumes (`conversing`) or not; None while the
-    gate is open."""
+    """Why the gate holds a start of a Session of `kind_code`, where the halt
+    of the window `halted` holds work items (`UsageHalts.halted`), None while
+    neither does, in a project `paused` or not, a job the `setup` or not
+    (`setups`), the controller `unreachable` or not, where `filled` running
+    work items leave a work item no slot (`WorkSlots.filled`), None while one
+    is free, a job is `queued` behind another of its project or not, and
+    another Session carries the conversation a work item resumes
+    (`conversing`) or not; None while the gate is open."""
+    if kind_code == WORK_KIND and halted is not None:
+        return Held(HALTED[halted])
     if paused and kind_code != CHAT_KIND and not setup:
         return Held(HeldReason.PAUSED)
     if unreachable:

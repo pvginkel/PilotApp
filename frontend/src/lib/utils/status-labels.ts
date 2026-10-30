@@ -4,13 +4,14 @@
  * status icon (F1.3, F141.1), and a step's standing in the plan popover (F3.1). How a work item's session reads: its one line on the
  * timeline (F26.1, F26.2, F125), why the gate holds its start (F26.1), why it stopped when no one
  * stopped it (F71), its session log's tail (F69.2), and a job's line withdrawn by an Undo (F14.1). How a condition that holds all work reads
- * on the gold bar (F125).
+ * on the gold bar (F125, F135.7).
  */
 
-import { Circle, CircleCheck, CircleDashed, Hourglass, Pause, ServerOff, UserRound, type LucideIcon } from 'lucide-react';
+import { Circle, CircleCheck, CircleDashed, Hourglass, OctagonPause, Pause, ServerOff, UserRound, type LucideIcon } from 'lucide-react';
 import type { components } from '@/lib/api/generated/types';
 import { phaseOf, type Activity } from '@/lib/chat/activity';
 import { summarizeTool } from '@/lib/chat/tools';
+import { clockFormat, formatTime } from '@/lib/utils/time-format';
 
 type ProjectTab = components['schemas']['ProjectListResponseSchema.e86ccd6.ProjectTabSchema'];
 type PlanProgress = components['schemas']['ProjectListResponseSchema.e86ccd6.PlanProgressSchema'];
@@ -20,7 +21,7 @@ type Work = components['schemas']['TimelineSchema.1fdd8ae.WorkSchema'];
 type HeldReason = components['schemas']['TimelineSchema.1fdd8ae.HeldReason'];
 type CurrentLine = components['schemas']['TimelineSchema.1fdd8ae.CurrentLineSchema'];
 type LineStep = NonNullable<CurrentLine['step']>;
-type ConditionCode = components['schemas']['ConditionsSchema.6c014b4.ConditionCode'];
+type Condition = components['schemas']['ConditionsSchema.6c014b4.ConditionSchema'];
 type DoneCause = components['schemas']['TimelineSchema.1fdd8ae.DoneSchema']['cause'];
 
 interface StepReading {
@@ -110,11 +111,16 @@ export function planStep(status: TaskStatus): PlanStep {
 }
 
 /**
- * Why the gate holds a work item’s start, as its line says it (F26.1, F141.5, F143.4, F59.2; DB 183);
+ * Why the gate holds a work item’s start, as its line says it (F26.1, F141.5, F143.4, F59.2, F135.1,
+ * F135.4; DB 183);
  * `running`, the work items that leave it no slot, counted while no slot is free.
  */
 export function heldReasonLabel(reason: HeldReason, running: number | null): string {
   switch (reason) {
+    case 'week_halt':
+      return 'Halted at the week’s limit';
+    case 'five_hour_halt':
+      return 'Halted at the five-hour limit';
     case 'paused':
       return 'Paused';
     case 'controller_unreachable':
@@ -165,8 +171,23 @@ interface ConditionLine {
   icon: LucideIcon;
 }
 
-/** A condition that holds all work, as its line and its badge on the gold bar say it (F125). */
-export function conditionLine(code: ConditionCode): ConditionLine {
+const PERCENT = new Intl.NumberFormat('en-GB', { style: 'percent', maximumFractionDigits: 0 });
+
+/** A halt's share of its window's quota and the reading's age, "92% of the week’s quota is used, as of 14:20". */
+function halted(condition: Condition, quota: string, today: string): string {
+  // The API gives a halt its share and the time of its reading.
+  const takenAt = condition.taken_at!;
+  return `${PERCENT.format(condition.share!)} of ${quota} is used, as of ${formatTime(takenAt, clockFormat(takenAt, today))}.`;
+}
+
+const HALT_HOLDS = 'No work item starts until a reading puts it under the limit; chats and Pilot’s own jobs go on.';
+
+/**
+ * A condition that holds all work, as its line and its badge on the gold bar say it (F125, F135.7),
+ * a time in it dated for an earlier day than the viewer's `today` (`useToday()`).
+ */
+export function conditionLine(condition: Condition, today: string): ConditionLine {
+  const code = condition.code;
   switch (code) {
     case 'outage':
       return {
@@ -174,6 +195,20 @@ export function conditionLine(code: ConditionCode): ConditionLine {
         detail: 'Nothing starts until it answers.',
         badge: 'Controller unreachable',
         icon: ServerOff,
+      };
+    case 'week_halt':
+      return {
+        title: 'Work items have been halted at the week’s usage limit',
+        detail: `${halted(condition, 'the week’s quota', today)} ${HALT_HOLDS}`,
+        badge: 'Halted at the week’s limit',
+        icon: OctagonPause,
+      };
+    case 'five_hour_halt':
+      return {
+        title: 'Work items have been halted at the five-hour usage limit',
+        detail: `${halted(condition, 'the five-hour window’s quota', today)} ${HALT_HOLDS}`,
+        badge: 'Halted at the five-hour limit',
+        icon: Hourglass,
       };
     default: {
       const unknown: never = code;

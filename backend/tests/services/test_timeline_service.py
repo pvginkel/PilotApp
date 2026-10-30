@@ -65,9 +65,11 @@ from app.services.relay_service import ENVIRONMENT_STOPPED
 from app.services.session_record_service import SessionRecordService
 from app.services.start_gate import WorkSlots
 from app.services.timeline_service import Badge, work_status
+from app.services.usage_halts import UsageHalts
 from tests.support.chats import ChatWriter, open_chat
 
 SLOTS = WorkSlots(work_max=3, project_max=3)
+HALTS = UsageHalts(week_limit=0.9, five_hour_limit=0.75)
 """The slot of the defaults: the work items these tests place leave it room."""
 
 ADA = AuthContext(
@@ -2076,6 +2078,7 @@ class TestWorkStatus:
             session,
             [work.id, no_work.id, notice.id, uuid.uuid4()],
             unreachable=False,
+            halts=HALTS,
             slots=SLOTS,
         )
 
@@ -2083,7 +2086,9 @@ class TestWorkStatus:
         assert found[work.id].state == SessionState.RUNNING
 
     def test_no_ids_read_nothing(self, session: DbSession) -> None:
-        assert work_status(session, [], unreachable=False, slots=SLOTS) == {}
+        assert (
+            work_status(session, [], unreachable=False, halts=HALTS, slots=SLOTS) == {}
+        )
 
     def test_a_retried_job_names_the_job_its_retry_placed_and_the_press(
         self,
@@ -2100,7 +2105,7 @@ class TestWorkStatus:
         _retried(session, failed, retry)
 
         found = work_status(
-            session, [failed.id, retry.id], unreachable=False, slots=SLOTS
+            session, [failed.id, retry.id], unreachable=False, halts=HALTS, slots=SLOTS
         )
 
         assert found[failed.id].retried == RetriedSchema(id=retry.id, at=pressed)
@@ -2124,7 +2129,11 @@ class TestWorkStatus:
         running = _work(session, project, environment, SessionState.RUNNING)
 
         found = work_status(
-            session, [placed.id, running.id], unreachable=False, slots=SLOTS
+            session,
+            [placed.id, running.id],
+            unreachable=False,
+            halts=HALTS,
+            slots=SLOTS,
         )
 
         assert found[placed.id].state == state
@@ -2142,7 +2151,9 @@ class TestWorkStatus:
         environment.name = environment.id
         session.flush()
 
-        found = work_status(session, [idle.id], unreachable=False, slots=SLOTS)[idle.id]
+        found = work_status(
+            session, [idle.id], unreachable=False, halts=HALTS, slots=SLOTS
+        )[idle.id]
 
         assert found.environment is not None
         assert (found.environment.id, found.environment.name) == (
@@ -2209,7 +2220,11 @@ class TestWorkStatus:
         running = _work(session, project, environment, SessionState.RUNNING)
 
         found = work_status(
-            session, [held.id, running.id], unreachable=unreachable, slots=SLOTS
+            session,
+            [held.id, running.id],
+            unreachable=unreachable,
+            halts=HALTS,
+            slots=SLOTS,
         )
 
         assert found[held.id].held_reason == reason
@@ -2232,9 +2247,9 @@ class TestWorkStatus:
         run.stopped_by_user_id = person.id if by_a_person else None
         session.flush()
 
-        work = work_status(session, [stopped.id], unreachable=False, slots=SLOTS)[
-            stopped.id
-        ]
+        work = work_status(
+            session, [stopped.id], unreachable=False, halts=HALTS, slots=SLOTS
+        )[stopped.id]
 
         assert work.stopped_at == datetime(2026, 10, 24, 9, 5, tzinfo=UTC)
         assert (work.stopped_by is not None and work.stopped_by.handle) == (
@@ -2256,7 +2271,9 @@ class TestWorkStatus:
         run.stopped_by_user_id = person.id
         session.flush()
 
-        work = work_status(session, [held.id], unreachable=False, slots=SLOTS)[held.id]
+        work = work_status(
+            session, [held.id], unreachable=False, halts=HALTS, slots=SLOTS
+        )[held.id]
 
         assert (work.stopped_at, work.stopped_by) == (None, None)
 
@@ -2274,9 +2291,9 @@ class TestWorkStatus:
         run.stopped_at = datetime(2026, 10, 24, 9, 5, tzinfo=UTC)
         _stop_record(container, session, run, cause)
 
-        work = work_status(session, [stopped.id], unreachable=False, slots=SLOTS)[
-            stopped.id
-        ]
+        work = work_status(
+            session, [stopped.id], unreachable=False, halts=HALTS, slots=SLOTS
+        )[stopped.id]
 
         assert (work.stopped_cause, work.stopped_by) == (cause, None)
 
@@ -2294,9 +2311,9 @@ class TestWorkStatus:
         run.stopped_by_user_id = person.id
         _stop_record(container, session, run, StopCause.ENVIRONMENT_STOPPED)
 
-        work = work_status(session, [stopped.id], unreachable=False, slots=SLOTS)[
-            stopped.id
-        ]
+        work = work_status(
+            session, [stopped.id], unreachable=False, halts=HALTS, slots=SLOTS
+        )[stopped.id]
 
         assert work.stopped_cause is None
 
@@ -2323,9 +2340,9 @@ class TestWorkStatus:
             controller_session="claude-2",
         )
 
-        work = work_status(session, [stopped.id], unreachable=False, slots=SLOTS)[
-            stopped.id
-        ]
+        work = work_status(
+            session, [stopped.id], unreachable=False, halts=HALTS, slots=SLOTS
+        )[stopped.id]
 
         assert work.stopped_cause is None
 
@@ -2340,7 +2357,9 @@ class TestWorkStatus:
         run = session.get_one(models.Session, held.id)
         _stop_record(container, session, run, StopCause.ENVIRONMENT_STOPPED)
 
-        work = work_status(session, [held.id], unreachable=False, slots=SLOTS)[held.id]
+        work = work_status(
+            session, [held.id], unreachable=False, halts=HALTS, slots=SLOTS
+        )[held.id]
 
         assert work.stopped_cause is None
 
