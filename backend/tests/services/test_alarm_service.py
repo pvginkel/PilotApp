@@ -10,6 +10,7 @@ its own, which reads committed rows alone."""
 
 from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -917,6 +918,46 @@ class TestAlarmServiceInFlight:
         assert _alarm(container, "ada", Condition.WEEK_HALT) is None
         assert _reconciles("superseded") == superseded + 1
         assert _clear_dismisses("sent") == sent + 1
+
+    @pytest.mark.parametrize("answered", [True, False])
+    def test_a_clear_committing_during_a_first_submits_write_back_reads_what_it_wrote(
+        self,
+        container: ServiceContainer,
+        bridge: WatchedFakeNotificationBridge,
+        supervise: Supervise,
+        log: LogWaiter,
+        answered: bool,
+    ) -> None:
+        _give_token(container, "ada", ADA_TOKEN)
+        service, _, _, coordinator = _service(container, supervise)
+        holding = {Condition.WEEK_HALT: _now()}
+        if not answered:
+            bridge.unreachable()
+        take = service._take
+        clears = []
+
+        def take_then_clear(*args: Any) -> bool:
+            cleared: bool = take(*args)
+            container.db_session().flush()
+            clears.append(in_thread(lambda: _clear(container, service, "ada")))
+            wait_until(
+                lambda: not clears[0].thread.is_alive() or lock_waits(container) == 1,
+                "the clear committed or waiting",
+            )
+            return cleared
+
+        with patch.object(service, "_take", side_effect=take_then_clear):
+            _reconcile(service, holding)
+        clears[0].result()
+
+        assert not _standing(container, "ada", Condition.WEEK_HALT)
+        assert not _owed(container, "ada", Condition.WEEK_HALT)
+        _reconcile(service, holding)
+        bridge.unreachable(on=False)
+        coordinator.fire_startup()
+        log.wait_for(rf"Loop {ALARM_CLEAR_JOB}:1 ended")
+        assert bridge.shown("ada") == {}
+        assert [call.call for call in bridge.calls("ada")][-1] == "dismiss"
 
     def test_two_processes_take_turns_and_the_phone_ends_on_the_latest_state(
         self,
