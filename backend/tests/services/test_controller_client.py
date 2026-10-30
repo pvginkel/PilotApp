@@ -1731,6 +1731,74 @@ class TestControllerClient:
 
         assert fake_controller.file_text(ENV, "/work/a.md") == "a"
 
+    @pytest.mark.parametrize("status", ["running", "stopped", "error"])
+    def test_delete_file_deletes_the_file_in_any_settled_status(
+        self,
+        fake_controller: ServedFakeController,
+        controller_client: ControllerClient,
+        status: EnvironmentStatus,
+    ) -> None:
+        fake_controller.add_environment(ENV, status=status)
+        fake_controller.put_file(ENV, "/work/.halt", b"")
+        fake_controller.put_file(ENV, "/work/a.md", b"a")
+
+        controller_client.delete_file(ENV, "/work/.halt")
+
+        assert fake_controller.environment(ENV).files == {"/work/a.md": b"a"}
+        assert fake_controller.calls == [
+            f"DELETE /environments/{ENV}/file?path=%2Fwork%2F.halt"
+        ]
+
+    def test_delete_file_of_nothing_at_the_path_or_of_an_environment_gone_is_deleted(
+        self, running: ServedFakeController, controller_client: ControllerClient
+    ) -> None:
+        controller_client.delete_file(ENV, "/work/.halt")
+        controller_client.delete_file("gone-env", "/work/.halt")
+
+        assert running.calls == [
+            f"DELETE /environments/{ENV}/file?path=%2Fwork%2F.halt",
+            "DELETE /environments/gone-env/file?path=%2Fwork%2F.halt",
+        ]
+
+    @pytest.mark.parametrize(
+        ("path", "problem_type"),
+        [
+            ("/work/Example", ControllerProblemType.NOT_A_FILE),
+            ("/home/example/a.md", ControllerProblemType.PATH_OUTSIDE_WORK),
+        ],
+    )
+    def test_delete_file_refusals_are_problems_to_switch_on(
+        self,
+        running: ServedFakeController,
+        controller_client: ControllerClient,
+        path: str,
+        problem_type: ControllerProblemType,
+    ) -> None:
+        running.put_file(ENV, "/work/Example/a.md", b"a")
+
+        with pytest.raises(ControllerProblem) as caught:
+            controller_client.delete_file(ENV, path)
+
+        assert caught.value.problem_type is problem_type
+        assert caught.value.operation == f"delete {path} in environment {ENV}"
+        assert running.environment(ENV).files == {"/work/Example/a.md": b"a"}
+
+    @pytest.mark.parametrize("status", ["provisioning", "starting", "deleting"])
+    def test_delete_file_during_the_controllers_own_work_on_the_tree_is_a_conflict(
+        self,
+        fake_controller: ServedFakeController,
+        controller_client: ControllerClient,
+        status: EnvironmentStatus,
+    ) -> None:
+        fake_controller.add_environment(ENV, status=status)
+        fake_controller.put_file(ENV, "/work/.halt", b"")
+
+        with pytest.raises(ControllerProblem) as caught:
+            controller_client.delete_file(ENV, "/work/.halt")
+
+        assert caught.value.problem_type is ControllerProblemType.CONFLICT
+        assert fake_controller.environment(ENV).files == {"/work/.halt": b""}
+
     @pytest.mark.parametrize("folder", ["/work/Example/docs", "/work/Example/docs/"])
     def test_list_folder_files_names_every_file_under_it_through_the_folder(
         self,
@@ -1805,9 +1873,10 @@ class TestControllerClient:
         [
             lambda client: client.read_file(ENV, "/work/a.md"),
             lambda client: client.write_file(ENV, "/work/a.md", b"a"),
+            lambda client: client.delete_file(ENV, "/work/a.md"),
             lambda client: client.list_folder_files(ENV, "/work"),
         ],
-        ids=["read", "write", "list"],
+        ids=["read", "write", "delete", "list"],
     )
     def test_a_file_route_of_an_unreadable_environment_turns_no_outage_on(
         self,
@@ -1829,9 +1898,10 @@ class TestControllerClient:
         [
             lambda client: client.read_file(ENV, "/work/a.md"),
             lambda client: client.write_file(ENV, "/work/a.md", b"a"),
+            lambda client: client.delete_file(ENV, "/work/a.md"),
             lambda client: client.list_folder_files(ENV, "/work"),
         ],
-        ids=["read", "write", "list"],
+        ids=["read", "write", "delete", "list"],
     )
     def test_a_file_route_of_a_controller_out_is_unreachable(
         self,

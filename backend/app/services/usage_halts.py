@@ -20,10 +20,10 @@ The watcher decides them again at each recorded reading, which the usage
 service hands it once its commit is done, at each overrule made, and at each
 tick of the scheduler, whose timer finds a stale window's minute passed: the
 one clock in the design. Each decision first ends the overrule a reading has
-spent. At a halt's turn the gate is asked again and every person's
-connections hear the conditions; at a reading while a halt holds, and at an
-overrule's end, they hear them too. Each process decides from the same
-readings; the halts it last told of are its own.
+spent. At a halt's turn the gate is asked again, the halt files are swept and
+every person's connections hear the conditions; at a reading while a halt
+holds, and at an overrule's end, they hear them too. Each process decides
+from the same readings; the halts it last told of are its own.
 """
 
 import logging
@@ -390,6 +390,7 @@ class UsageWatcher:
         effects = []
         if turned:
             effects.append(self._container.session_start_service().release_held)
+            effects.append(self._container.halt_file_service().request)
         if turned or spent is not None or (recorded and holding):
             effects.append(self._container.condition_service().tell)
         for effect in effects:

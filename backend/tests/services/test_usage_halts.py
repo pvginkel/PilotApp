@@ -594,6 +594,23 @@ def gate(container: ServiceContainer) -> _Gate:
     return gate
 
 
+class _HaltFiles:
+    """The halt files, as the watcher asks for their sweep."""
+
+    def __init__(self) -> None:
+        self.requested = 0
+
+    def request(self) -> None:
+        self.requested += 1
+
+
+@pytest.fixture
+def halt_files(container: ServiceContainer) -> _HaltFiles:
+    halt_files = _HaltFiles()
+    container.halt_file_service.override(providers.Object(halt_files))
+    return halt_files
+
+
 @pytest.fixture
 def usage(container: ServiceContainer) -> UsageService:
     return UsageService(container=container)
@@ -707,6 +724,21 @@ class TestUsageWatcher:
         assert gate.released == 4
         assert halts_log.matching("The five-hour halt lifted: .*")
         assert halts_log.matching("The week's halt lifted: .*")
+
+    def test_each_halts_turn_sweeps_the_halt_files(
+        self,
+        usage: UsageService,
+        watcher: UsageWatcher,
+        gate: _Gate,
+        halt_files: _HaltFiles,
+    ) -> None:
+        usage.receive(_reading(0.95))
+        turned_on = halt_files.requested
+        usage.receive(_reading(0.96, minutes=10))
+        held = halt_files.requested
+        usage.receive(_reading(0.1, minutes=20))
+
+        assert (turned_on, held, halt_files.requested) == (1, 1, 2)
 
     def test_a_reading_not_recorded_turns_nothing(
         self,

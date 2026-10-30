@@ -6,11 +6,11 @@ under `/api/testing/controller` (`app/api/testing_controller.py`). It holds
 environments and headless sessions with the controller's state machines,
 answers with the controller's status codes and problem+json, and serves the
 response stream and the fleet stream in the controller's SSE framing, and
-reads, writes and lists the files of an environment's `/work`, whatever its
-status, as the controller does off its share. A boxed headless session keeps
-the worker's rules: its create refused for a folder not on that tree or a pod
-without the sandbox profile, and a turn failing at its spawn once a folder of
-its box is gone. It serves the subscription's usage reading as a test sets it,
+reads, writes, deletes and lists the files of an environment's `/work`,
+whatever its status, as the controller does off its share. A boxed headless
+session keeps the worker's rules: its create refused for a folder not on that
+tree or a pod without the sandbox profile, and a turn failing at its spawn
+once a folder of its box is gone. It serves the subscription's usage reading as a test sets it,
 on its route and as the fleet stream's `usage` frame.
 
 A test drives it through its verbs, the public methods below: in process under
@@ -24,9 +24,9 @@ create and the reset answer at once, taking no `wait`; a delete's teardown ends
 as it is answered; the node's cap is a flag, of the node or of one environment,
 not a count. An environment's `/work` holds files alone, with no link, shared
 repo or mode, a folder there while a file is under it, and its path is
-normalised before it is checked; a write takes no `expectedSha256`, and is
-refused while the environment reads `provisioning` or `starting`, a bring-up
-under way, or `deleting`; a reset clears the tree, and a bring-up clones nothing
+normalised before it is checked; a write takes no `expectedSha256`, and a
+write or a delete is refused while the environment reads `provisioning` or
+`starting`, a bring-up under way, or `deleting`; a reset clears the tree, and a bring-up clones nothing
 into it. A box's roots on that tree are its cwd and its writable folders:
 `$HOME` and `/tmp`, writable roots of every box, are off it, so a read-only cwd
 meets no writable root but a listed folder. The usage reading is the one a
@@ -317,6 +317,7 @@ _ROUTES = Map(
         Rule("/environments/<env_id>/rename", endpoint="rename", methods=["POST"]),
         Rule("/environments/<env_id>/file", endpoint="read_file", methods=["GET"]),
         Rule("/environments/<env_id>/file", endpoint="write_file", methods=["PUT"]),
+        Rule("/environments/<env_id>/file", endpoint="delete_file", methods=["DELETE"]),
         Rule("/environments/<env_id>/files", endpoint="list_files", methods=["GET"]),
         Rule(
             "/environments/<env_id>/sessions",
@@ -401,6 +402,7 @@ class FakeController:
             "rename": self._rename,
             "read_file": self._read_file,
             "write_file": self._write_file,
+            "delete_file": self._delete_file,
             "list_files": self._list_files,
             "list_sessions": self._list_sessions,
             "create_session": self._create_session,
@@ -1034,24 +1036,19 @@ class FakeController:
         if len(data) > FILE_SIZE_CAP:
             raise _too_large(raw)
         with self._changed:
-            environment = self._readable(env_id)
-            if environment.status == "deleting":
-                raise FakeControllerProblem(
-                    409,
-                    "conflict",
-                    "the environment is being deleted",
-                    "its files are no longer written or deleted",
-                )
-            if environment.status in _BRINGING_UP:
-                raise FakeControllerProblem(
-                    409,
-                    "conflict",
-                    "the controller is building or removing the environment's /work",
-                    "a create, start, reset or delete of the environment is pending "
-                    "or under way; write or delete once the environment has settled",
-                )
-            _store(environment, raw, data)
+            _store(self._settled(env_id), raw, data)
         return _file_answer(b"", data, 204)
+
+    def _delete_file(self, request: Request, env_id: str) -> Response:
+        raw = _path_argument(request)
+        with self._changed:
+            environment = self._settled(env_id)
+            path = _pod_path(raw)
+            if environment.holds_folder(path):
+                raise _not_a_file(raw)
+            if environment.files.pop(path, None) is None:
+                raise _no_such_path(raw)
+        return Response(status=204)
 
     def _list_files(self, request: Request, env_id: str) -> Response:
         raw = request.args.get("path", _WORK)
@@ -1305,6 +1302,27 @@ class FakeController:
                 f"environment {env_id!r} could not be read",
                 "the environment is still there but the controller could not "
                 "read its record; try again",
+            )
+        return environment
+
+    def _settled(self, env_id: str) -> FakeEnvironment:
+        """The environment, readable, unless the controller's own work on its
+        tree — a bring-up or a delete — refuses a write or a delete there."""
+        environment = self._readable(env_id)
+        if environment.status == "deleting":
+            raise FakeControllerProblem(
+                409,
+                "conflict",
+                "the environment is being deleted",
+                "its files are no longer written or deleted",
+            )
+        if environment.status in _BRINGING_UP:
+            raise FakeControllerProblem(
+                409,
+                "conflict",
+                "the controller is building or removing the environment's /work",
+                "a create, start, reset or delete of the environment is pending "
+                "or under way; write or delete once the environment has settled",
             )
         return environment
 

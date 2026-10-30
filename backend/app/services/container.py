@@ -35,6 +35,7 @@ from app.services.fake_controller import FakeController
 from app.services.fake_notification_bridge import FakeNotificationBridge
 from app.services.fleet_consumer import FleetConsumer
 from app.services.frontend_version_service import FrontendVersionService
+from app.services.halt_file_service import HaltFileService
 from app.services.health_service import HealthService
 from app.services.item_service import ItemService
 from app.services.job_service import JobService
@@ -257,6 +258,19 @@ class ServiceContainer(containers.DeclarativeContainer):
         usage_halts=usage_halts,
     )
     register_for_background_startup(lambda c: c.usage_watcher())
+    # The halt file where a work item runs under a cooperative halt or its
+    # project's pause (design 2 §13.4); its job and timer register on the
+    # supervisor when built, before STARTUP.
+    halt_file_service = providers.Singleton(
+        HaltFileService,
+        container=__self__,
+        supervisor=supervisor,
+        usage_halts=usage_halts,
+        work_slots=work_slots,
+        week_halt=app_config.provided.week_halt,
+        five_hour_halt=app_config.provided.five_hour_halt,
+    )
+    register_for_background_startup(lambda c: c.halt_file_service())
     environment_service = providers.Singleton(
         EnvironmentService,
         container=__self__,
@@ -638,6 +652,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         document_service=document_service,
         attach_service=attach_service,
         job_service=job_service,
+        halt_file_service=halt_file_service,
     )
     # What a person does to an item: its answers and marks (F14, F32.4)
     item_service = providers.Factory(

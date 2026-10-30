@@ -40,6 +40,7 @@ from app.services.container import (
 from app.services.controller_client import HeadlessCreateRequest
 from app.services.environment_service import EnvironmentService
 from app.services.fleet_consumer import FleetConsumer
+from app.services.halt_file_service import HALT_FILE, HaltFileService
 from app.services.notification_reconcile_service import (
     NOTIFICATION_RETRY_TIMER,
     NotificationReconcileService,
@@ -418,6 +419,69 @@ class TestRelayWiring:
             fake_controller.play("env-a", name, raw_turn("turn_text"))
             fake_controller.finish("env-a", name)
             wait_until(lambda: _turns_ended(container, run_id) == 1, "the turn ended")
+        finally:
+            coordinator.shutdown()
+
+
+class TestHaltFileWiring:
+    def test_a_paused_projects_running_work_item_has_the_file_until_its_turn_ends(
+        self, committed_app: Flask, fake_controller: ServedFakeController
+    ) -> None:
+        container = committed_app.container
+        container.app_config.override(
+            AppSettings(controller_url=fake_controller.url, scheduler_tick_seconds=0.05)
+        )
+        client = client_of(container, fake_controller)
+        fake_controller.add_environment("env-a", status="running")
+        name = client.create_headless_session("env-a", HeadlessCreateRequest()).name
+        with scoped_session(container) as db:
+            person = User(
+                kind_code=UserKind.PERSON,
+                subject="subject-ada",
+                handle="ada",
+                name="Ada Example",
+                avatar_slot=1,
+            )
+            db.add_all([person, Environment(id="env-a", name="A", exempt=False)])
+            db.flush()
+            project = Project(
+                created_by_user_id=person.id,
+                state_code=ProjectState.OPEN,
+                slug="camp",
+                paused=True,
+            )
+            db.add(project)
+            db.flush()
+            run = AgentSession(
+                project_id=project.id,
+                environment_id="env-a",
+                kind_code="work",
+                cwd="/work/Example",
+                controller_session=name,
+                token_hash="1" * 64,
+                state_code=SessionState.IDLE,
+            )
+            db.add(run)
+            db.flush()
+            run_id = run.id
+        relays = container.relay_service()
+        assert isinstance(container.halt_file_service(), HaltFileService)
+        coordinator = container.lifecycle_coordinator()
+
+        coordinator.fire_startup()
+        try:
+            with scoped_session(container) as db:
+                relays.send(db, run_id, "Rename the badge")
+            wait_until(
+                lambda: fake_controller.file_text("env-a", HALT_FILE) == "",
+                "the halt file written where the work item runs",
+            )
+            fake_controller.play("env-a", name, raw_turn("turn_text"))
+            fake_controller.finish("env-a", name)
+            wait_until(
+                lambda: fake_controller.file_text("env-a", HALT_FILE) is None,
+                "the halt file deleted at the turn's end",
+            )
         finally:
             coordinator.shutdown()
 

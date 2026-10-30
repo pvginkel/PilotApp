@@ -53,6 +53,7 @@ from app.models.reference import (
 from app.schemas.projects import ProjectStatus
 from app.services.auth_service import AuthContext
 from app.services.chat_close_service import ChatCloseService
+from app.services.halt_file_service import HaltFileService
 from app.services.job_service import JobService
 from app.services.people_service import PeopleService
 from app.services.session_start_service import STOPPABLE, SessionStartService
@@ -234,6 +235,7 @@ class ProjectService:
         document_service: DocumentService,
         attach_service: AttachService,
         job_service: JobService,
+        halt_file_service: HaltFileService,
     ) -> None:
         self.db = db
         self.engine_bus = engine_bus
@@ -246,6 +248,7 @@ class ProjectService:
         self.document_service = document_service
         self.attach_service = attach_service
         self.job_service = job_service
+        self.halt_file_service = halt_file_service
 
     def tabs(self, auth: AuthContext, archived: bool) -> list[ProjectTab]:
         """The archived projects, or every other, in the order they were
@@ -424,8 +427,9 @@ class ProjectService:
         project's auto pilot is off and it is not paused, so Reopen leaves
         both so (F6). Archive keeps the pause, and Bring back returns it
         (F141.2). A pause and a resume move the reason on the project's held
-        work items' lines, and once a resume commits the gate opens for its
-        held starts (F141.5). Archive and Bring back raise the `manifest`
+        work items' lines; once either commits the halt files are swept
+        (F141.3), and once a resume commits the gate opens for its held
+        starts (F141.5). Archive and Bring back raise the `manifest`
         event once committed: the project's folder leaves the store's tree or
         comes back to it (F128.4).
 
@@ -748,8 +752,9 @@ class ProjectService:
 
     def _pause_moved(self, project: Project) -> None:
         """The project paused or resumed: its held work items' reasons moved
-        (`held_reason`), and on a resume the gate asked again once the
-        transaction commits (F141.5)."""
+        (`held_reason`); once the transaction commits, the halt file written
+        where its work items run or deleted where nothing holds it any more
+        (F141.3), and on a resume the gate asked again (F141.5)."""
         for session in self.db.scalars(
             select(AgentSession).where(
                 AgentSession.project_id == project.id,
@@ -757,6 +762,7 @@ class ProjectService:
             )
         ):
             work_moved(self.engine_bus, session)
+        after_commit(self.halt_file_service.request)
         if not project.paused:
             after_commit(self.session_start_service.release_held)
 

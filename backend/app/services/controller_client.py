@@ -758,6 +758,23 @@ class ControllerClient:
         )
         return _content_sha256(response, operation)
 
+    def delete_file(self, env_id: str, path: str) -> None:
+        """Delete the file at `path` on the environment's share: a stopped
+        environment's too. Nothing at the path, or no such environment,
+        answered `404`, is deleted. Its `409 conflict` is `write_file`'s, the
+        controller's own work on the tree, to retry once settled."""
+        try:
+            self._call(
+                "DELETE",
+                f"/environments/{_segment(env_id)}/file",
+                f"delete {path} in environment {env_id}",
+                expect=(204,),
+                params={"path": path},
+            )
+        except ControllerProblem as problem:
+            if problem.problem_type is not ControllerProblemType.NOT_FOUND:
+                raise
+
     def list_folder_files(self, env_id: str, path: str) -> list[str]:
         """Every file under the folder at `path`, its subfolders' included, in
         path order: each `path` joined with the file's path relative to it, so

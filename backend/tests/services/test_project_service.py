@@ -102,6 +102,13 @@ NEWCOMER = AuthContext(
 """A person at their first sign-in, with no handle yet."""
 
 
+class _HaltFiles:
+    """The halt files, as a transition asks for their sweep."""
+
+    def request(self) -> None:
+        raise AssertionError("the sweep runs only once the transition commits")
+
+
 def _make(container: ServiceContainer, **spec: Any) -> Project:
     spec.setdefault("members", ["ada"])
     return container.test_data_service().project(
@@ -2020,6 +2027,51 @@ class TestTransition:
         assert made.paused is paused
         # The grants are untouched: the switch stays where it is (F141.3).
         assert _standing(made) == before[1]
+
+    @pytest.mark.parametrize(
+        ("spec", "kind"),
+        [
+            ({"state": "open"}, TransitionKind.PAUSED),
+            ({"state": "open", "paused": True}, TransitionKind.RESUMED),
+            ({"state": "open", "paused": True}, TransitionKind.FINISHED),
+        ],
+    )
+    def test_a_pause_and_a_resume_sweep_the_halt_files_once_they_commit(
+        self, container: ServiceContainer, spec: dict[str, Any], kind: TransitionKind
+    ) -> None:
+        """The halt file written where the project's work items run, or
+        deleted where nothing holds it any more (F141.3)."""
+        made = _make(container, name="Camp", **spec)
+        halt_files = _HaltFiles()
+        container.halt_file_service.override(providers.Object(halt_files))
+        after_commit_module.clear_after_commit_callbacks()
+        try:
+            container.project_service().transition(ADA, made.id, kind)
+
+            assert halt_files.request in after_commit_module._callbacks.get()
+        finally:
+            after_commit_module.clear_after_commit_callbacks()
+
+    @pytest.mark.parametrize(
+        ("spec", "kind"),
+        [
+            ({"state": "open"}, TransitionKind.AUTOPILOT_ON),
+            ({"state": "open", "paused": True}, TransitionKind.ARCHIVED),
+        ],
+    )
+    def test_a_transition_that_keeps_the_pause_sweeps_nothing(
+        self, container: ServiceContainer, spec: dict[str, Any], kind: TransitionKind
+    ) -> None:
+        made = _make(container, name="Camp", **spec)
+        halt_files = _HaltFiles()
+        container.halt_file_service.override(providers.Object(halt_files))
+        after_commit_module.clear_after_commit_callbacks()
+        try:
+            container.project_service().transition(ADA, made.id, kind)
+
+            assert halt_files.request not in after_commit_module._callbacks.get()
+        finally:
+            after_commit_module.clear_after_commit_callbacks()
 
     def test_finish_resumes_a_paused_project_at_its_instant_by_its_person(
         self, container: ServiceContainer, session: DbSession, person: User

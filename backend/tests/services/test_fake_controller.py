@@ -1115,7 +1115,7 @@ class TestFakeController:
 
         assert response.status_code == 422
 
-    @pytest.mark.parametrize("method", ["GET", "PUT"])
+    @pytest.mark.parametrize("method", ["GET", "PUT", "DELETE"])
     def test_a_file_route_needs_a_path(
         self, fake: FakeController, http: Client, method: str
     ) -> None:
@@ -1154,6 +1154,27 @@ class TestFakeController:
 
         assert response.status_code == 422
         assert fake.environment("env-1").files == {}
+
+    def test_a_delete_of_nothing_at_the_path_or_in_no_environment_is_not_found(
+        self, fake: FakeController, http: Client
+    ) -> None:
+        # The client reads either as the file gone.
+        fake.add_environment("env-1")
+        fake.put_file("env-1", "/work/a.md", b"a")
+
+        deleted = http.delete(
+            "/environments/env-1/file?path=/work/a.md", headers=BEARER
+        )
+        again = http.delete("/environments/env-1/file?path=/work/a.md", headers=BEARER)
+        unknown = http.delete(
+            "/environments/env-2/file?path=/work/a.md", headers=BEARER
+        )
+
+        assert deleted.status_code == 204
+        assert [(r.status_code, r.get_json()["type"]) for r in (again, unknown)] == [
+            (404, "not-found"),
+            (404, "not-found"),
+        ]
 
     def test_a_reset_clears_the_tree_and_a_stop_keeps_it(
         self, fake: FakeController, http: Client
