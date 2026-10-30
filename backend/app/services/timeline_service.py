@@ -269,10 +269,8 @@ def work_status(
             stopper,
             retry.id,
             retry.created_at,
-            Item.done_at,
         )
         .join(Work, Work.id == AgentSession.id)
-        .join(Item, Item.id == Work.id)
         .outerjoin(Environment, Environment.id == AgentSession.environment_id)
         .join(Project, Project.id == AgentSession.project_id)
         .outerjoin(stopper, stopper.id == AgentSession.stopped_by_user_id)
@@ -305,13 +303,18 @@ def work_status(
         for session, *_ in rows
         if session.state_code is SessionState.HELD and session.kind_code == WORK_KIND
     }
-    halted_ends = {
+    owed_ends = [
         session.id
-        for session, *_, done_at in rows
-        if session.state_code is SessionState.IDLE
-        and session.nudge_owed_at is not None
-        and done_at is None
-    }
+        for session, *_ in rows
+        if session.state_code is SessionState.IDLE and session.nudge_owed_at is not None
+    ]
+    halted_ends = set(owed_ends) - set(
+        db.scalars(
+            select(Item.id).where(Item.id.in_(owed_ends), Item.done_at.is_not(None))
+        )
+        if owed_ends
+        else ()
+    )
     halted = halts.halted(db) if waiting or hard_stopped or halted_ends else None
     causes = dict.fromkeys(hard_stopped, _HALT_STOPS[halted]) | {
         session.id: _stop_cause(db, session.id)
@@ -411,7 +414,6 @@ def work_status(
             stopped_by,
             retry_id,
             retried_at,
-            _,
         ) in rows
     }
 
