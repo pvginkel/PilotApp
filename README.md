@@ -47,12 +47,16 @@ person's message starts the brain's session in the store, sandboxed and briefed,
 messages after it until it closes, after 55 quiet minutes or at Create project, Finish, Reopen and
 Archive, and acts on the record through its own tools, each call's effect shown where it ran, an
 answer given there reached from its block by *In the chat*, its chats projected for it as `chat.md`
-([`docs/chats.md`](docs/chats.md)). The brain's own repository holds its map, its rules, its four
-skills, and `pilot.py`, the script it edits a project's folder with, on the block DSL's own package
-([`docs/block-dsl.md`](docs/block-dsl.md)); its four skills' bodies are written: the chat's, the
-create skill's, the pre-ruling pass and the plan skill's modes. Each stage follows its own
-KubeCoder's fleet stream, and the dev stage's testing routes make projects there too. It is built on
-the ModernAppTemplate stack (Flask on PostgreSQL, React + Vite, Playwright), which CI builds and
-Argo CD deploys: every green build to the dev stage at `https://pilot-dev.home`, and production at
-`https://pilot.ginbov.nl` when the operator promotes it
+([`docs/chats.md`](docs/chats.md)); and the phone's notifications through the estate's bridge, under
+the token each person pastes on their profile: one standing notification per member and project,
+which reads its state and rises when something comes to wait on them, and an alarm per condition
+that holds all work, beside the profile's switch that turns the alarms off
+([`docs/notifications.md`](docs/notifications.md)). The brain's own repository holds its map, its
+rules, its four skills, and `pilot.py`, the script it edits a project's folder with, on the block
+DSL's own package ([`docs/block-dsl.md`](docs/block-dsl.md)); its four skills' bodies are written:
+the chat's, the create skill's, the pre-ruling pass and the plan skill's modes. Each stage follows
+its own KubeCoder's fleet stream, and the dev stage's testing routes make projects there too. It is
+built on the ModernAppTemplate stack (Flask on PostgreSQL, React + Vite, Playwright), which CI
+builds and Argo CD deploys: every green build to the dev stage at `https://pilot-dev.home`, and
+production at `https://pilot.ginbov.nl` when the operator promotes it
 ([`docs/deployment.md`](docs/deployment.md)).

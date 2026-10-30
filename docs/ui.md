@@ -130,7 +130,9 @@ In `src/components/shared/`:
 `.btn-danger`, `.btn-soft`, `.btn-ghost`), the text field (`.field` in a `.field-row` with its
 button beside it, level with its bottom edge), `.chip`, `.popover`, `.menu-pop`, `.dialog`,
 `.empty-state`, `.mention`, `.prose` (its lists with their bullets and numbers, a task list's
-checkboxes), `.fold` and `.link`; `.icon-cap`, an icon on its text's capitals in a flex row;
+checkboxes), `.fold` and `.link`; `.switch`, a button of role `switch` whose knob moves right while
+it is `aria-checked`, the head's auto pilot switch and the profile's alarms switch; `.icon-cap`, an
+icon on its text's capitals in a flex row;
 `.delta-fresh`; `.unread`, the chat's unread dot ([`chats.md`](chats.md)); and `@keyframes pulse`.
 
 ## The keys
@@ -249,6 +251,8 @@ The frontend suite's fixtures (`frontend/tests/support/fixtures.ts`):
   `goldLine(code)` read the gold bar.
 - `controller` drives the worker's fake controller, and `conditions` reads what the gold bar reads
   ([`work.md`](work.md)).
+- `bridge` adds registrations to the worker's fake notification bridge and reads what they show
+  ([`notifications.md`](notifications.md)).
 - `links`: `set({ticket_url_template?, environment_link_base_url?})` sets the link settings for the
   spec, a setting left out unset, and unsets both after it, through `PUT /api/testing/links`, which
   answers only in testing mode and refuses what the boot refuses; `environment(id, name)` puts an

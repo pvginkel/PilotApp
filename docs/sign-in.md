@@ -49,14 +49,15 @@ A person is a `users` row of kind `person` ([`record.md`](record.md)), keyed by 
 subject, made when they choose their handle. The endpoints are `backend/app/api/people.py`, on
 `PeopleService` (`backend/app/services/people_service.py`).
 
-- **`GET /api/people/self`** answers the signed-in person, `{handle, handle_prefill, name,
-  initials, avatar_slot}`, and is the sign-in on the record too, since the template's OIDC callback
-  has no hook for the app: for a person with a row it refreshes the email (the token's, or none),
-  the last seen time, and the name, which a token without one leaves as it was. Before the row,
-  `handle` and `avatar_slot` are null, and `handle_prefill` is what the handle step offers: the
-  name's first word, case-folded, folded to ASCII and stripped of everything but lower-case
-  letters, digits and hyphens ("Émile" gives `emile`), or empty. `name` and `initials` are null
-  for a token with no name or a blank one. Once the handle is chosen, `handle_prefill` is null.
+- **`GET /api/people/self`** answers the signed-in person, `{handle, handle_prefill, name, initials,
+  avatar_slot, notification_token_set, alarms}`, and is the sign-in on the record too, since the
+  template's OIDC callback has no hook for the app: for a person with a row it refreshes the email
+  (the token's, or none), the last seen time, and the name, which a token without one leaves as it
+  was. Before the row, `handle`, `avatar_slot`, `notification_token_set` and `alarms` are null, and
+  `handle_prefill` is what the handle step offers: the name's first word, case-folded, folded to
+  ASCII and stripped of everything but lower-case letters, digits and hyphens ("Émile" gives
+  `emile`), or empty. `name` and `initials` are null for a token with no name or a blank one. Once
+  the handle is chosen, `handle_prefill` is null.
 - **`POST /api/people/self/handle`** `{handle}` makes the row and answers `201` with the same body.
   A handle is lower-case letters, digits and hyphens (else `400`), not `agent`, which is Pilot's,
   not another person's, and chosen once: each of those is a `409`. The refusal's reason is the
@@ -78,8 +79,10 @@ chooses, and the Choose button. A refusal shows as a toast and keeps the typed t
 handle is chosen, the address the person asked for opens.
 
 **The profile page**, `/profile` (`frontend/src/routes/_shell/profile.tsx`), opened from Profile in
-the same menu, shows the person's avatar, their name and their handle, and nothing to edit: a
-handle never changes.
+the same menu, shows the person's avatar, their name and their handle, which never changes, and
+under it their notification token and their alarms switch, the page's only fields, with their
+endpoints, on [`notifications.md`](notifications.md). The self read's `notification_token_set`
+says whether a token is set, never the token, and `alarms` where the switch stands.
 
 ## Without sign-in
 

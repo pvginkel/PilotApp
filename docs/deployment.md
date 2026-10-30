@@ -154,6 +154,15 @@ objects into each stage's namespace:
   production as on dev. On either stage a controller that does not answer shows as the gold bar's
   line over the project list ([`ui.md`](ui.md)); `kubecoder-dev` is on the dev cluster, which is
   often powered off, and the dev stage's bar then says so.
+  The backend notifies each person through the notification bridge
+  ([`notifications.md`](notifications.md)) at `notificationBridge.url` in the values, as
+  `NOTIFICATION_BRIDGE_URL`, required, so that a stage without it fails its render:
+  `http://notification-bridge.notifications-prd.svc:8090` on both stages, the bridge's in-cluster
+  Service on the prd cluster, where both run. `migrate` gets none; the backend refuses to start
+  without it. The people's bridge registrations are made for production: the dev stage has none of
+  its own (D090), so a made-up token saved on pilot-dev is refused. The bridge knows a registration
+  by its token alone, so a person's real token saved there is taken, and pilot-dev's notifications
+  and alarms then reach their phone, its alarms under the same sequence ids as production's.
 - **Service `pilot`**, port 80 to the UI, its annotation `nginx.webathome.org/server-name` the
   stage's host. Production's `nginx.webathome.org/is-public: "true"` has the estate's front door
   serve it as a public site, over HTTPS with a Let's Encrypt certificate. Dev's `is-public: "false"`
@@ -238,7 +247,10 @@ reads its own OpenBao leaves, under `eso/prd/pilot/<stage>/`, through the `openb
   as `PILOT_SYNC_TOKEN`.
 - **Flask's `SECRET_KEY` and the drain endpoint's `DRAIN_AUTH_KEY`** are generated in each
   namespace, once, by External Secrets `Password` generators, into the Secrets `pilot-secret-key`
-  and `pilot-drain-auth`.
+  and `pilot-drain-auth`. `SECRET_KEY` also seals the notification tokens people paste on their
+  profile ([`notifications.md`](notifications.md)), and a new key opens none of them: recreating
+  `pilot-secret-key` stops every person's notifications and alarms until they paste their token
+  again, and their Clear is refused until then.
 - **The database password** is Terraform's (above).
 
 A secret a later feature needs comes the same way: a value from outside the cluster is an OpenBao

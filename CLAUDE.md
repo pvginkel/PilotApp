@@ -11,7 +11,9 @@ behind it (`backend/app/engine/`), the sync of the store's tree, the server's jo
 controller, Pilot's MCP server with the worker's round trip, the project's chat in the side panel,
 with the brain's tools, a new project: the plus, its definition chat and draft, Create project and
 its setup, Pilot's jobs after a worker's turn and an item of its own done, the pass's claims and its
-questions to the writer, the switch's dialog and the archive question. Every green build of
+questions to the writer, the switch's dialog and the archive question, and the phone's
+notifications through the bridge, a project's and the alarms, with the profile's token and switch.
+Every green build of
 `main` deploys itself to the dev stage at `https://pilot-dev.home`, and production at
 `https://pilot.ginbov.nl` runs what the operator promotes from there
 ([`docs/deployment.md`](docs/deployment.md)). Version 1 is built from the design record in
@@ -114,7 +116,7 @@ the template gives an app no place for a plugin; the Playwright backends' own se
 in the app-owned `frontend/tests/support/backend-env-extensions.ts`, given the backend's URL, where
 the template gives an app no place for a backend setting under Playwright: this app's points each
 backend's controller at the fake it serves itself, and its chats at a store environment in that
-fake; `run-suite`'s Playwright worker count,
+fake, and its notification bridge at the bridge's fake it serves too; `run-suite`'s Playwright worker count,
 which `tools/suite_runner/local.py` reads from `PLAYWRIGHT_WORKERS` when no `--workers` is given,
 where the library's `modernApp.test` fixes run-suite's flags and so left CI on the Playwright
 config's count; the completion of `useSSETask` in `frontend/src/hooks/use-sse-task.ts`, which
@@ -217,3 +219,6 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
   the clarification run, its write-back and the run's continuation; a project's chat and a draft's
   definition chat, its start in the store, its brief, its Stop, its close, `chat.md`, and its Chat
   tab, composer, Discuss and *In the chat*.
+- [`docs/notifications.md`](docs/notifications.md): the phone's notifications through the bridge, a
+  project's per member and the alarms per condition, their reconcile and retry, the profile's
+  token and alarms switch, and the bridge's fake.

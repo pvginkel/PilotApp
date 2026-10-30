@@ -121,8 +121,11 @@ While it holds, the gate holds every start ([`sessions.md`](sessions.md)); a run
 passes no gate and re-polls as it would. Each turn of it logs `The controller is unreachable:
 starts are held` or `The controller answers again: held starts go on`, and its listeners run in
 the thread that turned it: the start service releases the held starts at the off, and
-`ConditionService` sends the conditions to the browsers, the gold bar's (`GET /api/conditions`,
-[`ui.md`](ui.md)).
+`ConditionService` (`backend/app/services/condition_service.py`) tells its own listeners, the
+alarms' reconcile among them ([`notifications.md`](notifications.md)), then sends the conditions
+to the browsers, the gold bar's (`GET /api/conditions`, [`ui.md`](ui.md)). A listener subscribes
+with `ConditionService.subscribe(listener)` and runs in the thread that told, which may be inside
+another transaction.
 
 ## The fleet stream
 

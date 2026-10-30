@@ -112,8 +112,9 @@ that project, so it is fixed; an input validated at the boundary is not checked 
 Every change ships with a test. A feature without one is incomplete, and "verified by hand" is no
 substitute: the point of a test is that it runs again next time.
 
-`kc project test` is hermetic. It reaches no KubeCoder controller, no Claude session, no YouTrack
-and no GitHub: the server's jobs are tested against a fake controller and a fake sidecar, the block
+`kc project test` is hermetic. It reaches no KubeCoder controller, no notification bridge, no
+Claude session, no YouTrack and no GitHub: the server's jobs are tested against a fake controller, a
+fake sidecar and a fake bridge, the block
 DSL as a pure library, and the UI through the Playwright suite against the backend it boots per
 worker. It is green from any environment with no credentials. Checks that need the real fleet belong
 to the test phase ([`slice-test-plan.md`](slice-test-plan.md)), not to the suite.

@@ -4,7 +4,8 @@ The backend's long-lived work runs as threads of its own process, under the supe
 (`backend/app/services/supervisor.py`, the container's `supervisor` singleton): the fleet stream's
 consumer, a relay per session with a turn in flight, an interrupt per turn stopped under it, a start
 per session coming up and the release of the held ones, the reads and the write-backs of the
-documents a work item's run registered, and the timers.
+documents a work item's run registered, the standing notifications' and the alarms' sends, and the
+timers.
 Every job resumes from rows, so nothing drains to completion: a roll or a crash costs a restart of
 the job, never its work.
 
@@ -22,12 +23,21 @@ the job, never its work.
 | `chat-close` | a timer | closes the project chats that have stood quiet past their timeout ([`chats.md`](chats.md)) |
 | `relay-watchdog` | a timer | restarts a relay the fleet stream shows stuck or stopped ([`sessions.md`](sessions.md)) |
 | `controller-probe` | a timer | while the controller is unreachable, asks whether it answers ([`controller.md`](controller.md)) |
+| `notification:<project id>` | a loop of the job `notification` | brings each member's standing notification of the project to what the record says ([`notifications.md`](notifications.md)) |
+| `notification-clear:<n>` | a loop of the job `notification-clear` | dismisses, once each, a person's project notifications through the token they just cleared ([`notifications.md`](notifications.md)) |
+| `alarm` | a job with one loop | brings every person's alarms to the conditions that hold ([`notifications.md`](notifications.md)) |
+| `alarm-clear:<n>` | a loop of the job `alarm-clear` | dismisses, once each, a person's alarms through the token they just cleared ([`notifications.md`](notifications.md)) |
+| `notification-retry` | a timer | asks for the reconcile of each project with a notification owed past its retry ([`notifications.md`](notifications.md)) |
+| `alarm-retry` | a timer | asks for the alarms' reconcile when the alarms due have turned, or while one is owed past its retry ([`notifications.md`](notifications.md)) |
 
-Each needs the controller. With `CONTROLLER_URL` unset (the backend suite, a dev stack without the
-credential), none of them starts, and the log says so once at STARTUP: `No controller configured
-(CONTROLLER_URL unset): the jobs and timers that need one do not start (<names>)`. Production
-refuses to start without `CONTROLLER_URL` and `CONTROLLER_TOKEN`; the check is in the server's
-background start, which the CLI, and so the `migrate` init container, never runs.
+Each but the notifications' and the alarms' needs the controller. With `CONTROLLER_URL` unset (the
+backend suite, a dev stack without the credential), none of them starts, and the log says so once at
+STARTUP: `No controller configured (CONTROLLER_URL unset): the jobs and timers that need one do not
+start (<names>)`. Production refuses to start without `CONTROLLER_URL` and `CONTROLLER_TOKEN`; the
+check is in the server's background start, which the CLI, and so the `migrate` init container, never
+runs. The notifications' and the alarms' need the notification bridge instead: with
+`NOTIFICATION_BRIDGE_URL` unset (the backend suite, the dev stack), none of them is registered, and
+production refuses to start so.
 
 ## Jobs, loops and timers
 
@@ -37,9 +47,9 @@ a registration after STARTUP raises `InvalidOperationException`.
 - **A job**: `register_job(job, *, needs_controller, reconcile=None)`. Its reconcile,
   `Callable[[Session], None]`, runs once at STARTUP in a database session of its own, which commits
   when it returns and rolls back when it raises. The reconciles run in registration order (`fleet`,
-  `read`, `relay`, `interrupt`, `start`, `write-back`) on a thread of the supervisor's, not the
-  lifecycle coordinator's, so the server serves while they run. One that raises is logged, and its
-  job's loops start regardless.
+  `read`, `relay`, `interrupt`, `start`, `write-back`, `notification`, `alarm`) on a thread of the
+  supervisor's, not the lifecycle coordinator's, so the server serves while they run. One that
+  raises is logged, and its job's loops start regardless.
 - **A loop**: `start_loop(job, run, key=None, *, again=False) -> bool` runs `run(handle)` on a
   daemon thread named `job` or `job:key`, one live loop per name. A loop requested before its job's
   reconcile has run waits for it. A request for a name with a live or waiting loop does nothing, a
@@ -57,9 +67,9 @@ a registration after STARTUP raises `InvalidOperationException`.
   stopping the loop, and is True when it closed something.
 - **A timer**: `register_timer(timer, run, *, needs_controller)`. The scheduler runs the timers in
   registration order (`environment-shutdown`, `environment-delete`, `chat-close`, `relay-watchdog`,
-  then `controller-probe`), the first round at STARTUP, then each round `SCHEDULER_TICK_SECONDS`
-  after the last ended. Each run has a database session of its own; one that raises is logged and
-  counted, and the rest of the round runs.
+  `controller-probe`, `notification-retry`, then `alarm-retry`), the first round at STARTUP, then
+  each round `SCHEDULER_TICK_SECONDS` after the last ended. Each run has a database session of its
+  own; one that raises is logged and counted, and the rest of the round runs.
 
 The suite and the CLI never fire STARTUP, so there a requested loop never runs. A test that needs
 loops builds a supervisor on a lifecycle coordinator of its own with the `supervise` fixture
@@ -82,8 +92,9 @@ write a job makes is conditional on rows it reads under their lock: a relay, a s
 a held one and a send under the Session row's, the shutdown and delete timers and a start's take
 under the Environment row's and the chat-close timer under a chat's Session's, skipping one another
 process holds, and a read's or a write-back's take
-under the Project's, the Session's and the Document's rows, re-checked there. The watchdog restarts
-only this process's relays.
+under the Project's, the Session's and the Document's rows, re-checked there. A notification's or an
+alarm's sends take turns under an advisory lock of their own, and each write is dropped when the
+person's token changed meanwhile. The watchdog restarts only this process's relays.
 
 ## Settings and metrics
 

@@ -753,10 +753,12 @@ POD=$(cexec iac kubectl -n pilot-dev get pods -l app.kubernetes.io/name=pilot -o
    `grep` for the lines a check wants, never whole, and no line of a signed-in request is printed.
 
 3. **The backend's readiness, on the pod's IP, its controller and its fleet stream.** `200` with
-   `"status": "ok"`: `checks.database` `ok` (connected, no migration pending) and
+   `"status": "ok"`: `checks.database` `ok` (connected, no migration pending),
    `checks.controller` `ok` (the controller's `/readyz` answers, verified against the homelab root
-   the chart mounts). The `controller` check is not critical: a controller that does not answer
-   reads `"status": "degraded"`, still `200`, and is a finding here. The controller is
+   the chart mounts) and `checks.notification_bridge` `ok` (the notification bridge's `/healthz`
+   answers, [`notifications.md`](notifications.md)). Neither of the last two is critical: a
+   controller or a bridge that does not answer reads `"status": "degraded"`, still `200`, and is a
+   finding here. The controller is
    `kubecoder-dev`'s, never the operator's fleet:
 
    ```bash
