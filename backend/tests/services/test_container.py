@@ -31,6 +31,7 @@ from app.services.container import (
     ServiceContainer,
     require_pilot_server,
     start_controller_client,
+    start_notification_bridge_client,
 )
 from app.services.controller_client import HeadlessCreateRequest
 from app.services.environment_service import EnvironmentService
@@ -46,6 +47,7 @@ from tests.conftest_infrastructure import (
     _dispose_app,
 )
 from tests.support.fake_controller import ServedFakeController, client_of, raw_turn
+from tests.support.fake_notification_bridge import ServedFakeNotificationBridge
 from tests.support.supervisor import metric_value, wait_until
 from tests.support.tls import invent_ca
 
@@ -165,6 +167,50 @@ class TestStartControllerClient:
         )
 
         _dispose_app(production)
+
+
+class TestStartNotificationBridgeClient:
+    def test_production_refuses_to_start_without_a_bridge(
+        self, test_settings: Settings
+    ) -> None:
+        container = _container(
+            test_settings.model_copy(update={"flask_env": "production"}),
+            AppSettings(),
+        )
+
+        with pytest.raises(
+            ConfigurationError, match="NOTIFICATION_BRIDGE_URL must be set"
+        ):
+            start_notification_bridge_client(container)
+
+    @pytest.mark.parametrize("flask_env", ["production", "testing"])
+    def test_with_a_bridge_it_builds_its_client_and_check(
+        self,
+        app: Flask,
+        test_settings: Settings,
+        fake_notification_bridge: ServedFakeNotificationBridge,
+        flask_env: str,
+    ) -> None:
+        container = _container(
+            test_settings.model_copy(update={"flask_env": flask_env}),
+            AppSettings(notification_bridge_url=fake_notification_bridge.url),
+        )
+
+        start_notification_bridge_client(container)
+
+        assert _checks(app, container)["notification_bridge"] == {
+            "status": "ok",
+            "critical": False,
+        }
+
+    def test_with_no_bridge_the_app_runs_without_one(
+        self, app: Flask, test_settings: Settings
+    ) -> None:
+        container = _container(test_settings, AppSettings())
+
+        start_notification_bridge_client(container)
+
+        assert "notification_bridge" not in _checks(app, container)
 
 
 class TestRequirePilotServer:

@@ -31,6 +31,7 @@ from app.services.draft_service import DraftService
 from app.services.effect_service import EffectService
 from app.services.environment_service import EnvironmentService
 from app.services.fake_controller import FakeController
+from app.services.fake_notification_bridge import FakeNotificationBridge
 from app.services.fleet_consumer import FleetConsumer
 from app.services.frontend_version_service import FrontendVersionService
 from app.services.health_service import HealthService
@@ -38,6 +39,7 @@ from app.services.item_service import ItemService
 from app.services.job_service import JobService
 from app.services.link_service import LinkService
 from app.services.metrics_service import MetricsService
+from app.services.notification_bridge_client import NotificationBridgeClient
 from app.services.notification_token_cipher import NotificationTokenCipher
 from app.services.oidc_client_service import OidcClientService
 from app.services.people_service import PeopleService
@@ -94,6 +96,17 @@ def start_controller_client(container: "ServiceContainer") -> None:
         )
     if app_config.controller_url is not None:
         container.controller_client()
+
+
+def start_notification_bridge_client(container: "ServiceContainer") -> None:
+    """Build the notification bridge's client, which registers its readiness
+    check, when a bridge is configured. Production refuses to start without
+    one. The CLI never gets here, as `start_controller_client` says."""
+    bridge_url = container.app_config().notification_bridge_url
+    if container.config().is_production and bridge_url is None:
+        raise ConfigurationError("NOTIFICATION_BRIDGE_URL must be set in production")
+    if bridge_url is not None:
+        container.notification_bridge_client()
 
 
 def require_pilot_server(container: "ServiceContainer") -> None:
@@ -167,10 +180,23 @@ class ServiceContainer(containers.DeclarativeContainer):
     )
     register_for_background_startup(lambda c: require_pilot_server(c))
 
+    # The notification bridge's client (F94, F142); its starter, too, starts no
+    # thread.
+    notification_bridge_client = providers.Singleton(
+        NotificationBridgeClient,
+        base_url=app_config.provided.notification_bridge_url,
+        health_service=health_service,
+    )
+    register_for_background_startup(lambda c: start_notification_bridge_client(c))
+
     # The controller's fake, served under /api/testing/controller in testing mode
     fake_controller = providers.Singleton(
         FakeController, token=app_config.provided.controller_token
     )
+
+    # The notification bridge's fake, served under
+    # /api/testing/notification-bridge in testing mode
+    fake_notification_bridge = providers.Singleton(FakeNotificationBridge)
 
     # The supervisor: the long-lived jobs' threads (design 2 §7). Built by its
     # starter so that it hears STARTUP; jobs register on it before then.

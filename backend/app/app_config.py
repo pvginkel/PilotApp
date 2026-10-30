@@ -80,6 +80,13 @@ class AppEnvironment(BaseSettings):
             "empty leaves it to requests' own trust"
         ),
     )
+    NOTIFICATION_BRIDGE_URL: str = Field(
+        default="",
+        description=(
+            "The notification bridge's base URL, through which Pilot notifies each "
+            "person; empty runs the app with no bridge"
+        ),
+    )
     MCP_SERVER_URL: str = Field(
         default="",
         description=(
@@ -209,6 +216,17 @@ class AppSettings(BaseModel):
     """The CAs that verify the controller's certificate, PEM; None leaves it to
     requests' own trust."""
 
+    notification_bridge_url: str | None = None
+    """The notification bridge's base URL (F94, F142); None runs the app with
+    no bridge, and production refuses to start so."""
+
+    @field_validator("notification_bridge_url")
+    @classmethod
+    def _is_a_bridge_address(cls, url: str | None) -> str | None:
+        if url is not None and not url.startswith(("https://", "http://")):
+            raise ValueError("NOTIFICATION_BRIDGE_URL must be an http(s) address")
+        return url
+
     mcp_server_url: str | None = None
     """Pilot's MCP server's endpoint as a session reaches it, which every
     headless create Pilot makes hands the session (TD §4.5); None hands it
@@ -276,6 +294,7 @@ class AppSettings(BaseModel):
             controller_ca_file=(
                 Path(env.CONTROLLER_CA_FILE) if env.CONTROLLER_CA_FILE else None
             ),
+            notification_bridge_url=env.NOTIFICATION_BRIDGE_URL or None,
             mcp_server_url=env.MCP_SERVER_URL or None,
             scheduler_tick_seconds=env.SCHEDULER_TICK_SECONDS,
             environment_stop_after_seconds=env.ENVIRONMENT_STOP_AFTER_SECONDS,

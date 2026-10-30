@@ -12755,6 +12755,58 @@
         "x-required-role": "editor"
       }
     },
+    "/api/testing/notification-bridge/{path}": {
+      "get": {
+        "description": "",
+        "operationId": "get__api_testing_notification-bridge_{path}",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "format": "path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {},
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "The fake notification bridge's answer to its route at `path`.",
+        "tags": [],
+        "x-required-role": "editor"
+      },
+      "post": {
+        "description": "",
+        "operationId": "post__api_testing_notification-bridge_{path}",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "format": "path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {},
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "The fake notification bridge's answer to its route at `path`.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
     "/api/testing/people": {
       "post": {
         "description": "Returns:     201: The person, with the avatar slot they took     400: The handle is not lower-case letters, digits and hyphens     409: The handle is Pilot's or another person's",
