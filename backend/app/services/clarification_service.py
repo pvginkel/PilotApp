@@ -371,12 +371,14 @@ class ClarificationService:
         )
 
     def replied(self, session: AgentSession, reply: str | None, at: datetime) -> None:
-        """The worker's run `session` done at its turn's end `at`, in the
-        caller's transaction: a clarification run's reply, its turn's final
-        text, recorded with `at` (DB 255), the asked documents' screens told;
-        a turn that ended with no text leaves it none."""
+        """The worker's run `session` at a turn's end `at` with no error, done
+        or halted, in the caller's transaction: a clarification run's reply,
+        its turn's final text, recorded with `at` (DB 255), the asked
+        documents' screens told; a turn that ended with no text leaves it
+        none, and a reply recorded is never replaced, by a nudge's turn
+        among others."""
         run = self.db.get(ClarificationRun, session.id)
-        if run is None or not reply:
+        if run is None or not reply or run.reply is not None:
             return
         run.reply = reply
         run.replied_at = at

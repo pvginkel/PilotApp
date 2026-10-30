@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import pytest
 from flask import Flask
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import create_app
@@ -19,7 +20,7 @@ from app.config import Settings
 from app.database import scoped_session
 from app.engine.bus import ProjectChanged
 from app.exceptions import ConfigurationError
-from app.models import Chat, Environment, Project, ProjectMember, Turn, User
+from app.models import Chat, Environment, Item, Project, ProjectMember, Turn, User
 from app.models import Session as AgentSession
 from app.models.reference import (
     ChatKind,
@@ -48,7 +49,7 @@ from app.services.notification_reconcile_service import (
 from app.services.pilot_server import token_hash
 from app.services.relay_service import RelayService
 from app.services.relay_watchdog import WATCHDOG_TIMER, RelayWatchdog
-from app.services.session_start_service import SessionStartService
+from app.services.session_start_service import NUDGE, SessionStartService
 from app.services.supervisor import TIMER_RUNS_TOTAL, Supervisor
 from app.services.usage_halts import TIMER as USAGE_TIMER
 from app.services.usage_halts import UsageWatcher
@@ -62,6 +63,7 @@ from tests.support.fake_notification_bridge import (
     ServedFakeNotificationBridge,
     bridge_client_of,
 )
+from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
 from tests.support.supervisor import listening, metric_value, wait_until
 from tests.support.tls import invent_ca
 
@@ -549,6 +551,101 @@ class TestHardStopWiring:
             coordinator.shutdown()
 
 
+class TestNudgeWiring:
+    def test_a_reading_under_the_limit_nudges_the_run_its_halted_turn_left_open(
+        self, committed_app: Flask, fake_controller: ServedFakeController
+    ) -> None:
+        """The relay's halted end, the fleet stream's reading, the watcher's
+        lift, the start service's nudge: the run carried on, done at the
+        nudge's end (F135.3, F135.8; DB 232)."""
+        container = committed_app.container
+        container.app_config.override(
+            AppSettings(
+                controller_url=fake_controller.url,
+                scheduler_tick_seconds=0.05,
+                store_environment_id=STORE_ENVIRONMENT_ID,
+            )
+        )
+        client = client_of(container, fake_controller)
+        fake_controller.add_environment("env-a", status="running")
+        name = client.create_headless_session("env-a", HeadlessCreateRequest()).name
+        now = datetime.now(UTC)
+        with scoped_session(container) as db:
+            person = User(
+                kind_code=UserKind.PERSON,
+                subject="subject-ada",
+                handle="ada",
+                name="Ada Example",
+                avatar_slot=1,
+            )
+            db.add_all(
+                [
+                    person,
+                    Environment(
+                        id="env-a",
+                        name="A",
+                        exempt=False,
+                        repo="example/Example",
+                        server_created_at=now,
+                        server_started_at=now,
+                        started_pod_at=now,
+                        last_state="running",
+                    ),
+                ]
+            )
+            db.flush()
+            project = Project(
+                created_by_user_id=person.id, state_code=ProjectState.OPEN, slug="camp"
+            )
+            db.add(project)
+            db.flush()
+            run = AgentSession(
+                project_id=project.id,
+                environment_id="env-a",
+                kind_code="work",
+                cwd="/work/Example",
+                controller_session=name,
+                conversation_id="conv-1",
+                token_hash="1" * 64,
+                state_code=SessionState.IDLE,
+            )
+            db.add(run)
+            db.flush()
+            container.record_service().place_work(project, run, "Renaming the badge")
+            run_id = run.id
+        relays = container.relay_service()
+        assert isinstance(container.fleet_consumer(), FleetConsumer)
+        assert isinstance(container.usage_watcher(), UsageWatcher)
+        assert isinstance(container.halt_file_service(), HaltFileService)
+        assert isinstance(container.session_start_service(), SessionStartService)
+        coordinator = container.lifecycle_coordinator()
+
+        coordinator.fire_startup()
+        try:
+            with scoped_session(container) as db:
+                relays.send(db, run_id, "Rename the badge")
+            fake_controller.usage(seven_day=0.95, five_hour=0.1)
+            wait_until(lambda: _halted(container), "the week's halt holding")
+            fake_controller.finish("env-a", name)
+            wait_until(
+                lambda: _owed(container, run_id),
+                "the turn ended halted, its nudge owed",
+            )
+
+            fake_controller.usage(seven_day=0.5, five_hour=0.1)
+
+            wait_until(
+                lambda: _state(container, run_id) == SessionState.RUNNING,
+                "the nudge sent",
+            )
+            assert not _owed(container, run_id)
+            assert _last_message(container, run_id) == NUDGE
+            fake_controller.finish("env-a", name)
+            wait_until(lambda: _done(container, run_id), "the run done")
+        finally:
+            coordinator.shutdown()
+
+
 class TestRelayWatchdogWiring:
     def test_the_watchdogs_timer_runs_from_startup(
         self, committed_app: Flask, fake_controller: ServedFakeController
@@ -950,6 +1047,31 @@ def _stopped_owed(container: ServiceContainer, run_id: uuid.UUID) -> bool:
     with scoped_session(container) as db:
         run = db.get_one(AgentSession, run_id)
         return run.state_code == SessionState.STOPPED and run.nudge_owed_at is not None
+
+
+def _halted(container: ServiceContainer) -> bool:
+    with scoped_session(container) as db:
+        return container.usage_halts().halted(db) is not None
+
+
+def _owed(container: ServiceContainer, run_id: uuid.UUID) -> bool:
+    with scoped_session(container) as db:
+        return db.get_one(AgentSession, run_id).nudge_owed_at is not None
+
+
+def _last_message(container: ServiceContainer, run_id: uuid.UUID) -> str:
+    with scoped_session(container) as db:
+        return db.scalars(
+            select(Turn.message)
+            .where(Turn.session_id == run_id)
+            .order_by(Turn.seq.desc())
+            .limit(1)
+        ).one()
+
+
+def _done(container: ServiceContainer, run_id: uuid.UUID) -> bool:
+    with scoped_session(container) as db:
+        return db.get_one(Item, run_id).done_at is not None
 
 
 def _turns_ended(container: ServiceContainer, run_id: uuid.UUID) -> int | None:

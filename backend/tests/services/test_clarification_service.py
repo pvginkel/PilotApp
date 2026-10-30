@@ -5,7 +5,7 @@ document's clarification and each asked block's part of the reply."""
 
 import uuid
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from dependency_injector import providers
@@ -489,6 +489,30 @@ class TestReplied:
         _service(container).replied(clarifying, reply, AT)
 
         assert (clarification.reply, clarification.replied_at) == (None, None)
+
+    def test_a_reply_recorded_is_never_replaced(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """DB 255: written once, at the turn end that carries its final
+        text; a nudge's turn, after a turn ended under a halt, replaces it
+        not."""
+        clarifying, clarification = self._clarification(
+            session, container, project, environment
+        )
+        _service(container).replied(clarifying, "## D1\nFriday the 3rd.", AT)
+
+        _service(container).replied(
+            clarifying, "Nothing is left.", AT + timedelta(minutes=5)
+        )
+
+        assert (clarification.reply, clarification.replied_at) == (
+            "## D1\nFriday the 3rd.",
+            AT,
+        )
 
     def test_another_runs_turn_end_records_nothing(
         self,

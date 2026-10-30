@@ -60,13 +60,18 @@ class _Watcher:
 
 
 class _Gate:
-    """The session start, as the watcher asks it again."""
+    """The session start, as the watcher asks it again and for the nudges
+    owed."""
 
     def __init__(self) -> None:
         self.released = 0
+        self.nudged = 0
 
     def release_held(self) -> None:
         self.released += 1
+
+    def send_nudges(self) -> None:
+        self.nudged += 1
 
 
 @pytest.fixture
@@ -136,7 +141,7 @@ class TestMakeQuotaOverrule:
         assert response.status_code == 201
         assert frame is not None
         assert json.loads(frame.removeprefix("data: "))["payload"] == {"conditions": []}
-        assert gate.released == 1
+        assert (gate.released, gate.nudged) == (1, 1)
 
     def test_run_out_at_the_second_limit_has_no_target(
         self,

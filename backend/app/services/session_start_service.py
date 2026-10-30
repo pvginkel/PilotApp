@@ -82,6 +82,16 @@ created when it has none or that one is gone or deleting. A work item placed
 before slice 020, in an environment Pilot did not create, is never started
 there (F143.1; review A2).
 
+A nudge (F135.3, F141.3; DB 232) carries a work item on as a Resume does,
+its Turn the nudge's words: owed to one the hard stop stopped, and to one
+whose turn ended under a cooperative usage halt or its project's pause
+(`RelayService`), it goes once nothing holds it — every usage halt lifted,
+the project neither paused, finished nor archived, the item open — on a loop
+of its own, `start:nudges`. A halt's turn (`UsageWatcher`) and a project's
+resume ask for that loop; so do the job's reconcile, and the nudges' timer on
+every tick while one owed is held by nothing. A person's Resume clears the
+nudge owed: one continuation, never two.
+
 The close that leaves no document of a work item's ended run open continues its
 conversation (`continue_run`; decision 44, F26.7): a new work item placed in the
 close's transaction, its Session in the run's environment from then on, never
@@ -100,7 +110,7 @@ from datetime import UTC, datetime
 from functools import partial
 from typing import TYPE_CHECKING
 
-from sqlalchemy import select
+from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
 from app.core_exceptions import ExternalServiceException
@@ -114,6 +124,7 @@ from app.models import (
     Environment,
     Item,
     Project,
+    ProjectTransition,
     Turn,
     User,
     Work,
@@ -123,6 +134,7 @@ from app.models.reference import (
     ProjectState,
     RecordKind,
     SessionState,
+    TransitionKind,
     UserKind,
     WorkTrigger,
 )
@@ -177,7 +189,12 @@ HARD_STOP_KEY = "hard-stop"
 """The key of the start job's loop that stops the running work items under a
 usage halt's hard stop."""
 
+NUDGE_KEY = "nudges"
+"""The key of the start job's loop that sends the nudges owed."""
+
 PROBE_TIMER = "controller-probe"
+
+NUDGE_TIMER = "nudges"
 
 STARTING = "starting"
 """The `type` of the `server` record that names a phase of the start."""
@@ -227,6 +244,21 @@ _RESUME_REFUSALS = {
     SessionState.IDLE: "its turn has ended",
     SessionState.ENDED: "its session has ended",
 }
+
+_NUDGED = "This is a nudge to allow you to complete any outstanding work, if any."
+
+NUDGE = f"The subscription quota ran out. {_NUDGED}"
+"""The nudge to a work item found ended under a usage halt (F135.3)."""
+
+NUDGE_AFTER_A_STOP = (
+    "Pilot stopped this session at the subscription quota's usage limit, and "
+    f"there is quota again. {_NUDGED}"
+)
+"""The nudge to a work item a usage halt's hard stop stopped (F135.6)."""
+
+NUDGE_AFTER_A_PAUSE = f"The project was paused, and it has been resumed. {_NUDGED}"
+"""The nudge to a work item found ended while its project was paused
+(F141.3)."""
 
 _DONE_STATUSES = ("ended", "error")
 """A headless session's terminal statuses: it takes no turn."""
@@ -320,11 +352,13 @@ class SessionStartService:
         folder_wait_seconds: float = FOLDER_WAIT_SECONDS,
         folder_retry_seconds: float = FOLDER_RETRY_SECONDS,
     ) -> None:
-        """Register the `start` job, whose loops are one per Session and one
-        that moves the held Sessions on, and whose reconcile runs the start of
-        every Session still `starting` and opens the gate; the probe's timer;
-        and the release, on every turn of the outage and every move of the
-        slot's count.
+        """Register the `start` job, whose loops are one per Session, one
+        that moves the held Sessions on, one that stops the running work
+        items under a hard stop and one that sends the nudges owed, and whose
+        reconcile runs the start of every Session still `starting`, opens the
+        gate and sends the nudges; the probe's timer and the nudges'; and the
+        release, on every turn of the outage and every move of the slot's
+        count.
 
         Args:
             container: Gives each start transaction its database session, and
@@ -365,6 +399,9 @@ class SessionStartService:
             START_JOB, needs_controller=True, reconcile=self._reconcile
         )
         supervisor.register_timer(PROBE_TIMER, self.run_probe, needs_controller=True)
+        supervisor.register_timer(
+            NUDGE_TIMER, self.run_nudge_timer, needs_controller=False
+        )
         controller_outage.subscribe(self.release_held)
         work_slots.subscribe(self.release_held)
 
@@ -773,23 +810,22 @@ class SessionStartService:
         none yet (`_brief`), its loop run once that commits. One the gate
         still holds has its work item's line told again: a halt's turn, the
         outage's, the slot's count or a job's end, which asked for the run,
-        may have moved its reason. So has each work item the hard stop
-        stopped, its nudge owed: a halt's turn may have moved the halt its
-        line names (decision 66)."""
+        may have moved its reason. So has each work item whose nudge is owed,
+        the hard stop's or a turn's end's under a halt: a halt's turn may have
+        moved the halt its line names (decision 66)."""
         with scoped_session(self._container) as db:
             held = db.scalars(
                 select(AgentSession.id)
                 .where(AgentSession.state_code == SessionState.HELD)
                 .order_by(AgentSession.created_at, AgentSession.id)
             ).all()
-            for halt_stopped in db.scalars(
+            for owed in db.scalars(
                 select(AgentSession).where(
                     AgentSession.kind_code == WORK_KIND,
-                    AgentSession.state_code == SessionState.STOPPED,
                     AgentSession.nudge_owed_at.is_not(None),
                 )
             ):
-                self._moved(halt_stopped)
+                self._moved(owed)
         for session_id in held:
             if handle.stopping:
                 return
@@ -823,6 +859,38 @@ class SessionStartService:
                 return
             with scoped_session(self._container) as db:
                 self._stop_halted(db, session_id)
+
+    def send_nudges(self) -> None:
+        """What holds an owed nudge may have lifted — a usage halt, at a
+        reading or an overrule, or a project's pause: the nudges owed sent on
+        a loop of their own (F135.3, F141.3). A call while that loop runs has
+        it run once more."""
+        self._supervisor.start_loop(START_JOB, self.nudge, key=NUDGE_KEY, again=True)
+
+    def nudge(self, handle: LoopHandle) -> None:
+        """The nudges' loop's run: each Session whose nudge is owed and that
+        nothing holds now, in the order they were owed, carried on by its
+        nudge as a Resume carries one on, through the gate, its nudge then no
+        longer owed (DB 232); each in a transaction of its own, read again
+        under its locks."""
+        with scoped_session(self._container) as db:
+            owed = db.scalars(
+                self._nudgeable(db).order_by(
+                    AgentSession.nudge_owed_at, AgentSession.id
+                )
+            ).all()
+        for session_id in owed:
+            if handle.stopping:
+                return
+            with scoped_session(self._container) as db:
+                self._nudge_one(db, session_id)
+
+    def run_nudge_timer(self, db: Session) -> None:
+        """The nudges' tick (design 2 §8.2): their loop run while a nudge owed
+        is held by nothing, one a reading's or a resume's ask missed, a
+        project brought back or a stopped turn's end among them."""
+        if db.scalar(select(self._nudgeable(db).exists())):
+            self.send_nudges()
 
     def stop(self, db: Session, session_id: uuid.UUID, person: User) -> AgentSession:
         """`person`'s Stop of a work item, in the caller's transaction (F67.1):
@@ -905,16 +973,9 @@ class SessionStartService:
 
     def resume(self, db: Session, session_id: uuid.UUID) -> AgentSession:
         """A work item's Resume, stopped or failed, in the caller's
-        transaction (F67.2): a server-own Turn, "continue", or the ended
-        Turn's message while the Session has no conversation (R15's rule, so
-        a failed start's carries its brief, or while no Turn of the Session
-        has gone out, so a continuation's carries its message), and the
-        Session through the gate (§13.4): `held` while it is closed, else
-        `starting`, its loop sending the Turn once this commits. The item
-        stays one item (F26.7); its Session's `error` is cleared, and a
-        write-back the controller refused of a document it carries is owed
-        again (`RecordService.retry_write_backs`). With no conversation it is
-        a fresh start (`_fresh`).
+        transaction (F67.2): carried on by "continue" (`_carry_on`). The item
+        stays one item (F26.7). A nudge owed to it, the hard stop's, is owed
+        no more: the Resume stands in for it (DB 232).
 
         The project's row is read under a share lock, so a Resume and a
         Finish or an Archive never interleave, and the slot is counted under
@@ -952,46 +1013,11 @@ class SessionStartService:
         refusal = _closed(project)
         if refusal is not None:
             raise InvalidOperationException(operation, refusal)
-        ended = _latest_turn(db, session_id)
-        if ended.ended_at is None:
+        if _latest_turn(db, session_id).ended_at is None:
             raise InvalidOperationException(
                 operation, "its stopped turn is still ending"
             )
-        now = datetime.now(UTC)
-        turn = Turn(
-            session_id=session_id,
-            seq=ended.seq + 1,
-            message=(
-                ended.message
-                if session.conversation_id is None or not _went_out(db, session_id)
-                else CONTINUE
-            ),
-            started_at=now,
-        )
-        db.add(turn)
-        db.flush()
-        session.turns = turn.seq
-        session.turn_started_at = now
-        session.turn_ended_at = None
-        session.error = None
-        session.current_line = None
-        self._container.record_service().retry_write_backs(session_id)
-        held = self._held(
-            db,
-            project,
-            session.kind_code,
-            queued=False,
-            session=session,
-        )
-        if session.conversation_id is None:
-            self._fresh(db, session)
-        if held is None:
-            session.state_code = SessionState.STARTING
-            self._begin(db, session)
-        else:
-            session.state_code = SessionState.HELD
-            after_commit(_HeldWritten(self))
-        self._moved(session, state=True)
+        held = self._carry_on(db, project, session, CONTINUE)
         logger.info(
             "Session %s resumed%s",
             session_id,
@@ -1013,9 +1039,9 @@ class SessionStartService:
         self._outage.probe_answered()
 
     def _reconcile(self, db: Session) -> None:
-        """At STARTUP: run the start of every Session still `starting`, and
-        open the gate for the held ones, the outage off in a fresh process
-        (§8.2)."""
+        """At STARTUP: run the start of every Session still `starting`, open
+        the gate for the held ones, the outage off in a fresh process, and
+        send the nudges owed (§8.2)."""
         for session_id in db.scalars(
             select(AgentSession.id)
             .where(AgentSession.state_code == SessionState.STARTING)
@@ -1024,6 +1050,7 @@ class SessionStartService:
             logger.info("Resuming the start of session %s", session_id)
             self._start_loop(session_id)
         self.release_held()
+        self.send_nudges()
 
     def _release_one(self, db: Session, session_id: uuid.UUID) -> None:
         unlocked = db.get_one(AgentSession, session_id)
@@ -1110,6 +1137,103 @@ class SessionStartService:
         self._stop(db, session, pilot, now)
         session.nudge_owed_at = now
         logger.info("Session %s stopped at the usage limit, its nudge owed", session_id)
+
+    def _nudgeable(self, db: Session) -> Select[uuid.UUID]:
+        """The Sessions whose nudge is owed and that nothing holds now: their
+        work item open, their project neither finished, archived nor paused,
+        and, a work item's, no usage halt holding (DB 232, 266)."""
+        query = (
+            select(AgentSession.id)
+            .join(Project, Project.id == AgentSession.project_id)
+            .join(Item, Item.id == AgentSession.id)
+            .where(
+                AgentSession.nudge_owed_at.is_not(None),
+                Item.done_at.is_(None),
+                Project.state_code != ProjectState.FINISHED,
+                Project.archived.is_(False),
+                Project.paused.is_(False),
+            )
+        )
+        if self._halts.halted(db) is not None:
+            query = query.where(AgentSession.kind_code != WORK_KIND)
+        return query
+
+    def _nudge_one(self, db: Session, session_id: uuid.UUID) -> None:
+        """The Session's nudge sent, under its project's row and then its
+        own, while it is still owed and nothing holds it; one whose stopped
+        turn is still ending waits for the next run."""
+        unlocked = db.get_one(AgentSession, session_id)
+        project = _standing(db, unlocked.project_id, births=False)
+        session = self._records(db).lock_session(session_id)
+        if (
+            session.nudge_owed_at is None
+            or _closed(project) is not None
+            or project.paused
+            or db.get_one(Item, session_id, populate_existing=True).done_at is not None
+            or (session.kind_code == WORK_KIND and self._halts.halted(db) is not None)
+            or _latest_turn(db, session_id).ended_at is None
+        ):
+            return
+        held = self._carry_on(db, project, session, _nudge_words(db, session))
+        logger.info(
+            "Session %s nudged%s",
+            session_id,
+            "" if held is None else f", held: {held.reason}",
+        )
+
+    def _carry_on(
+        self, db: Session, project: Project, session: AgentSession, message: str
+    ) -> Held | None:
+        """Under the project's row and the Session's lock, its last Turn
+        ended: a server-own Turn, `message`, or the ended Turn's message
+        while the Session has no conversation (R15's rule, so a failed
+        start's carries its brief, or while no Turn of the Session has gone
+        out, so a continuation's carries its message), and the Session
+        through the gate (§13.4): `held` while it is closed, else
+        `starting`, its loop sending the Turn once this commits. Its `error`
+        is cleared, its nudge is owed no more, and a write-back the
+        controller refused of a document it carries is owed again
+        (`RecordService.retry_write_backs`). With no conversation it is a
+        fresh start (`_fresh`). Returns why the gate holds it; None while it
+        is open."""
+        ended = _latest_turn(db, session.id)
+        now = datetime.now(UTC)
+        turn = Turn(
+            session_id=session.id,
+            seq=ended.seq + 1,
+            message=(
+                ended.message
+                if session.conversation_id is None or not _went_out(db, session.id)
+                else message
+            ),
+            started_at=now,
+        )
+        db.add(turn)
+        db.flush()
+        session.turns = turn.seq
+        session.turn_started_at = now
+        session.turn_ended_at = None
+        session.error = None
+        session.current_line = None
+        session.nudge_owed_at = None
+        self._container.record_service().retry_write_backs(session.id)
+        held = self._held(
+            db,
+            project,
+            session.kind_code,
+            queued=False,
+            session=session,
+        )
+        if session.conversation_id is None:
+            self._fresh(db, session)
+        if held is None:
+            session.state_code = SessionState.STARTING
+            self._begin(db, session)
+        else:
+            session.state_code = SessionState.HELD
+            after_commit(_HeldWritten(self))
+        self._moved(session, state=True)
+        return held
 
     def _fresh(self, db: Session, session: AgentSession) -> None:
         """A Resume with no conversation to continue, a fresh start (review
@@ -1839,6 +1963,28 @@ def _standing(db: Session, project_id: uuid.UUID, *, births: bool) -> Project:
     if project is None:
         raise RecordNotFoundException("Project", str(project_id))
     return project
+
+
+def _nudge_words(db: Session, session: AgentSession) -> str:
+    """The nudge the Session is owed (DB 232; decision 53): worded for the
+    stop when a usage halt's hard stop stopped it, for the pause when its
+    project was paused when it was found ended, as its Project Transitions
+    read at `nudge_owed_at`, else for the quota."""
+    if session.state_code == SessionState.STOPPED:
+        return NUDGE_AFTER_A_STOP
+    last = db.scalar(
+        select(ProjectTransition.kind_code)
+        .where(
+            ProjectTransition.project_id == session.project_id,
+            ProjectTransition.kind_code.in_(
+                (TransitionKind.PAUSED, TransitionKind.RESUMED)
+            ),
+            ProjectTransition.at <= session.nudge_owed_at,
+        )
+        .order_by(ProjectTransition.at.desc(), ProjectTransition.id.desc())
+        .limit(1)
+    )
+    return NUDGE_AFTER_A_PAUSE if last is TransitionKind.PAUSED else NUDGE
 
 
 def _work_named(db: Session, session_id: uuid.UUID) -> str:

@@ -649,6 +649,30 @@ class TestTake:
 
         assert _taken(environments, session) == ENV
 
+    @pytest.mark.parametrize("closed", [False, True], ids=["open", "closed"])
+    def test_one_where_an_open_work_items_nudge_is_owed_is_never_taken(
+        self,
+        environments: EnvironmentService,
+        session: Session,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+        closed: bool,
+    ) -> None:
+        """DB 232: a run whose turn ended under a halt or a pause goes on
+        there once nothing holds it; a Finish closes it, its nudge never
+        going."""
+        _own(session)
+        run = _agent_session(session, project, SessionState.IDLE)
+        run.nudge_owed_at = datetime.now(UTC)
+        container.record_service().place_work(project, run, "Renaming the badge")
+        if closed:
+            container.record_service().close_unanswered(
+                project, person, datetime.now(UTC)
+            )
+
+        assert _taken(environments, session) == (ENV if closed else None)
+
     @pytest.mark.parametrize("read", _READS)
     def test_one_where_a_document_a_run_registered_is_open_is_never_taken(
         self,

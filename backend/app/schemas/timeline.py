@@ -450,9 +450,11 @@ class WorkSchema(BaseModel):
             "Why the gate holds its start, which its line says: a work "
             "item's the week's or the five-hour usage halt, its project "
             "paused, the controller unreachable, no slot free, or, a job's, "
-            "another job of its project before it; null unless `state` is "
-            "`held`, and while the gate opens for it (F26.1, F141.5, F143.4, "
-            "F59.2, F135.1, F135.4)"
+            "another job of its project before it; while `state` is `idle` "
+            "with its nudge owed, what holds that nudge, a usage halt or its "
+            "project paused; null in any other state, and while nothing "
+            "holds it (F26.1, F141.5, F143.4, F59.2, F135.1, F135.3, F135.4, "
+            "F141.3)"
         )
     )
     held_running: int | None = Field(
@@ -485,6 +487,15 @@ class WorkSchema(BaseModel):
             "it now, the week's or the five-hour's, or `usage_limit` once "
             "neither does; null when someone stopped it otherwise, and unless "
             "`state` is `stopped` (F26.1, F69.2, F71, F135.6)"
+        )
+    )
+    nudge_owed: bool = Field(
+        description=(
+            "Whether its nudge is owed, which carries it on once nothing holds "
+            "it, and it waits on nobody: a usage halt's hard stop stopped it, "
+            "`stopped`, or its turn ended under a cooperative usage halt or "
+            "its project's pause, `idle` and not done, its line saying why "
+            "(`held_reason`) (F135.3, F135.6, F141.3)"
         )
     )
     retried: RetriedSchema | None = Field(

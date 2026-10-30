@@ -310,6 +310,8 @@ type WorkLine = WorkCue | WorkStopped | WorkFailed;
 
 const STARTING: Activity = { kind: 'starting', phase: 'Starting' };
 const WAITING: Activity = { kind: 'waiting', phase: 'Waiting for Pilot' };
+/** A run whose turn ended under a halt or a pause, its nudge owed, while nothing holds that nudge. */
+const NUDGE_DUE: Activity = { kind: 'waiting', phase: 'Waiting for its nudge' };
 
 const cue = (activity: Activity, step: string | null = null): WorkCue => ({ kind: 'cue', activity, step });
 
@@ -317,8 +319,9 @@ const cue = (activity: Activity, step: string | null = null): WorkCue => ({ kind
  * A work item's one line (F26.1, F26.2): why the gate holds its start; the current line as the
  * chat words its cue, or that it starts, or waits for Pilot, before its session gives one;
  * "Stopped · <time>" with a stop made elsewhere's cause, or a usage halt's hard stop's "Stopped at
- * the week’s limit · <time>" and its like (F135.6); the error it failed on. Null once its turn
- * ended, when its done line stands for it.
+ * the week’s limit · <time>" and its like (F135.6); the error it failed on; what holds the nudge
+ * owed to a run whose turn ended under a halt or a pause, in a held start's words (F135.3, F141.3).
+ * Null once its turn ended done, when its done line stands for it.
  */
 export function workLine(work: Work): WorkLine | null {
   const line = work.current_line;
@@ -342,6 +345,8 @@ export function workLine(work: Work): WorkLine | null {
     case 'failed':
       return { kind: 'failed', error: work.error };
     case 'idle':
+      if (!work.nudge_owed) return null;
+      return cue(work.held_reason === null ? NUDGE_DUE : { kind: 'waiting', phase: heldReasonLabel(work.held_reason, work.held_running) });
     case 'ended':
       return null;
     default: {

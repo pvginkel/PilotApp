@@ -3,7 +3,8 @@ the week's and the five-hour's, decided from the latest Usage Reading at their
 limits, a window left out holding none, a five-hour limit of 0 none, a stale
 window lifted one minute past its reset; when each began; whether a hard-stop
 halt holds; and their watcher, which tells of a turn at a recorded reading and
-on its timer, and asks for the hard stop while one holds and a work item runs."""
+on its timer, asks for the nudges owed at a turn (DB 232), and asks for the
+hard stop while one holds and a work item runs."""
 
 import json
 from collections.abc import Generator, Iterator
@@ -614,18 +615,22 @@ class TestEndSpent:
 
 
 class _Gate:
-    """The session start, as the watcher asks it again and for the hard
-    stop."""
+    """The session start, as the watcher asks it again, for the hard stop
+    and for the nudges owed."""
 
     def __init__(self) -> None:
         self.released = 0
         self.hard_stops = 0
+        self.nudged = 0
 
     def release_held(self) -> None:
         self.released += 1
 
     def hard_stop(self) -> None:
         self.hard_stops += 1
+
+    def send_nudges(self) -> None:
+        self.nudged += 1
 
 
 def _reading(
@@ -858,6 +863,22 @@ class TestUsageWatcher:
 
         assert (turned_on, held, halt_files.requested) == (1, 1, 2)
 
+    def test_each_halts_turn_asks_for_the_nudges_owed(
+        self,
+        usage: UsageService,
+        watcher: UsageWatcher,
+        gate: _Gate,
+    ) -> None:
+        """A halt lifted is the reading that lets an owed nudge go (F135.8;
+        DB 232); the nudges' loop reads what holds each one."""
+        usage.receive(_reading(0.95))
+        turned_on = gate.nudged
+        usage.receive(_reading(0.96, minutes=10))
+        held = gate.nudged
+        usage.receive(_reading(0.1, minutes=20))
+
+        assert (turned_on, held, gate.nudged) == (1, 1, 2)
+
     def test_a_reading_not_recorded_turns_nothing(
         self,
         usage: UsageService,
@@ -892,6 +913,8 @@ class TestUsageWatcher:
 
         assert _codes(_frames(connection)) == [[]]
         assert gate.released == 2
+        # The stale fallback's lift lets the nudges owed go.
+        assert gate.nudged == 2
 
     def test_an_overrule_made_lifts_the_halt_whatever_this_process_told(
         self,
@@ -907,7 +930,7 @@ class TestUsageWatcher:
         watcher.overruled()
 
         assert _codes(_frames(connection)) == [[]]
-        assert gate.released == 1
+        assert (gate.released, gate.nudged) == (1, 1)
 
     def test_a_reading_that_spends_the_overrule_ends_it_and_the_halt_holds_again(
         self,

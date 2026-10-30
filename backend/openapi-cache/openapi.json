@@ -3576,7 +3576,7 @@
                 "type": "null"
               }
             ],
-            "description": "Why the gate holds its start, which its line says: a work item's the week's or the five-hour usage halt, its project paused, the controller unreachable, no slot free, or, a job's, another job of its project before it; null unless `state` is `held`, and while the gate opens for it (F26.1, F141.5, F143.4, F59.2, F135.1, F135.4)"
+            "description": "Why the gate holds its start, which its line says: a work item's the week's or the five-hour usage halt, its project paused, the controller unreachable, no slot free, or, a job's, another job of its project before it; while `state` is `idle` with its nudge owed, what holds that nudge, a usage halt or its project paused; null in any other state, and while nothing holds it (F26.1, F141.5, F143.4, F59.2, F135.1, F135.3, F135.4, F141.3)"
           },
           "held_running": {
             "anyOf": [
@@ -3589,6 +3589,11 @@
             ],
             "description": "The running work items that leave it no slot, which its line counts, \"Waiting for a slot · N running\": those across every project, or its project's own, whichever maximum closed the gate; null unless `held_reason` is `slot` (F143.4)",
             "title": "Held Running"
+          },
+          "nudge_owed": {
+            "description": "Whether its nudge is owed, which carries it on once nothing holds it, and it waits on nobody: a usage halt's hard stop stopped it, `stopped`, or its turn ended under a cooperative usage halt or its project's pause, `idle` and not done, its line saying why (`held_reason`) (F135.3, F135.6, F141.3)",
+            "title": "Nudge Owed",
+            "type": "boolean"
           },
           "pilots_own": {
             "description": "Whether it is Pilot's own work, a background job in the store (F59.1): its line has its session log and neither an environment chip nor Stop / Resume, which the server refuses (F26.3), and Retry once it failed or stopped until it is retried; false for a worker's run",
@@ -3672,6 +3677,7 @@
           "stopped_at",
           "stopped_by",
           "stopped_cause",
+          "nudge_owed",
           "retried"
         ],
         "title": "WorkSchema",
@@ -7982,7 +7988,7 @@
                 "type": "null"
               }
             ],
-            "description": "Why the gate holds its start, which its line says: a work item's the week's or the five-hour usage halt, its project paused, the controller unreachable, no slot free, or, a job's, another job of its project before it; null unless `state` is `held`, and while the gate opens for it (F26.1, F141.5, F143.4, F59.2, F135.1, F135.4)"
+            "description": "Why the gate holds its start, which its line says: a work item's the week's or the five-hour usage halt, its project paused, the controller unreachable, no slot free, or, a job's, another job of its project before it; while `state` is `idle` with its nudge owed, what holds that nudge, a usage halt or its project paused; null in any other state, and while nothing holds it (F26.1, F141.5, F143.4, F59.2, F135.1, F135.3, F135.4, F141.3)"
           },
           "held_running": {
             "anyOf": [
@@ -7995,6 +8001,11 @@
             ],
             "description": "The running work items that leave it no slot, which its line counts, \"Waiting for a slot · N running\": those across every project, or its project's own, whichever maximum closed the gate; null unless `held_reason` is `slot` (F143.4)",
             "title": "Held Running"
+          },
+          "nudge_owed": {
+            "description": "Whether its nudge is owed, which carries it on once nothing holds it, and it waits on nobody: a usage halt's hard stop stopped it, `stopped`, or its turn ended under a cooperative usage halt or its project's pause, `idle` and not done, its line saying why (`held_reason`) (F135.3, F135.6, F141.3)",
+            "title": "Nudge Owed",
+            "type": "boolean"
           },
           "pilots_own": {
             "description": "Whether it is Pilot's own work, a background job in the store (F59.1): its line has its session log and neither an environment chip nor Stop / Resume, which the server refuses (F26.3), and Retry once it failed or stopped until it is retried; false for a worker's run",
@@ -8078,6 +8089,7 @@
           "stopped_at",
           "stopped_by",
           "stopped_cause",
+          "nudge_owed",
           "retried"
         ],
         "title": "WorkSchema",
@@ -8359,7 +8371,7 @@
                 "type": "null"
               }
             ],
-            "description": "Why the gate holds its start, which its line says: a work item's the week's or the five-hour usage halt, its project paused, the controller unreachable, no slot free, or, a job's, another job of its project before it; null unless `state` is `held`, and while the gate opens for it (F26.1, F141.5, F143.4, F59.2, F135.1, F135.4)"
+            "description": "Why the gate holds its start, which its line says: a work item's the week's or the five-hour usage halt, its project paused, the controller unreachable, no slot free, or, a job's, another job of its project before it; while `state` is `idle` with its nudge owed, what holds that nudge, a usage halt or its project paused; null in any other state, and while nothing holds it (F26.1, F141.5, F143.4, F59.2, F135.1, F135.3, F135.4, F141.3)"
           },
           "held_running": {
             "anyOf": [
@@ -8372,6 +8384,11 @@
             ],
             "description": "The running work items that leave it no slot, which its line counts, \"Waiting for a slot · N running\": those across every project, or its project's own, whichever maximum closed the gate; null unless `held_reason` is `slot` (F143.4)",
             "title": "Held Running"
+          },
+          "nudge_owed": {
+            "description": "Whether its nudge is owed, which carries it on once nothing holds it, and it waits on nobody: a usage halt's hard stop stopped it, `stopped`, or its turn ended under a cooperative usage halt or its project's pause, `idle` and not done, its line saying why (`held_reason`) (F135.3, F135.6, F141.3)",
+            "title": "Nudge Owed",
+            "type": "boolean"
           },
           "pilots_own": {
             "description": "Whether it is Pilot's own work, a background job in the store (F59.1): its line has its session log and neither an environment chip nor Stop / Resume, which the server refuses (F26.3), and Retry once it failed or stopped until it is retried; false for a worker's run",
@@ -8455,6 +8472,7 @@
           "stopped_at",
           "stopped_by",
           "stopped_cause",
+          "nudge_owed",
           "retried"
         ],
         "title": "WorkSchema",

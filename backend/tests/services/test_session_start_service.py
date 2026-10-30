@@ -4,7 +4,9 @@ F88.1, F125, F143.1; decision 38; DB 240; V05, V15, V19), and the work item it
 is (DB Work, decision 3); the gate every start passes, the held start and its
 release (§13.4, §8.2; F141.5; DB 229, 230; V16, V24); the conversation of a run
 whose documents are all closed continued as a new work item (decision 44;
-F26.7, F65; DB 241); a usage halt's hard stop (F135.6; DB 269).
+F26.7, F65; DB 241); a usage halt's hard stop (F135.6; DB 269); the nudge
+owed to a work item the hard stop stopped or whose turn ended under a halt or
+a pause (F135.3, F141.3; DB 232).
 
 The start's write and its loop's run are on the test's session: the run is
 called as its loop calls it. `TestStartLoop` and `TestHeldLoop` run the loops
@@ -42,6 +44,7 @@ from app.models import (
     Item,
     PlanTask,
     Project,
+    ProjectTransition,
     Turn,
     UsageReading,
     User,
@@ -76,12 +79,17 @@ from app.services.fake_controller import (
     FakeControllerProblem,
     FinishOutcome,
 )
+from app.services.job_service import NEXT_TITLE
 from app.services.pilot_server import PilotServer, token_hash
 from app.services.relay_service import CONTINUE, SEND_FAILED, SESSION_GONE, RelayService
 from app.services.session_record_service import StoredRecord, read_records
 from app.services.session_start_service import (
     HARD_STOP_KEY,
     NOT_PILOTS,
+    NUDGE,
+    NUDGE_AFTER_A_PAUSE,
+    NUDGE_AFTER_A_STOP,
+    NUDGE_KEY,
     RELEASE_KEY,
     START_FAILED,
     START_JOB,
@@ -4912,6 +4920,489 @@ class TestHardStopLoop:
         with scoped_session(container) as db:
             assert run.stopped_by_user_id == _pilot_id(db)
             assert db.get_one(Item, work_id).done_at is None
+
+
+def _halted_end(
+    starts: SessionStartService,
+    fake: _Recording,
+    db: DbSession,
+    project: Project,
+    *,
+    week: float = 0.95,
+) -> models.Session:
+    """A work item whose turn ended well while the week's halt, the
+    cooperative stop, held at `week`: open, `idle`, its nudge owed, on its
+    conversation (DB 232)."""
+    run = _running(starts, db, project)
+    run.conversation_id = "conv-1"
+    _usage(db, week=week, five_hour=0.1)
+    _turn_ends(starts, fake, run, "success")
+    run = _read(db, run.id)
+    assert run.state_code == SessionState.IDLE
+    assert run.nudge_owed_at is not None
+    return run
+
+
+def _nudge(starts: SessionStartService) -> None:
+    """The nudges' loop's run, as its loop calls it."""
+    starts.nudge(LoopHandle(f"{START_JOB}:{NUDGE_KEY}"))
+
+
+def _stale(db: DbSession, *, week: float, reset_ago: timedelta) -> None:
+    """A stale Usage Reading recorded now, its week's reset `reset_ago`."""
+    now = datetime.now(UTC)
+    reading = UsageReading(taken_at=now, received_at=now, stale=True)
+    db.add(reading)
+    db.flush()
+    db.add_all(
+        [
+            WindowShare(
+                reading_id=reading.id,
+                window_code=UsageWindow.SEVEN_DAY,
+                share=week,
+                resets_at=now - reset_ago,
+            ),
+            WindowShare(
+                reading_id=reading.id,
+                window_code=UsageWindow.FIVE_HOUR,
+                share=0.1,
+                resets_at=now + timedelta(hours=1),
+            ),
+        ]
+    )
+    db.flush()
+
+
+def _transition(
+    db: DbSession, project: Project, person: User, kind: TransitionKind
+) -> None:
+    """The project paused or resumed by `person`, as its switch writes it."""
+    db.add(
+        ProjectTransition(
+            project_id=project.id,
+            kind_code=kind,
+            at=datetime.now(UTC),
+            by_user_id=person.id,
+        )
+    )
+    project.paused = kind is TransitionKind.PAUSED
+    db.flush()
+
+
+def _jobs_after(db: DbSession, run_id: uuid.UUID) -> list[uuid.UUID]:
+    """The jobs placed after the run's turn (design 3 D2)."""
+    return list(db.scalars(select(Work.id).where(Work.trigger_item_id == run_id)))
+
+
+def _nudges_asked(
+    starts: SessionStartService, monkeypatch: pytest.MonkeyPatch
+) -> list[str]:
+    """The nudges' loop each time its supervisor is asked for it from now
+    on."""
+    asked: list[str] = []
+    supervisor = starts._supervisor
+    start_loop = supervisor.start_loop
+
+    def recording(
+        job: str, run: Any, key: str | int | None = None, *, again: bool = False
+    ) -> bool:
+        if (job, key) == (START_JOB, NUDGE_KEY):
+            asked.append(f"{job}:{key}")
+        return start_loop(job, run, key, again=again)
+
+    monkeypatch.setattr(supervisor, "start_loop", recording)
+    return asked
+
+
+class TestNudge:
+    """The nudge (F135.3, F141.3; DB 232; V04, V07, V23, V25): owed to a work
+    item whose turn ended under a cooperative usage halt or its project's
+    pause, or that the hard stop stopped, it carries the run on as a Resume
+    does, a server Turn through the gate, once nothing holds it."""
+
+    def test_a_reading_that_lifts_the_halt_lets_it_carry_the_run_on(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        halted = _halted_end(starts, fake, session, project)
+        env_id, name = _env(session, halted.id), halted.controller_session
+        _nudge(starts)
+        assert _read(session, halted.id).nudge_owed_at is not None
+        assert len(_turns(session, halted.id)) == 1
+
+        _usage(session, week=0.5, five_hour=0.1)
+        engine_events.clear()
+        _nudge(starts)
+
+        run = _read(session, halted.id)
+        assert (run.state_code, run.nudge_owed_at) == (SessionState.STARTING, None)
+        _, nudged = _turns(session, run.id)
+        assert (nudged.seq, nudged.message, nudged.author_user_id) == (
+            2,
+            NUDGE,
+            None,
+        )
+        assert (run.turns, run.turn_started_at, run.turn_ended_at) == (
+            2,
+            nudged.started_at,
+            None,
+        )
+        assert WorkMoved(project.id, run.id) in _moves(engine_events)
+        # Its start loop asked for once its transaction committed: a second
+        # ask of it is none.
+        assert not starts._supervisor.start_loop(
+            START_JOB, lambda handle: None, key=str(run.id)
+        )
+
+        _run(starts, run)
+
+        run = _read(session, run.id)
+        assert run.state_code == SessionState.RUNNING
+        # The same run on its conversation: its controller session, its
+        # environment, one item.
+        assert (run.controller_session, run.environment_id) == (name, env_id)
+        assert fake.sent[-1] == NUDGE
+        assert session.get_one(Item, run.id).done_at is None
+
+    def test_the_run_is_done_at_the_nudges_normal_end_its_job_placed_then(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        """The ruling on a normal end: done at its first normal turn end
+        with no halt or pause holding, its documents read and the job after
+        its turn placed then, not at the halted end (decision 44)."""
+        halted = _halted_end(starts, fake, session, project)
+        assert _jobs_after(session, halted.id) == []
+        _usage(session, week=0.5, five_hour=0.1)
+        _nudge(starts)
+        clear_after_commit_callbacks()
+        _run(starts, _read(session, halted.id))
+
+        _turn_ends(starts, fake, _read(session, halted.id), "success")
+
+        run = _read(session, halted.id)
+        _, nudged = _turns(session, run.id)
+        assert (run.state_code, run.nudge_owed_at) == (SessionState.IDLE, None)
+        item = session.get_one(Item, run.id, populate_existing=True)
+        assert (item.done_at, item.done_cause_code) == (nudged.ended_at, "turn_ended")
+        [job] = _jobs_after(session, run.id)
+        assert session.get_one(Item, job).title == NEXT_TITLE
+
+    def test_the_stale_fallback_lifts_the_halt_a_minute_past_its_reset(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        """F135.8: a stale reading's window counts as reset a minute past its
+        `resets_at`, its halt lifted."""
+        halted = _halted_end(starts, fake, session, project)
+        _stale(session, week=0.95, reset_ago=timedelta(seconds=30))
+        _nudge(starts)
+        assert _read(session, halted.id).nudge_owed_at is not None
+
+        _stale(session, week=0.95, reset_ago=timedelta(minutes=2))
+        _nudge(starts)
+
+        run = _read(session, halted.id)
+        assert (run.state_code, run.nudge_owed_at) == (SessionState.STARTING, None)
+        assert _turns(session, run.id)[-1].message == NUDGE
+
+    def test_a_halt_and_the_pause_holding_together_hold_it_until_both_lift(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        halted = _halted_end(starts, fake, session, project)
+        _transition(session, project, person, TransitionKind.PAUSED)
+
+        _usage(session, week=0.5, five_hour=0.1)
+        _nudge(starts)
+        assert _read(session, halted.id).nudge_owed_at is not None
+
+        _usage(session, week=0.95, five_hour=0.1)
+        _transition(session, project, person, TransitionKind.RESUMED)
+        _nudge(starts)
+        assert _read(session, halted.id).nudge_owed_at is not None
+
+        _usage(session, week=0.5, five_hour=0.1)
+        _nudge(starts)
+
+        run = _read(session, halted.id)
+        assert run.nudge_owed_at is None
+        # Found ended under the halt, not the pause: worded for the quota.
+        assert _turns(session, run.id)[-1].message == NUDGE
+
+    def test_one_found_ended_under_the_pause_is_nudged_at_its_resume_worded_for_it(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        """F141.3: the pause's nudge, its words read from the Project
+        Transitions as they stood when the run was found ended (decision
+        53)."""
+        run = _running(starts, session, project)
+        run.conversation_id = "conv-1"
+        _transition(session, project, person, TransitionKind.PAUSED)
+        _turn_ends(starts, fake, run, "success")
+        assert _read(session, run.id).nudge_owed_at is not None
+        _nudge(starts)
+        assert _read(session, run.id).nudge_owed_at is not None
+
+        _transition(session, project, person, TransitionKind.RESUMED)
+        _nudge(starts)
+
+        run = _read(session, run.id)
+        assert (run.state_code, run.nudge_owed_at) == (SessionState.STARTING, None)
+        assert _turns(session, run.id)[-1].message == NUDGE_AFTER_A_PAUSE
+
+    def test_the_hard_stops_is_worded_for_the_stop_once_its_stopped_turn_ended(
+        self,
+        hard_starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        run = _running(hard_starts, session, project)
+        run.conversation_id = "conv-1"
+        _usage(session, week=0.95, five_hour=0.1)
+        _hard_stop(hard_starts)
+        clear_after_commit_callbacks()
+        _usage(session, week=0.5, five_hour=0.1)
+
+        # Its interrupt still on its way: the next run sends it.
+        _nudge(hard_starts)
+        assert _read(session, run.id).nudge_owed_at is not None
+
+        _turn_ends(hard_starts, fake, run, "interrupted")
+        _nudge(hard_starts)
+
+        run = _read(session, run.id)
+        assert (run.state_code, run.nudge_owed_at) == (SessionState.STARTING, None)
+        assert _turns(session, run.id)[-1].message == NUDGE_AFTER_A_STOP
+
+    def test_a_persons_resume_while_the_hard_stops_is_owed_stands_in_for_it(
+        self,
+        hard_starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        """One continuation, never two (DB 232): the Resume clears it, held
+        by the halt that still holds, and no nudge follows it."""
+        run = _running(hard_starts, session, project)
+        run.conversation_id = "conv-1"
+        _usage(session, week=0.95, five_hour=0.1)
+        _hard_stop(hard_starts)
+        _turn_ends(hard_starts, fake, run, "interrupted")
+        clear_after_commit_callbacks()
+
+        resumed = hard_starts.resume(session, run.id)
+        clear_after_commit_callbacks()
+
+        assert (resumed.state_code, resumed.nudge_owed_at) == (SessionState.HELD, None)
+        _usage(session, week=0.5, five_hour=0.1)
+        _nudge(hard_starts)
+        _release(hard_starts)
+        run = _read(session, run.id)
+        assert run.state_code == SessionState.STARTING
+        assert [turn.message for turn in _turns(session, run.id)] == [BRIEF, CONTINUE]
+
+    def test_it_takes_its_slot_through_the_gate_held_while_none_is_free(
+        self,
+        container: ServiceContainer,
+        fake: _Recording,
+        supervise: Supervise,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        """F141.5: the nudge passes the gate as every resume Pilot makes; it
+        is sent, and no longer owed, once its Turn is written."""
+        starts = _services(container, supervise, project_max=1)[0]
+        halted = _halted_end(starts, fake, session, project)
+        _usage(session, week=0.5, five_hour=0.1)
+        _running(starts, session, project)
+
+        _nudge(starts)
+
+        run = _read(session, halted.id)
+        assert (run.state_code, run.nudge_owed_at) == (SessionState.HELD, None)
+        assert _turns(session, run.id)[-1].message == NUDGE
+        status = work_status(
+            session,
+            [run.id],
+            unreachable=False,
+            halts=starts._halts,
+            slots=starts._slots,
+        )[run.id]
+        assert status.held_reason == HeldReason.SLOT
+
+    @pytest.mark.parametrize("closed", ["finished", "archived", "item done"])
+    def test_none_goes_to_a_work_item_closed_or_a_project_finished_or_archived(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        closed: str,
+    ) -> None:
+        """Nothing of such a project starts (F5.1, F128.1), and a Finish
+        closes the item, which a Reopen leaves done."""
+        halted = _halted_end(starts, fake, session, project)
+        _usage(session, week=0.5, five_hour=0.1)
+        if closed == "finished":
+            project.state_code = ProjectState.FINISHED
+        elif closed == "archived":
+            project.archived = True
+        else:
+            item = session.get_one(Item, halted.id)
+            item.done_at = datetime.now(UTC)
+            item.done_cause_code = "finished"
+        session.flush()
+
+        _nudge(starts)
+
+        run = _read(session, halted.id)
+        assert run.state_code == SessionState.IDLE
+        assert len(_turns(session, run.id)) == 1
+
+    def test_its_line_is_told_again_at_each_release(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        """What holds it is read at display (decision 66): a halt's turn,
+        which asks for the release, may move it."""
+        halted = _halted_end(starts, fake, session, project)
+        heard = len(engine_events)
+
+        _release(starts)
+
+        assert _moves(engine_events[heard:]) == [WorkMoved(project.id, halted.id)]
+
+    def test_a_loop_told_to_stop_sends_no_more(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        halted = _halted_end(starts, fake, session, project)
+        _usage(session, week=0.5, five_hour=0.1)
+        handle = LoopHandle(f"{START_JOB}:{NUDGE_KEY}")
+        handle._request_stop()
+
+        starts.nudge(handle)
+
+        assert _read(session, halted.id).nudge_owed_at is not None
+
+
+class TestNudgeTimer:
+    """The nudges' tick (design 2 §8.2) and the reconcile at STARTUP ask for
+    their loop: an owed nudge survives a restart, and one a reading's or a
+    resume's ask missed goes at the next tick."""
+
+    def test_the_tick_asks_for_the_loop_while_one_owed_is_held_by_nothing(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        asked = _nudges_asked(starts, monkeypatch)
+        starts.run_nudge_timer(session)
+        _halted_end(starts, fake, session, project)
+        starts.run_nudge_timer(session)
+        assert asked == []
+
+        _usage(session, week=0.5, five_hour=0.1)
+        starts.run_nudge_timer(session)
+
+        assert asked == [f"{START_JOB}:{NUDGE_KEY}"]
+
+    def test_the_reconcile_asks_for_the_loop(
+        self,
+        starts: SessionStartService,
+        session: DbSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        asked = _nudges_asked(starts, monkeypatch)
+
+        starts._reconcile(session)
+
+        assert asked == [f"{START_JOB}:{NUDGE_KEY}"]
+
+
+class TestNudgeLoop:
+    """The nudge from a process's start, on a database of its own: the run
+    halted at its turn's end in one process is carried on by the next, and
+    done at the nudge's end (DB 232; V04, V23)."""
+
+    def test_an_owed_nudge_goes_after_a_restart_and_the_run_is_done_at_its_end(
+        self,
+        committed_app: Flask,
+        committed_fake: _Recording,
+        supervise: Supervise,
+    ) -> None:
+        container = committed_app.container
+        starts, _, coordinator = _services(container, supervise)
+        project_id = _committed_project(container)
+        coordinator.fire_startup()
+        work_id = _committed_work(starts, container, project_id)
+        wait_until(
+            lambda: _committed(container, work_id).state_code == SessionState.RUNNING,
+            "the brief sent",
+        )
+        env_id = _committed_env(container, work_id)
+        name = _committed(container, work_id).controller_session
+        assert name is not None
+        with scoped_session(container) as db:
+            db.get_one(models.Session, work_id).conversation_id = "conv-1"
+            _usage(db, week=0.95, five_hour=0.1)
+        committed_fake.finish(env_id, name)
+        wait_until(
+            lambda: _committed(container, work_id).nudge_owed_at is not None,
+            "the turn ended halted, its nudge owed",
+        )
+        coordinator.shutdown()
+        with scoped_session(container) as db:
+            _usage(db, week=0.5, five_hour=0.1)
+
+        starts, _, coordinator = _services(container, supervise)
+        coordinator.fire_startup()
+        wait_until(
+            lambda: _committed(container, work_id).state_code == SessionState.RUNNING,
+            "the nudge sent",
+        )
+        assert committed_fake.sent[-1] == NUDGE
+        assert _committed(container, work_id).nudge_owed_at is None
+        committed_fake.finish(env_id, name)
+
+        def done() -> bool:
+            with scoped_session(container) as db:
+                return db.get_one(Item, work_id).done_at is not None
+
+        wait_until(done, "the run done at the nudge's end")
+        with scoped_session(container) as db:
+            assert len(_jobs_after(db, work_id)) == 1
 
 
 class TestStartInAClosedProject:

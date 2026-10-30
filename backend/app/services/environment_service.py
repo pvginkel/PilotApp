@@ -17,7 +17,8 @@ together. The fleet consumer writes none of them (§13.1).
 An environment of Pilot's own is free while it is neither gone nor deleting and
 no Session there is `running`, `starting` or `held`, nor `stopped` or `failed`,
 a work item that may resume (DB 240, as slice 020's refinement D1 rules it),
-nor is a document a run registered there still open: derived wherever it is
+nor `idle` an open work item owed its nudge (DB 232), nor is a document a run
+registered there still open: derived wherever it is
 read, no column. A start takes a free one of its Work's
 repository, renamed after the taking Project. A start on a new conversation
 runs in a tree made anew: a created one as it is, any other reset, its reset's
@@ -711,13 +712,21 @@ def _labelled(
 
 
 def _bound(env_id: InstrumentedAttribute[str] | str) -> ColumnElement[bool]:
-    """Whether a Session holds the environment (refinement D1), or a document
-    a work item's run registered there is still open, the conversation to go
-    on there once each is closed (DB 240; design 2 §13.5)."""
+    """Whether a Session holds the environment (refinement D1), an open work
+    item's run there owed its nudge, which goes on there (DB 232), or a
+    document a work item's run registered there is still open, the
+    conversation to go on there once each is closed (DB 240; design 2
+    §13.5)."""
     return or_(
         exists().where(
             AgentSession.environment_id == env_id,
             AgentSession.state_code.in_(_BINDING_STATES),
+        ),
+        exists().where(
+            AgentSession.environment_id == env_id,
+            AgentSession.nudge_owed_at.is_not(None),
+            Item.id == AgentSession.id,
+            Item.done_at.is_(None),
         ),
         exists().where(
             Document.source_environment_id == env_id,

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import pilot_dsl as dsl
-from sqlalchemy import exists, func, select
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.engine.attachments import AttachService
@@ -751,20 +751,25 @@ class ProjectService:
                 project.paused = False
 
     def _pause_moved(self, project: Project) -> None:
-        """The project paused or resumed: its held work items' reasons moved
-        (`held_reason`); once the transaction commits, the halt file written
-        where its work items run or deleted where nothing holds it any more
-        (F141.3), and on a resume the gate asked again (F141.5)."""
+        """The project paused or resumed: the reasons of its held work items
+        and of those whose nudge is owed moved (`held_reason`); once the
+        transaction commits, the halt file written where its work items run
+        or deleted where nothing holds it any more (F141.3), and on a resume
+        the gate asked again (F141.5) and the nudges owed sent (DB 232)."""
         for session in self.db.scalars(
             select(AgentSession).where(
                 AgentSession.project_id == project.id,
-                AgentSession.state_code == SessionState.HELD,
+                or_(
+                    AgentSession.state_code == SessionState.HELD,
+                    AgentSession.nudge_owed_at.is_not(None),
+                ),
             )
         ):
             work_moved(self.engine_bus, session)
         after_commit(self.halt_file_service.request)
         if not project.paused:
             after_commit(self.session_start_service.release_held)
+            after_commit(self.session_start_service.send_nudges)
 
     def _activities(self, projects: list[Project]) -> dict[uuid.UUID, Activity]:
         """What runs and waits in each open project among `projects`, as its

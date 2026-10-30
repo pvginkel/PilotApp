@@ -250,7 +250,9 @@ def work_status(
     `stopped_at?`, `stopped_by?`); one no one stopped has the cause its
     environment's stop under it left as its last record, and one a usage
     halt's hard stop stopped, its nudge owed, the halt that holds a work
-    item now (`halts`; decision 66). One whose start has
+    item now (`halts`; decision 66). One whose turn ended under a halt or a
+    pause, its nudge owed, has for its held reason what holds that nudge
+    now, read as the gate reads a start's halt and pause. One whose start has
     no environment yet has none (DB 107). A job's is Pilot's own (F59.1); a
     retried one's names the job its Retry placed, created at the press."""
     stopper = aliased(User)
@@ -300,7 +302,12 @@ def work_status(
         for session, *_ in rows
         if session.state_code is SessionState.HELD and session.kind_code == WORK_KIND
     }
-    halted = halts.halted(db) if waiting or hard_stopped else None
+    halted_ends = {
+        session.id
+        for session, *_ in rows
+        if session.state_code is SessionState.IDLE and session.nudge_owed_at is not None
+    }
+    halted = halts.halted(db) if waiting or hard_stopped or halted_ends else None
     causes = dict.fromkeys(hard_stopped, _HALT_STOPS[halted]) | {
         session.id: _stop_cause(db, session.id)
         for session in stopped
@@ -326,18 +333,30 @@ def work_status(
     )
     held: dict[uuid.UUID, Held] = {}
     for session, _, _, _, paused, trigger, *_ in rows:
-        if session.state_code is not SessionState.HELD:
+        if session.id in halted_ends:
+            reason = held_reason(
+                halted=halted,
+                paused=paused,
+                kind_code=session.kind_code,
+                setup=False,
+                unreachable=False,
+                filled=None,
+                queued=False,
+                conversing=False,
+            )
+        elif session.state_code is SessionState.HELD:
+            reason = held_reason(
+                halted=halted,
+                paused=paused,
+                kind_code=session.kind_code,
+                setup=trigger is WorkTrigger.SETUP,
+                unreachable=unreachable,
+                filled=filled.get(session.project_id),
+                queued=session.id in behind,
+                conversing=session.id in resuming,
+            )
+        else:
             continue
-        reason = held_reason(
-            halted=halted,
-            paused=paused,
-            kind_code=session.kind_code,
-            setup=trigger is WorkTrigger.SETUP,
-            unreachable=unreachable,
-            filled=filled.get(session.project_id),
-            queued=session.id in behind,
-            conversing=session.id in resuming,
-        )
         if reason is not None:
             held[session.id] = reason
     return {
@@ -368,6 +387,7 @@ def work_status(
                 else None
             ),
             stopped_cause=causes.get(session.id),
+            nudge_owed=session.nudge_owed_at is not None,
             retried=(
                 None if retry_id is None else RetriedSchema(id=retry_id, at=retried_at)
             ),

@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session as DbSession
 from werkzeug.wrappers import Request, Response
 
 from app import extensions, models
+from app.app_config import HaltSetting
 from app.core_exceptions import ExternalServiceException
 from app.database import scoped_session
 from app.engine.bus import EngineEvent, ProjectChanged, WorkMoved
@@ -35,7 +36,9 @@ from app.models import (
     Item,
     Project,
     Turn,
+    UsageReading,
     User,
+    WindowShare,
     Work,
 )
 from app.models.reference import (
@@ -44,6 +47,7 @@ from app.models.reference import (
     ProjectState,
     RecordKind,
     SessionState,
+    UsageWindow,
     UserKind,
     VersionCause,
     WorkTrigger,
@@ -58,6 +62,7 @@ from app.services.controller_client import (
 )
 from app.services.environment_service import SHUTDOWN_TIMER, EnvironmentService
 from app.services.fake_controller import FakeControllerProblem, FinishOutcome
+from app.services.halt_file_service import HaltFileService
 from app.services.job_service import NEXT_TITLE
 from app.services.pilot_server import PilotServer, token_hash
 from app.services.pilot_store_service import Brain
@@ -81,6 +86,7 @@ from app.services.sse_connection_manager import SSEConnection
 from app.services.start_gate import WorkSlots
 from app.services.supervisor import TIMER_RUNS_TOTAL, LoopHandle
 from app.services.turn_end_read_service import READ_JOB, TurnEndReadService
+from app.services.usage_halts import UsageHalts
 from app.utils import after_commit as after_commit_module
 from app.utils.after_commit import clear_after_commit_callbacks
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
@@ -1615,6 +1621,50 @@ def _moves(events: list[EngineEvent]) -> list[EngineEvent]:
     return [event for event in events if isinstance(event, WorkMoved | ProjectChanged)]
 
 
+def _usage(db: DbSession, *, week: float, five_hour: float = 0.1) -> None:
+    """A fresh Usage Reading recorded now with these shares."""
+    now = datetime.now(UTC)
+    reading = UsageReading(taken_at=now, received_at=now, stale=False)
+    db.add(reading)
+    db.flush()
+    db.add_all(
+        WindowShare(
+            reading_id=reading.id,
+            window_code=window,
+            share=share,
+            resets_at=now + timedelta(days=1),
+        )
+        for window, share in (
+            (UsageWindow.SEVEN_DAY, week),
+            (UsageWindow.FIVE_HOUR, five_hour),
+        )
+    )
+    db.flush()
+
+
+def _no_new_work(container: ServiceContainer, supervise: Supervise) -> None:
+    """The container's halt files on halts whose settings are both no new
+    work: no file is wanted under them."""
+    settings = {
+        "week_halt": HaltSetting.NO_NEW_WORK,
+        "five_hour_halt": HaltSetting.NO_NEW_WORK,
+    }
+    halt_files = HaltFileService(
+        container=container,
+        supervisor=supervise(container)[0],
+        usage_halts=UsageHalts(
+            week_limit=0.9,
+            week_allowance=0.05,
+            week_second_limit=0.98,
+            five_hour_limit=0.75,
+            **settings,
+        ),
+        work_slots=WorkSlots(work_max=3, project_max=3),
+        **settings,
+    )
+    container.halt_file_service.override(providers.Object(halt_files))
+
+
 class _Answering(ServedFakeController):
     """The fake, ending each turn as soon as it is sent, keeping each send's
     message."""
@@ -2227,6 +2277,199 @@ class TestRelayWorkItem:
             session.get_one(Item, work_item.id),
             session.get_one(Item, _job_after(session, work_item).id),
         ]
+
+
+class TestRelayHaltedEnd:
+    """A work item's turn that ends well while the halt file is wanted for
+    it, a cooperative usage halt holding or its project paused, is not done:
+    open, `idle`, waiting on nobody, its nudge owed (the ruling on a normal
+    end; F135.3, F135.6, F141.3; DB 232; V23)."""
+
+    @pytest.mark.parametrize("cause", ["week", "five-hour", "pause", "both"])
+    def test_it_stays_open_its_nudge_owed_and_nothing_of_a_done_end_happens(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        project: Project,
+        work_item: models.Session,
+        engine_events: list[EngineEvent],
+        cause: str,
+    ) -> None:
+        container.document_service().register(project, work_item, NOTES)
+        _usage(
+            session,
+            week=0.95 if cause in ("week", "both") else 0.5,
+            five_hour=0.8 if cause == "five-hour" else 0.1,
+        )
+        project.paused = cause in ("pause", "both")
+        session.flush()
+        turn = _send(relays, session, work_item)
+        opened = _opened(relays)
+        _turn_of(fake_controller, controller_session, raw_turn("turn_text"))
+        engine_events.clear()
+
+        _relay(relays, work_item)
+
+        assert work_item.state_code is SessionState.IDLE
+        assert work_item.nudge_owed_at == turn.ended_at is not None
+        assert (turn.error, work_item.current_line) == (None, None)
+        assert _item_done(session, work_item) == (None, None, None)
+        # Its documents await the end of the run, and the job after it too.
+        assert relays._supervisor.start_loop(
+            READ_JOB, lambda handle: None, key=str(work_item.id)
+        )
+        assert _jobs_after(session, work_item.id) == []
+        # Its slot opens, and its halt file goes (`WorkSlots.left`); its
+        # line moves, and no job after it is placed.
+        assert opened.calls == 1
+        assert _moves(engine_events)[-2:] == [
+            WorkMoved(project.id, work_item.id),
+            ProjectChanged(project.id),
+        ]
+
+    @pytest.mark.parametrize(
+        ("outcome", "state"),
+        [("error", SessionState.FAILED), ("interrupted", SessionState.STOPPED)],
+    )
+    def test_a_turn_that_did_not_end_well_owes_no_nudge(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        project: Project,
+        work_item: models.Session,
+        outcome: FinishOutcome,
+        state: SessionState,
+    ) -> None:
+        """It waits on a person, as it does today (F125, F67)."""
+        _usage(session, week=0.95)
+        project.paused = True
+        session.flush()
+        _send(relays, session, work_item)
+        _turn_of(fake_controller, controller_session, raw_turn("turn_text"), outcome)
+
+        _relay(relays, work_item)
+
+        assert (work_item.state_code, work_item.nudge_owed_at) == (state, None)
+
+    def test_under_no_new_work_it_is_done_as_today(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        supervise: Supervise,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        project: Project,
+        work_item: models.Session,
+    ) -> None:
+        """No file is written under no new work: a running work item goes
+        on to its end (F135.6)."""
+        _no_new_work(container, supervise)
+        _usage(session, week=0.95, five_hour=0.8)
+        turn = _send(relays, session, work_item)
+        _turn_of(fake_controller, controller_session, raw_turn("turn_text"))
+
+        _relay(relays, work_item)
+
+        assert (work_item.state_code, work_item.nudge_owed_at) == (
+            SessionState.IDLE,
+            None,
+        )
+        assert _item_done(session, work_item) == (turn.ended_at, "turn_ended", None)
+        assert _jobs_after(session, work_item.id) == [NEXT_TITLE]
+
+    @pytest.mark.parametrize("cause", ["halt", "pause"])
+    def test_a_jobs_turn_ends_done_as_today_with_no_nudge(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        project: Project,
+        cause: str,
+    ) -> None:
+        """No halt holds a job (F135); a job's turn under the pause runs to
+        its end, done (F141.3)."""
+        run, _, _ = _done_run(session, container, project)
+        job = _pass_of(session, container, project, run, controller_session)
+        if cause == "halt":
+            _usage(session, week=0.95, five_hour=0.8)
+        else:
+            project.paused = True
+            session.flush()
+        turn = _send(relays, session, job, "/pre-rule")
+        _turn_of(fake_controller, controller_session, raw_turn("turn_text"))
+
+        _relay(relays, job)
+
+        assert (job.state_code, job.nudge_owed_at) == (SessionState.IDLE, None)
+        assert _item_done(session, job) == (turn.ended_at, "turn_ended", None)
+
+    def test_a_clarification_runs_reply_is_its_halted_turns_final_text_kept_at_its_end(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        project: Project,
+    ) -> None:
+        """DB 255: written once, at the turn end that carries its final
+        text; the nudge's turn, ended with nothing holding, makes the run
+        done and replaces it not."""
+        run, _, _ = _done_run(session, container, project)
+        asking = _pass_of(session, container, project, run, None)
+        clarifying = _agent_session(session, project, controller_session)
+        clarifying.conversation_id = "conv-camp"
+        session.flush()
+        container.record_service().place_work(
+            project, clarifying, "Clarify cut-over.md"
+        )
+        session.add(ClarificationRun(id=clarifying.id, pass_id=asking.id))
+        session.flush()
+        _usage(session, week=0.95)
+        halted = _send(relays, session, clarifying, "Pilot asks about …")
+        _turn_of(
+            fake_controller, controller_session, raw_turn("turn_text"), result=REPLY
+        )
+        _relay(relays, clarifying)
+        [clarification] = _clarifications(session, asking)
+        assert (clarification.reply, clarification.replied_at) == (
+            REPLY,
+            halted.ended_at,
+        )
+        assert _jobs_after(session, clarifying.id) == []
+
+        _usage(session, week=0.5)
+        # The nudge's turn, as its send leaves the Session.
+        clarifying.nudge_owed_at = None
+        session.flush()
+        nudged = _send(relays, session, clarifying, "The subscription quota ran out.")
+        _turn_of(
+            fake_controller,
+            controller_session,
+            raw_turn("turn_text"),
+            result="Nothing is left.",
+        )
+        _relay(relays, clarifying)
+
+        [clarification] = _clarifications(session, asking)
+        assert (clarification.reply, clarification.replied_at) == (
+            REPLY,
+            halted.ended_at,
+        )
+        assert _item_done(session, clarifying) == (
+            nudged.ended_at,
+            "turn_ended",
+            None,
+        )
+        assert _jobs_after(session, clarifying.id) == ["Deciding what is next"]
 
 
 def _stopped(run: models.Session, person: User | None = None) -> datetime:

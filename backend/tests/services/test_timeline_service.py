@@ -461,6 +461,16 @@ def _hard_stopped(
     return stopped
 
 
+def _halted_end(session: DbSession, project: Project, environment: Environment) -> Item:
+    """A work item whose turn ended under a cooperative usage halt or its
+    project's pause: `idle`, open, its nudge owed (DB 232)."""
+    halted = _work(session, project, environment, SessionState.IDLE)
+    run = session.get_one(models.Session, halted.id)
+    run.nudge_owed_at = datetime(2026, 10, 24, 9, 5, tzinfo=UTC)
+    session.flush()
+    return halted
+
+
 def _usage(session: DbSession, *, week: float, five_hour: float) -> None:
     """A fresh Usage Reading recorded now with these shares."""
     now = datetime.now(UTC)
@@ -1935,6 +1945,7 @@ class TestTimeline:
             "stopped_at": None,
             "stopped_by": None,
             "stopped_cause": None,
+            "nudge_owed": False,
             "retried": None,
         }
 
@@ -2468,6 +2479,82 @@ class TestWorkStatus:
 
         assert work.stopped_cause is None
         assert work.stopped_by is not None and work.stopped_by.kind == "agent"
+
+    @pytest.mark.parametrize(
+        ("week", "five_hour", "paused", "reason"),
+        [
+            (0.95, 0.1, False, HeldReason.WEEK_HALT),
+            (0.5, 0.8, False, HeldReason.FIVE_HOUR_HALT),
+            (0.95, 0.8, True, HeldReason.WEEK_HALT),
+            (0.5, 0.1, True, HeldReason.PAUSED),
+            (0.5, 0.1, False, None),
+        ],
+        ids=["the week's", "the five-hour", "a halt and the pause", "paused", "none"],
+    )
+    def test_one_ended_under_a_halt_or_the_pause_says_what_holds_its_nudge_now(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        week: float,
+        five_hour: float,
+        paused: bool,
+        reason: HeldReason | None,
+    ) -> None:
+        """Decision 66 keeps no cause: read at display as a held start's
+        halt and pause are, the halt first; neither the outage nor the slot
+        holds a nudge, the gate's to hold once it is sent."""
+        project = _make(container)
+        project.paused = paused
+        halted = _halted_end(session, project, environment)
+        _usage(session, week=week, five_hour=five_hour)
+
+        work = work_status(
+            session, [halted.id], unreachable=True, halts=HALTS, slots=SLOTS
+        )[halted.id]
+
+        assert (work.state, work.nudge_owed) == (SessionState.IDLE, True)
+        assert work.held_reason == reason
+        assert work.held_running is None
+        assert (work.stopped_at, work.stopped_cause) == (None, None)
+
+    def test_only_a_nudge_owed_marks_a_work_item(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        """A done run's idle Session and a stop no halt made owe none; the
+        hard stop's does."""
+        project = _make(container)
+        project.paused = True
+        done = _work(
+            session,
+            project,
+            environment,
+            SessionState.IDLE,
+            done_at=datetime.now(UTC),
+            done_cause_code="turn_ended",
+        )
+        hard_stopped = _hard_stopped(session, project, environment)
+        _usage(session, week=0.95, five_hour=0.1)
+
+        found = work_status(
+            session,
+            [done.id, hard_stopped.id],
+            unreachable=False,
+            halts=HALTS,
+            slots=SLOTS,
+        )
+
+        assert (found[done.id].nudge_owed, found[done.id].held_reason) == (
+            False,
+            None,
+        )
+        assert (
+            found[hard_stopped.id].nudge_owed,
+            found[hard_stopped.id].held_reason,
+        ) == (True, None)
 
     def test_the_service_reads_one_work_item(
         self,
@@ -3437,6 +3524,20 @@ class TestBadges:
         session.get_one(models.Session, tooled.id).nudge_owed_at = None
         session.flush()
         assert self._badges(container, person, project) == {project.id: Badge(1, False)}
+
+    def test_a_work_item_ended_under_a_halt_or_the_pause_waits_on_no_one(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        """DB 232: open, its nudge carries it on once nothing holds it."""
+        project = _make(container)
+        project.paused = True
+        _halted_end(session, project, environment)
+
+        assert self._badges(container, person, project) == {}
 
     def test_a_failed_or_stopped_job_waits_until_it_is_retried(
         self,

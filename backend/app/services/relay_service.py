@@ -25,6 +25,14 @@ its state stays `stopped`, its line none. A turn the controller never got, or
 whose controller session is gone, ends there with no `result`. The interrupt
 runs on a loop of its own, `interrupt:<id>`, once the stop commits.
 
+A work item's turn that ends neither interrupted nor in error makes it done
+(decision 44), unless a usage halt whose setting is the cooperative stop
+holds then, or its project's pause: the halt file's holders
+(`HaltFileService`). Such a run stays open, `idle`, its nudge owed, a
+clarification run's reply recorded; the nudge carries it on once nothing
+holds it (`SessionStartService.send_nudges`), and it is done at its first
+normal turn end with neither holding (F135.3, F135.6, F141.3; DB 232).
+
 A brain session's turn that ends with a save of its own still held (the
 engine's turn end, `DocumentService.turn_ended`) gets the Session the server's
 follow-up turn, naming each such path and its faults (F79; design 3 §5.1),
@@ -969,8 +977,9 @@ class RelayService:
         and the engine's turn end. A work item's Session whose turn ended in
         error is `failed` instead, the error the Turn's (F125), and one that
         ended neither interrupted nor in error makes the work item done
-        (decision 44). A Session stopped under the turn stays as its stop left
-        it. A brain session left `idle` with a save of its own still held
+        (decision 44), or, under a cooperative usage halt or its project's
+        pause, leaves it open with its nudge owed (`_ended`). A Session
+        stopped under the turn stays as its stop left it. A brain session left `idle` with a save of its own still held
         stays `running` with the follow-up turn (`_follow_up`), a job's work
         item done at that turn's end, not this one's. A worker's done run
         that registered nothing has the job after its turn placed here
@@ -1053,7 +1062,11 @@ class RelayService:
         is done at its last turn's end (design 3 §5.1). A worker's done run
         has its documents read, the job after its turn following them, and a
         clarification run's reply recorded; a pass's last turn ended `idle`
-        or `failed` puts the questions it asked to the writer (DB 254, 255)."""
+        or `failed` puts the questions it asked to the writer (DB 254, 255).
+        A worker's run whose turn ends `idle` while the halt file is wanted
+        for it, a cooperative usage halt holding or its project paused, is
+        not done: its nudge is owed, and a clarification run's reply is
+        recorded now, as the turn's final text (DB 232, 255)."""
         work = db.get(Work, session.id) is not None
         if frame.interrupted:
             session.state_code = SessionState.STOPPED
@@ -1066,13 +1079,30 @@ class RelayService:
         else:
             session.state_code = SessionState.IDLE
             if work and not follows_up:
-                self._container.record_service().work_done(session.id, at)
                 clarifications = self._container.clarification_service()
+                if session.kind_code == WORK_KIND and self._halted(db, session):
+                    session.nudge_owed_at = at
+                    clarifications.replied(session, frame.result, at)
+                    logger.info(
+                        "Session %s ended its turn halted or paused, its nudge owed",
+                        session.id,
+                    )
+                    return
+                self._container.record_service().work_done(session.id, at)
                 if session.kind_code == WORK_KIND:
                     clarifications.replied(session, frame.result, at)
                     self._reads.run_ended(db, session)
                 else:
                     clarifications.pass_ended(session)
+
+    def _halted(self, db: Session, session: AgentSession) -> bool:
+        """Whether the halt file is wanted for the worker's Session now: a
+        usage halt whose setting is the cooperative stop holds, or its
+        project, whose row the turn's end holds, is paused (F135.6,
+        F141.3)."""
+        return db.get_one(
+            Project, session.project_id
+        ).paused or self._container.halt_file_service().halting(db)
 
     def _follow_up(self, db: Session, session: AgentSession, held: list[str]) -> None:
         """Under the Session's lock, its turn ended `idle` with its saves of

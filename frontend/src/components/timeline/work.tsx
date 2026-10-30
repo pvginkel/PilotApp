@@ -7,7 +7,8 @@
  * it runs; why the gate holds its start; "Stopped · <time>" with the cause of a stop made
  * elsewhere, or a usage halt's hard stop's "Stopped at the week’s limit · <time>" and its like
  * (F135.6); the error a failed start or a turn ended in error left, shown as a stopped one is
- * (F125). Its Session log opens the session's records in the overlay (F26.3, F69). Stop, while it
+ * (F125); what holds the nudge owed to a run whose turn ended under a halt or a pause, as a held
+ * start's reason, "Halted at the week’s limit", "Paused" (F135.3, F141.3). Its Session log opens the session's records in the overlay (F26.3, F69). Stop, while it
  * runs, starts or is held, asks first in its actions' place, Esc dismissing the question; Resume,
  * once it stopped or failed, carries it on (F67), disabled while the project is archived, as its
  * head's switch is (D012). Pilot's own work, a background job such as the setup, has no env chip

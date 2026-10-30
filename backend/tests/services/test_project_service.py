@@ -2612,12 +2612,16 @@ class TestTransition:
         spec: dict[str, Any],
         kind: TransitionKind,
     ) -> None:
-        """Their lines read `held_reason`, the pause first (F26.1); a Chat's
+        """Their lines read `held_reason`, the pause first (F26.1), and so
+        do those of the work items whose nudge is owed (DB 232); a Chat's
         Session has no work item."""
         made = _make(container, name="Camp", **spec)
         held = _run(container, session, made, environment, SessionState.HELD)
         _run(container, session, made, environment, SessionState.HELD, "chat")
         _run(container, session, made, environment, SessionState.IDLE)
+        owed = _run(container, session, made, environment, SessionState.IDLE)
+        owed.nudge_owed_at = datetime.now(UTC)
+        session.flush()
         with scoped_session(container):
             pass
         engine_events.clear()
@@ -2625,9 +2629,40 @@ class TestTransition:
         with scoped_session(container):
             container.project_service().transition(ADA, made.id, kind)
 
-        assert [event for event in engine_events if isinstance(event, WorkMoved)] == [
-            WorkMoved(made.id, held.id)
-        ]
+        assert sorted(
+            (event for event in engine_events if isinstance(event, WorkMoved)),
+            key=lambda event: str(event.work_id),
+        ) == sorted(
+            [WorkMoved(made.id, held.id), WorkMoved(made.id, owed.id)],
+            key=lambda event: str(event.work_id),
+        )
+
+    @pytest.mark.parametrize(
+        ("spec", "kind", "nudged"),
+        [
+            ({"state": "open", "paused": True}, TransitionKind.RESUMED, True),
+            ({"state": "open"}, TransitionKind.PAUSED, False),
+        ],
+    )
+    def test_a_resume_sends_the_nudges_owed_once_it_commits(
+        self,
+        container: ServiceContainer,
+        spec: dict[str, Any],
+        kind: TransitionKind,
+        nudged: bool,
+    ) -> None:
+        """F141.3: a run found ended under the pause is nudged at the
+        resume (DB 232)."""
+        made = _make(container, name="Camp", **spec)
+        starts = container.session_start_service()
+        after_commit_module.clear_after_commit_callbacks()
+        try:
+            container.project_service().transition(ADA, made.id, kind)
+
+            callbacks = after_commit_module._callbacks.get()
+            assert (starts.send_nudges in callbacks) is nudged
+        finally:
+            after_commit_module.clear_after_commit_callbacks()
 
     @pytest.mark.parametrize(
         ("spec", "kind"),

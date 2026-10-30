@@ -699,6 +699,7 @@ class TestGetTimeline:
             "stopped_at": None,
             "stopped_by": None,
             "stopped_cause": None,
+            "nudge_owed": False,
             "retried": None,
         }
 
