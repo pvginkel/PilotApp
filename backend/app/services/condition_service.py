@@ -90,7 +90,12 @@ class ConditionService:
             if since is None
             else [
                 ConditionSchema(
-                    code=ConditionCode.OUTAGE, since=since, share=None, taken_at=None
+                    code=ConditionCode.OUTAGE,
+                    since=since,
+                    share=None,
+                    taken_at=None,
+                    offer=None,
+                    target=None,
                 )
             ]
         )
@@ -100,6 +105,8 @@ class ConditionService:
                 since=halt.since,
                 share=halt.share,
                 taken_at=halt.taken_at,
+                offer=None if halt.offer is None else halt.offer.kind,
+                target=None if halt.offer is None else halt.offer.target,
             )
             for halt in self._halts.halts(db)
         ]

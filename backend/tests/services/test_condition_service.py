@@ -98,6 +98,8 @@ class TestConditionService:
                     "since": controller_outage.since,
                     "share": None,
                     "taken_at": None,
+                    "offer": None,
+                    "target": None,
                 }
             ]
         }
@@ -118,18 +120,24 @@ class TestConditionService:
                     "since": controller_outage.since,
                     "share": None,
                     "taken_at": None,
+                    "offer": None,
+                    "target": None,
                 },
                 {
                     "code": "week_halt",
                     "since": reading.received_at,
                     "share": 0.92,
                     "taken_at": reading.taken_at,
+                    "offer": "allowance",
+                    "target": pytest.approx(0.97),
                 },
                 {
                     "code": "five_hour_halt",
                     "since": reading.received_at,
                     "share": 0.8,
                     "taken_at": reading.taken_at,
+                    "offer": None,
+                    "target": None,
                 },
             ]
         }
@@ -183,6 +191,8 @@ class TestConditionService:
                         "since": since.isoformat().replace("+00:00", "Z"),
                         "share": None,
                         "taken_at": None,
+                        "offer": None,
+                        "target": None,
                     }
                 ]
             },

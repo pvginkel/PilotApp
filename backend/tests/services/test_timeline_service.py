@@ -69,7 +69,9 @@ from app.services.usage_halts import UsageHalts
 from tests.support.chats import ChatWriter, open_chat
 
 SLOTS = WorkSlots(work_max=3, project_max=3)
-HALTS = UsageHalts(week_limit=0.9, five_hour_limit=0.75)
+HALTS = UsageHalts(
+    week_limit=0.9, week_allowance=0.05, week_second_limit=0.98, five_hour_limit=0.75
+)
 """The slot of the defaults: the work items these tests place leave it room."""
 
 ADA = AuthContext(

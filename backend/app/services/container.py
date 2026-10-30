@@ -55,6 +55,7 @@ from app.services.pilot_store_service import PilotStoreService
 from app.services.pilot_work_service import PilotWorkService
 from app.services.project_event_service import ProjectEventService
 from app.services.project_service import ProjectService
+from app.services.quota_overrule_service import QuotaOverruleService
 from app.services.relay_service import RelayService
 from app.services.relay_watchdog import RelayWatchdog
 from app.services.session_record_service import SessionRecordService
@@ -244,6 +245,8 @@ class ServiceContainer(containers.DeclarativeContainer):
     usage_halts = providers.Singleton(
         UsageHalts,
         week_limit=app_config.provided.week_first_limit,
+        week_allowance=app_config.provided.week_allowance,
+        week_second_limit=app_config.provided.week_second_limit,
         five_hour_limit=app_config.provided.five_hour_limit,
     )
     usage_watcher = providers.Singleton(
@@ -497,6 +500,14 @@ class ServiceContainer(containers.DeclarativeContainer):
 
     # The signed-in person on the record (F137), and what links in text (F93)
     people_service = providers.Factory(PeopleService, db=db_session)
+    # A person's overrule of the week's usage halt (F135.2)
+    quota_overrule_service = providers.Factory(
+        QuotaOverruleService,
+        db=db_session,
+        people_service=people_service,
+        usage_halts=usage_halts,
+        usage_watcher=usage_watcher,
+    )
     link_service = providers.Factory(LinkService, db=db_session)
 
     # The person's bridge token, sealed at rest and opened to send (DB decision 17)

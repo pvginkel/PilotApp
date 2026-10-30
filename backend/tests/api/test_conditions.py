@@ -3,6 +3,7 @@ bar (UC *The gold bar*; F125, F135.7; design 2 §13.4)."""
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from flask.testing import FlaskClient
 from sqlalchemy.orm import Session
 
@@ -36,6 +37,8 @@ class TestGetConditions:
                     "since": since.isoformat().replace("+00:00", "Z"),
                     "share": None,
                     "taken_at": None,
+                    "offer": None,
+                    "target": None,
                 }
             ]
         }
@@ -66,6 +69,8 @@ class TestGetConditions:
                     "since": "2026-10-08T09:30:00Z",
                     "share": 0.9,
                     "taken_at": "2026-10-08T09:30:00Z",
+                    "offer": "allowance",
+                    "target": pytest.approx(0.95),
                 }
             ]
         }

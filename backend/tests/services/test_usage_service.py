@@ -313,6 +313,30 @@ class TestUsageService:
         with scoped_session(container) as db:
             assert _count(db) == 1
 
+    def test_a_reading_is_stamped_received_once_it_holds_the_table(
+        self, committed_app: Flask
+    ) -> None:
+        # A Quota Overrule's make holds the table so: an overrule's making and
+        # a reading's receipt order as their commits.
+        container = committed_app.container
+        holder: Session = container.session_maker()()
+        holder.execute(text("LOCK TABLE usage_readings IN SHARE MODE"))
+        receiving = threading.Thread(
+            target=UsageService(container=container).receive, args=(_reading(),)
+        )
+        try:
+            receiving.start()
+            wait_until(lambda: _waiting_on_the_table(container) == 1, "waiting")
+            released = datetime.now(UTC)
+        finally:
+            holder.rollback()
+            holder.close()
+        receiving.join()
+
+        with scoped_session(container) as db:
+            received_at = db.scalars(select(UsageReading.received_at)).one()
+        assert received_at > released
+
 
 class TestReadingAge:
     def test_it_is_nan_before_a_reading_with_figures(self, usage: UsageService) -> None:

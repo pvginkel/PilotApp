@@ -120,7 +120,6 @@ class UsageService:
         """Record the reading the controller served when it is one to record,
         and hold its figures unless they are older than the latest recorded;
         a reading recorded tells the listeners once its commit is done."""
-        received_at = datetime.now(UTC)
         if reading.taken_at is None or not reading.windows:
             logger.info(
                 "Usage reading without figures (%s): the latest recorded stands",
@@ -138,6 +137,10 @@ class UsageService:
         recorded: int | None = None
         with scoped_session(self._container) as db:
             db.execute(text("LOCK TABLE usage_readings IN EXCLUSIVE MODE"))
+            # Stamped under the lock, which a Quota Overrule's make takes too:
+            # a reading's receipt and an overrule's making order as their
+            # commits, as the overrule's end reads them (DB 268).
+            received_at = datetime.now(UTC)
             last = latest(db)
             if last is not None and usage.taken_at < last.taken_at:
                 logger.info(

@@ -20,8 +20,12 @@ class UserKind(StrEnum):
 
 
 class OverruleKind(StrEnum):
-    ADD_FIVE = "add_five"
-    TO_THE_END = "to_the_end"
+    """A kind of way a person lifts the week's usage halt (DB §2.4; decision
+    66): the allowance, a target under the second limit; run-out, at it, the
+    target the wall."""
+
+    ALLOWANCE = "allowance"
+    RUN_OUT = "run_out"
 
 
 class ProjectState(StrEnum):

@@ -12,24 +12,28 @@ from typing import Any
 
 import pytest
 from dependency_injector import providers
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.models import UsageReading, User, WindowShare
-from app.models.reference import UsageWindow
+from app.models import QuotaOverrule, UsageReading, User, WindowShare
+from app.models.reference import OverruleKind, UsageWindow
 from app.services import usage_halts as usage_halts_module
 from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerUsageReading
 from app.services.sse_connection_manager import SSEConnection, SSEConnectionManager
 from app.services.supervisor import Supervisor
-from app.services.usage_halts import TIMER, Halt, UsageHalts, UsageWatcher
+from app.services.usage_halts import TIMER, Halt, Offer, UsageHalts, UsageWatcher
 from app.services.usage_service import Usage, UsageService
 from tests.support.supervisor import LogWaiter, Supervise, listening, wait_until
 
 WEEK = UsageWindow.SEVEN_DAY
 FIVE_HOUR = UsageWindow.FIVE_HOUR
+ALLOWANCE = OverruleKind.ALLOWANCE
+RUN_OUT = OverruleKind.RUN_OUT
 
-HALTS = UsageHalts(week_limit=0.9, five_hour_limit=0.75)
+HALTS = UsageHalts(
+    week_limit=0.9, week_allowance=0.05, week_second_limit=0.98, five_hour_limit=0.75
+)
 
 RECEIVED_AT = datetime(2026, 10, 8, 9, tzinfo=UTC)
 WEEK_RESETS_AT = datetime(2026, 10, 9, 7, tzinfo=UTC)
@@ -70,6 +74,29 @@ def _record(
             )
     db.flush()
     return reading
+
+
+def _overrule(
+    db: Session,
+    person: User,
+    *,
+    kind: OverruleKind = OverruleKind.ALLOWANCE,
+    target: float | None = 0.98,
+    made_at: datetime = RECEIVED_AT + timedelta(minutes=5),
+    ended_at: datetime | None = None,
+) -> QuotaOverrule:
+    """A Quota Overrule `person` made at `made_at`, by default an allowance
+    holding, five minutes after the first reading's receipt."""
+    made = QuotaOverrule(
+        kind_code=kind,
+        made_by_user_id=person.id,
+        made_at=made_at,
+        target=target,
+        ended_at=ended_at,
+    )
+    db.add(made)
+    db.flush()
+    return made
 
 
 class _Clock:
@@ -151,7 +178,15 @@ class TestHolding:
     def test_a_five_hour_limit_of_0_holds_none(self, session: Session) -> None:
         _record(session, week=0.5, five_hour=1.3)
 
-        assert UsageHalts(week_limit=0.9, five_hour_limit=0).holding(session) == ()
+        assert (
+            UsageHalts(
+                week_limit=0.9,
+                week_allowance=0.05,
+                week_second_limit=0.98,
+                five_hour_limit=0,
+            ).holding(session)
+            == ()
+        )
 
     def test_a_lower_share_lifts_the_halt_a_lower_one_still_over_holds_it(
         self, session: Session
@@ -233,8 +268,8 @@ class TestHalts:
         )
 
         assert HALTS.halts(session) == [
-            Halt(WEEK, 0.93, began, latest.taken_at),
-            Halt(FIVE_HOUR, 0.8, latest.received_at, latest.taken_at),
+            Halt(WEEK, 0.93, began, latest.taken_at, Offer(ALLOWANCE, 0.98)),
+            Halt(FIVE_HOUR, 0.8, latest.received_at, latest.taken_at, None),
         ]
 
     def test_a_run_reaches_back_to_the_first_reading(self, session: Session) -> None:
@@ -266,7 +301,7 @@ class TestHalts:
         monkeypatch.setattr(usage_halts_module, "recorded", overtaken)
 
         assert HALTS.halts(session) == [
-            Halt(WEEK, 0.95, held.received_at, held.taken_at)
+            Halt(WEEK, 0.95, held.received_at, held.taken_at, Offer(ALLOWANCE, 0.98))
         ]
 
     @pytest.mark.parametrize(
@@ -289,6 +324,202 @@ class TestHalts:
         [halt] = HALTS.halts(session)
 
         assert halt.since == (first if since_first else latest).received_at
+
+
+class TestOverrule:
+    def test_one_that_holds_lifts_the_weeks_halt_and_not_the_five_hours(
+        self, session: Session, person: User
+    ) -> None:
+        reading = _record(session, week=0.95, five_hour=0.8)
+        _overrule(session, person)
+
+        assert HALTS.holding(session) == (FIVE_HOUR,)
+        assert HALTS.halted(session) == FIVE_HOUR
+        assert HALTS.halts(session) == [
+            Halt(FIVE_HOUR, 0.8, reading.received_at, reading.taken_at, None)
+        ]
+        assert HALTS.offer(session) is None
+
+    def test_a_spent_one_lifts_nothing(self, session: Session, person: User) -> None:
+        _record(session, week=0.95)
+        _overrule(session, person, ended_at=RECEIVED_AT + timedelta(minutes=8))
+
+        assert HALTS.holding(session) == (WEEK,)
+
+    @pytest.mark.parametrize(
+        ("week", "offer"),
+        [
+            (0.9, Offer(ALLOWANCE, pytest.approx(0.95))),
+            # The target held to the second limit.
+            (0.95, Offer(ALLOWANCE, 0.98)),
+            (0.9799, Offer(ALLOWANCE, 0.98)),
+            (0.98, Offer(RUN_OUT, None)),
+            (1.03, Offer(RUN_OUT, None)),
+        ],
+    )
+    def test_the_weeks_halt_offers_the_allowance_under_the_second_limit_and_run_out_at_it(
+        self, session: Session, week: float, offer: Offer
+    ) -> None:
+        _record(session, week=week)
+
+        assert HALTS.offer(session) == offer
+        [halt] = HALTS.halts(session)
+        assert halt.offer == offer
+
+    @pytest.mark.parametrize("week", [None, 0.89])
+    def test_no_overrule_is_offered_while_the_weeks_halt_does_not_hold(
+        self, session: Session, week: float | None
+    ) -> None:
+        _record(session, week=week, five_hour=0.9)
+
+        assert HALTS.offer(session) is None
+
+    def test_none_is_offered_before_the_first_reading(self, session: Session) -> None:
+        assert HALTS.offer(session) is None
+
+    def test_the_halt_held_again_at_an_overrules_end_began_then(
+        self, session: Session, person: User
+    ) -> None:
+        _record(session, week=0.95)
+        ended = RECEIVED_AT + timedelta(hours=2)
+        _overrule(session, person, ended_at=ended)
+        _record(session, week=0.98, received_at=ended)
+
+        [halt] = HALTS.halts(session)
+
+        assert halt.since == ended
+
+    def test_an_overrules_end_before_the_halts_run_leaves_its_start(
+        self, session: Session, person: User
+    ) -> None:
+        _overrule(session, person, ended_at=RECEIVED_AT - timedelta(days=1))
+        first = _record(session, week=0.95)
+
+        [halt] = HALTS.halts(session)
+
+        assert halt.since == first.received_at
+
+
+class TestEndSpent:
+    def test_none_holds_none_ends(self, session: Session) -> None:
+        _record(session, week=0.95)
+
+        assert HALTS.end_spent(session) is None
+
+    @pytest.mark.parametrize(
+        ("kind", "target", "week", "spent"),
+        [
+            (ALLOWANCE, 0.96, 0.9599, False),
+            (ALLOWANCE, 0.96, 0.96, True),
+            (ALLOWANCE, 0.96, 0.99, True),
+            (RUN_OUT, None, 0.9999, False),
+            (RUN_OUT, None, 1.0, True),
+        ],
+    )
+    def test_a_reading_at_or_over_its_target_spends_it(
+        self,
+        session: Session,
+        clock: type[_Clock],
+        person: User,
+        kind: OverruleKind,
+        target: float | None,
+        week: float,
+        spent: bool,
+    ) -> None:
+        _record(session, week=0.92)
+        made = _overrule(session, person, kind=kind, target=target)
+        _record(session, week=week, received_at=RECEIVED_AT + timedelta(minutes=10))
+        clock.at = RECEIVED_AT + timedelta(minutes=10)
+
+        ended = HALTS.end_spent(session)
+
+        assert ended is (made if spent else None)
+        session.refresh(made)
+        assert made.ended_at == (clock.at if spent else None)
+
+    def test_a_run_out_made_at_the_wall_is_spent_at_once(
+        self, session: Session, person: User
+    ) -> None:
+        _record(session, week=1.02)
+        made = _overrule(session, person, kind=RUN_OUT, target=None)
+
+        assert HALTS.end_spent(session) is made
+
+    def test_a_reading_lower_than_the_one_before_spends_it_under_its_target(
+        self, session: Session, person: User
+    ) -> None:
+        _record(session, week=0.96)
+        made = _overrule(session, person)
+        _record(session, week=0.955, received_at=RECEIVED_AT + timedelta(minutes=10))
+
+        assert HALTS.end_spent(session) is made
+        # The share still over the first limit: the halt holds again.
+        assert HALTS.holding(session) == (WEEK,)
+
+    def test_a_lower_reading_the_overrule_was_made_after_spends_nothing(
+        self, session: Session, person: User
+    ) -> None:
+        _record(session, week=0.99)
+        _record(session, week=0.96, received_at=RECEIVED_AT + timedelta(minutes=1))
+        _overrule(session, person, made_at=RECEIVED_AT + timedelta(minutes=2))
+
+        assert HALTS.end_spent(session) is None
+
+    def test_the_reading_before_is_the_one_before_that_carries_the_week(
+        self, session: Session, person: User
+    ) -> None:
+        _record(session, week=0.96)
+        made = _overrule(session, person)
+        _record(session, five_hour=0.2, received_at=RECEIVED_AT + timedelta(minutes=10))
+        # The latest without the week spends nothing.
+        assert HALTS.end_spent(session) is None
+        _record(session, week=0.955, received_at=RECEIVED_AT + timedelta(minutes=20))
+
+        assert HALTS.end_spent(session) is made
+
+    @pytest.mark.parametrize(
+        ("past_reset", "spent"),
+        [(timedelta(seconds=59), False), (timedelta(minutes=1), True)],
+    )
+    def test_a_stale_week_a_minute_past_its_reset_spends_it(
+        self,
+        session: Session,
+        clock: type[_Clock],
+        person: User,
+        past_reset: timedelta,
+        spent: bool,
+    ) -> None:
+        _record(session, week=0.95, stale=True)
+        made = _overrule(session, person)
+        clock.at = WEEK_RESETS_AT + past_reset
+
+        assert HALTS.end_spent(session) is (made if spent else None)
+
+    def test_it_is_ended_once(
+        self, session: Session, monkeypatch: pytest.MonkeyPatch, person: User
+    ) -> None:
+        _record(session, week=0.92)
+        made = _overrule(session, person)
+        _record(session, week=0.99, received_at=RECEIVED_AT + timedelta(minutes=10))
+        # Another decision ends it between this one's read and its write.
+        first_end = RECEIVED_AT + timedelta(minutes=11)
+        read = usage_halts_module.overrule
+
+        def overtaken(db: Session) -> QuotaOverrule | None:
+            holding = read(db)
+            db.execute(
+                update(QuotaOverrule)
+                .where(QuotaOverrule.id == made.id)
+                .values(ended_at=first_end)
+                .execution_options(synchronize_session=False)
+            )
+            return holding
+
+        monkeypatch.setattr(usage_halts_module, "overrule", overtaken)
+
+        assert HALTS.end_spent(session) is None
+        session.expire_all()
+        assert session.get_one(QuotaOverrule, made.id).ended_at == first_end
 
 
 class _Gate:
@@ -407,6 +638,8 @@ class TestUsageWatcher:
             "since": reading.received_at.isoformat().replace("+00:00", "Z"),
             "share": 0.95,
             "taken_at": "2026-10-08T09:00:00Z",
+            "offer": "allowance",
+            "target": 0.98,
         }
         assert gate.released == 1
         assert halts_log.matching("The week's halt holds: .*")
@@ -495,6 +728,93 @@ class TestUsageWatcher:
 
         assert _codes(_frames(connection)) == [[]]
         assert gate.released == 2
+
+    def test_an_overrule_made_lifts_the_halt_whatever_this_process_told(
+        self,
+        session: Session,
+        person: User,
+        watcher: UsageWatcher,
+        gate: _Gate,
+        connection: SSEConnection,
+    ) -> None:
+        _record(session, week=0.95)
+        _overrule(session, person)
+
+        watcher.overruled()
+
+        assert _codes(_frames(connection)) == [[]]
+        assert gate.released == 1
+
+    def test_a_reading_that_spends_the_overrule_ends_it_and_the_halt_holds_again(
+        self,
+        session: Session,
+        person: User,
+        usage: UsageService,
+        watcher: UsageWatcher,
+        gate: _Gate,
+        connection: SSEConnection,
+        halts_log: LogWaiter,
+    ) -> None:
+        usage.receive(_reading(0.95))
+        made = _overrule(session, person, made_at=datetime.now(UTC))
+        watcher.overruled()
+        # Under its target, and not lower: nothing to tell.
+        usage.receive(_reading(0.96, minutes=10))
+
+        usage.receive(_reading(0.98, minutes=20))
+
+        frames = _frames(connection)
+        assert _codes(frames) == [["week_halt"], [], ["week_halt"]]
+        session.refresh(made)
+        assert made.ended_at is not None
+        assert frames[-1]["payload"]["conditions"][0]["since"] == (
+            made.ended_at.isoformat().replace("+00:00", "Z")
+        )
+        assert gate.released == 3
+        assert halts_log.matching(r"Quota overrule \d+ \(allowance\) ended: .*")
+
+    def test_an_overrules_end_with_no_turn_is_told(
+        self,
+        session: Session,
+        person: User,
+        usage: UsageService,
+        watcher: UsageWatcher,
+        gate: _Gate,
+        connection: SSEConnection,
+    ) -> None:
+        usage.receive(_reading(0.95))
+        _overrule(session, person, made_at=datetime.now(UTC))
+        watcher.overruled()
+        _frames(connection)
+
+        # Lower, and under the first limit: the halt does not hold again.
+        usage.receive(_reading(0.3, minutes=10))
+
+        assert _codes(_frames(connection)) == [[]]
+        assert gate.released == 2
+        assert HALTS.offer(session) is None
+
+    def test_the_timer_ends_the_overrule_a_minute_past_a_stale_weeks_reset(
+        self,
+        session: Session,
+        clock: type[_Clock],
+        person: User,
+        watcher: UsageWatcher,
+        gate: _Gate,
+        connection: SSEConnection,
+    ) -> None:
+        _record(session, week=0.95, stale=True)
+        made = _overrule(session, person)
+        watcher.reevaluate()
+        assert _frames(connection) == []
+
+        clock.at = WEEK_RESETS_AT + timedelta(minutes=1)
+        watcher.run_timer(session)
+
+        assert _codes(_frames(connection)) == [[]]
+        session.refresh(made)
+        assert made.ended_at == clock.at
+        assert gate.released == 0
 
     def test_its_timer_runs_on_the_schedulers_tick_from_startup(
         self,

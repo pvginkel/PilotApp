@@ -11,6 +11,7 @@ from app.models.environment import Environment
 from app.models.item import Item
 from app.models.plan import PlanNote, PlanNoteReference, PlanTask
 from app.models.project import Project, ProjectMember, ProjectTransition
+from app.models.quota_overrule import QuotaOverrule
 from app.models.reference import (
     ConfirmationReason,
     DoneCause,

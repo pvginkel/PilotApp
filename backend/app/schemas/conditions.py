@@ -6,6 +6,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
+from app.models.reference import OverruleKind
+
 
 class ConditionCode(StrEnum):
     """Condition's codes (DB §2.4; decision 66): the controller unreachable
@@ -40,6 +42,22 @@ class ConditionSchema(BaseModel):
             "A halt's: when the latest reading's figures were taken, the age "
             'its line shows, "as of"; null for the outage'
         ),
+    )
+    offer: OverruleKind | None = Field(
+        description=(
+            "The week's halt's: the overrule it offers now, one at a time, "
+            "`allowance` under the second limit, `run_out` at or over it; "
+            "null for the outage and the five-hour halt, which has none"
+        ),
+    )
+    target: float | None = Field(
+        description=(
+            "The offered allowance's: the week's share at which it would end, "
+            "the share plus the allowance and at most the second limit, a "
+            "fraction; null for run-out, whose target is the wall, and for the "
+            "other conditions"
+        ),
+        examples=[0.97],
     )
 
 

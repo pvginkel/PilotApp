@@ -997,6 +997,17 @@
             "$ref": "#/components/schemas/ConditionsSchema.6c014b4.ConditionCode",
             "description": "Which condition: `outage`, the controller unreachable; `week_halt` or `five_hour_halt`, the work items halted at the week's or the five-hour usage limit"
           },
+          "offer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConditionsSchema.6c014b4.OverruleKind"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The week's halt's: the overrule it offers now, one at a time, `allowance` under the second limit, `run_out` at or over it; null for the outage and the five-hour halt, which has none"
+          },
           "share": {
             "anyOf": [
               {
@@ -1030,16 +1041,42 @@
             ],
             "description": "A halt's: when the latest reading's figures were taken, the age its line shows, \"as of\"; null for the outage",
             "title": "Taken At"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The offered allowance's: the week's share at which it would end, the share plus the allowance and at most the second limit, a fraction; null for run-out, whose target is the wall, and for the other conditions",
+            "examples": [
+              0.97
+            ],
+            "title": "Target"
           }
         },
         "required": [
           "code",
           "since",
           "share",
-          "taken_at"
+          "taken_at",
+          "offer",
+          "target"
         ],
         "title": "ConditionSchema",
         "type": "object"
+      },
+      "ConditionsSchema.6c014b4.OverruleKind": {
+        "description": "A kind of way a person lifts the week's usage halt (DB §2.4; decision\n66): the allowance, a target under the second limit; run-out, at it, the\ntarget the wall.",
+        "enum": [
+          "allowance",
+          "run_out"
+        ],
+        "title": "OverruleKind",
+        "type": "string"
       },
       "DeploymentTriggerRequestSchema.6b6ce9f": {
         "description": "Request schema for triggering version deployment events in testing mode.",
@@ -5115,6 +5152,81 @@
         ],
         "title": "ProjectTabSchema",
         "type": "object"
+      },
+      "QuotaOverruleRequestSchema.72d99af": {
+        "description": "The overrule the signed-in person makes.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/QuotaOverruleRequestSchema.72d99af.OverruleKind",
+            "description": "Which overrule: `allowance`, a new target, the week's share plus the allowance and at most the second limit, offered under the second limit; `run_out`, the target the wall, offered at or over it. It must be the one the week's halt offers (`offer`)"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "QuotaOverruleRequestSchema",
+        "type": "object"
+      },
+      "QuotaOverruleRequestSchema.72d99af.OverruleKind": {
+        "description": "A kind of way a person lifts the week's usage halt (DB §2.4; decision\n66): the allowance, a target under the second limit; run-out, at it, the\ntarget the wall.",
+        "enum": [
+          "allowance",
+          "run_out"
+        ],
+        "title": "OverruleKind",
+        "type": "string"
+      },
+      "QuotaOverruleSchema.72d99af": {
+        "description": "An overrule as it was made.",
+        "properties": {
+          "id": {
+            "description": "The overrule's id",
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/QuotaOverruleSchema.72d99af.OverruleKind",
+            "description": "Which overrule: `allowance` or `run_out`"
+          },
+          "made_at": {
+            "description": "When it was made",
+            "format": "date-time",
+            "title": "Made At",
+            "type": "string"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The allowance's: the week's share at which it ends, a fraction; null for run-out, which ends at the wall",
+            "examples": [
+              0.96
+            ],
+            "title": "Target"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "target",
+          "made_at"
+        ],
+        "title": "QuotaOverruleSchema",
+        "type": "object"
+      },
+      "QuotaOverruleSchema.72d99af.OverruleKind": {
+        "description": "A kind of way a person lifts the week's usage halt (DB §2.4; decision\n66): the allowance, a target under the second limit; run-out, at it, the\ntarget the wall.",
+        "enum": [
+          "allowance",
+          "run_out"
+        ],
+        "title": "OverruleKind",
+        "type": "string"
       },
       "ReadyzResponse.d817ae2": {
         "description": "Readiness response: the overall verdict and every check.",
@@ -11178,6 +11290,83 @@
           }
         ],
         "summary": "Change the project's standing, as the signed-in person, now.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/quota-overrules": {
+      "post": {
+        "description": "The allowance's target is the latest reading's week share plus the allowance, at most the second limit; run-out's is the wall. The overrule holds until a reading reaches its target or shows the share lower than the one before, or a stale reading's week is a minute past its reset; meanwhile the week's halt holds no work item, and every person's connections hear the conditions once it is made.\n\nReturns:     201: The overrule, as made     400: The kind is not an overrule's     401: No one is signed in     403: The caller lacks the editor role     409: The caller has not chosen a handle, an overrule holds already,         the week's halt does not hold, or it offers the other kind",
+        "operationId": "post__api_quota-overrules",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuotaOverruleRequestSchema.72d99af"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotaOverruleSchema.72d99af"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Overrule the week's usage halt, as the signed-in person, now.",
         "tags": [],
         "x-required-role": "editor"
       }

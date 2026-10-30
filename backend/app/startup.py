@@ -39,6 +39,7 @@ def register_blueprints(api_bp: Blueprint, app: Flask) -> None:
         from app.api.links import links_bp
         from app.api.people import people_bp
         from app.api.projects import projects_bp
+        from app.api.quota_overrules import quota_overrules_bp
         from app.api.sessions import sessions_bp
         from app.api.testing_record import testing_record_bp
 
@@ -49,6 +50,7 @@ def register_blueprints(api_bp: Blueprint, app: Flask) -> None:
         api_bp.register_blueprint(links_bp)
         api_bp.register_blueprint(people_bp)
         api_bp.register_blueprint(projects_bp)
+        api_bp.register_blueprint(quota_overrules_bp)
         api_bp.register_blueprint(sessions_bp)
         api_bp.register_blueprint(testing_record_bp)
 
