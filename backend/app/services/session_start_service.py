@@ -1737,18 +1737,19 @@ class SessionStartService:
         """A Session at the quota wall that a reading decided missed,
         under its project's row and then its own, while it still is: the
         failed end it is, its nudge owed no more and a pass's questions put
-        to the writer now (the ruling on the wall; DB 254)."""
+        to the writer now, unless its project is finished or archived, where
+        nothing starts (the ruling on the wall; DB 254; F5.1, F128.1)."""
         unlocked = db.get_one(AgentSession, session_id)
         # Before the Session's lock (the lock order): the clarification run's
         # placement is an Item's birth.
-        _standing(db, unlocked.project_id, births=True)
+        project = _standing(db, unlocked.project_id, births=True)
         session = self._records(db).lock_session(session_id)
         if not db.scalar(
             select(_missed().where(AgentSession.id == session_id).exists())
         ):
             return
         session.nudge_owed_at = None
-        if session.kind_code == JOB_KIND:
+        if session.kind_code == JOB_KIND and _closed(project) is None:
             self._container.clarification_service().pass_ended(session)
         self._moved(session, state=True)
         logger.info(

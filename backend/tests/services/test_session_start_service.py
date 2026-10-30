@@ -7764,6 +7764,51 @@ class TestQuotaWallsPass:
         assert _read(session, asking.id).nudge_owed_at is None
         assert _clarifying(session, asking).state_code == SessionState.STARTING
 
+    @pytest.mark.parametrize(
+        "standing",
+        [{"state_code": ProjectState.FINISHED}, {"archived": True}],
+        ids=["finished", "archived"],
+    )
+    def test_a_wall_missed_in_a_closed_project_asks_no_one_and_holds_no_nudge(
+        self,
+        container: ServiceContainer,
+        continues: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        person: User,
+        standing: dict[str, Any],
+    ) -> None:
+        """Nothing of a closed project starts (F5.1, F128.1), its pass's
+        clarification run with it, and the nudges owed elsewhere go on."""
+        elsewhere = _walled_job(
+            container,
+            session,
+            _project_named(session, person, "elsewhere"),
+            environment,
+            week=1.0,
+        )
+        asking = self._walled_pass(container, fake, session, project)
+        for column, value in standing.items():
+            setattr(project, column, value)
+        _usage(session, week=0.51, five_hour=0.1)
+
+        _nudge(continues)
+
+        settled = _read(session, asking.id)
+        assert (settled.state_code, settled.nudge_owed_at) == (
+            SessionState.FAILED,
+            None,
+        )
+        assert (
+            session.scalars(
+                select(ClarificationRun).where(ClarificationRun.pass_id == asking.id)
+            ).all()
+            == []
+        )
+        assert _read(session, elsewhere.id).state_code == SessionState.STARTING
+
     def test_a_continuation_that_fails_to_start_asks_the_writer_once_it_commits(
         self,
         container: ServiceContainer,
