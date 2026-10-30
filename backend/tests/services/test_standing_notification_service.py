@@ -540,7 +540,7 @@ class TestMessage:
             tasks=[
                 {
                     "id": "ci",
-                    "title": "1. Set up `ci` & [deploy]_now_",
+                    "title": "1. Set up `ci` & [deploy]_now_, 2) ship",
                     "status": "in_progress",
                 }
             ],
@@ -550,7 +550,7 @@ class TestMessage:
         seen = _seen(container, session, project)
 
         assert seen.title == "Camp *2026*"
-        assert seen.message == r"1\. Set up \`ci\` \& \[deploy\]\_now\_"
+        assert seen.message == r"1\. Set up \`ci\` \& \[deploy\]\_now\_, 2\) ship"
 
     def test_the_fields_stay_within_the_bridges_limits(
         self, container: ServiceContainer, session: DbSession, person: User

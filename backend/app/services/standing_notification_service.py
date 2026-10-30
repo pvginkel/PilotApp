@@ -29,7 +29,7 @@ _MAX_MESSAGE = 4096
 _CUT = "…"
 _SEPARATOR = " · "
 
-_MARKDOWN = re.compile(r"([\\`*_\[\]<>#+\-.!|~&])")
+_MARKDOWN = re.compile(r"([\\`*_\[\]<>#+\-.!|~&)])")
 """The characters by which a text could open or close a Markdown construct in
 the message, each escaped by a backslash (CommonMark §2.4)."""
 
