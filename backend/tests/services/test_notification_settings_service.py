@@ -115,7 +115,10 @@ def sends(
                 container=container,
                 supervisor=supervisor,
                 condition_service=ConditionService(
-                    container, outage, container.sse_connection_manager()
+                    container,
+                    outage,
+                    container.usage_halts(),
+                    container.sse_connection_manager(),
                 ),
                 notification_token_cipher=cipher,
                 bridge_configured=True,

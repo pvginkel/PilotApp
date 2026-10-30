@@ -113,7 +113,10 @@ def _service(
         container=container,
         supervisor=supervisor,
         condition_service=ConditionService(
-            container, outage, container.sse_connection_manager()
+            container,
+            outage,
+            container.usage_halts(),
+            container.sse_connection_manager(),
         ),
         notification_token_cipher=container.notification_token_cipher(),
         bridge_configured=configured,
