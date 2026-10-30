@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.exceptions import InvalidOperationException, ValidationException
 from app.models import User
 from app.models.reference import UserKind
+from app.schemas.people import SelfResponseSchema
 from app.services.auth_service import AuthContext
 
 HANDLE_PATTERN = re.compile(r"[a-z0-9-]+")
@@ -41,6 +42,20 @@ def handle_prefill(name: str | None) -> str:
         return ""
     folded = unicodedata.normalize("NFKD", name.split()[0].casefold())
     return re.sub(r"[^a-z0-9-]", "", folded.encode("ascii", "ignore").decode())
+
+
+def self_response(person: User) -> SelfResponseSchema:
+    """`person` as the self read answers: whether a notification token is
+    set, never the token (DB decision 17)."""
+    return SelfResponseSchema(
+        handle=person.handle,
+        handle_prefill=None,
+        name=person.name,
+        initials=initials(person.name),
+        avatar_slot=person.avatar_slot,
+        notification_token_set=person.notification_token is not None,
+        alarms=person.alarms,
+    )
 
 
 def token_name(auth: AuthContext) -> str | None:

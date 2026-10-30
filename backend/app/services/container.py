@@ -44,6 +44,9 @@ from app.services.notification_bridge_client import NotificationBridgeClient
 from app.services.notification_reconcile_service import (
     NotificationReconcileService,
 )
+from app.services.notification_settings_service import (
+    NotificationSettingsService,
+)
 from app.services.notification_token_cipher import NotificationTokenCipher
 from app.services.oidc_client_service import OidcClientService
 from app.services.people_service import PeopleService
@@ -551,6 +554,20 @@ class ServiceContainer(containers.DeclarativeContainer):
         outage_after_seconds=app_config.provided.outage_alarm_after_seconds,
     )
     register_for_background_startup(lambda c: c.alarm_service())
+    # A person's notification token, saved after its one-shot as a task, and
+    # their alarms switch, on their profile (F134, F142.1)
+    notification_settings_service = providers.Factory(
+        NotificationSettingsService,
+        db=db_session,
+        container=__self__,
+        notification_token_cipher=notification_token_cipher,
+        notification_reconcile_service=notification_reconcile_service,
+        alarm_service=alarm_service,
+        task_service=task_service,
+        bridge_configured=providers.Callable(
+            lambda url: url is not None, app_config.provided.notification_bridge_url
+        ),
+    )
     brief_service = providers.Factory(
         BriefService, db=db_session, plan_service=plan_service
     )

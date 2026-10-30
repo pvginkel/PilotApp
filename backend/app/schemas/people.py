@@ -1,4 +1,5 @@
-"""Schemas for /api/people: the signed-in person and their handle."""
+"""Schemas for /api/people: the signed-in person, their handle, their
+notification token and their alarms switch."""
 
 from pydantic import BaseModel, Field
 
@@ -36,6 +37,20 @@ class SelfResponseSchema(BaseModel):
         ),
         examples=[1, None],
     )
+    notification_token_set: bool | None = Field(
+        description=(
+            "Whether the person saved a notification token (F134); the token itself "
+            "is never answered; null until the handle is chosen"
+        ),
+        examples=[True, None],
+    )
+    alarms: bool | None = Field(
+        description=(
+            "The alarms switch (F142.1): on, the alarms of the conditions that hold "
+            "reach the person's phone; on by default; null until the handle is chosen"
+        ),
+        examples=[True, None],
+    )
 
 
 class HandleChoiceSchema(BaseModel):
@@ -47,4 +62,28 @@ class HandleChoiceSchema(BaseModel):
             "changed after"
         ),
         examples=["ada"],
+    )
+
+
+class NotificationTokenSchema(BaseModel):
+    """The notification token a person saves (F134)."""
+
+    token: str = Field(
+        description=(
+            "The bearer token of the person's bridge registration: visible ASCII, "
+            "with no spaces or line breaks; never shown back once saved"
+        ),
+        examples=["registration-token-of-ada"],
+    )
+
+
+class AlarmsSwitchSchema(BaseModel):
+    """Where a person turns their alarms switch (F142.1)."""
+
+    alarms: bool = Field(
+        description=(
+            "On: the alarms of the conditions that hold are submitted to the "
+            "person's phone; off: those standing are dismissed"
+        ),
+        examples=[False],
     )

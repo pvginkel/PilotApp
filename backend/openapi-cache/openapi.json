@@ -354,6 +354,24 @@
         "title": "HeldReason",
         "type": "string"
       },
+      "AlarmsSwitchSchema.d1d9f70": {
+        "description": "Where a person turns their alarms switch (F142.1).",
+        "properties": {
+          "alarms": {
+            "description": "On: the alarms of the conditions that hold are submitted to the person's phone; off: those standing are dismissed",
+            "examples": [
+              false
+            ],
+            "title": "Alarms",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "alarms"
+        ],
+        "title": "AlarmsSwitchSchema",
+        "type": "object"
+      },
       "AnswerRequestSchema.4ff8b5e": {
         "additionalProperties": false,
         "description": "A person's answer to a block, given in the chat, to record for them.",
@@ -3819,6 +3837,24 @@
         "title": "MarkRequestSchema",
         "type": "object"
       },
+      "NotificationTokenSchema.d1d9f70": {
+        "description": "The notification token a person saves (F134).",
+        "properties": {
+          "token": {
+            "description": "The bearer token of the person's bridge registration: visible ASCII, with no spaces or line breaks; never shown back once saved",
+            "examples": [
+              "registration-token-of-ada"
+            ],
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "NotificationTokenSchema",
+        "type": "object"
+      },
       "ProjectDocumentSchema.1fdd8ae": {
         "description": "The project's draft, `project.md`, or its handbook, `handbook.md`,\nread only, as the overlay draws it (F37.4, F129.4).",
         "properties": {
@@ -5194,6 +5230,22 @@
       "SelfResponseSchema.d1d9f70": {
         "description": "The signed-in person, as the app's shell and the handle step draw them.",
         "properties": {
+          "alarms": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The alarms switch (F142.1): on, the alarms of the conditions that hold reach the person's phone; on by default; null until the handle is chosen",
+            "examples": [
+              true,
+              null
+            ],
+            "title": "Alarms"
+          },
           "avatar_slot": {
             "anyOf": [
               {
@@ -5271,6 +5323,22 @@
               "Ada Example"
             ],
             "title": "Name"
+          },
+          "notification_token_set": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether the person saved a notification token (F134); the token itself is never answered; null until the handle is chosen",
+            "examples": [
+              true,
+              null
+            ],
+            "title": "Notification Token Set"
           }
         },
         "required": [
@@ -5278,7 +5346,9 @@
           "handle_prefill",
           "name",
           "initials",
-          "avatar_slot"
+          "avatar_slot",
+          "notification_token_set",
+          "alarms"
         ],
         "title": "SelfResponseSchema",
         "type": "object"
@@ -6102,6 +6172,38 @@
         },
         "title": "TaskStartRequestSchema",
         "type": "object"
+      },
+      "TaskStartResponse.70db092": {
+        "description": "Response when starting a new task.",
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/TaskStartResponse.70db092.TaskStatus",
+            "description": "Initial task status"
+          },
+          "task_id": {
+            "description": "Unique task identifier",
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "status"
+        ],
+        "title": "TaskStartResponse",
+        "type": "object"
+      },
+      "TaskStartResponse.70db092.TaskStatus": {
+        "description": "Task execution status.",
+        "enum": [
+          "pending",
+          "running",
+          "completed",
+          "failed",
+          "cancelled"
+        ],
+        "title": "TaskStatus",
+        "type": "string"
       },
       "TaskStartResponseSchema.6b6ce9f": {
         "description": "Response schema for test task start.",
@@ -9473,6 +9575,83 @@
         "x-required-role": "editor"
       }
     },
+    "/api/people/self/alarms": {
+      "put": {
+        "description": "Off dismisses their standing alarms and on submits those of the conditions that hold, after the answer.\n\nReturns:     200: The person, with the switch as turned     400: The switch is not true or false     401: No one is signed in     403: The caller lacks the editor role     409: The caller has not chosen a handle",
+        "operationId": "put__api_people_self_alarms",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AlarmsSwitchSchema.d1d9f70"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelfResponseSchema.d1d9f70"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Turn the signed-in person's alarms switch (F142.1).",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
     "/api/people/self/handle": {
       "post": {
         "description": "Returns:     201: The person, with their handle and avatar slot     400: The handle is not lower-case letters, digits and hyphens     401: No one is signed in     403: The caller lacks the editor role     409: The handle is Pilot's or another person's, or the caller has one",
@@ -9546,6 +9725,148 @@
           }
         ],
         "summary": "Choose the signed-in person's handle, which puts them on the record.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/people/self/notification-token": {
+      "delete": {
+        "description": "Each of their standing notifications and alarms is dismissed through the token cleared, tried once, after the answer; what the bridge does not take stays on the phone.\n\nReturns:     200: The person, with no token set     401: No one is signed in     403: The caller lacks the editor role     409: The caller has not chosen a handle, or the app's key does not         open their token",
+        "operationId": "delete__api_people_self_notification-token",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelfResponseSchema.d1d9f70"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Clear the signed-in person's notification token, at once (F134).",
+        "tags": [],
+        "x-required-role": "editor"
+      },
+      "put": {
+        "description": "A task sends the one-shot \"Pilot will notify you here\" through the token, and stores it once the bridge took it; its result is the person. A token the bridge refuses or does not answer fails the task with the bridge's reason, and is not stored.\n\nReturns:     202: The save's task     400: The token is not visible ASCII     401: No one is signed in     403: The caller lacks the editor role     409: The caller has not chosen a handle, or no notification bridge is         configured",
+        "operationId": "put__api_people_self_notification-token",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationTokenSchema.d1d9f70"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskStartResponse.70db092"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Save the signed-in person's notification token, a first one or another in its place (F134, F134.1).",
         "tags": [],
         "x-required-role": "editor"
       }
