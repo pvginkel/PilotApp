@@ -13,7 +13,7 @@ from dependency_injector import providers
 from flask import Flask
 from flask.testing import FlaskClient
 from prometheus_client.metrics import MetricWrapperBase
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.orm import Session as DbSession
 from werkzeug.test import TestResponse
 
@@ -272,6 +272,48 @@ def _done_deferrals(
         container.record_service().done(item, person)
         path = f"draft-{project.number}/{db.get_one(Document, item.id).path}"
         return str(item.id), path
+
+
+def _done_items(
+    container: ServiceContainer,
+    project: Project,
+    session: models.Session,
+    person: User,
+    count: int,
+) -> None:
+    """The plan of `project` with the task `fix`, and `count` more done items,
+    each with D1 deferred to `fix` and Q1 to the plan."""
+    with scoped_session(container):
+        container.plan_service().save(project, FIX_PLAN.encode())
+        for _ in range(count):
+            item = container.document_service().bear_item(
+                project, "decision", "Camp chores", session, DEFERRED
+            )
+            container.record_service().done(item, person)
+
+
+@contextmanager
+def _statements(session: DbSession) -> Iterator[list[str]]:
+    """Every SQL statement run on the test's connection meanwhile, in
+    order."""
+    connection = session.get_bind()
+    statements: list[str] = []
+
+    def executed(
+        conn: object,
+        cursor: object,
+        statement: str,
+        parameters: object,
+        context: object,
+        executemany: bool,
+    ) -> None:
+        statements.append(statement)
+
+    event.listen(connection, "before_cursor_execute", executed)
+    try:
+        yield statements
+    finally:
+        event.remove(connection, "before_cursor_execute", executed)
 
 
 def _told(session: DbSession, path: str) -> str:
@@ -1535,6 +1577,32 @@ class TestCheck:
             for answer in answers
         ] == [[(item, "reverted"), (plan, "parse")], [(plan, "parse")]]
         assert session.scalars(select(SaveError.kind_code)).all() == [ErrorKind.PARSE]
+
+    def test_fifty_done_items_cost_the_check_no_more_statements_than_one(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        # The hook asks the check after every writing tool call of a brain
+        # session, so its cost stays the same however large the project grows.
+        folder = f"draft-{project.number}"
+        _done_items(container, project, project_session, person, 1)
+        fake_sidecar.post_check(folder, 0.0)
+        with _statements(session) as one:
+            first = fake_sidecar.post_check(folder, 0.0).json
+        _done_items(container, project, project_session, person, 49)
+
+        with _statements(session) as fifty:
+            then = fake_sidecar.post_check(folder, 0.0).json
+
+        assert len(first["homeless_deferrals"]) == 2
+        assert len(then["homeless_deferrals"]) == 100
+        assert one
+        assert len(fifty) == len(one)
 
     def test_the_hooks_wait_is_observed(self, fake_sidecar: FakeSidecar) -> None:
         count = _sample(HOOK_WAIT_SECONDS, "pilot_sync_hook_wait_seconds_count")
