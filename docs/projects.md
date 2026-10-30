@@ -28,7 +28,8 @@ projects too.
   its prose items but the opening, a notice only while it is urgent and a registered document only
   once its turn-end read is made, and none whose open blocks are all actions Pilot claimed, which
   are Pilot's until their `done` ([`engine.md`](engine.md)); a work item whose session stopped or
-  failed, a job of Pilot's own only until it is retried; never a wait and never an item for another
+  failed, a job of Pilot's own only until it is retried, and neither while its nudge is owed
+  ([`usage.md`](usage.md)); never a wait and never an item for another
   person (before the caller has a handle, every item for someone is another's); `urgent` whether one
   of them is urgent.
 - **`GET /api/projects/<id>`** answers the project's head: `{id, name, ticket, repo, state,
@@ -77,8 +78,8 @@ or `paused`) is written with it:
 | `brought_back` | an archived project | nothing started: the next message starts a chat |
 | `autopilot_on` | an open project with auto pilot off | with `answer_confirmations` true, the switch's Yes: each open confirmation it would answer, the head's `autopilot_may_take`, answered `Yes` by the caller, `via: autopilot`, in timeline order, as the caller's own answer is, each doing what that answer does ([`work.md`](work.md), [`round-trip.md`](round-trip.md)) |
 | `autopilot_off` | a project with auto pilot on | |
-| `paused` | an open project that is not paused | every start in it but a Chat's held at the gate ([`sessions.md`](sessions.md)); a running turn runs out |
-| `resumed` | a paused project | once it commits, the gate opens for its held starts |
+| `paused` | an open project that is not paused | every start in it but a Chat's held at the gate ([`sessions.md`](sessions.md)); a running turn runs out, with the halt file written where a work item of the project runs, and a work item's turn that ends normally under the pause is not done but owed its nudge ([`usage.md`](usage.md)) |
+| `resumed` | a paused project | once it commits, the gate opens for its held starts, the nudges owed go where nothing else holds them, and the halt file is deleted where nothing holds it any more |
 
 An archived project takes `brought_back` alone. Any other `kind` is a `400`, and so is
 `answer_confirmations` with a kind but `autopilot_on`. A confirmation answered meanwhile is left as
@@ -163,7 +164,9 @@ document row, in id order. A transition emits a `TreeHashMoved` of the project's
 which shows its state, `archived` and `autopilot` ([`projection.md`](projection.md)); a pause and a
 resume, which the store's tree does not show, emit `ProjectChanged` alone, and so do a join and a
 leave, which move no file. A transition that moves the pause, Finish's resume among them, moves the
-reason on the project's held work items' lines ([`work.md`](work.md)). Archive and Bring back emit
+reason on the project's held work items' lines and on those whose nudge is owed
+([`work.md`](work.md)), and asks for the halt files' sweep once it commits
+([`usage.md`](usage.md)). Archive and Bring back emit
 `ManifestChanged` too: the project's folder leaves the store's tree, or comes back to it as the
 record renders it, once the transition commits ([`sync.md`](sync.md)). So does Create project, whose
 folder moves from `draft-<number>` to its slug.

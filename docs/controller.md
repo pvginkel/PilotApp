@@ -28,6 +28,7 @@ against `CONTROLLER_CA_FILE` when that is set, and against requests' own trust o
 | `delete_environment(env_id)` | `DELETE /environments/<id>`, `202`; one already gone, answered `404`, is deleted |
 | `read_file(env_id, path)` | `GET /environments/<id>/file?path=<path>`: a `FileContent(data, sha256)`, the raw bytes and their `KubeCoder-Content-Sha256` |
 | `write_file(env_id, path, data)` | `PUT /environments/<id>/file?path=<path>`, the raw body, `204`: the file overwritten whole, or created with the folders it needs, and the SHA-256 of what was written; it sends no `expectedSha256` |
+| `delete_file(env_id, path)` | `DELETE /environments/<id>/file?path=<path>`, `204`; nothing at the path, or no such environment, answered `404`, is deleted |
 | `list_folder_files(env_id, path)` | `GET /environments/<id>/files?path=…&offset=…&limit=1000`, page by page and folder by folder: every file under the folder, its subfolders' included, in path order, each named through the folder as given, so a link under it is followed as a read follows it |
 | `create_headless_session(env_id, HeadlessCreateRequest)` | `POST /environments/<id>/sessions/headless`; a field left None is not sent, its box among them (below) |
 | `send_message(env_id, name, message)` | `POST /environments/<id>/sessions/headless/<name>/messages`, `202`: the session is busy with the turn |
@@ -70,9 +71,9 @@ routes' `503 environment-unreadable` (the controller cannot read the environment
 socket), `409 not-a-directory` (a file given to `list_folder_files`) and `413 file-too-large` (past
 `FILE_SIZE_CAP`, 16 MiB each way). Its `cause` reads `the controller answered <status> <type>:
 <title>; <detail>`, the controller's reason whole. The file routes answer from the environment's
-share, never through its pod, so a stopped environment's files are read and written too; a path
-outside `/work` is refused, and so is a write while the controller brings the environment up,
-resets or deletes it (`409 conflict`). A call the controller does not
+share, never through its pod, so a stopped environment's files are read, written and deleted too;
+a path outside `/work` is refused, and so is a write or a delete while the controller brings the
+environment up, resets or deletes it (`409 conflict`). A call the controller does not
 answer, a connection error, a timeout, or a 5xx without the controller's own problem+json (an
 ingress's page in front of it), raises `ControllerUnreachable` and turns the outage on (below). Any
 other failure, another status or an answer that does not parse, raises a plain
@@ -92,10 +93,13 @@ iteration ends without raising.
   `wait_ms` only, `IncompleteFrame(status)`. The stream is opened after the send's `202`: the
   controller holds a turn's result until the next send, so a stream opened before it delivers the
   previous turn's.
-- The fleet stream's frames: `StateFrame(environment)`, `GoneFrame(env_id)` and
+- The fleet stream's frames: `StateFrame(environment)`, `GoneFrame(env_id)`,
   `SessionsFrame(env_id, sessions)`, an environment's whole session set, each a `SessionView`
-  (`name`, `title`, `state`, `mode`, `working`, `session_id`). The other channels' frames are not
-  Pilot's and are skipped unread.
+  (`name`, `title`, `state`, `mode`, `working`, `session_id`), and `UsageFrame(reading)`, the
+  subscription's usage as the controller's poll last read it, a `ControllerUsageReading`
+  (`taken_at`, `stale`, `stale_reason`, `windows`, each `{window, share, resets_at}`), which the
+  controller sends first on every connect and then at each change of anything but `takenAt`
+  ([`usage.md`](usage.md)). The other channels' frames are not Pilot's and are skipped unread.
 
 **Readiness.** The client registers the `controller` check, not critical, on the controller's own
 `/readyz`, with a 2 s timeout. That route asks for no bearer, so the check shows that the
@@ -136,7 +140,8 @@ applied after a `gone` frame would bring the departed environment back. A drop r
 supervisor connects again with backoff, from 1 s doubling to 30 s. A failure to open or a drop
 turns the outage on and holds it on; a connect's list applied turns it off.
 
-It keeps the Environment rows Pilot has current, and creates none. A report sets `name` (the
+It hands each `usage` frame, the connect's first among them, to `UsageService.receive`
+([`usage.md`](usage.md)). It keeps the Environment rows Pilot has current, and creates none. A report sets `name` (the
 environment id while the controller has none), `last_state` (the controller's `status`),
 `last_seen_at` (when Pilot applied it) and `exempt`, and clears `stop_due_at` when it reports the
 environment exempt. A `gone` frame sets `last_state` `gone` alone, as does a connect's list for a
@@ -223,7 +228,8 @@ and deletes only its own: never an operator's environment of the same repository
 environment a work item was placed in by its id.
 
 **Free.** One of Pilot's own is free while it is neither `deleting` nor `gone`, no Session there
-is `running`, `starting` or `held`, nor `stopped` or `failed`, and no document a work item's run
+is `running`, `starting` or `held`, nor `stopped` or `failed`, nor `idle` an open work item owed
+its nudge, whose run goes on there ([`usage.md`](usage.md)), and no document a work item's run
 registered there is still open: the run's conversation goes on there once each is closed
 ([`round-trip.md`](round-trip.md)), and the last close's continuation names the environment from
 its placement on, so it is never free between the two. A work item that shows Resume keeps
@@ -297,8 +303,10 @@ unless `backend/.env` sets one, as the fleet's live check does against KubeCoder
 reaches by URL. It holds environments and headless sessions with the controller's state machines,
 answers with its status codes and problem+json, and serves the response stream and the fleet stream
 in its SSE framing: `raw` frames with the offset as their `id:`, and the worker's `result` and
-`incomplete`. It serves the file routes, a read, a write and a folder's listing, over each
-environment's `files`. An environment's pod has a `startedAt` from its move out of `stopped` until it
+`incomplete`. It serves the file routes, a read, a write, a delete and a folder's listing, over each
+environment's `files`. It serves the subscription's usage reading as a test last set it, with no
+poll behind it, on `GET /usage` and as the fleet stream's `usage` frame: the first frame of every
+connect, latest-wins, pushed at any change but its `takenAt`'s; a fresh fake's is `no-reading-yet`. An environment's pod has a `startedAt` from its move out of `stopped` until it
 stops, in whole seconds and later than every pod's before it. It serves the create, the reset,
 the rename and the delete with the controller's refusals in its order, and the list filtered by
 `managedBy`, `repo` and `status`. An environment a create makes has an id minted from its
@@ -308,9 +316,9 @@ session's conversation id is minted by its first send, an environment that is no
 no headless session, `wait=settled` is `wait=ready`, the create and the reset answer at once and
 take no `wait`, a delete's teardown ends as it is answered, `deleting` then `gone`, and the node's
 cap is a flag, not a count. An environment's `/work` holds files alone, with no link, a folder being
-there while a file is under it; a write takes no `expectedSha256` (`422`), and is refused `409
-conflict` while the environment reads `provisioning`, `starting` or `deleting`; a reset clears the
-tree, a stop keeps it.
+there while a file is under it; a write takes no `expectedSha256` (`422`), and a write or a
+delete is refused `409 conflict` while the environment reads `provisioning`, `starting` or
+`deleting`; a reset clears the tree, a stop keeps it.
 
 A boxed create keeps the worker's rules in its order: its fields' types, then the profile, `409
 capability-unavailable` "sandboxing is not enabled for this environment: …" on an environment its
@@ -358,15 +366,23 @@ admission-blocked`; with none, the node's cap, every create too; never an exempt
 capability-unavailable` until `on=False`),
 `unprojectable`, `busy`, `play` (the lines `claude` prints, answered with their offsets), `finish`
 (the turn's outcome: `success`, `error`, `interrupted`, `spawn-failure` or `ended`), `write_log`,
-`publish_state`, `publish_sessions`, `drop_streams`, `put_file` (a process in the environment
+`publish_state`, `publish_sessions`, `drop_streams`, `usage` (the poll answered, taken at
+`taken_at`, now by default: each window given a share, `five_hour` and `seven_day`, a window given
+none left out, resetting at `five_hour_resets_at` or `seven_day_resets_at`, else where the last
+answer had it, else its length past `taken_at`), `usage_stale` (the poll's latest call unanswered,
+for a `reason`, `token-expired` by default: the last answer's figures, stale),
+`controller_restarted` (every stream ends, and the reading is `no-reading-yet` until a verb sets
+another; a window's reset is kept), `put_file` (a process in the environment
 writes the file, whatever its status; over HTTP its `content` is text), `remove_file`, `file_text`
 (the file's text, None when there is none: over HTTP a `204`), `unreadable` (the environment's read
 and its file routes `503 environment-unreadable`) and `reset`, which forgets everything, an
-outage, the node's cap, the refused owners and how creates settle included; it is not the
+outage, the node's cap, the refused owners, how creates settle and the usage reading included; it is not the
 controller's reset route. `environment()` (its `resets` counting the resets that cleared its
 folder, its `files` the bytes by path), `session()`, `sessions()` and `calls` read its state.
 
 The turns a test plays are invented, in `backend/tests/fixtures/raw/turn_text.jsonl`,
-`turn_tool.jsonl` and `turn_subagent.jsonl`, read by `raw_turn(name)`: bare `claude` lines in the
-shapes of its stream-json, which the fake frames as the controller does. No line of them is a real
+`turn_tool.jsonl` and `turn_subagent.jsonl`, and `turn_wall.jsonl`, a turn at the quota wall, read
+by `raw_turn(name)`: bare `claude` lines in the shapes of its stream-json, which the fake frames as
+the controller does, each `result` line with its `modelUsage` and each `rate_limit_event` with its
+`unifiedWindows` ([`usage.md`](usage.md)). No line of them is a real
 session's.

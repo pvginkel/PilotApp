@@ -15,7 +15,7 @@ on in [`jobs.md`](jobs.md).
 
 | Service | Does |
 |---|---|
-| `SessionStartService` (`session_start_service.py`) | a work item placed by repository, a run's continuation or a clarification run, its Session written `held` or `starting` through the gate and brought up by its start loop in an environment of Pilot's own; a brain session's start, a chat's or a job's, brought up in the store, a job briefed as it leaves the gate; Stop and Resume |
+| `SessionStartService` (`session_start_service.py`) | a work item placed by repository, a run's continuation or a clarification run, its Session written `held` or `starting` through the gate and brought up by its start loop in an environment of Pilot's own; a brain session's start, a chat's or a job's, brought up in the store, a job briefed as it leaves the gate; Stop and Resume; the usage halts' hard stop and the nudges ([`usage.md`](usage.md)) |
 | `start_gate.py` | `held_reason`, the gate every start passes, and `WorkSlots`, its slot; `setups` and `carried`, the setup the pause lets through and the conversation another run holds |
 | `session_scope.py` | `scoped_create`, what each create of a Session is handed |
 | `RelayService` (`relay_service.py`) | the send of a Turn, the relay of each turn into the records, and the interrupt of a turn stopped under it |
@@ -30,8 +30,9 @@ documents open places the run's continuation, and a pre-ruling pass's end its cl
 ([`round-trip.md`](round-trip.md)); Create project
 places the setup, a job of Pilot's own, and a worker's turn end and a person's close of an item of
 Pilot's own place the jobs after them ([`work.md`](work.md)). A person's Resume carries a stopped
-or failed worker's run on, a person's Retry places a fresh job for a failed or stopped one, and
-Stop, the brain's `stop_work`, Finish and Archive stop a worker's run.
+or failed worker's run on, a person's Retry places a fresh job for a failed or stopped one, a nudge
+carries on a run the usage limits or the pause halted ([`usage.md`](usage.md)), and Stop, the
+brain's `stop_work`, a usage halt's hard stop, Finish and Archive stop a worker's run.
 
 ## The session start
 
@@ -55,14 +56,16 @@ and with `RecordNotFoundException` for no such Project or a task not in the plan
 is read under the lock its Item's birth takes, `next_seq`'s `FOR UPDATE`, so a start and a Finish
 or an Archive never interleave, and two starts of one project go one after the other.
 
-Then the gate decides its state. **The gate** (`held_reason(paused=, kind_code=, setup=,
-unreachable=, filled=, queued=, conversing=)`) holds a start while its project is paused
+Then the gate decides its state. **The gate** (`held_reason(halted=, paused=, kind_code=, setup=,
+unreachable=, filled=, queued=, conversing=)`) holds a work item's start while a usage halt holds,
+the week's or the five-hour's (`UsageHalts.halted`, [`usage.md`](usage.md)); a start while its
+project is paused
 ([`projects.md`](projects.md)), a Chat's never for the pause, nor the setup's, a Retry's included
 (`setups`), which runs under the pause Create writes; while the controller is unreachable
 ([`controller.md`](controller.md)); a work item's alone, while no slot is free; a job's alone, while
 another job of its project is before it (below); and a work item's alone, while another Session runs
-or starts on the conversation it resumes (below). Where more than one holds, the pause is read
-first, then the outage, then the slot, then the queue, then the conversation. A start the gate holds
+or starts on the conversation it resumes (below). Where more than one holds, a usage halt is read
+first, then the pause, then the outage, then the slot, then the queue, then the conversation. A start the gate holds
 is `held`: its Turn 1 unsent, a job's not yet written (below), no `server` record, no current line,
 and no loop run for it. One it lets through is `starting`, takes its slot, and has its loop run once
 the transaction commits. A `starting` Session that has an Environment already, a Resume's, has the
@@ -182,8 +185,9 @@ placed there by the environment's id, is never started there: its start fails wi
 environment is not Pilot's", nothing called, and its Resume is refused so (below).
 
 **Held, then released.** A held Session goes on when the gate opens for it: at the outage's end, at
-a `resumed` transition's commit, at a work item's start or end, which moves the slot's count, at a
-job's end, which moves its project's queue, and at STARTUP. The loop `start:held` (`release_held()`)
+a `resumed` transition's commit, at a usage halt's turn and at an overrule made
+([`usage.md`](usage.md)), at a work item's start or end, which moves the slot's count, at a job's
+end, which moves its project's queue, and at STARTUP. The loop `start:held` (`release_held()`)
 takes each held Session in `created_at` order and, under its lock, while it is still `held` and the
 gate, read afresh, is open for it, a work item's slot counted under the slot's lock, moves it to
 `starting` as above and runs its loop. A work item it still holds has its line told again
@@ -289,6 +293,8 @@ otherwise, and takes each frame in order:
   surrogate such as a truncated emoji's `\ud83d`, the line kept whole rather than scrubbed. A line
   at or below the last recorded offset of the same controller session is one the record has, and
   is skipped. While the Session's `conversation_id` is null, a recorded line's `session_id` sets it.
+  A `result` line of `claude`'s own writes its Turn's tokens and cost in the same transaction
+  ([`usage.md`](usage.md)).
 - **The `result` frame ends the Turn**, and nothing else does (D004). In one transaction: the
   `result` record, its payload the frame's data and its offset the stream's last raw frame's; the
   Turn ended, with `error` the result's text (or "The turn ended in an error") when the frame says
@@ -305,9 +311,14 @@ otherwise, and takes each frame in order:
 
 The Session's state at its turn's end: `stopped` when the turn was interrupted, by no one
 (`stopped_at` the end, `stopped_by_user_id` none), even when the frame also says `isError`; a work
-item's Session `failed` when its turn ended in error, the error its Turn's (D036); else `idle`, and
-a work item done, as the engine's `work_done` makes it: cause `turn_ended`, by no one, at the turn's
-end, which a Finish that closed it first leaves as Finish closed it. A Session with no work item
+item's Session `failed` when its turn ended in error, the error its Turn's (D036), its nudge owed
+from the turn's end when its stream shows the quota wall (D098), and a pass then asking the writer
+nothing yet (D099); else `idle`, and a work item done, as the engine's `work_done` makes it: cause `turn_ended`, by
+no one, at the turn's end, which a Finish that closed it first leaves as Finish closed it. A
+worker's run whose turn ends so while a usage halt whose setting is the cooperative stop holds, or
+its project is paused, is not done: it stays open, `idle`, its nudge owed, and nothing of a done
+run's end follows until the run's first normal turn end with neither holding (D097,
+[`usage.md`](usage.md)). A Session with no work item
 whose turn ended in error is `idle`, the error its Turn's. A job's work item is done at its last
 turn's end: a turn that gets the follow-up turn (below) leaves it open, and the follow-up's end
 makes it done. A Session stopped under the turn keeps its stop, and its work item is not done. A
@@ -375,7 +386,9 @@ for an unknown Session.
 **`POST /api/sessions/<id>/stop`**, no body (`SessionStartService.stop`), stops it where it is, as
 the signed-in person: the Session `stopped`, `stopped_at` now, `stopped_by_user_id` the person, no
 current line, its environment, when it has one, handed to the shutdown timer as a failed start's is
-(above), and a work item's slot given back. It calls no controller in the transaction. A running Session's Turn stays in flight: once the stop
+(above), and a work item's slot given back. A usage halt's hard stop stops a running work item
+the same way, by Pilot, its nudge owed ([`usage.md`](usage.md)). It calls no controller in the
+transaction. A running Session's Turn stays in flight: once the stop
 commits, the loop `interrupt:<id>` asks the controller's interrupt, and the relay records the turn
 to the `result` the interrupt brings, its lines arriving, its line and state unmoved, its work item
 not done. A controller that does not answer the interrupt lets the turn run out; a controller
@@ -395,6 +408,8 @@ Turn of it has gone out, so that a continuation's carries its message. Its Sessi
 current line are cleared, a write-back the controller refused of a document it carries is owed
 again ([`round-trip.md`](round-trip.md)), and it passes the gate as a start does, `held` or `starting`,
 under a share lock on the project's row, its slot counted before its environment's row is locked.
+A nudge owed to it is owed no more: the Resume stands in for it, one continuation, never two. A
+nudge carries a run on the same way, its Turn the nudge's words ([`usage.md`](usage.md)).
 A stopped or failed work item keeps its environment meanwhile: no other start takes it, and
 nothing resets or deletes it (D042, [`controller.md`](controller.md)).
 
@@ -428,7 +443,8 @@ gate does, and `404` for an unknown Session. It is a `409` with no controller or
 environment configured, for a Session that is no work item's, a worker's run ("it is a worker's run,
 which Resume carries on"), a job done ("it is done") or withdrawn by an Undo ("an Undo withdrew it
 before its brief went out"), one retried already ("it was retried already"), one neither failed nor
-stopped (as Resume's refusals word it), one whose stopped turn is still ending, a job after an item's
+stopped (as Resume's refusals word it), one whose nudge is owed at the quota wall ("it waits for its
+nudge at the quota wall", D099), one whose stopped turn is still ending, a job after an item's
 close whose item is open again ("the item it follows is open again"), and in a finished or an
 archived project. Nothing else retries a job: the server retries none on its own.
 
@@ -540,7 +556,8 @@ At STARTUP the job `relay`'s reconcile runs the relay of every Session `running`
 with a Turn in flight (`Resuming the relay of session <id>`); the job `interrupt`'s asks the
 interrupt of every Session stopped with a Turn in flight; and the job `start`'s runs the start of
 every Session still `starting` (`Resuming the start of session <id>`), then the release of the held
-ones, the outage being off in a fresh process; the jobs `read` and `write-back` run what the
+ones, the outage being off in a fresh process, and the nudges owed ([`usage.md`](usage.md)); the
+job `halt-file`'s settles every environment whose halt file may be there or is owed; the jobs `read` and `write-back` run what the
 registered documents owe ([`round-trip.md`](round-trip.md)). Each run resumes from the rows:
 
 - **Sent or not.** Before it opens the stream, a relay's run reads the controller session's status

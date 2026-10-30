@@ -12,7 +12,9 @@ controller, Pilot's MCP server with the worker's round trip, the project's chat 
 with the brain's tools, a new project: the plus, its definition chat and draft, Create project and
 its setup, Pilot's jobs after a worker's turn and an item of its own done, the pass's claims and its
 questions to the writer, the switch's dialog and the archive question, and the phone's
-notifications through the bridge, a project's and the alarms, with the profile's token and switch.
+notifications through the bridge, a project's and the alarms, with the profile's token and switch,
+and the usage limits: the halts, the overrule, the halt file, the hard stop, the nudge and each
+turn's tokens.
 Every green build of
 `main` deploys itself to the dev stage at `https://pilot-dev.home`, and production at
 `https://pilot.ginbov.nl` runs what the operator promotes from there
@@ -222,3 +224,6 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
 - [`docs/notifications.md`](docs/notifications.md): the phone's notifications through the bridge, a
   project's per member and the alarms per condition, their reconcile and retry, the profile's
   token and alarms switch, and the bridge's fake.
+- [`docs/usage.md`](docs/usage.md): the usage limits: the reading, the week's and the five-hour
+  halts and their settings, the overrule, the halt file, the hard stop, a run halted at its turn's
+  end, the nudge, the quota wall, and each turn's tokens and cost.

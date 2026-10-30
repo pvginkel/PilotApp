@@ -151,9 +151,12 @@ objects into each stage's namespace:
   [`controller.md`](controller.md)). A message to a project's chat, a draft's definition chat among
   them, starts the stage's store where it is stopped, and the chat's session there
   ([`chats.md`](chats.md)), and Create project starts the setup's there ([`work.md`](work.md)), on
-  production as on dev. On either stage a controller that does not answer shows as the gold bar's
-  line over the project list ([`ui.md`](ui.md)); `kubecoder-dev` is on the dev cluster, which is
-  often powered off, and the dev stage's bar then says so.
+  production as on dev. On either stage a controller that does not answer shows on the gold bar,
+  a badge in the top bar or a line on a phone ([`ui.md`](ui.md)); `kubecoder-dev` is on the dev
+  cluster, which is often powered off, and the dev stage's bar then says so. Each stage's usage
+  limits read the subscription's usage as its own controller serves it on the fleet stream, and run
+  on the backend's default limits and halt settings, which the chart does not set
+  ([`usage.md`](usage.md)).
   The backend notifies each person through the notification bridge
   ([`notifications.md`](notifications.md)) at `notificationBridge.url` in the values, as
   `NOTIFICATION_BRIDGE_URL`, required, so that a stage without it fails its render:

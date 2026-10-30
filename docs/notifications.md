@@ -181,8 +181,8 @@ unless the person holds that same token again, whose save submits afresh.
 and app-wide condition, for every person who holds a token and whose alarms switch is on. Pilot
 holds none. The conditions that hold are the conditions service's, which the gold bar shows
 ([`controller.md`](controller.md), [`ui.md`](ui.md)), taken by their codes, so that each condition
-it tells of has its alarm (D089). It tells of the outage alone, so the halts' alarms, built with the
-rest, stand only once it tells of a halt.
+it tells of has its alarm (D089): the outage, and the week's and the five-hour usage halts
+([`usage.md`](usage.md)).
 
 | Condition | Title | Message | Priority |
 |---|---|---|---|

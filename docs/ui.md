@@ -22,33 +22,64 @@ are the template's (`CLAUDE.md` § Template ownership). The app's own:
 
 ## The shell
 
-`src/routes/_shell.tsx` is a layout route: the top bar, then, in `.app`'s grid, the gold bar over
-the side column (`nav.tabs`, the project list), and the centre (`main.centre`) beside both, where
-the child route shows. It reads the signed-in person through `useSelf()` (`GET /api/people/self`).
+`src/routes/_shell.tsx` is a layout route: the top bar, then, in `.app`'s grid, the side column
+(`nav.tabs`, the project list) and the centre (`main.centre`) beside it, where the child route
+shows. It reads the signed-in person through `useSelf()` (`GET /api/people/self`).
 Until they have a handle, the handle step stands under the top bar in place of the side column and
 the centre; a screen under the shell reads the person with `usePerson()`, whose handle, name and
 avatar slot are never null.
 
 - **The top bar** (`components/shell/top-bar.tsx`): the drawer toggle on a narrow window once the
-  app is open, the logo and the name, and the person's avatar, which opens the profile menu. The
+  app is open, the logo and the name, the gold bar's badges after them, none at the handle step,
+  and the person's avatar, which opens the profile menu. The
   menu holds the person's name, Theme (System, Light, Dark), Profile once the handle is chosen, and
   Sign out. The bar keeps the template's `app-shell.topbar.user*` test ids, so the template's
   sign-in specs pass against it.
-- **The gold bar** (`components/shell/gold-bar.tsx`), a `role="status"` region, is a line per
-  condition that holds all work, and none while nothing does; a line stands while its condition
-  holds and goes when it ends, and nothing dismisses it. Its one condition is the controller
-  unreachable ([`controller.md`](controller.md)): "The controller has been unreachable since
-  <hh:mm>. Nothing starts until it answers.", with a server-off icon (`conditionLine()`,
-  `src/lib/utils/status-labels.ts`). The lines are in the server's order. **`GET
-  /api/conditions`** answers `{conditions: [{code, since}]}`, `code` `outage` and `since` when it
-  began, as this server last met the controller; at each turn of a condition the SSE event
-  `conditions_changed` carries the same body to every person's connections. `useConditions()`
-  (`src/hooks/use-conditions.ts`) reads it, writes each event over the read, and reads it again at
-  every rise of the stream's `isConnected`. On a wide window the bar stands in the side column's
-  width, over `nav.tabs`, and the overlay's backdrop lies over it as over the project list.
-- **The narrow window.** Under the mockup's breakpoint, 900px wide, the gold bar spans the window
-  under the top bar, and in the row under it the side column is a drawer over the centre, with a
-  scrim. The top bar's toggle opens it; the scrim closes it, and so does any change of address.
+- **The gold bar** (`components/shell/gold-bar.tsx`) shows each condition that holds all work, and
+  nothing while none does; a condition's badge or line stands while it holds and goes when it ends,
+  and nothing dismisses it. Off a phone it is `GoldBadges`, a `role="status"` region in the top bar
+  after Pilot's name: a badge per condition, left-aligned, on the buttons' corner radius
+  (`--radius`), its words and the time it began, "Controller unreachable since 13:16", its full line
+  its `title`. The week's usage halt's badge, which carries its overrule, is a button with a chevron
+  and no `title`: it opens a popover (`Popover`, `.gold-pop`) that holds its line and the overrule's
+  button, so that a stray click on the top bar spends no quota, and the overrule's click closes it.
+  On a phone, at 900px and below, it is `GoldBar` instead, a `role="status"` region across the
+  window under the top bar, a line per condition, the overrule's button on the week's halt's line;
+  `shell.css` hides the other of the two. A time is the clock alone for today, and dated, "29 Oct,
+  13:16", for an earlier day, `useToday()` (`src/hooks/use-today.ts`) reading the day again each
+  minute so that a page left open past midnight dates it within the minute.
+  The conditions and their words (`conditionLine()`, `src/lib/utils/status-labels.ts`), in the
+  server's order:
+  - the controller unreachable ([`controller.md`](controller.md)), a server-off icon: "The
+    controller has been unreachable since <time>. Nothing starts until it answers."
+  - the week's usage halt ([`usage.md`](usage.md)), an octagon-pause icon, its badge "Halted at the
+    week's limit": "Work items have been halted at the week's usage limit since <time>. 92% of the
+    week's quota is used, as of <time>. No work item starts until a reading puts it under the
+    limit; chats and Pilot's own jobs go on." Its overrule's button says "Go on to 97%" for the
+    allowance and "Run it out" at the second limit, its `title` what it does, "Work items go on
+    until 97% of the week's quota is used." or "Work items go on until the week's quota runs
+    out.", which the toast says once the overrule is made, from the answer's `kind` and `target`
+    (`overruleWords()`). The toast follows the request, not the button, which the halt's lifting can
+    take off the screen first; a refusal is the query client's toast.
+  - the five-hour usage halt, an hourglass icon, its badge "Halted at the five-hour limit": the
+    week's words for the five-hour window, "… of the five-hour window's quota is used …", with no
+    overrule.
+
+  **`GET /api/conditions`** answers `{conditions: [{code, since, share, taken_at, offer, target}]}`:
+  `code` `outage`, `week_halt` or `five_hour_halt`, the outage first, then the week's halt, then
+  the five-hour halt; `since` when it began, as this server met the controller or received the
+  readings; a halt's `share` of its window's quota and its reading's `taken_at`, null for the
+  outage; and the week's halt's `offer`, `allowance` or `run_out`, with the allowance's `target`, a
+  fraction, null for the other conditions. At each turn of a condition, and as a halt's figures
+  move, the SSE event `conditions_changed` carries the same body to every person's connections.
+  `useConditions()` (`src/hooks/use-conditions.ts`), read once in `_shell.tsx` for both the badges
+  and the lines, reads it, writes each event over the read, and reads it again at every rise of the
+  stream's `isConnected`. The overrule posts `POST /api/quota-overrules` `{kind: offer}`
+  ([`usage.md`](usage.md)).
+- **The narrow window.** Under the mockup's breakpoint, 900px wide, the gold bar's lines span the
+  window under the top bar, and in the row under them the side column is a drawer over the centre,
+  with a scrim. The top bar's toggle opens it; the scrim closes it, and so does any change of
+  address.
 - **Empty states** are `EmptyState`: "No projects yet" when there is no project, "None yet" for an
   empty list of archived projects.
 
@@ -73,8 +104,10 @@ better in both themes. Pilot's mark is `--avatar-pilot`, grey, outside the palet
 a user icon for a name without initials.
 
 **The gold bar's** are `--gold`, `--gold-foreground` and `--gold-edge`, its surface, its text and
-the rule under each line, light and dark; `tests/shell/gold-bar.spec.ts` measures its text at 4.5:1
-or better and its hue gold in each theme.
+the rule under each line, light and dark; a badge redeclares the light theme's three on
+`.gold-badge`, so that it is the one gold in both themes on the top bar's blue.
+`tests/shell/gold-bar.spec.ts` measures its text at 4.5:1 or better and its hue gold in each
+theme.
 
 ## The shared pieces
 
@@ -84,7 +117,9 @@ In `src/components/shared/`:
 - `PILOT_MARK` (`pilot-mark.ts`): the paths of Pilot's mark, which Pilot's avatar draws and the
   timeline's auto pilot mark cuts its bolt out of ([`timeline.md`](timeline.md)).
 - `Menu` and `MenuItem`, and `Popover`: each closes on a press outside it and on Esc
-  (`src/hooks/use-dismiss.ts`).
+  (`src/hooks/use-dismiss.ts`). A `Popover`, which stands in Esc's order at the plan's rank, closes
+  on its button too, and its content may be a function of `close`, for an action in it that closes
+  it.
 - `Dialog`, a modal dialog on Radix's (`@radix-ui/react-dialog`, not the template's wrapper) that a
   click beside it or Esc closes, Esc through `useEscape` (below) and never Radix's own. While it is
   open, Tab and Shift+Tab stay inside it and the page behind it is hidden from a screen reader. It
@@ -97,8 +132,11 @@ In `src/components/shared/`:
 - `EmptyState({icon, title, testId})`.
 - `Time({at, format?})`: a time in the browser's time zone, with the full stamp as its tooltip: by
   `format`, the day and the month ("19 Oct", the default), `clock`, the hour and the minute
-  ("14:05"), or `stamp`, the date and the time ("22 Oct 2026, 14:05"). The record and the API hold
-  times in UTC.
+  ("14:05"), `dated`, the day, the month and the clock ("29 Oct, 14:05"), or `stamp`, the date and
+  the time ("22 Oct 2026, 14:05"). The formats are `formatTime(at, format)`'s
+  (`src/lib/utils/time-format.ts`), for a string such as a `title`, and `clockFormat(at, today)`
+  picks `clock` for a time on the viewer's `today` and `dated` for an earlier day's. The record and
+  the API hold times in UTC.
 - `LinkedText` and `EnvironmentLink`: below.
 - `Markdown({text, className?, deltas?, documentLink?})`: GFM (react-markdown with remark-gfm)
   inside `.prose`, its text linked as the record's words are except in code and inside a link, every
@@ -247,8 +285,10 @@ The frontend suite's fixtures (`frontend/tests/support/fixtures.ts`):
   the API, the same `subject` signing the same person in again; `firstSignIn({name?, subject?})`
   one at their first sign-in, `null` for a token with no name;
   `other(handle, name?)` puts another person on the record; `self()` reads the signed-in person.
-- `shell`: `open(path)` opens an address once the signed-in person is read; `goldBar` and
-  `goldLine(code)` read the gold bar.
+- `shell`: `open(path)` opens an address once the signed-in person is read; `goldBadges`,
+  `goldBadge(code)` and `goldPopover` read the badges and the week's halt's popover, `goldBar` and
+  `goldLine(code)` the phone's lines, `goldText(line)` a line's words without its button, and
+  `goldOverrule(line)` its overrule's button.
 - `controller` drives the worker's fake controller, and `conditions` reads what the gold bar reads
   ([`work.md`](work.md)).
 - `bridge` adds registrations to the worker's fake notification bridge and reads what they show

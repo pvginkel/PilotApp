@@ -95,9 +95,11 @@ draft, a fresh definition chat.
 ## The start in the store
 
 The chat's Session passes the gate as a work item's does ([`sessions.md`](sessions.md)), held while
-the controller is unreachable, never for the pause, and taking no slot
+the controller is unreachable, never for the pause or a usage halt, and taking no slot
 (`SessionStartService.start_brain`); it is refused with no controller or no store environment
-configured (`STORE_ENVIRONMENT_ID`, [`sync.md`](sync.md)). Its start loop takes the store: the
+configured (`STORE_ENVIRONMENT_ID`, [`sync.md`](sync.md)). A chat's turn that dies at the quota
+wall fails as any failed turn does, with no nudge after it: the person sends again (D096,
+[`usage.md`](usage.md)). Its start loop takes the store: the
 store's Environment row made from the controller's report where Pilot has none yet, the Session's
 Environment written under its lock with "Starting <store's name>…", and the store started and its
 settle awaited, as a stopped store is started on demand ([`controller.md`](controller.md)). The

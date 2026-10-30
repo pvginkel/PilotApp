@@ -35,26 +35,34 @@ for the live event:
 - `error`: only while `failed`, the latest Turn's error, else the Session's: a turn's failure is its
   Turn's, a start's the Session's;
 - `autopilot`: the switch's setting its start was briefed under;
-- `held_reason`: why the gate holds it as the gate reads now, `paused`, `controller_unreachable`,
-  `slot`, a job's `queue`, or a worker's run's `conversation`, another run on the conversation it
-  resumes; null unless `held`, and while the gate has opened for it and its
-  release is under way;
+- `held_reason`: why the gate holds it as the gate reads now, a worker's run's `week_halt` or
+  `five_hour_halt` ([`usage.md`](usage.md)), `paused`, `controller_unreachable`, `slot`, a job's
+  `queue`, or a worker's run's `conversation`, another run on the conversation it resumes; while it
+  is `idle` with its nudge owed, what holds that nudge, a usage halt or `paused`; null in any other
+  state, while the gate has opened for it and its release is under way, and while nothing holds its
+  nudge;
 - `held_running`: while it is held for a slot, the running work items of the maximum that closed
   the gate, across every project or its project's own ([`sessions.md`](sessions.md)); else null;
-- `stopped_at` and `stopped_by`, the person who stopped it by Stop, Finish or Archive: only while
-  `stopped`, `stopped_by` null when no person did;
+- `stopped_at` and `stopped_by`, who stopped it by Stop, Finish or Archive, or Pilot, through its
+  `stop_work` or a usage halt's hard stop: only while `stopped`, `stopped_by` null when no one did;
 - `stopped_cause`: `environment_stopped`, `environment_deleting`, `environment_error` or
   `environment_gone` while it is `stopped` with no person's stop, its environment stopped under its
-  turn or settled in error, read from the session's last record; null for a person's stop and for
-  an interrupt made elsewhere;
+  turn or settled in error, read from the session's last record; for a usage halt's hard stop, its
+  nudge owed, the halt that holds it now, `week_halt` or `five_hour_halt`, or `usage_limit` once
+  neither does; null for a person's stop and for an interrupt made elsewhere;
 - `pilots_own`: whether it is Pilot's own work, a job ([below](#pilots-own-work)), false for a
   worker's run;
 - `retried`: `{id, at}`, the job a person's Retry of this one placed and when; null while it is not
-  retried, and always for a worker's run.
+  retried, and always for a worker's run;
+- `nudge_owed`: whether a nudge is owed to it, which carries it on once nothing holds it
+  ([`usage.md`](usage.md)): hard-stopped, `stopped`; halted or paused at its turn's end, `idle` and
+  not done; or at the quota wall, `failed`.
 
-A work item waits on you while `stopped` or `failed`, a job only until it is retried, which its
-project's badge counts ([`projects.md`](projects.md)). It is done at the end of a turn neither
-interrupted nor in error ([`sessions.md`](sessions.md)), cause `turn_ended`, by no one, or by
+A work item waits on you while `stopped` or `failed`, a job only until it is retried, and neither
+while its nudge is owed, which its project's badge counts ([`projects.md`](projects.md)). It is
+done at the end of a turn neither interrupted nor in error ([`sessions.md`](sessions.md)), unless a
+cooperative usage halt or its project's pause holds then ([`usage.md`](usage.md)), cause
+`turn_ended`, by no one, or by
 Finish's close, and a job withdrawn before its brief by an Undo, cause `withdrawn`
 ([below](#pilots-own-work)); it then draws as its done line ([`timeline.md`](timeline.md)).
 
@@ -64,8 +72,8 @@ A write of a work item's state, its current line, its `started_at` or its `error
 `WorkMoved(project_id, work_id)` in its transaction, and `ProjectChanged` too when its state moved,
 since that moves the project's tab and head (`work_moved`, `backend/app/services/work_status.py`);
 equal events of one transaction go out once. A Chat's Session has no work item: its state's move
-raises `ProjectChanged` alone. A pause and a resume move the reason on the project's held items,
-each a `WorkMoved`, and the release of the held starts tells every work item it still holds,
+raises `ProjectChanged` alone. A pause and a resume move the reason on the project's held items
+and those whose nudge is owed, each a `WorkMoved`, and the release of the held starts tells every work item it still holds,
 since the outage's turn or the slot's count may have moved its reason. `ProjectEventService` sends a `WorkMoved` to every person's connections as the
 SSE event `work_moved`, `{project_id, item_id, work}`, `work` read after the commit, and nothing for
 a Session with no work item.
@@ -85,8 +93,10 @@ An open work item (`WorkItem`, `frontend/src/components/timeline/work.tsx`) is:
   15 s on the browser's clock.
 - **Its title.**
 - **Its one line** (`workLine()`, `frontend/src/lib/utils/status-labels.ts`): a held item's reason,
-  "Paused", "Waiting for the controller", "Waiting for a slot · N running", "Waiting for the job
-  before it" or "Waiting for the run before it"; else its current line
+  "Halted at the week's limit", "Halted at the five-hour limit", "Paused", "Waiting for the
+  controller", "Waiting for a slot · N running", "Waiting for the job before it" or "Waiting for
+  the run before it"; an `idle` item whose nudge is owed, what holds the nudge in the same words, or
+  "Waiting for its nudge" once nothing does; else its current line
   in the chat's working cue (`WorkingCue`), the server's own words while it starts ("Preparing
   <environment>", "Starting <environment>", "Creating the session", the trailing "…" left out) or
   its environment restarts, "Thinking", "Writing", "Working" or "Waiting for the <type> agent", with
@@ -94,16 +104,18 @@ An open work item (`WorkItem`, `frontend/src/components/timeline/work.tsx`) is:
   call whose input still streams in is its verb alone ("Editing"), and its target joins it once the
   call's line gives it; an empty target is not drawn. "Starting" before a start's first line, and "Waiting for
   Pilot" for a running one with none; "Stopped · <time>", with the cause of a stop made elsewhere
-  ("<environment> was stopped", "… is being deleted", "… is gone", "… is in error"); "Failed ·
-  <error>"; and nothing once `idle` or `ended`. A retried job's line has a second under it, "Retried
+  ("<environment> was stopped", "… is being deleted", "… is gone", "… is in error"), or, for a
+  usage halt's hard stop, "Stopped at the week's limit · <time>", "Stopped at the five-hour limit ·
+  <time>", or "Stopped at the usage limit · <time>" once neither halt holds; "Failed · <error>";
+  and nothing once `idle` or `ended`. A retried job's line has a second under it, "Retried
   as a new job below · <time>".
 - **Its actions**, while `running`, `starting` or `held`: Session log, then Stop. Stop asks first in
   the actions' place, "Stop the session? Its turn ends where it is; Resume sends it on.", with Stop
   it and Cancel, which takes the focus; Esc or Cancel puts the focus back on Stop, and the question
   goes as the item leaves those states. While `stopped` or `failed`: Resume, then Session log;
   Resume is disabled while the project is archived, as its head's switch is (D012), the API
-  refusing it until Bring back. Pilot's own work has no Stop or Resume: a job `stopped` or `failed`
-  and not retried offers Retry, then Session log, Retry disabled while the project is archived.
+  refusing it until Bring back. Pilot's own work has no Stop or Resume: a job `stopped` or `failed`,
+  not retried and owed no nudge offers Retry, then Session log, Retry disabled while the project is archived.
   Otherwise Session log alone.
 
 Stop and Resume (`useStop`, `useResume`, `frontend/src/hooks/use-work-acts.ts`) call
@@ -231,7 +243,9 @@ in the store and the record, and the new job's brief does not say so: a retried 
 Create's, `The plan: plan.json, empty.` included. The one retried is marked retried by the new
 job before that one starts: it keeps its state, its open item and its session log, offers Retry no
 more, and leaves the badge. A person has to press it: the server retries no job on its own. A job
-withdrawn by an Undo, done, never ran, and takes no Retry.
+withdrawn by an Undo, done, never ran, and takes no Retry; nor does a job whose turn died at the
+quota wall while its nudge is owed, which is not at its end until the run its nudge continues ends
+(D099, [`usage.md`](usage.md)).
 
 On the timeline, a job's `pilots_own` is true. Its line has its session log, and neither the env
 chip, the store's once its start takes it, nor Stop or Resume. Its session log's head names no
@@ -265,8 +279,9 @@ An address that names no work item of the project reads "The session log did not
   and " · Failed" after a failed one.
 - **Its tail**: while the item is held, starts or runs, the working cue: the held reason, what the
   turn in flight is doing, or "Starting" and "Waiting for Pilot" before its first record. Otherwise
-  how it ended (`sessionLogTail()`): "Stopped by you · <time>", "Stopped by <name> · <time>", the
-  cause of a stop made elsewhere, "Stopped", "The turn ended · <time>", or "Failed", the error over
+  how it ended (`sessionLogTail()`): "Stopped by you · <time>", "Stopped by <name> · <time>",
+  "Stopped by Pilot at the usage limit · <time>" after a usage halt's hard stop, the cause of a stop
+  made elsewhere, "Stopped", "The turn ended · <time>", or "Failed", the error over
   it where the last turn shows none.
 - **It follows the item's `work`** as the timeline holds it, live, so that a Resume carries the log
   on, and it sticks to its end while it grows: only the reader's own scrolling up, by the wheel, a
@@ -306,7 +321,8 @@ The status, its event and the routes are pinned in `backend/tests/services/test_
 `test_timeline_service.py`, `test_project_event_service.py`, and
 `backend/tests/api/test_sessions.py` and `test_testing_record.py`. The browser suites are
 `frontend/tests/work/`: `harness.spec.ts`, `timeline.spec.ts`, `stop-resume.spec.ts`,
-`session-log.spec.ts`, `switch-warning.spec.ts` and `registered.spec.ts`, the round trip of a
+`session-log.spec.ts`, `switch-warning.spec.ts`, `usage-halts.spec.ts`, `hard-stop.spec.ts` and
+`nudge.spec.ts`, the usage limits ([`usage.md`](usage.md)), and `registered.spec.ts`, the round trip of a
 registered document ([`round-trip.md`](round-trip.md)), with `clarification.spec.ts`, the
 clarification run and its reply, and `claimed.spec.ts`, a claimed action. Pilot's jobs are pinned in
 `backend/tests/services/test_job_service.py` (their placement, the queue, the triggers, the

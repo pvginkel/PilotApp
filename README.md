@@ -19,8 +19,8 @@ log, and Pilot's own background jobs among them, one at a time per project, each
 the brain's: the setup, the pre-ruling pass after every worker's turn, which may ask the worker's
 writer or claim an action for a work item of Pilot's, and the plan's next step after every item of
 Pilot's a person closes, with Retry on one that failed ([`docs/work.md`](docs/work.md)); each
-project's status as one icon on its tab, which pauses it, and the gold bar over the list while the
-controller does not answer; and the overlay that opens a document, an attachment or the handbook,
+project's status as one icon on its tab, which pauses it, and the gold bar, a badge in the top bar
+or a line on a phone, while the controller does not answer or a usage halt holds; and the overlay that opens a document, an attachment or the handbook,
 beside the side panel with the project's chat and its documents
 ([`docs/documents.md`](docs/documents.md)). A project starts from the plus beside the list, as a
 draft: its definition chat stands in the timeline's place while Pilot writes the draft,
@@ -51,7 +51,12 @@ answer given there reached from its block by *In the chat*, its chats projected 
 the token each person pastes on their profile: one standing notification per member and project,
 which reads its state and rises when something comes to wait on them, and an alarm per condition
 that holds all work, beside the profile's switch that turns the alarms off
-([`docs/notifications.md`](docs/notifications.md)). The brain's own repository holds its map, its
+([`docs/notifications.md`](docs/notifications.md)); and the subscription's usage limits, on work
+items alone: KubeCoder's reading of the week's and the five-hour share, the halts at their limits,
+each as its setting says, holding new work, asking running work to stop through a halt file, or
+stopping it, the week's halt's overrule from the gold bar, and the nudge that carries a halted,
+paused or walled run on once nothing holds it, with each turn's tokens and cost kept in the
+database ([`docs/usage.md`](docs/usage.md)). The brain's own repository holds its map, its
 rules, its four skills, and `pilot.py`, the script it edits a project's folder with, on the block
 DSL's own package ([`docs/block-dsl.md`](docs/block-dsl.md)); its four skills' bodies are written:
 the chat's, the create skill's, the pre-ruling pass and the plan skill's modes. Each stage follows

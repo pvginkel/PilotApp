@@ -38,7 +38,9 @@ A registered document is a review on the timeline from its registration, in one 
 ## The read at the run's end
 
 A run ends when its turn's `result` makes the work item done, cause `turn_ended`, its turn neither
-interrupted nor in error ([`sessions.md`](sessions.md)). Once that transaction commits, the loop
+interrupted nor in error ([`sessions.md`](sessions.md)); a turn that ends so under a cooperative
+usage halt or its project's pause leaves the run open for its nudge, and the run ends at its first
+such turn end with neither holding ([`usage.md`](usage.md)). Once that transaction commits, the loop
 `read:<session id>` reads every document the Session registered that still awaits its read, in the
 order registered, each through the controller outside any transaction, in the environment the
 document was registered from, and takes what the read gave in a transaction of its own, under the
@@ -87,9 +89,12 @@ on it meanwhile closes it as any Done does.
 **Asking the writer.** The pass asks a registered document's writer about a block it cannot read
 through `ask_writer` ([`mcp.md`](mcp.md)): a question a block, recorded as a Writer Question of the
 pass's Turn and named on the document's line. When the pass's job ends, idle after its last turn or
-failed, having asked, the relay places one **clarification run** in that transaction
+failed, having asked, one **clarification run** is placed in that transaction
 (`ClarificationService.pass_ended`), which puts every question the pass asked to the writer of the
-run whose turn it took, whichever run's document a question names; a Stop places none. It is a work
+run whose turn it took, whichever run's document a question names; a Stop places none. A pass whose
+turn died at the quota wall is not at its end while its nudge is owed (D099): its run is placed when
+the run its nudge continues ends, when that continuation's start fails, or when a reading decides
+the wall missed, while its project is neither finished nor archived ([`usage.md`](usage.md)). It is a work
 item (`SessionStartService.clarify`) titled `Clarify <names>`, the asked documents' file names,
 at the project's next place, on the run's plan task, with no trigger item, its role a
 `clarification_runs` row naming the pass ([`record.md`](record.md)); it resumes the run's
@@ -98,7 +103,9 @@ first Turn groups the questions by document, `Pilot asks about <path>:` and `- <
 <question>` a block, then ``Answer each under a heading per block id (`## D2`, `## D4`); register
 nothing, start nothing; then end your turn.``, a heading `## <path> <local id>` where two asked
 documents share a local id. Its turn's final text, at its idle end, is the writer's `reply`, with
-`replied_at`, which moves the timeline; a turn that ends with no text records none. The reply is
+`replied_at`, which moves the timeline; a turn that ends with no text records none. A turn that
+ends so under a cooperative usage halt or its project's pause, the run left open for its nudge,
+records its reply too, and no later turn of the run replaces it. The reply is
 split per block under the headings asked for, a heading matched outside a fence at its level and by
 its text, its part running to the next heading of the same or a higher level, and shown whole where
 any heading is missing (`reply_parts`): the document's `clarifications`, the overlay's section

@@ -189,7 +189,8 @@ and a controller that does not answer or refuses for a reason of its own a `502`
   pilot is on: the grants above hold for this session.` or `- Auto pilot is off: the grants above
   ask the operator first for this session.`, then `- The project's handbook:` and the handbook
   verbatim, each line that holds. `state` is its Session's, `starting` or `held`, and `held` why the
-  gate holds it, `paused`, `controller_unreachable` or `slot`, for the brain to say so. Each of
+  gate holds it, `week_halt` or `five_hour_halt` ([`usage.md`](usage.md)), `paused`,
+  `controller_unreachable` or `slot`, for the brain to say so. Each of
   `claims` names the work item for a claimed action, an open action of a registered document of the
   project, checked before the start and written after it, so a refused claim starts nothing: each
   stays open and Pilot's until its `done`, its line naming the work item named for it last, and the

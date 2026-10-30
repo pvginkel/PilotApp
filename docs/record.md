@@ -96,6 +96,8 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   is when Pilot stops it. An environment Pilot created is its own: `server_created_at` and `repo`,
   the repository it was made from, set together, and `delete_due_at`, when Pilot deletes it while
   it stays free, which only one of its own has ([`controller.md`](controller.md)).
+  `halt_requested_at` says the halt file may be there: set before its write goes out, cleared once
+  its delete is answered ([`usage.md`](usage.md)).
 - `sessions`: a run of a Claude Code conversation in one environment, none while its start has not
   provided one, for one project, of a session kind, in a state (`held`, `starting`, `running`, `idle`, `stopped`, `ended`, `failed`), the held
   ones indexed by `created_at`, the gate's order:
@@ -103,7 +105,9 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   Claude conversation; `current_line`, a JSON object, says what its turn in flight is doing, and is
   null while none is ([`sessions.md`](sessions.md)). `token_hash` is unique, so a bearer token
   resolves to one session: the sha256 of the token its latest create carried, and of one no one
-  holds before its first ([`mcp.md`](mcp.md)).
+  holds before its first ([`mcp.md`](mcp.md)). `nudge_owed_at`, indexed where it is set, is when
+  its nudge came to be owed: a hard stop, a turn's end halted or paused, or a turn's end at the
+  quota wall; none once the nudge's Turn goes out ([`usage.md`](usage.md)).
 - `work`: a work item, the extension table its Item and its Session share their id with
   ([`work.md`](work.md)): `project_id`, `session_kind_code` (`work` or `job`, never a Chat's),
   `trigger_code` (a job's Work Trigger; a worker's run has none) and `trigger_item_id` (an item of
@@ -128,7 +132,11 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   Turn has exactly when it has an author, its `message` ending with them; the item or the block it
   quotes (one at most, only on a Turn with words; a quoted block's removal clears the key;
   `ck_turns_words`; a file quoted by its path stays in the words alone), `started_at`, `ended_at`,
-  and the `error` of a turn that failed.
+  the `error` of a turn that failed, and the `cost` its `result` line reports, `numeric`, in US
+  dollars ([`usage.md`](usage.md)).
+- `token_counts`: the tokens of one Token Kind a Turn used, `tokens`, summed over every model its
+  run called: one per turn and kind, never negative (`ck_token_counts_tokens`), written as the
+  turn's `result` line is recorded.
 - `chats`: a project's chat, sharing its id with its Session, one of kind `chat` of the same project
   (`session_kind_code`, held `chat`): its kind, `definition` or `project`, and its close,
   `closed_at` and `close_cause_code` (`timeout`, `created`, `finished`, `reopened`, `archived`) set
@@ -153,9 +161,24 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   payload, its words and author being its turn's (`words`, `author_user_id`), and a turn has one at
   most; every other kind has a payload.
 
+**The subscription's usage** ([`usage.md`](usage.md))
+
+- `usage_readings`: a reading of the subscription's usage the controller served with figures and
+  Pilot recorded, never changed: `taken_at`, when the poll got its figures; `received_at`, when
+  this server received it; and `stale`. The latest by `id` is the one the halts read, and `id`
+  orders the readings as they were received.
+- `window_shares`: a window's figure in a reading, written with it, one per reading and window:
+  `window_code` (`five_hour`, `seven_day`), `share`, a fraction of the window's quota that may pass
+  1, `double precision` so that a reading's float compares equal to the one recorded, and
+  `resets_at`.
+- `quota_overrules`: a person's overrule of the week's usage halt: `kind_code` (`allowance`,
+  `run_out`), `made_by_user_id`, `made_at`, `target`, the allowance's week share at which it ends,
+  which run-out has none (`ck_quota_overrules_target`), and `ended_at`, written once by the server.
+  At most one holds, its `ended_at` none (`uq_quota_overrules_holding`).
+
 ## The reference values
 
-Twenty are PostgreSQL enum types, each a `StrEnum` in `backend/app/models/reference.py`, and four
+Twenty-two are PostgreSQL enum types, each a `StrEnum` in `backend/app/models/reference.py`, and four
 are tables with rows, because each value carries a fact. The revisions write the rows; a value is
 added by a revision and nowhere else.
 
