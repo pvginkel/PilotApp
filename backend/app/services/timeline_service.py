@@ -252,7 +252,8 @@ def work_status(
     halt's hard stop stopped, its nudge owed, the halt that holds a work
     item now (`halts`; decision 66). One whose turn ended under a halt or a
     pause, its nudge owed, has for its held reason what holds that nudge
-    now, read as the gate reads a start's halt and pause. One whose start has
+    now, read as the gate reads a start's halt and pause; one Finish closed
+    owes none, its nudge never sent to a done item. One whose start has
     no environment yet has none (DB 107). A job's is Pilot's own (F59.1); a
     retried one's names the job its Retry placed, created at the press."""
     stopper = aliased(User)
@@ -268,8 +269,10 @@ def work_status(
             stopper,
             retry.id,
             retry.created_at,
+            Item.done_at,
         )
         .join(Work, Work.id == AgentSession.id)
+        .join(Item, Item.id == Work.id)
         .outerjoin(Environment, Environment.id == AgentSession.environment_id)
         .join(Project, Project.id == AgentSession.project_id)
         .outerjoin(stopper, stopper.id == AgentSession.stopped_by_user_id)
@@ -304,8 +307,10 @@ def work_status(
     }
     halted_ends = {
         session.id
-        for session, *_ in rows
-        if session.state_code is SessionState.IDLE and session.nudge_owed_at is not None
+        for session, *_, done_at in rows
+        if session.state_code is SessionState.IDLE
+        and session.nudge_owed_at is not None
+        and done_at is None
     }
     halted = halts.halted(db) if waiting or hard_stopped or halted_ends else None
     causes = dict.fromkeys(hard_stopped, _HALT_STOPS[halted]) | {
@@ -387,7 +392,11 @@ def work_status(
                 else None
             ),
             stopped_cause=causes.get(session.id),
-            nudge_owed=session.nudge_owed_at is not None,
+            nudge_owed=(
+                session.id in halted_ends
+                if session.state_code is SessionState.IDLE
+                else session.nudge_owed_at is not None
+            ),
             retried=(
                 None if retry_id is None else RetriedSchema(id=retry_id, at=retried_at)
             ),
@@ -402,6 +411,7 @@ def work_status(
             stopped_by,
             retry_id,
             retried_at,
+            _,
         ) in rows
     }
 

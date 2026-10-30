@@ -2556,6 +2556,33 @@ class TestWorkStatus:
             found[hard_stopped.id].held_reason,
         ) == (True, None)
 
+    @pytest.mark.parametrize("paused", [False, True], ids=["halted", "paused"])
+    def test_one_finish_closed_while_its_nudge_was_owed_owes_none(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        paused: bool,
+    ) -> None:
+        """Its nudge never goes to a done item: its done line stands for it,
+        as for any run done."""
+        project = _make(container)
+        project.paused = paused
+        halted = _halted_end(session, project, environment)
+        person = session.scalars(select(User).where(User.handle == "ada")).one()
+        container.record_service().close_unanswered(project, person, datetime.now(UTC))
+        _usage(session, week=0.95, five_hour=0.1)
+
+        work = work_status(
+            session, [halted.id], unreachable=False, halts=HALTS, slots=SLOTS
+        )[halted.id]
+
+        assert (work.state, work.nudge_owed, work.held_reason) == (
+            SessionState.IDLE,
+            False,
+            None,
+        )
+
     def test_the_service_reads_one_work_item(
         self,
         container: ServiceContainer,
