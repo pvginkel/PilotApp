@@ -31,6 +31,7 @@ from tests.support.supervisor import (
     Supervise,
     listening,
     metric_value,
+    wait_until,
 )
 
 SUPERVISOR_LOGGER = "app.services.supervisor"
@@ -574,6 +575,15 @@ class TestSupervisorShutdown:
         supervisor.start_loop("failing", failing)
         assert streaming.wait(WAIT_SECONDS)
         supervisor_log.wait_for(r"Loop failing raised; restarting in 5 s")
+        # The waiter, on the supervisor's logger, hears a record before
+        # caplog, on the root: cleared before it lands there, it lands after.
+        wait_until(
+            lambda: any(
+                r.getMessage() == "Loop failing raised; restarting in 5 s"
+                for r in caplog.records
+            ),
+            "the restart's record in caplog",
+        )
 
         caplog.clear()
         with caplog.at_level(logging.WARNING):
