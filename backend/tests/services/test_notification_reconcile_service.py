@@ -9,7 +9,7 @@ called as its loop calls it; the loops themselves run where a test fires
 STARTUP."""
 
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import patch
@@ -17,7 +17,6 @@ from unittest.mock import patch
 import pytest
 from flask import Flask
 from sqlalchemy import select
-from werkzeug.wrappers import Request, Response
 
 from app.database import scoped_session
 from app.engine.bus import EngineBus, ProjectChanged, WorkMoved
@@ -38,7 +37,7 @@ from app.services.supervisor import LoopHandle, Supervisor
 from app.utils.after_commit import clear_after_commit_callbacks
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
 from tests.support.fake_notification_bridge import (
-    ServedFakeNotificationBridge,
+    WatchedFakeNotificationBridge,
     bridge_client_of,
 )
 from tests.support.locks import in_thread, lock_waits
@@ -58,27 +57,6 @@ SUPERVISOR_LOGGER = "app.services.supervisor"
 
 DECISION = "```decision id=D1\noptions:\n  - Dome\n  - Tunnel\n```\n"
 QUESTION = "```question id=Q1\n```\n"
-
-
-class _Watched(ServedFakeNotificationBridge):
-    """The fake, which runs `on_submit` once, after it took the next submit
-    and before it answers it: a submit in flight."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.on_submit: Callable[[], None] | None = None
-        self.failures: list[BaseException] = []
-
-    def _respond(self, request: Request) -> Response:
-        response = super()._respond(request)
-        hook = self.on_submit
-        if hook is not None and request.path == "/v1/submit":
-            self.on_submit = None
-            try:
-                hook()
-            except BaseException as error:
-                self.failures.append(error)
-        return response
 
 
 @pytest.fixture(autouse=True)
@@ -101,10 +79,10 @@ def container(committed_app: Flask) -> ServiceContainer:
 
 
 @pytest.fixture
-def bridge(container: ServiceContainer) -> Iterator[_Watched]:
+def bridge(container: ServiceContainer) -> Iterator[WatchedFakeNotificationBridge]:
     """The fake bridge, the container's client on it, with a registration for
     Ada and one for Ben."""
-    fake = _Watched()
+    fake = WatchedFakeNotificationBridge()
     try:
         bridge_client_of(container, fake)
         fake.add_registration("ada", ADA_TOKEN)
@@ -296,7 +274,7 @@ def _timeline(container: ServiceContainer, project_id: uuid.UUID) -> str:
 
 
 def _shown(
-    bridge: _Watched, project_id: uuid.UUID, name: str = "ada"
+    bridge: WatchedFakeNotificationBridge, project_id: uuid.UUID, name: str = "ada"
 ) -> FakeNotification:
     return bridge.shown(name)[str(project_id)]
 
@@ -311,7 +289,10 @@ def _clear_dismisses(outcome: str) -> float:
 
 class TestNotificationReconcileServiceReconcile:
     def test_a_member_holding_a_token_is_submitted_the_projects_standing(
-        self, container: ServiceContainer, bridge: _Watched, supervise: Supervise
+        self,
+        container: ServiceContainer,
+        bridge: WatchedFakeNotificationBridge,
+        supervise: Supervise,
     ) -> None:
         project_id = _project(container, ("ada", "ben"))
         _give_token(container, "ada", ADA_TOKEN)
@@ -349,7 +330,10 @@ class TestNotificationReconcileServiceReconcile:
         assert _reconciles("unchanged") == unchanged + 1
 
     def test_what_was_last_sent_is_not_sent_again(
-        self, container: ServiceContainer, bridge: _Watched, supervise: Supervise
+        self,
+        container: ServiceContainer,
+        bridge: WatchedFakeNotificationBridge,
+        supervise: Supervise,
     ) -> None:
         project_id = _project(container)
         _give_token(container, "ada", ADA_TOKEN)
@@ -365,7 +349,10 @@ class TestNotificationReconcileServiceReconcile:
         assert _reconciles("unchanged") == unchanged + 1
 
     def test_a_rise_alerts_and_every_other_change_is_silent(
-        self, container: ServiceContainer, bridge: _Watched, supervise: Supervise
+        self,
+        container: ServiceContainer,
+        bridge: WatchedFakeNotificationBridge,
+        supervise: Supervise,
     ) -> None:
         project_id = _project(container)
         _give_token(container, "ada", ADA_TOKEN)
@@ -427,7 +414,10 @@ class TestNotificationReconcileServiceReconcile:
         )
 
     def test_an_answer_drops_the_priority_back_silently(
-        self, container: ServiceContainer, bridge: _Watched, supervise: Supervise
+        self,
+        container: ServiceContainer,
+        bridge: WatchedFakeNotificationBridge,
+        supervise: Supervise,
     ) -> None:
         project_id = _project(container)
         _give_token(container, "ada", ADA_TOKEN)
@@ -446,7 +436,10 @@ class TestNotificationReconcileServiceReconcile:
         )
 
     def test_an_item_for_one_member_rises_theirs_alone(
-        self, container: ServiceContainer, bridge: _Watched, supervise: Supervise
+        self,
+        container: ServiceContainer,
+        bridge: WatchedFakeNotificationBridge,
+        supervise: Supervise,
     ) -> None:
         project_id = _project(container, ("ada", "ben"))
         _give_token(container, "ada", ADA_TOKEN)
@@ -479,7 +472,10 @@ class TestNotificationReconcileServiceReconcile:
         )
 
     def test_leave_dismisses_and_a_rejoin_submits_afresh(
-        self, container: ServiceContainer, bridge: _Watched, supervise: Supervise
+        self,
+        container: ServiceContainer,
+        bridge: WatchedFakeNotificationBridge,
+        supervise: Supervise,
     ) -> None:
         project_id = _project(container, ("ada", "ben"))
         _give_token(container, "ada", ADA_TOKEN)
@@ -511,7 +507,10 @@ class TestNotificationReconcileServiceReconcile:
         assert rejoined.notification_priority_code is NotificationPriority.MIN
 
     def test_archive_dismisses_and_bring_back_submits(
-        self, container: ServiceContainer, bridge: _Watched, supervise: Supervise
+        self,
+        container: ServiceContainer,
+        bridge: WatchedFakeNotificationBridge,
+        supervise: Supervise,
     ) -> None:
         project_id = _project(container, environment_id=None)
         _give_token(container, "ada", ADA_TOKEN)
@@ -529,7 +528,10 @@ class TestNotificationReconcileServiceReconcile:
         assert _last_sent(container, project_id)[0] is NotificationPriority.MIN
 
     def test_a_draft_and_a_finished_project_hold_theirs(
-        self, container: ServiceContainer, bridge: _Watched, supervise: Supervise
+        self,
+        container: ServiceContainer,
+        bridge: WatchedFakeNotificationBridge,
+        supervise: Supervise,
     ) -> None:
         draft = _project(container, environment_id=None, state="draft")
         finished = _project(container, environment_id=None, state="finished")
@@ -547,7 +549,7 @@ class TestNotificationReconcileServiceOwed:
     def test_a_send_the_bridge_does_not_answer_is_owed_and_logged_once(
         self,
         container: ServiceContainer,
-        bridge: _Watched,
+        bridge: WatchedFakeNotificationBridge,
         supervise: Supervise,
         log: LogWaiter,
     ) -> None:
@@ -585,7 +587,7 @@ class TestNotificationReconcileServiceOwed:
     def test_a_refused_token_is_owed(
         self,
         container: ServiceContainer,
-        bridge: _Watched,
+        bridge: WatchedFakeNotificationBridge,
         supervise: Supervise,
         log: LogWaiter,
     ) -> None:
@@ -600,7 +602,10 @@ class TestNotificationReconcileServiceOwed:
         log.wait_for(rf"The submit of project {project_id}'s .* is owed: .*401.*")
 
     def test_an_owed_send_is_sent_again_with_nothing_else_changed(
-        self, container: ServiceContainer, bridge: _Watched, supervise: Supervise
+        self,
+        container: ServiceContainer,
+        bridge: WatchedFakeNotificationBridge,
+        supervise: Supervise,
     ) -> None:
         project_id = _project(container, ("ada", "ben"))
         _give_token(container, "ada", ADA_TOKEN)
@@ -620,7 +625,10 @@ class TestNotificationReconcileServiceOwed:
         assert _last_sent(container, project_id) == (None, None, None)
 
     def test_a_rejoin_takes_the_place_of_an_owed_dismiss(
-        self, container: ServiceContainer, bridge: _Watched, supervise: Supervise
+        self,
+        container: ServiceContainer,
+        bridge: WatchedFakeNotificationBridge,
+        supervise: Supervise,
     ) -> None:
         project_id = _project(container, ("ada", "ben"))
         _give_token(container, "ada", ADA_TOKEN)
@@ -649,7 +657,10 @@ class TestNotificationReconcileServiceOwed:
 
 class TestNotificationReconcileServiceRetry:
     def test_the_timer_asks_for_the_projects_owed_past_their_retry(
-        self, container: ServiceContainer, bridge: _Watched, supervise: Supervise
+        self,
+        container: ServiceContainer,
+        bridge: WatchedFakeNotificationBridge,
+        supervise: Supervise,
     ) -> None:
         due, recent, settled = (
             _project(container, environment_id=None) for _ in range(3)
@@ -679,7 +690,7 @@ class TestNotificationReconcileServiceRetry:
     def test_an_owed_send_goes_out_on_the_timer_once_the_bridge_answers(
         self,
         container: ServiceContainer,
-        bridge: _Watched,
+        bridge: WatchedFakeNotificationBridge,
         supervise: Supervise,
         log: LogWaiter,
     ) -> None:
@@ -702,7 +713,7 @@ class TestNotificationReconcileServiceStartup:
     def test_startup_reconciles_what_stands_is_owed_or_should_stand(
         self,
         container: ServiceContainer,
-        bridge: _Watched,
+        bridge: WatchedFakeNotificationBridge,
         supervise: Supervise,
         log: LogWaiter,
     ) -> None:
@@ -738,7 +749,10 @@ class TestNotificationReconcileServiceStartup:
 
 class TestNotificationReconcileServiceBus:
     def test_a_project_changed_asks_for_its_reconcile_and_a_work_moved_alone_not(
-        self, container: ServiceContainer, bridge: _Watched, supervise: Supervise
+        self,
+        container: ServiceContainer,
+        bridge: WatchedFakeNotificationBridge,
+        supervise: Supervise,
     ) -> None:
         bus = EngineBus()
         _, supervisor, _ = _service(container, supervise, engine_bus=bus)
@@ -759,7 +773,7 @@ class TestNotificationReconcileServiceBus:
     def test_a_commit_is_reconciled_off_its_thread(
         self,
         container: ServiceContainer,
-        bridge: _Watched,
+        bridge: WatchedFakeNotificationBridge,
         supervise: Supervise,
         log: LogWaiter,
     ) -> None:
@@ -783,7 +797,10 @@ class TestNotificationReconcileServiceBus:
 
 class TestNotificationReconcileServiceSubmitAll:
     def test_a_token_set_submits_the_current_state_whatever_was_last_sent(
-        self, container: ServiceContainer, bridge: _Watched, supervise: Supervise
+        self,
+        container: ServiceContainer,
+        bridge: WatchedFakeNotificationBridge,
+        supervise: Supervise,
     ) -> None:
         project_id = _project(container)
         archived = _project(container, environment_id=None)
@@ -813,7 +830,7 @@ class TestNotificationReconcileServiceSubmitAll:
     def test_its_reconciles_are_asked_for_once_it_commits(
         self,
         container: ServiceContainer,
-        bridge: _Watched,
+        bridge: WatchedFakeNotificationBridge,
         supervise: Supervise,
         log: LogWaiter,
     ) -> None:
@@ -831,7 +848,7 @@ class TestNotificationReconcileServiceDismissAll:
     def test_a_clear_reads_dismissed_at_once_and_is_dismissed_once_off_the_request(
         self,
         container: ServiceContainer,
-        bridge: _Watched,
+        bridge: WatchedFakeNotificationBridge,
         supervise: Supervise,
         log: LogWaiter,
     ) -> None:
@@ -861,7 +878,7 @@ class TestNotificationReconcileServiceDismissAll:
     def test_a_dismiss_the_bridge_does_not_take_is_logged_counted_and_not_owed(
         self,
         container: ServiceContainer,
-        bridge: _Watched,
+        bridge: WatchedFakeNotificationBridge,
         supervise: Supervise,
         log: LogWaiter,
     ) -> None:
@@ -892,7 +909,7 @@ class TestNotificationReconcileServiceDismissAll:
     def test_the_same_token_set_again_is_not_dismissed(
         self,
         container: ServiceContainer,
-        bridge: _Watched,
+        bridge: WatchedFakeNotificationBridge,
         supervise: Supervise,
         log: LogWaiter,
     ) -> None:
@@ -945,7 +962,10 @@ class TestNotificationReconcileServiceDismissAll:
 
 class TestNotificationReconcileServiceInFlight:
     def test_a_clear_during_a_first_submit_is_followed_by_its_dismiss(
-        self, container: ServiceContainer, bridge: _Watched, supervise: Supervise
+        self,
+        container: ServiceContainer,
+        bridge: WatchedFakeNotificationBridge,
+        supervise: Supervise,
     ) -> None:
         project_id = _project(container)
         _give_token(container, "ada", ADA_TOKEN)
@@ -966,7 +986,10 @@ class TestNotificationReconcileServiceInFlight:
         assert _clear_dismisses("sent") == sent + 1
 
     def test_a_clears_dismiss_waits_for_a_submit_in_flight(
-        self, container: ServiceContainer, bridge: _Watched, supervise: Supervise
+        self,
+        container: ServiceContainer,
+        bridge: WatchedFakeNotificationBridge,
+        supervise: Supervise,
     ) -> None:
         project_id = _project(container)
         _give_token(container, "ada", ADA_TOKEN)
@@ -1005,7 +1028,7 @@ class TestNotificationReconcileServiceInFlight:
     def test_a_clear_committing_during_the_write_back_reads_what_it_wrote(
         self,
         container: ServiceContainer,
-        bridge: _Watched,
+        bridge: WatchedFakeNotificationBridge,
         supervise: Supervise,
         log: LogWaiter,
         answered: bool,
@@ -1042,7 +1065,10 @@ class TestNotificationReconcileServiceInFlight:
         assert [call.call for call in bridge.calls("ada")][-1] == "dismiss"
 
     def test_a_replace_during_a_submit_is_resubmitted_through_the_new_token(
-        self, container: ServiceContainer, bridge: _Watched, supervise: Supervise
+        self,
+        container: ServiceContainer,
+        bridge: WatchedFakeNotificationBridge,
+        supervise: Supervise,
     ) -> None:
         project_id = _project(container)
         _give_token(container, "ada", ADA_TOKEN)
@@ -1062,7 +1088,10 @@ class TestNotificationReconcileServiceInFlight:
         assert _last_sent(container, project_id)[0] is NotificationPriority.MIN
 
     def test_two_processes_take_turns_and_the_phone_ends_on_the_latest_state(
-        self, container: ServiceContainer, bridge: _Watched, supervise: Supervise
+        self,
+        container: ServiceContainer,
+        bridge: WatchedFakeNotificationBridge,
+        supervise: Supervise,
     ) -> None:
         project_id = _project(container)
         _give_token(container, "ada", ADA_TOKEN)

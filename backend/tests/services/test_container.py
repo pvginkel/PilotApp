@@ -24,10 +24,12 @@ from app.models import Session as AgentSession
 from app.models.reference import (
     ChatKind,
     CloseCause,
+    Condition,
     ProjectState,
     SessionState,
     UserKind,
 )
+from app.services.alarm_service import ALARM_RETRY_TIMER, AlarmService
 from app.services.chat_close_service import ChatCloseService
 from app.services.container import (
     ServiceContainer,
@@ -696,6 +698,80 @@ class TestNotificationReconcileWiring:
 
         register_job.assert_not_called()
         register_timer.assert_not_called()
+
+
+class TestAlarmWiring:
+    def test_with_a_bridge_the_outage_reaches_the_phone_after_its_time(
+        self,
+        committed_app: Flask,
+        fake_notification_bridge: ServedFakeNotificationBridge,
+    ) -> None:
+        container = committed_app.container
+        container.app_config.override(
+            AppSettings(
+                notification_bridge_url=fake_notification_bridge.url,
+                scheduler_tick_seconds=0.05,
+                outage_alarm_after_seconds=0.2,
+            )
+        )
+        bridge_client_of(container, fake_notification_bridge)
+        fake_notification_bridge.add_registration("ada", "token-of-ada")
+        with scoped_session(container) as db:
+            db.add(
+                User(
+                    kind_code=UserKind.PERSON,
+                    subject="subject-ada",
+                    handle="ada",
+                    name="Ada Example",
+                    avatar_slot=1,
+                    notification_token=container.notification_token_cipher().seal(
+                        "token-of-ada"
+                    ),
+                )
+            )
+        service = container.alarm_service()
+        assert isinstance(service, AlarmService)
+        assert service is container.alarm_service()
+        outage = container.controller_outage()
+        ticks = _alarm_ticks()
+        coordinator = container.lifecycle_coordinator()
+
+        coordinator.fire_startup()
+        try:
+            wait_until(lambda: _alarm_ticks() >= ticks + 2, "two retry ticks")
+            outage.call_unanswered()
+            wait_until(
+                lambda: Condition.OUTAGE.value in fake_notification_bridge.shown("ada"),
+                "the outage's alarm shown",
+            )
+            outage.probe_answered()
+            wait_until(
+                lambda: fake_notification_bridge.shown("ada") == {},
+                "the outage's alarm dismissed",
+            )
+        finally:
+            coordinator.shutdown()
+
+    def test_with_no_bridge_it_registers_nothing(self, committed_app: Flask) -> None:
+        container = committed_app.container
+        container.app_config.override(AppSettings())
+        supervisor = container.supervisor()
+        conditions = container.condition_service()
+
+        with (
+            patch.object(supervisor, "register_job") as register_job,
+            patch.object(supervisor, "register_timer") as register_timer,
+            patch.object(conditions, "subscribe") as subscribe,
+        ):
+            container.alarm_service()
+
+        register_job.assert_not_called()
+        register_timer.assert_not_called()
+        subscribe.assert_not_called()
+
+
+def _alarm_ticks() -> float:
+    return metric_value(TIMER_RUNS_TOTAL, timer=ALARM_RETRY_TIMER, outcome="ok")
 
 
 def _watchdog_ticks() -> float:

@@ -94,6 +94,14 @@ class AppEnvironment(BaseSettings):
             "every session Pilot creates; empty hands it none"
         ),
     )
+    OUTAGE_ALARM_AFTER_SECONDS: float = Field(
+        default=300.0,
+        ge=0,
+        description=(
+            "Seconds the controller stays unreachable before its alarm reaches "
+            "the phone, so a shorter blip buzzes nobody (F142.2)"
+        ),
+    )
     SCHEDULER_TICK_SECONDS: float = Field(
         default=10.0,
         gt=0,
@@ -239,6 +247,10 @@ class AppSettings(BaseModel):
             raise ValueError("MCP_SERVER_URL must be an http(s) address")
         return url
 
+    outage_alarm_after_seconds: float = 300.0
+    """How long the controller stays unreachable before its alarm is
+    submitted (F142.2; design 2 §13.4)."""
+
     scheduler_tick_seconds: float = 10.0
     """The wait between two rounds of the supervisor's timers (design 2 §7.1)."""
 
@@ -296,6 +308,7 @@ class AppSettings(BaseModel):
             ),
             notification_bridge_url=env.NOTIFICATION_BRIDGE_URL or None,
             mcp_server_url=env.MCP_SERVER_URL or None,
+            outage_alarm_after_seconds=env.OUTAGE_ALARM_AFTER_SECONDS,
             scheduler_tick_seconds=env.SCHEDULER_TICK_SECONDS,
             environment_stop_after_seconds=env.ENVIRONMENT_STOP_AFTER_SECONDS,
             environment_delete_after_seconds=env.ENVIRONMENT_DELETE_AFTER_SECONDS,

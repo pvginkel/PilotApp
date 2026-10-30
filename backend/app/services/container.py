@@ -17,6 +17,7 @@ from app.engine.record import RecordService
 from app.engine.tree import TreeService
 from app.engine.views import ViewService
 from app.exceptions import ConfigurationError
+from app.services.alarm_service import AlarmService
 from app.services.attachment_service import AttachmentService
 from app.services.auth_service import AuthService
 from app.services.brief_service import BriefService
@@ -534,6 +535,22 @@ class ServiceContainer(containers.DeclarativeContainer):
         sse_connection_manager=sse_connection_manager,
     )
     register_for_background_startup(lambda c: c.condition_service())
+    # The alarms, a standing notification per person and condition that holds
+    # (F142); its jobs and timer register on the supervisor, and it hears the
+    # conditions service, when built, before STARTUP.
+    alarm_service = providers.Singleton(
+        AlarmService,
+        container=__self__,
+        supervisor=supervisor,
+        condition_service=condition_service,
+        notification_token_cipher=notification_token_cipher,
+        bridge_configured=providers.Callable(
+            lambda url: url is not None, app_config.provided.notification_bridge_url
+        ),
+        base_url=config.provided.baseurl,
+        outage_after_seconds=app_config.provided.outage_alarm_after_seconds,
+    )
+    register_for_background_startup(lambda c: c.alarm_service())
     brief_service = providers.Factory(
         BriefService, db=db_session, plan_service=plan_service
     )

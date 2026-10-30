@@ -38,19 +38,18 @@ the phone. A submit through the token in flight when the clear commits is
 followed by a dismiss of its own.
 """
 
-import hashlib
 import itertools
 import logging
 import uuid
-from collections.abc import Iterator, Sequence
-from contextlib import contextmanager
+from collections.abc import Sequence
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from functools import partial
 from typing import TYPE_CHECKING
 
 from prometheus_client import Counter
-from sqlalchemy import Integer, and_, cast, func, literal, or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -58,6 +57,7 @@ from app.database import scoped_session
 from app.engine.bus import EngineBus, EngineEvent, ProjectChanged
 from app.models import Project, ProjectMember, User
 from app.models.reference import NotificationPriority
+from app.services.advisory_turn import advisory_turn, turn_key
 from app.services.notification_bridge_client import (
     BridgeOutcome,
     BridgePriority,
@@ -82,9 +82,8 @@ NOTIFICATION_RETRY_SECONDS = 60.0
 """The least time between two of the retry timer's tries of an owed send."""
 
 NOTIFICATION_LOCK = 224
-"""The first key of a member's advisory lock; the second is drawn from the
-person's and the project's ids. The slot's lock takes one key, so the two
-never meet."""
+"""The first key of a member's turn (`advisory_turn`); the second is drawn
+from the person's and the project's ids."""
 
 _BRIDGE_PRIORITY: dict[NotificationPriority, BridgePriority] = {
     NotificationPriority.MIN: "min",
@@ -360,24 +359,15 @@ class NotificationReconcileService:
             if cleared:
                 self._dismiss_once(due.token, project_id, due.handle)
 
-    @contextmanager
-    def _turn(self, person_id: uuid.UUID, project_id: uuid.UUID) -> Iterator[None]:
-        """The member's turn to send: their advisory lock, held by a
-        transaction of its own that holds nothing else, until the block
-        ends."""
-        lock: Session = self._container.session_maker()()
-        try:
-            lock.execute(
-                select(
-                    func.pg_advisory_xact_lock(
-                        cast(literal(NOTIFICATION_LOCK), Integer),
-                        cast(literal(_member_key(person_id, project_id)), Integer),
-                    )
-                )
-            )
-            yield
-        finally:
-            lock.close()
+    def _turn(
+        self, person_id: uuid.UUID, project_id: uuid.UUID
+    ) -> AbstractContextManager[None]:
+        """The member's turn to send, until the block ends."""
+        return advisory_turn(
+            self._container.session_maker(),
+            NOTIFICATION_LOCK,
+            turn_key(person_id.bytes, project_id.bytes),
+        )
 
     def _due(
         self, db: Session, project_id: uuid.UUID, person_id: uuid.UUID
@@ -572,10 +562,3 @@ def _unsent(membership: ProjectMember) -> None:
     membership.notification_priority_code = None
     membership.notification_text = None
     membership.notification_url = None
-
-
-def _member_key(person_id: uuid.UUID, project_id: uuid.UUID) -> int:
-    """The second key of the member's advisory lock, a signed 32-bit integer;
-    two members drawing the same one only take turns."""
-    digest = hashlib.blake2b(person_id.bytes + project_id.bytes, digest_size=4)
-    return int.from_bytes(digest.digest(), "big", signed=True)

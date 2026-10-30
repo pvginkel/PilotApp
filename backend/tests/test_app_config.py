@@ -253,6 +253,22 @@ class TestAppSettings:
         with pytest.raises(ValidationError, match="CHAT_CLOSE_TIMEOUT"):
             AppEnvironment.model_validate({"CHAT_CLOSE_TIMEOUT": seconds})
 
+    def test_the_outages_alarm_waits_five_minutes_by_default(self) -> None:
+        settings = AppSettings.load(AppEnvironment(_env_file=None))
+
+        assert settings.outage_alarm_after_seconds == 300
+
+    def test_load_reads_the_outages_alarm_wait_from_the_environment(self) -> None:
+        settings = AppSettings.load(
+            AppEnvironment(_env_file=None, OUTAGE_ALARM_AFTER_SECONDS=0)
+        )
+
+        assert settings.outage_alarm_after_seconds == 0
+
+    def test_load_refuses_a_negative_wait_for_the_outages_alarm(self) -> None:
+        with pytest.raises(ValidationError, match="OUTAGE_ALARM_AFTER_SECONDS"):
+            AppEnvironment.model_validate({"OUTAGE_ALARM_AFTER_SECONDS": -1})
+
     def test_the_controller_token_is_hidden_in_the_log(self) -> None:
         settings = AppSettings(
             controller_url="https://controller.example", controller_token="a-token"
@@ -281,6 +297,7 @@ class TestAppSettings:
             "controller_ca_file": "None",
             "notification_bridge_url": "None",
             "mcp_server_url": "None",
+            "outage_alarm_after_seconds": repr(300.0),
             "scheduler_tick_seconds": repr(10.0),
             "environment_stop_after_seconds": repr(1800.0),
             "environment_delete_after_seconds": repr(604800.0),
@@ -374,6 +391,7 @@ class TestAppSettings:
             "controller_ca_file": repr(None),
             "notification_bridge_url": repr(None),
             "mcp_server_url": repr(None),
+            "outage_alarm_after_seconds": repr(300.0),
             "scheduler_tick_seconds": repr(10.0),
             "environment_stop_after_seconds": repr(1800.0),
             "environment_delete_after_seconds": repr(604800.0),

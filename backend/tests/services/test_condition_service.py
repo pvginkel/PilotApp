@@ -103,3 +103,25 @@ class TestConditionService:
         off = {"type": "conditions_changed", "payload": {"conditions": []}}
         assert (_frames(ada), _frames(ben_tab)) == ([on, off], [on, off])
         assert _frames(newcomer) == []
+
+    def test_each_listener_hears_every_tell(
+        self, conditions: ConditionService, controller_outage: ControllerOutage
+    ) -> None:
+        heard: list[tuple[str, bool]] = []
+        for name in ("first", "second"):
+            conditions.subscribe(
+                lambda name=name: heard.append((name, controller_outage.holds))
+            )
+
+        controller_outage.call_unanswered()
+        controller_outage.probe_answered()
+        conditions.tell()
+
+        assert heard == [
+            ("first", True),
+            ("second", True),
+            ("first", False),
+            ("second", False),
+            ("first", False),
+            ("second", False),
+        ]

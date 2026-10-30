@@ -2,11 +2,13 @@
 bar*; DB Condition): the controller unreachable (F125; design 2 §13.4). The
 usage halt is slice 016's.
 
-When one turns on or off, every person's connections hear of it at once, as
-one event carrying the conditions that hold then (SSE-2). Only the process
-that holds a connection delivers to it, and the outage is each process's own.
+When one turns on or off, its listeners hear of it, the alarms among them, and
+every person's connections at once, as one event carrying the conditions that
+hold then (SSE-2). Only the process that holds a connection delivers to it,
+and the outage is each process's own.
 """
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select
@@ -24,6 +26,8 @@ if TYPE_CHECKING:
 EVENT_NAME = "conditions_changed"
 """The SSE event the conditions travel as, `ConditionsSchema`'s shape."""
 
+type ConditionListener = Callable[[], None]
+
 
 class ConditionService:
     """The conditions that hold, read and told; a listener of the outage from
@@ -38,6 +42,7 @@ class ConditionService:
         self._container = container
         self._outage = controller_outage
         self._manager = sse_connection_manager
+        self._listeners: tuple[ConditionListener, ...] = ()
         controller_outage.subscribe(self.tell)
 
     def conditions(self) -> ConditionsSchema:
@@ -49,8 +54,16 @@ class ConditionService:
             else [ConditionSchema(code=ConditionCode.OUTAGE, since=since)]
         )
 
+    def subscribe(self, listener: ConditionListener) -> None:
+        """Call `listener` at every `tell()`, in the thread that tells, which
+        may be inside another transaction."""
+        self._listeners = (*self._listeners, listener)
+
     def tell(self) -> None:
-        """Send the conditions that hold now to every person's connections."""
+        """Tell every listener that the conditions turned, then send those
+        that hold now to every person's connections."""
+        for listener in self._listeners:
+            listener()
         payload = self.conditions().model_dump(mode="json")
         with self._open_session() as db:
             subjects = db.scalars(
