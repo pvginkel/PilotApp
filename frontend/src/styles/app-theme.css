@@ -21,8 +21,20 @@
 /* Tailwind's `dark:` variant follows the page's theme, not the system's. */
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
-/* The tokens index.css does not map to Tailwind colours. */
+/* The tokens index.css does not map to Tailwind colours, and the type scale. */
 @theme {
+  /* The mockup's type scale, six sizes in Tailwind's names, so its text-* classes take them: the
+     phone's here, a pixel down off it (below). base is the body; sm a work item's line, a head's
+     or status line, a section's label and a small button; xs a timestamp, a card id, a divider, a
+     pill; lg to 2xl the titles. Text sized to its shape (an avatar, a count, a key) and mono keep
+     sizes of their own. Tailwind's line heights, ratios, follow the size. */
+  --text-xs: 13px;
+  --text-sm: 14.5px;
+  --text-base: 16px;
+  --text-lg: 17.5px;
+  --text-xl: 19px;
+  --text-2xl: 22px;
+
   --color-primary-strong: hsl(var(--primary-strong));
   --color-primary-edge: hsl(var(--primary-edge));
   --color-primary-muted: hsl(var(--primary-muted));
@@ -59,6 +71,18 @@
   --topbar: 56px;
   --tabs: 264px;
   --panel: 420px;
+}
+
+/* Off the phone, above 900px, the scale a pixel down. */
+@media (min-width: 901px) {
+  :root {
+    --text-xs: 12px;
+    --text-sm: 13.5px;
+    --text-base: 15px;
+    --text-lg: 16px;
+    --text-xl: 17.5px;
+    --text-2xl: 20px;
+  }
 }
 
 /* The mockup's light tokens: the template's, with a soft blue as the primary colour. */
@@ -201,7 +225,7 @@
 
 @layer base {
   body {
-    font: 15px/1.6 ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+    font: var(--text-base)/1.6 ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
   }
 
   a { color: hsl(var(--link)); text-decoration: none; }
