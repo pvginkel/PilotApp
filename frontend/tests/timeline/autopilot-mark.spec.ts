@@ -69,7 +69,7 @@ test.describe('The auto pilot mark', () => {
         const icon = element.querySelector('svg')!.getBoundingClientRect();
         return { cursor, color, width: icon.width, height: icon.height };
       });
-      expect(style).toMatchObject({ cursor: 'help', width: 13, height: 13 });
+      expect(style).toMatchObject({ cursor: 'help', width: 13.5, height: 13.5 });
       expect(style.color).toBe(await item.time.evaluate((element) => getComputedStyle(element).color));
 
       const [time, at, why] = await Promise.all([item.time, mark, item.why].map(async (part) => (await part.boundingBox())!));

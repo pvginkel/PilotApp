@@ -552,7 +552,11 @@
      chip, its environment's name its link's tooltip, and Edited shows a pencil for its word. */
   @media (max-width: 600px) {
     .block-head { flex-wrap: wrap; }
-    .item-head { column-gap: 6px; }
+    /* An item head's parts 4px apart, and Urgent its triangle bare, so that a document's head with
+       Urgent, Edited and its asks' count holds one line at 390px in the scale's sm. */
+    .item-head { column-gap: 4px; }
+    .item-head .kind, .item-head .edited { gap: 4px; }
+    .item-head .chip.urgent { padding: 0; background: none; }
     /* A work item's line puts the step on a line of its own under the phase, indented to its text
        past the cue's icon and gap, so that each is cut at most once. */
     .work-line:not(.ended) { flex-wrap: wrap; row-gap: 0; }
