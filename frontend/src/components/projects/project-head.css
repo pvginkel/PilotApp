@@ -50,13 +50,16 @@
   /* Beside the switch while work briefed under its other setting runs (F4.3). */
   .switch-warning { flex: none; margin-left: -6px; font-size: var(--text-sm); color: hsl(var(--warning-text)); }
 
-  /* The step button: its name gives way down to the floor plan-popover.tsx sets on the anchor. */
-  .step-anchor > .btn { max-width: 100%; }
+  /* The step button, a few pixels up from a small button's 28px: its name gives way down to the
+     floor plan-popover.tsx sets on the anchor. */
+  .step-anchor > .btn { --h: 32px; max-width: 100%; }
   .step-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   /* ", …" when more steps are in progress: it stays when the name gives way, without the gap. */
   .step-more { flex: none; margin-left: -6px; white-space: pre; }
   /* The plan's donut. It hangs from the baseline as an icon does, lowered to centre on the capitals. */
   .plan-ring { position: relative; top: calc(8px - 0.5cap); flex: none; width: 16px; height: 16px; transform: rotate(-90deg); }
+  /* In the step button, the donut 20px. */
+  .step-anchor .plan-ring { top: calc(10px - 0.5cap); width: 20px; height: 20px; }
   .plan-ring circle { fill: none; stroke-width: 3; stroke: hsl(var(--muted-foreground) / 0.3); }
   .plan-ring .done { stroke: hsl(var(--primary)); }
   .plan-ring .now { stroke: hsl(var(--primary) / 0.45); }

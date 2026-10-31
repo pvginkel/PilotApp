@@ -243,20 +243,21 @@
     display: grid;
     place-items: center;
     flex: none;
-    width: 32px;
-    height: 32px;
+    width: 38px;
+    height: 38px;
     border-radius: 999px;
     background: hsl(var(--muted));
     color: hsl(var(--muted-foreground));
-    font-size: 12px;
+    font-size: 14.5px;
     font-weight: 600;
     line-height: 1;
   }
-  .avatar.sm { width: 24px; height: 24px; font-size: 10px; }
-  .avatar.xs { width: 20px; height: 20px; font-size: 8.5px; }
-  .avatar .icon { font-size: 18px; }
-  .avatar.sm .icon { font-size: 14px; }
-  .avatar.xs .icon { font-size: 12px; }
+  .avatar.sm { width: 29px; height: 29px; font-size: 12px; }
+  /* The mockup's mini avatar draws its 8.5 on a 20 viewBox at 24px. */
+  .avatar.xs { width: 24px; height: 24px; font-size: 10.2px; }
+  .avatar .icon { font-size: 21.5px; }
+  .avatar.sm .icon { font-size: 17px; }
+  .avatar.xs .icon { font-size: 14.5px; }
   .avatar[data-colour="1"] { background: hsl(var(--avatar-1)); color: hsl(var(--avatar-1-text)); }
   .avatar[data-colour="2"] { background: hsl(var(--avatar-2)); color: hsl(var(--avatar-2-text)); }
   .avatar[data-colour="3"] { background: hsl(var(--avatar-3)); color: hsl(var(--avatar-3-text)); }

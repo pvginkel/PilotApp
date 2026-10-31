@@ -305,8 +305,8 @@ function BriefedOtherwise({ project }: { project: Project }) {
   );
 }
 
-// `.avatar.sm` is 24px wide, and each avatar after the first overlaps the one before by 2px.
-const AVATAR = 24;
+// `.avatar.sm` is 29px wide, and each avatar after the first overlaps the one before by 2px.
+const AVATAR = 29;
 const OVERLAP = 2;
 const across = (avatars: number) => avatars * AVATAR - (avatars - 1) * OVERLAP;
 

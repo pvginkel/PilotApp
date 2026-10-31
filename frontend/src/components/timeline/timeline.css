@@ -465,7 +465,7 @@
     color: hsl(var(--muted-foreground));
   }
   /* The avatar keeps its size and centre, and claims only 16px of the line, so it adds no height. */
-  .line .said .avatar { display: inline-grid; margin: -2px 6px -2px 0; vertical-align: calc(0.5cap - 8px); }
+  .line .said .avatar { display: inline-grid; margin: -4px 6px -4px 0; vertical-align: calc(0.5cap - 8px); }
   .line .said .note { white-space: nowrap; }
   .line .said .note .icon { margin-right: 4px; }
   .line time { flex: none; font-size: var(--text-sm); color: hsl(var(--muted-foreground)); font-variant-numeric: tabular-nums; }

@@ -20,7 +20,7 @@ interface Person {
 
 interface AvatarProps {
   who: Person | 'pilot';
-  /** 24px, or 20px for an answer's line; 32px by default. */
+  /** 29px, or 24px for an answer's line; 38px by default. */
   size?: 'sm' | 'xs';
 }
 
