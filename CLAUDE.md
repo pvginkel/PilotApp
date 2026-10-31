@@ -97,8 +97,9 @@ carries the sidecar's `golang` container and its `Test sidecar` and `Build pilot
 which the template, rendering no `sidecar/`, has no place for (D008), and which copies the
 backend's OpenAPI cache into the `pilot-ui` build context, where `frontend/openapi-cache` is a
 symlink to `backend/openapi-cache`; the page head of
-`frontend/index.html`, which links the PWA's `/manifest.json` and sets `theme-color`, which no
-app-owned file can; the cache rule of `frontend/nginx.conf`, which keeps the year-long immutable
+`frontend/index.html`, which links the PWA's `/manifest.json`, sets `theme-color`, and gives the
+viewport `interactive-widget=resizes-content`, so that a phone's keyboard shrinks the app rather
+than panning it, which no app-owned file can; the cache rule of `frontend/nginx.conf`, which keeps the year-long immutable
 cache to the build's hashed `/assets/` and has the root's files — the icons, the logo, the manifest,
 the worker — revalidated on every load, so that a changed icon shows under its name; the `/api/`
 location of `frontend/nginx.conf`, a `^~` prefix, so that nginx tries no regex location on an

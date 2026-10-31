@@ -1,6 +1,7 @@
 /**
  * The frame every screen sits in: the side column beside the centre on a wide window, a drawer
- * with a scrim under the mockup's breakpoint (F98.3), the same components.
+ * with a scrim under the mockup's breakpoint (F98.3), the same components; on a phone, the
+ * keyboard shrinks the app rather than panning it.
  */
 
 import { test, expect } from '../support/fixtures';
@@ -57,5 +58,15 @@ test.describe('The drawer on a narrow window', () => {
     await expect(shell.side).toBeVisible();
     await shell.drawerToggle.click();
     await expect(shell.side).toBeHidden();
+  });
+});
+
+test.describe('The phone’s keyboard', () => {
+  test('shrinks the app, the viewport resizing its content, where Chrome would pan the page', async ({ people, shell, page }) => {
+    await people.signIn();
+    await shell.open('/profile');
+
+    const viewport = await page.locator('meta[name="viewport"]').getAttribute('content');
+    expect(viewport!.split(',').map((part) => part.trim())).toContain('interactive-widget=resizes-content');
   });
 });

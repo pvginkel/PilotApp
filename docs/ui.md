@@ -85,7 +85,11 @@ avatar slot are never null.
 - **The phone's screen.** The app is as tall as the screen the browser shows: `h-dvh` on
   `__root.tsx`'s root and on the auth gate's screens, never `h-screen`, `100vh`, which a phone's
   Chrome measures with its URL bar hidden. The app scrolls inside itself, so the bar never hides,
-  and `100vh` cut off its foot by the bar's height.
+  and `100vh` cut off its foot by the bar's height. The keyboard shrinks the app with it: the
+  viewport's `interactive-widget=resizes-content` (`index.html`) has a phone's Chrome, from version
+  108, resize the page to the room above the keyboard where it would pan it, so that the top bar,
+  the project's head and the chat's composer stay in view and the messages area between them gets
+  shorter. Whether Firefox on Android honours it is not known.
 - **Empty states** are `EmptyState`: "No projects yet" when there is no project, "None yet" for an
   empty list of archived projects.
 
