@@ -88,9 +88,10 @@ An open work item (`WorkItem`, `frontend/src/components/timeline/work.tsx`) is:
 
 - **Its head**, an item's head ([`timeline.md`](timeline.md)), with the env chip once its start has
   an environment, but for Pilot's own work, the environment's name linked to KubeCoder's Open by its
-  id (`EnvironmentLink`, [`ui.md`](ui.md)), and, while `running` with a `started_at`, "running N
-  min" with a pulse: "under a minute", "12 min", "1 h 5 min", "3 h", "2 days", counted again every
-  15 s on the browser's clock.
+  id (`EnvironmentLink`, [`ui.md`](ui.md)), and, while `running` with a `started_at`, the running
+  time, a pulse and the figure alone, kept on one line: "0m", "12m", "1h 5m", past six hours "7h",
+  past two days "2d", counted again every 15 s on the browser's clock. "Running for 1h 5m" is its
+  tooltip and its accessible name (`role="timer"`).
 - **Its title.**
 - **Its one line** (`workLine()`, `frontend/src/lib/utils/status-labels.ts`): a held item's reason,
   "Halted at the week's limit", "Halted at the five-hour limit", "Paused", "Waiting for the

@@ -15,7 +15,7 @@ import { waitTestEvent } from '../helpers';
  * (F10.2, F11), a finished timeline's end (F5.3) with the archive question under it (F5.6), a new
  * project's ready line under its setup (D083), and where it stands scrolled; opened at its
  * project's address or at an item's or a block's under it (F97). A work item open shows its env
- * chip, "running N min", its one line — the working cue and the latest step — its Session log
+ * chip, its running time, its one line — the working cue and the latest step — its Session log
  * (F26), and Stop with its question or Resume (F67).
  */
 export class TimelinePage {

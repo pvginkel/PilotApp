@@ -492,7 +492,7 @@
 
   /* ---- Work: a running session, updated in place ---------------------------------------- */
 
-  .work-live { display: inline-flex; align-items: baseline; gap: 8px; }
+  .work-live { display: inline-flex; align-items: baseline; gap: 8px; white-space: nowrap; }
   /* The dot has no text, so its baseline is its bottom edge; it is lowered to centre on the capitals. */
   .pulse {
     position: relative;

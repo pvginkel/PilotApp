@@ -1,6 +1,6 @@
 /**
  * A work item on the timeline (F26): open, its head with the env chip opening the environment once
- * its start has one and "running N min" while its turn runs (F26.1, F12), and its one line
+ * its start has one and the running time, "17m", while its turn runs (F26.1, F12), and its one line
  * (F26.2), live as the server moves it (F80.2) — the server's own words while the session comes up
  * or its environment restarts, the working state and the latest step — a call whose input streams
  * in by its verb alone — why the gate holds its start (F141.5), a slot among it (F143.4),
@@ -53,7 +53,7 @@ async function startIn(projects: Projects, project: string, state = 'running', t
 }
 
 test.describe('An open work item', () => {
-  test('comes up with the server’s words, then runs under its env chip and “running N min”, its line the working state and the latest step, live', async ({
+  test('comes up with the server’s words, then runs under its env chip and its running time, “0m”, its line the working state and the latest step, live', async ({
     people,
     projects,
     controller,
@@ -82,7 +82,9 @@ test.describe('An open work item', () => {
     await expect(item.work.running).toHaveCount(0);
 
     await controller.setStatus(environment, 'running');
-    await expect(item.work.running).toHaveText('running under a minute');
+    await expect(item.work.running).toHaveText('0m');
+    await expect(item.work.running).toHaveAccessibleName('Running for 0m');
+    await expect(item.work.running).toHaveAttribute('title', 'Running for 0m');
     await expect(item.work.running.locator('.pulse')).toBeVisible();
     await expect(item.work.cue).toHaveText('Creating the session');
     await expect(item.work.step).toHaveCount(0);
@@ -154,7 +156,7 @@ test.describe('An open work item', () => {
     await expect(item.work.environment).toHaveCount(0);
 
     await projects.transition(project, 'resumed');
-    await expect(item.work.running).toHaveText('running under a minute');
+    await expect(item.work.running).toHaveText('0m');
     await expect(item.work.cue).toHaveText('Creating the session');
     await expect(item.work.environment).toHaveText((await projects.environment(project, work)).name);
   });

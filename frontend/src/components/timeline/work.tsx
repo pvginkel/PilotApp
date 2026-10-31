@@ -1,8 +1,8 @@
 /**
  * An open work item on the timeline (F26): a session Pilot started, updated in place as the
  * server's `work_moved` carries it (F80.2). Its head has the env chip, opening the environment in
- * KubeCoder, once its start has one, and "running N min" with a pulse while its turn runs (F26.1,
- * F12). Under its title is its one line (F26.2): the server's own words while its session comes
+ * KubeCoder, once its start has one, and the running time, a pulse and "17m", while its turn runs
+ * (F26.1, F12). Under its title is its one line (F26.2): the server's own words while its session comes
  * up, or comes back while its environment restarts; the working state and the latest step while
  * it runs; why the gate holds its start; "Stopped · <time>" with the cause of a stop made
  * elsewhere, or a usage halt's hard stop's "Stopped at the week’s limit · <time>" and its like
@@ -37,7 +37,7 @@ import { workLine } from '@/lib/utils/status-labels';
 
 type Work = components['schemas']['TimelineSchema.1fdd8ae.WorkSchema'];
 
-/** How often "running N min" is counted again, in milliseconds. */
+/** How often the running time is counted again, in milliseconds. */
 const TICK = 15_000;
 
 type Actions = 'stop' | 'resume' | 'retry' | 'log';
@@ -266,26 +266,35 @@ function Retried({ at }: { at: string }) {
   );
 }
 
-/** "running N min" from when its run began, with a pulse. */
+/**
+ * The running time from when its run began, a pulse and the figure alone, "17m"; "Running for 17m"
+ * its tooltip and its accessible name.
+ */
 function Running({ since }: { since: string }) {
   // performance.timeOrigin + performance.now() is the wall clock's time, in milliseconds.
   const now = performance.timeOrigin + useNow(true, TICK);
+  const figure = span(now - new Date(since).getTime());
   return (
-    <span className="work-live" data-testid="timeline.work.running">
+    <span
+      className="work-live"
+      role="timer"
+      title={`Running for ${figure}`}
+      aria-label={`Running for ${figure}`}
+      data-testid="timeline.work.running"
+    >
       <span className="pulse" aria-hidden="true" />
-      running {span(now - new Date(since).getTime())}
+      {figure}
     </span>
   );
 }
 
-/** A run's length as the head counts it: "under a minute", "12 min", "1 h 5 min", "3 h", "2 days". */
+/** A run's length as the head counts it: "0m", "12m", "1h 5m", past six hours "7h", past two days "2d". */
 function span(ms: number): string {
   const minutes = Math.round(Math.max(ms, 0) / 60_000);
-  if (minutes < 1) return 'under a minute';
-  if (minutes < 60) return `${minutes} min`;
+  if (minutes < 60) return `${minutes}m`;
   const hours = Math.floor(minutes / 60);
-  if (hours < 48) return minutes % 60 && hours < 6 ? `${hours} h ${minutes % 60} min` : `${hours} h`;
-  return `${Math.round(hours / 24)} days`;
+  if (hours < 48) return minutes % 60 && hours < 6 ? `${hours}h ${minutes % 60}m` : `${hours}h`;
+  return `${Math.round(hours / 24)}d`;
 }
 
 function Line({ work }: { work: Work }) {
