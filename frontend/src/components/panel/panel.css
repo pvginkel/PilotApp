@@ -49,7 +49,7 @@
     background: none;
     color: hsl(var(--muted-foreground));
     font: inherit;
-    font-size: 14px;
+    font-size: var(--text-base);
     font-weight: 600;
     cursor: pointer;
   }
@@ -65,18 +65,18 @@
   .project-chat .flash { animation: fresh 1.6s ease-out; }
 
   /* A draft's Draft tab (the mockup's "A new project: the draft"). */
-  .draft-empty { margin: 16px 18px; font-size: 14px; color: hsl(var(--muted-foreground)); }
+  .draft-empty { margin: 16px 18px; font-size: var(--text-base); color: hsl(var(--muted-foreground)); }
   .draft { padding: 16px 18px 18px; }
-  .draft .prose { font-size: 14px; }
+  .draft .prose { font-size: var(--text-base); }
   .draft > .prose + .prose { margin-top: 0.7em; }
   .draft > .block { margin: 14px 0 20px; }
-  .draft-foot { margin: 16px 0 0; font-size: 13px; color: hsl(var(--muted-foreground)); }
+  .draft-foot { margin: 16px 0 0; font-size: var(--text-sm); color: hsl(var(--muted-foreground)); }
 
   /* The Documents tab. */
   .docs { padding: 4px 8px 16px; }
-  .docs h3 { margin: 14px 8px 6px; font-size: 13px; font-weight: 600; color: hsl(var(--muted-foreground)); }
+  .docs h3 { margin: 14px 8px 6px; font-size: var(--text-sm); font-weight: 600; color: hsl(var(--muted-foreground)); }
   .docs ul { margin: 0; padding: 0; list-style: none; }
-  .docs .none { margin: 0 8px; font-size: 13.5px; color: hsl(var(--muted-foreground)); }
+  .docs .none { margin: 0 8px; font-size: var(--text-base); color: hsl(var(--muted-foreground)); }
   .docs .none.failed { margin-top: 14px; }
   .doc-row {
     display: flex;
@@ -86,14 +86,14 @@
     padding: 7px 8px;
     border-radius: 6px;
     color: inherit;
-    font-size: 14px;
+    font-size: var(--text-base);
     text-decoration: none;
   }
   a.doc-row:hover { background: hsl(var(--accent)); text-decoration: none; }
   .doc-row > .icon { color: hsl(var(--primary)); position: relative; top: calc(0.5em - 0.5cap); }
   .doc-row .t { display: flex; flex-direction: column; min-width: 0; }
   .doc-row .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .doc-row .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: hsl(var(--muted-foreground)); }
+  .doc-row .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-sm); color: hsl(var(--muted-foreground)); }
   /* Files attached in one call: under their folder, by the width of its icon and the gap after it. */
   .doc-batch > ul { padding-left: 24px; }
 
