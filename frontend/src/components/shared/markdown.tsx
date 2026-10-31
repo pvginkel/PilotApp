@@ -20,6 +20,9 @@ import { parseQuoteHref, QUOTE_SCHEME, quotesToLinks } from '@/lib/chat/quotes';
 import type { Linker } from '@/lib/links';
 import { cn } from '@/lib/utils';
 
+/** GFM, but only a double `~` strikes text out: a single one, as in `[!-~]+`, stays as written (P-139). */
+const remarkPlugins: Options['remarkPlugins'] = [[remarkGfm, { singleTilde: false }]];
+
 const UNLINKED = new Set(['a', 'code', 'pre']);
 
 function linkIn(children: ElementContent[], link: Linker): ElementContent[] {
@@ -85,7 +88,7 @@ export const HeadingWords = memo(function HeadingWords({ text }: { text: string 
   const source = `# ${text} #`;
   return (
     <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={remarkPlugins}
       rehypePlugins={rehypePlugins}
       components={nestedComponents}
       disallowedElements={['h1']}
@@ -134,7 +137,7 @@ export const Markdown = memo(function Markdown({ text, className, deltas, docume
   );
   return (
     <div className={cn('prose', className)}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins} components={drawn} urlTransform={urlTransform}>
+      <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={drawn} urlTransform={urlTransform}>
         {quoted.markdown}
       </ReactMarkdown>
     </div>

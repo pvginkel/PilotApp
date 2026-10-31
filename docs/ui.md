@@ -149,7 +149,8 @@ In `src/components/shared/`:
   the API hold times in UTC.
 - `LinkedText` and `EnvironmentLink`: below.
 - `Markdown({text, className?, deltas?, documentLink?})`: GFM (react-markdown with remark-gfm)
-  inside `.prose`, its text linked as the record's words are except in code and inside a link, every
+  inside `.prose`, only a double `~` striking text out, a single one drawn as written
+  (`singleTilde: false`, here, in `HeadingWords` and in `quotes.ts`'s parser alike), its text linked as the record's words are except in code and inside a link, every
   link opening in a new tab. Given `documentLink`, as the Draft tab gives it
   ([`documents.md`](documents.md)), it draws every link through that component and links nothing
   else. A quote tag ([`chats.md`](chats.md) has its forms) is a chip (`QuoteChip`) that goes to what

@@ -203,7 +203,7 @@ test.describe('An open item', () => {
     await expect(timeline.item(hers).urgent).toHaveCount(0);
   });
 
-  test('draws its prose as GFM, its ticket ids linked outside code, every link opening a new tab', async ({
+  test('draws its prose as GFM, a single `~` striking nothing, its ticket ids linked outside code, every link opening a new tab', async ({
     backendUrl,
     people,
     projects,
@@ -217,6 +217,7 @@ test.describe('An open item', () => {
       'Some **bold** words and a [page](https://example.com/page).',
       '| Card | State |\n| --- | --- |\n| RB-12 | open |',
       '- one\n- ~~two~~',
+      'It takes [!-~]+ before the colon and [!-~]+ after it.',
       '`RB-13` stays code.',
     ].join('\n\n');
     const placed = await projects.place(id, { kind: 'notice', title: 'Prose', text });
@@ -229,7 +230,9 @@ test.describe('An open item', () => {
     await expect(page).toHaveAttribute('target', '_blank');
     await expect(prose.locator('table tbody tr')).toHaveCount(1);
     await expect(prose.locator('li')).toHaveCount(2);
-    await expect(prose.locator('del')).toHaveText('two');
+    // Only a double `~` strikes text out; two single ones are drawn as written.
+    await expect(prose.locator('del')).toHaveText(['two']);
+    await expect(prose.locator('p', { hasText: 'It takes' })).toHaveText('It takes [!-~]+ before the colon and [!-~]+ after it.');
     const ticket = prose.locator('td').getByRole('link', { name: 'RB-12' });
     await expect(ticket).toHaveAttribute('href', `${backendUrl}/tickets/RB-12`);
     await expect(ticket).toHaveAttribute('target', '_blank');

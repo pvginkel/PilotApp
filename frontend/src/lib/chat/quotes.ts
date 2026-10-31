@@ -26,9 +26,9 @@ const labelOf = (body: string) => body.trim().split('\n')[0]!.slice(0, 120);
 
 export const QUOTE_SCHEME = 'pilot-quote:';
 
-// The parser `Markdown` draws with, react-markdown's with remark-gfm: what it reads as code is what
-// shows as code.
-const parser = unified().use(remarkParse).use(remarkGfm);
+// The parser `Markdown` draws with, react-markdown's with remark-gfm, a single `~` striking nothing:
+// what it reads as code is what shows as code.
+const parser = unified().use(remarkParse).use(remarkGfm, { singleTilde: false });
 
 interface MarkdownNode {
   type: string;
