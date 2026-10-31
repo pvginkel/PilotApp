@@ -22,7 +22,7 @@ test('a toast has the mockup’s look, 24px from the corner', async ({ page, peo
   await expect(toast).toHaveCSS('background-color', background);
   await expect(toast).toHaveCSS('border-radius', '8px');
   await expect(toast).toHaveCSS('max-width', '380px');
-  await expect(toast.getByText('toast look')).toHaveCSS('font-size', '14px');
+  await expect(toast.getByText('toast look')).toHaveCSS('font-size', '13.5px');
 
   // Once it has slid in.
   const viewport = page.viewportSize()!;

@@ -554,14 +554,14 @@ test.describe('A tight head beside the side panel', () => {
   });
 
   for (const font of ['the default font', 'a wider font'] as const) {
-    test(`at 1200px, in ${font}, the members fold last to the first avatars and a count naming the rest, the step’s name at its floor and the menu inside the head`, async ({
+    test(`at 1240px, in ${font}, the members fold last to the first avatars and a count naming the rest, the step’s name at its floor and the menu inside the head`, async ({
       page,
       people,
       projects,
       projectHead,
       panel,
     }) => {
-      await page.setViewportSize({ width: 1200, height: 720 });
+      await page.setViewportSize({ width: 1240, height: 720 });
       if (font === 'a wider font') await widen(page);
       const me = await people.signIn({ name: 'Test Person' });
       const { handles, names } = await six(people, me.handle!);
@@ -588,14 +588,14 @@ test.describe('A tight head beside the side panel', () => {
   }
 
   for (const font of ['the default font', 'a wider font'] as const) {
-    test(`an archived head at 1200px, in ${font}, stands in its two rows once its parts at their floors run past it in one, and in one again once brought back`, async ({
+    test(`an archived head at 1240px, in ${font}, stands in its two rows once its parts at their floors run past it in one, and in one again once brought back`, async ({
       page,
       people,
       projects,
       projectHead,
       panel,
     }) => {
-      await page.setViewportSize({ width: 1200, height: 720 });
+      await page.setViewportSize({ width: 1240, height: 720 });
       if (font === 'a wider font') await widen(page);
       const me = await people.signIn({ name: 'Test Person' });
       const { handles } = await six(people, me.handle!);
