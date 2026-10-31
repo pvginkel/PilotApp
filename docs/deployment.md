@@ -162,10 +162,12 @@ objects into each stage's namespace:
   `NOTIFICATION_BRIDGE_URL`, required, so that a stage without it fails its render:
   `http://notification-bridge.notifications-prd.svc:8090` on both stages, the bridge's in-cluster
   Service on the prd cluster, where both run. `migrate` gets none; the backend refuses to start
-  without it. The people's bridge registrations are made for production: the dev stage has none of
-  its own (D090), so a made-up token saved on pilot-dev is refused. The bridge knows a registration
-  by its token alone, so a person's real token saved there is taken, and pilot-dev's notifications
-  and alarms then reach their phone, its alarms under the same sequence ids as production's.
+  without it. The people's bridge registrations are made for production, and the dev stage has one
+  of its own, the operator's, `pilot-app-dev-pvginkel`, for testing the notifications on pilot-dev
+  (D110, which overrules D090); a made-up token saved on pilot-dev is refused. The bridge knows a
+  registration by its token alone, so a person's production token saved there is taken too, and
+  pilot-dev's notifications and alarms then reach their phone, its alarms under the same sequence
+  ids as production's.
 - **Service `pilot`**, port 80 to the UI, its annotation `nginx.webathome.org/server-name` the
   stage's host. Production's `nginx.webathome.org/is-public: "true"` has the estate's front door
   serve it as a public site, over HTTPS with a Let's Encrypt certificate. Dev's `is-public: "false"`
