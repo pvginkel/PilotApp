@@ -20,7 +20,7 @@ interface AuthGateProps {
 function AuthLoading() {
   return (
     <div
-      className="h-screen w-full bg-background"
+      className="h-dvh w-full bg-background"
       data-testid="auth.gate.loading"
     />
   );
@@ -89,7 +89,7 @@ function getErrorDisplay(error: Error): { title: string; description: string } {
 function AuthForbidden({ onLogout }: { onLogout: () => void }) {
   return (
     <div
-      className="flex h-screen w-full items-center justify-center bg-background"
+      className="flex h-dvh w-full items-center justify-center bg-background"
       data-testid="auth.gate.forbidden"
     >
       <div className="flex max-w-md flex-col items-center gap-4 rounded-lg border border-border bg-card p-8 text-center">
@@ -135,7 +135,7 @@ function AuthError({ error, onRetry }: { error: Error; onRetry: () => void }) {
 
   return (
     <div
-      className="flex h-screen w-full items-center justify-center bg-background"
+      className="flex h-dvh w-full items-center justify-center bg-background"
       data-testid="auth.gate.error"
     >
       <div className="flex max-w-md flex-col items-center gap-4 rounded-lg border border-border bg-card p-8 text-center">

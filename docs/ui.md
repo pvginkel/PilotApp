@@ -82,6 +82,10 @@ avatar slot are never null.
   window under the top bar, and in the row under them the side column is a drawer over the centre,
   with a scrim. The top bar's toggle opens it; the scrim closes it, and so does any change of
   address.
+- **The phone's screen.** The app is as tall as the screen the browser shows: `h-dvh` on
+  `__root.tsx`'s root and on the auth gate's screens, never `h-screen`, `100vh`, which a phone's
+  Chrome measures with its URL bar hidden. The app scrolls inside itself, so the bar never hides,
+  and `100vh` cut off its foot by the bar's height.
 - **Empty states** are `EmptyState`: "No projects yet" when there is no project, "None yet" for an
   empty list of archived projects.
 

@@ -15,7 +15,7 @@ function RootLayout() {
   return (
     <Providers>
       <div
-        className="flex h-screen flex-col overflow-hidden"
+        className="flex h-dvh flex-col overflow-hidden"
         data-testid="app-shell.root"
       >
         <DeploymentNotificationBar />
