@@ -32,7 +32,7 @@
     box-shadow: var(--shadow-md);
     color: hsl(var(--urgent-text));
     font: inherit;
-    font-size: 14px;
+    font-size: var(--text-base);
     text-align: left;
     cursor: pointer;
   }
@@ -40,7 +40,7 @@
   .pin-banner .what { font-weight: 600; }
   .pin-banner .sep { opacity: 0.5; }
   .pin-banner .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: hsl(var(--foreground)); }
-  .pin-banner .go { flex: none; font-size: 13px; }
+  .pin-banner .go { flex: none; font-size: var(--text-sm); }
   .open-above { position: absolute; top: calc(100% + 10px); left: 50%; transform: translateX(-50%); box-shadow: var(--shadow-md); }
 
   /* ---- Dividers ------------------------------------------------------------------------- */
@@ -50,14 +50,14 @@
     align-items: center;
     gap: 12px;
     margin: 18px 0 10px;
-    font-size: 12px;
+    font-size: var(--text-xs);
     color: hsl(var(--muted-foreground));
     white-space: nowrap;
   }
   .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: hsl(var(--border)); }
   .divider.date { font-weight: 600; margin-top: 26px; }
   .divider.step::before { flex: 0 0 24px; }
-  .divider.step { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px; }
+  .divider.step { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: var(--text-xs); }
   .divider.finished { margin-top: 22px; font-weight: 600; color: hsl(var(--foreground)); }
   .divider.finished .icon { margin-right: 6px; color: hsl(var(--primary)); }
 
@@ -92,7 +92,7 @@
     align-items: baseline;
     line-height: 28px;
     gap: 0 8px;
-    font-size: 13px;
+    font-size: var(--text-sm);
     color: hsl(var(--muted-foreground));
   }
   .item-head .kind { display: inline-flex; align-items: baseline; gap: 6px; font-weight: 600; white-space: nowrap; color: hsl(var(--primary-muted-foreground)); }
@@ -112,12 +112,12 @@
   .chip.urgent { background: hsl(var(--urgent) / 0.15); color: hsl(var(--urgent-text)); font-weight: 600; }
   /* A work item's env chip: the environment's name, its icon only on a phone. */
   .chip.env .icon { display: none; }
-  .item-title { margin: 6px 0 4px; font-size: 16px; font-weight: 600; line-height: 1.4; }
-  .item-sub { margin: 0 0 6px; font-size: 14px; color: hsl(var(--muted-foreground)); }
+  .item-title { margin: 6px 0 4px; font-size: var(--text-lg); font-weight: 600; line-height: 1.4; }
+  .item-sub { margin: 0 0 6px; font-size: var(--text-base); color: hsl(var(--muted-foreground)); }
   .item-after { margin-top: 12px; }
   .item-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
   /* A question asked in the actions' place: Stop's. */
-  .item-actions.confirm .confirm-text { flex: 1 1 260px; font-size: 13.5px; color: hsl(var(--muted-foreground)); }
+  .item-actions.confirm .confirm-text { flex: 1 1 260px; font-size: var(--text-base); color: hsl(var(--muted-foreground)); }
   /* The attachments hung on an item, a chip each (attachments.tsx). */
   .attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
   .attachments .btn { max-width: 100%; }
@@ -138,9 +138,9 @@
   .confirm-row { display: flex; align-items: center; gap: 12px; border-radius: 6px; scroll-margin: 90px; }
   .confirm-row.flash { animation: fresh 1.6s ease-out; }
   .confirm-text { flex: 1; min-width: 0; }
-  .confirm-row .item-title { margin: 0; font-size: 15px; }
-  .proposal { font-size: 14px; line-height: 1.45; color: hsl(var(--muted-foreground)); }
-  .confirm-text .note, .confirm-text .answer { margin-top: 4px; font-size: 13.5px; color: hsl(var(--muted-foreground)); }
+  .confirm-row .item-title { margin: 0; }
+  .proposal { font-size: var(--text-base); line-height: 1.45; color: hsl(var(--muted-foreground)); }
+  .confirm-text .note, .confirm-text .answer { margin-top: 4px; font-size: var(--text-base); color: hsl(var(--muted-foreground)); }
   .yes-no { display: flex; flex: none; gap: 6px; }
   .yn {
     display: grid;
@@ -159,8 +159,8 @@
   .yn.no:hover:not(:disabled), .yn.no.chosen { border-color: hsl(var(--destructive) / 0.6); background: hsl(var(--destructive) / 0.1); color: hsl(var(--destructive-text)); }
   .yn:disabled { cursor: default; }
   .yn:disabled:not(.chosen) { opacity: 0.4; }
-  .confirm-foot { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 14px; margin-top: 6px; font-size: 13px; }
-  .link.details { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; font-size: 13px; }
+  .confirm-foot { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 14px; margin-top: 6px; font-size: var(--text-base); }
+  .link.details { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; font-size: var(--text-base); }
   .confirm-prose { margin-top: 8px; }
   .item.confirm .console, .block .console.no { margin-top: 8px; }
   .console.no { border-color: hsl(var(--destructive) / 0.6); }
@@ -182,7 +182,7 @@
     align-items: baseline;
     gap: 8px;
     padding: 6px 8px 0 14px;
-    font-size: 13px;
+    font-size: var(--text-sm);
     line-height: 28px;
     color: hsl(var(--muted-foreground));
   }
@@ -194,7 +194,7 @@
   .block-head .toggle { --h: 20px; position: relative; top: calc(6px - 0.5cap); }
   .block-head .toggle .icon { width: 12px; height: 12px; stroke-width: 2.2; }
   /* Who answered: the time, then the avatar, which keeps one place whatever comes before it. */
-  .block-head .who { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; white-space: nowrap; }
+  .block-head .who { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
   /* Discuss centres on the label's capitals, whatever the font: its baseline is the icon's foot,
      lowered by half the icon less half the cap height. */
   .block-head .block-discuss { position: relative; top: calc(0.5em - 0.5cap); }
@@ -211,7 +211,7 @@
     background: hsl(var(--background));
     color: hsl(var(--muted-foreground));
     font: inherit;
-    font-size: 12.5px;
+    font-size: var(--text-xs);
     line-height: 18px;
     white-space: nowrap;
     cursor: pointer;
@@ -240,7 +240,7 @@
     background: hsl(var(--background));
     color: inherit;
     font: inherit;
-    font-size: 14px;
+    font-size: var(--text-base);
     text-align: left;
     cursor: pointer;
   }
@@ -255,7 +255,7 @@
     border-radius: 999px;
     background: hsl(var(--primary-strong));
     color: hsl(var(--primary-foreground));
-    font-size: 11.5px;
+    font-size: var(--text-xs);
     font-weight: 600;
   }
   .option.recommended { border-color: hsl(var(--primary) / 0.7); background: hsl(var(--primary-muted)); }
@@ -307,7 +307,7 @@
   .console-btn.send { color: hsl(var(--primary-strong)); }
 
   /* An answer that is no option's row: a question's, an action's, a deferral. */
-  .answer { font-size: 14px; }
+  .answer { font-size: var(--text-base); }
   .answer .said { white-space: pre-wrap; }
   .answer .said.boxed { padding: 6px 10px; border-radius: 6px; background: hsl(var(--muted)); }
   .block-controls > .answer + * { margin-top: 10px; }
@@ -348,9 +348,9 @@
   /* Edited's pencil, in the item's head and the overlay's, stands in for its word on a phone. */
   .edited .edited-icon { display: none; position: relative; top: calc(0.5em - 0.5cap); }
   /* That Pilot asked a registered document's writer (F86.8), Pilot's mark before the words. */
-  .writer-asked { display: flex; align-items: center; gap: 6px; font-size: 13.5px; }
+  .writer-asked { display: flex; align-items: center; gap: 6px; font-size: var(--text-sm); }
   /* Pilot's line under a new project's setup while Create's pause holds its work (D083). */
-  .project-ready { display: flex; align-items: center; gap: 6px; margin: 10px 0; font-size: 13.5px; color: hsl(var(--muted-foreground)); }
+  .project-ready { display: flex; align-items: center; gap: 6px; margin: 10px 0; font-size: var(--text-sm); color: hsl(var(--muted-foreground)); }
 
   /* A section Pilot settled, one line until opened (F31.5): its mark, its heading, the answer, the
      note a muted line under them; each clipped to its line, consecutive ones one tight list. */
@@ -363,7 +363,7 @@
     width: 100%;
     padding: 4px 8px;
     border-radius: 6px;
-    font-size: 14px;
+    font-size: var(--text-base);
     line-height: 22px;
     text-align: left;
     cursor: pointer;
@@ -389,7 +389,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 13px;
+    font-size: var(--text-sm);
     line-height: 18px;
     color: hsl(var(--muted-foreground));
   }
@@ -400,7 +400,7 @@
   .doc-card .title-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
   /* A registered document whose read failed: the one state of the three that waits on the person. */
   .chip.did-not-load { background: hsl(var(--warning) / 0.15); color: hsl(var(--warning-text)); font-weight: 600; }
-  .progress { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 13px; color: hsl(var(--muted-foreground)); }
+  .progress { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: var(--text-sm); color: hsl(var(--muted-foreground)); }
 
   /* A document's progress: a segment per block, filled once answered; a segment goes to its block. */
   .segbar { display: flex; align-items: center; gap: 3px; min-width: 0; }
@@ -437,7 +437,7 @@
     width: 100%;
     min-height: 38px;
     padding: 6px 12px;
-    font-size: 14px;
+    font-size: var(--text-base);
     line-height: 26px;
   }
   .item.collapsed { border-color: transparent; background: none; margin: 2px 0; }
@@ -460,15 +460,15 @@
     min-width: 0;
     flex-basis: 100%;
     margin: 0 0 2px 24px;
-    font-size: 13.5px;
-    line-height: 20px;
+    font-size: var(--text-sm);
+    line-height: 22px;
     color: hsl(var(--muted-foreground));
   }
   /* The avatar keeps its size and centre, and claims only 16px of the line, so it adds no height. */
   .line .said .avatar { display: inline-grid; margin: -2px 6px -2px 0; vertical-align: calc(0.5cap - 8px); }
   .line .said .note { white-space: nowrap; }
   .line .said .note .icon { margin-right: 4px; }
-  .line time { flex: none; font-size: 12.5px; color: hsl(var(--muted-foreground)); font-variant-numeric: tabular-nums; }
+  .line time { flex: none; font-size: var(--text-sm); color: hsl(var(--muted-foreground)); font-variant-numeric: tabular-nums; }
 
   /* A work item's line is quiet: a session that ran reads as a footnote between the items,
      indented behind a 2px rule in the dividers' colour, one stroke down a run, stopping 1px short
@@ -483,7 +483,7 @@
     margin-left: 18px;
     min-height: 0;
     padding: 5px 12px 5px 10px;
-    font-size: 13px;
+    font-size: var(--text-sm);
     line-height: 22px;
     color: hsl(var(--muted-foreground));
   }
@@ -492,9 +492,9 @@
   .quiet:not(.quiet + .quiet) .line::before { top: 2px; }
   .quiet:not(:has(+ .quiet)) .line { padding-bottom: 0; }
   .quiet:not(:has(+ .quiet)) .line::before { bottom: 2px; }
-  .quiet .line .kind-icon { font-size: 12px; color: inherit; }
-  .quiet .line time { font-size: 10px; line-height: 20px; }
-  .quiet .line .btn { margin-block: -3px; font-size: 11px; opacity: 0.7; }
+  .quiet .line .kind-icon { font-size: var(--text-xs); color: inherit; }
+  .quiet .line time { font-size: var(--text-xs); line-height: 20px; }
+  .quiet .line .btn { margin-block: -3px; font-size: var(--text-xs); opacity: 0.7; }
   .quiet .line .btn:hover, .quiet .line .btn:focus-visible { opacity: 1; }
 
   /* ---- Work: a running session, updated in place ---------------------------------------- */
@@ -514,9 +514,9 @@
   /* Its one line: the working cue and the latest step, cut short where long, the step under the
      cue on a phone; a stop or a failure in the stopped chip's colour, an error wrapping whole; a
      job's Retry muted under it. */
-  .work-line { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 2px 0 0; font-size: 13px; }
+  .work-line { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 2px 0 0; font-size: var(--text-sm); }
   .work-line .step { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: hsl(var(--foreground) / 0.8); }
-  .work-line.ended { align-items: baseline; font-size: 14px; color: hsl(var(--warning-text)); }
+  .work-line.ended { align-items: baseline; font-size: var(--text-sm); color: hsl(var(--warning-text)); }
   .work-line.ended .icon { position: relative; top: calc(0.5em - 0.5cap); }
   /* A job's Retry placed a new one: said under its stop or its failure, no longer a warning. */
   .work-line.ended.retried { color: hsl(var(--muted-foreground)); }
@@ -531,7 +531,7 @@
     border-radius: 4px 14px 14px 14px;
     background: hsl(var(--muted));
   }
-  .prompt .who { font-size: 13px; color: hsl(var(--muted-foreground)); }
+  .prompt .who { font-size: var(--text-base); color: hsl(var(--muted-foreground)); }
   .prompt .who b { color: hsl(var(--foreground)); }
   .prompt .said { margin-top: 2px; white-space: pre-wrap; }
   .prompt .fold.long::after { background: linear-gradient(hsl(var(--muted) / 0), hsl(var(--muted))); }
