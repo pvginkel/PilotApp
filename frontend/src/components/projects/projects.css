@@ -8,7 +8,7 @@
     align-items: center;
     justify-content: space-between;
     padding: 10px 10px 4px 21px;
-    font-size: 13px;
+    font-size: var(--text-sm);
     font-weight: 600;
     color: hsl(var(--muted-foreground));
   }
@@ -27,9 +27,9 @@
   }
   .tab:hover { background: hsl(var(--accent)); text-decoration: none; }
   .tab[aria-current="page"] { border-left-color: hsl(var(--primary)); background: hsl(var(--primary-muted)); }
-  .tab-name { display: flex; align-items: center; gap: 8px; font-weight: 600; line-height: 1.35; }
-  .tab-name .card-id { margin-left: auto; font-weight: 400; font-size: 12px; color: hsl(var(--muted-foreground)); }
-  .tab-status { display: flex; align-items: center; gap: 6px; margin-top: 2px; font-size: 13px; color: hsl(var(--muted-foreground)); }
+  .tab-name { display: flex; align-items: center; gap: 8px; font-size: var(--text-lg); font-weight: 600; line-height: 1.35; }
+  .tab-name .card-id { margin-left: auto; font-weight: 400; font-size: var(--text-xs); color: hsl(var(--muted-foreground)); }
+  .tab-status { display: flex; align-items: center; gap: 6px; margin-top: 2px; font-size: var(--text-base); color: hsl(var(--muted-foreground)); }
   /* The project's status in the live dot's place (F1.3), the pause or the play glyph in its place
      under the pointer and the focus (F141.2); the running glyph is the dot, pulsing. */
   .status-icon {
@@ -40,7 +40,7 @@
     height: 20px;
     margin: -2px 0 -2px -3px;
     border-radius: 4px;
-    font-size: 14px;
+    font-size: var(--text-base);
   }
   .status-icon[role="button"] { cursor: pointer; }
   .status-icon[role="button"]:hover { background: hsl(var(--muted-foreground) / 0.15); color: hsl(var(--foreground)); }
@@ -92,7 +92,7 @@
     background: none;
     color: hsl(var(--muted-foreground));
     font: inherit;
-    font-size: 13px;
+    font-size: var(--text-sm);
     font-weight: 600;
     text-align: left;
     cursor: pointer;
@@ -102,5 +102,5 @@
   .tab.finished .tab-name { font-weight: 500; color: hsl(var(--muted-foreground)); }
   .tab.finished[aria-current="page"] .tab-name { color: hsl(var(--foreground)); }
 
-  .tabs-none { margin: 6px 21px; font-size: 13px; color: hsl(var(--muted-foreground)); }
+  .tabs-none { margin: 6px 21px; font-size: var(--text-base); color: hsl(var(--muted-foreground)); }
 }

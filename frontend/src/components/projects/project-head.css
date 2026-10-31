@@ -13,8 +13,8 @@
     border-bottom: 1px solid hsl(var(--border));
   }
   .feed-head .head-row { display: contents; }
-  .feed-head h1 { min-width: 0; margin: 0; overflow: hidden; font-size: 17px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
-  .feed-head .ticket, .feed-head .repo { font-size: 13px; color: hsl(var(--muted-foreground)); white-space: nowrap; }
+  .feed-head h1 { min-width: 0; margin: 0; overflow: hidden; font-size: var(--text-xl); font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+  .feed-head .ticket, .feed-head .repo { font-size: var(--text-sm); color: hsl(var(--muted-foreground)); white-space: nowrap; }
   .feed-head .repo { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   /* The spacer before auto pilot takes back the gap after it, and the repo carries the gap before
      it as its own, giving way with it: neither costs the row a gap once it has no width. */
@@ -48,7 +48,7 @@
   .members .avatar + .avatar { margin-left: -2px; }
 
   /* Beside the switch while work briefed under its other setting runs (F4.3). */
-  .switch-warning { flex: none; margin-left: -6px; font-size: 14px; color: hsl(var(--warning-text)); }
+  .switch-warning { flex: none; margin-left: -6px; font-size: var(--text-sm); color: hsl(var(--warning-text)); }
 
   /* The step button: its name gives way down to the floor plan-popover.tsx sets on the anchor. */
   .step-anchor > .btn { max-width: 100%; }
@@ -79,7 +79,7 @@
   .plan-step .note-list { flex-basis: 100%; margin: 4px 0 2px; padding-left: 28px; }
 
   /* A list of notes: each summary, then its content. */
-  .note-list { margin: 0; padding: 0; list-style: none; font-size: 13.5px; font-weight: 400; color: hsl(var(--foreground)); }
+  .note-list { margin: 0; padding: 0; list-style: none; font-size: var(--text-base); font-weight: 400; color: hsl(var(--foreground)); }
   .note-list > li + li { margin-top: 8px; }
   .note-summary { display: block; font-weight: 600; }
   .note-content { margin: 2px 0 0; color: hsl(var(--muted-foreground)); white-space: pre-wrap; }
