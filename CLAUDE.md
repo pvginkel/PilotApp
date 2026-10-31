@@ -60,11 +60,10 @@ Other repos the work touches, checked out beside this one:
 - **`../PilotDeploy`**: the deploy chart and its per-stage values.
 - **`../PilotProjects`**: the store environment's repo: the brain's map, skills and scripts, and no
   data.
-- **`../AIWorkflow`**: the `dev` plugin marketplace, the AI workflow Pilot drives, which the plan's
-  stage 5 re-envisions for Pilot running it (P-111), the operator's own work in a branch, cut over
-  at self-hosting. A change there keeps that repo's own `CLAUDE.md`: a plugin version and a
-  changelog entry with every change, and a running loop takes it only once pushed and
-  the plugin updated. Its spec repo is `../AIWorkflowSpecs`, a shared tree as this one's is.
+- **`../AIWorkflow`**: the `dev` plugin marketplace, the AI workflow Pilot drives, re-envisioned
+  for Pilot running it by the plan's stage 5 (P-111) and on its `main` since 0.10. A change there
+  keeps that repo's own `CLAUDE.md`: a plugin version and a changelog entry with every change, and
+  a running loop takes it only once pushed and the plugin updated. Its spec repo is `../AIWorkflowSpecs`, a shared tree as this one's is.
 - **`../KubeCoderConfig`**: the `kubecoder` plugin marketplace, the host conventions the `dev`
   plugin's skills load; every change bumps its plugin version.
 
@@ -178,13 +177,14 @@ item of `understanding.md` §5, one taken in a session of its own. A decision ta
 
 ## The dev pipeline
 
-Code changes go through the `dev` plugin's slice workflow (`/dev:triage` → `/dev:plan-slice` →
-`/dev:run-slice`), which the operator drives. The project's half of that contract is `.aiworkflowrc`
-and `.kubecoder/project.yaml`; nothing the pipeline reads by machine belongs in this file.
-A finding against the workflow itself — a loop's read-back, a document the plugin writes, a
-skill's wording — is a card in `AIWF`, the workflow's own project, never a P card or a Pilot slice,
-and is worked from a session started in `../AIWorkflow`; what Pilot needs the plugin to change,
-stage 5's work, is P-111's, the operator's own redesign in a branch of `../AIWorkflow`.
+Code changes go through the `dev` plugin's slice workflow. A slice is filed by `/dev:triage`, the
+operator's own chat skill, or in Pilot by a project's definition chat; its planning,
+`/dev:plan-slice`, and its run, `/dev:run-slice`, are stages Pilot runs as work items, each putting
+its asks to the operator as documents in the app (the plugin's `docs/pilot.md`). The project's half
+of that contract is `.aiworkflowrc` and `.kubecoder/project.yaml`; nothing the pipeline reads by
+machine belongs in this file. A finding against the workflow itself — a loop's read-back, a
+document the plugin writes, a skill's wording — is a card in `AIWF`, the workflow's own project,
+never a P card or a Pilot slice, and is worked from a session started in `../AIWorkflow`.
 
 Issue tracking follows the host convention: this project is **`PilotApp`** on the tracker, key
 **`P`**.
