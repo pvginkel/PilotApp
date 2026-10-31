@@ -106,12 +106,36 @@ sets `data-theme` when the shell's module loads, before the first render, and wh
 System it follows the OS live. Before it runs, `index.css`'s own tokens show, with the same
 background and text.
 
+**The type scale** is the mockup's six sizes, in Tailwind's names, so that every `text-*` class,
+the template's included, takes them: `--text-xs` to `--text-2xl` in `app-theme.css`'s `@theme`,
+and a font size in the app's CSS is `var(--text-<step>)`. On a phone, at 900px and below, they are
+13, 14.5, 16, 17.5, 19 and 22px; above it a pixel down, 12, 13.5, 15, 16, 17.5 and 20px. The body
+is base, its line 1.6. Which text takes which step is the mockup's:
+
+- **base**: the body, a done line, a document's prose, an answer, an option, a field, a button, a
+  menu item, the chat, a dialog's text.
+- **sm**: a work item's line, an item's and a block's head, a head's or status line, a section's
+  label, a small button, a done line's answer and its time, a step's line, the working cue, a quote.
+- **xs**: a timestamp elsewhere, a card id, a divider, a chip, Recommended, *In the chat*, a quiet
+  line's icon, time and button.
+- **lg**: an item's title, a project's name in the list, the overlay's title, an empty state's and
+  a dialog's title, a prose h2.
+- **xl**: the project head's title, the profile's, a prose h1.
+- **2xl**: Pilot's name in the top bar.
+
+Text sized to its shape keeps a size of its own: an avatar's letters, a count (11.5px in a tab or a
+group, 12px in the project list), Yes and No (18px) and the drawer's toggle (22px); so does mono,
+`code` at 0.86em, `.mono` at 0.92em, `pre` at 13px and `kbd` at 11px. Tailwind's line heights,
+ratios, follow the step; a chat class that replaced a `text-[Npx]`, which set no line, keeps the
+body's with it, as `text-sm/[1.6]`.
+
 **The avatars.** The palette is `--avatar-1` to `--avatar-6`, each with its `-text`: the primary
 tint, pink, green, amber, violet and teal. A person's avatar slot counts from 1 and slot *n* takes
 colour (*n* − 1) modulo 6, plus 1; `tests/shell/avatars.spec.ts` measures every pair at 4.5:1 or
 better in both themes. Pilot's mark is `--avatar-pilot`, grey, outside the palette. `Avatar`
 (`components/shared/avatar.tsx`) shows a person's initials with their full name as its tooltip, or
-a user icon for a name without initials.
+a user icon for a name without initials. It is 38px, `sm` 29px and `xs`, an answer's, 24px, its
+initials 14.5, 12 and 10.2px, and Pilot's mark 13/20 of the circle.
 
 **The gold bar's** are `--gold`, `--gold-foreground` and `--gold-edge`, its surface, its text and
 the rule under each line, light and dark; a badge redeclares the light theme's three on
