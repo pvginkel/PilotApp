@@ -20,7 +20,7 @@
     color: hsl(var(--primary-foreground));
   }
   /* Large text (bold, over 18.66px), for which the header's 3.4:1 passes. */
-  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 20px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: var(--text-2xl); }
   .logo { width: 32px; height: 32px; }
   .topbar .spacer { flex: 1; }
   /* The gold bar off a phone: a badge per condition after Pilot's name, its full line its title,
@@ -41,7 +41,7 @@
     background: hsl(var(--gold));
     color: hsl(var(--gold-foreground));
     font: inherit;
-    font-size: 13px;
+    font-size: var(--text-sm);
     font-weight: 600;
     white-space: nowrap;
   }
@@ -137,7 +137,7 @@
     border-bottom: 1px solid hsl(var(--gold-edge));
     background: hsl(var(--gold));
     color: hsl(var(--gold-foreground));
-    font-size: 13px;
+    font-size: var(--text-base);
     line-height: 1.45;
   }
   /* Centred on the first line. */
@@ -160,7 +160,7 @@
     background: hsl(0 0% 100% / 0.35);
     color: hsl(var(--gold-foreground));
     font: inherit;
-    font-size: 12.5px;
+    font-size: var(--text-sm);
     font-weight: 600;
     white-space: nowrap;
     cursor: pointer;
@@ -172,7 +172,7 @@
 
   /* ---- The keys list -------------------------------------------------------------------- */
 
-  dl.keys { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: 14px; }
+  dl.keys { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: var(--text-base); }
   dl.keys dd { margin: 0; color: hsl(var(--muted-foreground)); }
 
   /* ---- A narrow window: the gold bar across it, under it the side column a drawer over the
