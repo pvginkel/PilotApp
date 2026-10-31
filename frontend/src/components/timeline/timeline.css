@@ -84,16 +84,18 @@
   @keyframes fresh { from { box-shadow: 0 0 0 4px hsl(var(--primary) / 0.35); } }
 
   .item-body { padding: 12px 16px 14px; }
-  /* The head's text shares a baseline, its line as tall as a small button so it centres. */
+  /* The head's text shares a baseline, its line as tall as a small button so it centres. Where its
+     parts are wider than the card, it wraps rather than run out of it. */
   .item-head {
     display: flex;
+    flex-wrap: wrap;
     align-items: baseline;
     line-height: 28px;
-    gap: 8px;
+    gap: 0 8px;
     font-size: 13px;
     color: hsl(var(--muted-foreground));
   }
-  .item-head .kind { display: inline-flex; align-items: baseline; gap: 6px; font-weight: 600; color: hsl(var(--primary-muted-foreground)); }
+  .item-head .kind { display: inline-flex; align-items: baseline; gap: 6px; font-weight: 600; white-space: nowrap; color: hsl(var(--primary-muted-foreground)); }
   /* A kind's icon hangs from the text's baseline, as an inline icon does, whatever the font. */
   .item-head .kind .icon { position: relative; top: calc(0.5em - 0.5cap); }
   .item.urgent .item-head .kind { color: hsl(var(--urgent-text)); }
@@ -102,7 +104,8 @@
      as a kind's icon is. */
   .ap-may { display: inline-flex; align-items: baseline; color: hsl(var(--muted-foreground)); cursor: help; }
   .item-head .ap-may .icon, .block-head .ap-may .icon { position: relative; top: calc(0.5em - 0.5cap); }
-  .item-head .grow { flex: 1; }
+  /* Discuss at the head's end, pushed there by its margin, which costs no gap as a spacer would. */
+  .item-head .item-discuss { margin-left: auto; }
   .item-head .btn { align-self: center; }
   .chip.for { background: hsl(330 60% 50% / 0.12); color: hsl(330 55% 38%); }
   :root[data-theme="dark"] .chip.for { color: hsl(330 70% 78%); }
@@ -340,8 +343,10 @@
   .doc-actions .grow { flex: 1; }
   /* A darker orange, its text a lighter one, in both themes. */
   .chip.unsent { background: hsl(30 85% 28%); color: hsl(40 95% 74%); font-weight: 600; }
-  .item-head .edited { display: inline-flex; align-items: baseline; gap: 6px; }
+  .item-head .edited { display: inline-flex; align-items: baseline; gap: 6px; white-space: nowrap; }
   .item-head .edited .avatar { align-self: center; }
+  /* Edited's pencil, in the item's head and the overlay's, stands in for its word on a phone. */
+  .edited .edited-icon { display: none; position: relative; top: calc(0.5em - 0.5cap); }
   /* That Pilot asked a registered document's writer (F86.8), Pilot's mark before the words. */
   .writer-asked { display: flex; align-items: center; gap: 6px; font-size: 13.5px; }
   /* Pilot's line under a new project's setup while Create's pause holds its work (D083). */
@@ -540,11 +545,12 @@
     .option .note { order: 2; }
   }
   /* A narrow block head wraps what does not fit, and Answered and In the chat keep their icons
-     alone, their words left to a screen reader (F98.3); so does an item head's env chip, its
-     environment's name its link's tooltip. */
+     alone, their words left to a screen reader (F98.3); so do an item head's Urgent and its env
+     chip, its environment's name its link's tooltip, and Edited shows a pencil for its word. */
   @media (max-width: 600px) {
     .block-head { flex-wrap: wrap; }
-    .block-head .chip-label, .block-head .in-chat-label, .item-head .chip-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-    .chip.env .icon { display: inline-block; }
+    .item-head { column-gap: 6px; }
+    .block-head .chip-label, .block-head .in-chat-label, .item-head .chip-label, .edited .edited-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    .chip.env .icon, .edited .edited-icon { display: inline-block; }
   }
 }

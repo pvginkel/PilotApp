@@ -99,7 +99,8 @@ overlay below 1200px.
 At a document's address (`DocumentOverlay`, read by `useItemDocument`):
 
 - **The head**: the title, and under it the project's name, the step, the segment bar, *Done* or
-  *Unsent*, and *Edited <time>*.
+  *Unsent*, and *Edited <time>*, a pencil in place of its word at 600px and below
+  ([`timeline.md`](timeline.md)).
 - **The body**: the summary as its lead, the attachments, then Pilot's questions to the writer
   (below), then the text as an inline document draws it, every block answered in place and every
   settled section collapsed, a claimed action reading "Pilot does it" and its work item

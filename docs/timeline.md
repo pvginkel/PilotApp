@@ -160,7 +160,8 @@ timeline's place ([`chats.md`](chats.md)).
   document's "Document · N" with its most common block's icon), the time, the full stamp as its
   tooltip, a confirmation's auto pilot mark (below) and reason line, the Urgent chip and "for
   <full name>" while it is for someone, and at its end Discuss,
-  quoting the item into the chat ([`chats.md`](chats.md)). The text's prose is GFM
+  quoting the item into the chat ([`chats.md`](chats.md)). The kind never wraps, and where the
+  head's parts are wider than the card the head wraps, so that none leaves it or widens the page. The text's prose is GFM
   (`Markdown`, [`ui.md`](ui.md)); the prose before the first block folds past 13.5em with Show
   more, the ask stands in that block's place, and the prose after it shows whole. A concept has a
   dashed border. An open work item is its session's: its env chip once its start has an
@@ -370,7 +371,12 @@ block; a document's own address, an attachment's, the handbook's and the project
 
 **On a narrow window.** At 900px and below an option's line goes under its label, Recommended
 staying at the label's end. At 600px and below a block's head wraps, and Answered shows its icon
-alone, as *In the chat* does, their words left to a screen reader.
+alone, as *In the chat* does, their words left to a screen reader. An item's head, at 600px and
+below, sets its parts 6px apart, Urgent shows its triangle alone and *Edited* a pencil in place of
+its word, Pilot's mark and the time staying, in the overlay's head too, the words again left to a
+screen reader; a work item's env chip is its icon ([`work.md`](work.md)). At 390px a document's head
+with Urgent, *Edited* and its count, and a work item's with its env chip and running time, each
+hold one line.
 
 ## Testing it
 

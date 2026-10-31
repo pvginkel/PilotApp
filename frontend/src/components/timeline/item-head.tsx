@@ -3,11 +3,13 @@
  * confirmation's auto pilot mark (F4.4) and its reason line with its tooltip (F22.1), and the
  * Urgent and "for <user>" chips (F10.1, F107); after them what a document's head adds; at its end
  * Discuss, quoting the item (F39.1). A document Pilot changed in a turn after the text it was first
- * shown with says so, *Edited <time>* beside Pilot's mark (F28.7).
+ * shown with says so, *Edited <time>* beside Pilot's mark (F28.7). On a phone Urgent is its
+ * triangle and *Edited* a pencil, their words left to a screen reader; the kind never wraps, and
+ * the head wraps where its parts still do not fit, so that none leaves the card.
  */
 
 import type { ReactNode } from 'react';
-import { TriangleAlert } from 'lucide-react';
+import { Pencil, TriangleAlert } from 'lucide-react';
 import { DiscussButton } from '@/components/chat/discuss-button';
 import { quoteOfItem } from '@/components/chat/discuss-quotes';
 import { Avatar } from '@/components/shared/avatar';
@@ -92,7 +94,7 @@ export function ItemHead({ item, because = null, mayTake = false, children }: It
       {item.urgent && (
         <span className="chip urgent" data-testid="timeline.item.urgent">
           <TriangleAlert className="icon" aria-hidden="true" />
-          Urgent
+          <span className="chip-label">Urgent</span>
         </span>
       )}
       {item.for_user && (
@@ -101,18 +103,21 @@ export function ItemHead({ item, because = null, mayTake = false, children }: It
         </span>
       )}
       {children}
-      <span className="grow" />
-      <DiscussButton quote={quoteOfItem(item)} testId="timeline.item.discuss" />
+      <DiscussButton quote={quoteOfItem(item)} className="item-discuss" testId="timeline.item.discuss" />
     </div>
   );
 }
 
-/** *Edited <time>*, the time of Pilot's latest such turn. */
+/**
+ * *Edited <time>*, the time of Pilot's latest such turn; on a phone a pencil in the word's place,
+ * the word left to a screen reader.
+ */
 export function Edited({ at }: { at: string }) {
   return (
     <span className="edited" data-testid="timeline.item.edited">
       <Avatar who="pilot" size="xs" />
-      Edited <Time at={at} format="clock" testId="timeline.item.edited.time" />
+      <Pencil className="icon edited-icon" aria-hidden="true" />
+      <span className="edited-label">Edited</span> <Time at={at} format="clock" testId="timeline.item.edited.time" />
     </span>
   );
 }
