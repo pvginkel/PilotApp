@@ -259,6 +259,15 @@ export class Controller {
     await this.conditions.halts(haltsOf(shares));
   }
 
+  /**
+   * The latest poll got no answer: the reading stale, its figures and `takenAt` the last answer's,
+   * which the backend records as a reading of its own.
+   */
+  async usageStale(): Promise<void> {
+    this.usageMoved = true;
+    await this.verb('usage-stale', {});
+  }
+
   /** The controller as every spec starts with it, after a spec that changed it. */
   async restore(): Promise<void> {
     if (this.unanswered) await this.outage(false);

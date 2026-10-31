@@ -346,9 +346,25 @@ class TestHalts:
         )
 
         assert HALTS.halts(session) == [
-            Halt(WEEK, 0.93, began, latest.taken_at, Offer(ALLOWANCE, 0.98)),
-            Halt(FIVE_HOUR, 0.8, latest.received_at, latest.taken_at, None),
+            Halt(WEEK, 0.93, began, latest.taken_at, False, Offer(ALLOWANCE, 0.98)),
+            Halt(FIVE_HOUR, 0.8, latest.received_at, latest.taken_at, False, None),
         ]
+
+    @pytest.mark.parametrize("stale", [False, True])
+    def test_a_halt_says_whether_its_reading_is_stale(
+        self, session: Session, stale: bool
+    ) -> None:
+        # A week that resets ahead: a stale reading past its minute holds none.
+        _record(
+            session,
+            week=0.95,
+            stale=stale,
+            week_resets_at=datetime.now(UTC) + timedelta(days=1),
+        )
+
+        [halt] = HALTS.halts(session)
+
+        assert halt.stale is stale
 
     def test_a_run_reaches_back_to_the_first_reading(self, session: Session) -> None:
         first = _record(session, week=0.9)
@@ -379,7 +395,14 @@ class TestHalts:
         monkeypatch.setattr(usage_halts_module, "recorded", overtaken)
 
         assert HALTS.halts(session) == [
-            Halt(WEEK, 0.95, held.received_at, held.taken_at, Offer(ALLOWANCE, 0.98))
+            Halt(
+                WEEK,
+                0.95,
+                held.received_at,
+                held.taken_at,
+                False,
+                Offer(ALLOWANCE, 0.98),
+            )
         ]
 
     @pytest.mark.parametrize(
@@ -414,7 +437,7 @@ class TestOverrule:
         assert HALTS.holding(session) == (FIVE_HOUR,)
         assert HALTS.halted(session) == FIVE_HOUR
         assert HALTS.halts(session) == [
-            Halt(FIVE_HOUR, 0.8, reading.received_at, reading.taken_at, None)
+            Halt(FIVE_HOUR, 0.8, reading.received_at, reading.taken_at, False, None)
         ]
         assert HALTS.offer(session) is None
 
@@ -795,6 +818,7 @@ class TestUsageWatcher:
             "since": reading.received_at.isoformat().replace("+00:00", "Z"),
             "share": 0.95,
             "taken_at": "2026-10-08T09:00:00Z",
+            "stale": False,
             "offer": "allowance",
             "target": 0.98,
         }

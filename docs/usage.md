@@ -95,9 +95,12 @@ first tick. A turn logs `The week's halt holds: work items' starts are held` or 
 lifted: held work items go on`, and an overrule's end `Quota overrule <id> (<kind>) ended: …`.
 
 Each halt that holds is a condition of the conditions service, `week_halt` and `five_hour_halt`,
-after the outage, the week's first, with its `since`, its `share` and the reading's `taken_at`, and
-the week's with the overrule it offers (`GET /api/conditions`, [`ui.md`](ui.md)); the alarms take
-them by their codes ([`notifications.md`](notifications.md)).
+after the outage, the week's first, with its `since`, its `share`, the reading's `taken_at` and
+whether it is `stale`, and the week's with the overrule it offers (`GET /api/conditions`,
+[`ui.md`](ui.md)); the alarms take them by their codes ([`notifications.md`](notifications.md)).
+A halt's line gives the reading's age, "as of <time>", only while the reading is stale (D102): the
+frame goes out only when something but `takenAt` changes, so a fresh reading's `takenAt` is its
+figures' last change, and the reading itself is current to within the poll.
 
 ## The overrule
 
@@ -180,7 +183,8 @@ normal turn end with neither holding. Under `no_new_work` no file is written and
 done; a job's turn ends as it always does, done, with no nudge.
 
 While its nudge is owed, the item waits on nobody, and its line says what holds the nudge, in a
-held start's words, or "Waiting for its nudge" once nothing does ([`work.md`](work.md)). Stop and
+held start's words, or "Waiting for its nudge" once nothing does, and so does its session log,
+under "The turn ended · <time>" ([`work.md`](work.md)). Stop and
 Resume refuse it, as they refuse any Session that is `idle`. It keeps its environment: no other
 start takes it ([`controller.md`](controller.md)).
 
@@ -267,7 +271,11 @@ the turns before it.
 
 One run can print several `result` lines, a backgrounded task waking it again among the causes, each
 carrying the run's figures so far: each line recorded writes the counts and the cost in place of an
-earlier line's, so the last one's stand. A line whose `modelUsage` is not a map of per-model counts,
+earlier line's, so the last one's stand. A turn whose run ends by answering KubeCoder's nudge, the
+worker's word to a run that left a background task running at its result, keeps the figures from
+before that nudge: the worker leaves the nudge turn's lines, its `result` line included, out of the
+raw file the relay reads, and the controller's result frame carries no usage, so its calls are not
+counted. A line whose `modelUsage` is not a map of per-model counts,
 each a non-negative integer, writes nothing, and a `total_cost_usd` that is no finite non-negative
 number leaves `cost` null: the relay never fails on what `claude` printed. A turn cut short with no
 `result` line keeps none. Nothing in the API or the app shows them; they are read with a query of

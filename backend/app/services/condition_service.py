@@ -94,6 +94,7 @@ class ConditionService:
                     since=since,
                     share=None,
                     taken_at=None,
+                    stale=None,
                     offer=None,
                     target=None,
                 )
@@ -105,6 +106,7 @@ class ConditionService:
                 since=halt.since,
                 share=halt.share,
                 taken_at=halt.taken_at,
+                stale=halt.stale,
                 offer=None if halt.offer is None else halt.offer.kind,
                 target=None if halt.offer is None else halt.offer.target,
             )

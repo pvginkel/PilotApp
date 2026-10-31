@@ -8,8 +8,9 @@
  * its time; it sticks to the end while it grows, and only the reader's own scrolling lets go
  * (F69.2). Its tail is the working cue while the session is held, starts or runs, else how it
  * ended: "Stopped by you · <time>", by whom else, by Pilot at the usage limit, the environment
- * stopped under it, "The turn ended · <time>", or "Failed" under the error (F69.2, F125, F135.6).
- * The tail follows the item's state as the timeline reads it, live, so that a Resume carries the
+ * stopped under it, "The turn ended · <time>", or "Failed" under the error (F69.2, F125, F135.6);
+ * a run whose turn ended under a halt or a pause adds, under its end, what holds its nudge, as its
+ * line does (F135.3, F141.3). The tail follows the item's state as the timeline reads it, live, so that a Resume carries the
  * log on. An address that names no work item of the project reads "The session log did not load".
  */
 
@@ -37,7 +38,7 @@ import type { ChatStreamState } from '@/lib/chat/stream-state';
 import { buildChatView, type TurnView } from '@/lib/chat/view';
 import { useUiStateInstrumentation } from '@/lib/test/ui-state';
 import { cn } from '@/lib/utils';
-import { heldReasonLabel, sessionLogTail } from '@/lib/utils/status-labels';
+import { heldReasonLabel, nudgeCue, sessionLogTail } from '@/lib/utils/status-labels';
 
 type Work = components['schemas']['TimelineSchema.1fdd8ae.WorkSchema'];
 
@@ -167,6 +168,11 @@ function SessionLog({ item, work, body }: SessionLogProps) {
               )}
             </span>
           </div>
+          {work.state === 'idle' && work.nudge_owed && (
+            <div className="log-cue mx-1.5" data-testid="session-log.cue">
+              <WorkingCue activity={nudgeCue(work)} />
+            </div>
+          )}
         </>
       )}
     </div>

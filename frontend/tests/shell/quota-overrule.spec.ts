@@ -21,7 +21,7 @@ const CLOCK = String.raw`\d\d:\d\d`;
 const WEEK_BADGE = new RegExp(`^Halted at the week’s limit since ${CLOCK}$`);
 const weekLine = (percent: number) =>
   new RegExp(
-    `^Work items have been halted at the week’s usage limit since ${CLOCK}\\. ${percent}% of the week’s quota is used, as of ${CLOCK}\\. `,
+    `^Work items have been halted at the week’s usage limit since ${CLOCK}\\. ${percent}% of the week’s quota is used\\. `,
   );
 const goOnTo = (percent: number) => `Work items go on until ${percent}% of the week’s quota is used.`;
 const RUN_OUT = 'Work items go on until the week’s quota runs out.';

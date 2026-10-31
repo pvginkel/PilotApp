@@ -54,8 +54,9 @@ avatar slot are never null.
     controller has been unreachable since <time>. Nothing starts until it answers."
   - the week's usage halt ([`usage.md`](usage.md)), an octagon-pause icon, its badge "Halted at the
     week's limit": "Work items have been halted at the week's usage limit since <time>. 92% of the
-    week's quota is used, as of <time>. No work item starts until a reading puts it under the
-    limit; chats and Pilot's own jobs go on." Its overrule's button says "Go on to 97%" for the
+    week's quota is used. No work item starts until a reading puts it under the limit; chats and
+    Pilot's own jobs go on.", the share followed by ", as of <time>" while the reading is `stale`,
+    the age a fresh reading does not have (`usage.md`). Its overrule's button says "Go on to 97%" for the
     allowance and "Run it out" at the second limit, its `title` what it does, "Work items go on
     until 97% of the week's quota is used." or "Work items go on until the week's quota runs
     out.", which the toast says once the overrule is made, from the answer's `kind` and `target`

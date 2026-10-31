@@ -36,6 +36,7 @@ class TestGetConditions:
                     "since": since.isoformat().replace("+00:00", "Z"),
                     "share": None,
                     "taken_at": None,
+                    "stale": None,
                     "offer": None,
                     "target": None,
                 }
@@ -68,6 +69,7 @@ class TestGetConditions:
                     "since": "2026-10-08T09:30:00Z",
                     "share": 0.9,
                     "taken_at": "2026-10-08T09:30:00Z",
+                    "stale": False,
                     "offer": "allowance",
                     "target": 0.95,
                 }

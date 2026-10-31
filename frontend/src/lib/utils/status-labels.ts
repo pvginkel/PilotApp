@@ -174,11 +174,17 @@ interface ConditionLine {
 
 const PERCENT = new Intl.NumberFormat('en-GB', { style: 'percent', maximumFractionDigits: 0 });
 
-/** A halt's share of its window's quota and the reading's age, "92% of the week’s quota is used, as of 14:20". */
+/**
+ * A halt's share of its window's quota, "92% of the week’s quota is used.", and the reading's age
+ * while it is stale, "92% of the week’s quota is used, as of 14:20." (design 4 §6, The age; D102).
+ */
 function halted(condition: Condition, quota: string, today: string): string {
-  // The API gives a halt its share and the time of its reading.
+  // The API gives a halt its share, the time of its reading and whether it is stale.
+  const used = `${PERCENT.format(condition.share!)} of ${quota} is used`;
+  // A fresh reading is current to within the poll, whatever its taken_at.
+  if (!condition.stale) return `${used}.`;
   const takenAt = condition.taken_at!;
-  return `${PERCENT.format(condition.share!)} of ${quota} is used, as of ${formatTime(takenAt, clockFormat(takenAt, today))}.`;
+  return `${used}, as of ${formatTime(takenAt, clockFormat(takenAt, today))}.`;
 }
 
 const HALT_HOLDS = 'No work item starts until a reading puts it under the limit; chats and Pilot’s own jobs go on.';
@@ -313,6 +319,14 @@ const WAITING: Activity = { kind: 'waiting', phase: 'Waiting for Pilot' };
 /** A run whose turn ended under a halt or a pause, its nudge owed, while nothing holds that nudge. */
 const NUDGE_DUE: Activity = { kind: 'waiting', phase: 'Waiting for its nudge' };
 
+/**
+ * What holds the nudge owed to a run whose turn ended under a halt or a pause, in a held start's
+ * words, or that the nudge is due once nothing does (F135.3, F141.3).
+ */
+export function nudgeCue(work: Work): Activity {
+  return work.held_reason === null ? NUDGE_DUE : { kind: 'waiting', phase: heldReasonLabel(work.held_reason, work.held_running) };
+}
+
 const cue = (activity: Activity, step: string | null = null): WorkCue => ({ kind: 'cue', activity, step });
 
 /**
@@ -346,7 +360,7 @@ export function workLine(work: Work): WorkLine | null {
       return { kind: 'failed', error: work.error };
     case 'idle':
       if (!work.nudge_owed) return null;
-      return cue(work.held_reason === null ? NUDGE_DUE : { kind: 'waiting', phase: heldReasonLabel(work.held_reason, work.held_running) });
+      return cue(nudgeCue(work));
     case 'ended':
       return null;
     default: {

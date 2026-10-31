@@ -20,13 +20,15 @@ const HOLDS = String.raw`No work item starts until a reading puts it under the l
 
 const WEEK_BADGE = new RegExp(`^Halted at the week’s limit since ${CLOCK}$`);
 const FIVE_HOUR_BADGE = new RegExp(`^Halted at the five-hour limit since ${CLOCK}$`);
-const weekLine = (percent: number) =>
+// A fresh reading's line gives its share alone; a stale one's, the reading's age.
+const weekLine = (percent: number, age = '') =>
   new RegExp(
-    `^Work items have been halted at the week’s usage limit since ${CLOCK}\\. ${percent}% of the week’s quota is used, as of ${CLOCK}\\. ${HOLDS}$`,
+    `^Work items have been halted at the week’s usage limit since ${CLOCK}\\. ${percent}% of the week’s quota is used${age}\\. ${HOLDS}$`,
   );
+const AS_OF = `, as of ${CLOCK}`;
 const fiveHourLine = (percent: number) =>
   new RegExp(
-    `^Work items have been halted at the five-hour usage limit since ${CLOCK}\\. ${percent}% of the five-hour window’s quota is used, as of ${CLOCK}\\. ${HOLDS}$`,
+    `^Work items have been halted at the five-hour usage limit since ${CLOCK}\\. ${percent}% of the five-hour window’s quota is used\\. ${HOLDS}$`,
   );
 
 interface Fixtures {
@@ -78,6 +80,11 @@ test.describe('The usage halts', () => {
     // A reading at or over the limit keeps it; its share moves on the bar.
     await controller.usage({ seven_day: 0.95, five_hour: 0.1 });
     await expect(shell.goldText(shell.goldPopover)).toHaveText(weekLine(95));
+    await expect(item.cue).toHaveText('Halted at the week’s limit');
+
+    // A stale reading keeps its figures and the halt; its line gives the reading's age.
+    await controller.usageStale();
+    await expect(shell.goldText(shell.goldPopover)).toHaveText(weekLine(95, AS_OF));
     await expect(item.cue).toHaveText('Halted at the week’s limit');
 
     await controller.usage({ seven_day: 0.3, five_hour: 0.1 });

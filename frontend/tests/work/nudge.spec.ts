@@ -3,8 +3,9 @@
  * turn ends well while the halt file is written for it — the week's halt, the suite's backends' a
  * cooperative stop (tests/support/backend-env-extensions.ts), or its project's pause — is not done. It
  * stays open, its line saying what holds it as a held start's does, "Halted at the week’s limit" or
- * "Paused", waiting on nobody, and its halt file goes at its turn's end. Once nothing holds it, the
- * nudge carries the same run on, and it is done at that turn's end.
+ * "Paused", waiting on nobody, and its halt file goes at its turn's end; its session log says so too,
+ * under the turn's end. Once nothing holds it, the nudge carries the same run on, and it is done at
+ * that turn's end.
  */
 
 import { rawTurn, type Controller } from "../support/controller";
@@ -57,8 +58,10 @@ test.describe("A run halted at its turn’s end", () => {
     projects,
     controller,
     timeline,
+    sessionLog,
     projectList,
     deploymentSse,
+    page,
   }) => {
     const { name, project, work, environment } = await running({
       people,
@@ -89,6 +92,10 @@ test.describe("A run halted at its turn’s end", () => {
     await expect
       .poll(() => controller.fileText(environment, HALT_FILE))
       .toBeNull();
+    await item.work.sessionLog.click();
+    await expect(sessionLog.tail).toHaveText(/^The turn ended · \d\d:\d\d$/);
+    await expect(sessionLog.cue).toHaveText("Halted at the week’s limit");
+    await page.keyboard.press("Escape");
 
     await controller.usage({ seven_day: 0.5, five_hour: 0.1 });
 

@@ -40,7 +40,15 @@ class ConditionSchema(BaseModel):
     taken_at: datetime | None = Field(
         description=(
             "A halt's: when the latest reading's figures were taken, the age "
-            'its line shows, "as of"; null for the outage'
+            'its line shows, "as of", while the reading is stale; null for the '
+            "outage"
+        ),
+    )
+    stale: bool | None = Field(
+        description=(
+            "A halt's: whether the latest reading is stale, KubeCoder unable to "
+            "refresh it; a fresh one is current to within the poll, whatever "
+            "its `taken_at`; null for the outage"
         ),
     )
     offer: OverruleKind | None = Field(

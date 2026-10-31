@@ -103,7 +103,12 @@ class Halt:
     since: datetime
     """When it began, as this server received the readings."""
     taken_at: datetime
-    """When the latest reading's figures were taken: the age its line shows."""
+    """When the latest reading's figures were taken: the age its line shows
+    while the reading is stale."""
+    stale: bool
+    """Whether the latest reading is stale, KubeCoder unable to refresh it: a
+    fresh one is current to within the poll, whatever its `taken_at`, and its
+    line shows no age (design 4 §6, *The age*; D102)."""
     offer: Offer | None
     """The week's: the overrule it offers; None for the five-hour halt, and for
     the week's at the wall."""
@@ -184,7 +189,8 @@ class UsageHalts:
 
     def halts(self, db: Session) -> list[Halt]:
         """Each halt that holds now, the week's first, with the share it holds
-        at, when it began, the age of the reading and the week's offer."""
+        at, when it began, the age of the reading and whether it is stale, and
+        the week's offer."""
         # Each read up to the latest as this one reads it: a reading recorded
         # between two statements is the next decision's.
         reading_id = db.scalar(select(func.max(UsageReading.id)))
@@ -198,6 +204,7 @@ class UsageHalts:
                 usage.windows[window].share,
                 self._since(db, window, reading_id),
                 usage.taken_at,
+                usage.stale,
                 self._offer(usage.windows[window].share)
                 if window is UsageWindow.SEVEN_DAY
                 else None,

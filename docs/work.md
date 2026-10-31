@@ -284,7 +284,9 @@ An address that names no work item of the project reads "The session log did not
   how it ended (`sessionLogTail()`): "Stopped by you · <time>", "Stopped by <name> · <time>",
   "Stopped by Pilot at the usage limit · <time>" after a usage halt's hard stop, the cause of a stop
   made elsewhere, "Stopped", "The turn ended · <time>", or "Failed", the error over
-  it where the last turn shows none.
+  it where the last turn shows none. A run whose turn ended under a halt or a pause, its nudge owed,
+  shows under "The turn ended · <time>" what its line shows, what holds the nudge or "Waiting for
+  its nudge" (`nudgeCue()`).
 - **It follows the item's `work`** as the timeline holds it, live, so that a Resume carries the log
   on, and it sticks to its end while it grows: only the reader's own scrolling up, by the wheel, a
   key or a drag, lets go, and scrolling back down to the end picks it up again (`useStickyBottom`).
