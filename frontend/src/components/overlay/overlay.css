@@ -43,8 +43,8 @@
   .sheet-head .titles { flex: 1; min-width: 0; }
   /* An attachment's Back: the arrow hangs into the padding, level with the text under it. */
   .sheet-head .back { margin-left: -6px; }
-  .sheet-head h2 { margin: 0; font-size: 17px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .sheet-head .sub { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: 13px; color: hsl(var(--muted-foreground)); }
+  .sheet-head h2 { margin: 0; font-size: var(--text-lg); line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sheet-head .sub { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: var(--text-sm); color: hsl(var(--muted-foreground)); }
   .sheet-head .sub .segbar { align-self: center; }
   .sheet-head .edited { display: inline-flex; align-items: baseline; gap: 6px; }
   .sheet-head .edited .avatar { align-self: center; }
@@ -64,20 +64,20 @@
     background: hsl(var(--muted) / 0.4);
   }
   .sheet-foot .grow { flex: 1; }
-  .sheet-foot .state { font-size: 13px; color: hsl(var(--muted-foreground)); }
+  .sheet-foot .state { font-size: var(--text-sm); color: hsl(var(--muted-foreground)); }
 
   .sheet .attachments { margin: 0 0 14px; }
-  .lead { margin-bottom: 18px; padding: 10px 14px; border-radius: var(--radius); background: hsl(var(--primary-muted) / 0.6); font-size: 14.5px; }
+  .lead { margin-bottom: 18px; padding: 10px 14px; border-radius: var(--radius); background: hsl(var(--primary-muted) / 0.6); font-size: var(--text-base); }
 
   /* Pilot's questions to a registered document's writer and the reply, over its text
      (clarification.tsx): each question after its block's id, the writer's words set in under it. */
-  .clarification { margin: 0 0 18px; padding: 10px 14px 12px; border: 1px solid hsl(var(--border)); border-radius: var(--radius); background: hsl(var(--muted) / 0.35); font-size: 14px; }
-  .clarification h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font-size: 13px; font-weight: 600; color: hsl(var(--muted-foreground)); }
+  .clarification { margin: 0 0 18px; padding: 10px 14px 12px; border: 1px solid hsl(var(--border)); border-radius: var(--radius); background: hsl(var(--muted) / 0.35); font-size: var(--text-base); }
+  .clarification h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font-size: var(--text-sm); font-weight: 600; color: hsl(var(--muted-foreground)); }
   .clarification-questions { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; }
   .clarification .asked { display: flex; align-items: baseline; gap: 8px; margin: 0; }
   .clarification .block-id { flex: none; font-weight: 600; color: hsl(var(--primary-muted-foreground)); }
   .clarification .reply { margin-top: 6px; padding-left: 12px; border-left: 2px solid hsl(var(--border)); }
-  .clarification .reply .prose { font-size: 14px; }
+  .clarification .reply .prose { font-size: var(--text-base); }
   .clarification .reply .prose :is(h1, h2, h3, h4, h5, h6) { margin: 0.6em 0 0.3em; font-size: 1em; }
   .clarification-questions + .reply { margin-top: 12px; }
 
@@ -93,15 +93,15 @@
   .attachment-file > .icon { flex: none; position: relative; top: calc(0.5em - 0.5cap); color: hsl(var(--primary)); }
   .attachment-file .t { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   .attachment-file .title, .attachment-file .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .attachment-file .sub { font-size: 13px; color: hsl(var(--muted-foreground)); }
+  .attachment-file .sub { font-size: var(--text-sm); color: hsl(var(--muted-foreground)); }
   .attachment-file .btn { flex: none; align-self: center; }
 
   /* A work item's session log (session-log-overlay.tsx; the mockup's `.log-tail`): its turns, each
      ended one closing on its time, then the cue or how it ended. */
   .log-turn + .log-turn { margin-top: 12px; }
-  .log-turn-end { margin: 4px 6px 0; font-size: 12px; color: hsl(var(--muted-foreground)); }
+  .log-turn-end { margin: 4px 6px 0; font-size: var(--text-xs); color: hsl(var(--muted-foreground)); }
   .log-turn-end .failed { color: hsl(var(--destructive-text)); }
-  .log-tail { display: flex; align-items: baseline; gap: 8px; margin: 12px 6px 0; font-size: 13.5px; color: hsl(var(--muted-foreground)); }
+  .log-tail { display: flex; align-items: baseline; gap: 8px; margin: 12px 6px 0; font-size: var(--text-base); color: hsl(var(--muted-foreground)); }
   .log-tail .icon { position: relative; top: calc(0.5em - 0.5cap); }
   .log-tail.failed { color: hsl(var(--destructive-text)); }
   .log-cue { margin-top: 6px; }
