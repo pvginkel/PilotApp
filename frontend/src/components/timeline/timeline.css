@@ -464,8 +464,10 @@
     line-height: 22px;
     color: hsl(var(--muted-foreground));
   }
-  /* The avatar keeps its size and centre, and claims only 16px of the line, so it adds no height. */
-  .line .said .avatar { display: inline-grid; margin: -4px 6px -4px 0; vertical-align: calc(0.5cap - 8px); }
+  /* The avatar keeps its size and claims only 16px of the line, so it adds no height. Its baseline
+     is its initials', not its foot as the mockup's drawing's is, so it centres on the text's middle
+     rather than by the mockup's offset from the foot, which set it low and cut it off. */
+  .line .said .avatar { display: inline-grid; margin: -4px 6px -4px 0; vertical-align: middle; }
   .line .said .note { white-space: nowrap; }
   .line .said .note .icon { margin-right: 4px; }
   .line time { flex: none; font-size: var(--text-sm); color: hsl(var(--muted-foreground)); font-variant-numeric: tabular-nums; }
