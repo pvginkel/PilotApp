@@ -430,16 +430,25 @@ class BriefService:
 
     def _given(self, run_id: uuid.UUID) -> list[str]:
         """The claimed actions whose standing Claim Assignment names the run
-        `run_id` (DB 260), for their `done` (design 3 §6.5), in timeline
-        order, each as its block reads now: open while still claimed, else as
-        its close reads, a person's Done meanwhile among them; none where the
-        run was given none."""
+        `run_id` or a work item on its conversation (DB 260), so that a
+        continuation's names those of the run it continues (D100), for their
+        `done` (design 3 §6.5), in timeline order, each as its block reads
+        now: open while still claimed, else as its close reads, a person's
+        Done meanwhile among them; none where the run was given none."""
+        conversation = self.db.get_one(AgentSession, run_id).conversation_id
+        runs = (
+            [run_id]
+            if conversation is None
+            else select(AgentSession.id).where(
+                AgentSession.conversation_id == conversation
+            )
+        )
         latest = (
             standing()
             .where(
                 ClaimAssignment.block_id.in_(
                     select(ClaimAssignment.block_id).where(
-                        ClaimAssignment.work_id == run_id
+                        ClaimAssignment.work_id.in_(runs)
                     )
                 )
             )
@@ -451,7 +460,7 @@ class BriefService:
             .join(Block, Block.document_id == Document.id)
             .join(latest, latest.c.block_id == Block.id)
             .join(document_item, document_item.id == Document.id)
-            .where(latest.c.work_id == run_id)
+            .where(latest.c.work_id.in_(runs))
             .order_by(document_item.seq, Block.position)
         ).all()
         if not rows:

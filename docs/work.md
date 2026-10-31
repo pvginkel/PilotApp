@@ -193,9 +193,11 @@ pause holds no setup. Then by trigger:
   `Registered this run, in the order registered:` and a line per document, `- <path> (<item id>) —
   published` or `— read failed: <reason>`, or `Registered nothing this run.`; then `Attached on the
   work item: 1 file (timeline.json lists it).` or `<N> files (timeline.json lists them).` where some
-  are; then, where the work item was given claimed actions, its standing naming theirs, `The claimed
-  actions given to this work item, as they stand:` and a line per action in timeline order, `-
-  <path> (<item id>) <local id> open, claimed`, `… open, its claim gone`, or its close as the record
+  are; then, where the work item or another on its conversation was given claimed actions, its
+  standing naming theirs, so that a continuation's names those of the run it continues and a retry,
+  on a conversation of its own, takes them from it (D100), `The claimed actions given to this work
+  item, as they stand:` and a line per action in timeline order, `- <path> (<item id>) <local id>
+  open, claimed`, `… open, its claim gone`, or its close as the record
   holds it, a person's Done meanwhile included; then every open plan note by summary and the
   deferrals without a home, as the chat's brief has them ([`chats.md`](chats.md)).
 - **The writer answered**, the job after a clarification run's turn, trigger `worker_turn_ended`,

@@ -80,8 +80,9 @@ work item that does it, the block named in its `claims` ([`mcp.md`](mcp.md)), th
 block `Pilot does it`, `by: agent`, the note naming the work item. The block stays open, Pilot's:
 its document waits on no person while every open block of it is such a claim, out of the badge, and
 its line and the overlay name and link the work item ([`timeline.md`](timeline.md)). The job after
-that work item's turn names the claimed actions in its brief ([`work.md`](work.md)), and the plan
-skill writes each action's `done`, `by: agent`, the paste-back its note; its document then closes by
+that work item's turn names the claimed actions in its brief, as does the job after the turn of a
+continuation of its run (D100; [`work.md`](work.md)), and the plan skill writes each action's
+`done`, `by: agent`, the paste-back its note; its document then closes by
 Pilot's own Done where that was its last open block, and the write-back and the continuation follow
 as for any close. A run that fails leaves the claim standing and the block open, and a person's Done
 on it meanwhile closes it as any Done does.

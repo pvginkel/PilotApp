@@ -799,6 +799,79 @@ class TestWorkerTurnEnded:
             f"- {path} ({cut_over.id}) A4 open, its claim gone"
         )
 
+    def test_a_continuation_names_the_claimed_actions_of_the_run_it_continues(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        project_session: models.Session,
+    ) -> None:
+        """A continuation, on the run's conversation, names the actions whose
+        latest naming is the run as the run's own brief does; one a retry, on
+        a conversation of its own, named since is the retry's (D100)."""
+        documents = container.document_service()
+        cut_over = documents.register(
+            opened, project_session, "/work/Soup/cut-over.md"
+        ).item
+        documents.publish_read(
+            session.get_one(Document, cut_over.id), CUT_OVER, project_session.id
+        )
+        run = _worker_run(session, container, opened, None)
+        run.conversation_id = "conversation-1"
+        retry = models.Session(
+            project_id=opened.id,
+            kind_code="work",
+            cwd="/work/Soup",
+            conversation_id="conversation-2",
+            token_hash="8" * 64,
+            state_code=SessionState.STARTING,
+        )
+        session.add(retry)
+        session.flush()
+        container.record_service().place_work(opened, retry, "Salting it again")
+        blocks = dict(
+            session.execute(
+                select(Block.local_id, Block.id).where(Block.document_id == cut_over.id)
+            ).all()
+        )
+        session.add_all(
+            [
+                *(
+                    ClaimAssignment(work_id=run.id, block_id=blocks[local_id])
+                    for local_id in ("A1", "A3")
+                ),
+                ClaimAssignment(work_id=retry.id, block_id=blocks["A3"]),
+            ]
+        )
+        session.flush()
+        continuation = models.Session(
+            project_id=opened.id,
+            environment_id=WORKER_ENV,
+            kind_code="work",
+            cwd="/work/Soup",
+            controller_session="claude-8",
+            conversation_id="conversation-1",
+            token_hash="9" * 64,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(continuation)
+        session.flush()
+        container.record_service().place_work(
+            opened, continuation, "Fixing the stock", repo="example/Soup"
+        )
+        _turn_ended(session, container, continuation, "")
+
+        path = session.get_one(Document, cut_over.id).path
+        assert briefs.job(opened, _after(continuation), AT, AT).split("\n\n")[3] == (
+            f'The work item: "Fixing the stock" ({continuation.id}), repository'
+            " example/Soup, environment example-soup-3f2a1c, session claude-8;"
+            " its turn ended 2026-10-26T09:29:50Z.\n"
+            "Registered nothing this run.\n"
+            "The claimed actions given to this work item, as they stand:\n"
+            f"- {path} ({cut_over.id}) A1 open, claimed"
+        )
+
     def test_a_trigger_in_a_pause_carries_it_after_the_switch(
         self,
         session: DbSession,
