@@ -147,13 +147,13 @@ export function ProjectChat({ projectId, members, home, covered }: ProjectChatPr
           className={cn(
             'flex min-h-full flex-col justify-end gap-4',
             home === 'feed'
-              ? 'mx-auto w-full max-w-(--column) px-6 py-5 text-[15px] [--person-width:75%] max-[900px]:px-3'
-              : 'px-3.5 pt-2 pb-4 text-[14px]',
+              ? 'mx-auto w-full max-w-(--column) px-6 py-5 text-base/[1.6] [--person-width:75%] max-[900px]:px-3'
+              : 'px-3.5 pt-2 pb-4 text-base/[1.6]',
           )}
           data-testid="chat"
         >
           {read === 'failed' ? (
-            <p className="mx-2 my-auto text-center text-[14px] text-muted-foreground" data-testid="chat.failed">
+            <p className="mx-2 my-auto text-center text-base/[1.6] text-muted-foreground" data-testid="chat.failed">
               The chat did not load.
             </p>
           ) : (
@@ -162,7 +162,7 @@ export function ProjectChat({ projectId, members, home, covered }: ProjectChatPr
                 <button
                   type="button"
                   onClick={loadMore}
-                  className="mx-auto mt-1 inline-flex items-center gap-1.5 rounded-md border border-r-2 border-b-2 px-2.5 py-0.5 text-[12.5px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                  className="mx-auto mt-1 inline-flex items-center gap-1.5 rounded-md border border-r-2 border-b-2 px-2.5 py-0.5 text-sm/[1.6] text-muted-foreground hover:bg-accent hover:text-foreground"
                   data-testid="chat.before"
                 >
                   <ChevronUp className="size-3.5" aria-hidden />

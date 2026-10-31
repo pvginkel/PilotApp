@@ -120,17 +120,17 @@ function AgentCard({ call, agent, liveFrom }: { call: ToolCallView; agent: Agent
         {status && <span className="ml-1.5 inline-flex align-[-2px]">{status}</span>}
       </StepLine>
       {!open && running && agent.progress && (
-        <div className="truncate px-2.5 pb-1 pl-8 font-mono text-[11.5px] text-muted-foreground">{agent.progress}</div>
+        <div className="truncate px-2.5 pb-1 pl-8 font-mono text-xs/[1.6] text-muted-foreground">{agent.progress}</div>
       )}
       {open && (
         <div className="border-t px-2.5 py-1.5">
           {agent.steps.length ? (
             <ReplySteps steps={agent.steps} liveFrom={liveFrom} nested />
           ) : (
-            <div className="text-[13px] text-muted-foreground">Starting…</div>
+            <div className="text-sm/[1.6] text-muted-foreground">Starting…</div>
           )}
           {agent.summary && (
-            <div className="mt-1.5 border-t pt-1.5 text-[13px] text-muted-foreground">
+            <div className="mt-1.5 border-t pt-1.5 text-sm/[1.6] text-muted-foreground">
               <span className="font-medium">Reported:</span> {agent.summary}
             </div>
           )}
@@ -177,7 +177,7 @@ export function ReplySteps({
         let body: React.ReactNode;
         switch (s.kind) {
           case 'text':
-            body = <Markdown text={s.text} className={nested ? 'text-[13px]' : undefined} />;
+            body = <Markdown text={s.text} className={nested ? 'text-sm/[1.6]' : undefined} />;
             break;
           case 'tool':
             body = isAgent(s) ? <AgentCard call={s.call} agent={s.call.agent!} liveFrom={liveFrom} /> : <ToolCallLine call={s.call} />;

@@ -86,7 +86,7 @@ export function Composer({ projectId, home, answering, onSent, onDiscussed, cove
     <div className={cn('flex-none border-t', home === 'feed' && 'overflow-hidden [scrollbar-gutter:stable]')} data-testid="chat.composer">
       <div className={cn('pt-2.5 pb-3.5', home === 'feed' ? 'mx-auto max-w-(--column) px-6 max-[900px]:px-3' : 'px-3.5')}>
         {archived && (
-          <p className="mb-2 text-[13px] text-muted-foreground" data-testid="chat.composer.archived">
+          <p className="mb-2 text-sm/[1.6] text-muted-foreground" data-testid="chat.composer.archived">
             The project is archived: bring it back to message Pilot.
           </p>
         )}

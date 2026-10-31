@@ -41,7 +41,7 @@ function ToolDetail({ call }: { call: ToolCallView }) {
   const result = call.result?.text ?? '';
   const cut = !all && result.length > RESULT_PREVIEW;
   return (
-    <div className="mt-0.5 mb-1.5 ml-6 flex flex-col gap-1 text-[12px]">
+    <div className="mt-0.5 mb-1.5 ml-6 flex flex-col gap-1 text-xs/[1.6]">
       <pre className="max-h-40 overflow-auto rounded-md bg-muted px-2.5 py-1.5 leading-[1.45] whitespace-pre-wrap break-all">{input}</pre>
       {call.result && (
         <pre

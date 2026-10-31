@@ -35,7 +35,7 @@ export function StepLine({
     </>
   );
   const cls = cn(
-    'flex w-full min-w-0 items-baseline gap-2 py-0.5 text-left text-[13px] leading-5',
+    'flex w-full min-w-0 items-baseline gap-2 py-0.5 text-left text-sm leading-5',
     tone === 'muted' && 'text-muted-foreground',
     tone === 'error' && 'text-destructive-text',
     tone === 'success' && 'text-success-text',

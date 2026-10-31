@@ -24,7 +24,7 @@ export function ChatEmptyState({ home }: { home: ChatHome }) {
     );
   }
   return (
-    <p className="mx-2 my-auto text-center text-[14px] text-muted-foreground" data-testid="chat.empty">
+    <p className="mx-2 my-auto text-center text-base/[1.6] text-muted-foreground" data-testid="chat.empty">
       Ask Pilot about this project: how a session is going, what an item means, a change to the plan. Discuss on an item quotes it here.
     </p>
   );

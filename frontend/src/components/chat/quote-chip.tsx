@@ -33,7 +33,7 @@ export function QuoteLine({ quote }: { quote: QuoteRef }) {
       data-testid="chat.quote"
       data-quote={`${quote.kind} ${quote.id}`}
       title="Show it"
-      className="mb-1 flex max-w-full items-baseline gap-1.5 text-left text-[12.5px] text-muted-foreground hover:[&>span]:underline"
+      className="mb-1 flex max-w-full items-baseline gap-1.5 text-left text-sm/[1.6] text-muted-foreground hover:[&>span]:underline"
     >
       <QuoteIcon quote={quote} />
       <span className="truncate">{quote.label}</span>
@@ -63,7 +63,7 @@ export function QuoteChip({ quote, label }: { quote: QuoteRef; label: React.Reac
 export function ComposerQuote({ quote, onRemove }: { quote: QuoteRef; onRemove: () => void }) {
   return (
     <div
-      className="mb-2 flex items-baseline gap-1.5 rounded-sm border-l-[3px] border-primary bg-primary-muted/60 py-0.5 pr-0.5 pl-2.5 text-[13px] text-primary-muted-foreground"
+      className="mb-2 flex items-baseline gap-1.5 rounded-sm border-l-[3px] border-primary bg-primary-muted/60 py-0.5 pr-0.5 pl-2.5 text-sm/[1.6] text-primary-muted-foreground"
       data-testid="chat.composer.quote"
       data-quote={`${quote.kind} ${quote.id}`}
     >
