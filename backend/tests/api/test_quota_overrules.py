@@ -215,6 +215,24 @@ class TestMakeQuotaOverrule:
             "second limit, where the allowance is offered"
         )
 
+    def test_at_the_wall_it_is_a_conflict(
+        self,
+        client: FlaskClient,
+        session: Session,
+        person: User,
+        watcher: _Watcher,
+    ) -> None:
+        _week(session, 1.0)
+        _sign_in(client)
+
+        response = client.post(OVERRULES, json={"kind": "run_out"})
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            "Cannot run out the week's quota because the week's share is at the "
+            "wall, where no overrule is offered"
+        )
+
     def test_a_caller_without_a_handle_is_a_conflict(
         self, client: FlaskClient, session: Session, watcher: _Watcher
     ) -> None:

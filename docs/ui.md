@@ -70,8 +70,9 @@ avatar slot are never null.
   the five-hour halt; `since` when it began, as this server met the controller or received the
   readings; a halt's `share` of its window's quota and its reading's `taken_at`, null for the
   outage; and the week's halt's `offer`, `allowance` or `run_out`, with the allowance's `target`, a
-  fraction, null for the other conditions. At each turn of a condition, and as a halt's figures
-  move, the SSE event `conditions_changed` carries the same body to every person's connections.
+  fraction, null at the wall and for the other conditions, where the line shows no overrule. At
+  each turn of a condition, and as a halt's figures move, the SSE event `conditions_changed`
+  carries the same body to every person's connections.
   `useConditions()` (`src/hooks/use-conditions.ts`), read once in `_shell.tsx` for both the badges
   and the lines, reads it, writes each event over the read, and reads it again at every rise of the
   stream's `isConnected`. The overrule posts `POST /api/quota-overrules` `{kind: offer}`

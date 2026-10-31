@@ -104,14 +104,17 @@ them by their codes ([`notifications.md`](notifications.md)).
 The week's halt offers one overrule at a time, anyone's to make: under the second limit **the
 allowance**, its target the week's share plus `WEEK_ALLOWANCE`, summed in decimal so that a reading
 at the target reaches it, at most the second limit; at or over the second limit **run-out**, its
-target the wall, the whole quota. The five-hour halt offers none.
+target the wall, the whole quota. At the wall, a week's share of 1 or over, it offers none: nothing
+runs there, and a run-out made there would be spent at the watcher's next decision, the halt back at
+once (D101). The five-hour halt offers none.
 
 **`POST /api/quota-overrules`** `{kind}`, `allowance` or `run_out`, behind the API's `editor` gate
 (`QuotaOverruleService.make`), makes it as the signed-in person and answers `201` `{id, kind,
 target, made_at}`, `target` a fraction for the allowance and null for run-out. It answers `400` for
 a kind that is no overrule's, and `409` when the caller has no handle, an overrule holds already,
-the week's halt does not hold, or it offers the other kind ("Cannot add the week's allowance because
-…", "Cannot run out the week's quota because …"): the person gets the kind they clicked or nothing.
+the week's halt does not hold, the week's share is at the wall, or it offers the other kind ("Cannot
+add the week's allowance because …", "Cannot run out the week's quota because …"): the person gets
+the kind they clicked or nothing.
 The make locks `quota_overrules` in SHARE ROW EXCLUSIVE mode, so makes go one at a time, and
 `usage_readings` in SHARE mode, so that a reading's receipt and a make order as their commits. Once
 the make commits, the watcher lifts the week's halt: the gate is asked again, the nudges owed are

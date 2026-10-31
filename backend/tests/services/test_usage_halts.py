@@ -432,11 +432,14 @@ class TestOverrule:
             (0.95, Offer(ALLOWANCE, 0.98)),
             (0.9799, Offer(ALLOWANCE, 0.98)),
             (0.98, Offer(RUN_OUT, None)),
-            (1.03, Offer(RUN_OUT, None)),
+            (0.9999, Offer(RUN_OUT, None)),
+            # At the wall a run-out would be spent the moment it is made.
+            (1.0, None),
+            (1.03, None),
         ],
     )
     def test_the_weeks_halt_offers_the_allowance_under_the_second_limit_and_run_out_at_it(
-        self, session: Session, week: float, offer: Offer
+        self, session: Session, week: float, offer: Offer | None
     ) -> None:
         _record(session, week=week)
 

@@ -16,7 +16,8 @@ class QuotaOverruleRequestSchema(BaseModel):
             "Which overrule: `allowance`, a new target, the week's share plus "
             "the allowance and at most the second limit, offered under the "
             "second limit; `run_out`, the target the wall, offered at or over "
-            "it. It must be the one the week's halt offers (`offer`)"
+            "it and under the wall, where none is offered. It must be the one "
+            "the week's halt offers (`offer`)"
         )
     )
 

@@ -139,7 +139,7 @@ class TestMake:
 
         assert make(ALLOWANCE).target == 0.98
 
-    @pytest.mark.parametrize("week", [0.98, 1.04])
+    @pytest.mark.parametrize("week", [0.98, 0.9999])
     def test_run_out_at_or_over_the_second_limit_has_no_target(
         self,
         session: Session,
@@ -174,6 +174,33 @@ class TestMake:
         assert refused.value.message == (
             "Cannot add the week's allowance because the week's halt does not hold"
         )
+
+    @pytest.mark.parametrize(
+        ("week", "kind", "operation"),
+        [
+            (1.0, RUN_OUT, "run out the week's quota"),
+            (1.04, ALLOWANCE, "add the week's allowance"),
+        ],
+    )
+    def test_it_is_refused_at_the_wall(
+        self,
+        session: Session,
+        person: User,
+        make: Callable[..., QuotaOverrule],
+        week: float,
+        kind: OverruleKind,
+        operation: str,
+    ) -> None:
+        _record(session, week=week)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            make(kind)
+
+        assert refused.value.message == (
+            f"Cannot {operation} because the week's share is at the wall, where "
+            "no overrule is offered"
+        )
+        assert session.scalars(select(QuotaOverrule)).all() == []
 
     def test_it_is_refused_before_the_first_reading(
         self, person: User, make: Callable[..., QuotaOverrule]

@@ -3,7 +3,8 @@ decision 66, assertions 179 and 267).
 
 An overrule is made only while the week's halt holds, which no holding
 overrule allows, and only as the halt offers it: the allowance under the
-second limit, its target written when made; run-out at or over it. The
+second limit, its target written when made; run-out at or over it, short of
+the wall, where none is offered (D101). The
 server ends it (`UsageHalts.end_spent`); once made, the watcher lifts the
 halt and tells of it.
 """
@@ -15,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.exceptions import InvalidOperationException
 from app.models import QuotaOverrule
-from app.models.reference import OverruleKind
+from app.models.reference import OverruleKind, UsageWindow
 from app.services.auth_service import AuthContext
 from app.services.people_service import PeopleService
 from app.services.usage_halts import UsageHalts, UsageWatcher, overrule
@@ -57,7 +58,8 @@ class QuotaOverruleService:
 
         Raises:
             InvalidOperationException: the caller has not chosen a handle, an
-                overrule holds already, the week's halt does not hold, or it
+                overrule holds already, the week's halt does not hold, the
+                week's share is at the wall, where it offers none (D101), or it
                 offers the other kind.
         """
         operation = _OPERATIONS[kind]
@@ -70,7 +72,12 @@ class QuotaOverruleService:
             raise InvalidOperationException(operation, "an overrule holds already")
         offer = self.usage_halts.offer(self.db)
         if offer is None:
-            raise InvalidOperationException(operation, "the week's halt does not hold")
+            raise InvalidOperationException(
+                operation,
+                "the week's share is at the wall, where no overrule is offered"
+                if UsageWindow.SEVEN_DAY in self.usage_halts.holding(self.db)
+                else "the week's halt does not hold",
+            )
         if offer.kind is not kind:
             raise InvalidOperationException(operation, _NOT_OFFERED[kind])
         made = QuotaOverrule(

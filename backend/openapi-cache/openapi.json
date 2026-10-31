@@ -1006,7 +1006,7 @@
                 "type": "null"
               }
             ],
-            "description": "The week's halt's: the overrule it offers now, one at a time, `allowance` under the second limit, `run_out` at or over it; null for the outage and the five-hour halt, which has none"
+            "description": "The week's halt's: the overrule it offers now, one at a time, `allowance` under the second limit, `run_out` at or over it and under the wall; null at the wall, where none is offered, and for the outage and the five-hour halt, which has none"
           },
           "share": {
             "anyOf": [
@@ -5167,7 +5167,7 @@
         "properties": {
           "kind": {
             "$ref": "#/components/schemas/QuotaOverruleRequestSchema.72d99af.OverruleKind",
-            "description": "Which overrule: `allowance`, a new target, the week's share plus the allowance and at most the second limit, offered under the second limit; `run_out`, the target the wall, offered at or over it. It must be the one the week's halt offers (`offer`)"
+            "description": "Which overrule: `allowance`, a new target, the week's share plus the allowance and at most the second limit, offered under the second limit; `run_out`, the target the wall, offered at or over it and under the wall, where none is offered. It must be the one the week's halt offers (`offer`)"
           }
         },
         "required": [

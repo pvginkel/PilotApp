@@ -46,8 +46,9 @@ class ConditionSchema(BaseModel):
     offer: OverruleKind | None = Field(
         description=(
             "The week's halt's: the overrule it offers now, one at a time, "
-            "`allowance` under the second limit, `run_out` at or over it; "
-            "null for the outage and the five-hour halt, which has none"
+            "`allowance` under the second limit, `run_out` at or over it and "
+            "under the wall; null at the wall, where none is offered, and for "
+            "the outage and the five-hour halt, which has none"
         ),
     )
     target: float | None = Field(

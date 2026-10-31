@@ -12,7 +12,8 @@ condition (design 2 §8.2).
 
 The week's halt offers one overrule (F135.2; DB 179): under the second limit
 the allowance, its target the share plus the allowance, at most the second
-limit; at or over it run-out, its target the wall. An overrule ends at the
+limit; at or over it run-out, its target the wall; at the wall none, where a
+run-out would be spent the moment it is made (D101). An overrule ends at the
 first reading at or over its target, or lower than the reading before it, or
 when a stale reading's week is a minute past its `resets_at` (DB 268).
 
@@ -104,7 +105,8 @@ class Halt:
     taken_at: datetime
     """When the latest reading's figures were taken: the age its line shows."""
     offer: Offer | None
-    """The week's: the overrule it offers; None for the five-hour halt."""
+    """The week's: the overrule it offers; None for the five-hour halt, and for
+    the week's at the wall."""
 
 
 def overrule(db: Session) -> QuotaOverrule | None:
@@ -205,7 +207,8 @@ class UsageHalts:
 
     def offer(self, db: Session) -> Offer | None:
         """The overrule the week's halt offers now; None while it does not
-        hold, an overrule holding among the reasons."""
+        hold, an overrule holding among the reasons, and while the week's
+        share is at the wall."""
         usage = latest(db)
         overruled = overrule(db) is not None
         if UsageWindow.SEVEN_DAY not in self._holding(
@@ -273,7 +276,11 @@ class UsageHalts:
         )
         return before is not None and figure.share < before
 
-    def _offer(self, share: float) -> Offer:
+    def _offer(self, share: float) -> Offer | None:
+        if share >= WALL:
+            # Nothing runs at the wall: a run-out made there would be spent at
+            # the watcher's next decision (DB 268), the halt back at once (D101).
+            return None
         if share < self._second_limit:
             # Summed in decimal: a share is a percent ÷ 100, and a binary sum
             # can land a rounding error over the reading that reaches it
