@@ -1,7 +1,7 @@
 /**
  * An open work item on the timeline (F26): a session Pilot started, updated in place as the
  * server's `work_moved` carries it (F80.2). Its head has the env chip, opening the environment in
- * KubeCoder, once its start has one, and the running time, a pulse and "17m", while its turn runs
+ * KubeCoder, once its start has one, an icon alone on a phone, and the running time, a pulse and "17m", while its turn runs
  * (F26.1, F12). Under its title is its one line (F26.2): the server's own words while its session comes
  * up, or comes back while its environment restarts; the working state and the latest step while
  * it runs; why the gate holds its start; "Stopped · <time>" with the cause of a stop made
@@ -22,7 +22,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, useParams } from '@tanstack/react-router';
-import { CircleAlert, Play, RotateCw, ScrollText, Square } from 'lucide-react';
+import { CircleAlert, Play, RotateCw, ScrollText, Server, Square } from 'lucide-react';
 import { WorkingCue } from '@/components/chat/working-cue';
 import { EnvironmentLink, LinkedText } from '@/components/shared/linked-text';
 import { Time } from '@/components/shared/time';
@@ -62,10 +62,14 @@ export function WorkItem({ item }: { item: TimelineItem }) {
   return (
     <div className="item-body">
       <ItemHead item={item}>
-        {/* A job's environment is the store's once its start takes it. */}
+        {/* A job's environment is the store's once its start takes it. On a phone the chip is its
+            icon, the name left to the link's tooltip and to a screen reader. */}
         {!work.pilots_own && work.environment !== null && (
           <span className="chip mono env">
-            <EnvironmentLink environment={work.environment} testId="timeline.work.environment" />
+            <EnvironmentLink environment={work.environment} testId="timeline.work.environment">
+              <Server className="icon" aria-hidden="true" />
+              <span className="chip-label">{work.environment.name}</span>
+            </EnvironmentLink>
           </span>
         )}
         {work.state === 'running' && work.started_at !== null && <Running since={work.started_at} />}

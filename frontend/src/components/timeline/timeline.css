@@ -107,6 +107,8 @@
   .chip.for { background: hsl(330 60% 50% / 0.12); color: hsl(330 55% 38%); }
   :root[data-theme="dark"] .chip.for { color: hsl(330 70% 78%); }
   .chip.urgent { background: hsl(var(--urgent) / 0.15); color: hsl(var(--urgent-text)); font-weight: 600; }
+  /* A work item's env chip: the environment's name, its icon only on a phone. */
+  .chip.env .icon { display: none; }
   .item-title { margin: 6px 0 4px; font-size: 16px; font-weight: 600; line-height: 1.4; }
   .item-sub { margin: 0 0 6px; font-size: 14px; color: hsl(var(--muted-foreground)); }
   .item-after { margin-top: 12px; }
@@ -538,9 +540,11 @@
     .option .note { order: 2; }
   }
   /* A narrow block head wraps what does not fit, and Answered and In the chat keep their icons
-     alone, their words left to a screen reader (F98.3). */
+     alone, their words left to a screen reader (F98.3); so does an item head's env chip, its
+     environment's name its link's tooltip. */
   @media (max-width: 600px) {
     .block-head { flex-wrap: wrap; }
-    .block-head .chip-label, .block-head .in-chat-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    .block-head .chip-label, .block-head .in-chat-label, .item-head .chip-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    .chip.env .icon { display: inline-block; }
   }
 }

@@ -259,7 +259,9 @@ from acting.
 
 **`<EnvironmentLink environment={{id, name}} />`** is an environment by its name, linked by its id
 to `<base>/environments/<id>/ssh/open`, "Open <name> in VS Code", while the base is set, and plain
-text while it is unset or not yet read: the env chip's and the session log's.
+text, the name its tooltip, while it is unset or not yet read: the env chip's and the session log's.
+Its `children`, where given, show in place of the name: the env chip's icon and the name in a
+`.chip-label`, which a phone leaves to a screen reader ([`work.md`](work.md)).
 
 ## The PWA
 

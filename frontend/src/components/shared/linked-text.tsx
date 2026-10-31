@@ -68,15 +68,31 @@ export function NestedLink({ href, title, children }: { href: string; title?: st
 
 type Environment = components['schemas']['TimelineSchema.1fdd8ae.EnvironmentNameSchema'];
 
-/** An environment by its name, linked by its id to KubeCoder's Open (F93); unlinked while what links is unread or unset. */
-export function EnvironmentLink({ environment, testId }: { environment: Environment; testId?: string }) {
+interface EnvironmentLinkProps {
+  environment: Environment;
+  testId?: string;
+  /** What it shows in place of the environment's name, which a screen reader is then given in it. */
+  children?: ReactNode;
+}
+
+/**
+ * An environment by its name, linked by its id to KubeCoder's Open (F93); unlinked while what links
+ * is unread or unset, its name then its tooltip.
+ */
+export function EnvironmentLink({ environment, testId, children = environment.name }: EnvironmentLinkProps) {
   const { data } = useGetLinks();
   const base = data?.environment_link_base_url ?? null;
-  if (base === null) return <span data-testid={testId}>{environment.name}</span>;
+  if (base === null) {
+    return (
+      <span title={environment.name} data-testid={testId}>
+        {children}
+      </span>
+    );
+  }
   const { href, title } = environmentLink(base, environment.id, environment.name);
   return (
     <a className="mention" href={href} title={title} target="_blank" rel="noreferrer" data-testid={testId}>
-      {environment.name}
+      {children}
     </a>
   );
 }

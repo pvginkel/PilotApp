@@ -1,7 +1,8 @@
 /**
  * A work item on the timeline (F26): open, its head with the env chip opening the environment once
- * its start has one and the running time, "17m", while its turn runs (F26.1, F12), and its one line
- * (F26.2), live as the server moves it (F80.2) — the server's own words while the session comes up
+ * its start has one, an icon on a phone, and the running time, "17m", while its turn runs (F26.1,
+ * F12), and its one line (F26.2), live as the server moves it (F80.2) — the server's own words
+ * while the session comes up
  * or its environment restarts, the working state and the latest step — a call whose input streams
  * in by its verb alone — why the gate holds its start (F141.5), a slot among it (F143.4),
  * "Stopped · <time>" with the cause of a stop made elsewhere (F71), a failure's error (F125) — and
@@ -78,6 +79,8 @@ test.describe('An open work item', () => {
     expect(name).toBe(slugOf(project));
     await expect(item.work.environment).toHaveText(name);
     await expect(item.work.environment).toHaveAttribute('href', `${KUBECODER}/environments/${environment}/ssh/open`);
+    // Its icon is the phone's alone.
+    await expect(item.work.environment.locator('svg')).toBeHidden();
     await expect(item.work.cue).toHaveText(`Preparing ${name}`);
     await expect(item.work.running).toHaveCount(0);
 
@@ -270,6 +273,32 @@ test.describe('An open work item', () => {
     await controller.finish(other.id, 'claude-1', 'error', 'The model is overloaded.');
     await expect(timeline.item(erred).work.line).toHaveText('Failed · The model is overloaded.');
     await expect(timeline.item(erred).root).toHaveAttribute('data-state', 'open');
+  });
+});
+
+test.describe('An open work item on a phone', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('shows its env chip as an icon, still the link to the environment, its name its tooltip and its accessible name', async ({
+    people,
+    projects,
+    links,
+    timeline,
+  }) => {
+    await links.set({ environment_link_base_url: KUBECODER });
+    const project = await setUp({ people, projects });
+    const work = await startIn(projects, project);
+    const { id: environment, name } = await projects.environment(project, work);
+    await timeline.open(project);
+    const chip = timeline.item(work).work.environment;
+
+    await expect(chip.locator('svg')).toBeVisible();
+    await expect(chip).toHaveAccessibleName(name);
+    await expect(chip).toHaveAttribute('title', `Open ${name} in VS Code`);
+    await expect(chip).toHaveAttribute('href', `${KUBECODER}/environments/${environment}/ssh/open`);
+    // The name is drawn nowhere: the chip is as wide as its icon and its padding.
+    expect((await chip.locator('.chip-label').boundingBox())!.width).toBeLessThanOrEqual(1);
+    expect((await chip.boundingBox())!.width).toBeLessThan(20);
   });
 });
 
