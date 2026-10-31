@@ -102,7 +102,10 @@ An open work item (`WorkItem`, `frontend/src/components/timeline/work.tsx`) is:
   in the chat's working cue (`WorkingCue`), the server's own words while it starts ("Preparing
   <environment>", "Starting <environment>", "Creating the session", the trailing "…" left out) or
   its environment restarts, "Thinking", "Writing", "Working" or "Waiting for the <type> agent", with
-  the latest step beside it, worded as the chat words a call, or the sub-agent's description. A
+  the latest step beside it, worded as the chat words a call, or the sub-agent's description; at
+  600px and below the step stands on a line of its own under the phase, indented to its text, so
+  that each line is cut at most once and a phase as short as "Thinking" never is (operator,
+  2026-10-31). A
   call whose input still streams in is its verb alone ("Editing"), and its target joins it once the
   call's line gives it; an empty target is not drawn. "Starting" before a start's first line, and "Waiting for
   Pilot" for a running one with none; "Stopped · <time>", with the cause of a stop made elsewhere

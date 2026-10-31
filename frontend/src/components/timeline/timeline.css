@@ -511,8 +511,9 @@
     background: hsl(var(--success));
     animation: pulse 1.4s ease-in-out infinite;
   }
-  /* Its one line: the working cue and the latest step, cut short where long; a stop or a failure
-     in the stopped chip's colour, an error wrapping whole; a job's Retry muted under it. */
+  /* Its one line: the working cue and the latest step, cut short where long, the step under the
+     cue on a phone; a stop or a failure in the stopped chip's colour, an error wrapping whole; a
+     job's Retry muted under it. */
   .work-line { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 2px 0 0; font-size: 13px; }
   .work-line .step { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: hsl(var(--foreground) / 0.8); }
   .work-line.ended { align-items: baseline; font-size: 14px; color: hsl(var(--warning-text)); }
@@ -550,6 +551,10 @@
   @media (max-width: 600px) {
     .block-head { flex-wrap: wrap; }
     .item-head { column-gap: 6px; }
+    /* A work item's line puts the step on a line of its own under the phase, indented to its text
+       past the cue's icon and gap, so that each is cut at most once. */
+    .work-line:not(.ended) { flex-wrap: wrap; row-gap: 0; }
+    .work-line .step { flex-basis: 100%; padding-left: 24px; }
     .block-head .chip-label, .block-head .in-chat-label, .item-head .chip-label, .edited .edited-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
     .chip.env .icon, .edited .edited-icon { display: inline-block; }
   }

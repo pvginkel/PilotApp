@@ -11,6 +11,7 @@
  * finished project (F5.3). A run of work items stands under its last member's dividers (F9.1).
  */
 
+import type { Locator } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import type { People } from '../support/people';
@@ -299,6 +300,37 @@ test.describe('An open work item on a phone', () => {
     // The name is drawn nowhere: the chip is as wide as its icon and its padding.
     expect((await chip.locator('.chip-label').boundingBox())!.width).toBeLessThanOrEqual(1);
     expect((await chip.boundingBox())!.width).toBeLessThan(20);
+  });
+
+  test('puts the latest step on a line of its own under the phase, indented to its text, the phase whole and each cut at most once', async ({
+    people,
+    projects,
+    controller,
+    timeline,
+  }) => {
+    const project = await setUp({ people, projects });
+    const work = await startIn(projects, project);
+    const { id: environment } = await projects.environment(project, work);
+    await timeline.open(project);
+    const item = timeline.item(work);
+    const step = 'List the closed lists in the reference documents of the project and of each of its slices';
+    await controller.play(environment, 'claude-1', [
+      toolUse('toolu_bash', 'Bash', { command: 'ls', description: step }),
+      toolResult('toolu_bash', 'Listed.'),
+    ]);
+    await expect(item.work.cue).toHaveText('Thinking');
+    await expect(item.work.step).toHaveText(`Ran ${step}`);
+
+    const phase = item.work.cue.locator('> span').nth(1);
+    const clipped = (part: Locator) => part.evaluate((element) => element.scrollWidth > element.clientWidth);
+    expect(await clipped(phase)).toBe(false);
+    expect(await clipped(item.work.step)).toBe(true);
+    const cue = (await item.work.cue.boundingBox())!;
+    expect((await item.work.step.boundingBox())!.y).toBeGreaterThanOrEqual(cue.y + cue.height - 1);
+    const textAt = await item.work.step.evaluate(
+      (element) => element.getBoundingClientRect().left + parseFloat(getComputedStyle(element).paddingLeft),
+    );
+    expect(Math.abs(textAt - (await phase.boundingBox())!.x)).toBeLessThan(1);
   });
 });
 
