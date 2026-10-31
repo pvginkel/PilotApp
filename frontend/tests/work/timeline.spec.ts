@@ -300,6 +300,13 @@ test.describe('An open work item on a phone', () => {
     // The name is drawn nowhere: the chip is as wide as its icon and its padding.
     expect((await chip.locator('.chip-label').boundingBox())!.width).toBeLessThanOrEqual(1);
     expect((await chip.boundingBox())!.width).toBeLessThan(20);
+    // Its icon sits on the head's text as the kind's does, lowered once and not twice.
+    const middle = async (icon: Locator) => {
+      const box = (await icon.boundingBox())!;
+      return box.y + box.height / 2;
+    };
+    const kind = await middle(timeline.item(work).kind.locator('svg'));
+    expect(Math.abs((await middle(chip.locator('svg'))) - kind)).toBeLessThan(1);
   });
 
   test('puts the latest step on a line of its own under the phase, indented to its text, the phase whole and each cut at most once', async ({

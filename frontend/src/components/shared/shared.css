@@ -212,6 +212,10 @@
     white-space: nowrap;
   }
   .chip .icon { position: relative; top: calc(0.5em - 0.5cap); }
+  /* An icon in a link in a chip, as a work item's env chip on a phone, is an inline box, where
+     .icon's vertical-align already sets it on the text's middle: the shift above would lower it
+     twice. */
+  .chip .mention .icon { top: 0; }
 
   /* ---- Counts --------------------------------------------------------------------------- */
 
