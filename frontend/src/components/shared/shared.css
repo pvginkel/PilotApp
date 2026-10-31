@@ -32,7 +32,7 @@
     background: hsl(var(--background));
     color: inherit;
     font: inherit;
-    font-size: 14px;
+    font-size: var(--text-base);
     font-weight: 500;
     line-height: calc(var(--h) - 3px);
     white-space: nowrap;
@@ -41,7 +41,7 @@
   .btn .icon { position: relative; top: calc(0.5em - 0.5cap); }
   .btn:hover:not(:disabled) { background: hsl(var(--accent)); }
   .btn:disabled { opacity: 0.45; cursor: default; }
-  .btn-sm { --h: 28px; padding: 0 10px; font-size: 13px; gap: 6px; }
+  .btn-sm { --h: 28px; padding: 0 10px; font-size: var(--text-sm); gap: 6px; }
   .btn-icon { width: var(--h); padding: 0; align-items: center; }
   .btn-icon .icon { top: 0; }
   /* White text sits on the deeper blue: on the header's #568ed2 it has 3.4:1, here 5.7:1. */
@@ -93,8 +93,8 @@
     background: hsl(var(--background));
     color: inherit;
     font: inherit;
-    font-size: 14px;
-    line-height: 22px;
+    font-size: var(--text-base);
+    line-height: 24px;
     resize: none;
     overflow-y: hidden;
   }
@@ -115,7 +115,7 @@
     border: 0;
     background: none;
     font: inherit;
-    font-size: 13px;
+    font-size: var(--text-sm);
     color: hsl(var(--muted-foreground));
     white-space: nowrap;
     cursor: pointer;
@@ -155,7 +155,7 @@
 
   /* ---- Markdown (markdown.tsx) ---------------------------------------------------------- */
 
-  .prose { font-size: 14.5px; overflow-wrap: break-word; }
+  .prose { font-size: var(--text-base); overflow-wrap: break-word; }
   .prose > :first-child { margin-top: 0; }
   .prose > :last-child { margin-bottom: 0; }
   .prose p { margin: 0 0 0.7em; }
@@ -165,13 +165,13 @@
   .prose li { margin: 0.15em 0; }
   .prose li > input[type="checkbox"] { margin: 0 0.4em 0 -1.2em; vertical-align: -0.1em; }
   .prose li:has(> input[type="checkbox"]) { list-style: none; }
-  .prose h1 { font-size: 19px; margin: 1.4em 0 0.5em; line-height: 1.35; }
-  .prose h2 { font-size: 17px; margin: 1.4em 0 0.5em; line-height: 1.35; }
-  .prose h3 { font-size: 15.5px; margin: 1.2em 0 0.4em; }
+  .prose h1 { font-size: var(--text-xl); margin: 1.4em 0 0.5em; line-height: 1.35; }
+  .prose h2 { font-size: var(--text-lg); margin: 1.4em 0 0.5em; line-height: 1.35; }
+  .prose h3 { font-size: var(--text-base); margin: 1.2em 0 0.4em; }
   .prose h1, .prose h2, .prose h3 { font-weight: 600; }
   .prose strong { font-weight: 600; }
   .prose blockquote { margin: 0 0 0.7em; padding: 2px 12px; border-left: 3px solid hsl(var(--border)); color: hsl(var(--muted-foreground)); }
-  .prose table { border-collapse: collapse; margin: 0 0 1em; font-size: 13.5px; display: block; overflow-x: auto; }
+  .prose table { border-collapse: collapse; margin: 0 0 1em; font-size: var(--text-base); display: block; overflow-x: auto; }
   .prose th, .prose td { padding: 5px 9px; border: 1px solid hsl(var(--border)); vertical-align: top; text-align: left; }
   .prose th { background: hsl(var(--muted)); font-weight: 600; }
   .prose hr { border: 0; border-top: 1px solid hsl(var(--border)); margin: 1.4em 0; }
@@ -194,7 +194,7 @@
     height: 3em;
     background: linear-gradient(hsl(var(--card) / 0), hsl(var(--card)));
   }
-  .more { margin-top: 4px; font-size: 13px; }
+  .more { margin-top: 4px; font-size: var(--text-sm); }
 
   /* ---- Chips ---------------------------------------------------------------------------- */
 
@@ -207,7 +207,7 @@
     border-radius: 999px;
     background: hsl(var(--muted));
     color: hsl(var(--muted-foreground));
-    font-size: 12px;
+    font-size: var(--text-xs);
     line-height: 1.6;
     white-space: nowrap;
   }
@@ -234,8 +234,8 @@
 
   .empty-state { margin: 48px auto; max-width: 440px; text-align: center; color: hsl(var(--muted-foreground)); }
   .empty-state > .icon { width: 56px; height: 56px; stroke-width: 1.5; color: hsl(var(--primary)); }
-  .empty-state h2 { margin: 12px 0 6px; font-size: 18px; color: hsl(var(--foreground)); }
-  .empty-state p { margin: 0; font-size: 14.5px; }
+  .empty-state h2 { margin: 12px 0 6px; font-size: var(--text-lg); color: hsl(var(--foreground)); }
+  .empty-state p { margin: 0; font-size: var(--text-base); }
 
   /* ---- Avatars (avatar.tsx) ------------------------------------------------------------- */
 
@@ -282,7 +282,7 @@
     background: hsl(var(--background));
     box-shadow: var(--shadow-lg);
     color: hsl(var(--foreground));
-    font-size: 14px;
+    font-size: var(--text-base);
     line-height: 1.6;
   }
   .menu-item {
@@ -296,7 +296,7 @@
     background: none;
     color: inherit;
     font: inherit;
-    font-size: 14px;
+    font-size: var(--text-base);
     text-align: left;
     white-space: nowrap;
     cursor: pointer;
@@ -318,14 +318,14 @@
     background: hsl(var(--background));
     box-shadow: var(--shadow-lg);
     color: hsl(var(--foreground));
-    font-size: 14px;
+    font-size: var(--text-base);
     font-weight: 400;
     text-align: left;
     white-space: normal;
     cursor: default;
     overflow-y: auto;
   }
-  .popover h3 { margin: 0 0 6px; padding: 0 14px; font-size: 13px; color: hsl(var(--muted-foreground)); }
+  .popover h3 { margin: 0 0 6px; padding: 0 14px; font-size: var(--text-sm); color: hsl(var(--muted-foreground)); }
 
   /* ---- Dialogs (dialog.tsx) ------------------------------------------------------------- */
 
@@ -347,11 +347,11 @@
   }
   /* The dialog holds the focus itself only where nothing in it takes it, as in the keys list. */
   .dialog:focus-visible { outline: none; }
-  .dialog h2 { margin: 0 0 12px; font-size: 16px; font-weight: 700; }
+  .dialog h2 { margin: 0 0 12px; font-size: var(--text-lg); font-weight: 700; }
   /* A confirm dialog (the mockup's Finish): what the act does, a note, then Cancel and the act. */
   .dialog.confirm { width: min(480px, calc(100vw - 32px)); min-width: 0; }
-  .dialog-list { margin: 0 0 14px; padding-left: 1.2em; font-size: 14px; }
+  .dialog-list { margin: 0 0 14px; padding-left: 1.2em; font-size: var(--text-base); }
   .dialog-list li { margin: 4px 0; }
-  .dialog-note { margin: 0 0 18px; font-size: 13.5px; color: hsl(var(--muted-foreground)); }
+  .dialog-note { margin: 0 0 18px; font-size: var(--text-base); color: hsl(var(--muted-foreground)); }
   .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
 }

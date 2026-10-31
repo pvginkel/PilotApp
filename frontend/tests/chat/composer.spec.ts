@@ -53,7 +53,7 @@ test.describe('The Chat tab’s composer', () => {
     await chat.field.fill('');
     const rest = (await chat.field.boundingBox())!.height;
     await chat.field.fill(Array.from({ length: 8 }, (_, index) => `Line ${index + 1}`).join('\n'));
-    await expect.poll(async () => Math.round((await chat.field.boundingBox())!.height)).toBe(Math.round(rest + 4 * 22));
+    await expect.poll(async () => Math.round((await chat.field.boundingBox())!.height)).toBe(Math.round(rest + 4 * 24));
     await expect(chat.field).toHaveCSS('overflow-y', 'auto');
 
     await chat.field.fill('Which tent');
