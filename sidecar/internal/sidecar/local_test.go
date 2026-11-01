@@ -677,11 +677,12 @@ func TestAHookCallThatIsNotOneIs400AndTakesNothing(t *testing.T) {
 	running.lock(t, "proj", job, os.Getpid())
 }
 
-func TestHealthzAnswers(t *testing.T) {
-	s := newServer(t)
-	running := start(t, s, t.TempDir(), t.TempDir())
+// health is the sidecar's /healthz answer, answered 200 in text/plain: its
+// text.
+func (s started) health(t testing.TB) string {
+	t.Helper()
 	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
-		"http://"+running.sidecar.listener.Addr().String()+"/healthz", nil)
+		"http://"+s.sidecar.listener.Addr().String()+"/healthz", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -694,9 +695,33 @@ func TestHealthzAnswers(t *testing.T) {
 	if err := errors.Join(err, response.Body.Close()); err != nil {
 		t.Fatal(err)
 	}
-	if response.StatusCode != http.StatusOK || text.String() != "ok\n" {
-		t.Fatalf("answered %d %q", response.StatusCode, text.String())
+	if response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != "text/plain; charset=utf-8" {
+		t.Fatalf("answered %d %s %q", response.StatusCode, response.Header.Get("Content-Type"), text.String())
 	}
+	return text.String()
+}
+
+func TestHealthzSaysWhetherTheStreamIsConnectedAndHowManyChangesWaitToGoUp(t *testing.T) {
+	s := newServer(t)
+	s.opens(func(attempt int) (int, string) {
+		if attempt > 1 {
+			return http.StatusServiceUnavailable, `{"error": "unavailable"}`
+		}
+		return 0, ""
+	})
+	tree := t.TempDir()
+	running := start(t, s, tree, t.TempDir())
+	if got := running.health(t); got != "ok\nconnected: true\npending: 0\n" {
+		t.Fatalf("answered %q", got)
+	}
+
+	s.answering(func(put) answer { return answer{status: http.StatusRequestEntityTooLarge} })
+	write(t, filepath.Join(tree, "proj", "a.md"), "too big")
+	eventually(t, "the PUT", func() bool { return len(s.taken()) == 1 })
+	eventually(t, "the change pending", func() bool { return running.health(t) == "ok\nconnected: true\npending: 1\n" })
+
+	running.stream.drop()
+	eventually(t, "the stream down", func() bool { return running.health(t) == "ok\nconnected: false\npending: 1\n" })
 }
 
 func TestRefusesALocalPortInUse(t *testing.T) {

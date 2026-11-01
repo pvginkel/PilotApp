@@ -145,19 +145,24 @@ func TestNeverWritesDownOverBytesThatNeverSynced(t *testing.T) {
 	write(t, file, "the agent's")
 	s.record("proj/a.md", "two")
 	s.answering(func(put) answer { return answer{status: http.StatusServiceUnavailable} })
-	running := start(t, s, tree, data)
+	var waits *retries
+	running := startWith(t, s, tree, data, func(sidecar *Sidecar) { waits = retrying(sidecar) })
 	running.stream.send(t, change("proj/a.md", "two"))
 	settle()
 	if got := read(t, file); got != "the agent's" {
 		t.Fatalf("the file holds %q", got)
 	}
 
-	// The next reconcile sends up what the last could not.
+	// The next reconcile sends up what the last could not, its wait to
+	// retry under way.
 	s.answering(func(put) answer { return answer{} })
 	running.stream.send(t, manifest)
 	eventually(t, "the PUT again", func() bool { return len(s.taken()) == 2 })
 	if again := s.taken()[1]; again.body != "the agent's" || again.base != hashOf("one") {
 		t.Fatalf("took %q based on %s", again.body, again.base)
+	}
+	if got := waits.begun(); !slices.Equal(got, []time.Duration{retryMin}) {
+		t.Fatalf("waited %v", got)
 	}
 }
 

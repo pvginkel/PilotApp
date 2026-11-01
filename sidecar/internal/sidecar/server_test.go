@@ -467,24 +467,70 @@ func run(t testing.TB, sidecar *Sidecar) func() {
 }
 
 // started is a sidecar running until the test ends, or until stop is
-// called, and the change stream it holds.
+// called, the change stream it holds, and what it logs.
 type started struct {
 	sidecar *Sidecar
 	stop    func()
 	stream  *stream
+	logged  *logs
 }
 
 // start runs a sidecar on tree and data against s, once its reconcile on
 // connect is done.
 func start(t testing.TB, s *server, tree, data string) started {
 	t.Helper()
-	sidecar, _ := newSidecar(t, s, tree, data)
+	return startWith(t, s, tree, data, func(*Sidecar) {})
+}
+
+// startWith is start, the sidecar given to ready before it runs.
+func startWith(t testing.TB, s *server, tree, data string, ready func(*Sidecar)) started {
+	t.Helper()
+	sidecar, logged := newSidecar(t, s, tree, data)
+	ready(sidecar)
 	before := len(s.manifests())
 	stop := run(t, sidecar)
 	opened := s.accept(t)
 	eventually(t, "the reconcile on connect", func() bool { return len(s.manifests()) > before })
 	settle()
-	return started{sidecar: sidecar, stop: stop, stream: opened}
+	return started{sidecar: sidecar, stop: stop, stream: opened, logged: logged}
+}
+
+// retries are the waits of a sidecar's uploads before a retry, made the
+// test's: each is kept as it begins, and the one under way ends when the
+// test ends it.
+type retries struct {
+	mu    sync.Mutex
+	waits []time.Duration
+	ended chan time.Time
+}
+
+// retrying makes the waits of sidecar's uploads before a retry the test's.
+func retrying(sidecar *Sidecar) *retries {
+	r := &retries{ended: make(chan time.Time)}
+	sidecar.uploads.after = func(d time.Duration) <-chan time.Time {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		r.waits = append(r.waits, d)
+		return r.ended
+	}
+	return r
+}
+
+// begun is every wait begun so far, in order.
+func (r *retries) begun() []time.Duration {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.waits)
+}
+
+// end ends the wait under way.
+func (r *retries) end(t testing.TB) {
+	t.Helper()
+	select {
+	case r.ended <- time.Now():
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out ending a wait before a retry")
+	}
 }
 
 // noted is the local note on path, "" when there is none.

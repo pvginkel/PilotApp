@@ -65,6 +65,31 @@ func (e *StatusError) Error() string {
 	return fmt.Sprintf("answered %d: %s", e.Status, e.Body)
 }
 
+// unanswered is a call that got no whole answer: it could not be sent, it
+// timed out, or its connection dropped before its answer was read.
+type unanswered struct {
+	err error
+}
+
+func (e *unanswered) Error() string {
+	return e.err.Error()
+}
+
+func (e *unanswered) Unwrap() error {
+	return e.err
+}
+
+// Transient says whether err, a call's, can pass with the call made again
+// as it was: the server's 5xx, or a call that got no whole answer.
+func Transient(err error) bool {
+	var refused *StatusError
+	if errors.As(err, &refused) {
+		return refused.Status >= http.StatusInternalServerError
+	}
+	var lost *unanswered
+	return errors.As(err, &lost)
+}
+
 // Client calls the sync routes of the server at its base URL.
 type Client struct {
 	base        string
@@ -181,7 +206,7 @@ func (c *Client) do(request *http.Request) (reply, error) {
 	}
 	body, err := io.ReadAll(response.Body)
 	if err := errors.Join(err, response.Body.Close()); err != nil {
-		return reply{}, err
+		return reply{}, &unanswered{err}
 	}
 	return reply{status: response.StatusCode, header: response.Header, body: body}, nil
 }
@@ -194,7 +219,7 @@ func (c *Client) send(request *http.Request) (*http.Response, error) {
 	request.Header.Set("X-Pilot-Sync-Protocol", strconv.Itoa(Version))
 	response, err := c.http.Do(request)
 	if err != nil {
-		return nil, err
+		return nil, &unanswered{err}
 	}
 	if response.StatusCode >= 300 {
 		return nil, errors.Join(refusal(response), response.Body.Close())

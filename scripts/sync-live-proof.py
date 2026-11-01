@@ -528,7 +528,11 @@ class Proof:
 
     def hook_check_answers(self) -> str:
         health = call("GET", f"http://127.0.0.1:{self.local_port}/healthz")
-        expect(health.status == 200 and health.body == b"ok\n", "/healthz")
+        expect(
+            health.status == 200
+            and health.body == b"ok\nconnected: true\npending: 0\n",
+            f"/healthz: {health.status} {health.body!r}",
+        )
 
         mark = self.log.mark()
         edited = self.tree.read(HANDBOOK) or b""

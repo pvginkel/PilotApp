@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/pvginkel/PilotApp/sidecar/internal/config"
@@ -31,6 +32,8 @@ type Sidecar struct {
 	listener net.Listener
 	// wanted holds a reconcile asked for and not yet run.
 	wanted chan struct{}
+	// connected says whether the change stream is open.
+	connected atomic.Bool
 	// sleep waits d, false when ctx is done first.
 	sleep func(ctx context.Context, d time.Duration) bool
 }

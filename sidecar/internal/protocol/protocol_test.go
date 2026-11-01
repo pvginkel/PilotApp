@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"testing"
+	"time"
 )
 
 const (
@@ -331,5 +332,57 @@ func TestEventsAnswersARefusal(t *testing.T) {
 	var status *StatusError
 	if _, err := client.Events(context.Background()); !errors.As(err, &status) || status.Status != http.StatusForbidden {
 		t.Errorf("403: got %v", err)
+	}
+}
+
+func TestTransientIsA5xxOrACallWithNoWholeAnswer(t *testing.T) {
+	put := func(client *Client, ctx context.Context) error {
+		_, err := client.Put(ctx, "a.md", []byte("x"), "", "")
+		return err
+	}
+	for status, want := range map[int]bool{
+		http.StatusInternalServerError:   true,
+		http.StatusBadGateway:            true,
+		http.StatusServiceUnavailable:    true,
+		http.StatusBadRequest:            false,
+		http.StatusUnauthorized:          false,
+		http.StatusForbidden:             false,
+		http.StatusNotFound:              false,
+		http.StatusRequestEntityTooLarge: false,
+		http.StatusUpgradeRequired:       false,
+	} {
+		client, _ := serve(t, answerWith(status, nil, `{"min": 3, "max": 4}`))
+		if got := Transient(put(client, context.Background())); got != want {
+			t.Errorf("%d: transient %t", status, got)
+		}
+	}
+
+	client, _ := serve(t, answerWith(http.StatusNoContent, map[string]string{"X-Pilot-Hash": Hash([]byte("x"))}, ""))
+	if err := put(client, context.Background()); err == nil || Transient(err) {
+		t.Errorf("an answer that is not the protocol's: got %v", err)
+	}
+
+	server := httptest.NewServer(http.NotFoundHandler())
+	server.Close()
+	if err := put(NewClient(server.URL, token, environment), context.Background()); !Transient(err) {
+		t.Errorf("not sent: got %v", err)
+	}
+
+	client, _ = serve(t, func(w http.ResponseWriter, _ *http.Request, _ []byte) {
+		w.Header().Set("Content-Length", "100")
+		w.Header().Set("X-Pilot-Hash", Hash([]byte("x")))
+		w.Header().Set("X-Pilot-Faults", "0")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "cut")
+	})
+	if err := put(client, context.Background()); !Transient(err) {
+		t.Errorf("dropped: got %v", err)
+	}
+
+	client, _ = serve(t, func(_ http.ResponseWriter, r *http.Request, _ []byte) { <-r.Context().Done() })
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if err := put(client, ctx); !Transient(err) {
+		t.Errorf("timed out: got %v", err)
 	}
 }

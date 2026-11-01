@@ -41,7 +41,8 @@ func (s *Sidecar) keep(ctx context.Context) {
 			}
 			wait = delay
 			delay = min(delay*2, backoffMax)
-			s.logger.Warn("the change stream dropped: reconnecting", "error", err, "in", wait)
+			s.logger.Warn("the change stream dropped: reconnecting", "error", err, "in", wait,
+				"pending", s.uploads.pending())
 		}
 		if !s.sleep(ctx, wait) {
 			return
@@ -58,8 +59,9 @@ func (s *Sidecar) session(ctx context.Context) (reconciled bool, err error) {
 	if err != nil {
 		return false, err
 	}
+	s.connected.Store(true)
 	s.logger.Info("the change stream is open", "min", stream.Hello.Protocol.Min, "max", stream.Hello.Protocol.Max,
-		"manifest_hash", stream.Hello.ManifestHash)
+		"manifest_hash", stream.Hello.ManifestHash, "pending", s.uploads.pending())
 	// What was asked for while away, the reconcile on connect does.
 	select {
 	case <-s.wanted:
@@ -73,6 +75,7 @@ func (s *Sidecar) session(ctx context.Context) (reconciled bool, err error) {
 		close(listened)
 	}()
 	defer func() {
+		s.connected.Store(false)
 		cancel()
 		<-listened
 		changes.close()
@@ -189,6 +192,6 @@ func (s *Sidecar) reconcile(ctx context.Context) error {
 		return fmt.Errorf("reconcile: %w", ctx.Err())
 	}
 	s.logger.Info("reconciled", "sent_up", len(changed), "listed", len(answer.Manifest),
-		"written_down", len(answer.WriteDown), "deleted", len(answer.Delete))
+		"written_down", len(answer.WriteDown), "deleted", len(answer.Delete), "pending", s.uploads.pending())
 	return nil
 }

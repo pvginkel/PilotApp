@@ -5,9 +5,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/pvginkel/PilotApp/sidecar/internal/protocol"
 )
@@ -216,5 +219,209 @@ func TestRefusesADataDirectoryItCannotWrite(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "cannot write the data directory "+data) {
 			t.Errorf("%s: got %v", name, err)
 		}
+	}
+}
+
+// P-28: a change a reconcile could not get up goes up once the server takes
+// it again, with the change stream open, heartbeats alone on it and nothing
+// else moving.
+func TestRetriesAnUploadAReconcileCouldNotSendUntilItLands(t *testing.T) {
+	s := newServer(t)
+	tree, data := t.TempDir(), t.TempDir()
+	file := filepath.Join(tree, "proj", "a.md")
+	s.record("proj/a.md", "one")
+	start(t, s, tree, data).stop()
+
+	write(t, file, "the agent's")
+	var down atomic.Bool
+	down.Store(true)
+	s.answering(func(put) answer {
+		if down.Load() {
+			return answer{status: http.StatusServiceUnavailable}
+		}
+		return answer{}
+	})
+	var waits *retries
+	running := startWith(t, s, tree, data, func(sidecar *Sidecar) { waits = retrying(sidecar) })
+	want := []time.Duration{
+		time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 30 * time.Second, 30 * time.Second,
+	}
+	for i := range want {
+		eventually(t, "the wait before a retry", func() bool { return len(waits.begun()) == i+1 })
+		if got := running.health(t); got != "ok\nconnected: true\npending: 1\n" {
+			t.Fatalf("answered %q while the change waits", got)
+		}
+		running.stream.send(t, heartbeat)
+		waits.end(t)
+	}
+	eventually(t, "the wait before the last retry", func() bool { return len(waits.begun()) == len(want)+1 })
+	down.Store(false)
+	running.stream.send(t, heartbeat)
+	waits.end(t)
+	eventually(t, "the change landed", func() bool { return running.synced("proj/a.md") == hashOf("the agent's") })
+	settle()
+
+	if got := waits.begun(); !slices.Equal(got[:len(want)], want) || got[len(want)] != retryMax {
+		t.Errorf("waited %v", got)
+	}
+	puts := s.taken()
+	// The reconcile's, then one at the end of each wait.
+	if len(puts) != len(want)+2 {
+		t.Fatalf("took %d PUTs", len(puts))
+	}
+	for _, again := range puts {
+		if again.body != "the agent's" || again.base != hashOf("one") {
+			t.Fatalf("took %q based on %s", again.body, again.base)
+		}
+	}
+	if posts := s.manifests(); len(posts) != 2 {
+		t.Errorf("posted %d manifests: a reconcile sent it up", len(posts))
+	}
+	if got := running.health(t); got != "ok\nconnected: true\npending: 0\n" {
+		t.Errorf("answered %q once it landed", got)
+	}
+	logged := running.logged.String()
+	for _, line := range []string{
+		`msg="cannot sync a file of the tree: retrying" path=proj/a.md error="PUT proj/a.md: answered 503: " in=1s pending=1`,
+		`msg="no longer waiting to go up" path=proj/a.md pending=0`,
+	} {
+		if !strings.Contains(logged, line) {
+			t.Errorf("logged no %s", line)
+		}
+	}
+}
+
+func TestAChangeWhileAnUploadWaitsToRetryGoesUpAtOnce(t *testing.T) {
+	s := newServer(t)
+	s.answering(func(taken put) answer {
+		if taken.body == "first" {
+			return answer{status: http.StatusBadGateway}
+		}
+		return answer{}
+	})
+	tree := t.TempDir()
+	file := filepath.Join(tree, "proj", "a.md")
+	var waits *retries
+	running := startWith(t, s, tree, t.TempDir(), func(sidecar *Sidecar) { waits = retrying(sidecar) })
+
+	write(t, file, "first")
+	eventually(t, "the wait before a retry", func() bool { return len(waits.begun()) == 1 })
+	write(t, file, "second")
+	eventually(t, "the change landed", func() bool { return running.synced("proj/a.md") == hashOf("second") })
+	settle()
+	if puts := s.taken(); len(puts) != 2 || puts[1].body != "second" || puts[1].base != "none" {
+		t.Fatalf("took %+v", puts)
+	}
+	if got := waits.begun(); len(got) != 1 {
+		t.Fatalf("waited %v", got)
+	}
+	if got := running.health(t); got != "ok\nconnected: true\npending: 0\n" {
+		t.Fatalf("answered %q", got)
+	}
+}
+
+// V13: a save a retry gets up goes up as the session whose save its bytes
+// are, whoever holds the lock by then.
+func TestARetriedUploadGoesUpAsTheSaveOfItsSession(t *testing.T) {
+	s := newServer(t)
+	var down atomic.Bool
+	down.Store(true)
+	s.answering(func(put) answer {
+		if down.Load() {
+			return answer{status: http.StatusInternalServerError}
+		}
+		return answer{}
+	})
+	tree := t.TempDir()
+	var waits *retries
+	running := startWith(t, s, tree, t.TempDir(), func(sidecar *Sidecar) { waits = retrying(sidecar) })
+
+	running.lock(t, "proj", chat, os.Getpid())
+	write(t, filepath.Join(tree, "proj", "a.md"), "the chat's")
+	eventually(t, "the wait before a retry", func() bool { return len(waits.begun()) == 1 })
+	began := time.Now()
+	if got := running.release(t, "proj", chat); got != "not yet checked: proj/a.md\n" {
+		t.Fatalf("printed %q", got)
+	}
+	if waited := time.Since(began); waited > time.Second {
+		t.Fatalf("the release's flush waited %v, for the wait to retry", waited)
+	}
+	eventually(t, "the next wait before a retry", func() bool { return len(waits.begun()) == 2 })
+	running.lock(t, "proj", job, os.Getpid())
+
+	down.Store(false)
+	waits.end(t)
+	eventually(t, "the change landed", func() bool { return running.synced("proj/a.md") == hashOf("the chat's") })
+	puts := s.taken()
+	if len(puts) != 3 {
+		t.Fatalf("took %d PUTs", len(puts))
+	}
+	for _, taken := range puts {
+		if session := sessionOf(taken); session != chat {
+			t.Errorf("a PUT carried %q, not the chat's session", session)
+		}
+	}
+}
+
+// V14: a PUT the server can never take is not made again, and stays pending;
+// a path of no record is a stray, not pending.
+func TestRetriesNoUploadTheServerCanNeverTake(t *testing.T) {
+	s := newServer(t)
+	s.answering(func(taken put) answer {
+		switch {
+		case taken.path == "proj/notes.md":
+			return answer{status: http.StatusNotFound}
+		case taken.body == "too big":
+			return answer{status: http.StatusRequestEntityTooLarge}
+		}
+		return answer{}
+	})
+	tree := t.TempDir()
+	big := filepath.Join(tree, "proj", "a.md")
+	var waits *retries
+	running := startWith(t, s, tree, t.TempDir(), func(sidecar *Sidecar) { waits = retrying(sidecar) })
+
+	write(t, big, "too big")
+	write(t, filepath.Join(tree, "proj", "notes.md"), "mine")
+	eventually(t, "both PUTs", func() bool { return len(s.taken()) == 2 })
+	settle()
+	if puts := s.taken(); len(puts) != 2 {
+		t.Fatalf("took %d PUTs", len(puts))
+	}
+	if got := waits.begun(); len(got) != 0 {
+		t.Fatalf("waited %v to retry", got)
+	}
+	if got := running.health(t); got != "ok\nconnected: true\npending: 1\n" {
+		t.Fatalf("answered %q", got)
+	}
+	if line := `msg="cannot sync a file of the tree" path=proj/a.md error="PUT proj/a.md: answered 413: " pending=1`; !strings.Contains(running.logged.String(), line) {
+		t.Errorf("logged no %s", line)
+	}
+
+	write(t, big, "smaller")
+	eventually(t, "the edit landed", func() bool { return running.synced("proj/a.md") == hashOf("smaller") })
+	if got := running.health(t); got != "ok\nconnected: true\npending: 0\n" {
+		t.Fatalf("answered %q once the edit landed", got)
+	}
+}
+
+func TestAStopEndsAWaitToRetry(t *testing.T) {
+	s := newServer(t)
+	s.answering(func(put) answer { return answer{status: http.StatusServiceUnavailable} })
+	tree := t.TempDir()
+	var waits *retries
+	running := startWith(t, s, tree, t.TempDir(), func(sidecar *Sidecar) { waits = retrying(sidecar) })
+	write(t, filepath.Join(tree, "proj", "a.md"), "one")
+	eventually(t, "the wait before a retry", func() bool { return len(waits.begun()) == 1 })
+
+	stopped := make(chan struct{})
+	go func() {
+		running.stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("still running past the stop, its wait to retry under way")
 	}
 }

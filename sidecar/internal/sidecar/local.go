@@ -35,10 +35,16 @@ func (s *Sidecar) local(ctx context.Context) *http.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /lock", s.lock)
 	mux.HandleFunc("POST /release", s.release)
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		text(w, http.StatusOK, "ok\n")
-	})
+	mux.HandleFunc("GET /healthz", s.healthz)
 	return &http.Server{Handler: mux, BaseContext: func(net.Listener) context.Context { return ctx }}
+}
+
+// healthz answers 200 whatever is pending, so that a probe of it restarts no
+// sidecar over a change waiting to go up: `ok`, then whether the change
+// stream is open, `connected: true` or `connected: false`, then how many
+// changes wait to go up, `pending: <n>`, each on a line of its own.
+func (s *Sidecar) healthz(w http.ResponseWriter, _ *http.Request) {
+	text(w, http.StatusOK, fmt.Sprintf("ok\nconnected: %t\npending: %d\n", s.connected.Load(), s.uploads.pending()))
 }
 
 // hookCall is the body of a hook's /lock and /release, JSON.
