@@ -906,21 +906,33 @@ POD=$(cexec iac kubectl -n pilot-dev get pods -l app.kubernetes.io/name=pilot -o
 
    **The dev stage's store**, `pvginkel-pilotprojects-d75970` on `kubecoder-dev`
    ([`deployment.md`](deployment.md)), is the slices' own, as `pilot-dev` is. A check that needs it
-   reads its sidecar's log, and stops, starts or resets it through `kubecoder-dev`'s API with
-   Pilot's dev credential. A reset, of a stopped store, clones PilotProjects' `main` again and
-   empties the sidecar's data, so a push to PilotProjects reaches the store that way. A session
-   there whose working directory is `/work/PilotProjects` gets the store's hooks ([`sync.md`](sync.md)).
-   The dev stage's chats run there: a message to a project's chat on `pilot-dev`, `POST
-   /api/projects/<id>/chat/messages` as the signed-in person, starts the store where it is stopped
-   and the chat's session in it, boxed and briefed, its records read as any session's
-   ([`chats.md`](chats.md)); a check of the chat after a PilotProjects change resets the store
-   first, so the chat runs the skill as pushed. Production's store is never touched:
+   reads its sidecar's log. A session there whose working directory is `/work/PilotProjects` gets
+   the store's hooks ([`sync.md`](sync.md)). The dev stage's chats run there: a message to a
+   project's chat on `pilot-dev`, `POST /api/projects/<id>/chat/messages` as the signed-in person,
+   starts the store where it is stopped and the chat's session in it, boxed and briefed, its records
+   read as any session's ([`chats.md`](chats.md)).
+
+   A PilotProjects change reaches the store through the store's update, `POST
+   /api/testing/store-update` on `pilot-dev` as the signed-in person, and never through a stop or a
+   reset on `kubecoder-dev`'s API, which takes the store from under `pilot-dev`'s running sessions.
+   The route makes the update, `201`, or answers `409` while one is under way. At its timer's next
+   tick the server holds the store's work, stops the store's running jobs and chats, stops, resets
+   and starts the store, which clones PilotProjects' `main` again and empties the sidecar's data,
+   waits for the sidecar's first manifest, retries the jobs it stopped and lifts the hold. The
+   update stands while `GET /api/conditions` holds `store_update`, and the backend's log has a line
+   a phase. `{"lift": true}` asks the lift of one that stands, skipping the phases it has not
+   reached, and answers its row, its `error` in it. A check of the chat after a PilotProjects change
+   runs the update first, so the chat runs the skill as pushed. Production's store is never touched:
 
    ```bash
    STORE=pvginkel-pilotprojects-d75970
    cexec iac kubectl -n kubecoder-dev logs $STORE -c pilot-sync --tail=50
-   curl -s -m 15 -o /dev/null -w '%{http_code}\n' -X POST -H "Authorization: Bearer $PILOT_DEV_CONTROLLER_TOKEN" \
-     "https://kubecoder-dev.home/environments/$STORE/stop"   # or start, or reset once stopped; 200 or 202
+   curl -s -m 15 -b $S -c $S -o /dev/null -w '%{http_code}\n' -X POST -H 'Content-Type: application/json' \
+     -d '{}' https://pilot-dev.home/api/testing/store-update   # 201; with '{"lift": true}', 200
+   SECONDS=0
+   until ! curl -s -m 10 -b $S -c $S https://pilot-dev.home/api/conditions | grep -q '"store_update"' ||
+     [ $SECONDS -ge 900 ]; do sleep 5; done
+   cexec iac kubectl -n pilot-dev logs $POD -c backend | grep "The store's update"   # stopped, reset, reconciled, retried, lifted
    ```
 
 8. **The builds.** Each of `PilotApp/Build-Main` and `AaC/PilotApp` has a green latest build, and
@@ -956,3 +968,17 @@ PilotDeploy commit that carries the slice and the build `<n>` it pins named in i
 production goes on running the release before it, and the slice's change is on dev alone. What
 production then shows its users is the operator's to see; nothing here signs in to
 `https://pilot.ginbov.nl`.
+
+A slice whose change to PilotProjects needs the store reset ends its close-out with an `action`
+entry that names the store's update on production as the operator's to run:
+
+```bash
+kubectl --context prd -n pilot-prd exec deploy/pilot -c backend -- python -m app.cli update-store
+```
+
+It holds the store's work, stops, resets and starts production's store onto PilotProjects' `main`,
+which carries what the slice pushed, retries the jobs it stopped and lifts the hold, printing each
+phase until the lift. The entry says that no PilotApp environment can run it: none can `exec` into
+`pilot-prd`, and PilotApp takes no `kubePrdWrite`. Where the promotion's action is due too, it comes
+after that one, since production's store runs against production's build. Its Consequence:
+production's store runs the brain's skills as before the slice.
