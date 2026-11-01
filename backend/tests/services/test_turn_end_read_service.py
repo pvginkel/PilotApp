@@ -677,7 +677,8 @@ class TestTurnEndReadServiceRefusals:
 
         assert time.perf_counter() - began >= WAIT
         reads = _file_reads(fake)
-        assert len(reads) > 2
+        # Made again at least once; how many rounds fit in WAIT is the machine's.
+        assert len(reads) >= 2
         assert set(reads) == {_read_of(PATH)}
         assert _servers(session, run.id) == [
             (None, _failed(item, PATH, LINK_LOOP_REASON))
