@@ -355,6 +355,8 @@ class TestPilotWorkServiceRegisterDocument:
                 " bytes",
             ),
         ],
+        # The last case's content is 16 MB: named, so that its id is not.
+        ids=["outside-work", "relative", "missing", "directory", "too-large"],
     )
     def test_a_file_the_controller_will_not_read_is_refused_with_its_reason(
         self,
