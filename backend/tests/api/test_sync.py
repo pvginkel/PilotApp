@@ -736,7 +736,7 @@ class TestPutFile:
         path = _bear_item(container, project, project_session, ANSWERED)
         brain = _brain(session, project, kind)
         turn_in_flight(session, brain)
-        edited = ANSWERED.replace("# Which tent?", "# Which tent for the lake?")
+        edited = ANSWERED.replace("title: Which tent?", "title: Which tent now?")
 
         response = fake_sidecar.put(
             path, edited.encode(), sha256_hex(ANSWERED), str(brain.id)
@@ -829,7 +829,7 @@ class TestPutFile:
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         path = _bear_item(container, project, project_session, ANSWERED)
-        edited = ANSWERED.replace("# Which tent?", "# Which tent for the lake?")
+        edited = ANSWERED.replace("title: Which tent?", "title: Which tent now?")
 
         with caplog.at_level(logging.WARNING):
             response = fake_sidecar.put(path, edited.encode(), sha256_hex(ANSWERED))
@@ -868,7 +868,7 @@ class TestPutFile:
             "garbled": "not-a-session",
         }[writer]
         assert project_session.kind_code == WORK_KIND
-        edited = ANSWERED.replace("# Which tent?", "# Which tent for the lake?")
+        edited = ANSWERED.replace("title: Which tent?", "title: Which tent now?")
 
         with caplog.at_level(logging.WARNING):
             response = fake_sidecar.put(
