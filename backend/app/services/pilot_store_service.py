@@ -757,13 +757,22 @@ class PilotStoreService:
         )
 
     def _project(self, brain: Brain) -> Project:
-        """The brain's project, its row locked until the transaction ends."""
-        return self.db.scalars(
+        """The brain's project, its row locked until the transaction ends,
+        then its Session's, before any Document's: a store save of the
+        brain's takes its Session's row before its Document's
+        (`IngestService`)."""
+        project = self.db.scalars(
             select(Project)
             .where(Project.id == brain.project_id)
             .with_for_update()
             .execution_options(populate_existing=True)
         ).one()
+        self.db.execute(
+            select(AgentSession.id)
+            .where(AgentSession.id == brain.session_id)
+            .with_for_update()
+        )
+        return project
 
     def _in_definition_chat(self, brain: Brain) -> bool:
         """Whether the brain is its draft's definition chat, the one session

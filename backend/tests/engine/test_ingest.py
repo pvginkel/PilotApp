@@ -7,6 +7,7 @@ import threading
 import time
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 import pilot_dsl as dsl
 import pytest
@@ -29,7 +30,7 @@ from app.engine.bus import (
 )
 from app.engine.documents import DocumentService
 from app.engine.ingest import Ingested, PathKind, WorkerVersion
-from app.engine.paths import sha256_hex
+from app.engine.paths import sha256_hex, tree_path
 from app.engine.tree import TreeDocument, TreeFile
 from app.exceptions import RecordNotFoundException
 from app.extensions import db
@@ -42,6 +43,7 @@ from app.models import (
     PlanTask,
     Project,
     SaveError,
+    SessionRecord,
     User,
 )
 from app.models.reference import (
@@ -54,6 +56,8 @@ from app.models.reference import (
     VersionCause,
 )
 from app.services.container import ServiceContainer
+from app.services.effect_service import EffectService
+from app.services.pilot_store_service import Brain
 from tests.support.fake_sidecar import FakeSidecar, Put
 from tests.support.turns import end_turns, turn_in_flight
 
@@ -98,6 +102,10 @@ options:
 """
 
 SHORTER = HANDBOOK.replace("Keep it short.", "Keep it shorter.")
+
+TWO_ASKS = UNANSWERED + "\n```question id=Q1\ndefault: The lake\n```\n"
+
+TWO_ASKS_EDITED = TWO_ASKS.replace("The lake", "The river")
 
 TENT_FRONT_MATTER = "---\ntitle: Which tent?\n---\n"
 
@@ -1547,6 +1555,28 @@ class TestIngestServiceLateSave:
             ProjectChanged(project.id),
         ]
 
+    def test_a_held_save_after_a_record_write_cuts_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        """The published text moved since the last Version, a person's answer:
+        a held save cuts no Version of it."""
+        text = "# Badges\n\n```question id=Q1\ndefault: Blue\n```\n"
+        draft = _bear_draft(container, project, text)
+        with scoped_session(container):
+            container.record_service().answer(draft, "Q1", person, "Green")
+        path = f"draft-{project.number}/project.md"
+
+        answer = _ingest(container, path, BROKEN, environment, session=project_session)
+
+        assert answer.held
+        assert _versions(session, draft) == [(1, VersionCause.BORN, text, None)]
+
     def test_another_sessions_writing_stands(
         self,
         session: DbSession,
@@ -2345,6 +2375,19 @@ def _committed_run(app: Flask, document_id: uuid.UUID) -> uuid.UUID:
         return run.id
 
 
+def _committed_item(app: Flask, run_id: uuid.UUID) -> tuple[str, uuid.UUID]:
+    """A document of two asks the Session `run_id` bore in its project,
+    committed: its tree path and its id."""
+    container = app.container
+    with scoped_session(container) as session:
+        run = session.get_one(models.Session, run_id)
+        project = session.get_one(Project, run.project_id)
+        item = container.document_service().bear_item(
+            project, "document", "Which tent?", run, TWO_ASKS
+        )
+        return tree_path(project, session.get_one(Document, item.id).path), item.id
+
+
 def _save(
     app: Flask, path: str, content: str, run_id: uuid.UUID | None = None
 ) -> Ingested:
@@ -2670,6 +2713,54 @@ class TestIngestServiceRowLock:
             (VersionCause.BORN, HANDBOOK, None),
             (VersionCause.TURN, SHORTER, run_id),
         ]
+
+
+    def test_a_save_while_its_brain_answers_waits_for_the_answer(
+        self, committed_app: Flask, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The brain's answer takes its Session's row before the document's,
+        as the save does: a save of the document while the brain answers in
+        it waits for the answer, and neither deadlocks."""
+        _, document_id = _committed_handbook(committed_app)
+        run_id = _committed_run(committed_app, document_id)
+        path, item_id = _committed_item(committed_app, run_id)
+        container = committed_app.container
+        save = _Save(committed_app, path, TWO_ASKS_EDITED, run_id)
+        record = EffectService.record
+
+        def saving_record(
+            self: EffectService, *args: Any, **kwargs: Any
+        ) -> SessionRecord | None:
+            save.start()
+            _wait_for_a_lock_wait(committed_app)
+            return record(self, *args, **kwargs)
+
+        monkeypatch.setattr(EffectService, "record", saving_record)
+        try:
+            with scoped_session(container) as session:
+                run = session.get_one(models.Session, run_id)
+                container.pilot_store_service().answer(
+                    Brain(run.id, run.project_id, run.kind_code),
+                    f"{item_id}/D1",
+                    "Dome",
+                    "ada",
+                    note=None,
+                    to=None,
+                    tool_use_id=None,
+                )
+        finally:
+            save.join(5)
+
+        assert save.error is None
+        with scoped_session(container) as session:
+            document = session.get_one(Document, item_id)
+            assert document.ingested_session_id == run_id
+            assert "default: The river" in (document.published_text or "")
+            assert session.scalars(
+                select(Block.answer).where(
+                    Block.document_id == item_id, Block.local_id == "D1"
+                )
+            ).one() == "Dome"
 
 
 def _wait_for_a_lock_wait(app: Flask) -> None:
