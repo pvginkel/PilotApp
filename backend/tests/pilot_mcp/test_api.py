@@ -23,14 +23,16 @@ def _closed_port() -> int:
 
 
 def test_an_added_work_items_held_takes_every_reason_the_gate_holds_its_start() -> None:
-    """A new work item resumes no conversation and is no job: the gate holds
-    its start for every other reason."""
+    """A new work item resumes no conversation, is no job and is no job's or
+    Chat's to hold for the store's update: the gate holds its start for
+    every other reason."""
     [reasons, _] = get_args(Added.model_fields["held"].annotation)
 
     assert set(get_args(reasons)) == {
         reason.value
         for reason in HeldReason
-        if reason not in (HeldReason.QUEUE, HeldReason.CONVERSATION)
+        if reason
+        not in (HeldReason.QUEUE, HeldReason.CONVERSATION, HeldReason.STORE_UPDATE)
     }
 
 
