@@ -264,7 +264,8 @@ function Autopilot({ project }: { project: Project }) {
         className="switch"
         role="switch"
         aria-checked={project.autopilot}
-        disabled={project.archived || flip.isPending}
+        aria-disabled={flip.isPending || undefined}
+        disabled={project.archived}
         title="Auto pilot hands the project to Pilot; it still asks on the held column"
         onClick={toggle}
         data-testid="project.autopilot"
