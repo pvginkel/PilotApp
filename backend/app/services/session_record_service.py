@@ -116,9 +116,10 @@ def read_records(
         .order_by(SessionRecord.seq.desc() if newest_first else SessionRecord.seq)
         .limit(limit)
     )
+    # Indexed, not unpacked: mypy types this select's rows as `Row[*tuple[Any, ...]]`,
+    # whose unpacking it reads as `object`.
     return [
-        StoredRecord(record, turn, author, words)
-        for record, turn, author, words in db.execute(statement).tuples()
+        StoredRecord(row[0], row[1], row[2], row[3]) for row in db.execute(statement)
     ]
 
 
