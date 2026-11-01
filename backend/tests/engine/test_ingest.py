@@ -2714,7 +2714,6 @@ class TestIngestServiceRowLock:
             (VersionCause.TURN, SHORTER, run_id),
         ]
 
-
     def test_a_save_while_its_brain_answers_waits_for_the_answer(
         self, committed_app: Flask, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -2756,11 +2755,14 @@ class TestIngestServiceRowLock:
             document = session.get_one(Document, item_id)
             assert document.ingested_session_id == run_id
             assert "default: The river" in (document.published_text or "")
-            assert session.scalars(
-                select(Block.answer).where(
-                    Block.document_id == item_id, Block.local_id == "D1"
-                )
-            ).one() == "Dome"
+            assert (
+                session.scalars(
+                    select(Block.answer).where(
+                        Block.document_id == item_id, Block.local_id == "D1"
+                    )
+                ).one()
+                == "Dome"
+            )
 
 
 def _wait_for_a_lock_wait(app: Flask) -> None:
