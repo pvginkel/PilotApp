@@ -32,7 +32,9 @@ places the setup, a job of Pilot's own, and a worker's turn end and a person's c
 Pilot's own place the jobs after them ([`work.md`](work.md)). A person's Resume carries a stopped
 or failed worker's run on, a person's Retry places a fresh job for a failed or stopped one, a nudge
 carries on a run the usage limits or the pause halted ([`usage.md`](usage.md)), and Stop, the
-brain's `stop_work`, a usage halt's hard stop, Finish and Archive stop a worker's run.
+brain's `stop_work`, a usage halt's hard stop, Finish and Archive stop a worker's run. The store's
+update stops the store's running jobs and chats, and retries the jobs it stopped at its lift
+([`store-update.md`](store-update.md)).
 
 ## The session start
 
@@ -57,15 +59,18 @@ is read under the lock its Item's birth takes, `next_seq`'s `FOR UPDATE`, so a s
 or an Archive never interleave, and two starts of one project go one after the other.
 
 Then the gate decides its state. **The gate** (`held_reason(halted=, paused=, kind_code=, setup=,
-unreachable=, filled=, queued=, conversing=)`) holds a work item's start while a usage halt holds,
-the week's or the five-hour's (`UsageHalts.halted`, [`usage.md`](usage.md)); a start while its
-project is paused
+updating=, unreachable=, filled=, queued=, conversing=)`) holds a work item's start while a usage
+halt holds, the week's or the five-hour's (`UsageHalts.halted`, [`usage.md`](usage.md)); a start
+while its project is paused
 ([`projects.md`](projects.md)), a Chat's never for the pause, nor the setup's, a Retry's included
-(`setups`), which runs under the pause Create writes; while the controller is unreachable
+(`setups`), which runs under the pause Create writes; a job's and a Chat's, the setup's among them,
+never a work item's, while the store's update is unlifted (`unlifted`,
+[`store-update.md`](store-update.md)); while the controller is unreachable
 ([`controller.md`](controller.md)); a work item's alone, while no slot is free; a job's alone, while
 another job of its project is before it (below); and a work item's alone, while another Session runs
 or starts on the conversation it resumes (below). Where more than one holds, a usage halt is read
-first, then the pause, then the outage, then the slot, then the queue, then the conversation. A start the gate holds
+first, then the pause, then the store's update, then the outage, then the slot, then the queue,
+then the conversation. A start the gate holds
 is `held`: its Turn 1 unsent, a job's not yet written (below), no `server` record, no current line,
 and no loop run for it. One it lets through is `starting`, takes its slot, and has its loop run once
 the transaction commits. A `starting` Session that has an Environment already, a Resume's, has the
@@ -186,7 +191,8 @@ environment is not Pilot's", nothing called, and its Resume is refused so (below
 
 **Held, then released.** A held Session goes on when the gate opens for it: at the outage's end, at
 a `resumed` transition's commit, at a usage halt's turn and at an overrule made
-([`usage.md`](usage.md)), at a work item's start or end, which moves the slot's count, at a job's
+([`usage.md`](usage.md)), at the store's update's lift ([`store-update.md`](store-update.md)), at a
+work item's start or end, which moves the slot's count, at a job's
 end, which moves its project's queue, and at STARTUP. The loop `start:held` (`release_held()`)
 takes each held Session in `created_at` order and, under its lock, while it is still `held` and the
 gate, read afresh, is open for it, a work item's slot counted under the slot's lock, moves it to
@@ -387,7 +393,9 @@ for an unknown Session.
 the signed-in person: the Session `stopped`, `stopped_at` now, `stopped_by_user_id` the person, no
 current line, its environment, when it has one, handed to the shutdown timer as a failed start's is
 (above), and a work item's slot given back. A usage halt's hard stop stops a running work item
-the same way, by Pilot, its nudge owed ([`usage.md`](usage.md)). It calls no controller in the
+the same way, by Pilot, its nudge owed ([`usage.md`](usage.md)), and the store's update every job's
+and Chat's Session `running` or `starting`, by Pilot, with no nudge owed and a Chat left open
+([`store-update.md`](store-update.md)). It calls no controller in the
 transaction. A running Session's Turn stays in flight: once the stop
 commits, the loop `interrupt:<id>` asks the controller's interrupt, and the relay records the turn
 to the `result` the interrupt brings, its lines arriving, its line and state unmoved, its work item
@@ -446,7 +454,8 @@ before its brief went out"), one retried already ("it was retried already"), one
 stopped (as Resume's refusals word it), one whose nudge is owed at the quota wall ("it waits for its
 nudge at the quota wall", D099), one whose stopped turn is still ending, a job after an item's
 close whose item is open again ("the item it follows is open again"), and in a finished or an
-archived project. Nothing else retries a job: the server retries none on its own.
+archived project. The server retries a job on its own only at the store's update's lift: each job
+the update stopped, once, through this Retry and its refusals ([`store-update.md`](store-update.md)).
 
 **Finish, Archive and Reopen** stop every Session of the project running, starting or held, a
 Chat's among them, as Stop stops one, by the person, at the transition's instant, before Finish's
@@ -558,7 +567,8 @@ interrupt of every Session stopped with a Turn in flight; and the job `start`'s 
 every Session still `starting` (`Resuming the start of session <id>`), then the release of the held
 ones, the outage being off in a fresh process, and the nudges owed ([`usage.md`](usage.md)); the
 job `halt-file`'s settles every environment whose halt file may be there or is owed; the jobs `read` and `write-back` run what the
-registered documents owe ([`round-trip.md`](round-trip.md)). Each run resumes from the rows:
+registered documents owe ([`round-trip.md`](round-trip.md)); and the job `store-update`'s takes up
+an update left unlifted ([`store-update.md`](store-update.md)). Each run resumes from the rows:
 
 - **Sent or not.** Before it opens the stream, a relay's run reads the controller session's status
   snapshot. The controller has the turn when the session is `busy` or `interrupting`, or its `turn`

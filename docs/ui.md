@@ -52,6 +52,9 @@ avatar slot are never null.
   server's order:
   - the controller unreachable ([`controller.md`](controller.md)), a server-off icon: "The
     controller has been unreachable since <time>. Nothing starts until it answers."
+  - the store's update ([`store-update.md`](store-update.md)), a refresh icon, its badge "Pilot is
+    updating": "Pilot is updating its store since <time>. No chat answers and no job of Pilot's
+    starts until it is done; work items go on."
   - the week's usage halt ([`usage.md`](usage.md)), an octagon-pause icon, its badge "Halted at the
     week's limit": "Work items have been halted at the week's usage limit since <time>. 92% of the
     week's quota is used. No work item starts until a reading puts it under the limit; chats and
@@ -66,11 +69,12 @@ avatar slot are never null.
     week's words for the five-hour window, "… of the five-hour window's quota is used …", with no
     overrule.
 
-  **`GET /api/conditions`** answers `{conditions: [{code, since, share, taken_at, offer, target}]}`:
-  `code` `outage`, `week_halt` or `five_hour_halt`, the outage first, then the week's halt, then
-  the five-hour halt; `since` when it began, as this server met the controller or received the
-  readings; a halt's `share` of its window's quota and its reading's `taken_at`, null for the
-  outage; and the week's halt's `offer`, `allowance` or `run_out`, with the allowance's `target`, a
+  **`GET /api/conditions`** answers `{conditions: [{code, since, share, taken_at, stale, offer,
+  target}]}`: `code` `outage`, `store_update`, `week_halt` or `five_hour_halt`, the outage first,
+  then the store's update, then the week's halt, then the five-hour halt; `since` when it began, as
+  this server met the controller, as the update was made, or as it received the readings; a halt's
+  `share` of its window's quota, its reading's `taken_at` and whether it is `stale`, null for the
+  outage and the store's update; and the week's halt's `offer`, `allowance` or `run_out`, with the allowance's `target`, a
   fraction, null at the wall and for the other conditions, where the line shows no overrule. At
   each turn of a condition, and as a halt's figures move, the SSE event `conditions_changed`
   carries the same body to every person's connections.

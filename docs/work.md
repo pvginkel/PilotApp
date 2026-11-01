@@ -36,24 +36,27 @@ for the live event:
   Turn's, a start's the Session's;
 - `autopilot`: the switch's setting its start was briefed under;
 - `held_reason`: why the gate holds it as the gate reads now, a worker's run's `week_halt` or
-  `five_hour_halt` ([`usage.md`](usage.md)), `paused`, `controller_unreachable`, `slot`, a job's
-  `queue`, or a worker's run's `conversation`, another run on the conversation it resumes; while it
-  is `idle` with its nudge owed, what holds that nudge, a usage halt or `paused`; null in any other
+  `five_hour_halt` ([`usage.md`](usage.md)), `paused`, a job's `store_update`
+  ([`store-update.md`](store-update.md)), `controller_unreachable`, `slot`, a job's `queue`, or a
+  worker's run's `conversation`, another run on the conversation it resumes; while it is `idle` with
+  its nudge owed, what holds that nudge, a usage halt, `paused` or a job's `store_update`; null in any other
   state, while the gate has opened for it and its release is under way, and while nothing holds its
   nudge;
 - `held_running`: while it is held for a slot, the running work items of the maximum that closed
   the gate, across every project or its project's own ([`sessions.md`](sessions.md)); else null;
 - `stopped_at` and `stopped_by`, who stopped it by Stop, Finish or Archive, or Pilot, through its
-  `stop_work` or a usage halt's hard stop: only while `stopped`, `stopped_by` null when no one did;
+  `stop_work`, a usage halt's hard stop or the store's update: only while `stopped`, `stopped_by`
+  null when no one did;
 - `stopped_cause`: `environment_stopped`, `environment_deleting`, `environment_error` or
   `environment_gone` while it is `stopped` with no person's stop, its environment stopped under its
   turn or settled in error, read from the session's last record; for a usage halt's hard stop, its
   nudge owed, the halt that holds it now, `week_halt` or `five_hour_halt`, or `usage_limit` once
-  neither does; null for a person's stop and for an interrupt made elsewhere;
+  neither does; for a job the store's update stopped, `store_update`, read from its stop, the
+  update standing or lifted; null for a person's stop and for an interrupt made elsewhere;
 - `pilots_own`: whether it is Pilot's own work, a job ([below](#pilots-own-work)), false for a
   worker's run;
-- `retried`: `{id, at}`, the job a person's Retry of this one placed and when; null while it is not
-  retried, and always for a worker's run;
+- `retried`: `{id, at}`, the job a Retry of this one placed and when, a person's or the store's
+  update's at its lift; null while it is not retried, and always for a worker's run;
 - `nudge_owed`: whether a nudge is owed to it, which carries it on once nothing holds it
   ([`usage.md`](usage.md)): hard-stopped, `stopped`; halted or paused at its turn's end, `idle` and
   not done; or at the quota wall, `failed`.
@@ -95,8 +98,8 @@ An open work item (`WorkItem`, `frontend/src/components/timeline/work.tsx`) is:
   "Running for 1h 5m" is its tooltip and its accessible name (`role="timer"`).
 - **Its title.**
 - **Its one line** (`workLine()`, `frontend/src/lib/utils/status-labels.ts`): a held item's reason,
-  "Halted at the week's limit", "Halted at the five-hour limit", "Paused", "Waiting for the
-  controller", "Waiting for a slot · N running", "Waiting for the job before it" or "Waiting for
+  "Halted at the week's limit", "Halted at the five-hour limit", "Paused", "Waiting for Pilot's
+  update", "Waiting for the controller", "Waiting for a slot · N running", "Waiting for the job before it" or "Waiting for
   the run before it"; an `idle` item whose nudge is owed, what holds the nudge in the same words, or
   "Waiting for its nudge" once nothing does; else its current line
   in the chat's working cue (`WorkingCue`), the server's own words while it starts ("Preparing
@@ -111,7 +114,8 @@ An open work item (`WorkItem`, `frontend/src/components/timeline/work.tsx`) is:
   Pilot" for a running one with none; "Stopped · <time>", with the cause of a stop made elsewhere
   ("<environment> was stopped", "… is being deleted", "… is gone", "… is in error"), or, for a
   usage halt's hard stop, "Stopped at the week's limit · <time>", "Stopped at the five-hour limit ·
-  <time>", or "Stopped at the usage limit · <time>" once neither halt holds; "Failed · <error>";
+  <time>", or "Stopped at the usage limit · <time>" once neither halt holds, and for a job the
+  store's update stopped, "Stopped for Pilot's update · <time>"; "Failed · <error>";
   and nothing once `idle` or `ended`. A retried job's line has a second under it, "Retried
   as a new job below · <time>".
 - **Its actions**, while `running`, `starting` or `held`: Session log, then Stop. Stop asks first in
@@ -147,7 +151,8 @@ at its trigger's instant:
 - its Item is next on the timeline.
 
 It starts through the gate as a chat does (`start_brain`, [`sessions.md`](sessions.md)): held while
-its project is paused, the setup's never, a Retry's included, and while another job of its project
+its project is paused, the setup's never, a Retry's included, while the store's update is unlifted,
+the setup's too ([`store-update.md`](store-update.md)), and while another job of its project
 is before it, so that a project's jobs
 run one at a time in the order their triggers came, the chat beside them; taking no slot; boxed to
 the project's folder with `pilot-store` handed to it, and its create made again for a bounded time
@@ -155,7 +160,7 @@ while that folder is not on disk. Its brief is composed as it leaves the gate, f
 then stands (below). Its item is done at its last turn's end, the follow-up's where it gets one
 ([`chats.md`](chats.md)), and its project's next job goes on then. Neither a person's Stop or Resume
 nor the brain's `stop_work` takes it ([`sessions.md`](sessions.md)); Finish and Archive stop it as
-they stop every session. One job is placed per trigger, never one for several.
+they stop every session, and the store's update while it runs or starts. One job is placed per trigger, never one for several.
 
 **The triggers.** Three place a job:
 
@@ -249,7 +254,8 @@ retry's brief consumes the item only if the job it retries did not. What the fai
 in the store and the record, and the new job's brief does not say so: a retried setup's reads as
 Create's, `The plan: plan.json, empty.` included. The one retried is marked retried by the new
 job before that one starts: it keeps its state, its open item and its session log, offers Retry no
-more, and leaves the badge. A person has to press it: the server retries no job on its own. A job
+more, and leaves the badge. A person has to press it, but at the store's update's lift, which
+retries each job the update stopped once ([`store-update.md`](store-update.md)). A job
 withdrawn by an Undo, done, never ran, and takes no Retry; nor does a job whose turn died at the
 quota wall while its nudge is owed, which is not at its end until the run its nudge continues ends
 (D099, [`usage.md`](usage.md)).
@@ -287,7 +293,8 @@ An address that names no work item of the project reads "The session log did not
 - **Its tail**: while the item is held, starts or runs, the working cue: the held reason, what the
   turn in flight is doing, or "Starting" and "Waiting for Pilot" before its first record. Otherwise
   how it ended (`sessionLogTail()`): "Stopped by you · <time>", "Stopped by <name> · <time>",
-  "Stopped by Pilot at the usage limit · <time>" after a usage halt's hard stop, the cause of a stop
+  "Stopped by Pilot at the usage limit · <time>" after a usage halt's hard stop, "Stopped by Pilot
+  for its update · <time>" after the store's update's stop, the cause of a stop
   made elsewhere, "Stopped", "The turn ended · <time>", or "Failed", the error over
   it where the last turn shows none. A run whose turn ended under a halt or a pause, its nudge owed,
   shows under "The turn ended · <time>" what its line shows, what holds the nudge or "Waiting for

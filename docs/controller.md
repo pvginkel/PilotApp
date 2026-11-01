@@ -157,11 +157,13 @@ The gauge `pilot_fleet_stream_connected` is 1 while the stream is open, and each
 ## Environments on demand
 
 `EnvironmentService` (`backend/app/services/environment_service.py`) starts environments, creates,
-takes, renames, resets and deletes environments of Pilot's own (below), and arms, clears and runs
-the shutdown and delete timers. Pilot stops only what it started. The claim is `server_started_at`,
-set when Pilot's own start, create or reset scheduled the bring-up, and `started_pod_at`, the
-`pod.startedAt` that bring-up settled on. Nothing stops an environment without the claim, while it
-is exempt, or while a Session is `running` or `starting` there. On an environment Pilot did not
+takes, renames, resets and deletes environments of Pilot's own (below), resets the store at the
+store's update ([`store-update.md`](store-update.md)), and arms, clears and runs the shutdown and
+delete timers. Pilot stops only what it started, and the store at its update, whose reset stops it
+first. The claim is `server_started_at`, set when Pilot's own start, create or reset scheduled the
+bring-up, and `started_pod_at`, the `pod.startedAt` that bring-up settled on. Nothing else stops an
+environment without the claim, while it is exempt, or while a Session is `running` or `starting`
+there. On an environment Pilot did not
 create, the claim holds only the pod its start brought up, and the timer stops one only while it
 still runs that pod; on one of Pilot's own every pod is Pilot's, and the claim holds whatever pod
 runs there. The claim ends with its deadline: `_end_claim` clears `server_started_at`,
@@ -169,8 +171,8 @@ runs there. The claim ends with its deadline: `_end_claim` clears `server_starte
 
 - `ensure_environment(db, env_id)` makes the Environment row from the controller's own report on
   Pilot's first touch of the environment, in the caller's transaction, and leaves a row that exists
-  as it is. `start` makes its row through it, the sync's gate and a brain session's start the
-  store's ([`sync.md`](sync.md), [`chats.md`](chats.md)), and `pilot-store`'s copy of outside
+  as it is. `start` makes its row through it, the sync's gate, a brain session's start and the
+  store's update the store's ([`sync.md`](sync.md), [`chats.md`](chats.md)), and `pilot-store`'s copy of outside
   material its source's ([`mcp.md`](mcp.md)); the controller's `404` raises `ControllerProblem`
   `not-found`.
 - `start(env_id) -> ControllerEnvironment` brings the environment up and waits until it settles.
@@ -188,7 +190,7 @@ runs there. The claim ends with its deadline: `_end_claim` clears `server_starte
   wait ran out raises `ExternalServiceException`; a call the controller does not answer raises
   `ControllerUnreachable`. Each of its writes is a transaction of its own. It is safe to repeat: a
   start resumed from its rows calls it as it is. A brain session's start calls it on the store, which
-  is exempt, so the store is started on demand and no timer of Pilot's stops it.
+  is exempt, so the store is started on demand and the shutdown timer never stops it.
 
 **The shutdown timer.** `stop_due_at` is when Pilot stops an environment it started.
 
@@ -225,7 +227,8 @@ An environment is Pilot's own while its row has `server_created_at`: the server 
 knows its own from its rows; the create also makes it a managed environment of Pilot's client at the
 controller, its `managedBy`, by which the controller's list filters. Pilot takes, renames, resets
 and deletes only its own: never an operator's environment of the same repository, the store, or an
-environment a work item was placed in by its id.
+environment a work item was placed in by its id. The one exception is the store's reset at its
+update (`reset`, below).
 
 **Free.** One of Pilot's own is free while it is neither `deleting` nor `gone`, no Session there
 is `running`, `starting` or `held`, nor `stopped` or `failed`, nor `idle` an open work item owed
@@ -257,8 +260,10 @@ Freedom is derived wherever it is read; no column holds it.
   the take's commit, and sets the row's name from the answer. The name is the operator's reading
   aid: nothing of Pilot's reads it, and the env chip shows the row as it stands, so that a finished
   item's chip names the project now using that environment, or its id while it is free.
-- `reset(env_id)` brings a taken one up in a tree made anew, for a start on a new conversation. The
-  controller resets a `stopped` environment only, and its stop takes no `wait`: the stop goes first,
+- `reset(env_id)` brings a taken one up in a tree made anew, for a start on a new conversation. It
+  is called on the store too, at the store's update, the store named by `STORE_ENVIRONMENT_ID` alone
+  ([`store-update.md`](store-update.md)): the one environment Pilot did not create that it resets.
+  The controller resets a `stopped` environment only, and its stop takes no `wait`: the stop goes first,
   whatever the row says, answered `200` when it is stopped already, and a `202`'s settle is awaited;
   one settled other than `stopped` raises `EnvironmentStartFailed` ("it settled <status> after its
   stop"). Then `POST …/reset`, whose `409 admission-blocked` raises `EnvironmentStartFailed` ("the

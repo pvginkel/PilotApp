@@ -152,7 +152,8 @@ objects into each stage's namespace:
   them, starts the stage's store where it is stopped, and the chat's session there
   ([`chats.md`](chats.md)), and Create project starts the setup's there ([`work.md`](work.md)), on
   production as on dev. On either stage a controller that does not answer shows on the gold bar,
-  a badge in the top bar or a line on a phone ([`ui.md`](ui.md)); `kubecoder-dev` is on the dev
+  a badge in the top bar or a line on a phone ([`ui.md`](ui.md)), as does the store's update
+  ([`store-update.md`](store-update.md)); `kubecoder-dev` is on the dev
   cluster, which is often powered off, and the dev stage's bar then says so. Each stage's usage
   limits read the subscription's usage as its own controller serves it on the fleet stream, and run
   on the backend's default limits and halt settings, which the chart does not set
@@ -209,9 +210,13 @@ version keeps an incompatible one out: a sidecar outside the server's range is a
 **How a change reaches a store.** A push to KubeCoderDeploy's `main` rolls `kubecoder-dev`'s
 controller onto the catalog entry, and production's reaches KubeCoder's production fleet through
 KubeCoder's own promotion, `KubeCoder/Promote-PRD`. PilotProjects' files, the service list and the
-hooks among them, reach a store's checkout when the stopped environment is reset
-(`POST /environments/<id>/reset` on the stage's controller), which clones it again from the repo
-and empties the sidecar's data, its shadow with it; a restart does not pull it. The brain's
+hooks among them, reach a store's checkout through the store's update, which holds the store's
+work, stops the store's jobs and chats, and resets the store. The reset clones the repo again and
+empties the sidecar's data, its shadow with it; a restart does not pull it. The update is the
+backend's command, `kubectl --context prd -n pilot-prd exec deploy/pilot -c backend -- python -m
+app.cli update-store`, `-n pilot-dev` on dev, and the testing route
+`POST /api/testing/store-update` on dev ([`store-update.md`](store-update.md)). A reset through
+the controller's API, under the running stage, would take the store from under its sessions. The brain's
 scripts run in the catalog's `python` tool container, which PilotProjects' `.kubecoder/config.yaml`
 lists beside the service, and the store's pod start syncs their environment: the block DSL they
 run on is `pilot-dsl` at the PilotApp commit PilotProjects pins, fetched from GitHub, whatever the

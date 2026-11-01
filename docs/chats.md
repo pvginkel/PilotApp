@@ -34,6 +34,7 @@ the chat's id, which is its Session's, the message's Turn's number in it, the Se
 the error of a send the controller failed, the Turn ended with it ([`sessions.md`](sessions.md)).
 It is a `400` with no words, a `404` for an unknown project, and a `409` with the reason for a
 caller who has not chosen a handle, in an archived project ("its project is archived"),
+while the store's update is unlifted ("Pilot is updating", [`store-update.md`](store-update.md)),
 while the chat's start is under way or held ("its chat is starting"), while a turn of it is in
 flight ("a turn is in flight", the controller's `409 session-busy`, or "a turn of its chat is in
 flight"), and with no controller or no store environment configured.
@@ -95,7 +96,8 @@ draft, a fresh definition chat.
 ## The start in the store
 
 The chat's Session passes the gate as a work item's does ([`sessions.md`](sessions.md)), held while
-the controller is unreachable, never for the pause or a usage halt, and taking no slot
+the store's update is unlifted and while the controller is unreachable, never for the pause or a
+usage halt, and taking no slot
 (`SessionStartService.start_brain`); it is refused with no controller or no store environment
 configured (`STORE_ENVIRONMENT_ID`, [`sync.md`](sync.md)). A chat's turn that dies at the quota
 wall fails as any failed turn does, with no nudge after it: the person sends again (D096,
@@ -103,7 +105,9 @@ wall fails as any failed turn does, with no nudge after it: the person sends aga
 store's Environment row made from the controller's report where Pilot has none yet, the Session's
 Environment written under its lock with "Starting <store's name>…", and the store started and its
 settle awaited, as a stopped store is started on demand ([`controller.md`](controller.md)). The
-store is exempt, so no timer of Pilot's stops it again. Then "Creating the session…", and the
+store is exempt, so the shutdown timer never stops it: only the store's update stops and resets it,
+stopping a chat's running turn first and leaving the chat open
+([`store-update.md`](store-update.md)). Then "Creating the session…", and the
 create as `scoped_create` derives it ([`sessions.md`](sessions.md)): the cwd read-only, the
 project's folder, `/work/Projects/<folder>`, the one folder under `/work` it writes, `PILOT_PROJECT`
 naming that folder, `PILOT_SESSION` its own Session's id, and `pilot-store` handed to it
@@ -429,11 +433,12 @@ The browser suites are `frontend/tests/chat/` (`chat-tab.spec.ts`, `composer.spe
 `tests/projects/new-project.spec.ts` and `create-project.spec.ts` for the definition chat. The
 Playwright backends start every chat in the store environment of their own fake, `playwright-store`
 (`STORE_ENVIRONMENT_ID`, `loadAppBackendEnv()`), which the `chats` fixture
-(`frontend/tests/support/chats.ts`) puts there once per backend with the store repo and the
-project's folder on its tree. `chats.start(project, words, other?)` sends a message and answers
+(`frontend/tests/support/chats.ts`) puts there once per backend. `stock()` puts the store repo on
+its tree, on every call, since the store's update's reset clears the tree
+([`store-update.md`](store-update.md)), and `stocked()` says whether it is there. `chats.start(project, words, other?)` sends a message and answers
 `{chat, session}` once the store's session works, and `chats.opening(project, folder?)` readies the
 store for a message sent from the composer and answers a wait for its session; `ready(project,
-folder?)` puts the project's folder on the store's tree, an open project's slug unless a draft's
+folder?)` stocks the store and puts the project's folder on its tree, an open project's slug unless a draft's
 `draft-<number>` is named, as `projects.makeDraft` answers it, so `ready(project, slug)` before
 Create lets the setup start; the spec plays a turn with `controller.play` and `finish` on
 `chats.store`. `send`, `working(session)`, `idle(project)`, `stop`, `seen`, `list` and `other(name,

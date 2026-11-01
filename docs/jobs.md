@@ -5,7 +5,7 @@ The backend's long-lived work runs as threads of its own process, under the supe
 consumer, a relay per session with a turn in flight, an interrupt per turn stopped under it, a start
 per session coming up, the release of the held ones, the usage halts' hard stop and the nudges, the
 halt file's writes and deletes, the reads and the write-backs of the documents a work item's run
-registered, the standing notifications' and the alarms' sends, and the timers.
+registered, the store's update, the standing notifications' and the alarms' sends, and the timers.
 Every job resumes from rows, so nothing drains to completion: a roll or a crash costs a restart of
 the job, never its work.
 
@@ -22,6 +22,7 @@ the job, never its work.
 | `halt-file:<env id>` | a loop of the job `halt-file` | writes or deletes the halt file in the environment until it is as the rows want it ([`usage.md`](usage.md)) |
 | `read:<session id>` | a loop of the job `read` | reads the documents a work item's ended run registered, and publishes each or fails its read ([`round-trip.md`](round-trip.md)) |
 | `write-back:<session id>` | a loop of the job `write-back` | writes a run's closed registered documents back to their files ([`round-trip.md`](round-trip.md)) |
+| `store-update` | a job with one loop | runs the unlifted store's update's sequence from its row: the stop, the reset, the retry and the lift ([`store-update.md`](store-update.md)) |
 | `usage-halts` | a timer | decides the usage halts again, for a stale reading's window past its reset ([`usage.md`](usage.md)) |
 | `halt-file` | a timer | sweeps the halt files ([`usage.md`](usage.md)) |
 | `environment-shutdown` | a timer | stops the idle environments Pilot started ([`controller.md`](controller.md)) |
@@ -30,6 +31,7 @@ the job, never its work.
 | `relay-watchdog` | a timer | restarts a relay the fleet stream shows stuck or stopped ([`sessions.md`](sessions.md)) |
 | `controller-probe` | a timer | while the controller is unreachable, asks whether it answers ([`controller.md`](controller.md)) |
 | `nudges` | a timer | asks for `start:nudges` while a nudge owed is held by nothing, or a wall decided missed still owes one ([`usage.md`](usage.md)) |
+| `store-update` | a timer | tells the conditions when the unlifted store's update turned, and runs the job `store-update` while one stands not waiting for the sync ([`store-update.md`](store-update.md)) |
 | `notification:<project id>` | a loop of the job `notification` | brings each member's standing notification of the project to what the record says ([`notifications.md`](notifications.md)) |
 | `notification-clear:<n>` | a loop of the job `notification-clear` | dismisses, once each, a person's project notifications through the token they just cleared ([`notifications.md`](notifications.md)) |
 | `alarm` | a job with one loop | brings every person's alarms to the conditions that hold ([`notifications.md`](notifications.md)) |
@@ -37,8 +39,8 @@ the job, never its work.
 | `notification-retry` | a timer | asks for the reconcile of each project with a notification owed past its retry ([`notifications.md`](notifications.md)) |
 | `alarm-retry` | a timer | asks for the alarms' reconcile when the alarms due have turned, or while one is owed past its retry ([`notifications.md`](notifications.md)) |
 
-Each but the notifications', the alarms' and the timers `usage-halts` and `nudges` needs the
-controller. With `CONTROLLER_URL` unset (the
+Each but the notifications', the alarms' and the timers `usage-halts`, `nudges` and `store-update`
+needs the controller. With `CONTROLLER_URL` unset (the
 backend suite, a dev stack without the credential), none of them starts, and the log says so once at
 STARTUP: `No controller configured (CONTROLLER_URL unset): the jobs and timers that need one do not
 start (<names>)`. Production refuses to start without `CONTROLLER_URL` and `CONTROLLER_TOKEN`; the
@@ -55,7 +57,8 @@ a registration after STARTUP raises `InvalidOperationException`.
 - **A job**: `register_job(job, *, needs_controller, reconcile=None)`. Its reconcile,
   `Callable[[Session], None]`, runs once at STARTUP in a database session of its own, which commits
   when it returns and rolls back when it raises. The reconciles run in registration order (`fleet`,
-  `halt-file`, `read`, `relay`, `interrupt`, `start`, `write-back`, `notification`, `alarm`) on a thread of the
+  `halt-file`, `read`, `relay`, `interrupt`, `start`, `store-update`, `write-back`, `notification`,
+  `alarm`) on a thread of the
   supervisor's, not the lifecycle coordinator's, so the server serves while they run. One that
   raises is logged, and its job's loops start regardless.
 - **A loop**: `start_loop(job, run, key=None, *, again=False) -> bool` runs `run(handle)` on a
@@ -75,8 +78,8 @@ a registration after STARTUP raises `InvalidOperationException`.
   stopping the loop, and is True when it closed something.
 - **A timer**: `register_timer(timer, run, *, needs_controller)`. The scheduler runs the timers in
   registration order (`usage-halts`, `halt-file`, `environment-shutdown`, `environment-delete`,
-  `chat-close`, `relay-watchdog`, `controller-probe`, `nudges`, `notification-retry`, then
-  `alarm-retry`), the first round at STARTUP, then
+  `chat-close`, `relay-watchdog`, `controller-probe`, `nudges`, `store-update`,
+  `notification-retry`, then `alarm-retry`), the first round at STARTUP, then
   each round `SCHEDULER_TICK_SECONDS` after the last ended. Each run has a database session of its
   own; one that raises is logged and counted, and the rest of the round runs.
 

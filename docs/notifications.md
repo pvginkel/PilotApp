@@ -181,12 +181,14 @@ unless the person holds that same token again, whose save submits afresh.
 and app-wide condition, for every person who holds a token and whose alarms switch is on. Pilot
 holds none. The conditions that hold are the conditions service's, which the gold bar shows
 ([`controller.md`](controller.md), [`ui.md`](ui.md)), taken by their codes, so that each condition
-it tells of has its alarm (D089): the outage, and the week's and the five-hour usage halts
+it tells of has its alarm (D089): the outage, the store's update
+([`store-update.md`](store-update.md)), and the week's and the five-hour usage halts
 ([`usage.md`](usage.md)).
 
 | Condition | Title | Message | Priority |
 |---|---|---|---|
 | `outage` | The controller has been unreachable | Nothing starts until it answers. | `high` |
+| `store_update` | Pilot is updating its store | No chat answers and no job starts until it is done. | `default` |
 | `week_halt` | The week's usage halt | Work items are halted until a reading puts the week's share back under its limit, or someone overrules the halt. | `high` |
 | `five_hour_halt` | The five-hour usage halt | Work items are halted until a reading puts the five-hour window's share back under its limit. | `default` |
 

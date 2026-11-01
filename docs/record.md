@@ -176,6 +176,16 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   which run-out has none (`ck_quota_overrules_target`), and `ended_at`, written once by the server.
   At most one holds, its `ended_at` none (`uq_quota_overrules_holding`).
 
+**The store's update** ([`store-update.md`](store-update.md))
+
+- `store_updates`: an update of the store, the hold on the store's work while it is not lifted:
+  `made_at`, written by its make. The server writes the phases, each once, in order: `stopped_at`,
+  `reset_at` and `reconciled_at`, though `reconciled_at` can come before `reset_at`. Then
+  `lift_requested_at`, written by a lift's ask, and `lifted_at`. `error` is the sequence's last
+  failure, cleared at the next attempt. At most one is not lifted, its `lifted_at` none
+  (`uq_store_updates_unlifted`). No column names the jobs an update stopped: they are read from
+  their stop, a job's Session stopped by Pilot while the update stood.
+
 ## The reference values
 
 Twenty-two are PostgreSQL enum types, each a `StrEnum` in `backend/app/models/reference.py`, and four

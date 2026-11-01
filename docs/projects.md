@@ -426,6 +426,10 @@ answers only in testing mode ([`sign-in.md`](sign-in.md)).
   ([`chats.md`](chats.md)). It answers `201` `{effect}`, the effect's line; an unknown project,
   block or handle is a `404`, and a project with no chat open, a chat with no turn in flight or an
   answer the record refuses a `409`.
+- `POST /api/testing/store-update` `{lift?}` makes the store's update, `201`, or with `{"lift":
+  true}` asks the unlifted one's lift, `200`, as `update-store` does; each answers the update's row,
+  and a second make or a lift with none under way is a `409`
+  ([`store-update.md`](store-update.md)).
 
 A project past the draft, born with its opening, an item placed, a work item placed, an item's save
 posted, Pilot's Done and attachments hung each raise `project_changed` through the engine, so an

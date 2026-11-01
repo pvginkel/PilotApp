@@ -105,6 +105,10 @@ sidecar last synced it, `shadow`, each a map of path to hash. It answers `{"mani
 - `send_up`: every manifest path whose hash on disk is not its shadow's. The sidecar sends those up
   before it asks, so the list is a cross-check, logged as a warning and never acted on.
 
+A manifest with an empty shadow is a fresh sidecar's, as after the store's reset. Its reconcile
+tells the store's update (`StoreUpdater.reconciled`), which writes its `reconciled_at` while it
+waits for one ([`store-update.md`](store-update.md)).
+
 A file the record never bore is in neither the manifest nor the shadow, so it is in no list, and a
 reconcile never removes it. A held document's tree hash is its ingest's, so a file still holding
 the held save is not written down. A held `plan.json` is: its rendering is written down canonical,

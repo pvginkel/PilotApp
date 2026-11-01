@@ -95,7 +95,7 @@ first tick. A turn logs `The week's halt holds: work items' starts are held` or 
 lifted: held work items go on`, and an overrule's end `Quota overrule <id> (<kind>) ended: …`.
 
 Each halt that holds is a condition of the conditions service, `week_halt` and `five_hour_halt`,
-after the outage, the week's first, with its `since`, its `share`, the reading's `taken_at` and
+after the outage and the store's update ([`store-update.md`](store-update.md)), the week's first, with its `since`, its `share`, the reading's `taken_at` and
 whether it is `stale`, and the week's with the overrule it offers (`GET /api/conditions`,
 [`ui.md`](ui.md)); the alarms take them by their codes ([`notifications.md`](notifications.md)).
 A halt's line gives the reading's age, "as of <time>", only while the reading is stale (D102): the
@@ -200,7 +200,8 @@ sends again.
 wall a reading decided missed (below); then it takes each Session whose nudge is owed and that
 nothing holds, in the order they were owed: its item open; its project neither finished, archived
 nor paused, a setup's nudge going through the pause as the gate lets the setup's start; a work
-item's with no usage halt holding; and one at the wall once a reading confirmed it and there is
+item's with no usage halt holding; a job's while no store's update stands
+([`store-update.md`](store-update.md)); and one at the wall once a reading confirmed it and there is
 quota again. Each, under its project's row and then its own lock, read again there, is carried on as
 a Resume carries one on (`_carry_on`): a Turn of the server's own with the nudge's words, or the
 ended Turn's message while the Session has no conversation, its `error` cleared and its nudge owed
@@ -214,7 +215,7 @@ Session whose stopped turn is still ending waits for the next run.
 | every other: one halted at its turn's end, one at the quota wall | "The subscription quota ran out. This is a nudge to allow you to complete any outstanding work, if any." |
 
 The nudges are asked for at a halt's turn and at an overrule made, at a resume's commit
-([`projects.md`](projects.md)), at each reading recorded while a turn at the wall owes its nudge, at
+([`projects.md`](projects.md)), at the store's update's lift, at each reading recorded while a turn at the wall owes its nudge, at
 STARTUP, by the start job's reconcile, and by the timer `nudges` on every tick while a nudge owed is
 held by nothing or a wall decided missed still owes one. A person's Resume of a hard-stopped work
 item clears its nudge owed, its own continuation standing in for it: one continuation, never two.

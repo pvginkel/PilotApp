@@ -912,8 +912,9 @@ POD=$(cexec iac kubectl -n pilot-dev get pods -l app.kubernetes.io/name=pilot -o
    starts the store where it is stopped and the chat's session in it, boxed and briefed, its records
    read as any session's ([`chats.md`](chats.md)).
 
-   A PilotProjects change reaches the store through the store's update, `POST
-   /api/testing/store-update` on `pilot-dev` as the signed-in person, and never through a stop or a
+   A PilotProjects change reaches the store through the store's update
+   ([`store-update.md`](store-update.md)), `POST /api/testing/store-update` on `pilot-dev` as the
+   signed-in person, and never through a stop or a
    reset on `kubecoder-dev`'s API, which takes the store from under `pilot-dev`'s running sessions.
    The route makes the update, `201`, or answers `409` while one is under way. Its hold on the
    store's work stands from the request's commit, a chat's message refused and a job's start held
@@ -972,7 +973,8 @@ production then shows its users is the operator's to see; nothing here signs in 
 `https://pilot.ginbov.nl`.
 
 A slice whose change to PilotProjects needs the store reset ends its close-out with an `action`
-entry that names the store's update on production as the operator's to run:
+entry that names the store's update ([`store-update.md`](store-update.md)) on production as the
+operator's to run:
 
 ```bash
 kubectl --context prd -n pilot-prd exec deploy/pilot -c backend -- python -m app.cli update-store
@@ -981,6 +983,6 @@ kubectl --context prd -n pilot-prd exec deploy/pilot -c backend -- python -m app
 It holds the store's work, stops, resets and starts production's store onto PilotProjects' `main`,
 which carries what the slice pushed, retries the jobs it stopped and lifts the hold, printing each
 phase until the lift. The entry says that no PilotApp environment can run it: none can `exec` into
-`pilot-prd`, and PilotApp takes no `kubePrdWrite`. Where the promotion's action is due too, it comes
+`pilot-prd`, and PilotApp takes no `kubePrdWrite`, the run being the operator's (D116). Where the promotion's action is due too, it comes
 after that one, since production's store runs against production's build. Its Consequence:
 production's store runs the brain's skills as before the slice.
