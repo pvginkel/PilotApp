@@ -208,7 +208,10 @@ still held leaves that save held, its item showing its last published text, and 
 any session of the project meets the fault through the hooks ([`sync.md`](sync.md)). A save is a
 session's when its ingest names that session: in the store, the session that held the project
 folder's write lock as the sidecar read the file ([`sync.md`](sync.md)). A save made with no lock
-held is no session's, and brings no follow-up.
+held is no session's, and brings no follow-up; nor does one that lands after its session's turn
+ended, which no turn's end returns ([`engine.md`](engine.md)): held, it stays so, its item a
+concept, as one a follow-up left, and the next turn of any session of the project meets the fault
+through the hooks.
 
 ## Stopping Pilot's answer
 

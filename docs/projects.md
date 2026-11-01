@@ -359,17 +359,18 @@ answers only in testing mode ([`sign-in.md`](sign-in.md)).
   project's session, a worker's in the test data, places none. A project with no session, unless
   `by_pilot`, or a text with a fault, is a `409`.
 - `POST /api/testing/items/<id>/saves` `{text}` ingests an agent's save of the item's file by that
-  session, on the tree's current hash, as the store's sync does, and answers `200` `{held, faults:
-  [{line, message}]}`. A held save leaves the item a concept until a clean one.
+  session, in a Turn of it in flight, opened when it has none, on the tree's current hash, as the
+  store's sync does, and answers `200` `{held, faults: [{line, message}]}`. A held save leaves the
+  item a concept until a clean one.
 - `POST /api/testing/projects/<id>/draft/saves` and `…/handbook/saves` `{text}` ingest a save of the
   project document or the handbook by the project's session, as an item's does, with the same
   answer. An unknown or archived project, and a draft's handbook, are a `404`; a project with no
   session a `409`.
 - `POST /api/testing/projects/<id>/turn-ends`, no body, ends the turn of the project's session
-  started last as the relay does ([`engine.md`](engine.md)), and answers `204`: Pilot's writing
-  flag cleared on every document the session was saving, each raising `project_changed`, and a
-  `turn` Version cut of each whose text moved. An unknown project is a `404`, one with no session a
-  `409`.
+  started last as the relay does ([`engine.md`](engine.md)), its Turns in flight with it, and
+  answers `204`: Pilot's writing flag cleared on every document the session was saving, each
+  raising `project_changed`, and a `turn` Version cut of each whose text moved. An unknown project
+  is a `404`, one with no session a `409`.
 - `POST /api/testing/items/<id>/done`, no body, marks a document Done as Pilot does one it settled
   or deferred whole, by the project's session, and answers `204`: cause `settled`, a `done` Version
   cut, a registered document of one block taken as Pilot's `mark` takes it ([`mcp.md`](mcp.md)). An

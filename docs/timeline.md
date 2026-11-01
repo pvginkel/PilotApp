@@ -47,8 +47,8 @@ each with:
   `read_minutes`, that count at 230 words a minute, rounded half up, at least 1; both null where
   `body` is;
 - `writing`: whether a session's running turn is saving the text (`Document.writing_session_id`).
-  A save sets it and the turn's end clears it, each raising `project_changed`
-  ([`engine.md`](engine.md));
+  A save in its session's turn sets it, one landing after that turn ended never, and the turn's
+  end clears it, each raising `project_changed` ([`engine.md`](engine.md));
 - `edited_at`: the time of the latest `turn` Version that follows the first Version whose text has
   anything in `dsl.body`, the first text the item was shown with; null where no such Version
   follows it, and where `body` is null (D032);

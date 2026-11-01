@@ -133,14 +133,17 @@ brain session that held the project folder's write lock as the sidecar read the 
   with no base hash is stale;
 - `held`, and `faults`: what held the save, or what the merge put back or took out.
 
-A save of a document runs in one transaction, under the document's row lock:
+A save of a document runs in one transaction, under the row lock of the session it is credited to,
+when it is one's, then the document's, the order a turn's end takes them in, so that a save and its
+session's turn end are taken one after the other:
 
 1. The bytes are decoded. Bytes that are not UTF-8, and NUL, which PostgreSQL's `text` cannot
    hold, are replaced by U+FFFD with a fault at the line of the first; the answer carries the
    replaced text.
-2. The save is stored as the document's ingest, with its session. A session given that is not the
-   one writing the document becomes the writer from now, which raises `ProjectChanged`: Pilot's
-   dots show on the document.
+2. The save is stored as the document's ingest, with its session. A session given that has a Turn
+   in flight and is not the one writing the document becomes the writer from now, which raises
+   `ProjectChanged`: Pilot's dots show on the document. A save that lands after its session's turn
+   ended is late: it makes no writer, and leaves the document's writer as it is.
 3. The path's `parse` Save Errors go, in every environment: the save's faults replace them.
 4. The text is validated against the record ([`block-dsl.md`](block-dsl.md)): every user's
    handle, the plan's tasks and removed tasks, the confirmation reasons, the other projects' slugs,
@@ -150,6 +153,11 @@ A save of a document runs in one transaction, under the document's row lock:
 6. With none, the save is merged by ownership against the published text and the result
    published, with a `reverted` Save Error per fault the merge reports; the answer carries the
    merged text where it differs from the save. The `reverted` rows of earlier saves stand.
+7. A late save not held cuts its session's `turn` version at once, where the published text moved
+   since the last version (`cut_turn_version`, below), and raises `ProjectChanged`: no turn's end
+   is left to cut it, and the document's *Edited* time is the save's (D113). A held one cuts
+   nothing. A document the turn saved can so take two `turn` versions of the one session, when the
+   turn's end commits before the late save.
 
 `project.md` is read as a draft while its project is one, and past Create project under the
 handbook's rules ([`block-dsl.md`](block-dsl.md)): a person's answered block frozen, a dropped one
@@ -298,7 +306,8 @@ trim every value and read a blank note as none.
 
 `DocumentService.turn_ended(session)` clears the writing session of every document `session` was
 writing, cuts a `turn` version of each whose published text changed since its last version, its
-`created_at` the clock's at the cut, and
+`created_at` the clock's at the cut (`cut_turn_version(document, session_id)`, which a late save
+calls too), and
 returns the paths, from the tree's root and sorted, of those whose latest save is still held. It
 raises `ProjectChanged` for each document it lets go, whatever the Session's state. The relay calls
 it in the transaction that ends a turn on the controller's `result` frame, and in the one that ends
@@ -322,7 +331,7 @@ already emitted in the transaction is delivered once.
 | `ErrorsRaised(project_id, path)` | on every held save |
 | `ErrorsResolved(project_id, path)` | on a clean save after a held one, and when a held `plan.json` is written down |
 | `ManifestChanged()` | when the set of syncing projects or their folders changed: a draft started from the plus, a project created, archived or brought back ([`projects.md`](projects.md)), and the sync's testing endpoint |
-| `ProjectChanged(project_id)` | when what the project's timeline, head or tab shows moved: with every `TreeHashMoved` of its `timeline.json`; on a publish that changes the published text of an item, a record write on a held item included, of the handbook or of the project document; on a save that holds an item or ends its hold; on a save that makes its session a document's writer, and for each document a turn's end lets go; on a save of `plan.json` that moved its rendering; on a pause, a resume, a join and a leave ([`projects.md`](projects.md)); on every move of one of its Sessions' state; on a chat's open and close ([`chats.md`](chats.md)); on a registered document's failed read, and on a continuation released, which takes Undo from its run's documents ([`round-trip.md`](round-trip.md)). `ProjectEventService` sends it to the browsers ([`timeline.md`](timeline.md)), and it starts the project's notification reconcile ([`notifications.md`](notifications.md)) |
+| `ProjectChanged(project_id)` | when what the project's timeline, head or tab shows moved: with every `TreeHashMoved` of its `timeline.json`; on a publish that changes the published text of an item, a record write on a held item included, of the handbook or of the project document; on a save that holds an item or ends its hold; on a save that makes its session a document's writer, on a late save that cuts its session's `turn` version, and for each document a turn's end lets go; on a save of `plan.json` that moved its rendering; on a pause, a resume, a join and a leave ([`projects.md`](projects.md)); on every move of one of its Sessions' state; on a chat's open and close ([`chats.md`](chats.md)); on a registered document's failed read, and on a continuation released, which takes Undo from its run's documents ([`round-trip.md`](round-trip.md)). `ProjectEventService` sends it to the browsers ([`timeline.md`](timeline.md)), and it starts the project's notification reconcile ([`notifications.md`](notifications.md)) |
 | `WriteBackOwed(session_id)` | on a close that owes a registered document's text to its file, and on a Resume that owes a refused one again; the write-back service hears it ([`round-trip.md`](round-trip.md)) |
 | `WorkMoved(project_id, work_id)` | when what a work item's line shows of its Session moved: its state, its current line, its start or its error ([`work.md`](work.md)). `ProjectEventService` sends it with the work item's status |
 
@@ -334,3 +343,7 @@ serve them: `engine_events`, every event the bus delivers during the test, and `
 store's sidecar played against the sync routes ([`sync.md`](sync.md)): `save()` writes a file and
 puts it, and `drain()` fetches what the change stream says moved. The bus delivers on a commit, so
 a test reads events after committing through `scoped_session(container)` or a request context.
+A save credited to a session is late unless that session has a Turn in flight: a test that saves as
+a session and expects it writing calls `turn_in_flight(db, run)` from
+`backend/tests/support/turns.py` first, and `end_turns(db, run)` ends its Turns as a turn's end
+does.

@@ -164,9 +164,10 @@ item's Session ("… is a work session, not a chat's or a job's") and for a chat
 turn is not running, so a bearer acts only while its turn does. A call acts on the bearer's project
 alone: an item, a block or an attachment of another project is a `404` "… was not found". `for`
 names a person by their handle, `404` "Person <handle> was not found" for one no person has, Pilot's
-`agent` included. Every write locks the Project's row first and the Session's for the effect after,
-the order Finish takes. A refusal of the record's is a `409` with the reason, the record unchanged,
-and a controller that does not answer or refuses for a reason of its own a `502`.
+`agent` included. Every write locks the Project's row first, the order Finish takes, then the
+Session's, before any Document's, the order a store save of the brain's takes its Session's and its
+Document's in ([`engine.md`](engine.md)). A refusal of the record's is a `409` with the reason, the
+record unchanged, and a controller that does not answer or refuses for a reason of its own a `502`.
 
 - **`add_item(item)`**, `POST …/items`, answers `201` `{id, path, state, held, effect}`. `item` is
   one object in `timeline.json`'s shape ([`projection.md`](projection.md)): `kind` (`decision`,

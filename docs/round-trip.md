@@ -50,11 +50,15 @@ of session <id> no longer awaits its read`).
 
 - **A clean text** is published as written (`publish_read`), and the timeline moves live.
 - **A failed read**: the controller's `404` (the file or the environment gone), `403
-  path-outside-work`, `409 not-a-file`, `413 file-too-large` or `409 conflict` (a link loop, or a
-  manifest the controller cannot read the layout from), or a text with faults (`its text holds
-  faults: line N: …`). The document keeps no text (`fail_read`, which emits `ProjectChanged` alone),
-  and the registering Session's log gets the `server` record `{"type": "read-failed", "item",
-  "path", "reason"}`, in no Turn.
+  path-outside-work`, `409 not-a-file` or `413 file-too-large`, a `409 conflict` once its wait has
+  passed (below), or a text with faults (`its text holds faults: line N: …`). The document keeps no
+  text (`fail_read`, which emits `ProjectChanged` alone), and the registering Session's log gets the
+  `server` record `{"type": "read-failed", "item", "path", "reason"}`, in no Turn.
+- **Made again**: a `409 conflict` (a link loop, a manifest the controller cannot read the layout
+  from, or the path changed during the call, which settles) is read again every 5 s until 5 minutes
+  have passed since its first refusal, and is then a failed read with the controller's last answer
+  (D112). The loop reads a round at a time, every document still owed in each, so that the run's
+  waits run side by side (`RefusalWaits`, `backend/app/services/refusal_waits.py`).
 - **Retried**: a read the controller does not answer, its `503 environment-unreadable`, or any other
   refusal of its own raises, and the loop runs again after its backoff ([`jobs.md`](jobs.md)),
   waiting the outage out. Each document is its own transaction: one failing leaves the others.
@@ -142,9 +146,21 @@ and a second close have the loop write the new text. A write taken sets `written
   registering Session's log gets `{"type": "write-back-refused", "item", "path", "reason"}`, in no
   Turn, live on its stream. It is not written again until the document's next close, after an Undo,
   or the Resume of the continuation that carries it.
-- **Retried**: a write the controller does not answer, its `409 conflict` (its own work on the
-  tree), its `503 environment-unreadable` or any other refusal of its own raises, and the loop runs
-  again after its backoff.
+- **Refused once its wait has passed**, for a reason of the controller's own: its `409 conflict`
+  (its own work on the tree), its `503 environment-unreadable`, or any other answer, a `401`, a
+  `422` or a `500` among them. The write is made again every 5 s while Pilot's record has its
+  environment coming up or being deleted (`last_state` `provisioning`, `starting` or `deleting`, as
+  the fleet stream reports it), then until 5 minutes have passed since its first refusal after that,
+  and is then refused as above, with the controller's last answer (D112). The loop writes a round at
+  a time, every document still owed in each, so that the documents a continuation carries wait those
+  minutes side by side (`RefusalWaits`, `backend/app/services/refusal_waits.py`), and each close
+  owes its write afresh, with a wait of its own.
+- **Retried**: a write the controller does not answer raises, and the loop runs again after its
+  backoff, with no wait started.
+
+The waits are a run's own, in memory: a restart, or a run that raises, starts them afresh. A
+wait's first refusal logs `Write-back of document <path> of session <id> refused, made again for
+300 s: <reason>`, and a read's `Read of document …` the same.
 
 A document whose read failed has no text to write. Finish's close, cause `finished`, owes no
 write-back and continues nothing (D049): with no document of the run open and no continuation to
@@ -183,11 +199,12 @@ skill's to leave unstarted (D076).
   is archived (D012).
 - **Its start writes back first.** Before its environment is brought up, which the controller
   refuses a write during, its start loop runs the write-backs the documents it carries still owe.
-  One the controller refused, before or in that run, fails the start: its line reads "Failed ·
-  Cannot write <path> back because <reason>", the reason read from the run's `write-back-refused`
-  record, with a `start-failed` record in its own log. A `409 conflict` or a `503` waits it out on
-  the loop's backoff, the line "Starting <environment>…" meanwhile; a controller that does not
-  answer holds it; any other failure fails it.
+  One the controller refused, before or in that run, one refused for a reason of its own once its
+  wait has passed, fails the start: its line reads "Failed · Cannot write <path> back because
+  <reason>", the reason read from the run's `write-back-refused` record, with a `start-failed`
+  record in its own log. The documents it carries are written in one run, their waits side by
+  side, the line "Starting <environment>…" meanwhile; a Stop ends the wait between two rounds,
+  and nothing is brought up. A controller that does not answer holds it.
 - **Its Resume** owes the refused write-backs again (`RecordService.retry_write_backs`), so that its
   start writes them first, and sends the continuation's message, not `continue`, while no Turn of
   its Session has gone out ([`sessions.md`](sessions.md)).
@@ -218,15 +235,19 @@ documents is open, the continuation's Session holds it as any Session holds its 
 ## Testing it
 
 The backend's tests are `backend/tests/services/test_turn_end_read_service.py` (the reads, their
-refusals, the outage, startup, Finish racing a read, the lock order), `test_write_back_service.py`
-(each close, a stopped environment, the order, the refusals, the retries, Undo, the outage,
-startup, Undo racing a write, the lock order), `test_session_start_service.py` (`TestContinueRun`,
-`TestRunContinuation`, `TestClarify`), `test_clarification_service.py` and `test_relay_service.py`
+refusals, the waits, the outage, startup, Finish racing a read, the lock order),
+`test_write_back_service.py` (each close, a stopped environment, the order, the refusals, the waits,
+the retries, Undo, the outage, startup, Undo racing a write, the lock order),
+`test_refusal_waits.py`, `test_session_start_service.py` (`TestContinueRun`, `TestRunContinuation`,
+`TestClarify`), `test_clarification_service.py` and `test_relay_service.py`
 (`TestClarificationRun`), `test_environment_service.py` (the binding) and
 `test_project_event_service.py` (a second connection hears the release); and
-`backend/tests/engine/test_record.py` (`TestRecordServiceRelease`, `TestRecordServiceRetryWriteBacks`,
-`TestResumeMessage`, `TestRecordServiceReleaseLocks`, `TestRecordServiceWriteBackOwed`) and
-`test_documents.py`.
+`backend/tests/engine/test_record.py` (`TestRecordServiceRelease`,
+`TestRecordServiceRetryWriteBacks`, `TestResumeMessage`, `TestRecordServiceReleaseLocks`,
+`TestRecordServiceWriteBackOwed`) and `test_documents.py`. Both services take their waits as
+`refusal_wait_seconds` and `refusal_retry_seconds`, which the tests set small, a continuation's
+through the container's `write_back_service` (`_write_backs_waiting`), and `RoundsHandle`
+(`backend/tests/support/supervisor.py`) runs the test's own step between two rounds.
 
 `frontend/tests/work/registered.spec.ts` plays the round trip against the fake controller: a spec
 writes the file with `controller.putFile`, registers it with `projects.register`

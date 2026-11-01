@@ -191,8 +191,18 @@ before anything is written, and a `200`'s bytes are written over the file, with 
 the file still holds the bytes sent: what the agent wrote meanwhile stays, and goes up next. Every
 write is a temp file in the file's directory, named `.pilot-sync-…`, renamed over it. The client
 refuses an answer whose `X-Pilot-Hash` is not the hash of the bytes the file then holds. A `404`
-leaves the file as it is, with a local note; any other failure is logged, and the next reconcile
-sends the file up. A file deleted sends nothing: nothing is deleted going up, and the reconcile
+leaves the file as it is, with a local note. A PUT that failed for a reason that can pass, a `5xx`,
+the gate's `502` among them, or a call with no whole answer (not sent, timed out, or a success's
+body broken off), is made again after a wait, 1 s doubling to 30 s, for as long as it fails so. A
+change of the path, or a release's flush or a reconcile sending it, ends the wait at once, so that
+neither waits on it. Any other failure, a `400`, `401`, `403`, `413` or `426`, a refusal whose body
+broke off, or an answer the client refuses, is logged, and the next reconcile sends the file up. A
+path whose last PUT failed waits to go up, counted pending (`/healthz`, below) until a later pass of
+it lands it or finds it in sync or gone. The log says each: `cannot sync a file of the tree:
+retrying`, with the wait as `in`, for a failure that can pass, `cannot sync a file of the tree` for
+any other, and `no longer waiting to go up` once a path that waited no longer does, each with the
+count as `pending`, which `the change stream is open`, `the change stream dropped: reconnecting` and
+`reconciled` carry too. A file deleted sends nothing: nothing is deleted going up, and the reconcile
 writes a file of the record back down.
 
 **Down.** The sidecar holds the change stream open. It reconciles on every connect, then applies
@@ -230,7 +240,10 @@ The sidecar serves the store's hooks on `127.0.0.1:<PILOT_SYNC_LOCAL_PORT>`, ans
 write lock as the sidecar reads the file, and the check is the lock's release, which reports the
 project's whole list (D077):
 
-- `GET /healthz`: `200`, `ok`.
+- `GET /healthz`: `200`, three lines: `ok`; `connected: true` while the change stream is open,
+  else `connected: false`; and `pending: <n>`, the changes waiting to go up, the paths whose last
+  PUT failed (above). It answers `200` whatever is pending, so that a probe of it restarts no
+  sidecar over a change waiting to go up.
 - `POST /lock`, `{"project", "session", "pid"}`: the project's folder, absolute (the session's
   `PILOT_PROJECT`), the brain session's Session id (its `PILOT_SESSION`, [`sessions.md`](sessions.md))
   and the pid of the session's Claude process. It answers `200` once the session holds the folder's
@@ -356,7 +369,8 @@ production's store.
   The engine's tests use it too.
 - **The sidecar.** `kc project test --project sidecar` runs `go test -race ./...`. The tests play
   the routes from an `httptest` server over a record of their own, on a temporary tree and data
-  directory, and serve the hooks' endpoint on a free port.
+  directory, and serve the hooks' endpoint on a free port. `retrying(sidecar)` (`server_test.go`)
+  makes the waits before a retry the test's.
 - **Live.** `scripts/sync-live-proof.py` runs the binary against the dev stack
   ([`slice-test-plan.md`](slice-test-plan.md) §2). Two testing endpoints set off there what only
   the record can, and answer `400` `ROUTE_NOT_AVAILABLE` unless the server runs with
