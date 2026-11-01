@@ -37,6 +37,7 @@ from app.models import (
     Attachment,
     Block,
     Document,
+    DocumentVersion,
     Environment,
     PlanTask,
     Project,
@@ -50,9 +51,11 @@ from app.models.reference import (
     SessionState,
     TaskStatus,
     UserKind,
+    VersionCause,
 )
 from app.services.container import ServiceContainer
 from tests.support.fake_sidecar import FakeSidecar, Put
+from tests.support.turns import end_turns, turn_in_flight
 
 DRAFT = "---\ntitle: Badge colours\n---\n\nWhich colours for the badges?\n"
 
@@ -93,6 +96,8 @@ options:
   - Tunnel
 ```
 """
+
+SHORTER = HANDBOOK.replace("Keep it short.", "Keep it shorter.")
 
 TENT_FRONT_MATTER = "---\ntitle: Which tent?\n---\n"
 
@@ -171,6 +176,20 @@ def _task(
     session.add(task)
     session.flush()
     return task
+
+
+def _versions(
+    session: DbSession, document: Document
+) -> list[tuple[int, VersionCause, str | None, uuid.UUID | None]]:
+    """The document's Versions in order: number, cause, text and Session."""
+    return [
+        (version.number, version.cause_code, version.text, version.session_id)
+        for version in session.scalars(
+            select(DocumentVersion)
+            .where(DocumentVersion.document_id == document.id)
+            .order_by(DocumentVersion.number)
+        )
+    ]
 
 
 def _open(session: DbSession, project: Project, slug: str) -> None:
@@ -1336,6 +1355,7 @@ class TestIngestServiceMerge:
 
     def test_the_writing_columns_take_the_saves_session(
         self,
+        session: DbSession,
         container: ServiceContainer,
         project: Project,
         environment: Environment,
@@ -1343,6 +1363,7 @@ class TestIngestServiceMerge:
     ) -> None:
         draft = _bear_draft(container, project, DRAFT)
         path = f"draft-{project.number}/project.md"
+        turn_in_flight(session, project_session)
 
         _ingest(container, path, BROKEN, environment, session=project_session)
         since = draft.writing_since
@@ -1373,6 +1394,8 @@ class TestIngestServiceMerge:
         session.flush()
         draft = _bear_draft(container, project, DRAFT)
         path = f"draft-{project.number}/project.md"
+        turn_in_flight(session, project_session)
+        turn_in_flight(session, later)
 
         _ingest(container, path, BROKEN, environment, session=project_session)
         since = draft.writing_since
@@ -1394,6 +1417,201 @@ class TestIngestServiceMerge:
         assert draft.ingested_session_id is None
         assert draft.writing_session_id is None
         assert draft.writing_since is None
+
+
+class TestIngestServiceLateSave:
+    """A save credited to a session with no turn in flight, its turn ended
+    before the save landed, stays that session's: it cuts the session's
+    `turn` Version at once and leaves no session writing the document
+    (P-103's ruling; D077)."""
+
+    @pytest.mark.parametrize("turned", ["ended", "none"])
+    def test_it_cuts_its_sessions_version_at_once(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+        turned: str,
+    ) -> None:
+        draft = _bear_draft(container, project, DRAFT)
+        if turned == "ended":
+            turn_in_flight(session, project_session)
+            end_turns(session, project_session)
+        before = datetime.now(UTC)
+
+        _ingest(
+            container,
+            f"draft-{project.number}/project.md",
+            RETITLED,
+            environment,
+            session=project_session,
+        )
+
+        after = datetime.now(UTC)
+        assert (
+            draft.ingested_session_id,
+            draft.writing_session_id,
+            draft.writing_since,
+        ) == (project_session.id, None, None)
+        assert _versions(session, draft) == [
+            (1, VersionCause.BORN, DRAFT, None),
+            (2, VersionCause.TURN, RETITLED, project_session.id),
+        ]
+        cut = session.scalars(
+            select(DocumentVersion.created_at).where(
+                DocumentVersion.document_id == draft.id, DocumentVersion.number == 2
+            )
+        ).one()
+        # The document's Edited time is its latest `turn` Version's (F28.7).
+        assert before <= cut <= after
+
+    def test_a_save_that_moves_no_text_cuts_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+    ) -> None:
+        draft = _bear_draft(container, project, DRAFT)
+
+        _ingest(
+            container,
+            f"draft-{project.number}/project.md",
+            DRAFT,
+            environment,
+            session=project_session,
+        )
+
+        assert (draft.ingested_session_id, draft.writing_session_id) == (
+            project_session.id,
+            None,
+        )
+        assert _versions(session, draft) == [(1, VersionCause.BORN, DRAFT, None)]
+
+    def test_a_held_save_cuts_nothing_and_stands_held(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+    ) -> None:
+        """No turn end is left to follow it up (F79): it shows held until a
+        session of the project meets its fault."""
+        draft = _bear_draft(container, project, DRAFT)
+        path = f"draft-{project.number}/project.md"
+
+        answer = _ingest(container, path, BROKEN, environment, session=project_session)
+
+        assert answer.held
+        assert (draft.ingested_session_id, draft.writing_session_id) == (
+            project_session.id,
+            None,
+        )
+        assert _versions(session, draft) == [(1, VersionCause.BORN, DRAFT, None)]
+        assert container.tree_service().held_path(path)
+
+    def test_a_record_write_since_the_last_version_is_in_its_version(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        """As at a turn's end: its Version is of the published text, moved
+        since the last Version whoever moved it; the Edited time it moves is
+        told to the browsers."""
+        text = "# Badges\n\n```question id=Q1\ndefault: Blue\n```\n"
+        draft = _bear_draft(container, project, text)
+        with scoped_session(container):
+            container.record_service().answer(draft, "Q1", person, "Green")
+        answered = draft.published_text
+        assert answered is not None
+        path = f"draft-{project.number}/project.md"
+        engine_events.clear()
+
+        _ingest(container, path, answered, environment, session=project_session)
+
+        assert _versions(session, draft) == [
+            (1, VersionCause.BORN, text, None),
+            (2, VersionCause.TURN, answered, project_session.id),
+        ]
+        assert engine_events == [
+            DocumentModified(project.id, path),
+            ProjectChanged(project.id),
+        ]
+
+    def test_another_sessions_writing_stands(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+    ) -> None:
+        """The late save writes no document, nor lets go of one another
+        session's turn is writing."""
+        writing = models.Session(
+            project_id=project.id,
+            environment_id=environment.id,
+            kind_code="work",
+            cwd="/work/Example",
+            token_hash="2" * 64,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(writing)
+        session.flush()
+        turn_in_flight(session, writing)
+        draft = _bear_draft(container, project, DRAFT)
+        path = f"draft-{project.number}/project.md"
+        _ingest(container, path, BROKEN, environment, session=writing)
+        since = draft.writing_since
+
+        _ingest(container, path, RETITLED, environment, session=project_session)
+
+        assert (
+            draft.ingested_session_id,
+            draft.writing_session_id,
+            draft.writing_since,
+        ) == (project_session.id, writing.id, since)
+        assert _versions(session, draft) == [
+            (1, VersionCause.BORN, DRAFT, None),
+            (2, VersionCause.TURN, RETITLED, project_session.id),
+        ]
+
+    def test_after_its_turns_end_on_a_document_the_turn_saved_its_own_version(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        project_session: models.Session,
+    ) -> None:
+        """A turn's end that commits before the late save cuts the turn's
+        save; the late save then cuts its own, both the session's."""
+        draft = _bear_draft(container, project, DRAFT)
+        path = f"draft-{project.number}/project.md"
+        turn_in_flight(session, project_session)
+        _ingest(container, path, RETITLED, environment, session=project_session)
+        end_turns(session, project_session)
+        with scoped_session(container):
+            container.document_service().turn_ended(project_session)
+        later = RETITLED.replace("Which colours", "Which two colours")
+
+        _ingest(container, path, later, environment, session=project_session)
+
+        assert draft.writing_session_id is None
+        assert _versions(session, draft) == [
+            (1, VersionCause.BORN, DRAFT, None),
+            (2, VersionCause.TURN, RETITLED, project_session.id),
+            (3, VersionCause.TURN, later, project_session.id),
+        ]
 
 
 class TestIngestServiceEvents:
@@ -1483,6 +1701,7 @@ class TestIngestServiceEvents:
 
     def test_the_save_that_takes_a_document_changes_its_project(
         self,
+        session: DbSession,
         container: ServiceContainer,
         engine_events: list[EngineEvent],
         project: Project,
@@ -1492,6 +1711,7 @@ class TestIngestServiceEvents:
         """Pilot's dots show from the save that makes its session the
         document's writer, whatever the save changed (F35)."""
         _bear_draft(container, project, DRAFT)
+        turn_in_flight(session, project_session)
         engine_events.clear()
         path = f"draft-{project.number}/project.md"
 
@@ -2107,7 +2327,29 @@ def _committed_handbook(app: Flask) -> tuple[str, uuid.UUID]:
         return f"draft-{project.number}/handbook.md", handbook.id
 
 
-def _save(app: Flask, path: str, content: str) -> Ingested:
+def _committed_run(app: Flask, document_id: uuid.UUID) -> uuid.UUID:
+    """A Session of the document's project with a Turn in flight, committed:
+    its id."""
+    with scoped_session(app.container) as session:
+        run = models.Session(
+            project_id=session.get_one(Document, document_id).project_id,
+            environment_id=ENVIRONMENT_ID,
+            kind_code="chat",
+            cwd="/work/PilotProjects",
+            token_hash="1" * 64,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(run)
+        session.flush()
+        turn_in_flight(session, run)
+        return run.id
+
+
+def _save(
+    app: Flask, path: str, content: str, run_id: uuid.UUID | None = None
+) -> Ingested:
+    """The save of `path` on the handbook's hash, credited to the Session
+    `run_id`."""
     container = app.container
     with scoped_session(container) as session:
         return container.ingest_service().ingest(
@@ -2115,22 +2357,64 @@ def _save(app: Flask, path: str, content: str) -> Ingested:
             content.encode(),
             sha256_hex(HANDBOOK),
             session.get_one(Environment, ENVIRONMENT_ID),
-            None,
+            None if run_id is None else session.get_one(models.Session, run_id),
         )
 
 
+def _end_turn(app: Flask, run_id: uuid.UUID) -> None:
+    """The Session's turn ended as the relay ends it: under the Session's
+    lock, its Turns ended and the engine's turn end."""
+    container = app.container
+    with scoped_session(container) as session:
+        run = container.session_record_service().lock_session(run_id)
+        end_turns(session, run)
+        container.document_service().turn_ended(run)
+
+
 class _Save(threading.Thread):
-    def __init__(self, app: Flask, path: str, content: str) -> None:
+    def __init__(
+        self, app: Flask, path: str, content: str, run_id: uuid.UUID | None = None
+    ) -> None:
         super().__init__()
-        self.app, self.path, self.content = app, path, content
+        self.app, self.path, self.content, self.run_id = app, path, content, run_id
         self.answer: Ingested | None = None
         self.error: Exception | None = None
 
     def run(self) -> None:
         try:
-            self.answer = _save(self.app, self.path, self.content)
+            self.answer = _save(self.app, self.path, self.content, self.run_id)
         except Exception as error:
             self.error = error
+
+
+class _TurnEnd(threading.Thread):
+    def __init__(self, app: Flask, run_id: uuid.UUID) -> None:
+        super().__init__()
+        self.app, self.run_id = app, run_id
+        self.error: Exception | None = None
+
+    def run(self) -> None:
+        try:
+            _end_turn(self.app, self.run_id)
+        except Exception as error:
+            self.error = error
+
+
+def _committed_versions(
+    app: Flask, document_id: uuid.UUID
+) -> list[tuple[VersionCause, str | None, uuid.UUID | None]]:
+    with scoped_session(app.container) as session:
+        return [
+            (cause, text, session_id)
+            for _, cause, text, session_id in _versions(
+                session, session.get_one(Document, document_id)
+            )
+        ]
+
+
+def _writing(app: Flask, document_id: uuid.UUID) -> uuid.UUID | None:
+    with scoped_session(app.container) as session:
+        return session.get_one(Document, document_id).writing_session_id
 
 
 class TestIngestServiceRowLock:
@@ -2283,6 +2567,109 @@ class TestIngestServiceRowLock:
         assert isinstance(raised.value.orig, LockNotAvailable)
         with scoped_session(container) as session:
             assert container.tree_service().held_path(path)
+
+    def test_a_sessions_save_takes_its_sessions_row_before_the_documents(
+        self, committed_app: Flask
+    ) -> None:
+        """Every end of a Turn takes the Session's row before its documents'
+        (`RelayService._end_turn`): the save takes them in that order."""
+        path, document_id = _committed_handbook(committed_app)
+        run_id = _committed_run(committed_app, document_id)
+        with committed_app.app_context():
+            engine = db.engine
+        save = _Save(committed_app, path, SHORTER, run_id)
+
+        with engine.connect() as holder, engine.connect() as other:
+            holder.execute(
+                sql("SELECT id FROM sessions WHERE id = :id FOR UPDATE"),
+                {"id": run_id},
+            )
+            save.start()
+            try:
+                _wait_for_a_lock_wait(committed_app)
+                # The waiting save holds no lock on the document's row.
+                other.execute(
+                    sql("SELECT id FROM documents WHERE id = :id FOR UPDATE NOWAIT"),
+                    {"id": document_id},
+                )
+                other.rollback()
+            finally:
+                holder.rollback()
+                save.join(5)
+
+        assert save.error is None
+        assert _writing(committed_app, document_id) == run_id
+
+    def test_a_save_behind_its_turns_end_finds_the_turn_ended(
+        self, committed_app: Flask
+    ) -> None:
+        """The turn's end commits first: the save is late, its Version cut at
+        once, and no session writes the document."""
+        path, document_id = _committed_handbook(committed_app)
+        run_id = _committed_run(committed_app, document_id)
+        with committed_app.app_context():
+            engine = db.engine
+        save = _Save(committed_app, path, SHORTER, run_id)
+
+        with engine.connect() as holder:
+            holder.execute(
+                sql("SELECT id FROM sessions WHERE id = :id FOR UPDATE"),
+                {"id": run_id},
+            )
+            holder.execute(
+                sql("UPDATE turns SET ended_at = now() WHERE session_id = :id"),
+                {"id": run_id},
+            )
+            save.start()
+            try:
+                _wait_for_a_lock_wait(committed_app)
+            finally:
+                holder.commit()
+                save.join(5)
+
+        assert save.error is None
+        assert _writing(committed_app, document_id) is None
+        assert _committed_versions(committed_app, document_id) == [
+            (VersionCause.BORN, HANDBOOK, None),
+            (VersionCause.TURN, SHORTER, run_id),
+        ]
+
+    def test_a_turn_end_behind_a_save_finds_the_document_written(
+        self, committed_app: Flask, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The save commits first: it writes the document in the turn, and
+        the turn's end cuts the one Version, of the save's text."""
+        path, document_id = _committed_handbook(committed_app)
+        run_id = _committed_run(committed_app, document_id)
+        save = _Save(committed_app, path, SHORTER, run_id)
+        turn_end = _TurnEnd(committed_app, run_id)
+        holding, release = threading.Event(), threading.Event()
+        lock = DocumentService.lock
+
+        def held_lock(self: DocumentService, document: Document) -> None:
+            lock(self, document)
+            if threading.current_thread() is save:
+                holding.set()
+                assert release.wait(5)
+
+        monkeypatch.setattr(DocumentService, "lock", held_lock)
+        save.start()
+        try:
+            assert holding.wait(5)
+            turn_end.start()
+            _wait_for_a_lock_wait(committed_app)
+        finally:
+            release.set()
+            save.join(5)
+            turn_end.join(5)
+
+        assert save.error is None
+        assert turn_end.error is None
+        assert _writing(committed_app, document_id) is None
+        assert _committed_versions(committed_app, document_id) == [
+            (VersionCause.BORN, HANDBOOK, None),
+            (VersionCause.TURN, SHORTER, run_id),
+        ]
 
 
 def _wait_for_a_lock_wait(app: Flask) -> None:

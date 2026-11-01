@@ -312,6 +312,21 @@ class DocumentService:
         )
         self.db.flush()
 
+    def cut_turn_version(self, document: Document, session_id: uuid.UUID) -> bool:
+        """A `turn` Version of the document, of the Session `session_id`, cut
+        where its published hash moved since its last Version (DB 172);
+        whether it was."""
+        last = self.db.scalars(
+            select(DocumentVersion.hash)
+            .where(DocumentVersion.document_id == document.id)
+            .order_by(DocumentVersion.number.desc())
+            .limit(1)
+        ).one()
+        if document.published_hash == last:
+            return False
+        self.cut_version(document, VersionCause.TURN, session_id)
+        return True
+
     def turn_ended(self, session: AgentSession) -> list[str]:
         """Turn ended for `session` (design 1 §7): the writing columns of the
         documents it was writing cleared, told to the browsers whatever the
@@ -329,14 +344,7 @@ class DocumentService:
         for document in documents:
             document.writing_session_id = None
             document.writing_since = None
-            last = self.db.scalars(
-                select(DocumentVersion.hash)
-                .where(DocumentVersion.document_id == document.id)
-                .order_by(DocumentVersion.number.desc())
-                .limit(1)
-            ).one()
-            if document.published_hash != last:
-                self.cut_version(document, VersionCause.TURN, session.id)
+            self.cut_turn_version(document, session.id)
             project, _ = self.owner(document)
             self.engine_bus.emit(ProjectChanged(project.id))
             if self.tree_service.held(project, document):

@@ -1353,6 +1353,7 @@ class TestRelay:
     ) -> None:
         documents = container.document_service()
         draft = documents.bear_draft(project, "# Badges\n")
+        _send(relays, session, idle)
         container.ingest_service().ingest(
             f"draft-{project.number}/project.md",
             b"# Badge colours\n",
@@ -1361,7 +1362,6 @@ class TestRelay:
             idle,
         )
         assert draft.writing_session_id == idle.id
-        _send(relays, session, idle)
         _turn_of(fake_controller, controller_session, raw_turn("turn_text"))
 
         _relay(relays, idle)
@@ -1899,8 +1899,8 @@ class TestFollowUpTurn:
         relays, fake, name = answering
         run = _agent_session(session, project, name)
         run.kind_code = kind
-        path = _held_save(container, session, project, run)
         _send(relays, session, run, "Write the palette")
+        path = _held_save(container, session, project, run)
 
         _relay(relays, run)
 
@@ -1933,8 +1933,8 @@ class TestFollowUpTurn:
         relays, fake, name = answering
         run = _agent_session(session, project, name)
         run.kind_code = "chat"
-        path = _held_save(container, session, project, run)
         _send(relays, session, run, "Write the palette")
+        path = _held_save(container, session, project, run)
         _relay(relays, run)
         # The brain saves the draft again in the follow-up turn, held still.
         container.ingest_service().ingest(path, HELD_SAVE, None, _row(session), run)
@@ -1961,8 +1961,8 @@ class TestFollowUpTurn:
         container.record_service().place_work(
             project, run, "Setting up the project", trigger=WorkTrigger.SETUP
         )
-        path = _held_save(container, session, project, run)
         _send(relays, session, run, "/plan")
+        path = _held_save(container, session, project, run)
 
         _relay(relays, run)
 
@@ -1994,8 +1994,8 @@ class TestFollowUpTurn:
         container.record_service().place_work(
             project, run, "Setting up the project", trigger=WorkTrigger.SETUP
         )
-        path = _held_save(container, session, project, run)
         _send(relays, session, run, "/plan")
+        path = _held_save(container, session, project, run)
         told: list[None] = []
         relays._slots.subscribe(lambda: told.append(None))
 
@@ -2039,8 +2039,8 @@ class TestFollowUpTurn:
     ) -> None:
         relays, fake, name = answering
         run = _agent_session(session, project, name)
-        _held_save(container, session, project, run)
         _send(relays, session, run, "Write the palette")
+        _held_save(container, session, project, run)
 
         _relay(relays, run)
 
@@ -2058,6 +2058,7 @@ class TestFollowUpTurn:
         run = _agent_session(session, project, name)
         run.kind_code = "chat"
         container.document_service().bear_draft(project, "# Badges\n")
+        _send(relays, session, run, "Write the palette")
         container.ingest_service().ingest(
             f"draft-{project.number}/project.md",
             b"# Badge colours\n",
@@ -2065,7 +2066,6 @@ class TestFollowUpTurn:
             _row(session),
             run,
         )
-        _send(relays, session, run, "Write the palette")
 
         _relay(relays, run)
 
@@ -2083,8 +2083,8 @@ class TestFollowUpTurn:
         idle: models.Session,
     ) -> None:
         idle.kind_code = "chat"
-        _held_save(container, session, project, idle)
         _send(relays, session, idle)
+        _held_save(container, session, project, idle)
         _stopped(idle)
         _turn_of(
             fake_controller, controller_session, raw_turn("turn_text"), "interrupted"
@@ -2817,6 +2817,7 @@ class TestStoppedUnderTheTurn:
         """Pilot's dots go from the open screens at the turn's end, though
         the stopped Session moves no state (F35)."""
         draft = container.document_service().bear_draft(project, "# Badges\n")
+        _send(relays, session, work_item)
         container.ingest_service().ingest(
             f"draft-{project.number}/project.md",
             b"# Badge colours\n",
@@ -2824,7 +2825,6 @@ class TestStoppedUnderTheTurn:
             _row(session),
             work_item,
         )
-        _send(relays, session, work_item)
         _stopped(work_item, person)
         _turn_of(
             fake_controller, controller_session, raw_turn("turn_tool"), "interrupted"
@@ -2929,6 +2929,7 @@ class TestStoppedUnderTheTurn:
     ) -> None:
         documents = container.document_service()
         draft = documents.bear_draft(project, "# Badges\n")
+        _send(relays, session, work_item)
         container.ingest_service().ingest(
             f"draft-{project.number}/project.md",
             b"# Badge colours\n",
@@ -2936,7 +2937,6 @@ class TestStoppedUnderTheTurn:
             _row(session),
             work_item,
         )
-        _send(relays, session, work_item)
         _stopped(work_item)
         fake_controller.restart(ENV)
         fake_controller.set_status(ENV, "running")
@@ -3220,6 +3220,7 @@ class TestEnvironmentUnderATurn:
     ) -> None:
         documents = container.document_service()
         draft = documents.bear_draft(project, "# Badges\n")
+        _send(relays, session, work_item)
         container.ingest_service().ingest(
             f"draft-{project.number}/project.md",
             b"# Badge colours\n",
@@ -3227,7 +3228,6 @@ class TestEnvironmentUnderATurn:
             _row(session),
             work_item,
         )
-        _send(relays, session, work_item)
         fake_controller.set_status(ENV, "stopped")
 
         _relay(relays, work_item)

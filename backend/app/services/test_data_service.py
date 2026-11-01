@@ -363,6 +363,9 @@ NOTICE_TEXT = "# {title}\n"
 PASS_BRIEF = "An invented pre-ruling pass, made for a test."
 """The one Turn of the job's Session a spec's pass asks the writer in."""
 
+SAVING_BRIEF = "An invented turn that saves the project's documents, made for a test."
+"""The Turn of the project's session a spec's saves land in, until its end."""
+
 PASS_TITLE = "Pre-ruling, invented"
 """The line of a spec's pass once its writer has replied."""
 
@@ -728,9 +731,9 @@ class TestDataService:
         return self.document_service.bear_item(project, kind, title, session, text)
 
     def save(self, item_id: uuid.UUID, text: str) -> Ingested:
-        """An agent's save of the item's file by the project's session, on the
-        tree's current hash, through the ingest the store's sync calls: held
-        on a fault, else merged and published.
+        """An agent's save of the item's file by the project's session in its
+        turn, on the tree's current hash, through the ingest the store's sync
+        calls: held on a fault, else merged and published.
 
         Raises:
             RecordNotFoundException: no item has the id, or its project is
@@ -749,8 +752,8 @@ class TestDataService:
         self, project_id: uuid.UUID, role: DocumentRole, text: str
     ) -> Ingested:
         """An agent's save of the project's draft or handbook by the project's
-        session, on the tree's current hash, through the ingest the store's
-        sync calls: held on a fault, else merged and published.
+        session in its turn, on the tree's current hash, through the ingest
+        the store's sync calls: held on a fault, else merged and published.
 
         Raises:
             RecordNotFoundException: no project has the id, it has no
@@ -798,9 +801,10 @@ class TestDataService:
 
     def end_turn(self, project_id: uuid.UUID) -> None:
         """The turn of the project's session ended, as the relay ends it for
-        the documents: the writing columns of those it was saving cleared and
-        told to the browsers, a `turn` Version cut of each whose published
-        text moved since its last Version (design 1 §7).
+        the documents: its Turns in flight ended, the writing columns of the
+        documents it was saving cleared and told to the browsers, a `turn`
+        Version cut of each whose published text moved since its last
+        Version (design 1 §7).
 
         Raises:
             RecordNotFoundException: no project has the id.
@@ -810,6 +814,12 @@ class TestDataService:
         if project is None:
             raise RecordNotFoundException("Project", str(project_id))
         session = self._session_of(project, f"end a turn of project {project.id}")
+        now = self.db.scalar(select(func.now()))
+        for turn in self.db.scalars(
+            select(Turn).where(Turn.session_id == session.id, Turn.ended_at.is_(None))
+        ):
+            turn.ended_at = now
+            session.turn_ended_at = now
         self.document_service.turn_ended(session)
 
     def register_document(
@@ -1167,6 +1177,7 @@ class TestDataService:
     def _ingest(
         self, project: Project, document: Document, session: AgentSession, text: str
     ) -> Ingested:
+        self._saving_turn(session)
         return self.ingest_service.ingest(
             tree_path(project, document.path),
             text.encode(),
@@ -1174,6 +1185,27 @@ class TestDataService:
             self.db.get_one(Environment, session.environment_id),
             session,
         )
+
+    def _saving_turn(self, session: AgentSession) -> None:
+        """A Turn of `session` in flight, opened when it has none: a save that
+        lands after its session's turn ended writes no document (design 1
+        §7)."""
+        in_flight = Turn.session_id == session.id, Turn.ended_at.is_(None)
+        if self.db.scalar(select(exists().where(*in_flight))):
+            return
+        now = self.db.scalar(select(func.now()))
+        assert now is not None
+        seq = self.db.scalar(
+            select(func.coalesce(func.max(Turn.seq), 0) + 1).where(
+                Turn.session_id == session.id
+            )
+        )
+        self.db.add(
+            Turn(session_id=session.id, seq=seq, message=SAVING_BRIEF, started_at=now)
+        )
+        session.turns += 1
+        session.turn_started_at, session.turn_ended_at = now, None
+        self.db.flush()
 
     def _worker(self, item_id: uuid.UUID, operation: str) -> Worker:
         """The work item's Session, as its bearer names it to `pilot-work`."""

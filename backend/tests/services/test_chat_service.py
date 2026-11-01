@@ -22,6 +22,7 @@ from werkzeug.wrappers import Request, Response
 from app import models
 from app.database import scoped_session
 from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved, _Delivery
+from app.engine.paths import tree_path
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import (
     Block,
@@ -1629,6 +1630,35 @@ class TestHandbookNotice:
 
         turn = _send(chats, opened, person, "Two")
 
+        assert turn.message == "Two"
+        assert metric_value(HANDBOOK_CHANGED_TOTAL, project=str(opened.id)) == counted
+
+    def test_the_chats_own_save_after_its_turn_ended_brings_none(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+    ) -> None:
+        """Its save that lands once its turn ended cuts its own Version at
+        once (P-103's ruling): no change of anyone else's."""
+        handbook = container.document_service().bear_handbook(opened, "# Handbook\n")
+        run = _idle_chat(services, chats, session, fake, opened, person)
+        container.ingest_service().ingest(
+            tree_path(opened, handbook.path),
+            b"# Handbook\n\n- Salt last.\n",
+            None,
+            session.get_one(Environment, STORE_ENVIRONMENT_ID),
+            run,
+        )
+        counted = metric_value(HANDBOOK_CHANGED_TOTAL, project=str(opened.id))
+
+        turn = _send(chats, opened, person, "Two")
+
+        assert handbook.writing_session_id is None
         assert turn.message == "Two"
         assert metric_value(HANDBOOK_CHANGED_TOTAL, project=str(opened.id)) == counted
 

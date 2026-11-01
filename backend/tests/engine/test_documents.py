@@ -44,6 +44,7 @@ from app.models.reference import (
 from app.services.container import ServiceContainer
 from tests.support.locks import in_thread, lock_waits
 from tests.support.supervisor import WAIT_SECONDS, wait_until
+from tests.support.turns import turn_in_flight
 
 REGISTERED_PATH = "/work/Example/docs/refinement.md"
 
@@ -1904,7 +1905,51 @@ def _save(
     text: str,
     run: models.Session,
 ) -> None:
+    """`run`'s save of `path` in its turn, which it is then writing."""
+    turn_in_flight(container.db_session(), run)
     container.ingest_service().ingest(path, text.encode(), None, environment, run)
+
+
+class TestDocumentServiceCutTurnVersion:
+    def test_a_moved_text_is_cut_of_the_session(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        documents = container.document_service()
+        draft = documents.bear_draft(project, "# Badges\n")
+        documents.cut_version(draft, VersionCause.DONE)
+        documents.publish(draft, "# Badge colours\n")
+
+        assert documents.cut_turn_version(draft, project_session.id)
+
+        assert [
+            (version.number, version.cause_code, version.text, version.session_id)
+            for version in _versions(session, draft)
+        ] == [
+            (1, VersionCause.BORN, "# Badges\n", None),
+            (2, VersionCause.DONE, "# Badges\n", None),
+            (3, VersionCause.TURN, "# Badge colours\n", project_session.id),
+        ]
+
+    def test_a_text_its_last_version_holds_is_not_cut(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        """Its last Version's hash, not the first's, whatever its cause."""
+        documents = container.document_service()
+        draft = documents.bear_draft(project, "# Badges\n")
+        documents.publish(draft, "# Badge colours\n")
+        documents.cut_version(draft, VersionCause.DONE)
+
+        assert not documents.cut_turn_version(draft, project_session.id)
+
+        assert len(_versions(session, draft)) == 2
 
 
 class TestDocumentServiceTurnEnded:

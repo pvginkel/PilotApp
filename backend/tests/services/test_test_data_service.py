@@ -1053,6 +1053,34 @@ class TestSave:
         ).one()
         assert version.session_id == _session_of(session, camp).id
 
+    def test_saves_are_the_sessions_turns_one_turn_until_its_end(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        camp: Project,
+        notice: Item,
+    ) -> None:
+        """A save is its session's in its turn (design 1 §7): the first opens
+        a Turn in flight, the next lands in it."""
+        service = container.test_data_service()
+        run = _session_of(session, camp)
+        before = run.turns
+
+        service.save(notice.id, "Red.\n")
+        service.save(notice.id, "---\ntitle: Palette\n---\nRed.\n")
+
+        turns = session.scalars(
+            select(Turn).where(Turn.session_id == run.id).order_by(Turn.seq)
+        ).all()
+        assert [turn.ended_at for turn in turns][-1:] == [None]
+        assert sum(turn.ended_at is None for turn in turns) == 1
+        assert (run.turns, run.turn_started_at, run.turn_ended_at) == (
+            before + 1,
+            turns[-1].started_at,
+            None,
+        )
+        assert session.get_one(Document, notice.id).writing_session_id == run.id
+
     def test_a_save_after_a_held_one_is_on_its_hash(
         self, container: ServiceContainer, notice: Item
     ) -> None:
@@ -1131,6 +1159,27 @@ class TestEndTurn:
             (VersionCause.BORN, _session_of(session, camp).id),
             (VersionCause.TURN, _session_of(session, camp).id),
         ]
+
+    def test_its_turn_ends_and_the_next_save_opens_another(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        camp: Project,
+        notice: Item,
+    ) -> None:
+        service = container.test_data_service()
+        run = _session_of(session, camp)
+        service.save(notice.id, "---\ntitle: Palette\n---\nRed.\n")
+
+        service.end_turn(camp.id)
+        ended = session.scalars(
+            select(Turn).where(Turn.session_id == run.id, Turn.ended_at.is_(None))
+        ).all()
+        service.save(notice.id, "---\ntitle: Palette\n---\nGreen.\n")
+
+        assert ended == []
+        assert run.turn_ended_at is None
+        assert session.get_one(Document, notice.id).writing_session_id == run.id
 
     def test_a_turn_that_saved_nothing_cuts_no_version(
         self,

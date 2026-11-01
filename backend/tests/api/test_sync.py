@@ -27,8 +27,16 @@ from app.engine.bus import (
     TreeHashMoved,
 )
 from app.engine.paths import sha256_hex
-from app.models import Document, Environment, Project, SaveError, User
-from app.models.reference import ErrorKind, ProjectState, SessionState
+from app.models import (
+    Document,
+    DocumentVersion,
+    Environment,
+    Project,
+    SaveError,
+    Turn,
+    User,
+)
+from app.models.reference import ErrorKind, ProjectState, SessionState, VersionCause
 from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerClient
 from app.services.session_scope import STORE_REPO
@@ -53,6 +61,7 @@ from tests.support.fake_sidecar import (
     FakeSidecar,
     sync_headers,
 )
+from tests.support.turns import end_turns, turn_in_flight
 
 ANSWERED = """---
 title: Which tent?
@@ -314,6 +323,19 @@ def _statements(session: DbSession) -> Iterator[list[str]]:
         yield statements
     finally:
         event.remove(connection, "before_cursor_execute", executed)
+
+
+def _versions(
+    session: DbSession, document: Document
+) -> list[tuple[VersionCause, str | None, uuid.UUID | None]]:
+    return [
+        (version.cause_code, version.text, version.session_id)
+        for version in session.scalars(
+            select(DocumentVersion)
+            .where(DocumentVersion.document_id == document.id)
+            .order_by(DocumentVersion.number)
+        )
+    ]
 
 
 def _told(session: DbSession, path: str) -> str:
@@ -713,6 +735,7 @@ class TestPutFile:
     ) -> None:
         path = _bear_item(container, project, project_session, ANSWERED)
         brain = _brain(session, project, kind)
+        turn_in_flight(session, brain)
         edited = ANSWERED.replace("# Which tent?", "# Which tent for the lake?")
 
         response = fake_sidecar.put(
@@ -726,6 +749,75 @@ class TestPutFile:
             brain.id,
             brain.id,
         )
+
+    @pytest.mark.parametrize("kind", [CHAT_KIND, JOB_KIND])
+    def test_a_save_after_its_brain_sessions_turn_ended_is_cut_at_once(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+        project_session: models.Session,
+        kind: str,
+    ) -> None:
+        """A save that reaches the server once its session's turn ended, as an
+        upload pilot-sync sends up again does: that session's still, its
+        `turn` Version cut at once, and the document written by no session."""
+        path = _bear_item(container, project, project_session, ANSWERED)
+        brain = _brain(session, project, kind)
+        turn_in_flight(session, brain)
+        end_turns(session, brain)
+        edited = ANSWERED.replace("title: Which tent?", "title: Which tent now?")
+
+        response = fake_sidecar.put(
+            path, edited.encode(), sha256_hex(ANSWERED), str(brain.id)
+        )
+
+        assert response.status_code == 204
+        document = session.scalars(select(Document)).one()
+        session.refresh(document)
+        assert (document.ingested_session_id, document.writing_session_id) == (
+            brain.id,
+            None,
+        )
+        assert _versions(session, document) == [
+            (VersionCause.BORN, ANSWERED, project_session.id),
+            (VersionCause.TURN, edited, brain.id),
+        ]
+
+    def test_a_held_save_after_its_turn_ended_is_followed_up_by_no_turn(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        fake_sidecar: FakeSidecar,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        """It cuts nothing, and no turn's end is left to follow it up (F79):
+        its errors stand for the next session of the project to meet."""
+        path = _bear_item(container, project, project_session, ANSWERED)
+        brain = _brain(session, project, CHAT_KIND)
+        turn_in_flight(session, brain)
+        end_turns(session, brain)
+
+        response = fake_sidecar.put(
+            path, BROKEN.encode(), sha256_hex(ANSWERED), str(brain.id)
+        )
+
+        assert response.status_code == 204
+        assert int(response.headers["X-Pilot-Faults"]) > 0
+        document = session.scalars(select(Document)).one()
+        session.refresh(document)
+        assert (document.ingested_session_id, document.writing_session_id) == (
+            brain.id,
+            None,
+        )
+        assert _versions(session, document) == [
+            (VersionCause.BORN, ANSWERED, project_session.id)
+        ]
+        assert _told(session, path)
+        (turn,) = session.scalars(select(Turn).where(Turn.session_id == brain.id))
+        assert turn.ended_at is not None
 
     def test_a_save_no_session_held_is_no_sessions(
         self,
@@ -1783,6 +1875,7 @@ class TestCheckSequences:
         item = _bear_item(container, project, project_session, ANSWERED)
         folder = f"draft-{project.number}"
         chat = _brain(session, project, CHAT_KIND)
+        turn_in_flight(session, chat)
         fake_sidecar.connect()
 
         fake_sidecar.lock(folder, str(chat.id))

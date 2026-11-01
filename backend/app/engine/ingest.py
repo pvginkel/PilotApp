@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 
 import pilot_dsl as dsl
-from sqlalchemy import delete, select
+from sqlalchemy import delete, exists, select
 from sqlalchemy.orm import Session
 
 from app.engine.bus import (
@@ -26,7 +26,16 @@ from app.engine.paths import PLAN, sha256_hex
 from app.engine.plan import PlanService
 from app.engine.tree import TreeDocument, TreeFile, TreePlan, TreeService
 from app.engine.views import ViewService
-from app.models import Document, Environment, Item, PlanTask, Project, SaveError, User
+from app.models import (
+    Document,
+    Environment,
+    Item,
+    PlanTask,
+    Project,
+    SaveError,
+    Turn,
+    User,
+)
 from app.models import Session as AgentSession
 from app.models.reference import DocumentRole, ErrorKind, ProjectState
 
@@ -104,7 +113,11 @@ class IngestService:
         `base_hash` is the hash the sidecar last synced for the path, none
         when it has none; `session` the Session the save is credited to, the
         one that held the write lock of the path's project folder, none when
-        it is no Session's (design 1 §7).
+        it is no Session's (design 1 §7). A document's save while that
+        Session has a Turn in flight has it writing the document until its
+        turn ends; one that lands after its turn ended cuts the Session's
+        `turn` Version at once, where the published text moved, and a held
+        one cuts nothing.
 
         A read-only path stores nothing and is answered with its projection.
         A save of `plan.json` writes the plan's rows, or on any fault changes
@@ -239,12 +252,13 @@ class IngestService:
         session: AgentSession | None,
     ) -> Ingested:
         project, document, item = resolved.project, resolved.document, resolved.item
+        in_turn = session is not None and self._in_turn(session)
         self.document_service.lock(document)
         held_before = self.tree_service.held(project, document)
         tree_hash = self.tree_service.hash(project, document)
 
         text, faults = _decoded(content)
-        taken = self._store(document, text, session)
+        taken = self._store(document, text, session, in_turn)
         self._clear(path)
         kind = _kind(project, document, item)
         if kind is dsl.DocumentKind.OPENING:
@@ -264,6 +278,14 @@ class IngestService:
             faults = list(merged.reverted)
             self._raise(environment, path, ErrorKind.REVERTED, faults)
             tree_text = merged.text
+        # No turn end is left to cut the Version of a save that landed after
+        # its session's turn ended.
+        versioned = (
+            session is not None
+            and not in_turn
+            and not held
+            and self.document_service.cut_turn_version(document, session.id)
+        )
 
         moved = self.tree_service.hash(project, document)
         if moved != tree_hash:
@@ -276,8 +298,9 @@ class IngestService:
         if item is not None and held != held_before:
             # The item shows as a concept while its save is held (F78).
             self.engine_bus.emit(ProjectChanged(project.id))
-        if taken:
-            # Pilot's dots show on the document its session writes (F35).
+        if taken or versioned:
+            # Pilot's dots show on the document its session writes (F35), and
+            # its Edited time is its latest `turn` Version's (F28.7).
             self.engine_bus.emit(ProjectChanged(project.id))
         return Ingested(
             kind=PathKind.DOCUMENT,
@@ -288,17 +311,40 @@ class IngestService:
             faults=tuple(faults),
         )
 
+    def _in_turn(self, session: AgentSession) -> bool:
+        """Whether `session` has a Turn in flight, read under its row's lock,
+        held until the transaction ends: every end of a Turn takes that lock,
+        so a save and its session's turn end are taken one after the other.
+        Taken before the document's lock, the order a turn's end takes them
+        in."""
+        self.db.execute(
+            select(AgentSession.id)
+            .where(AgentSession.id == session.id)
+            .with_for_update()
+        )
+        return bool(
+            self.db.scalar(
+                select(
+                    exists().where(
+                        Turn.session_id == session.id, Turn.ended_at.is_(None)
+                    )
+                )
+            )
+        )
+
     @staticmethod
-    def _store(document: Document, text: str, session: AgentSession | None) -> bool:
-        """The save as the document's ingest, and its session as the one
-        writing it (design 1 §7); whether that session took the document
-        with it."""
+    def _store(
+        document: Document, text: str, session: AgentSession | None, in_turn: bool
+    ) -> bool:
+        """The save as the document's ingest, its session's (D077), and that
+        session as the one writing it while its turn is in flight, `in_turn`
+        (design 1 §7); whether that session took the document with it."""
         now = datetime.now(UTC)
         document.ingested_text = text
         document.ingested_hash = sha256_hex(text)
         document.ingested_at = now
         document.ingested_session_id = None if session is None else session.id
-        if session is None or document.writing_session_id == session.id:
+        if session is None or not in_turn or document.writing_session_id == session.id:
             return False
         document.writing_session_id = session.id
         document.writing_since = now

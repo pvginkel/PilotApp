@@ -71,6 +71,7 @@ from app.services.start_gate import WorkSlots
 from app.services.timeline_service import Badge, work_status
 from app.services.usage_halts import UsageHalts
 from tests.support.chats import ChatWriter, open_chat
+from tests.support.turns import end_turns, turn_in_flight
 
 ENVIRONMENT_CAUSES = [
     StopCause.ENVIRONMENT_STOPPED,
@@ -539,7 +540,9 @@ def _save(
     run: models.Session,
     text: str,
 ) -> None:
-    """A clean save of the item's file by `run`, which it is then writing."""
+    """A clean save of the item's file by `run` in its turn, which it is then
+    writing."""
+    turn_in_flight(session, run)
     document = _document(session, item)
     ingested = container.ingest_service().ingest(
         tree_path(project, document.path),
@@ -1649,6 +1652,37 @@ class TestTimeline:
         ended = _items(container, project)[1]["writing"]
 
         assert (born, saved, ended) == (False, True, False)
+
+    def test_a_save_after_its_turn_ended_is_edited_at_once_and_written_by_none(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        """Its own `turn` Version, cut at the save, gives the document its
+        Edited time, and it shows no dots (P-103's ruling)."""
+        project = _make(container)
+        run = _run(session, project, environment)
+        item = _bear(container, project, run, "notice", "Opens in May", NOTICE)
+        turn_in_flight(session, run)
+        end_turns(session, run)
+        document = _document(session, item)
+
+        container.ingest_service().ingest(
+            tree_path(project, document.path),
+            NOTICE_LATER.encode(),
+            container.tree_service().hash(project, document),
+            environment,
+            run,
+        )
+
+        line = _items(container, project)[1]
+        (turn,) = _versions(session, item, VersionCause.TURN)
+        assert turn.session_id == run.id
+        assert (line["writing"], datetime.fromisoformat(line["edited_at"])) == (
+            False,
+            turn.created_at,
+        )
 
     def test_a_document_only_born_or_changed_by_no_turn_is_not_edited(
         self,
