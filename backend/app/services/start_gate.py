@@ -1,11 +1,14 @@
-"""The gate every start passes (design 2 §13.4, §13.5, §8.2, D11; F141.5,
-F143.4, F59.2, F135; DB 229, 243, 266).
+"""The gate every start passes (design 2 §13.4, §13.5, §8.2, D11; design 5
+D3; F141.5, F143.4, F59.2, F135, F144.2; DB 229, 243, 266, 282).
 
 A work item's start is held while a usage halt holds, the week's or the
 five-hour's (`UsageHalts`), a job's and a Chat's never. A start is held while
 its project is paused, a Chat's never (F141.4), nor
 the setup's, a Retry's included, which runs under the pause Create project
-writes (D083); while the controller is unreachable; a work item's alone while
+writes (D083); a job's and a Chat's, never a work item's, while a Store
+Update is unlifted (`store_update_service.unlifted`), the hold on the
+store's work; while the
+controller is unreachable; a work item's alone while
 no slot is free: the work items running or starting across every Project
 number the cross-project maximum, or those of its Project the per-project
 one; a job's alone while another job of its Project is before it (`queued`);
@@ -13,8 +16,9 @@ and a work item's alone while another Session runs or starts on the
 conversation it resumes, in its Environment (`carried`; DB 183): a run's
 continuation and its clarification run each wait for the other's turn to
 end. Where more than one holds, the halt comes first, the week's before the
-five-hour's, then the pause, then the outage — the halts and the outage the
-gold bar's —, then the slot, then the queue, then the conversation.
+five-hour's, then the pause, then the store's update, then the outage — the
+halts, the update and the outage the gold bar's —, then the slot, then the
+queue, then the conversation.
 
 The slot is counted under one app-wide lock (`WorkSlots.lock`), so two starts
 never both take its last place, and the conversation is read under it, so two
@@ -77,6 +81,7 @@ def held_reason(
     paused: bool,
     kind_code: str,
     setup: bool,
+    updating: bool,
     unreachable: bool,
     filled: int | None,
     queued: bool,
@@ -85,7 +90,8 @@ def held_reason(
     """Why the gate holds a start of a Session of `kind_code`, where the halt
     of the window `halted` holds work items (`UsageHalts.halted`), None while
     neither does, in a project `paused` or not, a job the `setup` or not
-    (`setups`), the controller `unreachable` or not, where `filled` running
+    (`setups`), a Store Update unlifted (`updating`) or not, the controller
+    `unreachable` or not, where `filled` running
     work items leave a work item no slot (`WorkSlots.filled`), None while one
     is free, a job is `queued` behind another of its project or not, and
     another Session carries the conversation a work item resumes
@@ -94,6 +100,8 @@ def held_reason(
         return Held(HALTED[halted])
     if paused and kind_code != CHAT_KIND and not setup:
         return Held(HeldReason.PAUSED)
+    if updating and kind_code != WORK_KIND:
+        return Held(HeldReason.STORE_UPDATE)
     if unreachable:
         return Held(HeldReason.CONTROLLER_UNREACHABLE)
     if kind_code == WORK_KIND and filled is not None:

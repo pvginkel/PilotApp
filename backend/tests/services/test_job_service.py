@@ -45,6 +45,7 @@ from app.services.timeline_service import work_status
 from tests.support.fake_controller import ServedFakeController, client_of
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
 from tests.support.starts import configured_starts
+from tests.support.store_updates import hold, lift
 from tests.support.supervisor import WAIT_SECONDS, Supervise, wait_until
 
 AT = datetime(2026, 10, 27, 9, 30, 15, tzinfo=UTC)
@@ -1448,6 +1449,64 @@ class TestRetry:
         assert _read(session, failed).state_code is SessionState.FAILED
         assert session.get_one(Work, failed.id).retried_by_id is None
         assert session.scalar(select(func.count()).select_from(Work)) == 1
+
+
+class TestUnderTheStoresUpdate:
+    """While a Store Update is unlifted a job's placement and a person's
+    Retry are held at the gate, briefed once the lift lets them go (design 5
+    D3; F144.2; DB 282)."""
+
+    def test_a_job_placed_under_it_is_held_unbriefed_until_the_lift(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        opening: Item,
+    ) -> None:
+        update = hold(session)
+
+        job = _setup(container, starts, opened)
+
+        assert job.state_code is SessionState.HELD
+        assert (job.turns, job.turn_started_at) == (0, None)
+        assert starts.held(session, opened, job) == Held(HeldReason.STORE_UPDATE)
+        status = work_status(
+            session,
+            [job.id],
+            unreachable=False,
+            halts=starts._halts,
+            slots=starts._slots,
+        )[job.id]
+        assert status.held_reason is HeldReason.STORE_UPDATE
+        _release(starts)
+        assert _read(session, job).state_code is SessionState.HELD
+
+        lift(session, update)
+        _release(starts)
+
+        job = _read(session, job)
+        assert (job.state_code, job.turns) == (SessionState.STARTING, 1)
+
+    def test_a_persons_retry_under_it_is_held_until_the_lift(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        opening: Item,
+    ) -> None:
+        failed = _ended(session, container, _setup(container, starts, opened))
+        update = hold(session)
+
+        retry = _retry(container, starts, failed)
+
+        assert retry.state_code is SessionState.HELD
+        assert starts.held(session, opened, retry) == Held(HeldReason.STORE_UPDATE)
+        assert session.get_one(Work, failed.id).retried_by_id == retry.id
+        lift(session, update)
+        _release(starts)
+        assert _read(session, retry).state_code is SessionState.STARTING
 
 
 class TestRetryRefused:

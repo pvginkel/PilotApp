@@ -88,6 +88,11 @@ ALARM_TEXTS: dict[Condition, AlarmText] = {
         message="Nothing starts until it answers.",
         priority="high",
     ),
+    Condition.STORE_UPDATE: AlarmText(
+        title="Pilot is updating its store",
+        message="No chat answers and no job starts until it is done.",
+        priority="default",
+    ),
     Condition.WEEK_HALT: AlarmText(
         title="The week's usage halt",
         message=(

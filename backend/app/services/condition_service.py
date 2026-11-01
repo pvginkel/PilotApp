@@ -1,5 +1,6 @@
 """The conditions that hold all work, which the gold bar shows (UC *The gold
-bar*; DB Condition): the controller unreachable (F125; design 2 §13.4), and the
+bar*; DB Condition): the controller unreachable (F125; design 2 §13.4), Pilot
+updating its store, a Store Update unlifted (F144.4; design 5 D8), and the
 week's and the five-hour usage halts (F135.7; `UsageHalts`).
 
 When one turns on or off, its listeners hear of it, the alarms among them, and
@@ -20,6 +21,7 @@ from app.models.reference import UsageWindow, UserKind
 from app.schemas.conditions import ConditionCode, ConditionSchema, ConditionsSchema
 from app.services.controller_outage import ControllerOutage
 from app.services.sse_connection_manager import SSEConnectionManager, Target
+from app.services.store_update_service import unlifted
 from app.services.usage_halts import UsageHalts
 
 if TYPE_CHECKING:
@@ -100,6 +102,19 @@ class ConditionService:
                 )
             ]
         )
+        update = unlifted(db)
+        if update is not None:
+            held.append(
+                ConditionSchema(
+                    code=ConditionCode.STORE_UPDATE,
+                    since=update.made_at,
+                    share=None,
+                    taken_at=None,
+                    stale=None,
+                    offer=None,
+                    target=None,
+                )
+            )
         held += [
             ConditionSchema(
                 code=HALT_CODES[halt.window],

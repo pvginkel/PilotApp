@@ -160,6 +160,7 @@ class Condition(StrEnum):
     """An app-wide standing that holds work: what an Alarm is for."""
 
     OUTAGE = "outage"
+    STORE_UPDATE = "store_update"
     WEEK_HALT = "week_halt"
     FIVE_HOUR_HALT = "five_hour_halt"
 

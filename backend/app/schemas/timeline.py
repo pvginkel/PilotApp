@@ -32,15 +32,17 @@ ItemKindCode = Literal[
 
 class HeldReason(StrEnum):
     """Why the gate holds a start (design 2 §13.4, §13.5; F26.1, F143.4,
-    F59.2, F135.1, F135.4; DB 183, 266): a work item's the week's or the
-    five-hour usage halt, its project paused, the controller unreachable, a
-    work item's no slot free, a job's another job of its project before it,
-    or a work item's another run on its conversation until that run's turn
-    ends. Read at display, never stored (decision 53)."""
+    F59.2, F135.1, F135.4, F144.2; DB 183, 266, 282): a work item's the
+    week's or the five-hour usage halt, its project paused, a job's or a
+    Chat's the store's update, the controller unreachable, a work item's no
+    slot free, a job's another job of its project before it, or a work item's
+    another run on its conversation until that run's turn ends. Read at
+    display, never stored (decision 53)."""
 
     WEEK_HALT = "week_halt"
     FIVE_HOUR_HALT = "five_hour_halt"
     PAUSED = "paused"
+    STORE_UPDATE = "store_update"
     CONTROLLER_UNREACHABLE = "controller_unreachable"
     SLOT = "slot"
     QUEUE = "queue"
@@ -449,12 +451,13 @@ class WorkSchema(BaseModel):
         description=(
             "Why the gate holds its start, which its line says: a work "
             "item's the week's or the five-hour usage halt, its project "
-            "paused, the controller unreachable, no slot free, or, a job's, "
-            "another job of its project before it; while `state` is `idle` "
-            "with its nudge owed, what holds that nudge, a usage halt or its "
-            "project paused; null in any other state, and while nothing "
-            "holds it (F26.1, F141.5, F143.4, F59.2, F135.1, F135.3, F135.4, "
-            "F141.3)"
+            "paused, a job's the store's update, the controller unreachable, "
+            "no slot free, or, a job's, another job of its project before "
+            "it; while `state` is `idle` with its nudge owed, what holds that "
+            "nudge, a usage halt, its project paused or, a job's, the store's "
+            "update; null in any other state, and while nothing holds it "
+            "(F26.1, F141.5, F143.4, F59.2, F135.1, F135.3, F135.4, F141.3, "
+            "F144.2)"
         )
     )
     held_running: int | None = Field(

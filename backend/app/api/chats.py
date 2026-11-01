@@ -69,8 +69,9 @@ def send_chat_message(
         403: The caller lacks the editor role
         404: No project has the id
         409: The caller has not chosen a handle; the project is archived;
-            the chat is starting or a turn of it is in flight; or no
-            controller or store environment is configured
+            Pilot is updating its store; the chat is starting or a turn of
+            it is in flight; or no controller or store environment is
+            configured
     """
     words = ChatMessageRequestSchema.model_validate(request.get_json()).words
     person = people_service.require_person(

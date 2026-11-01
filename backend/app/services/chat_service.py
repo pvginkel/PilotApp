@@ -76,6 +76,7 @@ from app.services.session_record_service import SessionRecordService, read_recor
 from app.services.session_scope import STORE_REPO
 from app.services.session_start_service import SessionStartService
 from app.services.start_gate import CHAT_KIND
+from app.services.store_update_service import unlifted
 
 QUOTE_TAG = re.compile(
     r'<quoted_(item|block) id="([^"]+)">[\s\S]*?</quoted_\1 id="\2">'
@@ -145,20 +146,28 @@ class ChatService:
         project's chat, or a start and a Finish, never interleave, and runs
         once this commits.
 
+        Under a Store Update unlifted, the hold on the store's work, no
+        message is taken, no Turn written (F144.2; DB 282): one whose send
+        began before the update was made lands its chat's start held at the
+        gate.
+
         Returns:
             The Turn; one whose send failed has its `error`
 
         Raises:
             RecordNotFoundException: No project has the id
-            InvalidOperationException: The project is archived; its chat's
-                start is under way, or a turn of it is in flight; no
-                controller or no store environment is configured
+            InvalidOperationException: The project is archived; Pilot is
+                updating its store; its chat's start is under way, or a turn
+                of it is in flight; no controller or no store environment is
+                configured
         """
         project = self.db.get(Project, project_id, populate_existing=True)
         if project is None:
             raise RecordNotFoundException("Project", str(project_id))
         operation = f"send a message to Pilot in {project_name(project)}"
         _refuse_message(project, operation)
+        if unlifted(self.db) is not None:
+            raise InvalidOperationException(operation, "Pilot is updating")
         quoted = self._quote(project, person, words)
         session = self._open_chat(project.id)
         if session is not None and not _unbriefed(session):

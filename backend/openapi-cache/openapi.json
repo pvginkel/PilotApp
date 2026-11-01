@@ -343,11 +343,12 @@
         "type": "object"
       },
       "AddedSchema.4ff8b5e.HeldReason": {
-        "description": "Why the gate holds a start (design 2 §13.4, §13.5; F26.1, F143.4,\nF59.2, F135.1, F135.4; DB 183, 266): a work item's the week's or the\nfive-hour usage halt, its project paused, the controller unreachable, a\nwork item's no slot free, a job's another job of its project before it,\nor a work item's another run on its conversation until that run's turn\nends. Read at display, never stored (decision 53).",
+        "description": "Why the gate holds a start (design 2 §13.4, §13.5; F26.1, F143.4,\nF59.2, F135.1, F135.4, F144.2; DB 183, 266, 282): a work item's the\nweek's or the five-hour usage halt, its project paused, a job's or a\nChat's the store's update, the controller unreachable, a work item's no\nslot free, a job's another job of its project before it, or a work item's\nanother run on its conversation until that run's turn ends. Read at\ndisplay, never stored (decision 53).",
         "enum": [
           "week_halt",
           "five_hour_halt",
           "paused",
+          "store_update",
           "controller_unreachable",
           "slot",
           "queue",
@@ -966,7 +967,7 @@
         "description": "The conditions that hold now, which the gold bar shows.",
         "properties": {
           "conditions": {
-            "description": "Each condition that holds, the outage first, then the week's halt, then the five-hour halt; empty while none does",
+            "description": "Each condition that holds, the outage first, then the store's update, then the week's halt, then the five-hour halt; empty while none does",
             "items": {
               "$ref": "#/components/schemas/ConditionsSchema.6c014b4.ConditionSchema"
             },
@@ -981,9 +982,10 @@
         "type": "object"
       },
       "ConditionsSchema.6c014b4.ConditionCode": {
-        "description": "Condition's codes (DB §2.4; decision 66): the controller unreachable\n(design 2 §13.4), the week's usage halt and the five-hour one (F135.1,\nF135.4).",
+        "description": "Condition's codes (DB §2.4; decisions 66, 68): the controller\nunreachable (design 2 §13.4), Pilot updating its store (F144.4), the\nweek's usage halt and the five-hour one (F135.1, F135.4).",
         "enum": [
           "outage",
+          "store_update",
           "week_halt",
           "five_hour_halt"
         ],
@@ -995,7 +997,7 @@
         "properties": {
           "code": {
             "$ref": "#/components/schemas/ConditionsSchema.6c014b4.ConditionCode",
-            "description": "Which condition: `outage`, the controller unreachable; `week_halt` or `five_hour_halt`, the work items halted at the week's or the five-hour usage limit"
+            "description": "Which condition: `outage`, the controller unreachable; `store_update`, Pilot updating its store, which holds every chat's message and every start of a job of Pilot's; `week_halt` or `five_hour_halt`, the work items halted at the week's or the five-hour usage limit"
           },
           "offer": {
             "anyOf": [
@@ -1006,7 +1008,7 @@
                 "type": "null"
               }
             ],
-            "description": "The week's halt's: the overrule it offers now, one at a time, `allowance` under the second limit, `run_out` at or over it and under the wall; null at the wall, where none is offered, and for the outage and the five-hour halt, which has none"
+            "description": "The week's halt's: the overrule it offers now, one at a time, `allowance` under the second limit, `run_out` at or over it and under the wall; null at the wall, where none is offered, and for the outage, the store's update and the five-hour halt, which has none"
           },
           "share": {
             "anyOf": [
@@ -1017,7 +1019,7 @@
                 "type": "null"
               }
             ],
-            "description": "A halt's: its window's used share of the subscription's quota in the latest reading, a fraction, unclamped; null for the outage",
+            "description": "A halt's: its window's used share of the subscription's quota in the latest reading, a fraction, unclamped; null for the outage and the store's update",
             "examples": [
               0.92
             ],
@@ -1038,7 +1040,7 @@
                 "type": "null"
               }
             ],
-            "description": "A halt's: whether the latest reading is stale, KubeCoder unable to refresh it; a fresh one is current to within the poll, whatever its `taken_at`; null for the outage",
+            "description": "A halt's: whether the latest reading is stale, KubeCoder unable to refresh it; a fresh one is current to within the poll, whatever its `taken_at`; null for the outage and the store's update",
             "title": "Stale"
           },
           "taken_at": {
@@ -1051,7 +1053,7 @@
                 "type": "null"
               }
             ],
-            "description": "A halt's: when the latest reading's figures were taken, the age its line shows, \"as of\", while the reading is stale; null for the outage",
+            "description": "A halt's: when the latest reading's figures were taken, the age its line shows, \"as of\", while the reading is stale; null for the outage and the store's update",
             "title": "Taken At"
           },
           "target": {
@@ -3211,11 +3213,12 @@
         "type": "object"
       },
       "ItemDocumentSchema.1fdd8ae.HeldReason": {
-        "description": "Why the gate holds a start (design 2 §13.4, §13.5; F26.1, F143.4,\nF59.2, F135.1, F135.4; DB 183, 266): a work item's the week's or the\nfive-hour usage halt, its project paused, the controller unreachable, a\nwork item's no slot free, a job's another job of its project before it,\nor a work item's another run on its conversation until that run's turn\nends. Read at display, never stored (decision 53).",
+        "description": "Why the gate holds a start (design 2 §13.4, §13.5; F26.1, F143.4,\nF59.2, F135.1, F135.4, F144.2; DB 183, 266, 282): a work item's the\nweek's or the five-hour usage halt, its project paused, a job's or a\nChat's the store's update, the controller unreachable, a work item's no\nslot free, a job's another job of its project before it, or a work item's\nanother run on its conversation until that run's turn ends. Read at\ndisplay, never stored (decision 53).",
         "enum": [
           "week_halt",
           "five_hour_halt",
           "paused",
+          "store_update",
           "controller_unreachable",
           "slot",
           "queue",
@@ -3589,7 +3592,7 @@
                 "type": "null"
               }
             ],
-            "description": "Why the gate holds its start, which its line says: a work item's the week's or the five-hour usage halt, its project paused, the controller unreachable, no slot free, or, a job's, another job of its project before it; while `state` is `idle` with its nudge owed, what holds that nudge, a usage halt or its project paused; null in any other state, and while nothing holds it (F26.1, F141.5, F143.4, F59.2, F135.1, F135.3, F135.4, F141.3)"
+            "description": "Why the gate holds its start, which its line says: a work item's the week's or the five-hour usage halt, its project paused, a job's the store's update, the controller unreachable, no slot free, or, a job's, another job of its project before it; while `state` is `idle` with its nudge owed, what holds that nudge, a usage halt, its project paused or, a job's, the store's update; null in any other state, and while nothing holds it (F26.1, F141.5, F143.4, F59.2, F135.1, F135.3, F135.4, F141.3, F144.2)"
           },
           "held_running": {
             "anyOf": [
@@ -7306,11 +7309,12 @@
         "type": "object"
       },
       "TimelineSchema.1fdd8ae.HeldReason": {
-        "description": "Why the gate holds a start (design 2 §13.4, §13.5; F26.1, F143.4,\nF59.2, F135.1, F135.4; DB 183, 266): a work item's the week's or the\nfive-hour usage halt, its project paused, the controller unreachable, a\nwork item's no slot free, a job's another job of its project before it,\nor a work item's another run on its conversation until that run's turn\nends. Read at display, never stored (decision 53).",
+        "description": "Why the gate holds a start (design 2 §13.4, §13.5; F26.1, F143.4,\nF59.2, F135.1, F135.4, F144.2; DB 183, 266, 282): a work item's the\nweek's or the five-hour usage halt, its project paused, a job's or a\nChat's the store's update, the controller unreachable, a work item's no\nslot free, a job's another job of its project before it, or a work item's\nanother run on its conversation until that run's turn ends. Read at\ndisplay, never stored (decision 53).",
         "enum": [
           "week_halt",
           "five_hour_halt",
           "paused",
+          "store_update",
           "controller_unreachable",
           "slot",
           "queue",
@@ -8001,7 +8005,7 @@
                 "type": "null"
               }
             ],
-            "description": "Why the gate holds its start, which its line says: a work item's the week's or the five-hour usage halt, its project paused, the controller unreachable, no slot free, or, a job's, another job of its project before it; while `state` is `idle` with its nudge owed, what holds that nudge, a usage halt or its project paused; null in any other state, and while nothing holds it (F26.1, F141.5, F143.4, F59.2, F135.1, F135.3, F135.4, F141.3)"
+            "description": "Why the gate holds its start, which its line says: a work item's the week's or the five-hour usage halt, its project paused, a job's the store's update, the controller unreachable, no slot free, or, a job's, another job of its project before it; while `state` is `idle` with its nudge owed, what holds that nudge, a usage halt, its project paused or, a job's, the store's update; null in any other state, and while nothing holds it (F26.1, F141.5, F143.4, F59.2, F135.1, F135.3, F135.4, F141.3, F144.2)"
           },
           "held_running": {
             "anyOf": [
@@ -8384,7 +8388,7 @@
                 "type": "null"
               }
             ],
-            "description": "Why the gate holds its start, which its line says: a work item's the week's or the five-hour usage halt, its project paused, the controller unreachable, no slot free, or, a job's, another job of its project before it; while `state` is `idle` with its nudge owed, what holds that nudge, a usage halt or its project paused; null in any other state, and while nothing holds it (F26.1, F141.5, F143.4, F59.2, F135.1, F135.3, F135.4, F141.3)"
+            "description": "Why the gate holds its start, which its line says: a work item's the week's or the five-hour usage halt, its project paused, a job's the store's update, the controller unreachable, no slot free, or, a job's, another job of its project before it; while `state` is `idle` with its nudge owed, what holds that nudge, a usage halt, its project paused or, a job's, the store's update; null in any other state, and while nothing holds it (F26.1, F141.5, F143.4, F59.2, F135.1, F135.3, F135.4, F141.3, F144.2)"
           },
           "held_running": {
             "anyOf": [
@@ -8589,11 +8593,12 @@
         "type": "object"
       },
       "WorkSchema.1fdd8ae.HeldReason": {
-        "description": "Why the gate holds a start (design 2 §13.4, §13.5; F26.1, F143.4,\nF59.2, F135.1, F135.4; DB 183, 266): a work item's the week's or the\nfive-hour usage halt, its project paused, the controller unreachable, a\nwork item's no slot free, a job's another job of its project before it,\nor a work item's another run on its conversation until that run's turn\nends. Read at display, never stored (decision 53).",
+        "description": "Why the gate holds a start (design 2 §13.4, §13.5; F26.1, F143.4,\nF59.2, F135.1, F135.4, F144.2; DB 183, 266, 282): a work item's the\nweek's or the five-hour usage halt, its project paused, a job's or a\nChat's the store's update, the controller unreachable, a work item's no\nslot free, a job's another job of its project before it, or a work item's\nanother run on its conversation until that run's turn ends. Read at\ndisplay, never stored (decision 53).",
         "enum": [
           "week_halt",
           "five_hour_halt",
           "paused",
+          "store_update",
           "controller_unreachable",
           "slot",
           "queue",
@@ -10278,7 +10283,7 @@
     },
     "/api/projects/{project_id}/chat/messages": {
       "post": {
-        "description": "A send the controller fails is the turn's `error` (F125).\n\nReturns:     201: The message's turn in the chat     400: The message has no words     401: No one is signed in     403: The caller lacks the editor role     404: No project has the id     409: The caller has not chosen a handle; the project is archived;         the chat is starting or a turn of it is in flight; or no         controller or store environment is configured",
+        "description": "A send the controller fails is the turn's `error` (F125).\n\nReturns:     201: The message's turn in the chat     400: The message has no words     401: No one is signed in     403: The caller lacks the editor role     404: No project has the id     409: The caller has not chosen a handle; the project is archived;         Pilot is updating its store; the chat is starting or a turn of         it is in flight; or no controller or store environment is         configured",
         "operationId": "post__api_projects_{project_id}_chat_messages",
         "parameters": [
           {

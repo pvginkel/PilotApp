@@ -45,6 +45,7 @@ from app.models.reference import (
     UserKind,
     VersionCause,
 )
+from app.schemas.timeline import HeldReason
 from app.services.auth_service import AuthContext
 from app.services.chat_close_service import CLOSED, ChatCloseService
 from app.services.chat_service import (
@@ -57,10 +58,10 @@ from app.services.controller_client import HeadlessCreateRequest
 from app.services.controller_outage import ControllerOutage
 from app.services.environment_service import EnvironmentService
 from app.services.pilot_server import PilotServer
-from app.services.relay_service import RelayService
+from app.services.relay_service import RelayService, Words
 from app.services.session_record_service import StoredRecord, read_records
 from app.services.session_start_service import SessionStartService
-from app.services.start_gate import WorkSlots
+from app.services.start_gate import Held, WorkSlots
 from app.services.supervisor import LoopHandle
 from app.services.turn_end_read_service import TurnEndReadService
 from app.utils import after_commit as after_commit_module
@@ -69,6 +70,7 @@ from tests.support.chats import close_chat, open_chat
 from tests.support.fake_controller import ServedFakeController, client_of
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
 from tests.support.locks import in_thread, lock_waits
+from tests.support.store_updates import hold, lift
 from tests.support.supervisor import WAIT_SECONDS, Supervise, metric_value, wait_until
 
 MCP_URL = "https://pilot-mcp.example.com/mcp"
@@ -1155,6 +1157,115 @@ class TestRefusals:
             InvalidOperationException, match="no controller is configured"
         ):
             _send(chats, opened, person)
+
+
+class TestUnderTheStoresUpdate:
+    """While a Store Update is unlifted a message to a chat is refused, no
+    Turn written, and the gate is the net under the check (design 5 D5; Q1;
+    F144.2; DB 282)."""
+
+    def test_a_message_starting_the_chat_is_refused_and_nothing_written(
+        self,
+        session: DbSession,
+        chats: ChatService,
+        fake: _Sent,
+        opened: Project,
+        person: User,
+    ) -> None:
+        hold(session)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _send(chats, opened, person)
+
+        assert str(refused.value) == (
+            "Cannot send a message to Pilot in Soup club because Pilot is updating"
+        )
+        assert _chat_rows(session, opened) == []
+        assert session.scalars(select(Turn)).all() == []
+        assert fake.calls == []
+
+    def test_a_message_to_the_open_chat_is_refused_and_nothing_sent(
+        self,
+        session: DbSession,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+    ) -> None:
+        run = _idle_chat(services, chats, session, fake, opened, person)
+        hold(session)
+
+        with pytest.raises(
+            InvalidOperationException, match="because Pilot is updating"
+        ):
+            _send(chats, opened, person, "Two")
+
+        assert fake.sent == []
+        assert _sends(session, run.id) == [(1, "One")]
+        assert session.scalars(
+            select(Turn.seq).where(Turn.session_id == run.id)
+        ).all() == [1]
+        assert _read(session, run.id).state_code == SessionState.IDLE
+
+    def test_a_message_to_a_draft_is_refused(
+        self,
+        session: DbSession,
+        chats: ChatService,
+        fake: _Sent,
+        draft: Project,
+        person: User,
+    ) -> None:
+        hold(session)
+
+        with pytest.raises(
+            InvalidOperationException, match="because Pilot is updating"
+        ):
+            _send(chats, draft, person)
+
+        assert _chat_rows(session, draft) == []
+
+    def test_the_lift_lets_the_next_message_through(
+        self,
+        session: DbSession,
+        chats: ChatService,
+        fake: _Sent,
+        opened: Project,
+        person: User,
+    ) -> None:
+        update = hold(session)
+        with pytest.raises(InvalidOperationException):
+            _send(chats, opened, person)
+        lift(session, update)
+
+        turn = _send(chats, opened, person)
+
+        assert _read(session, turn.session_id).state_code == SessionState.STARTING
+
+    def test_a_send_begun_before_the_update_was_made_lands_its_chat_held(
+        self,
+        session: DbSession,
+        chats: ChatService,
+        services: tuple[SessionStartService, RelayService],
+        fake: _Sent,
+        opened: Project,
+        person: User,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        quote = chats._quote
+
+        def made_meanwhile(project: Project, by: User, words: str) -> Words:
+            hold(session)
+            return quote(project, by, words)
+
+        monkeypatch.setattr(chats, "_quote", made_meanwhile)
+
+        turn = _send(chats, opened, person)
+
+        run = _read(session, turn.session_id)
+        assert run.state_code == SessionState.HELD
+        assert services[0].held(session, opened, run) == Held(HeldReason.STORE_UPDATE)
+        assert fake.calls == []
 
 
 def _transition(

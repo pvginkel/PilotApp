@@ -112,6 +112,7 @@ from tests.support.fake_controller import (
 )
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
 from tests.support.locks import in_thread, lock_waits
+from tests.support.store_updates import hold, lift
 from tests.support.supervisor import (
     WAIT_SECONDS,
     LogWaiter,
@@ -8057,3 +8058,244 @@ class TestQuotaWallsPass:
         clear_after_commit_callbacks()
         continues._continuation_failed(asking.id)
         assert _clarifying(session, asking).state_code == SessionState.STARTING
+
+
+def _fired_job(
+    container: ServiceContainer,
+    db: DbSession,
+    project: Project,
+    environment: Environment,
+) -> models.Session:
+    """A job a wait's firing placed, held at the gate in the store, its
+    brief written: no setup, so the pause holds it."""
+    job = _chat(db, project, environment, SessionState.HELD)
+    job.kind_code = "job"
+    db.flush()
+    container.record_service().place_work(
+        project, job, "Checking the forecast", trigger=WorkTrigger.WAIT_FIRED
+    )
+    return job
+
+
+def _owed_job(
+    container: ServiceContainer,
+    db: DbSession,
+    project: Project,
+    environment: Environment,
+) -> models.Session:
+    """A job whose turn ended well while its project was paused, since
+    resumed: `idle` on its conversation, its nudge owed (F141.3)."""
+    job = _job(container, db, project, environment, SessionState.IDLE)
+    job.conversation_id = "conv-job"
+    ended = datetime.now(UTC)
+    _turns(db, job.id)[0].ended_at = ended
+    job.turn_ended_at = job.nudge_owed_at = ended
+    db.flush()
+    clear_after_commit_callbacks()
+    return job
+
+
+class TestUnderTheStoresUpdate:
+    """While a Store Update is unlifted the gate holds a job's and a Chat's
+    start, on every path a start passes, and never a work item's (design 5
+    D3; F144.2; DB 282)."""
+
+    def test_a_chats_start_is_held_for_it_and_goes_on_once_it_is_lifted(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        update = hold(session)
+
+        chat = _brain(starts, session, project)
+
+        assert chat.state_code == SessionState.HELD
+        assert starts.held(session, project, chat) == Held(HeldReason.STORE_UPDATE)
+        clear_after_commit_callbacks()
+        _release(starts)
+        assert _read(session, chat.id).state_code == SessionState.HELD
+
+        lift(session, update)
+        _release(starts)
+
+        assert _read(session, chat.id).state_code == SessionState.STARTING
+        assert fake.calls == []
+
+    def test_a_held_jobs_release_keeps_it_held_its_line_saying_why_until_the_lift(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        job = _job(container, session, project, environment, SessionState.HELD)
+        update = hold(session)
+
+        _release(starts)
+
+        assert _read(session, job.id).state_code == SessionState.HELD
+        assert _held_reason(session, starts, job) is HeldReason.STORE_UPDATE
+        lift(session, update)
+        _release(starts)
+        assert _read(session, job.id).state_code == SessionState.STARTING
+
+    def test_it_comes_after_the_pause_and_before_the_outage(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+        environment: Environment,
+        controller_outage: ControllerOutage,
+    ) -> None:
+        job = _fired_job(container, session, project, environment)
+        _transition(session, project, person, TransitionKind.PAUSED)
+        controller_outage.call_unanswered()
+        update = hold(session)
+
+        assert starts.held(session, project, job) == Held(HeldReason.PAUSED)
+        assert _held_reason(session, starts, job) is HeldReason.PAUSED
+        _transition(session, project, person, TransitionKind.RESUMED)
+        assert starts.held(session, project, job) == Held(HeldReason.STORE_UPDATE)
+        assert _held_reason(session, starts, job) is HeldReason.STORE_UPDATE
+        lift(session, update)
+        assert starts.held(session, project, job) == Held(
+            HeldReason.CONTROLLER_UNREACHABLE
+        )
+
+    def test_the_setup_goes_through_the_pause_and_not_through_it(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+        environment: Environment,
+    ) -> None:
+        setup = _job(container, session, project, environment, SessionState.HELD)
+        _transition(session, project, person, TransitionKind.PAUSED)
+        hold(session)
+
+        assert starts.held(session, project, setup) == Held(HeldReason.STORE_UPDATE)
+
+    def test_a_jobs_nudge_at_the_quota_wall_waits_for_the_lift(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        job = _walled_job(container, session, project, environment, week=1.0)
+        update = hold(session)
+        _usage(session, week=0.5, five_hour=0.1)
+
+        _nudge(starts)
+
+        run = _read(session, job.id)
+        assert run.state_code == SessionState.FAILED
+        assert run.nudge_owed_at is not None
+        lift(session, update)
+        _nudge(starts)
+        run = _read(session, job.id)
+        assert (run.state_code, run.nudge_owed_at) == (SessionState.STARTING, None)
+
+    def test_a_jobs_owed_nudge_waits_for_the_lift_its_line_and_its_tick_saying_so(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        job = _owed_job(container, session, project, environment)
+        update = hold(session)
+        asked = _nudges_asked(starts, monkeypatch)
+
+        starts.run_nudge_timer(session)
+        _nudge(starts)
+
+        assert asked == []
+        run = _read(session, job.id)
+        assert (run.state_code, run.nudge_owed_at) == (
+            SessionState.IDLE,
+            job.turn_ended_at,
+        )
+        # The timeline's read of an idle Session whose nudge is owed.
+        assert _held_reason(session, starts, job) is HeldReason.STORE_UPDATE
+        lift(session, update)
+        assert _held_reason(session, starts, job) is None
+        starts.run_nudge_timer(session)
+        assert asked == [f"{START_JOB}:{NUDGE_KEY}"]
+        _nudge(starts)
+        run = _read(session, job.id)
+        assert (run.state_code, run.nudge_owed_at) == (SessionState.STARTING, None)
+
+    def test_a_work_items_start_and_resume_go_on(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        stopped = _stopped_item(starts, fake, session, project, person)
+        hold(session)
+
+        started = _start(starts, session, project)
+        resumed = starts.resume(session, stopped.id)
+
+        assert started.state_code == SessionState.STARTING
+        assert resumed.state_code == SessionState.STARTING
+
+    def test_a_work_items_nudge_goes_on(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        halted = _halted_end(starts, fake, session, project)
+        hold(session)
+        _usage(session, week=0.5, five_hour=0.1)
+
+        _nudge(starts)
+
+        run = _read(session, halted.id)
+        assert (run.state_code, run.nudge_owed_at) == (SessionState.STARTING, None)
+
+    def test_a_runs_continuation_and_its_clarification_run_go_on(
+        self,
+        container: ServiceContainer,
+        continues: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        run = _ended_run(session, container, fake, project)
+        refinement = _read_at_its_end(
+            session, container, fake, project, run, REFINEMENT, REFINEMENT_TEXT
+        )
+        asking = _pass(session, container, project, run, (refinement, "D1", "Which?"))
+        hold(session)
+
+        container.clarification_service().pass_ended(asking)
+
+        clarifying = _clarifying(session, asking)
+        assert clarifying.state_code == SessionState.STARTING
+        clarifying.state_code = SessionState.IDLE
+        session.flush()
+        container.record_service().answer(
+            session.get_one(Document, refinement.id), "D1", person, "The lake"
+        )
+        assert _released(session, refinement).state_code == SessionState.STARTING

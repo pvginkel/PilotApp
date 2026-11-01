@@ -1,5 +1,5 @@
 """Schemas for the conditions that hold all work, which the gold bar shows (UC
-*The gold bar*; F125, F135.7; DB Condition)."""
+*The gold bar*; F125, F135.7, F144.4; DB Condition)."""
 
 from datetime import datetime
 from enum import StrEnum
@@ -10,11 +10,12 @@ from app.models.reference import OverruleKind
 
 
 class ConditionCode(StrEnum):
-    """Condition's codes (DB §2.4; decision 66): the controller unreachable
-    (design 2 §13.4), the week's usage halt and the five-hour one (F135.1,
-    F135.4)."""
+    """Condition's codes (DB §2.4; decisions 66, 68): the controller
+    unreachable (design 2 §13.4), Pilot updating its store (F144.4), the
+    week's usage halt and the five-hour one (F135.1, F135.4)."""
 
     OUTAGE = "outage"
+    STORE_UPDATE = "store_update"
     WEEK_HALT = "week_halt"
     FIVE_HOUR_HALT = "five_hour_halt"
 
@@ -24,7 +25,9 @@ class ConditionSchema(BaseModel):
 
     code: ConditionCode = Field(
         description=(
-            "Which condition: `outage`, the controller unreachable; `week_halt` "
+            "Which condition: `outage`, the controller unreachable; "
+            "`store_update`, Pilot updating its store, which holds every "
+            "chat's message and every start of a job of Pilot's; `week_halt` "
             "or `five_hour_halt`, the work items halted at the week's or the "
             "five-hour usage limit"
         )
@@ -33,7 +36,8 @@ class ConditionSchema(BaseModel):
     share: float | None = Field(
         description=(
             "A halt's: its window's used share of the subscription's quota in "
-            "the latest reading, a fraction, unclamped; null for the outage"
+            "the latest reading, a fraction, unclamped; null for the outage "
+            "and the store's update"
         ),
         examples=[0.92],
     )
@@ -41,14 +45,14 @@ class ConditionSchema(BaseModel):
         description=(
             "A halt's: when the latest reading's figures were taken, the age "
             'its line shows, "as of", while the reading is stale; null for the '
-            "outage"
+            "outage and the store's update"
         ),
     )
     stale: bool | None = Field(
         description=(
             "A halt's: whether the latest reading is stale, KubeCoder unable to "
             "refresh it; a fresh one is current to within the poll, whatever "
-            "its `taken_at`; null for the outage"
+            "its `taken_at`; null for the outage and the store's update"
         ),
     )
     offer: OverruleKind | None = Field(
@@ -56,7 +60,8 @@ class ConditionSchema(BaseModel):
             "The week's halt's: the overrule it offers now, one at a time, "
             "`allowance` under the second limit, `run_out` at or over it and "
             "under the wall; null at the wall, where none is offered, and for "
-            "the outage and the five-hour halt, which has none"
+            "the outage, the store's update and the five-hour halt, which has "
+            "none"
         ),
     )
     target: float | None = Field(
@@ -75,7 +80,8 @@ class ConditionsSchema(BaseModel):
 
     conditions: list[ConditionSchema] = Field(
         description=(
-            "Each condition that holds, the outage first, then the week's halt, "
-            "then the five-hour halt; empty while none does"
+            "Each condition that holds, the outage first, then the store's "
+            "update, then the week's halt, then the five-hour halt; empty while "
+            "none does"
         )
     )

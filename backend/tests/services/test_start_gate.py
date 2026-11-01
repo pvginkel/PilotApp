@@ -1,6 +1,7 @@
-"""The gate every start passes (design 2 §13.4, §13.5; F141.4, F141.5, F143.4,
-F59.2, F135; DB 183, 229, 243, 266): its conditions in their order, the usage
-halts a work item's alone, the slot's count, its
+"""The gate every start passes (design 2 §13.4, §13.5; design 5 D3; F141.4,
+F141.5, F143.4, F59.2, F135, F144.2; DB 183, 229, 243, 266, 282): its
+conditions in their order, the usage halts a work item's alone, the store's
+update a job's and a Chat's alone, the slot's count, its
 lock and its open event, a project's queue of jobs, and the runs of one
 conversation."""
 
@@ -32,6 +33,7 @@ from app.utils import after_commit as after_commit_module
 from app.utils.after_commit import clear_after_commit_callbacks
 
 UNREACHABLE = HeldReason.CONTROLLER_UNREACHABLE
+STORE_UPDATE = HeldReason.STORE_UPDATE
 CONVERSATION = HeldReason.CONVERSATION
 WEEK_HALT = HeldReason.WEEK_HALT
 FIVE_HOUR_HALT = HeldReason.FIVE_HOUR_HALT
@@ -95,6 +97,7 @@ class TestHeldReason:
                 paused=paused,
                 kind_code=kind_code,
                 setup=False,
+                updating=False,
                 unreachable=unreachable,
                 filled=filled,
                 queued=queued,
@@ -135,6 +138,7 @@ class TestHeldReason:
                 paused=paused,
                 kind_code=kind_code,
                 setup=False,
+                updating=False,
                 unreachable=unreachable,
                 filled=filled,
                 queued=False,
@@ -163,8 +167,67 @@ class TestHeldReason:
                 paused=paused,
                 kind_code="job",
                 setup=True,
+                updating=False,
                 unreachable=unreachable,
                 filled=None,
+                queued=queued,
+                conversing=False,
+            )
+            == held
+        )
+
+    @pytest.mark.parametrize(
+        (
+            "kind_code",
+            "halted",
+            "paused",
+            "setup",
+            "unreachable",
+            "filled",
+            "queued",
+            "held",
+        ),
+        [
+            ("job", None, False, False, False, None, False, Held(STORE_UPDATE)),
+            ("chat", None, False, False, False, None, False, Held(STORE_UPDATE)),
+            # A work item's start never.
+            ("work", None, False, False, False, None, False, None),
+            ("work", None, False, False, True, None, False, Held(UNREACHABLE)),
+            ("work", None, False, False, False, 3, False, Held(HeldReason.SLOT, 3)),
+            ("work", WEEK, False, False, False, None, False, Held(WEEK_HALT)),
+            # After the pause and before the outage and the queue.
+            ("job", None, True, False, True, None, True, Held(HeldReason.PAUSED)),
+            ("job", None, False, False, True, None, True, Held(STORE_UPDATE)),
+            ("chat", None, False, False, True, None, False, Held(STORE_UPDATE)),
+            # A Chat's never held for the pause, nor a job's for a halt.
+            ("chat", None, True, False, False, None, False, Held(STORE_UPDATE)),
+            ("job", WEEK, False, False, False, None, False, Held(STORE_UPDATE)),
+            # The setup goes through the pause, not through the update.
+            ("job", None, True, True, False, None, False, Held(STORE_UPDATE)),
+        ],
+    )
+    def test_the_stores_update_holds_a_jobs_and_a_chats_start_after_the_pause(
+        self,
+        kind_code: str,
+        halted: UsageWindow | None,
+        paused: bool,
+        setup: bool,
+        unreachable: bool,
+        filled: int | None,
+        queued: bool,
+        held: Held | None,
+    ) -> None:
+        """Design 5 D3; DB 282: a work item runs elsewhere and touches the
+        store nowhere."""
+        assert (
+            held_reason(
+                halted=halted,
+                paused=paused,
+                kind_code=kind_code,
+                setup=setup,
+                updating=True,
+                unreachable=unreachable,
+                filled=filled,
                 queued=queued,
                 conversing=False,
             )

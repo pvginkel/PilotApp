@@ -104,6 +104,7 @@ from app.services.start_gate import (
     held_reason,
     queued,
 )
+from app.services.store_update_service import unlifted
 from app.services.usage_halts import UsageHalts
 
 WORK = "work"
@@ -244,7 +245,8 @@ def work_status(
     Session `error?`). A held one's reason is the gate's as it reads now, a
     work item's usage halt read for it (`halts`), the slot's with the count
     that closed it (`slots`), a job's queue read for it (`queued`), a work
-    item's conversation for it (`conversing`). A
+    item's conversation for it (`conversing`), a job's the store's update
+    (`unlifted`). A
     stopped one's stop is
     when and by whom, a Resume keeping both on the Session (DB Session
     `stopped_at?`, `stopped_by?`); one no one stopped has the cause its
@@ -252,7 +254,8 @@ def work_status(
     halt's hard stop stopped, its nudge owed, the halt that holds a work
     item now (`halts`; decision 66). One whose turn ended under a halt or a
     pause, its nudge owed, has for its held reason what holds that nudge
-    now, read as the gate reads a start's halt and pause; one Finish closed
+    now, read as the gate reads a start's halt, pause and the store's
+    update; one Finish closed
     owes none, its nudge never sent to a done item. One whose start has
     no environment yet has none (DB 107). A job's is Pilot's own (F59.1); a
     retried one's names the job its Retry placed, created at the press."""
@@ -316,6 +319,14 @@ def work_status(
         else ()
     )
     halted = halts.halted(db) if waiting or hard_stopped or halted_ends else None
+    updating = (
+        any(
+            session.kind_code == JOB_KIND
+            and (session.state_code is SessionState.HELD or session.id in halted_ends)
+            for session, *_ in rows
+        )
+        and unlifted(db) is not None
+    )
     causes = dict.fromkeys(hard_stopped, _HALT_STOPS[halted]) | {
         session.id: _stop_cause(db, session.id)
         for session in stopped
@@ -347,6 +358,7 @@ def work_status(
                 paused=paused,
                 kind_code=session.kind_code,
                 setup=False,
+                updating=updating,
                 unreachable=False,
                 filled=None,
                 queued=False,
@@ -358,6 +370,7 @@ def work_status(
                 paused=paused,
                 kind_code=session.kind_code,
                 setup=trigger is WorkTrigger.SETUP,
+                updating=updating,
                 unreachable=unreachable,
                 filled=filled.get(session.project_id),
                 queued=session.id in behind,

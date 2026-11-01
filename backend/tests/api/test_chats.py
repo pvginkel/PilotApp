@@ -33,6 +33,7 @@ from app.services.turn_end_read_service import TurnEndReadService
 from app.utils.after_commit import clear_after_commit_callbacks
 from tests.support.chats import ChatWriter, close_chat, open_chat
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
+from tests.support.store_updates import hold
 from tests.support.supervisor import Supervise
 
 SUBJECT = "subject-ada"
@@ -244,6 +245,26 @@ class TestSendChatMessage:
             " archived"
         )
         assert session.scalars(select(Chat)).all() == []
+
+    def test_under_the_stores_update_a_message_is_409_and_no_turn_written(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        starts: None,
+        opened: Project,
+        person: User,
+    ) -> None:
+        hold(session)
+        _sign_in(client)
+
+        response = client.post(_messages(opened.id), json={"words": "Hi"})
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            "Cannot send a message to Pilot in Soup club because Pilot is updating"
+        )
+        assert session.scalars(select(Chat)).all() == []
+        assert session.scalars(select(Turn)).all() == []
 
     def test_a_drafts_message_starts_its_definition_chat_201(
         self,

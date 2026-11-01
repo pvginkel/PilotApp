@@ -181,6 +181,7 @@ from app.services.start_gate import (
     queued,
     setups,
 )
+from app.services.store_update_service import unlifted
 from app.services.supervisor import LoopHandle, Supervisor
 from app.services.usage_halts import UsageHalts
 from app.services.work_status import work_moved
@@ -1170,9 +1171,9 @@ class SessionStartService:
         """The Sessions whose nudge is owed and that nothing holds now: their
         work item open, their project neither finished, archived nor paused,
         a setup let through the pause as the gate lets its start (F49), a
-        work item's with no usage halt holding, and one at the quota wall
-        with the wall confirmed by a reading and quota again (DB 232, 266;
-        `quota_wall`)."""
+        work item's with no usage halt holding, a job's with no Store Update
+        unlifted (F144.2), and one at the quota wall with the wall confirmed
+        by a reading and quota again (DB 232, 266, 282; `quota_wall`)."""
         query = (
             select(AgentSession.id)
             .join(Project, Project.id == AgentSession.project_id)
@@ -1195,6 +1196,8 @@ class SessionStartService:
         )
         if self._halts.halted(db) is not None:
             query = query.where(AgentSession.kind_code != WORK_KIND)
+        if unlifted(db) is not None:
+            query = query.where(AgentSession.kind_code == WORK_KIND)
         if not quota_back(db):
             query = query.where(AgentSession.state_code != SessionState.FAILED)
         return query
@@ -1212,6 +1215,7 @@ class SessionStartService:
             or (project.paused and session.id not in setups(db, [session.id]))
             or db.get_one(Item, session_id, populate_existing=True).done_at is not None
             or (session.kind_code == WORK_KIND and self._halts.halted(db) is not None)
+            or (session.kind_code != WORK_KIND and unlifted(db) is not None)
             or (
                 session.state_code == SessionState.FAILED
                 and not _wall_lifted(db, session.nudge_owed_at)
@@ -1758,7 +1762,9 @@ class SessionStartService:
         `project` now, a job's `queued` behind another of its project or not,
         a work item's or a job's `session` when it is written already, a
         setup's let through the pause (`setups`); None while it is open. A
-        work item's reads the usage halts (`UsageHalts.halted`), and counts
+        job's and a Chat's read the store's update (`unlifted`), which holds
+        from its row's commit. A work item's reads the usage halts
+        (`UsageHalts.halted`), and counts
         the slot under the slot's lock (`WorkSlots.lock`), held to the
         transaction's end, so the next start's count sees the Session this
         one moves to `starting`, and reads under it whether another Session
@@ -1766,11 +1772,14 @@ class SessionStartService:
         halted = None
         filled = None
         conversing = False
+        updating = False
         if kind_code == WORK_KIND:
             halted = self._halts.halted(db)
             self._slots.lock(db)
             filled = self._slots.filled(db, [project.id]).get(project.id)
             conversing = session is not None and carried(db, session)
+        else:
+            updating = unlifted(db) is not None
         return held_reason(
             halted=halted,
             paused=project.paused,
@@ -1778,6 +1787,7 @@ class SessionStartService:
             setup=session is not None
             and kind_code == JOB_KIND
             and session.id in setups(db, [session.id]),
+            updating=updating,
             unreachable=self._outage.holds,
             filled=filled,
             queued=queued,

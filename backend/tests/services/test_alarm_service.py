@@ -18,7 +18,7 @@ from flask import Flask
 from sqlalchemy import select
 
 from app.database import scoped_session
-from app.models import Alarm, User
+from app.models import Alarm, StoreUpdate, User
 from app.models.reference import Condition
 from app.services.alarm_service import (
     ALARM_CLEAR_DISMISSES_TOTAL,
@@ -27,6 +27,7 @@ from app.services.alarm_service import (
     ALARM_RECONCILES_TOTAL,
     ALARM_TEXTS,
     AlarmService,
+    AlarmText,
 )
 from app.services.condition_service import ConditionService
 from app.services.container import ServiceContainer
@@ -40,6 +41,7 @@ from tests.support.fake_notification_bridge import (
     bridge_client_of,
 )
 from tests.support.locks import in_thread, lock_waits
+from tests.support.store_updates import hold, lift
 from tests.support.supervisor import (
     LogWaiter,
     Supervise,
@@ -249,15 +251,35 @@ class TestAlarmServiceHolding:
 
         assert service.holding() == {Condition.OUTAGE: outage.since}
 
+    def test_the_stores_update_holds_by_its_condition_code_from_its_made_at(
+        self, container: ServiceContainer, supervise: Supervise
+    ) -> None:
+        service, _, _, _ = _service(container, supervise)
+        with scoped_session(container) as db:
+            made_at = hold(db).made_at
+
+        assert service.holding() == {Condition.STORE_UPDATE: made_at}
+
     def test_every_condition_has_its_fixed_text(self) -> None:
         assert set(ALARM_TEXTS) == set(Condition)
+
+    def test_the_stores_update_alarms_at_default_priority_in_design_5s_words(
+        self,
+    ) -> None:
+        """Q2: it alarms, `default` priority, as the five-hour halt does."""
+        assert ALARM_TEXTS[Condition.STORE_UPDATE] == AlarmText(
+            title="Pilot is updating its store",
+            message="No chat answers and no job starts until it is done.",
+            priority="default",
+        )
 
 
 class TestAlarmServiceReconcile:
     @pytest.mark.parametrize(
-        "condition", [Condition.WEEK_HALT, Condition.FIVE_HOUR_HALT]
+        "condition",
+        [Condition.WEEK_HALT, Condition.FIVE_HOUR_HALT, Condition.STORE_UPDATE],
     )
-    def test_a_halt_is_submitted_at_once_to_each_person_with_a_token_and_the_switch(
+    def test_a_halt_or_the_stores_update_is_submitted_at_once_to_each_person_with_a_token_and_the_switch(
         self,
         container: ServiceContainer,
         bridge: WatchedFakeNotificationBridge,
@@ -338,6 +360,7 @@ class TestAlarmServiceReconcile:
             service,
             {
                 Condition.OUTAGE: since,
+                Condition.STORE_UPDATE: since,
                 Condition.WEEK_HALT: since,
                 Condition.FIVE_HOUR_HALT: since,
             },
@@ -433,6 +456,30 @@ class TestAlarmServiceConditions:
         outage.probe_answered()
 
         wait_until(lambda: bridge.shown("ada") == {}, "the outage's alarm dismissed")
+        assert [call.call for call in bridge.calls("ada")] == ["submit", "dismiss"]
+
+    def test_the_stores_update_reaches_the_phone_at_once_and_leaves_at_its_lift(
+        self,
+        container: ServiceContainer,
+        bridge: WatchedFakeNotificationBridge,
+        supervise: Supervise,
+    ) -> None:
+        """Read through the conditions service, due from its `made_at` with
+        no wait of the outage's (Q2)."""
+        _give_token(container, "ada", ADA_TOKEN)
+        service, _, _, _ = _service(container, supervise, outage_after_seconds=3600)
+        with scoped_session(container) as db:
+            update_id = hold(db).id
+
+        service.reconcile(LoopHandle("test"))
+
+        assert bridge.shown("ada") == {
+            "store_update": _expected(container, Condition.STORE_UPDATE)
+        }
+        with scoped_session(container) as db:
+            lift(db, db.get_one(StoreUpdate, update_id))
+        service.reconcile(LoopHandle("test"))
+        assert bridge.shown("ada") == {}
         assert [call.call for call in bridge.calls("ada")] == ["submit", "dismiss"]
 
     def test_startup_dismisses_an_outage_alarm_a_stopped_process_left_standing(

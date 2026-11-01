@@ -7,7 +7,7 @@
  * on the gold bar (F125, F135.7), and the week's halt's overrule (F135.2).
  */
 
-import { Circle, CircleCheck, CircleDashed, Hourglass, OctagonPause, Pause, ServerOff, UserRound, type LucideIcon } from 'lucide-react';
+import { Circle, CircleCheck, CircleDashed, Hourglass, OctagonPause, Pause, RefreshCw, ServerOff, UserRound, type LucideIcon } from 'lucide-react';
 import type { components } from '@/lib/api/generated/types';
 import { phaseOf, type Activity } from '@/lib/chat/activity';
 import { summarizeTool } from '@/lib/chat/tools';
@@ -113,7 +113,7 @@ export function planStep(status: TaskStatus): PlanStep {
 
 /**
  * Why the gate holds a work item’s start, as its line says it (F26.1, F141.5, F143.4, F59.2, F135.1,
- * F135.4; DB 183);
+ * F135.4, F144.4; DB 183);
  * `running`, the work items that leave it no slot, counted while no slot is free.
  */
 export function heldReasonLabel(reason: HeldReason, running: number | null): string {
@@ -124,6 +124,8 @@ export function heldReasonLabel(reason: HeldReason, running: number | null): str
       return 'Halted at the five-hour limit';
     case 'paused':
       return 'Paused';
+    case 'store_update':
+      return 'Waiting for Pilot’s update';
     case 'controller_unreachable':
       return 'Waiting for the controller';
     case 'slot':
@@ -190,7 +192,7 @@ function halted(condition: Condition, quota: string, today: string): string {
 const HALT_HOLDS = 'No work item starts until a reading puts it under the limit; chats and Pilot’s own jobs go on.';
 
 /**
- * A condition that holds all work, as its line and its badge on the gold bar say it (F125, F135.7),
+ * A condition that holds all work, as its line and its badge on the gold bar say it (F125, F135.7, F144.4),
  * a time in it dated for an earlier day than the viewer's `today` (`useToday()`).
  */
 export function conditionLine(condition: Condition, today: string): ConditionLine {
@@ -202,6 +204,13 @@ export function conditionLine(condition: Condition, today: string): ConditionLin
         detail: 'Nothing starts until it answers.',
         badge: 'Controller unreachable',
         icon: ServerOff,
+      };
+    case 'store_update':
+      return {
+        title: 'Pilot is updating its store',
+        detail: 'No chat answers and no job of Pilot’s starts until it is done; work items go on.',
+        badge: 'Pilot is updating',
+        icon: RefreshCw,
       };
     case 'week_halt':
       return {

@@ -1,5 +1,6 @@
 """The conditions that hold all work, which the gold bar shows (UC *The gold
-bar*; F125, F135.7; design 2 §13.4): the outage and the usage halts, read, and
+bar*; F125, F135.7, F144.4; design 2 §13.4; design 5 D8): the outage, the
+store's update and the usage halts, read, and
 told to every person's connections at once when one turns. Read off test
 connections' queues."""
 
@@ -18,6 +19,7 @@ from app.services.condition_service import ConditionService
 from app.services.container import ServiceContainer
 from app.services.controller_outage import ControllerOutage
 from app.services.sse_connection_manager import SSEConnection, SSEConnectionManager
+from tests.support.store_updates import hold, lift
 
 
 @pytest.fixture
@@ -145,6 +147,61 @@ class TestConditionService:
                 },
             ]
         }
+
+    def test_the_stores_update_holds_after_the_outage_before_the_halts_since_made(
+        self,
+        conditions: ConditionService,
+        controller_outage: ControllerOutage,
+        session: DbSession,
+    ) -> None:
+        controller_outage.call_unanswered()
+        update = hold(session)
+        _usage(session, week=0.5, five_hour=0.8)
+
+        held = conditions.conditions().model_dump()["conditions"]
+
+        assert [condition["code"] for condition in held] == [
+            "outage",
+            "store_update",
+            "five_hour_halt",
+        ]
+        assert held[1] == {
+            "code": "store_update",
+            "since": update.made_at,
+            "share": None,
+            "taken_at": None,
+            "stale": None,
+            "offer": None,
+            "target": None,
+        }
+
+    def test_the_stores_update_holds_until_its_lift(
+        self, conditions: ConditionService, session: DbSession
+    ) -> None:
+        update = hold(session)
+        assert [c.code for c in conditions.conditions().conditions] == ["store_update"]
+
+        lift(session, update)
+
+        assert conditions.conditions().conditions == []
+
+    def test_the_stores_update_is_told_with_the_conditions(
+        self,
+        conditions: ConditionService,
+        manager: SSEConnectionManager,
+        connections: list[SSEConnection],
+        person: User,
+        session: DbSession,
+    ) -> None:
+        """The server tells them at the hold's change (P3); here the test
+        does."""
+        connections.append(manager.on_connect("ada-1", person.subject))
+        hold(session)
+
+        conditions.tell()
+
+        [frame] = _frames(connections[0])
+        assert [c["code"] for c in frame["payload"]["conditions"]] == ["store_update"]
 
     def test_a_halt_is_told_with_the_conditions(
         self,
