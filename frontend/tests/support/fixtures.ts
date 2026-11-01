@@ -7,8 +7,9 @@
  * screen sits in, `handleStep` and `profile` the person's own pages, `projectList` the side column's
  * list, `projectHead` a project's head, `timeline` its timeline, `overlay` the overlay over it,
  * `sessionLog` a work item's session log in it, `panel` the side panel beside it, `chat` its Chat tab,
- * `chats` puts a project's chats in the store's fake environment and sends their messages, and
- * `bridge` adds registrations to the worker's fake notification bridge and reads what they show.
+ * `chats` puts a project's chats in the store's fake environment and sends their messages,
+ * `bridge` adds registrations to the worker's fake notification bridge and reads what they show, and
+ * `storeUpdate` makes the store's update and asks its lift, lifting one a spec left standing.
  * `conditions`, the worker's, reads what the gold bar reads.
  */
 
@@ -30,6 +31,7 @@ import { ShellPage } from './page-objects/shell-page';
 import { TimelinePage } from './page-objects/timeline-page';
 import { People } from './people';
 import { Projects } from './projects';
+import { StoreUpdate } from './store-update';
 
 interface DomainFixtures {
   people: People;
@@ -49,6 +51,7 @@ interface DomainFixtures {
   definitionChat: ChatPage;
   chats: Chats;
   bridge: NotificationBridge;
+  storeUpdate: StoreUpdate;
 }
 
 interface DomainWorkerFixtures {
@@ -125,6 +128,11 @@ export const test = infrastructureFixtures.extend<DomainFixtures, DomainWorkerFi
     const bridge = new NotificationBridge(page, backendUrl);
     await use(bridge);
     await bridge.restore();
+  },
+  storeUpdate: async ({ page, backendUrl, conditions, chats }, use) => {
+    const storeUpdate = new StoreUpdate(page, backendUrl, conditions, chats);
+    await use(storeUpdate);
+    await storeUpdate.restore();
   },
 });
 

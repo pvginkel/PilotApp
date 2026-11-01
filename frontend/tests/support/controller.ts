@@ -44,6 +44,9 @@ const FIVE_HOUR_LIMIT = 0.75;
 const UNDER_THE_LIMITS: Shares = { five_hour: 0.1, seven_day: 0.1 };
 
 /** The halts the shares make at the backend's default limits, the week's first. */
+/** The usage halts, the conditions a reading turns on. */
+const HALTS: readonly ConditionCode[] = ['week_halt', 'five_hour_halt'];
+
 function haltsOf(shares: Shares): ConditionCode[] {
   return [
     ...((shares.seven_day ?? 0) >= WEEK_LIMIT ? (['week_halt'] as const) : []),
@@ -103,7 +106,7 @@ export class Conditions {
   /** Returns once the usage halts the backend reads are `halts`, in their order. */
   async halts(halts: ConditionCode[]): Promise<void> {
     await expect
-      .poll(async () => (await this.read()).map((condition) => condition.code).filter((code) => code !== 'outage'))
+      .poll(async () => (await this.read()).map((condition) => condition.code).filter((code) => HALTS.includes(code)))
       .toEqual(halts);
   }
 

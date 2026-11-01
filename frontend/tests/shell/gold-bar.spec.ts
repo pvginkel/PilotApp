@@ -7,7 +7,8 @@
  * answers again, and nothing dismisses it. The time it began carries its date once that is an
  * earlier day than the viewer's today (R9). A stream that comes back up reads it again, covering a
  * turn missed while it was down (design 2 §6.2). A controller that answers about one environment
- * turns nothing on (review O2).
+ * turns nothing on (review O2). While the store's update holds, it shows Pilot updating its store
+ * since the update was made, before the halts', and goes at its lift (F144.4).
  */
 
 import type { Page } from '@playwright/test';
@@ -16,12 +17,15 @@ import { coloursOf, hue } from '../support/contrast';
 import { makeUnique, waitForUiState } from '../support/helpers';
 import { createDeploymentSseHelper } from '../support/helpers/deployment-sse';
 import { ShellPage } from '../support/page-objects/shell-page';
+import { TICKS_MS } from '../support/store-update';
 
 const CLOCK = String.raw`\d\d:\d\d`;
 const lineOf = (since: string) => new RegExp(String.raw`^The controller has been unreachable since ${since}\. Nothing starts until it answers\.$`);
 const badgeOf = (since: string) => new RegExp(`^Controller unreachable since ${since}$`);
 const LINE = lineOf(CLOCK);
 const BADGE = badgeOf(CLOCK);
+const updatingLine = (since: string) =>
+  `Pilot is updating its store since ${since}. No chat answers and no job of Pilot’s starts until it is done; work items go on.`;
 const PHONE = { width: 390, height: 844 };
 
 async function boxes(shell: ShellPage) {
@@ -225,6 +229,50 @@ test.describe('The gold bar', () => {
 
     await controller.outage(false);
     await expect(shell.goldBadge('outage')).toHaveCount(0);
+  });
+
+  test('shows Pilot updating its store while the store’s update holds, since it was made, before the halts’, and goes at its lift', async ({
+    page,
+    people,
+    shell,
+    controller,
+    conditions,
+    storeUpdate,
+    deploymentSse,
+  }) => {
+    await people.signIn();
+    await shell.open('/profile');
+    await deploymentSse.ensureConnected();
+    await waitForUiState(page, 'shell.conditions', 'ready');
+    await expect(shell.goldBadge('store_update')).toHaveCount(0);
+
+    const { made_at } = await storeUpdate.make();
+    const held = (await conditions.read()).find((condition) => condition.code === 'store_update');
+    expect(Date.parse(held!.since)).toBe(Date.parse(made_at));
+    const since = await page.evaluate(
+      (at) => new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' }).format(new Date(at)),
+      made_at,
+    );
+
+    // The server tells the open browsers at its timer's next tick.
+    await expect(shell.goldBadge('store_update')).toHaveText(`Pilot is updating since ${since}`, { timeout: TICKS_MS });
+    await expect(shell.goldBadge('store_update')).toHaveAttribute('title', updatingLine(since));
+    await expect(shell.goldBadges.getByRole('button')).toHaveCount(0);
+
+    await controller.usage({ seven_day: 0.92, five_hour: 0.1 });
+    await expect(shell.goldBadge('week_halt')).toBeVisible();
+    const badges = shell.goldBadges.getByTestId('shell.gold-badges.badge');
+    expect(await badges.evaluateAll((each) => each.map((badge) => badge.getAttribute('data-condition')))).toEqual([
+      'store_update',
+      'week_halt',
+    ]);
+
+    await page.setViewportSize(PHONE);
+    await expect(shell.goldLine('store_update')).toHaveText(updatingLine(since));
+
+    await storeUpdate.lift();
+    await expect(shell.goldLine('store_update')).toHaveCount(0);
+    await expect(shell.goldLine('week_halt')).toBeVisible();
   });
 
   test('stays away while the controller answers about one environment alone', async ({

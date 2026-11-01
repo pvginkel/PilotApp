@@ -1,17 +1,19 @@
 """Schemas for the testing endpoints that make the record's states the UI
 cannot make: people, environments, projects, their items, their work items,
 an agent's saves of them, the files hung on them, a worker's registrations and
-attachments, the pre-ruling pass's questions to a writer, and an answer the
-brain records in the chat."""
+attachments, the pre-ruling pass's questions to a writer, an answer the brain
+records in the chat, and the store's update and its lift."""
 
 import base64
 import binascii
 import uuid
+from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from pydantic import (
     BaseModel,
     BeforeValidator,
+    ConfigDict,
     Field,
     WithJsonSchema,
     field_validator,
@@ -422,4 +424,36 @@ class InventedAttachmentsSchema(BaseModel):
     )
     ids: list[uuid.UUID] = Field(
         description="The attachments' ids, in the files' order"
+    )
+
+
+class InventedStoreUpdateCreateSchema(BaseModel):
+    """A store's update made, as `update-store` makes one, or the unlifted
+    one's lift asked, as its `--lift` does."""
+
+    lift: bool = Field(
+        default=False,
+        description="Ask the unlifted update's lift rather than make an update",
+        examples=[True],
+    )
+
+
+class InventedStoreUpdateSchema(BaseModel):
+    """A Store Update as its row stands (DB decision 68)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int = Field(examples=[1])
+    made_at: datetime = Field(description="When it was made, its hold standing since")
+    stopped_at: datetime | None = Field(
+        description="When the store's jobs and chats were stopped by Pilot"
+    )
+    reset_at: datetime | None = Field(description="When the store's reset returned")
+    reconciled_at: datetime | None = Field(
+        description="When the store's sidecar posted a manifest with an empty shadow"
+    )
+    lift_requested_at: datetime | None = Field(description="When its lift was asked")
+    lifted_at: datetime | None = Field(description="When it was lifted")
+    error: str | None = Field(
+        description="The sequence's last failure, cleared at the next attempt"
     )

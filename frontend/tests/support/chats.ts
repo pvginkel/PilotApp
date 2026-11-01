@@ -2,7 +2,8 @@
  * A project's chats for a spec (F38, F40). The suite's backends start every chat's session in the
  * store environment of their fake controller (backend-env-extensions.ts), which `ready()` adds once
  * per backend, running and exempt, its tree holding the store repo, every chat session's cwd, and
- * the project's folder, which the fake requires of a boxed create (TD §4.2). A message is sent as a
+ * the project's folder, which the fake requires of a boxed create (TD §4.2). A store's update
+ * (store-update.ts) resets the store, clearing its tree: `ready()` puts back what it holds. A message is sent as a
  * person sends it (POST /api/projects/<id>/chat/messages): by the signed-in person, or by another
  * person on a connection of their own (`other()`); or through the composer, after `opening()`. A
  * chat's start creates its headless session in the store, `claude-<n>` in the order the backend
@@ -24,6 +25,8 @@ type ChatList = components['schemas']['ChatListSchema.f9d9b43'];
 
 /** The store repo's root, every chat session's cwd (backend/app/services/session_scope.py). */
 const STORE_REPO = '/work/PilotProjects';
+/** The store repo's file that `stock()` puts in its root. */
+const STORE_ROOT = `${STORE_REPO}/CLAUDE.md`;
 /** The store's tree, a folder per project under it. */
 const PROJECTS = '/work/Projects';
 
@@ -75,15 +78,23 @@ export class Chats {
 
   /** The store in the fake, its tree holding the store repo and the project's folder, an open project's by its slug unless named. */
   async ready(projectId: string, folder = slugOf(projectId)): Promise<void> {
+    await this.stock();
+    await this.controller.putFile(this.store, `${PROJECTS}/${folder}/project.md`, '# Invented\n');
+  }
+
+  /** The store in the fake, its tree holding the store repo. */
+  async stock(): Promise<void> {
     const response = await this.page.request.get(`${this.backendUrl}/api/testing/controller/environments/${this.store}`, {
       headers: { Authorization: `Bearer ${FAKE_CONTROLLER_TOKEN}` },
     });
     expect([200, 404], await response.text()).toContain(response.status());
-    if (response.status() === 404) {
-      await this.controller.addEnvironment(this.store, 'example/PilotProjects', { exempt: true });
-      await this.controller.putFile(this.store, `${STORE_REPO}/CLAUDE.md`, '# The store\n');
-    }
-    await this.controller.putFile(this.store, `${PROJECTS}/${folder}/project.md`, '# Invented\n');
+    if (response.status() === 404) await this.controller.addEnvironment(this.store, 'example/PilotProjects', { exempt: true });
+    await this.controller.putFile(this.store, STORE_ROOT, '# The store\n');
+  }
+
+  /** Whether the store's tree holds the store repo, which a reset of the store clears. */
+  async stocked(): Promise<boolean> {
+    return (await this.controller.fileText(this.store, STORE_ROOT)) !== null;
   }
 
   /** A message of the signed-in person's to the project's chat. */

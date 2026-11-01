@@ -8,9 +8,10 @@ environment of Pilot's own the stage's own controller creates, named for the
 claimed actions it does, and the
 documents and the material its session registers and attaches there, each with
 its effect; a pre-ruling pass's questions to a registered document's writer,
-and its clarification run, with the writer's reply or to run; and a person's
+and its clarification run, with the writer's reply or to run; a person's
 answer the brain records through the project's open chat, with
-its effect.
+its effect; and the store's update, made or its lift asked, as `update-store`
+does (F144.5).
 Nothing in the UI places a work item, which the brain adds (F66).
 
 They answer on every STAGE but prd, whatever FLASK_ENV says, so that the dev
@@ -49,6 +50,8 @@ from app.schemas.testing_record import (
     InventedRegistrationCreateSchema,
     InventedSaveCreateSchema,
     InventedSaveSchema,
+    InventedStoreUpdateCreateSchema,
+    InventedStoreUpdateSchema,
     InventedWorkCreateSchema,
     InventedWorkerAttachmentCreateSchema,
     InventedWorkerAttachmentsSchema,
@@ -56,6 +59,7 @@ from app.schemas.testing_record import (
     InventedWriterQuestionsSchema,
 )
 from app.services.container import ServiceContainer
+from app.services.store_update_service import StoreUpdateService
 from app.services.test_data_service import TestDataService
 from app.utils.flask_error_handlers import build_error_response
 from app.utils.spectree_config import api
@@ -654,6 +658,44 @@ def create_chat_answer(
     return RecordedSchema(effect=f"{line.verb} · {line.label}").model_dump(
         mode="json"
     ), 201
+
+
+@testing_record_bp.route("/store-update", methods=["POST"])
+@api.validate(
+    json=InventedStoreUpdateCreateSchema,
+    resp=SpectreeResponse(
+        HTTP_200=InventedStoreUpdateSchema,
+        HTTP_201=InventedStoreUpdateSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def create_store_update(
+    store_update_service: StoreUpdateService = Provide[
+        ServiceContainer.store_update_service
+    ],
+) -> Any:
+    """Make a store's update, its hold on the store's work standing from the
+    request's commit, or ask the unlifted one's lift, as `update-store` and
+    its `--lift` do (F144.5): the row written and nothing else, the server
+    taking it up at its timer's next tick (DB 279).
+
+    Returns:
+        201: The update made
+        200: The unlifted update, its lift asked
+        400: The body is invalid, or the stage is prd
+        409: An update is under way, to make one, or none is, to lift: the
+            reason
+    """
+    data = InventedStoreUpdateCreateSchema.model_validate(request.get_json())
+    if data.lift:
+        update = store_update_service.request_lift()
+        return InventedStoreUpdateSchema.model_validate(update).model_dump(
+            mode="json"
+        ), 200
+    update = store_update_service.make()
+    return InventedStoreUpdateSchema.model_validate(update).model_dump(mode="json"), 201
 
 
 def _saved(ingested: Ingested) -> dict[str, Any]:

@@ -4,8 +4,9 @@ UI cannot make (TEST-6), on every stage but prd, behind the API's sign-in
 saves of the project's draft and handbook, Pilot's Done, a work item placed by
 repository, started in an environment of Pilot's own the stage's own
 controller creates, its worker's registrations and attachments with their
-effects, and a pre-ruling pass's questions to a registered document's
-writer."""
+effects, a pre-ruling pass's questions to a registered document's
+writer, and the store's update and its lift, as `update-store` makes and asks
+them."""
 
 import base64
 import uuid
@@ -32,6 +33,7 @@ from app.models import (
     Item,
     ItemAttachment,
     Project,
+    StoreUpdate,
     Turn,
     User,
     Work,
@@ -49,17 +51,20 @@ from app.services.relay_service import RelayService
 from app.services.session_record_service import read_records
 from app.services.session_start_service import SessionStartService
 from app.services.start_gate import WorkSlots
+from app.services.store_update_service import unlifted, utc_time
 from app.services.supervisor import LoopHandle
 from app.services.turn_end_read_service import TurnEndReadService
 from app.utils.after_commit import clear_after_commit_callbacks
 from tests.support.chats import ChatWriter, open_chat
 from tests.support.fake_controller import ServedFakeController
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
+from tests.support.store_updates import hold, lift
 from tests.support.supervisor import Supervise
 
 PEOPLE = "/api/testing/people"
 ENVIRONMENTS = "/api/testing/environments"
 PROJECTS = "/api/testing/projects"
+STORE_UPDATE = "/api/testing/store-update"
 
 TASKS = [{"id": "build", "title": "Build the camp", "status": "pending"}]
 
@@ -1706,6 +1711,7 @@ ENDPOINTS = [
         _chat_answers_path(NO_ROW),
         {"block": f"{NO_ROW}/D1", "value": "Yes", "for": "ada"},
     ),
+    (STORE_UPDATE, {}),
 ]
 
 
@@ -2405,6 +2411,98 @@ class TestCreateChatAnswer:
         assert response.status_code == 400
 
 
+def _at(value: str) -> datetime:
+    return datetime.fromisoformat(value)
+
+
+class TestCreateStoreUpdate:
+    """The store's update as `update-store` makes it and asks its lift
+    (F144.5): the row alone, which the server takes up from the record."""
+
+    def test_an_update_is_made_its_hold_standing(
+        self, client: FlaskClient, session: Session
+    ) -> None:
+        before = datetime.now(UTC)
+
+        response = client.post(STORE_UPDATE, json={})
+
+        assert response.status_code == 201
+        body = response.get_json()
+        made = unlifted(session)
+        assert made is not None
+        assert before <= made.made_at <= datetime.now(UTC)
+        assert {**body, "made_at": _at(body["made_at"])} == {
+            "id": made.id,
+            "made_at": made.made_at,
+            "stopped_at": None,
+            "reset_at": None,
+            "reconciled_at": None,
+            "lift_requested_at": None,
+            "lifted_at": None,
+            "error": None,
+        }
+
+    def test_a_second_while_one_is_unlifted_conflicts(
+        self, client: FlaskClient, session: Session
+    ) -> None:
+        standing = hold(session)
+        # The refused request rolls back to here.
+        session.commit()
+
+        response = client.post(STORE_UPDATE, json={"lift": False})
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            "Cannot update the store because an update is under way since "
+            f"{utc_time(standing.made_at)}"
+        )
+        assert _count(session, StoreUpdate) == 1
+
+    def test_the_lift_is_asked_of_the_unlifted_update(
+        self, client: FlaskClient, session: Session
+    ) -> None:
+        standing = hold(session)
+        before = datetime.now(UTC)
+
+        response = client.post(STORE_UPDATE, json={"lift": True})
+
+        assert response.status_code == 200
+        body = response.get_json()
+        session.refresh(standing)
+        assert standing.lift_requested_at is not None
+        assert before <= standing.lift_requested_at <= datetime.now(UTC)
+        assert standing.lifted_at is None
+        assert (
+            body["id"],
+            _at(body["made_at"]),
+            _at(body["lift_requested_at"]),
+            body["lifted_at"],
+        ) == (standing.id, standing.made_at, standing.lift_requested_at, None)
+
+    def test_a_lift_with_no_update_under_way_conflicts(
+        self, client: FlaskClient, session: Session
+    ) -> None:
+        lift(session, hold(session))
+        session.commit()
+
+        response = client.post(STORE_UPDATE, json={"lift": True})
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            "Cannot lift the store's update because no update is under way"
+        )
+        assert _count(session, StoreUpdate) == 1
+        assert unlifted(session) is None
+
+    def test_a_body_that_is_not_one_is_invalid(
+        self, client: FlaskClient, session: Session
+    ) -> None:
+        response = client.post(STORE_UPDATE, json={"lift": "maybe"})
+
+        assert response.status_code == 400
+        assert _count(session, StoreUpdate) == 0
+
+
 @pytest.mark.usefixtures("person")
 class TestTheStage:
     @pytest.mark.parametrize(
@@ -2432,7 +2530,8 @@ class TestTheStage:
     ) -> None:
         monkeypatch.setattr(app.container.config(), "flask_env", flask_env)
         monkeypatch.setattr(app.container.config(), "stage", Stage(stage))
-        before = [_count(session, model) for model in (User, Environment, Project)]
+        counted = (User, Environment, Project, StoreUpdate)
+        before = [_count(session, model) for model in counted]
 
         response = client.post(path, json=body)
 
@@ -2440,9 +2539,7 @@ class TestTheStage:
         assert response.get_json()["error"] == (
             "The record's testing endpoints are not available on prd"
         )
-        assert [
-            _count(session, model) for model in (User, Environment, Project)
-        ] == before
+        assert [_count(session, model) for model in counted] == before
 
     def test_a_deployment_that_forgets_stage_loads_as_prd(
         self, monkeypatch: pytest.MonkeyPatch

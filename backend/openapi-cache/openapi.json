@@ -1981,6 +1981,129 @@
         "title": "InventedFaultSchema",
         "type": "object"
       },
+      "InventedStoreUpdateCreateSchema.6d6b324": {
+        "description": "A store's update made, as `update-store` makes one, or the unlifted\none's lift asked, as its `--lift` does.",
+        "properties": {
+          "lift": {
+            "default": false,
+            "description": "Ask the unlifted update's lift rather than make an update",
+            "examples": [
+              true
+            ],
+            "title": "Lift",
+            "type": "boolean"
+          }
+        },
+        "title": "InventedStoreUpdateCreateSchema",
+        "type": "object"
+      },
+      "InventedStoreUpdateSchema.6d6b324": {
+        "description": "A Store Update as its row stands (DB decision 68).",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The sequence's last failure, cleared at the next attempt",
+            "title": "Error"
+          },
+          "id": {
+            "examples": [
+              1
+            ],
+            "title": "Id",
+            "type": "integer"
+          },
+          "lift_requested_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When its lift was asked",
+            "title": "Lift Requested At"
+          },
+          "lifted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When it was lifted",
+            "title": "Lifted At"
+          },
+          "made_at": {
+            "description": "When it was made, its hold standing since",
+            "format": "date-time",
+            "title": "Made At",
+            "type": "string"
+          },
+          "reconciled_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the store's sidecar posted a manifest with an empty shadow",
+            "title": "Reconciled At"
+          },
+          "reset_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the store's reset returned",
+            "title": "Reset At"
+          },
+          "stopped_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the store's jobs and chats were stopped by Pilot",
+            "title": "Stopped At"
+          }
+        },
+        "required": [
+          "id",
+          "made_at",
+          "stopped_at",
+          "reset_at",
+          "reconciled_at",
+          "lift_requested_at",
+          "lifted_at",
+          "error"
+        ],
+        "title": "InventedStoreUpdateSchema",
+        "type": "object"
+      },
       "InventedWorkCreateSchema.6d6b324": {
         "description": "A work item placed by repository and started, as Pilot starts one, in\nan environment of Pilot's own the stage's controller creates from it.",
         "properties": {
@@ -14167,6 +14290,73 @@
           }
         ],
         "summary": "Send a fake task event to a specific SSE connection for testing.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/store-update": {
+      "post": {
+        "description": "Returns:     201: The update made     200: The unlifted update, its lift asked     400: The body is invalid, or the stage is prd     409: An update is under way, to make one, or none is, to lift: the         reason",
+        "operationId": "post__api_testing_store-update",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventedStoreUpdateCreateSchema.6d6b324"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventedStoreUpdateSchema.6d6b324"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventedStoreUpdateSchema.6d6b324"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Make a store's update, its hold on the store's work standing from the request's commit, or ask the unlifted one's lift, as `update-store` and its `--lift` do (F144.5): the row written and nothing else, the server taking it up at its timer's next tick (DB 279).",
         "tags": [],
         "x-required-role": "editor"
       }

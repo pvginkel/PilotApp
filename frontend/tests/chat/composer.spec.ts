@@ -7,6 +7,8 @@
  * focus stays in the field after Send and after Stop, and a message sent takes the chat back to its
  * end, wherever the reader had scrolled. The words are kept in the browser until sent,
  * keyed by the project (F133). In an archived project it takes no message and says why (F128.5).
+ * While Pilot updates its store it takes none, the refusal toasted in the API's words and the words
+ * kept, and after the update's lift the message starts the chat (F144.2).
  */
 
 import { test, expect } from '../support/fixtures';
@@ -218,6 +220,41 @@ test.describe('The Chat tab’s composer', () => {
     const session = await opened();
     await expect(chat.field).toHaveValue('');
     expect(await kept()).toEqual({});
+    await controller.finish(chats.store, session, 'success', 'The gas one.');
+  });
+
+  test('takes no message while Pilot updates its store, the refusal toasted and the words kept; after the update’s lift the message starts the chat', async ({
+    people,
+    projects,
+    controller,
+    timeline,
+    chat,
+    chats,
+    storeUpdate,
+    toastHelper,
+  }) => {
+    const me = await people.signIn();
+    const name = makeUnique('Updating');
+    const project = await projects.make({ name, members: [me.handle!] });
+    const read = chat.read();
+    await timeline.open(project);
+    await read;
+    await storeUpdate.make();
+
+    await chat.field.fill('Which stove?');
+    await chat.send.click();
+    await toastHelper.expectErrorToast(`Cannot send a message to Pilot in ${name} because Pilot is updating`);
+    await expect(chat.field).toHaveValue('Which stove?');
+    await expect(chat.empty).toBeVisible();
+    expect((await chats.list(project)).chats).toEqual([]);
+
+    await storeUpdate.lift();
+    // The chat starts in the store the update reset: `opening()` puts back what its tree held.
+    const opened = await chats.opening(project);
+    await chat.send.click();
+    const session = await opened();
+    await expect(chat.field).toHaveValue('');
+    await expect(chat.messageTexts).toHaveText(['Which stove?']);
     await controller.finish(chats.store, session, 'success', 'The gas one.');
   });
 
