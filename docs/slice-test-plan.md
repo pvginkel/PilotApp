@@ -915,14 +915,16 @@ POD=$(cexec iac kubectl -n pilot-dev get pods -l app.kubernetes.io/name=pilot -o
    A PilotProjects change reaches the store through the store's update, `POST
    /api/testing/store-update` on `pilot-dev` as the signed-in person, and never through a stop or a
    reset on `kubecoder-dev`'s API, which takes the store from under `pilot-dev`'s running sessions.
-   The route makes the update, `201`, or answers `409` while one is under way. At its timer's next
-   tick the server holds the store's work, stops the store's running jobs and chats, stops, resets
-   and starts the store, which clones PilotProjects' `main` again and empties the sidecar's data,
-   waits for the sidecar's first manifest, retries the jobs it stopped and lifts the hold. The
-   update stands while `GET /api/conditions` holds `store_update`, and the backend's log has a line
-   a phase. `{"lift": true}` asks the lift of one that stands, skipping the phases it has not
-   reached, and answers its row, its `error` in it. A check of the chat after a PilotProjects change
-   runs the update first, so the chat runs the skill as pushed. Production's store is never touched:
+   The route makes the update, `201`, or answers `409` while one is under way. Its hold on the
+   store's work stands from the request's commit, a chat's message refused and a job's start held
+   from then. At its timer's next tick the server stops the store's running jobs and chats, stops,
+   resets and starts the store, which clones PilotProjects' `main` again and empties the sidecar's
+   data, waits for the sidecar's first manifest, retries the jobs it stopped and lifts the hold.
+   The update stands while `GET /api/conditions` holds `store_update`, and the backend's log has a
+   line a phase. `{"lift": true}` asks the lift of one that stands, skipping the phases it has not
+   reached, and answers its row, its `error` in it. A check of the chat after a PilotProjects
+   change runs the update first, so the chat runs the skill as pushed. Production's store is never
+   touched:
 
    ```bash
    STORE=pvginkel-pilotprojects-d75970

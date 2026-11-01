@@ -43,10 +43,10 @@ const FIVE_HOUR_LIMIT = 0.75;
 
 const UNDER_THE_LIMITS: Shares = { five_hour: 0.1, seven_day: 0.1 };
 
-/** The halts the shares make at the backend's default limits, the week's first. */
 /** The usage halts, the conditions a reading turns on. */
 const HALTS: readonly ConditionCode[] = ['week_halt', 'five_hour_halt'];
 
+/** The halts the shares make at the backend's default limits, the week's first. */
 function haltsOf(shares: Shares): ConditionCode[] {
   return [
     ...((shares.seven_day ?? 0) >= WEEK_LIMIT ? (['week_halt'] as const) : []),
