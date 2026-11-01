@@ -67,6 +67,7 @@ from app.services.standing_notification_service import (
     StandingNotificationService,
 )
 from app.services.start_gate import WorkSlots
+from app.services.store_update_service import StoreUpdateService
 from app.services.supervisor import Supervisor
 from app.services.sync_service import SyncService
 from app.services.sync_stream_service import SyncStreamService
@@ -524,6 +525,8 @@ class ServiceContainer(containers.DeclarativeContainer):
         usage_halts=usage_halts,
         usage_watcher=usage_watcher,
     )
+    # The operator's update of the store, made and lifted by `update-store` (F144.1)
+    store_update_service = providers.Factory(StoreUpdateService, db=db_session)
     link_service = providers.Factory(LinkService, db=db_session)
 
     # The person's bridge token, sealed at rest and opened to send (DB decision 17)

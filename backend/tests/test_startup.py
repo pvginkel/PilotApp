@@ -1,5 +1,7 @@
-"""The app's startup hooks: the seed `cli load-test-data` loads (slice 002 P9)."""
+"""The app's startup hooks: the seed `cli load-test-data` loads (slice 002 P9),
+and the app's CLI commands."""
 
+import click
 import pytest
 from flask import Flask
 from sqlalchemy import select
@@ -9,7 +11,8 @@ from app.app import App
 from app.engine.bus import EngineEvent, TreeHashMoved
 from app.models import Project
 from app.services.container import ServiceContainer
-from app.startup import load_test_data_hook
+from app.startup import load_test_data_hook, register_cli_commands
+from app.store_update_cli import update_store
 
 
 class TestLoadTestDataHook:
@@ -40,3 +43,12 @@ class TestLoadTestDataHook:
         out = capsys.readouterr().out
         assert "   - 4 projects\n" in out
         assert "   - 12 items\n" in out
+
+
+class TestRegisterCliCommands:
+    def test_it_registers_update_store(self) -> None:
+        group = click.Group()
+
+        register_cli_commands(group)
+
+        assert group.commands == {"update-store": update_store}

@@ -84,8 +84,11 @@ def register_root_blueprints(app: Flask) -> None:
 
 
 def register_cli_commands(cli: click.Group) -> None:
-    """Register app-specific CLI commands."""
-    pass
+    """Register app-specific CLI commands: `update-store`, the operator's
+    update of the store while Pilot runs (F144.1)."""
+    from app.store_update_cli import update_store
+
+    cli.add_command(update_store)
 
 
 def post_migration_hook(app: Flask) -> None:
