@@ -29,6 +29,7 @@ from app.models import Environment, SaveError, SessionKind
 from app.models import Session as AgentSession
 from app.models.reference import ErrorKind, Surface
 from app.services.environment_service import EnvironmentService
+from app.services.store_updater import StoreUpdater
 
 SYNC_PROTOCOL_MIN = 2
 """The oldest protocol version the server serves."""
@@ -106,6 +107,7 @@ class SyncService:
         tree_service: TreeService,
         plan_service: PlanService,
         environment_service: EnvironmentService,
+        store_updater: StoreUpdater,
     ) -> None:
         self.db = db
         self.app_settings = app_settings
@@ -113,6 +115,7 @@ class SyncService:
         self.tree_service = tree_service
         self.plan_service = plan_service
         self.environment_service = environment_service
+        self.store_updater = store_updater
 
     def admit(
         self,
@@ -222,6 +225,9 @@ class SyncService:
         so the list is a cross-check, logged and never acted on. A file the
         record never bore is in neither the manifest nor the shadow, and so
         in no list.
+
+        A manifest with an empty shadow is a fresh sidecar's, the store's
+        reset's: the store's update notes its reconcile (`reconciled`).
         """
         manifest = self.tree_service.manifest()
         listed = {entry.path for entry in manifest}
@@ -233,6 +239,8 @@ class SyncService:
             if path in listed and shadow.get(path) != disk_hash
         )
         self.ingest_service.write_down(entry.path for entry in write_down)
+        if not shadow:
+            self.store_updater.reconciled(self.db)
         RECONCILES_TOTAL.inc()
         logger.info(
             "Sync reconcile: %d paths listed, %d to write down, %d to delete",

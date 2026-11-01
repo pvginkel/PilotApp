@@ -8299,3 +8299,130 @@ class TestUnderTheStoresUpdate:
             session.get_one(Document, refinement.id), "D1", person, "The lake"
         )
         assert _released(session, refinement).state_code == SessionState.STARTING
+
+
+class TestStopForUpdate:
+    """The store's update's stops: every job's and Chat's Session running or
+    starting, by Pilot, as a Stop stops one, a held one left held and a Chat
+    left open (design 5 D4; F144.3; DB 279, 280)."""
+
+    def test_it_names_the_running_and_starting_jobs_and_chats_in_created_at_order(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        running_chat = _chat(session, project, environment, SessionState.RUNNING)
+        starting_job = _job(
+            container, session, project, environment, SessionState.STARTING
+        )
+        for state in (
+            SessionState.HELD,
+            SessionState.IDLE,
+            SessionState.STOPPED,
+            SessionState.FAILED,
+        ):
+            _job(container, session, project, environment, state)
+        _running(starts, session, project)
+        # One transaction's rows share its `now()`: the later one's made later.
+        running_chat.created_at = datetime.now(UTC) - timedelta(minutes=2)
+        starting_job.created_at = datetime.now(UTC) - timedelta(minutes=1)
+        session.flush()
+
+        assert starts.stoppable_for_update(session) == [
+            running_chat.id,
+            starting_job.id,
+        ]
+
+    def test_a_running_chat_is_stopped_by_pilot_its_turn_left_to_its_relay(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        run = _chat_in_flight(container, session, project, person, SessionState.RUNNING)
+        before = datetime.now(UTC)
+
+        starts.stop_for_update(session, run.id)
+
+        stopped = _read(session, run.id)
+        assert (
+            stopped.state_code,
+            stopped.stopped_by_user_id,
+            stopped.current_line,
+            stopped.turn_ended_at,
+        ) == (SessionState.STOPPED, _pilot_id(session), None, None)
+        assert stopped.stopped_at is not None and stopped.stopped_at >= before
+        (turn,) = _turns(session, run.id)
+        assert turn.ended_at is None
+        # The interrupt runs once the stop commits; the chat stays open.
+        assert "_InterruptStart" in _callbacks()
+        assert session.get_one(models.Chat, run.id).closed_at is None
+        clear_after_commit_callbacks()
+
+    def test_a_starting_job_ends_its_turn_unsent(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        job = _job(container, session, project, environment, SessionState.STARTING)
+        engine_events.clear()
+
+        with scoped_session(container) as db:
+            starts.stop_for_update(db, job.id)
+
+        stopped = _read(session, job.id)
+        (brief,) = _turns(session, job.id)
+        assert (stopped.state_code, stopped.stopped_by_user_id) == (
+            SessionState.STOPPED,
+            _pilot_id(session),
+        )
+        assert brief.ended_at == stopped.stopped_at == stopped.turn_ended_at
+        assert stopped.nudge_owed_at is None
+        moves = _moves(engine_events)
+        assert len(moves) == 2
+        assert WorkMoved(project.id, job.id) in moves
+        assert ProjectChanged(project.id) in moves
+
+    @pytest.mark.parametrize(
+        "state", [SessionState.HELD, SessionState.IDLE, SessionState.STOPPED]
+    )
+    def test_a_job_neither_running_nor_starting_is_left_as_it_is(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        state: SessionState,
+    ) -> None:
+        """Read under its lock: a held job goes on at the lift, and one that
+        ended or was stopped since it was named is not stopped again."""
+        job = _job(container, session, project, environment, state)
+
+        starts.stop_for_update(session, job.id)
+
+        after = _read(session, job.id)
+        assert (after.state_code, after.stopped_by_user_id) == (state, None)
+
+    def test_a_running_work_item_is_never_stopped_by_it(
+        self,
+        starts: SessionStartService,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+    ) -> None:
+        run = _running(starts, session, project)
+
+        starts.stop_for_update(session, run.id)
+
+        after = _read(session, run.id)
+        assert (after.state_code, after.stopped_at) == (SessionState.RUNNING, None)

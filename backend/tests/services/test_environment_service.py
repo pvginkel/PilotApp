@@ -7,12 +7,15 @@ stopped, nor one running a pod other than the one Pilot's start brought up, nor
 an exempt one, nor one where a Session runs or starts (`TestShutdownTimer`,
 `test_..._is_never_stopped`); an environment Pilot did not create is never
 taken, renamed or deleted, nor one a Session holds, a stopped or failed work
-item's among them (`TestTake`, `TestDeleteTimer`)."""
+item's among them (`TestTake`, `TestDeleteTimer`), nor reset but the store at
+its update (`TestResetCallers`)."""
 
+import ast
 import json
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -2600,3 +2603,48 @@ def _committed(container: ServiceContainer, column: str) -> Any:
     with scoped_session(container) as db:
         row = _row(db)
         return None if row is None else getattr(row, column)
+
+
+def _callers(method: str) -> set[tuple[str, str]]:
+    """Each module of the app and function in it that calls a method named
+    `method`, a provider's `db_session.reset()` left out."""
+    root = Path(environment_service.__file__).parents[1]
+    found = set()
+    for path in sorted(root.rglob("*.py")):
+        for function in ast.walk(ast.parse(path.read_text())):
+            if not isinstance(function, ast.FunctionDef):
+                continue
+            for node in ast.walk(function):
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == method
+                    and not (
+                        isinstance(node.func.value, ast.Attribute)
+                        and node.func.value.attr == "db_session"
+                    )
+                ):
+                    found.add((path.relative_to(root).as_posix(), function.name))
+    return found
+
+
+class TestResetCallers:
+    """Nothing but the store's update resets an environment Pilot did not
+    create (design 5's Risks, D6; F144.3; DB 239)."""
+
+    def test_the_controllers_reset_is_asked_by_the_services_reset_alone(self) -> None:
+        assert _callers("reset_environment") == {
+            ("services/environment_service.py", "reset")
+        }
+
+    def test_the_services_reset_is_a_start_in_pilots_own_and_the_stores_update(
+        self,
+    ) -> None:
+        """A start resets an environment it took, Pilot's own (`_take`), or
+        one it was placed in whose reset is still to make, which the start
+        fails unless it is Pilot's own (NOT_PILOTS); the store's update
+        resets the store, by its setting's id."""
+        assert _callers("reset") == {
+            ("services/session_start_service.py", "_bring_up"),
+            ("services/store_updater.py", "_reset"),
+        }

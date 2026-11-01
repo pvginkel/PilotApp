@@ -3,7 +3,7 @@ shutdown and delete timers (design 2 §13.2, §13.3, §13.5; F88.1, F73.1, F143.
 F143.3).
 
 Pilot starts an environment knowing whether it started it, and stops only what
-it started. The claim is `server_started_at`, set when Pilot's own `start` or
+it started, but the store at its update. The claim is `server_started_at`, set when Pilot's own `start` or
 create scheduled the bring-up, and `started_pod_at`, the `pod.startedAt` that
 bring-up settled on (D12; DB 233). An environment Pilot created is its own,
 `server_created_at` and `repo` set (DB 239). The shutdown timer stops an
@@ -25,7 +25,10 @@ runs in a tree made anew: a created one as it is, any other reset, its reset's
 `202` taking the claim as a start's does. The delete timer's tick clears
 the name of one that has become free and sets its `delete_due_at`, both or
 neither, and deletes it once that has passed with it still free, its row kept
-`gone`. Nothing that is not Pilot's own is taken, renamed, reset or deleted.
+`gone`. Nothing that is not Pilot's own is taken, renamed, reset or deleted,
+but the store, which the store's update stops and resets (`StoreUpdater`),
+named by STORE_ENVIRONMENT_ID alone: the one reset of an environment Pilot did
+not create (F144.3; DB 239).
 """
 
 import logging
@@ -334,7 +337,8 @@ class EnvironmentService:
 
     def reset(self, env_id: str) -> ControllerEnvironment:
         """Bring the environment up in a tree made anew, for a start on a new
-        conversation (§13.5), and wait until it settles. KubeCoder resets a
+        conversation (§13.5) or the store's update (`StoreUpdater`), and wait
+        until it settles. KubeCoder resets a
         `stopped` environment only, and its stop takes no `wait`: one not
         `stopped` is stopped first, `error` among them, and its settled
         `stopped` waited on. The reset ends in a running pod as a start does,

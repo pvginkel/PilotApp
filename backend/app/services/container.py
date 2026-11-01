@@ -68,6 +68,7 @@ from app.services.standing_notification_service import (
 )
 from app.services.start_gate import WorkSlots
 from app.services.store_update_service import StoreUpdateService
+from app.services.store_updater import StoreUpdater
 from app.services.supervisor import Supervisor
 from app.services.sync_service import SyncService
 from app.services.sync_stream_service import SyncStreamService
@@ -381,6 +382,18 @@ class ServiceContainer(containers.DeclarativeContainer):
     )
     register_for_background_startup(lambda c: c.session_start_service())
 
+    # The store's update (F144.3; design 5 D2): its job and its timer register
+    # on the supervisor when built, before STARTUP.
+    store_updater = providers.Singleton(
+        StoreUpdater,
+        container=__self__,
+        supervisor=supervisor,
+        environment_service=environment_service,
+        session_start_service=session_start_service,
+        store_environment_id=app_config.provided.store_environment_id,
+    )
+    register_for_background_startup(lambda c: c.store_updater())
+
     # Task service - in-memory task management
     task_service = providers.Singleton(
         TaskService,
@@ -475,6 +488,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         tree_service=tree_service,
         plan_service=plan_service,
         environment_service=environment_service,
+        store_updater=store_updater,
     )
     sync_stream_service = providers.Singleton(
         SyncStreamService,

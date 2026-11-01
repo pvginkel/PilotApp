@@ -4,6 +4,7 @@ put's metrics, the manifest reconcile, and the hook's check (design 1 §5.1,
 
 import json
 import logging
+from datetime import UTC, datetime
 
 import pytest
 from dependency_injector import providers
@@ -43,6 +44,7 @@ from app.services.sync_service import (
 )
 from tests.support.fake_controller import ServedFakeController
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID, SYNC_TOKEN
+from tests.support.store_updates import hold
 
 BEARER = f"Bearer {SYNC_TOKEN}"
 
@@ -613,6 +615,34 @@ class TestSyncService:
         _sync(container).reconcile({}, {})
 
         assert _reconciles() == before + 2
+
+    def test_a_manifest_with_an_empty_shadow_reconciles_the_stopped_update(
+        self, container: ServiceContainer, session: DbSession
+    ) -> None:
+        """A fresh sidecar's, the store's reset's (design 5 D6; DB 279)."""
+        update = hold(session)
+        update.stopped_at = datetime.now(UTC)
+        session.flush()
+
+        _sync(container).reconcile({}, {})
+
+        session.flush()
+        assert update.reconciled_at is not None
+        assert update.reconciled_at >= update.stopped_at
+
+    def test_a_manifest_with_a_shadow_reconciles_no_update(
+        self, container: ServiceContainer, session: DbSession
+    ) -> None:
+        """A sidecar that kept its shadow reconnected before the store's
+        stop."""
+        update = hold(session)
+        update.stopped_at = datetime.now(UTC)
+        session.flush()
+
+        _sync(container).reconcile({"camp/plan.json": HASH}, {"camp/plan.json": HASH})
+
+        session.flush()
+        assert update.reconciled_at is None
 
     def test_manifest_hash_hashes_the_manifests_entries_in_path_order(
         self, container: ServiceContainer, project: Project

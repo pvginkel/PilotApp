@@ -20,7 +20,16 @@ from app.config import Settings
 from app.database import scoped_session
 from app.engine.bus import ProjectChanged
 from app.exceptions import ConfigurationError
-from app.models import Chat, Environment, Item, Project, ProjectMember, Turn, User
+from app.models import (
+    Chat,
+    Environment,
+    Item,
+    Project,
+    ProjectMember,
+    StoreUpdate,
+    Turn,
+    User,
+)
 from app.models import Session as AgentSession
 from app.models.reference import (
     ChatKind,
@@ -50,6 +59,7 @@ from app.services.pilot_server import token_hash
 from app.services.relay_service import RelayService
 from app.services.relay_watchdog import WATCHDOG_TIMER, RelayWatchdog
 from app.services.session_start_service import NUDGE, SessionStartService
+from app.services.store_updater import StoreUpdater
 from app.services.supervisor import TIMER_RUNS_TOTAL, Supervisor
 from app.services.usage_halts import TIMER as USAGE_TIMER
 from app.services.usage_halts import UsageWatcher
@@ -63,7 +73,7 @@ from tests.support.fake_notification_bridge import (
     ServedFakeNotificationBridge,
     bridge_client_of,
 )
-from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
+from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID, FakeSidecar
 from tests.support.supervisor import listening, metric_value, wait_until
 from tests.support.tls import invent_ca
 
@@ -772,6 +782,60 @@ class TestChatCloseWiring:
             )
         finally:
             coordinator.shutdown()
+
+
+class TestStoreUpdaterWiring:
+    def test_an_update_the_command_makes_runs_from_its_tick_to_its_lift(
+        self,
+        committed_app: Flask,
+        fake_controller: ServedFakeController,
+        test_app_settings: AppSettings,
+    ) -> None:
+        """Taken up within a tick, the store never used before made its row
+        and reset, its sidecar's manifest through the sync's route, the lift
+        (F144.3)."""
+        container = committed_app.container
+        container.app_config.override(
+            test_app_settings.model_copy(
+                update={
+                    "controller_url": fake_controller.url,
+                    "scheduler_tick_seconds": 0.05,
+                }
+            )
+        )
+        client_of(container, fake_controller)
+        fake_controller.add_environment(
+            STORE_ENVIRONMENT_ID, name="PilotProjects", status="running", exempt=True
+        )
+        updater = container.store_updater()
+        assert isinstance(updater, StoreUpdater)
+        assert updater is container.store_updater()
+        coordinator = container.lifecycle_coordinator()
+
+        coordinator.fire_startup()
+        try:
+            with scoped_session(container):
+                update_id = container.store_update_service().make().id
+            wait_until(
+                lambda: _store_update(container, update_id).reset_at is not None,
+                "the store reset",
+            )
+            sidecar = FakeSidecar(committed_app.test_client())
+            assert sidecar.post_manifest({}, {}).status_code == 200
+            wait_until(
+                lambda: _store_update(container, update_id).lifted_at is not None,
+                "the hold lifted",
+            )
+        finally:
+            coordinator.shutdown()
+        assert fake_controller.environment(STORE_ENVIRONMENT_ID).resets == 1
+
+
+def _store_update(container: ServiceContainer, update_id: int) -> StoreUpdate:
+    with scoped_session(container) as db:
+        update = db.get_one(StoreUpdate, update_id)
+        db.expunge(update)
+        return update
 
 
 def _close_cause(container: ServiceContainer, chat_id: uuid.UUID) -> CloseCause | None:

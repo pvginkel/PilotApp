@@ -70,7 +70,9 @@ A work item's Stop ends its Session where it is (F67.1): a turn in flight is
 interrupted after the commit, and a start held or under way ends, nothing of it
 sent afterwards. Finish and Archive stop every Session of the project so (F5.1,
 F128.1), and Reopen a finished project's chat (F5.5); a usage halt's hard stop
-every running work item, by Pilot, its nudge owed (F135.6; DB 269). Its Resume
+every running work item, by Pilot, its nudge owed (F135.6; DB 269); and the
+store's update every job and Chat running or starting, by Pilot (F144.3; DB
+279, 280). Its Resume
 writes a server-own Turn, "continue", or the ended Turn's
 message while the Session has no conversation (R15's rule), and passes the gate
 as a start does (F67.2): `held`, or `starting`, its loop sending the Turn to
@@ -172,6 +174,7 @@ from app.services.session_record_service import (
 from app.services.session_scope import ScopedCreate, scoped_create
 from app.services.session_stream_service import SessionStreamService
 from app.services.start_gate import (
+    CHAT_KIND,
     JOB_KIND,
     WORK_KIND,
     Held,
@@ -233,6 +236,11 @@ FOLDER_RETRY_SECONDS = 2.0
 STOPPABLE = (SessionState.RUNNING, SessionState.STARTING, SessionState.HELD)
 """The states a Stop ends a Session in: a turn in flight, a start under way or
 held at the gate."""
+
+UPDATE_STOPS = (SessionState.RUNNING, SessionState.STARTING)
+"""The states the store's update stops a job's or a Chat's Session in: a turn
+in flight or a start under way. A held one has not started, and goes on at
+the lift (DB 279)."""
 
 _STOP_REFUSALS = {
     SessionState.IDLE: "its turn has ended",
@@ -875,6 +883,31 @@ class SessionStartService:
             with scoped_session(self._container) as db:
                 self._stop_halted(db, session_id)
 
+    def stoppable_for_update(self, db: Session) -> list[uuid.UUID]:
+        """The Sessions the store's update stops (DB 279): every job's and
+        Chat's `running` or `starting`, in `created_at` order."""
+        return list(
+            db.scalars(
+                select(AgentSession.id)
+                .where(
+                    AgentSession.kind_code.in_((JOB_KIND, CHAT_KIND)),
+                    AgentSession.state_code.in_(UPDATE_STOPS),
+                )
+                .order_by(AgentSession.created_at, AgentSession.id)
+            )
+        )
+
+    def stop_for_update(self, db: Session, session_id: uuid.UUID) -> None:
+        """The store's update's stop of a job's or a Chat's Session, by Pilot,
+        in the caller's transaction, as `_stop` writes a Stop, under its lock
+        while it is still `running` or `starting` (DB 279, 280): a turn in
+        flight is interrupted once this commits, and a Chat stays open with
+        its conversation. A work item's is never stopped so."""
+        session = self._records(db).lock_session(session_id)
+        if session.kind_code == WORK_KIND or session.state_code not in UPDATE_STOPS:
+            return
+        self._stop(db, session, _pilot(db), datetime.now(UTC))
+
     def send_nudges(self) -> None:
         """What holds an owed nudge may have lifted — a usage halt, at a
         reading or an overrule, or a project's pause: the nudges owed sent on
@@ -1161,9 +1194,8 @@ class SessionStartService:
         session = self._records(db).lock_session(session_id)
         if session.state_code != SessionState.RUNNING or not self._halts.stopping(db):
             return
-        pilot = db.scalars(select(User).where(User.kind_code == UserKind.AGENT)).one()
         now = datetime.now(UTC)
-        self._stop(db, session, pilot, now)
+        self._stop(db, session, _pilot(db), now)
         session.nudge_owed_at = now
         logger.info("Session %s stopped at the usage limit, its nudge owed", session_id)
 
@@ -1853,6 +1885,11 @@ class SessionStartService:
     def _client(self) -> ControllerClient:
         client: ControllerClient = self._container.controller_client()
         return client
+
+
+def _pilot(db: Session) -> User:
+    """Pilot, the record's agent: who the server's own stops are by."""
+    return db.scalars(select(User).where(User.kind_code == UserKind.AGENT)).one()
 
 
 def _unbriefed(session: AgentSession) -> bool:
