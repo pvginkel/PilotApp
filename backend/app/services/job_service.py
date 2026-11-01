@@ -22,7 +22,8 @@ ended, once the turn-end read settled every document the run registered (D2);
 and a person's close of an item of Pilot's own (DB decision 45), whose Undo
 withdraws the job while it is held before its brief. A job that failed or
 stopped takes a person's Retry, a fresh job for the same trigger; the server
-retries none on its own.
+retries none on its own, but each job the store's update stopped, once, at its
+lift, through the same Retry (D078; DB 281).
 """
 
 import uuid
@@ -56,6 +57,9 @@ NEXT_TITLE = "Deciding what is next"
 and of the job after an item of Pilot's own is closed (DB Item sample)."""
 
 _RETRIABLE = (SessionState.FAILED, SessionState.STOPPED)
+
+TURN_ENDING = "its stopped turn is still ending"
+"""Retry's refusal of a stopped job whose turn its relay has yet to end."""
 
 _RETRY_REFUSALS = {
     SessionState.HELD: "its start waits at the gate",
@@ -181,7 +185,8 @@ class JobService:
 
     def retry(self, session_id: uuid.UUID) -> Work:
         """A person's Retry of the job `session_id`, failed or stopped, its
-        work item open, in the caller's transaction: a fresh job for the
+        work item open, or the store's update's of a job it stopped, at its
+        lift (DB 281), in the caller's transaction: a fresh job for the
         same trigger and trigger item, titled as it is, placed at the press's
         instant at the project's next place, behind every job of the project
         already waiting, and briefed from the record as it stands when it
@@ -226,7 +231,7 @@ class JobService:
         )
         if work is None or line is None:
             raise InvalidOperationException(operation, "it is no work item")
-        refusal = self._retry_refusal(project, job, work, line)
+        refusal = retry_refusal(self.db, project, job, work, line)
         if refusal is not None:
             raise InvalidOperationException(operation, refusal)
         assert work.trigger_code is not None and line.title is not None
@@ -241,38 +246,6 @@ class JobService:
         )
         work_moved(self.engine_bus, job)
         return retry
-
-    def _retry_refusal(
-        self, project: Project, job: AgentSession, work: Work, line: Item
-    ) -> str | None:
-        """Why the job takes no Retry now; None while it does."""
-        if job.kind_code != JOB_KIND:
-            return "it is a worker's run, which Resume carries on"
-        if line.done_at is not None:
-            if line.done_cause_code == WITHDRAWN:
-                return "an Undo withdrew it before its brief went out"
-            return "it is done"
-        if work.retried_by_id is not None:
-            return "it was retried already"
-        if job.nudge_owed_at is not None:
-            # Dead at the quota wall: not at its end until the run its nudge
-            # continues ends (D078).
-            return "it waits for its nudge at the quota wall"
-        if job.state_code not in _RETRIABLE:
-            return _RETRY_REFUSALS[job.state_code]
-        if job.state_code is SessionState.STOPPED and (
-            job.turns > 0 and job.turn_ended_at is None
-        ):
-            return "its stopped turn is still ending"
-        if project.archived:
-            return "its project is archived"
-        if project.state_code is ProjectState.FINISHED:
-            return "its project is finished"
-        if work.trigger_code is WorkTrigger.ITEM_DONE:
-            assert work.trigger_item_id is not None
-            if self.db.get_one(Item, work.trigger_item_id).done_at is None:
-                return "the item it follows is open again"
-        return None
 
     def _pass_title(self, run_id: uuid.UUID) -> str:
         """The title of the job after the run's turn: the places of the
@@ -332,3 +305,36 @@ class JobService:
             self.db.flush()
         self.session_start_service.start_brain(self.db, project, session, operation)
         return work
+
+
+def retry_refusal(
+    db: Session, project: Project, job: AgentSession, work: Work, line: Item
+) -> str | None:
+    """Why the job takes no Retry now; None while it does."""
+    if job.kind_code != JOB_KIND:
+        return "it is a worker's run, which Resume carries on"
+    if line.done_at is not None:
+        if line.done_cause_code == WITHDRAWN:
+            return "an Undo withdrew it before its brief went out"
+        return "it is done"
+    if work.retried_by_id is not None:
+        return "it was retried already"
+    if job.nudge_owed_at is not None:
+        # Dead at the quota wall: not at its end until the run its nudge
+        # continues ends (D078).
+        return "it waits for its nudge at the quota wall"
+    if job.state_code not in _RETRIABLE:
+        return _RETRY_REFUSALS[job.state_code]
+    if job.state_code is SessionState.STOPPED and (
+        job.turns > 0 and job.turn_ended_at is None
+    ):
+        return TURN_ENDING
+    if project.archived:
+        return "its project is archived"
+    if project.state_code is ProjectState.FINISHED:
+        return "its project is finished"
+    if work.trigger_code is WorkTrigger.ITEM_DONE:
+        assert work.trigger_item_id is not None
+        if db.get_one(Item, work.trigger_item_id).done_at is None:
+            return "the item it follows is open again"
+    return None

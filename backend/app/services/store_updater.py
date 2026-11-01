@@ -1,5 +1,5 @@
 """The store's update, which the server runs from its row (F144.3; design 5
-D2, D4, D6; DB Store Update, assertions 279 and 280).
+D2, D4, D6, D7; DB Store Update, assertions 279 to 281).
 
 The job `store-update` runs the unlifted Store Update's sequence on one loop,
 from the row's columns. Each phase is a transaction of its own that locks the
@@ -23,8 +23,14 @@ is asked (`lift_requested_at`):
    backoff makes; a call the controller did not answer writes none.
 3. `reconciled_at`, the sync's (`reconciled`): the loop ends here, and runs
    again at that commit or when the timer finds it written.
-4. `lifted_at`; once it commits, the held starts released, the nudges sent and
-   the conditions told.
+4. `lifted_at`, after each job the update stopped whose item is open and
+   which no Work retries is retried once, through a person's Retry, in the
+   order the jobs were made, each in a transaction of its own under the row's
+   lock (DB 281): its retry placed held behind its project's held jobs, a
+   refusal logged and the job's Retry left to a person. A stopped turn still
+   ending, which that Retry refuses too, holds the lift to a later run. Once
+   `lifted_at` commits, the held starts are released, the nudges sent and the
+   conditions told. The server retries no other job (D078).
 
 A lift asked goes to 4 from wherever the sequence stands. The job's reconcile
 at STARTUP and the timer `store-update`, on every tick, run the loop while an
@@ -40,24 +46,27 @@ commit.
 import logging
 import threading
 import time
+import uuid
 from datetime import UTC, datetime
 from enum import Enum, auto
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Exists, exists, select
+from sqlalchemy import Exists, Select, exists, select
 from sqlalchemy.orm import Session
 
 from app.core_exceptions import ExternalServiceException
 from app.database import scoped_session
+from app.exceptions import InvalidOperationException
+from app.models import Item, StoreUpdate, Work
 from app.models import Session as AgentSession
-from app.models import StoreUpdate
 from app.models.reference import SessionState
 from app.services.advisory_turn import advisory_turn
 from app.services.controller_client import ControllerUnreachable
 from app.services.environment_service import EnvironmentService
+from app.services.job_service import TURN_ENDING
 from app.services.session_start_service import SessionStartService
 from app.services.start_gate import CHAT_KIND, JOB_KIND
-from app.services.store_update_service import unlifted
+from app.services.store_update_service import stopped_by, unlifted
 from app.services.supervisor import LoopHandle, Supervisor
 from app.utils.after_commit import after_commit
 
@@ -259,7 +268,19 @@ class StoreUpdater:
                     )
 
     def _lift(self, update_id: int) -> None:
-        """Phase 4: `lifted_at`, and once it commits the gate opened."""
+        """Phase 4: the jobs the update stopped retried, then `lifted_at`, and
+        once it commits the gate opened; nothing more while a stopped turn is
+        still ending."""
+        with scoped_session(self._container) as db:
+            update = db.get_one(StoreUpdate, update_id, populate_existing=True)
+            if update.lifted_at is not None:
+                return
+            retrying = db.scalars(_retriable(update)).all()
+        for job_id in retrying:
+            with scoped_session(self._container) as db:
+                update = _locked(db, update_id)
+                if update.lifted_at is not None or not self._retry(db, update, job_id):
+                    return
         with scoped_session(self._container) as db:
             update = _locked(db, update_id)
             if update.lifted_at is not None:
@@ -267,6 +288,35 @@ class StoreUpdater:
             update.lifted_at = datetime.now(UTC)
             after_commit(self._lifted)
             logger.info("The store's update %s: lifted", update_id)
+
+    def _retry(self, db: Session, update: StoreUpdate, job_id: uuid.UUID) -> bool:
+        """Under the update's lock, while the job is one to retry still: a
+        person's Retry of it, or that Retry's refusal logged; False when the
+        refusal is its stopped turn still ending."""
+        if (
+            db.scalars(_retriable(update).where(AgentSession.id == job_id)).first()
+            is None
+        ):
+            return True
+        try:
+            self._container.job_service().retry(job_id)
+        except InvalidOperationException as refused:
+            if refused.cause == TURN_ENDING:
+                logger.info(
+                    "The store's update %s: lifts once %s's stopped turn ends",
+                    update.id,
+                    job_id,
+                )
+                return False
+            logger.info(
+                "The store's update %s: left %s to a person's Retry: %s",
+                update.id,
+                job_id,
+                refused.message,
+            )
+            return True
+        logger.info("The store's update %s: retried %s", update.id, job_id)
+        return True
 
     def _lifted(self) -> None:
         self._starts.release_held()
@@ -323,6 +373,18 @@ def _locked(db: Session, update_id: int) -> StoreUpdate:
         .with_for_update()
         .execution_options(populate_existing=True)
     ).one()
+
+
+def _retriable(update: StoreUpdate) -> Select[uuid.UUID]:
+    """The jobs the update stopped whose item is open and which no Work
+    retries, in the order they were made (DB 281)."""
+    return (
+        select(AgentSession.id)
+        .join(Item, Item.id == AgentSession.id)
+        .join(Work, Work.id == AgentSession.id)
+        .where(stopped_by(update), Item.done_at.is_(None), Work.retried_by_id.is_(None))
+        .order_by(AgentSession.created_at, AgentSession.id)
+    )
 
 
 def _turns_ending(since: datetime) -> Exists:

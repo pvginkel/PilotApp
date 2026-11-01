@@ -262,14 +262,19 @@ export function overruleWords(kind: OverruleKind, target: number | null): Overru
 
 /** A stop no one of the app's people made, as its line and its session log's tail say it. */
 type StopWords =
-  /** A usage halt's hard stop (F135.6): its line's words, for the halt that holds it now. */
-  | { kind: 'halt'; line: string }
+  /**
+   * Pilot's stop: a usage halt's hard stop (F135.6), for the halt that holds it now, or the store's
+   * update's (F144.4); its line's words and its session log tail's.
+   */
+  | { kind: 'pilot'; line: string; tail: string }
   /** Its environment stopped under it or settled in error, a stop made elsewhere (F71). */
   | { kind: 'elsewhere'; cause: string };
 
+const HALT_TAIL = 'Stopped by Pilot at the usage limit';
+
 /**
  * Why a work item stopped when no one of the app's people stopped it (F26.1, F69.2): a usage halt's
- * hard stop, or a stop made elsewhere; null for any other stop.
+ * hard stop, the store's update, or a stop made elsewhere; null for any other stop.
  */
 function stopWords(work: Work): StopWords | null {
   const cause = work.stopped_cause;
@@ -278,11 +283,13 @@ function stopWords(work: Work): StopWords | null {
   const environment = () => work.environment!.name;
   switch (cause) {
     case 'week_halt':
-      return { kind: 'halt', line: 'Stopped at the week’s limit' };
+      return { kind: 'pilot', line: 'Stopped at the week’s limit', tail: HALT_TAIL };
     case 'five_hour_halt':
-      return { kind: 'halt', line: 'Stopped at the five-hour limit' };
+      return { kind: 'pilot', line: 'Stopped at the five-hour limit', tail: HALT_TAIL };
     case 'usage_limit':
-      return { kind: 'halt', line: 'Stopped at the usage limit' };
+      return { kind: 'pilot', line: 'Stopped at the usage limit', tail: HALT_TAIL };
+    case 'store_update':
+      return { kind: 'pilot', line: 'Stopped for Pilot’s update', tail: 'Stopped by Pilot for its update' };
     case 'environment_stopped':
       return { kind: 'elsewhere', cause: `${environment()} was stopped` };
     case 'environment_deleting':
@@ -306,10 +313,10 @@ interface WorkCue {
   step: string | null;
 }
 
-/** "Stopped · <time>", or a usage halt's hard stop's words before it, and the cause of a stop made elsewhere. */
+/** "Stopped · <time>", or Pilot's stop's words before it, and the cause of a stop made elsewhere. */
 interface WorkStopped {
   kind: 'stopped';
-  /** "Stopped", or "Stopped at the week’s limit" and its like (F135.6). */
+  /** "Stopped", or "Stopped at the week’s limit" and its like (F135.6), or "Stopped for Pilot’s update" (F144.4). */
   text: string;
   at: string | null;
   cause: string | null;
@@ -342,7 +349,8 @@ const cue = (activity: Activity, step: string | null = null): WorkCue => ({ kind
  * A work item's one line (F26.1, F26.2): why the gate holds its start; the current line as the
  * chat words its cue, or that it starts, or waits for Pilot, before its session gives one;
  * "Stopped · <time>" with a stop made elsewhere's cause, or a usage halt's hard stop's "Stopped at
- * the week’s limit · <time>" and its like (F135.6); the error it failed on; what holds the nudge
+ * the week’s limit · <time>" and its like (F135.6), or the store's update's "Stopped for Pilot’s
+ * update · <time>" (F144.4); the error it failed on; what holds the nudge
  * owed to a run whose turn ended under a halt or a pause, in a held start's words (F135.3, F141.3).
  * Null once its turn ended done, when its done line stands for it.
  */
@@ -360,7 +368,7 @@ export function workLine(work: Work): WorkLine | null {
       const words = stopWords(work);
       return {
         kind: 'stopped',
-        text: words?.kind === 'halt' ? words.line : 'Stopped',
+        text: words?.kind === 'pilot' ? words.line : 'Stopped',
         at: work.stopped_at,
         cause: words?.kind === 'elsewhere' ? words.cause : null,
       };
@@ -426,8 +434,9 @@ interface LogTail {
 
 /**
  * A session log's tail once its work runs no turn (F69.2): "Stopped by you", by whom else, by Pilot
- * at the usage limit (F135.6), or the environment stopped under it, at the stop; "The turn ended"
- * or "Failed", at `endedAt`. Null while it is held, starts or runs, when the working cue is the tail.
+ * at the usage limit (F135.6) or for its update (F144.4), or the environment stopped under it, at the
+ * stop; "The turn ended" or "Failed", at `endedAt`. Null while it is held, starts or runs, when the
+ * working cue is the tail.
  */
 export function sessionLogTail(work: Work, selfHandle: string, endedAt: string | null): LogTail | null {
   switch (work.state) {
@@ -442,8 +451,8 @@ export function sessionLogTail(work: Work, selfHandle: string, endedAt: string |
       const words = stopWords(work);
       const by = work.stopped_by;
       const text =
-        words?.kind === 'halt'
-          ? 'Stopped by Pilot at the usage limit'
+        words?.kind === 'pilot'
+          ? words.tail
           : by !== null
             ? by.handle === selfHandle
               ? 'Stopped by you'

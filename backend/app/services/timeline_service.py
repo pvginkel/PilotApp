@@ -104,7 +104,7 @@ from app.services.start_gate import (
     held_reason,
     queued,
 )
-from app.services.store_update_service import unlifted
+from app.services.store_update_service import stopped_for_update, unlifted
 from app.services.usage_halts import UsageHalts
 
 WORK = "work"
@@ -246,19 +246,18 @@ def work_status(
     work item's usage halt read for it (`halts`), the slot's with the count
     that closed it (`slots`), a job's queue read for it (`queued`), a work
     item's conversation for it (`conversing`), a job's the store's update
-    (`unlifted`). A
-    stopped one's stop is
-    when and by whom, a Resume keeping both on the Session (DB Session
-    `stopped_at?`, `stopped_by?`); one no one stopped has the cause its
-    environment's stop under it left as its last record, and one a usage
-    halt's hard stop stopped, its nudge owed, the halt that holds a work
-    item now (`halts`; decision 66). One whose turn ended under a halt or a
-    pause, its nudge owed, has for its held reason what holds that nudge
-    now, read as the gate reads a start's halt, pause and the store's
-    update; one Finish closed
-    owes none, its nudge never sent to a done item. One whose start has
-    no environment yet has none (DB 107). A job's is Pilot's own (F59.1); a
-    retried one's names the job its Retry placed, created at the press."""
+    (`unlifted`). A stopped one's stop is when and by whom, a Resume keeping
+    both on the Session (DB Session `stopped_at?`, `stopped_by?`); one no one
+    stopped has the cause its environment's stop under it left as its last
+    record, one a usage halt's hard stop stopped, its nudge owed, the halt
+    that holds a work item now (`halts`; decision 66), and a job the store's
+    update stopped that update, derived from its stop (DB 280). One whose
+    turn ended under a halt or a pause, its nudge owed, has for its held
+    reason what holds that nudge now, read as the gate reads a start's halt,
+    pause and the store's update; one Finish closed owes none, its nudge
+    never sent to a done item. One whose start has no environment yet has
+    none (DB 107). A job's is Pilot's own (F59.1); a retried one's names the
+    job its Retry placed, created at the press."""
     stopper = aliased(User)
     retry = aliased(AgentSession)
     rows = db.execute(
@@ -327,11 +326,29 @@ def work_status(
         )
         and unlifted(db) is not None
     )
-    causes = dict.fromkeys(hard_stopped, _HALT_STOPS[halted]) | {
-        session.id: _stop_cause(db, session.id)
+    by_pilot = [
+        session.id
         for session in stopped
-        if session.stopped_by_user_id is None
-    }
+        if session.kind_code == JOB_KIND and session.stopped_by_user_id is not None
+    ]
+    causes = (
+        dict.fromkeys(hard_stopped, _HALT_STOPS[halted])
+        | {
+            session.id: _stop_cause(db, session.id)
+            for session in stopped
+            if session.stopped_by_user_id is None
+        }
+        | dict.fromkeys(
+            db.scalars(
+                select(AgentSession.id).where(
+                    AgentSession.id.in_(by_pilot), stopped_for_update()
+                )
+            )
+            if by_pilot
+            else (),
+            StopCause.STORE_UPDATE,
+        )
+    )
     filled = slots.filled(db, waiting) if waiting else {}
     behind = queued(
         db,

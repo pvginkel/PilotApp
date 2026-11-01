@@ -1,27 +1,28 @@
 """The store's update, run by the server from its row (F144.3; design 5 D2,
-D4, D6, D9; DB Store Update, assertions 279 and 280): the stops by Pilot, the
-store's reset, the wait for its sidecar's reconcile and the lift, each phase
-written once and in order, through a roll, a cut and an outage.
+D4, D6, D7, D9; DB Store Update, assertions 279 to 281): the stops by Pilot,
+the store's reset, the wait for its sidecar's reconcile, the retries of the
+jobs it stopped and the lift, each phase written once and in order, through a
+roll, a cut and an outage.
 
-`TestRun`, `TestTimer` and `TestReconciled` call the loop's run, the tick and
-the sync's note on the test's session, as their callers do. `TestSequence`
-runs the job from the row's commit on a database of its own, as the
-supervisor does, on the fake controller and the fake sidecar."""
+`TestRun`, `TestLift`, `TestTimer` and `TestReconciled` call the loop's run,
+the tick and the sync's note on the test's session, as their callers do.
+`TestSequence` runs the job from the row's commit on a database of its own, as
+the supervisor does, on the fake controller and the fake sidecar."""
 
 import uuid
 from collections.abc import Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
 from dependency_injector import providers
 from flask import Flask
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.database import scoped_session
-from app.models import Chat, Environment, Project, StoreUpdate, Turn, User
+from app.models import Chat, Environment, Item, Project, StoreUpdate, Turn, User, Work
 from app.models.reference import (
     ChatKind,
     ProjectState,
@@ -41,7 +42,7 @@ from app.services.session_start_service import (
     START_JOB,
     SessionStartService,
 )
-from app.services.start_gate import WorkSlots
+from app.services.start_gate import WorkSlots, queued
 from app.services.store_updater import STORE_UPDATE_JOB, StoreUpdater
 from app.services.supervisor import JOB_RESTARTS_TOTAL, TIMER_RUNS_TOTAL, LoopHandle
 from app.services.turn_end_read_service import TurnEndReadService
@@ -50,7 +51,7 @@ from app.utils.lifecycle_coordinator import LifecycleCoordinator
 from tests.support.fake_controller import ServedFakeController, client_of
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID, FakeSidecar
 from tests.support.locks import lock_waits
-from tests.support.store_updates import hold, lift
+from tests.support.store_updates import hold, lift, stopped_job
 from tests.support.supervisor import (
     LogWaiter,
     RoundsHandle,
@@ -559,6 +560,166 @@ class TestRun:
         assert told == [None]
 
 
+def _at_lift(db: DbSession, *, asked: bool = False) -> StoreUpdate:
+    """An update at its lift: the store reset and its tree reconciled, or its
+    lift asked."""
+    update = hold(db)
+    update.stopped_at = update.reset_at = datetime.now(UTC)
+    if asked:
+        update.lift_requested_at = datetime.now(UTC)
+    else:
+        update.reconciled_at = datetime.now(UTC)
+    db.flush()
+    return update
+
+
+def _retry_of(db: DbSession, job: models.Session) -> uuid.UUID | None:
+    return db.get_one(Work, job.id, populate_existing=True).retried_by_id
+
+
+def _retry(db: DbSession, job: models.Session) -> models.Session:
+    """The job a Retry placed for `job`."""
+    retry_id = _retry_of(db, job)
+    assert retry_id is not None
+    return _session(db, retry_id)
+
+
+def _retried(db: DbSession) -> set[uuid.UUID]:
+    """The jobs a Retry placed a job for."""
+    return set(db.scalars(select(Work.id).where(Work.retried_by_id.is_not(None))))
+
+
+class TestLift:
+    """Before `lifted_at`, each job the update stopped is retried once
+    through a person's Retry (design 5 D7; DB 281)."""
+
+    @pytest.mark.parametrize("asked", [False, True], ids=["reconciled", "lift asked"])
+    def test_it_retries_each_job_it_stopped_in_the_order_made_held_behind_the_held_jobs(
+        self,
+        container: ServiceContainer,
+        updater: StoreUpdater,
+        session: DbSession,
+        camp: Project,
+        monkeypatch: pytest.MonkeyPatch,
+        asked: bool,
+    ) -> None:
+        update = _at_lift(session, asked=asked)
+        soup = _project(session, session.get_one(User, camp.created_by_user_id), "soup")
+        first = stopped_job(container, session, camp, datetime.now(UTC))
+        second = stopped_job(container, session, soup, datetime.now(UTC))
+        third = stopped_job(container, session, camp, datetime.now(UTC))
+        # A job of camp's placed under the hold, held at the gate.
+        waiting = _brain(
+            container, session, camp, "job", SessionState.HELD, briefed=False
+        )
+        loops = _asked(updater, monkeypatch)
+
+        _run(updater)
+
+        retries = [_retry(session, job) for job in (first, second, third)]
+        assert [retry.state_code for retry in retries] == [SessionState.HELD] * 3
+        assert retries[0].created_at < retries[1].created_at < retries[2].created_at
+        seqs = [session.get_one(Item, retry.id).seq for retry in retries[::2]]
+        assert session.get_one(Item, waiting.id).seq < seqs[0] < seqs[1]
+        assert queued(session, [retries[0].id, retries[2].id]) == {
+            retries[0].id,
+            retries[2].id,
+        }
+        lifted = _update(session, update.id)
+        assert lifted.lifted_at is not None
+        assert lifted.lifted_at > retries[2].created_at
+        assert f"{START_JOB}:{RELEASE_KEY}" in loops
+
+    def test_a_job_its_retry_refuses_is_logged_and_left_to_a_persons_retry(
+        self,
+        container: ServiceContainer,
+        updater: StoreUpdater,
+        session: DbSession,
+        camp: Project,
+        updater_log: LogWaiter,
+    ) -> None:
+        update = _at_lift(session)
+        camp.archived = True
+        left = stopped_job(container, session, camp, datetime.now(UTC))
+
+        _run(updater)
+
+        assert _retry_of(session, left) is None
+        assert _update(session, update.id).lifted_at is not None
+        assert updater_log.matching(
+            rf"The store's update {update.id}: left {left.id} to a person's "
+            "Retry: Cannot retry Setting up the project because its project is "
+            "archived"
+        )
+
+    def test_a_stopped_turn_still_ending_holds_the_lift_to_a_later_run(
+        self,
+        container: ServiceContainer,
+        updater: StoreUpdater,
+        session: DbSession,
+        camp: Project,
+    ) -> None:
+        update = _at_lift(session)
+        first = stopped_job(container, session, camp, datetime.now(UTC))
+        ending = stopped_job(container, session, camp, datetime.now(UTC))
+        ending.turn_ended_at = None
+        session.flush()
+
+        _run(updater)
+
+        assert _retry_of(session, first) is not None
+        assert _retry_of(session, ending) is None
+        assert _update(session, update.id).lifted_at is None
+
+        _session(session, ending.id).turn_ended_at = datetime.now(UTC)
+        session.flush()
+        _run(updater)
+
+        assert _retried(session) == {first.id, ending.id}
+        assert _update(session, update.id).lifted_at is not None
+
+    def test_it_retries_no_other_job(
+        self,
+        container: ServiceContainer,
+        updater: StoreUpdater,
+        session: DbSession,
+        camp: Project,
+    ) -> None:
+        update = _at_lift(session)
+        person = session.get_one(User, camp.created_by_user_id)
+        before = stopped_job(
+            container, session, camp, update.made_at - timedelta(minutes=1)
+        )
+        stopped_job(container, session, camp, datetime.now(UTC), by=person)
+        done = stopped_job(container, session, camp, datetime.now(UTC))
+        line = session.get_one(Item, done.id)
+        line.done_at, line.done_cause_code = datetime.now(UTC), "turn_ended"
+        retried = stopped_job(container, session, camp, datetime.now(UTC))
+        session.get_one(Work, retried.id).retried_by_id = before.id
+        _brain(container, session, camp, "job", SessionState.FAILED)
+        chat = _brain(container, session, camp, "chat", SessionState.STOPPED)
+        chat.stopped_at, chat.stopped_by_user_id = datetime.now(UTC), _pilot_id(session)
+        session.flush()
+        jobs = session.scalar(
+            select(func.count())
+            .select_from(models.Session)
+            .where(models.Session.kind_code == "job")
+        )
+
+        _run(updater)
+
+        assert _retried(session) == {retried.id}
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(models.Session)
+                .where(models.Session.kind_code == "job")
+            )
+            == jobs
+        )
+        assert _update(session, update.id).lifted_at is not None
+
+
 class TestTimer:
     def test_it_tells_the_conditions_once_each_time_the_update_turns(
         self,
@@ -670,11 +831,22 @@ class TestReconciled:
 
 
 def _committed_people(container: ServiceContainer) -> tuple[uuid.UUID, uuid.UUID]:
-    """Two open projects, `camp` and `soup`, the store's row made."""
+    """Two open projects, `camp` and `soup`, the store's row made; camp has its
+    opening, which the brief of a setup's retry names."""
     with scoped_session(container) as db:
         person = _person(db)
         _store_row(db)
-        return _project(db, person, "camp").id, _project(db, person, "soup").id
+        camp = _project(db, person, "camp")
+        db.add(
+            Item(
+                project_id=camp.id,
+                seq=1,
+                kind_code="opening",
+                title="Camp",
+                created_by_user_id=person.id,
+            )
+        )
+        return camp.id, _project(db, person, "soup").id
 
 
 def _in_flight(
@@ -737,6 +909,7 @@ def _reconciled(app: Flask, *, shadow: dict[str, str] | None = None) -> None:
 def _folders(fake: ServedFakeController) -> None:
     """The tree the store's sidecar writes down after its reconcile."""
     fake.put_file(STORE_ENVIRONMENT_ID, f"{STORE_REPO}/CLAUDE.md", b"# Pilot\n")
+    fake.put_file(STORE_ENVIRONMENT_ID, "/work/Projects/camp/plan.json", b"{}")
     fake.put_file(STORE_ENVIRONMENT_ID, "/work/Projects/soup/plan.json", b"{}")
 
 
@@ -840,6 +1013,15 @@ class TestSequence:
         wait_until(lambda: told == [None, None], "the conditions told of the lift")
         with scoped_session(container) as db:
             assert db.get_one(Chat, chat_id).closed_at is None
+            retry_id = db.get_one(Work, job_id).retried_by_id
+            assert retry_id is not None
+            lifted_at = db.get_one(StoreUpdate, update_id).lifted_at
+            assert lifted_at is not None
+            assert db.get_one(models.Session, retry_id).created_at < lifted_at
+        wait_until(
+            lambda: _state(container, retry_id).state_code == SessionState.RUNNING,
+            "the stopped job's retry started",
+        )
         coordinator.shutdown()
 
     def test_two_processes_at_once_write_each_phase_once_and_in_order(
@@ -857,12 +1039,14 @@ class TestSequence:
         first.fire_startup()
         second.fire_startup()
         chat_id = _in_flight(container, starts, camp_id, "chat")
+        job_id = _in_flight(container, starts, camp_id, "job")
 
         update_id = _committed_update(container)
         wait_until(
             lambda: _committed(container, update_id).reset_at is not None,
             "the store reset",
         )
+        _folders(committed_fake)
         _reconciled(committed_app)
         wait_until(
             lambda: _committed(container, update_id).lifted_at is not None,
@@ -877,9 +1061,11 @@ class TestSequence:
             rf"The store's update {update_id}: reset the store {STORE_ENVIRONMENT_ID}",
             rf"The store's update {update_id}: its tree reconciled",
             rf"The store's update {update_id}: lifted",
+            rf"The store's update {update_id}: retried {job_id}",
             rf"Session {chat_id} stopped by .*",
         ):
             assert len(updater_log.matching(written)) == 1, written
+        assert not updater_log.matching(rf"The store's update {update_id}: left .*")
         first.shutdown()
         second.shutdown()
 

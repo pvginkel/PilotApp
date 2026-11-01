@@ -71,6 +71,7 @@ from app.services.start_gate import WorkSlots
 from app.services.timeline_service import Badge, work_status
 from app.services.usage_halts import UsageHalts
 from tests.support.chats import ChatWriter, open_chat
+from tests.support.store_updates import hold, lift, stopped_job
 from tests.support.turns import end_turns, turn_in_flight
 
 ENVIRONMENT_CAUSES = [
@@ -2513,6 +2514,59 @@ class TestWorkStatus:
 
         assert work.stopped_cause is None
         assert work.stopped_by is not None and work.stopped_by.kind == "agent"
+
+    @pytest.mark.parametrize("lifted", [False, True], ids=["standing", "lifted"])
+    def test_a_job_the_stores_update_stopped_names_it(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        lifted: bool,
+    ) -> None:
+        """By Pilot within the update, derived from its stop (DB 280); once
+        lifted, its retry beside it."""
+        project = _make(container)
+        update = hold(session)
+        job = stopped_job(container, session, project, datetime.now(UTC))
+        if lifted:
+            retry = _job(session, project, environment, SessionState.HELD)
+            _retried(session, session.get_one(Item, job.id), retry)
+            lift(session, update)
+
+        work = work_status(
+            session, [job.id], unreachable=False, halts=HALTS, slots=SLOTS
+        )[job.id]
+
+        assert work.stopped_cause == StopCause.STORE_UPDATE
+        assert work.stopped_at == job.stopped_at
+        assert work.stopped_by is not None and work.stopped_by.kind == "agent"
+        assert (work.retried is not None) is lifted
+
+    def test_a_job_pilot_stopped_outside_an_update_or_at_a_finish_names_no_cause(
+        self, container: ServiceContainer, session: DbSession
+    ) -> None:
+        project = _make(container)
+        before = stopped_job(container, session, project, datetime.now(UTC))
+        update = hold(session)
+        finished = stopped_job(container, session, project, datetime.now(UTC))
+        line = session.get_one(Item, finished.id)
+        line.done_at, line.done_cause_code = finished.stopped_at, "finished"
+        lift(session, update)
+        after = stopped_job(container, session, project, datetime.now(UTC))
+
+        found = work_status(
+            session,
+            [before.id, finished.id, after.id],
+            unreachable=False,
+            halts=HALTS,
+            slots=SLOTS,
+        )
+
+        assert [found[job.id].stopped_cause for job in (before, finished, after)] == [
+            None,
+            None,
+            None,
+        ]
 
     @pytest.mark.parametrize(
         ("week", "five_hour", "paused", "reason"),

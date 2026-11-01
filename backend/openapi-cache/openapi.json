@@ -3463,7 +3463,7 @@
         "type": "object"
       },
       "ItemDocumentSchema.1fdd8ae.StopCause": {
-        "description": "Why a work item stopped when no person did. A stop made elsewhere, its\nenvironment stopped under its turn (design 2 §9.6; F71): it settled\n`stopped`, it settled `deleting`, the controller has it no longer, or it\nsettled `error`; the `server` record that ended the turn holds it. A\nusage halt's hard stop, its nudge owed (F135.6; DB 269): the halt that\nholds it, the week's or the five-hour's, or neither once both lifted,\nread at display (decision 66).",
+        "description": "Why a work item stopped when no person did. A stop made elsewhere, its\nenvironment stopped under its turn (design 2 §9.6; F71): it settled\n`stopped`, it settled `deleting`, the controller has it no longer, or it\nsettled `error`; the `server` record that ended the turn holds it. A\nusage halt's hard stop, its nudge owed (F135.6; DB 269): the halt that\nholds it, the week's or the five-hour's, or neither once both lifted,\nread at display (decision 66). A job's stop by Pilot at the store's\nupdate, derived from its stop (F144.4; DB 280).",
         "enum": [
           "environment_stopped",
           "environment_deleting",
@@ -3471,7 +3471,8 @@
           "environment_error",
           "week_halt",
           "five_hour_halt",
-          "usage_limit"
+          "usage_limit",
+          "store_update"
         ],
         "title": "StopCause",
         "type": "string"
@@ -3666,7 +3667,7 @@
                 "type": "null"
               }
             ],
-            "description": "Who stopped it, by Stop, Finish or Archive, or Pilot, through its tool or a usage halt's hard stop; null when no one of Pilot's did, and unless `state` is `stopped` (F69.2, F135.6)"
+            "description": "Who stopped it, by Stop, Finish or Archive, or Pilot, through its tool, a usage halt's hard stop or the store's update; null when no one of Pilot's did, and unless `state` is `stopped` (F69.2, F135.6, F144.4)"
           },
           "stopped_cause": {
             "anyOf": [
@@ -3677,7 +3678,7 @@
                 "type": "null"
               }
             ],
-            "description": "Why it stopped, which its stopped line and its session log's tail say: its environment stopped under it, a stop made elsewhere, stopped, being deleted, gone, or in error; or a usage halt's hard stop, by Pilot, its nudge owed, the halt that holds it now, the week's or the five-hour's, or `usage_limit` once neither does; null when someone stopped it otherwise, and unless `state` is `stopped` (F26.1, F69.2, F71, F135.6)"
+            "description": "Why it stopped, which its stopped line and its session log's tail say: its environment stopped under it, a stop made elsewhere, stopped, being deleted, gone, or in error; or a usage halt's hard stop, by Pilot, its nudge owed, the halt that holds it now, the week's or the five-hour's, or `usage_limit` once neither does; or a job's stop by Pilot at the store's update, `store_update`; null when someone stopped it otherwise, and unless `state` is `stopped` (F26.1, F69.2, F71, F135.6, F144.4)"
           }
         },
         "required": [
@@ -7559,7 +7560,7 @@
         "type": "object"
       },
       "TimelineSchema.1fdd8ae.StopCause": {
-        "description": "Why a work item stopped when no person did. A stop made elsewhere, its\nenvironment stopped under its turn (design 2 §9.6; F71): it settled\n`stopped`, it settled `deleting`, the controller has it no longer, or it\nsettled `error`; the `server` record that ended the turn holds it. A\nusage halt's hard stop, its nudge owed (F135.6; DB 269): the halt that\nholds it, the week's or the five-hour's, or neither once both lifted,\nread at display (decision 66).",
+        "description": "Why a work item stopped when no person did. A stop made elsewhere, its\nenvironment stopped under its turn (design 2 §9.6; F71): it settled\n`stopped`, it settled `deleting`, the controller has it no longer, or it\nsettled `error`; the `server` record that ended the turn holds it. A\nusage halt's hard stop, its nudge owed (F135.6; DB 269): the halt that\nholds it, the week's or the five-hour's, or neither once both lifted,\nread at display (decision 66). A job's stop by Pilot at the store's\nupdate, derived from its stop (F144.4; DB 280).",
         "enum": [
           "environment_stopped",
           "environment_deleting",
@@ -7567,7 +7568,8 @@
           "environment_error",
           "week_halt",
           "five_hour_halt",
-          "usage_limit"
+          "usage_limit",
+          "store_update"
         ],
         "title": "StopCause",
         "type": "string"
@@ -8079,7 +8081,7 @@
                 "type": "null"
               }
             ],
-            "description": "Who stopped it, by Stop, Finish or Archive, or Pilot, through its tool or a usage halt's hard stop; null when no one of Pilot's did, and unless `state` is `stopped` (F69.2, F135.6)"
+            "description": "Who stopped it, by Stop, Finish or Archive, or Pilot, through its tool, a usage halt's hard stop or the store's update; null when no one of Pilot's did, and unless `state` is `stopped` (F69.2, F135.6, F144.4)"
           },
           "stopped_cause": {
             "anyOf": [
@@ -8090,7 +8092,7 @@
                 "type": "null"
               }
             ],
-            "description": "Why it stopped, which its stopped line and its session log's tail say: its environment stopped under it, a stop made elsewhere, stopped, being deleted, gone, or in error; or a usage halt's hard stop, by Pilot, its nudge owed, the halt that holds it now, the week's or the five-hour's, or `usage_limit` once neither does; null when someone stopped it otherwise, and unless `state` is `stopped` (F26.1, F69.2, F71, F135.6)"
+            "description": "Why it stopped, which its stopped line and its session log's tail say: its environment stopped under it, a stop made elsewhere, stopped, being deleted, gone, or in error; or a usage halt's hard stop, by Pilot, its nudge owed, the halt that holds it now, the week's or the five-hour's, or `usage_limit` once neither does; or a job's stop by Pilot at the store's update, `store_update`; null when someone stopped it otherwise, and unless `state` is `stopped` (F26.1, F69.2, F71, F135.6, F144.4)"
           }
         },
         "required": [
@@ -8462,7 +8464,7 @@
                 "type": "null"
               }
             ],
-            "description": "Who stopped it, by Stop, Finish or Archive, or Pilot, through its tool or a usage halt's hard stop; null when no one of Pilot's did, and unless `state` is `stopped` (F69.2, F135.6)"
+            "description": "Who stopped it, by Stop, Finish or Archive, or Pilot, through its tool, a usage halt's hard stop or the store's update; null when no one of Pilot's did, and unless `state` is `stopped` (F69.2, F135.6, F144.4)"
           },
           "stopped_cause": {
             "anyOf": [
@@ -8473,7 +8475,7 @@
                 "type": "null"
               }
             ],
-            "description": "Why it stopped, which its stopped line and its session log's tail say: its environment stopped under it, a stop made elsewhere, stopped, being deleted, gone, or in error; or a usage halt's hard stop, by Pilot, its nudge owed, the halt that holds it now, the week's or the five-hour's, or `usage_limit` once neither does; null when someone stopped it otherwise, and unless `state` is `stopped` (F26.1, F69.2, F71, F135.6)"
+            "description": "Why it stopped, which its stopped line and its session log's tail say: its environment stopped under it, a stop made elsewhere, stopped, being deleted, gone, or in error; or a usage halt's hard stop, by Pilot, its nudge owed, the halt that holds it now, the week's or the five-hour's, or `usage_limit` once neither does; or a job's stop by Pilot at the store's update, `store_update`; null when someone stopped it otherwise, and unless `state` is `stopped` (F26.1, F69.2, F71, F135.6, F144.4)"
           }
         },
         "required": [
@@ -8720,7 +8722,7 @@
         "type": "string"
       },
       "WorkSchema.1fdd8ae.StopCause": {
-        "description": "Why a work item stopped when no person did. A stop made elsewhere, its\nenvironment stopped under its turn (design 2 §9.6; F71): it settled\n`stopped`, it settled `deleting`, the controller has it no longer, or it\nsettled `error`; the `server` record that ended the turn holds it. A\nusage halt's hard stop, its nudge owed (F135.6; DB 269): the halt that\nholds it, the week's or the five-hour's, or neither once both lifted,\nread at display (decision 66).",
+        "description": "Why a work item stopped when no person did. A stop made elsewhere, its\nenvironment stopped under its turn (design 2 §9.6; F71): it settled\n`stopped`, it settled `deleting`, the controller has it no longer, or it\nsettled `error`; the `server` record that ended the turn holds it. A\nusage halt's hard stop, its nudge owed (F135.6; DB 269): the halt that\nholds it, the week's or the five-hour's, or neither once both lifted,\nread at display (decision 66). A job's stop by Pilot at the store's\nupdate, derived from its stop (F144.4; DB 280).",
         "enum": [
           "environment_stopped",
           "environment_deleting",
@@ -8728,7 +8730,8 @@
           "environment_error",
           "week_halt",
           "five_hour_halt",
-          "usage_limit"
+          "usage_limit",
+          "store_update"
         ],
         "title": "StopCause",
         "type": "string"

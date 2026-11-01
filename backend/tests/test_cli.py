@@ -10,12 +10,14 @@ from flask import Flask
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app import cli
+from app import cli, models
 from app.app import App
-from app.models import StoreUpdate
+from app.models import Item, Project, StoreUpdate, User, Work
+from app.models.reference import ProjectState, UserKind
 from app.services.container import ServiceContainer
 from app.services.store_update_service import unlifted, utc_time
 from app.store_update_cli import POLL_SECONDS, handle_update_store, update_store
+from tests.support.store_updates import stopped_job
 
 URI = "postgresql+psycopg://pilot:s3cret-password@db.test/pilot?sslmode=prefer"
 
@@ -70,8 +72,8 @@ def _set(**columns: object) -> Step:
 
 
 class _Server:
-    """Stands in for the server's sequence, which nothing runs yet: each of
-    the command's sleeps writes the next step on the row it polls."""
+    """Stands in for the server's sequence: each of the command's sleeps
+    writes the next step on the row it polls."""
 
     def __init__(self, session: Session, *steps: Step) -> None:
         self._session = session
@@ -97,6 +99,46 @@ def cli_app(app: Flask, container: ServiceContainer) -> App:
     """The session app, its commands' sessions the test's."""
     assert isinstance(app, App)
     return app
+
+
+def _project(db: Session, name: str, *, archived: bool = False) -> Project:
+    person = db.scalars(select(User).where(User.handle == "ada")).one_or_none()
+    if person is None:
+        person = User(
+            kind_code=UserKind.PERSON,
+            subject="subject-ada",
+            handle="ada",
+            name="Ada Example",
+            avatar_slot=1,
+        )
+        db.add(person)
+        db.flush()
+    made = Project(
+        created_by_user_id=person.id,
+        state_code=ProjectState.OPEN,
+        slug=name.lower(),
+        name=name,
+        archived=archived,
+    )
+    db.add(made)
+    db.flush()
+    return made
+
+
+def _retried(
+    container: ServiceContainer,
+    db: Session,
+    project: Project,
+    job: models.Session,
+    placed: datetime,
+) -> None:
+    """The job marked retried by a job placed at `placed`, a person's stop
+    of which leaves it no job of the update's."""
+    person = db.get_one(User, project.created_by_user_id)
+    retry = stopped_job(container, db, project, AT, by=person)
+    retry.created_at = placed
+    db.get_one(Work, job.id).retried_by_id = retry.id
+    db.flush()
 
 
 def _made(update: StoreUpdate) -> str:
@@ -141,6 +183,67 @@ class TestUpdateStore:
             "The store's tree written down again at 2026-10-13 06:03:30 UTC.\n"
             "Lifted at 2026-10-13 06:03:31 UTC: Pilot's chats and jobs go on.\n"
         )
+
+    def test_the_lift_says_how_many_jobs_it_retried_and_which_it_left(
+        self,
+        cli_app: App,
+        container: ServiceContainer,
+        session: Session,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """As the record has them at the lift (DB 281): a retry placed after
+        it is a person's, and a job whose item closed before it neither."""
+        lifted_at = AT + timedelta(minutes=2)
+        camp = _project(session, "Camp")
+        soup = _project(session, "Soup", archived=True)
+        standing = StoreUpdate(made_at=AT)
+        session.add(standing)
+        session.flush()
+        stopped = AT + timedelta(seconds=5)
+        retried = [stopped_job(container, session, camp, stopped) for _ in range(2)]
+        stopped_job(container, session, soup, stopped, title="Deciding what is next")
+        closed = stopped_job(container, session, camp, stopped)
+        line = session.get_one(Item, closed.id)
+        line.done_at, line.done_cause_code = AT + timedelta(minutes=1), "turn_ended"
+        retried_late = stopped_job(container, session, camp, stopped)
+        for job, placed in (
+            (retried[0], lifted_at - timedelta(seconds=2)),
+            (retried[1], lifted_at - timedelta(seconds=1)),
+            (retried_late, lifted_at + timedelta(seconds=1)),
+        ):
+            _retried(container, session, camp, job, placed)
+        server = _Server(session, _set(lifted_at=lifted_at))
+
+        handle_update_store(cli_app, lift=True, wait=True, sleep=server.sleep)
+
+        assert capsys.readouterr().out.splitlines()[-2:] == [
+            "Retried 2 jobs; 2 left to a person's Retry: Deciding what is next "
+            "in Soup (its project is archived), Setting up the project in Camp "
+            "(it was retried already).",
+            "Lifted at 2026-10-13 06:04:11 UTC: Pilot's chats and jobs go on.",
+        ]
+
+    def test_a_lift_that_left_none_says_how_many_it_retried(
+        self,
+        cli_app: App,
+        container: ServiceContainer,
+        session: Session,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        lifted_at = AT + timedelta(minutes=2)
+        camp = _project(session, "Camp")
+        session.add(StoreUpdate(made_at=AT))
+        session.flush()
+        job = stopped_job(container, session, camp, AT + timedelta(seconds=5))
+        _retried(container, session, camp, job, lifted_at - timedelta(seconds=1))
+        server = _Server(session, _set(lifted_at=lifted_at))
+
+        handle_update_store(cli_app, lift=True, wait=True, sleep=server.sleep)
+
+        assert capsys.readouterr().out.splitlines()[-2:] == [
+            "Retried 1 job.",
+            "Lifted at 2026-10-13 06:04:11 UTC: Pilot's chats and jobs go on.",
+        ]
 
     def test_it_prints_the_rows_error_each_time_it_appears(
         self, cli_app: App, session: Session, capsys: pytest.CaptureFixture[str]

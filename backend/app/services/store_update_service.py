@@ -1,18 +1,23 @@
 """The operator's update of the store while Pilot runs (F144; DB Store Update,
-decision 68, assertions 276 and 279).
+decision 68, assertions 276, 279 and 280).
 
 `update-store` makes an update, the hold on the store's work while it is
 unlifted, and asks its lift. Both write the row and nothing else: no listener
-is told, and the server takes the row up from the record.
+is told, and the server takes the row up from the record. The jobs an update
+stopped are derived from their stop, never linked (`stopped_by`).
 """
 
 from datetime import UTC, datetime
 
-from sqlalchemy import select, text
-from sqlalchemy.orm import Session
+from sqlalchemy import ColumnElement, and_, exists, or_, select, text
+from sqlalchemy.orm import Session, aliased
 
+from app.engine.record import FINISHED
 from app.exceptions import InvalidOperationException
-from app.models import StoreUpdate
+from app.models import Item, StoreUpdate, User
+from app.models import Session as AgentSession
+from app.models.reference import UserKind
+from app.services.start_gate import JOB_KIND
 
 
 def utc_time(at: datetime) -> str:
@@ -25,6 +30,49 @@ def unlifted(db: Session) -> StoreUpdate | None:
     return db.scalars(
         select(StoreUpdate).where(StoreUpdate.lifted_at.is_(None))
     ).one_or_none()
+
+
+def stopped_by(update: StoreUpdate) -> ColumnElement[bool]:
+    """Whether a Session is a job the update stopped (DB 280): stopped by
+    Pilot at or after its `made_at`, and before its `lifted_at` once it has
+    one, its Item not closed by a Finish at its stop."""
+    stopped = AgentSession.stopped_at >= update.made_at
+    if update.lifted_at is not None:
+        stopped = and_(stopped, AgentSession.stopped_at < update.lifted_at)
+    return and_(_stopped_by_pilot(), stopped)
+
+
+def stopped_for_update() -> ColumnElement[bool]:
+    """Whether a Session is a job a Store Update stopped (DB 280), any update,
+    lifted or not: its stop's cause."""
+    return and_(
+        _stopped_by_pilot(),
+        exists().where(
+            StoreUpdate.made_at <= AgentSession.stopped_at,
+            or_(
+                StoreUpdate.lifted_at.is_(None),
+                AgentSession.stopped_at < StoreUpdate.lifted_at,
+            ),
+        ),
+    )
+
+
+def _stopped_by_pilot() -> ColumnElement[bool]:
+    """A job's Session stopped by Pilot, but at a Finish, which closes its
+    Item at the instant it stops it (DB 280)."""
+    # An alias of its own, so that a caller's select may join Item too.
+    line = aliased(Item)
+    return and_(
+        AgentSession.kind_code == JOB_KIND,
+        AgentSession.stopped_by_user_id.in_(
+            select(User.id).where(User.kind_code == UserKind.AGENT)
+        ),
+        ~exists().where(
+            line.id == AgentSession.id,
+            line.done_cause_code == FINISHED,
+            line.done_at == AgentSession.stopped_at,
+        ),
+    )
 
 
 class StoreUpdateService:

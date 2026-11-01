@@ -1,19 +1,29 @@
-"""The operator's update of the store (F144.1; DB Store Update, assertions 276
-and 279): made while none is unlifted, its lift asked once."""
+"""The operator's update of the store (F144.1; DB Store Update, assertions 276,
+279 and 280): made while none is unlifted, its lift asked once, and the jobs
+it stopped derived from their stop."""
 
 import threading
+import uuid
 from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 from flask import Flask
-from sqlalchemy import func, select, text
+from sqlalchemy import ColumnElement, func, select, text
 from sqlalchemy.orm import Session
 
+from app import models
 from app.database import scoped_session
 from app.exceptions import InvalidOperationException
-from app.models import StoreUpdate
+from app.models import Item, Project, StoreUpdate, User
+from app.models.reference import ProjectState, SessionState, UserKind
 from app.services.container import ServiceContainer
-from app.services.store_update_service import unlifted, utc_time
+from app.services.store_update_service import (
+    stopped_by,
+    stopped_for_update,
+    unlifted,
+    utc_time,
+)
+from tests.support.store_updates import pilot, stopped_job
 from tests.support.supervisor import wait_until
 
 MADE_AT = datetime(2026, 10, 13, 6, 2, 11, tzinfo=UTC)
@@ -25,6 +35,35 @@ def _lifted(db: Session, days: int) -> StoreUpdate:
     db.add(lifted)
     db.flush()
     return lifted
+
+
+def _camp(db: Session) -> Project:
+    person = User(
+        kind_code=UserKind.PERSON,
+        subject="subject-ada",
+        handle="ada",
+        name="Ada Example",
+        avatar_slot=1,
+    )
+    db.add(person)
+    db.flush()
+    camp = Project(
+        created_by_user_id=person.id, state_code=ProjectState.OPEN, slug="camp"
+    )
+    db.add(camp)
+    db.flush()
+    return camp
+
+
+def _matching(db: Session, clause: ColumnElement[bool]) -> set[uuid.UUID]:
+    return set(db.scalars(select(models.Session.id).where(clause)))
+
+
+def _finished_at_stop(db: Session, job: models.Session) -> None:
+    """The job's item closed by a Finish at the instant of its stop."""
+    line = db.get_one(Item, job.id)
+    line.done_at, line.done_cause_code = job.stopped_at, "finished"
+    db.flush()
 
 
 class TestUtcTime:
@@ -200,3 +239,94 @@ class TestConcurrentMakes:
         assert refusals[0].startswith("an update is under way since ")
         with scoped_session(container) as db:
             assert db.scalar(select(func.count()).select_from(StoreUpdate)) == 1
+
+
+class TestStoppedBy:
+    """The jobs an update stopped (DB 280): by Pilot from its `made_at` to its
+    `lifted_at`, but those a Finish closed at their stop."""
+
+    def test_it_is_each_job_pilot_stopped_from_the_made_at_to_the_lift(
+        self, container: ServiceContainer, session: Session
+    ) -> None:
+        camp = _camp(session)
+        update = StoreUpdate(made_at=MADE_AT, lifted_at=MADE_AT + timedelta(minutes=10))
+        session.add(update)
+        session.flush()
+        at_made = stopped_job(container, session, camp, MADE_AT)
+        within = stopped_job(container, session, camp, MADE_AT + timedelta(minutes=5))
+        stopped_job(container, session, camp, MADE_AT - timedelta(seconds=1))
+        stopped_job(container, session, camp, MADE_AT + timedelta(minutes=10))
+        by_a_person = session.get_one(User, camp.created_by_user_id)
+        stopped_job(
+            container, session, camp, MADE_AT + timedelta(minutes=5), by=by_a_person
+        )
+        work_item = models.Session(
+            project_id=camp.id,
+            kind_code="work",
+            cwd="/work/Camp",
+            token_hash=uuid.uuid4().hex,
+            state_code=SessionState.STOPPED,
+            stopped_at=MADE_AT + timedelta(minutes=5),
+            stopped_by_user_id=pilot(session).id,
+        )
+        session.add(work_item)
+        session.flush()
+
+        assert _matching(session, stopped_by(update)) == {at_made.id, within.id}
+
+    def test_an_unlifted_update_takes_each_stop_since_its_made_at(
+        self, container: ServiceContainer, session: Session
+    ) -> None:
+        camp = _camp(session)
+        update = StoreUpdate(made_at=MADE_AT)
+        session.add(update)
+        session.flush()
+        later = stopped_job(container, session, camp, MADE_AT + timedelta(days=3))
+
+        assert _matching(session, stopped_by(update)) == {later.id}
+
+    def test_a_job_a_finish_closed_at_its_stop_is_not_the_updates(
+        self, container: ServiceContainer, session: Session
+    ) -> None:
+        camp = _camp(session)
+        update = StoreUpdate(made_at=MADE_AT)
+        session.add(update)
+        session.flush()
+        finished = stopped_job(container, session, camp, MADE_AT + timedelta(minutes=1))
+        _finished_at_stop(session, finished)
+        closed_later = stopped_job(
+            container, session, camp, MADE_AT + timedelta(minutes=1)
+        )
+        line = session.get_one(Item, closed_later.id)
+        line.done_at = MADE_AT + timedelta(minutes=2)
+        line.done_cause_code = "finished"
+        session.flush()
+
+        assert _matching(session, stopped_by(update)) == {closed_later.id}
+
+
+class TestStoppedForUpdate:
+    def test_it_is_each_job_some_update_stopped_lifted_or_not(
+        self, container: ServiceContainer, session: Session
+    ) -> None:
+        camp = _camp(session)
+        lifted = _lifted(session, 2)
+        standing = StoreUpdate(made_at=MADE_AT)
+        session.add(standing)
+        session.flush()
+        assert lifted.lifted_at is not None
+        in_lifted = stopped_job(
+            container, session, camp, lifted.made_at + timedelta(minutes=1)
+        )
+        stopped_job(container, session, camp, lifted.lifted_at)
+        stopped_job(container, session, camp, MADE_AT - timedelta(hours=1))
+        in_standing = stopped_job(
+            container, session, camp, MADE_AT + timedelta(minutes=1)
+        )
+        finished = stopped_job(container, session, camp, MADE_AT + timedelta(minutes=2))
+        _finished_at_stop(session, finished)
+
+        assert _matching(session, stopped_for_update()) == {
+            in_lifted.id,
+            in_standing.id,
+        }

@@ -56,7 +56,8 @@ class StopCause(StrEnum):
     settled `error`; the `server` record that ended the turn holds it. A
     usage halt's hard stop, its nudge owed (F135.6; DB 269): the halt that
     holds it, the week's or the five-hour's, or neither once both lifted,
-    read at display (decision 66)."""
+    read at display (decision 66). A job's stop by Pilot at the store's
+    update, derived from its stop (F144.4; DB 280)."""
 
     ENVIRONMENT_STOPPED = "environment_stopped"
     ENVIRONMENT_DELETING = "environment_deleting"
@@ -65,6 +66,7 @@ class StopCause(StrEnum):
     WEEK_HALT = "week_halt"
     FIVE_HOUR_HALT = "five_hour_halt"
     USAGE_LIMIT = "usage_limit"
+    STORE_UPDATE = "store_update"
 
 
 ItemForm = Literal["prose", "work", "wait"]
@@ -477,8 +479,9 @@ class WorkSchema(BaseModel):
     stopped_by: UserSchema | None = Field(
         description=(
             "Who stopped it, by Stop, Finish or Archive, or Pilot, through its "
-            "tool or a usage halt's hard stop; null when no one of Pilot's "
-            "did, and unless `state` is `stopped` (F69.2, F135.6)"
+            "tool, a usage halt's hard stop or the store's update; null when "
+            "no one of Pilot's did, and unless `state` is `stopped` (F69.2, "
+            "F135.6, F144.4)"
         )
     )
     stopped_cause: StopCause | None = Field(
@@ -488,8 +491,9 @@ class WorkSchema(BaseModel):
             "elsewhere, stopped, being deleted, gone, or in error; or a usage "
             "halt's hard stop, by Pilot, its nudge owed, the halt that holds "
             "it now, the week's or the five-hour's, or `usage_limit` once "
-            "neither does; null when someone stopped it otherwise, and unless "
-            "`state` is `stopped` (F26.1, F69.2, F71, F135.6)"
+            "neither does; or a job's stop by Pilot at the store's update, "
+            "`store_update`; null when someone stopped it otherwise, and "
+            "unless `state` is `stopped` (F26.1, F69.2, F71, F135.6, F144.4)"
         )
     )
     nudge_owed: bool = Field(
