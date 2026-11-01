@@ -192,18 +192,18 @@ the file still holds the bytes sent: what the agent wrote meanwhile stays, and g
 write is a temp file in the file's directory, named `.pilot-sync-…`, renamed over it. The client
 refuses an answer whose `X-Pilot-Hash` is not the hash of the bytes the file then holds. A `404`
 leaves the file as it is, with a local note. A PUT that failed for a reason that can pass, a `5xx`,
-the gate's `502` among them, or a call with no whole answer (not sent, timed out, or a success's
-body broken off), is made again after a wait, 1 s doubling to 30 s, for as long as it fails so. A
-change of the path, or a release's flush or a reconcile sending it, ends the wait at once, so that
-neither waits on it. Any other failure, a `400`, `401`, `403`, `413` or `426`, a refusal whose body
-broke off, or an answer the client refuses, is logged, and the next reconcile sends the file up. A
-path whose last PUT failed waits to go up, counted pending (`/healthz`, below) until a later pass of
-it lands it or finds it in sync or gone. The log says each: `cannot sync a file of the tree:
-retrying`, with the wait as `in`, for a failure that can pass, `cannot sync a file of the tree` for
-any other, and `no longer waiting to go up` once a path that waited no longer does, each with the
-count as `pending`, which `the change stream is open`, `the change stream dropped: reconnecting` and
-`reconciled` carry too. A file deleted sends nothing: nothing is deleted going up, and the reconcile
-writes a file of the record back down.
+the gate's `502` among them, its body read whole or broken off, or a call with no whole answer (not
+sent, timed out, or a success's body broken off), is made again after a wait, 1 s doubling to 30 s,
+for as long as it fails so. A change of the path, or a release's flush or a reconcile sending it,
+ends the wait at once, so that neither waits on it. Any other failure, a `400`, `401`, `403`, `413`
+or `426`, another refusal whose body broke off, or an answer the client refuses, is logged, and the
+next reconcile sends the file up. A path whose last PUT failed waits to go up, counted pending
+(`/healthz`, below) until a later pass of it lands it or finds it in sync or gone. The log says
+each: `cannot sync a file of the tree: retrying`, with the wait as `in`, for a failure that can
+pass, `cannot sync a file of the tree` for any other, and `no longer waiting to go up` once a path
+that waited no longer does, each with the count as `pending`, which `the change stream is open`,
+`the change stream dropped: reconnecting` and `reconciled` carry too. A file deleted sends nothing:
+nothing is deleted going up, and the reconcile writes a file of the record back down.
 
 **Down.** The sidecar holds the change stream open. It reconciles on every connect, then applies
 the events until the stream drops: a path's `change` events are gathered for 100 ms, and the path

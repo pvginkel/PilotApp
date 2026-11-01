@@ -230,7 +230,12 @@ func (c *Client) send(request *http.Request) (*http.Response, error) {
 func refusal(response *http.Response) error {
 	body, err := io.ReadAll(io.LimitReader(response.Body, errorBodyLimit))
 	if err != nil {
-		return fmt.Errorf("answered %d, its body unread: %w", response.StatusCode, err)
+		unread := fmt.Errorf("answered %d, its body unread: %w", response.StatusCode, err)
+		if response.StatusCode >= http.StatusInternalServerError {
+			// The server's 5xx, its answer cut off: it can pass as either can.
+			return &unanswered{unread}
+		}
+		return unread
 	}
 	switch response.StatusCode {
 	case http.StatusNotFound:

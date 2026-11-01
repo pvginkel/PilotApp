@@ -379,6 +379,17 @@ func TestTransientIsA5xxOrACallWithNoWholeAnswer(t *testing.T) {
 		t.Errorf("dropped: got %v", err)
 	}
 
+	for status, want := range map[int]bool{http.StatusServiceUnavailable: true, http.StatusNotFound: false} {
+		client, _ = serve(t, func(w http.ResponseWriter, _ *http.Request, _ []byte) {
+			w.Header().Set("Content-Length", "100")
+			w.WriteHeader(status)
+			_, _ = io.WriteString(w, "cut")
+		})
+		if got := Transient(put(client, context.Background())); got != want {
+			t.Errorf("%d cut off: transient %t", status, got)
+		}
+	}
+
 	client, _ = serve(t, func(_ http.ResponseWriter, r *http.Request, _ []byte) { <-r.Context().Done() })
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
