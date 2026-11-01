@@ -16,9 +16,16 @@ environment — the environment gone, outside `/work`, a folder or under a file
 now, over 16 MiB — is not made again until the document's next close, or the
 Resume of the continuation that carries it: `write_back_refused_at` says so,
 and a `server` record in no Turn of the Session's log names its path and the
-controller's answer. A write the controller does not answer, or refuses for a
-reason of its own — its own work on the tree (`409 conflict`), its share
-unreadable (`503`) — raises, and the loop runs again after its backoff.
+controller's answer. A write it refuses for a reason of its own — its own work
+on the tree (`409 conflict`), its share unreadable (`503`), or any other
+answer, a `401`, a `422` or a `500` among them — is made again while Pilot's
+record has its environment coming up or being deleted, then for
+`REFUSAL_WAIT_SECONDS` more (`RefusalWaits`), and is then refused so, with the
+controller's last answer. A run makes its writes again side by side, so that
+the documents a continuation carries wait those minutes together, and a close
+owes its write afresh, with a wait of its own. A write the controller does not
+answer raises, and the loop runs again after its backoff, with no wait
+started.
 
 At STARTUP the job's reconcile runs the writes every Session owes, from the
 rows.
@@ -26,23 +33,32 @@ rows.
 
 import logging
 import uuid
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from functools import partial
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core_exceptions import ExternalServiceException
 from app.database import scoped_session
 from app.engine.bus import EngineBus, EngineEvent, WriteBackOwed
 from app.engine.record import owes_write_back, write_back_owed
 from app.engine.views import ViewService
-from app.models import Document, Item, Project
+from app.models import Document, Environment, Item, Project
 from app.models.reference import RecordKind
 from app.services.controller_client import (
     ControllerClient,
     ControllerProblem,
     ControllerProblemType,
+    ControllerUnreachable,
+)
+from app.services.refusal_waits import (
+    REFUSAL_RETRY_SECONDS,
+    REFUSAL_WAIT_SECONDS,
+    RefusalWaits,
 )
 from app.services.session_record_service import SessionRecordService
 from app.services.session_stream_service import SessionStreamService
@@ -70,6 +86,10 @@ _FILE_REFUSALS = (
 its path or its environment. A write makes the file and the folders it needs,
 so its `NOT_FOUND` is an environment gone."""
 
+_SETTLING = ("provisioning", "starting", "deleting")
+"""The statuses of an environment the controller is bringing up or deleting:
+a refusal of a write there counts toward no wait."""
+
 
 @dataclass(frozen=True)
 class _Owed:
@@ -77,10 +97,21 @@ class _Owed:
     is."""
 
     document_id: uuid.UUID
+    session_id: uuid.UUID
+    """The Session that registered it."""
+    closed_at: datetime
     environment_id: str
     path: str
     text: str
     hash: str
+    settling: bool
+    """Pilot's record has its environment coming up or being deleted."""
+
+    @property
+    def key(self) -> tuple[uuid.UUID, datetime, str]:
+        """The write as its close owes it: each close owes it afresh, and a
+        close's time is to the second."""
+        return (self.document_id, self.closed_at, self.hash)
 
 
 @dataclass(frozen=True)
@@ -88,6 +119,9 @@ class _Refused:
     """The controller's refusal of a write, in its words."""
 
     reason: str
+    own: bool
+    """For a reason of the controller's own: made again until its wait
+    passes."""
 
 
 class WriteBackService:
@@ -99,6 +133,8 @@ class WriteBackService:
         supervisor: Supervisor,
         session_streams: SessionStreamService,
         engine_bus: EngineBus,
+        refusal_wait_seconds: float = REFUSAL_WAIT_SECONDS,
+        refusal_retry_seconds: float = REFUSAL_RETRY_SECONDS,
     ) -> None:
         """Register the `write-back` job, whose loops are one per registering
         Session, and whose reconcile runs the writes every Session owes; and
@@ -111,36 +147,63 @@ class WriteBackService:
             session_streams: Woken by a refused write's `server` record
             engine_bus: Tells of each close that owes a write-back, once it
                 commits
+            refusal_wait_seconds: How long a write the controller refuses for
+                a reason of its own is made again from its first refusal
+                counted
+            refusal_retry_seconds: The wait between two rounds of those writes
         """
         self._container = container
         self._supervisor = supervisor
         self._streams = session_streams
+        self._refusal_wait = refusal_wait_seconds
+        self._refusal_retry = refusal_retry_seconds
         supervisor.register_job(
             WRITE_BACK_JOB, needs_controller=True, reconcile=self._reconcile
         )
         engine_bus.subscribe(self._heard)
 
-    def write_back(self, session_id: uuid.UUID, handle: LoopHandle) -> None:
-        """The write-back loop's run: each document the Session registered
-        whose text is owed to its file, in the order registered, written and
-        taken, until none is owed. Returns then, and when the loop is told to
-        stop.
+    def write_back(
+        self,
+        session_ids: Sequence[uuid.UUID],
+        handle: LoopHandle,
+        going_on: Callable[[], bool] | None = None,
+    ) -> None:
+        """Each document the Sessions registered whose text is owed to its
+        file, in the order registered, written and taken, a round at a time,
+        until none is owed: the write-back loop's run, its Session's, and a
+        continuation's start's, the Sessions it carries. A write the
+        controller refuses for a reason of its own is made again in the next
+        round until its wait passes (`RefusalWaits`). Returns then, when the
+        loop is told to stop, and when `going_on` says no between two rounds.
 
         Raises:
-            ExternalServiceException: The controller did not answer, or
-                refused a write for a reason of its own
+            ControllerUnreachable: The controller did not answer a write
         """
+        waits = RefusalWaits(self._refusal_wait, self._refusal_retry)
         while not handle.stopping:
             with scoped_session(self._container) as db:
-                owed = _owed(db, session_id)
+                owed = _owed(db, session_ids)
             if not owed:
                 return
+            waits.round(document.key for document in owed)
+            waiting = False
             for document in owed:
                 if handle.stopping:
                     return
                 refused = self._write(document)
+                if (
+                    refused is not None
+                    and refused.own
+                    and not self._waited_out(document, refused, waits)
+                ):
+                    waiting = True
+                    continue
                 with scoped_session(self._container) as db:
-                    self._take(db, session_id, document, refused)
+                    self._take(db, document, refused)
+            if waiting and (
+                handle.wait(waits.pause()) or (going_on is not None and not going_on())
+            ):
+                return
 
     def _heard(self, event: EngineEvent) -> None:
         if isinstance(event, WriteBackOwed):
@@ -166,30 +229,61 @@ class WriteBackService:
         # has its write made by a run after it.
         self._supervisor.start_loop(
             WRITE_BACK_JOB,
-            partial(self.write_back, session_id),
+            partial(self.write_back, (session_id,)),
             key=str(session_id),
             again=True,
         )
 
     def _write(self, owed: _Owed) -> _Refused | None:
-        """The text written to the file, or the controller's refusal of it."""
+        """The text written to the file, or the controller's refusal of it.
+
+        Raises:
+            ControllerUnreachable: The controller did not answer
+        """
         try:
             self._client().write_file(
                 owed.environment_id, owed.path, owed.text.encode()
             )
-        except ControllerProblem as problem:
-            if problem.problem_type not in _FILE_REFUSALS:
+        except ExternalServiceException as error:
+            if isinstance(error, ControllerUnreachable):
                 raise
-            return _Refused(problem.cause)
+            own = not (
+                isinstance(error, ControllerProblem)
+                and error.problem_type in _FILE_REFUSALS
+            )
+            return _Refused(error.cause, own)
         return None
 
-    def _take(
-        self,
-        db: Session,
-        session_id: uuid.UUID,
-        owed: _Owed,
-        refused: _Refused | None,
-    ) -> None:
+    def _waited_out(self, owed: _Owed, refused: _Refused, waits: RefusalWaits) -> bool:
+        """A refusal of the controller's own counted toward the write's wait,
+        unless Pilot's record has its environment coming up or being deleted,
+        which starts the wait afresh from the next one: whether the wait has
+        passed."""
+        if owed.settling:
+            waits.restart(owed.key)
+            logger.debug(
+                "Write-back of document %s of session %s refused while its"
+                " environment settles: %s",
+                owed.path,
+                owed.session_id,
+                refused.reason,
+            )
+            return False
+        started = owed.key in waits
+        if waits.passed(owed.key):
+            return True
+        if not started:
+            logger.info(
+                "Write-back of document %s of session %s refused, made again for"
+                " %g s: %s",
+                owed.path,
+                owed.session_id,
+                self._refusal_wait,
+                refused.reason,
+            )
+        return False
+
+    def _take(self, db: Session, owed: _Owed, refused: _Refused | None) -> None:
         """What the write came to, taken under the Project's row, the
         Session's and the Document's, unless the document no longer owes the
         text written."""
@@ -202,22 +296,24 @@ class WriteBackService:
         records = SessionRecordService(
             db, self._streams, ViewService(db, self._container.engine_bus())
         )
-        records.lock_session(session_id)
+        records.lock_session(owed.session_id)
         documents.lock(document)
         if not owes_write_back(item, document) or document.published_hash != owed.hash:
             logger.info(
                 "Document %s of session %s no longer owes the text written",
                 owed.path,
-                session_id,
+                owed.session_id,
             )
             return
         if refused is None:
             documents.wrote_back(document)
-            logger.info("Wrote document %s of session %s back", owed.path, session_id)
+            logger.info(
+                "Wrote document %s of session %s back", owed.path, owed.session_id
+            )
             return
         documents.refuse_write_back(document)
         records.append(
-            session_id,
+            owed.session_id,
             RecordKind.SERVER,
             payload={
                 "type": WRITE_BACK_REFUSED,
@@ -229,7 +325,7 @@ class WriteBackService:
         logger.info(
             "Write-back of document %s of session %s refused: %s",
             owed.path,
-            session_id,
+            owed.session_id,
             refused.reason,
         )
 
@@ -238,26 +334,53 @@ class WriteBackService:
         return client
 
 
-def _owed(db: Session, session_id: uuid.UUID) -> list[_Owed]:
-    """The documents the Session registered whose text is owed to their
-    files, with where those are, in the order registered."""
+def _owed(db: Session, session_ids: Sequence[uuid.UUID]) -> list[_Owed]:
+    """The documents the Sessions registered whose text is owed to their
+    files, with where those are and their environment's status as Pilot's
+    record has it, in the order registered."""
     rows = db.execute(
         select(
             Document.id,
+            Item.created_by_session_id,
+            Item.done_at,
             Document.source_environment_id,
             Document.source_path,
             Document.published_text,
             Document.published_hash,
+            Environment.last_state,
         )
         .join(Item, Item.id == Document.id)
-        .where(Item.created_by_session_id == session_id, write_back_owed())
+        .join(Environment, Environment.id == Document.source_environment_id)
+        .where(Item.created_by_session_id.in_(session_ids), write_back_owed())
         .order_by(Item.seq)
     ).all()
     owed: list[_Owed] = []
-    for document_id, environment_id, path, text, text_hash in rows:
-        # A registered document's source is its environment and its path, and
-        # one owed its write-back has a text.
+    for (
+        document_id,
+        session_id,
+        closed_at,
+        environment_id,
+        path,
+        text,
+        text_hash,
+        state,
+    ) in rows:
+        # A registered document is its Session's, its source is its
+        # environment and its path, and one owed its write-back is closed and
+        # has a text.
+        assert session_id is not None and closed_at is not None
         assert environment_id is not None and path is not None
         assert text is not None and text_hash is not None
-        owed.append(_Owed(document_id, environment_id, path, text, text_hash))
+        owed.append(
+            _Owed(
+                document_id,
+                session_id,
+                closed_at,
+                environment_id,
+                path,
+                text,
+                text_hash,
+                state in _SETTLING,
+            )
+        )
     return owed

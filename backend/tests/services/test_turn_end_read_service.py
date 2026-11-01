@@ -1,11 +1,14 @@
 """The turn-end read (TD §4.4; F65.1, F89; ruling D1; design 2 §8; V07, V08,
 V24): the documents a work item's run registered, read through the fake
 controller once the run ends, and published as written or their read failed;
-then the job after the worker's turn (design 3 D2; slice 025 V12).
+then the job after the worker's turn (design 3 D2; slice 025 V12); a read
+the controller refuses `409 conflict` made again, and failed once its wait has
+passed (slice 030 V09).
 
 The read's run is called on the test's session as its loop calls it; the
 loop's tests run it on a database of its own, as the supervisor does."""
 
+import time
 import uuid
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
@@ -90,11 +93,18 @@ def _no_callbacks() -> Iterator[None]:
     clear_after_commit_callbacks()
 
 
+WAIT = 0.2
+"""The tests' wait on a read the controller refuses `409 conflict`."""
+LINK_LOOP = FakeControllerProblem(409, "conflict", "too many levels of links")
+LINK_LOOP_REASON = "the controller answered 409 conflict: too many levels of links"
+
+
 def _service(
-    container: ServiceContainer, supervise: Supervise
+    container: ServiceContainer, supervise: Supervise, *, wait: float = WAIT
 ) -> tuple[TurnEndReadService, LifecycleCoordinator]:
     """The reads on a supervisor of their own, the container's start the
-    one the job after a run's turn starts through, its loops never run."""
+    one the job after a run's turn starts through, its loops never run; a
+    read the controller refuses `409 conflict` made again for `wait`."""
     supervisor, coordinator = supervise(container)
     container.session_start_service.override(
         providers.Object(configured_starts(container, supervise))
@@ -103,6 +113,8 @@ def _service(
         container=container,
         supervisor=supervisor,
         session_streams=container.session_stream_service(),
+        refusal_wait_seconds=wait,
+        refusal_retry_seconds=0.01,
     )
     return reads, coordinator
 
@@ -225,6 +237,10 @@ def _file_reads(fake: ServedFakeController) -> list[str]:
     return [
         call for call in fake.calls if call.startswith(f"GET /environments/{ENV}/file")
     ]
+
+
+def _read_of(path: str) -> str:
+    return f"GET /environments/{ENV}/file?path={quote(path, safe='')}"
 
 
 def _failed(item: Item, path: str, reason: str) -> dict[str, str]:
@@ -619,41 +635,112 @@ def watched(
 
 
 class TestTurnEndReadServiceRefusals:
-    @pytest.mark.parametrize(
-        ("problem", "reason"),
-        [
-            (
-                FakeControllerProblem(409, "conflict", "too many levels of links"),
-                "the controller answered 409 conflict: too many levels of links",
-            ),
-            (
-                FakeControllerProblem(409, "not-a-file", "a FIFO"),
-                "the controller answered 409 not-a-file: a FIFO",
-            ),
-        ],
-        ids=["a-link-loop", "not-a-regular-file"],
-    )
-    def test_a_conflict_or_not_a_file_fails_the_read(
+    def test_a_file_that_is_not_regular_fails_the_read(
         self,
         session: DbSession,
         container: ServiceContainer,
         supervise: Supervise,
         project: Project,
         watched: tuple[_ReadWatched, models.Session],
-        problem: FakeControllerProblem,
-        reason: str,
     ) -> None:
         fake, run = watched
         item = _register(container, project, run)
         _end(session, container, run)
-        fake.refusal = problem
+        fake.refusal = FakeControllerProblem(409, "not-a-file", "a FIFO")
 
         _read(_service(container, supervise)[0], run.id)
 
-        [(_, payload)] = _servers(session, run.id)
-        assert isinstance(payload, dict)
-        assert payload["reason"].startswith(reason)
+        assert _file_reads(fake) == [_read_of(PATH)]
+        assert _servers(session, run.id) == [
+            (
+                None,
+                _failed(item, PATH, "the controller answered 409 not-a-file: a FIFO"),
+            )
+        ]
         assert _document(session, item).read_failed_at is not None
+
+    def test_a_conflict_is_made_again_then_fails_the_read_once_its_wait_has_passed(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        supervise: Supervise,
+        project: Project,
+        watched: tuple[_ReadWatched, models.Session],
+    ) -> None:
+        fake, run = watched
+        item = _register(container, project, run)
+        _end(session, container, run)
+        fake.refusal = LINK_LOOP
+        began = time.perf_counter()
+
+        _read(_service(container, supervise)[0], run.id)
+
+        assert time.perf_counter() - began >= WAIT
+        reads = _file_reads(fake)
+        assert len(reads) > 2
+        assert set(reads) == {_read_of(PATH)}
+        assert _servers(session, run.id) == [
+            (None, _failed(item, PATH, LINK_LOOP_REASON))
+        ]
+        document = _document(session, item)
+        assert document.read_failed_at is not None
+        assert not awaits_read(item, document)
+        # The run's last read settled: the job after its turn is placed.
+        assert len(_jobs_after(session, run)) == 1
+
+    def test_a_conflict_that_settles_within_its_wait_is_read(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        supervise: Supervise,
+        project: Project,
+        watched: tuple[_ReadWatched, models.Session],
+    ) -> None:
+        fake, run = watched
+        item = _register(container, project, run)
+        _end(session, container, run)
+        fake.refusal = FakeControllerProblem(409, "conflict", "the path changed")
+        reads: list[str] = []
+
+        def settles(path: str) -> None:
+            reads.append(path)
+            if len(reads) == 3:
+                fake.refusal = None
+
+        fake.on_read = settles
+
+        _read(_service(container, supervise, wait=5.0)[0], run.id)
+
+        assert reads == [PATH] * 3
+        document = _document(session, item)
+        assert document.published_text == TEXT
+        assert document.read_failed_at is None
+        assert _servers(session, run.id) == []
+
+    def test_the_runs_reads_wait_side_by_side_not_one_after_another(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        supervise: Supervise,
+        project: Project,
+        watched: tuple[_ReadWatched, models.Session],
+    ) -> None:
+        fake, run = watched
+        first = _register(container, project, run)
+        second = _register(container, project, run, OTHER)
+        _end(session, container, run)
+        fake.refusal = LINK_LOOP
+
+        _read(_service(container, supervise)[0], run.id)
+
+        reads = _file_reads(fake)
+        rounds = len(reads) // 2
+        assert rounds > 1
+        assert reads == [_read_of(PATH), _read_of(OTHER)] * rounds
+        assert _servers(session, run.id) == [
+            (None, _failed(first, PATH, LINK_LOOP_REASON)),
+            (None, _failed(second, OTHER, LINK_LOOP_REASON)),
+        ]
 
     @pytest.mark.parametrize(
         "status", [401, 422, 500], ids=["unauthenticated", "invalid", "its-own"]

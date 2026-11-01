@@ -10,11 +10,15 @@ written in a transaction of its own, under the Project's row, the Session's and
 the Document's, in the start's lock order, unless the document no longer
 awaits its read: Finish closed it, or another process read it first. A file the
 controller refuses — nothing at the path, outside `/work`, not a file, over
-16 MiB, a link loop or a manifest it cannot read the layout from — or a text
-with faults is a failed read: the document keeps no text and takes its closes,
-and a `server` record in no Turn of the Session's log names its path and why.
-A read the controller does not answer, or answers `503 environment-unreadable`,
-raises, and the loop runs again after its backoff, waiting the outage out.
+16 MiB — or a text with faults is a failed read: the document keeps no text and
+takes its closes, and a `server` record in no Turn of the Session's log names
+its path and why. A read it refuses `409 conflict` — a link loop, a manifest it
+cannot read the layout from, or the path changed during the call, which
+settles — is made again for `REFUSAL_WAIT_SECONDS` from its first refusal, the
+run's reads side by side (`RefusalWaits`), and is then a failed read with the
+controller's last answer. A read the controller does not answer, or answers
+`503 environment-unreadable` or otherwise, raises, and the loop runs again
+after its backoff, waiting the outage out.
 
 Once no document the run registered awaits its read, the job after the
 worker's turn is placed (design 3 D2; `JobService`): in the transaction that
@@ -48,6 +52,11 @@ from app.services.controller_client import (
     ControllerProblem,
     ControllerProblemType,
 )
+from app.services.refusal_waits import (
+    REFUSAL_RETRY_SECONDS,
+    REFUSAL_WAIT_SECONDS,
+    RefusalWaits,
+)
 from app.services.session_record_service import SessionRecordService
 from app.services.session_stream_service import SessionStreamService
 from app.services.supervisor import LoopHandle, Supervisor
@@ -69,12 +78,11 @@ _FILE_REFUSALS = (
     ControllerProblemType.PATH_OUTSIDE_WORK,
     ControllerProblemType.NOT_A_FILE,
     ControllerProblemType.FILE_TOO_LARGE,
-    ControllerProblemType.CONFLICT,
 )
-"""The controller's refusals of a read that name what is wrong with the file,
-its path or its environment's layout: a failed read. A `CONFLICT` is a link
-loop, or a manifest the controller cannot read the layout from; reads take no
-`409` from a bring-up."""
+"""The controller's refusals of a read that name what is wrong with the file
+or its path: a failed read. Its `CONFLICT` is a link loop, a manifest the
+controller cannot read the layout from, or the path changed during the call,
+made again until its wait passes; reads take no `409` from a bring-up."""
 
 
 @dataclass(frozen=True)
@@ -91,6 +99,8 @@ class _Refused:
     """The controller's refusal of a file, in its words."""
 
     reason: str
+    conflict: bool = False
+    """Its `409 conflict`: made again until its wait passes."""
 
 
 @dataclass(frozen=True)
@@ -111,6 +121,8 @@ class TurnEndReadService:
         container: "ServiceContainer",
         supervisor: Supervisor,
         session_streams: SessionStreamService,
+        refusal_wait_seconds: float = REFUSAL_WAIT_SECONDS,
+        refusal_retry_seconds: float = REFUSAL_RETRY_SECONDS,
     ) -> None:
         """Register the `read` job, whose loops are one per Session, and whose
         reconcile runs the reads every Session owes.
@@ -120,10 +132,15 @@ class TurnEndReadService:
                 the client
             supervisor: Runs the reads, and runs one again whose call raised
             session_streams: Woken by a failed read's `server` record
+            refusal_wait_seconds: How long a read the controller refuses `409
+                conflict` is made again from its first refusal
+            refusal_retry_seconds: The wait between two rounds of those reads
         """
         self._container = container
         self._supervisor = supervisor
         self._streams = session_streams
+        self._refusal_wait = refusal_wait_seconds
+        self._refusal_retry = refusal_retry_seconds
         supervisor.register_job(
             READ_JOB, needs_controller=True, reconcile=self._reconcile
         )
@@ -144,21 +161,36 @@ class TurnEndReadService:
     def read(self, session_id: uuid.UUID, handle: LoopHandle) -> None:
         """The read loop's run: each document the Session registered that is
         owed its read, in the order registered, read and published, or its
-        read failed. Returns once none is owed, and when the loop is told to
-        stop.
+        read failed, a round at a time: a read the controller refuses `409
+        conflict` is made again in the next round until its wait passes
+        (`RefusalWaits`). Returns once none is owed, and when the loop is told
+        to stop.
 
         Raises:
             ExternalServiceException: The controller did not answer, or
-                refused a read for a reason of its own
+                refused a read for a reason of its own other than a conflict
         """
-        with scoped_session(self._container) as db:
-            owed = _owed(db, session_id)
-        for document in owed:
-            if handle.stopping:
-                return
-            content = self._read_file(document)
+        waits = RefusalWaits(self._refusal_wait, self._refusal_retry)
+        while True:
             with scoped_session(self._container) as db:
-                self._take(db, session_id, document, content)
+                owed = _owed(db, session_id)
+            waits.round(document.document_id for document in owed)
+            waiting = False
+            for document in owed:
+                if handle.stopping:
+                    return
+                content = self._read_file(document)
+                if (
+                    isinstance(content, _Refused)
+                    and content.conflict
+                    and not self._waited_out(session_id, document, content, waits)
+                ):
+                    waiting = True
+                    continue
+                with scoped_session(self._container) as db:
+                    self._take(db, session_id, document, content)
+            if not waiting or handle.wait(waits.pause()):
+                return
 
     def _reconcile(self, db: Session) -> None:
         """At STARTUP: run the reads of every Session that owes one (§8)."""
@@ -185,9 +217,33 @@ class TurnEndReadService:
         try:
             return self._client().read_file(owed.environment_id, owed.path).data
         except ControllerProblem as problem:
+            if problem.problem_type is ControllerProblemType.CONFLICT:
+                return _Refused(problem.cause, conflict=True)
             if problem.problem_type not in _FILE_REFUSALS:
                 raise
             return _Refused(problem.cause)
+
+    def _waited_out(
+        self,
+        session_id: uuid.UUID,
+        owed: _Owed,
+        refused: _Refused,
+        waits: RefusalWaits,
+    ) -> bool:
+        """A conflict counted toward the read's wait: whether it has
+        passed."""
+        started = owed.document_id in waits
+        if waits.passed(owed.document_id):
+            return True
+        if not started:
+            logger.info(
+                "Read of document %s of session %s refused, made again for %g s: %s",
+                owed.path,
+                session_id,
+                self._refusal_wait,
+                refused.reason,
+            )
+        return False
 
     def _take(
         self,

@@ -1,10 +1,13 @@
-"""The write-back (TD §4.4, FM §5; F65.1, F89; V10): a closed registered
-document's text, the answers in it, written to its file through the fake
-controller once the close commits, or the write refused and said why.
+"""The write-back (TD §4.4, FM §5; F65.1, F89; V10; slice 030 V01 to V03,
+V10, V17): a closed registered document's text, the answers in it, written to
+its file through the fake controller once the close commits, or the write
+refused and said why, a refusal of the controller's own once its wait has
+passed.
 
 The write's run is called on the test's session as its loop calls it; the
 loop's tests run it on a database of its own, as the supervisor does."""
 
+import time
 import uuid
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
@@ -17,7 +20,6 @@ from sqlalchemy.orm import Session as DbSession
 from werkzeug.wrappers import Request, Response
 
 from app import extensions, models
-from app.core_exceptions import ExternalServiceException
 from app.database import scoped_session
 from app.engine.bus import EngineBus
 from app.models import Document, Environment, Item, Project, User
@@ -25,8 +27,6 @@ from app.models.reference import RecordKind, SessionState, UserKind
 from app.services.container import ServiceContainer
 from app.services.controller_client import (
     ControllerClient,
-    ControllerProblem,
-    ControllerProblemType,
     ControllerUnreachable,
     EnvironmentStatus,
 )
@@ -45,6 +45,7 @@ from tests.support.fake_controller import ServedFakeController, client_of
 from tests.support.locks import in_thread, lock_waits
 from tests.support.supervisor import (
     LogWaiter,
+    RoundsHandle,
     Supervise,
     listening,
     wait_until,
@@ -80,6 +81,12 @@ default: Friday
 REVIEW = "# The survey\n\nNine of ten want the lake.\n"
 SUPERVISOR_LOGGER = "app.services.supervisor"
 WRITE_BACK_LOGGER = "app.services.write_back_service"
+WAIT = 0.2
+"""The tests' wait on a write the controller refuses for a reason of its
+own."""
+RETRY = 0.01
+OWN = FakeControllerProblem(500, "something", "its own")
+OWN_REASON = "the controller answered 500 something: its own"
 
 
 @pytest.fixture(autouse=True)
@@ -93,15 +100,21 @@ def _service(
     container: ServiceContainer,
     supervise: Supervise,
     engine_bus: EngineBus | None = None,
+    *,
+    wait: float = WAIT,
 ) -> tuple[WriteBackService, LifecycleCoordinator]:
     """The write-backs, hearing `engine_bus`: a bus of their own unless one
-    is given, so that the session app's bus keeps no subscriber of a test's."""
+    is given, so that the session app's bus keeps no subscriber of a test's;
+    a write the controller refuses for a reason of its own made again for
+    `wait`."""
     supervisor, coordinator = supervise(container)
     write_backs = WriteBackService(
         container=container,
         supervisor=supervisor,
         session_streams=container.session_stream_service(),
         engine_bus=EngineBus() if engine_bus is None else engine_bus,
+        refusal_wait_seconds=wait,
+        refusal_retry_seconds=RETRY,
     )
     return write_backs, coordinator
 
@@ -172,9 +185,23 @@ def _answer(
     )
 
 
-def _write_back(write_backs: WriteBackService, run_id: uuid.UUID) -> None:
-    """The write-back's run, as its loop calls it."""
-    write_backs.write_back(run_id, LoopHandle(f"{WRITE_BACK_JOB}:{run_id}"))
+def _write_back(
+    write_backs: WriteBackService,
+    run_id: uuid.UUID,
+    between: Callable[[int], None] | None = None,
+) -> None:
+    """The write-back's run, as its loop calls it; `between` called with the
+    count of its waits so far before each wait between two rounds."""
+    name = f"{WRITE_BACK_JOB}:{run_id}"
+    handle = LoopHandle(name) if between is None else RoundsHandle(name, between)
+    write_backs.write_back((run_id,), handle)
+
+
+def _record_has(db: DbSession, status: EnvironmentStatus) -> None:
+    """Pilot's record has the environment at `status`, as the fleet stream
+    reports it."""
+    db.get_one(Environment, ENV).last_state = status
+    db.flush()
 
 
 def _document(db: DbSession, item: Item) -> Document:
@@ -549,12 +576,46 @@ class TestWriteBackServiceRetried:
         )
         assert _servers(session, run.id) == []
 
-    @pytest.mark.parametrize("status", ["provisioning", "starting"])
-    def test_the_controllers_own_work_on_the_tree_raises_until_it_settles(
+    def test_a_write_the_controller_does_not_answer_counts_toward_no_wait(
         self,
         session: DbSession,
         container: ServiceContainer,
-        write_backs: WriteBackService,
+        supervise: Supervise,
+        project: Project,
+        person: User,
+        watched: tuple["_WriteWatched", models.Session],
+    ) -> None:
+        fake, run = watched
+        item = _registered(session, container, project, run)
+        _answer(session, container, item, person, "The hill")
+        fake.refusal = OWN
+        write_backs = _service(container, supervise)[0]
+        with pytest.raises(ControllerUnreachable):
+            _write_back(write_backs, run.id, lambda waits: fake.outage())
+        time.sleep(WAIT + 0.05)
+        fake.outage(on=False)
+        handles: list[int] = []
+
+        def first_round_only(waits: int) -> None:
+            handles.append(waits)
+            raise _Stopped
+
+        # The wait of the run the outage ended went with it: the next run's
+        # first refusal starts its own, and is refused at none.
+        with pytest.raises(_Stopped):
+            _write_back(write_backs, run.id, first_round_only)
+
+        assert handles == [1]
+        assert _servers(session, run.id) == []
+        assert _document(session, item).write_back_refused_at is None
+
+    @pytest.mark.usefixtures("controller_client")
+    @pytest.mark.parametrize("status", ["provisioning", "starting", "deleting"])
+    def test_the_controllers_own_work_on_the_tree_is_waited_out_until_it_settles(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        supervise: Supervise,
         fake_controller: ServedFakeController,
         project: Project,
         person: User,
@@ -564,22 +625,29 @@ class TestWriteBackServiceRetried:
         item = _registered(session, container, project, run)
         _answer(session, container, item, person, "The hill")
         fake_controller.set_status(ENV, status)
+        _record_has(session, status)
 
-        with pytest.raises(ControllerProblem) as raised:
-            _write_back(write_backs, run.id)
+        def between(waits: int) -> None:
+            assert _servers(session, run.id) == []
+            if waits == 3:
+                fake_controller.set_status(ENV, "running")
+                _record_has(session, "running")
 
-        assert raised.value.problem_type is ControllerProblemType.CONFLICT
-        assert _document(session, item).write_back_refused_at is None
+        # A wait of none: no refusal met while it settles counts toward one.
+        _write_back(_service(container, supervise, wait=0.0)[0], run.id, between)
+
+        assert _writes(fake_controller) == [_write_of(PATH)] * 4
+        document = _document(session, item)
+        assert document.written_back_at is not None
+        assert document.write_back_refused_at is None
         assert _servers(session, run.id) == []
-        fake_controller.set_status(ENV, "running")
-        _write_back(write_backs, run.id)
-        assert _document(session, item).written_back_at is not None
 
-    def test_an_environment_the_controller_cannot_read_raises(
+    @pytest.mark.usefixtures("controller_client")
+    def test_a_refusal_once_the_record_has_it_settled_starts_the_wait(
         self,
         session: DbSession,
         container: ServiceContainer,
-        write_backs: WriteBackService,
+        supervise: Supervise,
         fake_controller: ServedFakeController,
         project: Project,
         person: User,
@@ -587,17 +655,29 @@ class TestWriteBackServiceRetried:
     ) -> None:
         item = _registered(session, container, project, run)
         _answer(session, container, item, person, "The hill")
-        fake_controller.unreadable(ENV)
+        fake_controller.set_status(ENV, "starting")
+        _record_has(session, "starting")
 
-        with pytest.raises(ControllerProblem) as raised:
-            _write_back(write_backs, run.id)
+        def between(waits: int) -> None:
+            if waits == 2:
+                # The controller still refuses: a bring-up stuck at its end.
+                _record_has(session, "running")
 
-        assert raised.value.problem_type is ControllerProblemType.ENVIRONMENT_UNREADABLE
-        document = _document(session, item)
-        assert (document.written_back_at, document.write_back_refused_at) == (
-            None,
-            None,
+        _write_back(_service(container, supervise, wait=0.0)[0], run.id, between)
+
+        assert _writes(fake_controller) == [_write_of(PATH)] * 3
+        [(_, payload)] = _servers(session, run.id)
+        assert isinstance(payload, dict)
+        assert payload["reason"].startswith(
+            "the controller answered 409 conflict: the controller is building or"
+            " removing the environment's /work"
         )
+        assert payload == _refused(item, PATH, payload["reason"])
+        assert _document(session, item).write_back_refused_at is not None
+
+
+class _Stopped(Exception):
+    """A test's end of a run between two of its rounds."""
 
 
 class _WriteWatched(ServedFakeController):
@@ -663,9 +743,37 @@ class TestWriteBackServiceRefusals:
         assert _document(session, item).write_back_refused_at is not None
 
     @pytest.mark.parametrize(
-        "status", [401, 422, 500], ids=["unauthenticated", "invalid", "its-own"]
+        ("problem", "reason"),
+        [
+            pytest.param(
+                FakeControllerProblem(409, "conflict", "the path changed"),
+                "the controller answered 409 conflict: the path changed",
+                id="a-conflict",
+            ),
+            pytest.param(
+                FakeControllerProblem(503, "environment-unreadable", "unreadable"),
+                "the controller answered 503 environment-unreadable: unreadable",
+                id="unreadable",
+            ),
+            pytest.param(
+                FakeControllerProblem(401, "unauthorized", "no token"),
+                "the controller answered 401 unauthorized: no token",
+                id="unauthenticated",
+            ),
+            pytest.param(
+                FakeControllerProblem(422, "validation-error", "invalid"),
+                "the controller answered 422 validation-error: invalid",
+                id="invalid",
+            ),
+            pytest.param(OWN, OWN_REASON, id="its-own"),
+            pytest.param(
+                FakeControllerProblem(409, "a-new-conflict", "unknown"),
+                "the controller answered 409 a-new-conflict: unknown",
+                id="unknown",
+            ),
+        ],
     )
-    def test_a_refusal_of_the_controllers_own_raises_and_takes_nothing(
+    def test_a_refusal_of_the_controllers_own_is_made_again_then_refused_once_its_wait_has_passed(
         self,
         session: DbSession,
         container: ServiceContainer,
@@ -673,20 +781,115 @@ class TestWriteBackServiceRefusals:
         project: Project,
         person: User,
         watched: tuple[_WriteWatched, models.Session],
-        status: int,
+        problem: FakeControllerProblem,
+        reason: str,
     ) -> None:
         fake, run = watched
         item = _registered(session, container, project, run)
         _answer(session, container, item, person, "The hill")
-        fake.refusal = FakeControllerProblem(status, "something", "its own")
+        fake.refusal = problem
+        began = time.perf_counter()
 
-        with pytest.raises(ExternalServiceException):
-            _write_back(_service(container, supervise)[0], run.id)
+        _write_back(_service(container, supervise)[0], run.id)
 
+        assert time.perf_counter() - began >= WAIT
+        assert len(_writes(fake)) > 2
+        assert set(_writes(fake)) == {_write_of(PATH)}
+        assert _servers(session, run.id) == [(None, _refused(item, PATH, reason))]
         document = _document(session, item)
-        assert (document.written_back_at, document.write_back_refused_at) == (
-            None,
-            None,
+        assert document.written_back_at is None
+        assert document.write_back_refused_at is not None
+
+    def test_a_conflict_that_settles_within_its_wait_is_written(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        supervise: Supervise,
+        project: Project,
+        person: User,
+        watched: tuple[_WriteWatched, models.Session],
+    ) -> None:
+        fake, run = watched
+        item = _registered(session, container, project, run)
+        _answer(session, container, item, person, "The hill")
+        fake.refusal = FakeControllerProblem(409, "conflict", "the path changed")
+        writes: list[str] = []
+
+        def settles(path: str) -> None:
+            writes.append(path)
+            if len(writes) == 3:
+                fake.refusal = None
+
+        fake.on_write = settles
+
+        _write_back(_service(container, supervise, wait=5.0)[0], run.id)
+
+        assert writes == [PATH] * 3
+        text = fake.file_text(ENV, PATH)
+        assert text is not None and "answer: The hill" in text
+        assert _document(session, item).written_back_at is not None
+        assert _servers(session, run.id) == []
+
+    def test_the_documents_wait_side_by_side_not_one_after_another(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        supervise: Supervise,
+        project: Project,
+        person: User,
+        watched: tuple[_WriteWatched, models.Session],
+    ) -> None:
+        fake, run = watched
+        decision = _registered(session, container, project, run)
+        survey = _registered(session, container, project, run, REVIEW, OTHER)
+        _answer(session, container, decision, person, "The hill")
+        container.record_service().reviewed(survey, person)
+        fake.refusal = OWN
+
+        _write_back(_service(container, supervise)[0], run.id)
+
+        # Each round makes both: their waits start in the first, and pass in
+        # the last.
+        writes = _writes(fake)
+        rounds = len(writes) // 2
+        assert rounds > 1
+        assert writes == [_write_of(PATH), _write_of(OTHER)] * rounds
+        assert _servers(session, run.id) == [
+            (None, _refused(decision, PATH, OWN_REASON)),
+            (None, _refused(survey, OTHER, OWN_REASON)),
+        ]
+
+    def test_a_close_during_its_wait_owes_the_write_afresh_with_a_wait_of_its_own(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        supervise: Supervise,
+        project: Project,
+        person: User,
+        watched: tuple[_WriteWatched, models.Session],
+    ) -> None:
+        fake, run = watched
+        item = _registered(session, container, project, run)
+        _kept_open(session, container, project, run)
+        _answer(session, container, item, person, "The hill")
+        fake.refusal = OWN
+
+        def between(waits: int) -> None:
+            if waits == 1:
+                container.record_service().undo(item)
+                _answer(session, container, item, person, "The lake")
+            else:
+                raise _Stopped
+
+        with (
+            listening(WRITE_BACK_LOGGER) as log,
+            pytest.raises(_Stopped),
+        ):
+            _write_back(_service(container, supervise)[0], run.id, between)
+
+        assert (
+            len(log.matching(rf"Write-back of document {PATH} .* made again for .*"))
+            == 2
         )
         assert _servers(session, run.id) == []
 
@@ -804,6 +1007,37 @@ class TestWriteBackServiceLoop:
         file, record, written = _file_and_stamp(container, fake_controller, item_id)
         assert file == record
         assert written
+
+    def test_a_refusal_of_the_controllers_own_is_refused_once_its_wait_has_passed_with_no_restart(
+        self,
+        committed_app: Flask,
+        supervise: Supervise,
+        loop_log: LogWaiter,
+    ) -> None:
+        container = committed_app.container
+        fake = _WriteWatched(keepalive_seconds=0.2)
+        try:
+            client_of(container, fake)
+            _, run_id, item_id, person_id = _committed_rows(committed_app, fake)
+            _, coordinator = _service(container, supervise, container.engine_bus())
+            coordinator.fire_startup()
+            fake.refusal = OWN
+
+            _close_committed(container, item_id, person_id, "The hill")
+
+            loop_log.wait_for(
+                rf"Write-back of document {PATH} of session {run_id} refused:"
+                f" {OWN_REASON}"
+            )
+            loop_log.wait_for(rf"Loop {WRITE_BACK_JOB}:{run_id} ended")
+            assert loop_log.matching(r".* raised; restarting .*") == []
+            with scoped_session(container) as db:
+                assert db.get_one(Document, item_id).write_back_refused_at is not None
+                assert _servers(db, run_id) == [
+                    (None, _refused(db.get_one(Item, item_id), PATH, OWN_REASON))
+                ]
+        finally:
+            fake.close()
 
     def test_startup_makes_the_write_backs_owed_from_the_rows(
         self,

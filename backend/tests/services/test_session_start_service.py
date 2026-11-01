@@ -34,7 +34,7 @@ from werkzeug.wrappers import Request, Response
 from app import models
 from app.app_config import HaltSetting
 from app.database import scoped_session
-from app.engine.bus import EngineEvent, ProjectChanged, WorkMoved
+from app.engine.bus import EngineBus, EngineEvent, ProjectChanged, WorkMoved
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import (
     Block,
@@ -67,8 +67,6 @@ from app.services.auth_service import AuthContext
 from app.services.chat_close_service import ChatCloseService
 from app.services.container import ServiceContainer
 from app.services.controller_client import (
-    ControllerProblem,
-    ControllerProblemType,
     EnvironmentStatus,
     HeadlessCreateRequest,
 )
@@ -101,7 +99,7 @@ from app.services.supervisor import LoopHandle
 from app.services.timeline_service import work_status
 from app.services.turn_end_read_service import READ_JOB, TurnEndReadService
 from app.services.usage_halts import UsageHalts
-from app.services.write_back_service import WRITE_BACK_REFUSED
+from app.services.write_back_service import WRITE_BACK_REFUSED, WriteBackService
 from app.utils import after_commit as after_commit_module
 from app.utils.after_commit import clear_after_commit_callbacks
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
@@ -117,6 +115,7 @@ from tests.support.locks import in_thread, lock_waits
 from tests.support.supervisor import (
     WAIT_SECONDS,
     LogWaiter,
+    RoundsHandle,
     Supervise,
     listening,
     wait_until,
@@ -142,7 +141,9 @@ class _Recording(ServedFakeController):
     made, and each headless create's body, refusing every send with `502
     worker-unreachable` while `refuse_sends` is set, and answering the next
     reset, made, with an ingress's `502` while `lose_reset` is set, as a
-    reset whose `202` was lost leaves it, and each send's message.
+    reset whose `202` was lost leaves it, and each send's message; refusing
+    each file write with `refuse_next_writes`' first, which it takes, while
+    it has one, else with `refuse_writes` while it is set.
     `during_provision`,
     `during_rename`, `during_start`, `during_settle`, `during_create`,
     `during_snapshot` and `during_send`, when set, run once, as an
@@ -158,6 +159,8 @@ class _Recording(ServedFakeController):
         self.sent: list[str] = []
         self.refuse_sends = False
         self.lose_reset = False
+        self.refuse_next_writes: list[FakeControllerProblem] = []
+        self.refuse_writes: FakeControllerProblem | None = None
         self.during_provision: Callable[[], None] | None = None
         self.during_rename: Callable[[], None] | None = None
         self.during_start: Callable[[], None] | None = None
@@ -186,6 +189,13 @@ class _Recording(ServedFakeController):
         if hook is not None:
             hook()
         return super()._start(request, env_id)
+
+    def _write_file(self, request: Request, env_id: str) -> Response:
+        if self.refuse_next_writes:
+            raise self.refuse_next_writes.pop(0)
+        if self.refuse_writes is not None:
+            raise self.refuse_writes
+        return super()._write_file(request, env_id)
 
     def _reset_environment(self, request: Request, env_id: str) -> Response:
         response = super()._reset_environment(request, env_id)
@@ -6735,6 +6745,37 @@ def _a_folder_at(fake: _Recording, path: str) -> None:
     fake.put_file(RUN_ENV, f"{path}/notes.md", b"Notes.\n")
 
 
+WRITE_BACK_WAIT = 0.2
+"""The continuation tests' wait on a write-back the controller refuses for a
+reason of its own."""
+ITS_OWN = FakeControllerProblem(500, "something", "its own")
+
+
+def _write_backs_waiting(
+    container: ServiceContainer, supervise: Supervise, wait: float = WRITE_BACK_WAIT
+) -> None:
+    """The container's write-backs, which a continuation's start makes, a
+    write the controller refuses for a reason of its own made again for
+    `wait`, on a bus and a supervisor of their own."""
+    supervisor, _ = supervise(container)
+    container.write_back_service.override(
+        providers.Object(
+            WriteBackService(
+                container=container,
+                supervisor=supervisor,
+                session_streams=container.session_stream_service(),
+                engine_bus=EngineBus(),
+                refusal_wait_seconds=wait,
+                refusal_retry_seconds=0.01,
+            )
+        )
+    )
+
+
+def _puts(fake: _Recording) -> list[str]:
+    return [call for call in _calls_on(fake, RUN_ENV) if call.startswith("PUT ")]
+
+
 @pytest.mark.usefixtures("continues")
 class TestContinueRun:
     """The close that leaves no document of a work item's ended run open
@@ -6992,7 +7033,7 @@ class TestRunContinuation:
         )
         _a_folder_at(fake, REFINEMENT)
         container.write_back_service().write_back(
-            run.id, LoopHandle(f"write-back:{run.id}")
+            (run.id,), LoopHandle(f"write-back:{run.id}")
         )
         assert _document(session, refinement).write_back_refused_at is not None
         fake.calls.clear()
@@ -7093,40 +7134,181 @@ class TestRunContinuation:
         assert fake.create_bodies == []
 
     @pytest.mark.parametrize(
-        ("busy", "problem"),
+        ("refuse", "reason"),
         [
-            ("bringing-up", ControllerProblemType.CONFLICT),
-            ("unreadable", ControllerProblemType.ENVIRONMENT_UNREADABLE),
+            pytest.param(
+                lambda fake: fake.set_status(RUN_ENV, "starting"),
+                "the controller answered 409 conflict: the controller is building"
+                " or removing the environment's /work",
+                id="a-conflict",
+            ),
+            pytest.param(
+                lambda fake: fake.unreadable(RUN_ENV),
+                "the controller answered 503 environment-unreadable",
+                id="unreadable",
+            ),
+            pytest.param(
+                lambda fake: setattr(
+                    fake,
+                    "refuse_writes",
+                    FakeControllerProblem(401, "unauthorized", "no token"),
+                ),
+                "the controller answered 401 unauthorized: no token",
+                id="unauthenticated",
+            ),
+            pytest.param(
+                lambda fake: setattr(
+                    fake,
+                    "refuse_writes",
+                    FakeControllerProblem(422, "validation-error", "invalid"),
+                ),
+                "the controller answered 422 validation-error: invalid",
+                id="invalid",
+            ),
+            pytest.param(
+                lambda fake: setattr(fake, "refuse_writes", ITS_OWN),
+                "the controller answered 500 something: its own",
+                id="its-own",
+            ),
         ],
     )
-    def test_a_write_back_refused_for_the_controllers_own_reason_is_waited_out(
+    def test_a_write_back_refused_for_the_controllers_own_reason_fails_it_once_its_wait_has_passed(
         self,
         starts: SessionStartService,
         container: ServiceContainer,
+        supervise: Supervise,
         fake: _Recording,
         session: DbSession,
         project: Project,
         person: User,
-        busy: str,
-        problem: ControllerProblemType,
+        refuse: Callable[[_Recording], object],
+        reason: str,
+    ) -> None:
+        run, refinement, survey = _answered_and_reviewed(
+            session, container, fake, project, person
+        )
+        _write_backs_waiting(container, supervise)
+        continuation = _continuation(session, run)
+        refuse(fake)
+
+        _run(starts, continuation)
+
+        assert len(_puts(fake)) > 2
+        refused = [
+            payload
+            for _, payload in _server(session, run.id)
+            if payload["type"] == WRITE_BACK_REFUSED
+        ]
+        assert [payload["item"] for payload in refused] == [
+            str(refinement.id),
+            str(survey.id),
+        ]
+        assert all(payload["reason"].startswith(reason) for payload in refused)
+        assert _document(session, refinement).write_back_refused_at is not None
+        _assert_failed(
+            session,
+            continuation.id,
+            f"Cannot write {REFINEMENT} back because {refused[0]['reason']};"
+            f" Cannot write {SURVEY} back because {refused[1]['reason']}",
+        )
+        assert _verbs(fake, RUN_ENV) == []
+        assert fake.create_bodies == []
+        assert fake.sent == []
+
+    def test_its_documents_wait_side_by_side_not_one_after_another(
+        self,
+        starts: SessionStartService,
+        container: ServiceContainer,
+        supervise: Supervise,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        run, _, _ = _answered_and_reviewed(session, container, fake, project, person)
+        _write_backs_waiting(container, supervise)
+        continuation = _continuation(session, run)
+        fake.refuse_writes = ITS_OWN
+
+        _run(starts, continuation)
+
+        # Each round makes both writes: their waits start in the first and
+        # pass in the last, one wait for the continuation, not one per
+        # document.
+        puts = _puts(fake)
+        rounds = len(puts) // 2
+        assert rounds > 1
+        assert puts == [_put(REFINEMENT), _put(SURVEY)] * rounds
+        _assert_failed(session, continuation.id)
+
+    def test_a_write_back_conflict_that_settles_within_its_wait_lands_and_it_goes_on(
+        self,
+        starts: SessionStartService,
+        container: ServiceContainer,
+        supervise: Supervise,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        run, refinement, survey = _answered_and_reviewed(
+            session, container, fake, project, person
+        )
+        _write_backs_waiting(container, supervise, wait=5.0)
+        continuation = _continuation(session, run)
+        swapped = FakeControllerProblem(409, "conflict", "the path changed")
+        fake.refuse_next_writes = [swapped, swapped]
+
+        _run(starts, continuation)
+
+        assert _read(session, continuation.id).state_code == SessionState.RUNNING
+        assert _calls_on(fake, RUN_ENV)[:5] == [
+            _put(REFINEMENT),
+            _put(SURVEY),
+            _put(REFINEMENT),
+            _put(SURVEY),
+            f"POST /environments/{RUN_ENV}/start",
+        ]
+        assert _document(session, refinement).written_back_at is not None
+        assert _document(session, survey).written_back_at is not None
+        assert [
+            payload
+            for _, payload in _server(session, run.id)
+            if payload["type"] == WRITE_BACK_REFUSED
+        ] == []
+        assert fake.sent == [CONTINUED]
+
+    def test_a_stop_during_its_wait_ends_it_with_nothing_brought_up(
+        self,
+        starts: SessionStartService,
+        container: ServiceContainer,
+        supervise: Supervise,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
     ) -> None:
         run, refinement, _ = _answered_and_reviewed(
             session, container, fake, project, person
         )
+        _write_backs_waiting(container, supervise, wait=5.0)
         continuation = _continuation(session, run)
-        if busy == "bringing-up":
-            fake.set_status(RUN_ENV, "starting")
-        else:
-            fake.unreadable(RUN_ENV)
+        fake.refuse_writes = ITS_OWN
 
-        with pytest.raises(ControllerProblem) as raised:
-            _run(starts, continuation)
+        def stopped(waits: int) -> None:
+            starts.stop(session, continuation.id, person)
+            clear_after_commit_callbacks()
 
-        assert raised.value.problem_type is problem
-        assert _read(session, continuation.id).state_code == SessionState.STARTING
+        starts.run(
+            continuation.id, RoundsHandle(f"{START_JOB}:{continuation.id}", stopped)
+        )
+
+        assert _read(session, continuation.id).state_code == SessionState.STOPPED
+        assert _puts(fake) == [_put(REFINEMENT), _put(SURVEY)]
         refused = _document(session, refinement)
         assert (refused.written_back_at, refused.write_back_refused_at) == (None, None)
         assert _verbs(fake, RUN_ENV) == []
+        assert fake.create_bodies == []
 
 
 STORE_REPO = "/work/PilotProjects"

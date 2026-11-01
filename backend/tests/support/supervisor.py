@@ -10,7 +10,7 @@ from contextlib import contextmanager
 
 from prometheus_client.metrics import MetricWrapperBase
 
-from app.services.supervisor import Supervisor
+from app.services.supervisor import LoopHandle, Supervisor
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
 
 # The longest a test waits for a thread to get somewhere.
@@ -19,6 +19,22 @@ WAIT_SECONDS = 5.0
 type Supervise = Callable[..., tuple[Supervisor, LifecycleCoordinator]]
 """The `supervise` fixture: builds a supervisor on a lifecycle coordinator of
 its own."""
+
+
+class RoundsHandle(LoopHandle):
+    """A loop's handle that calls `between` on the run's thread with the
+    count of its waits so far, before it sleeps each: what happens between
+    two rounds of a run that makes its calls again."""
+
+    def __init__(self, name: str, between: Callable[[int], None]) -> None:
+        super().__init__(name)
+        self.waits = 0
+        self._between = between
+
+    def wait(self, seconds: float) -> bool:
+        self.waits += 1
+        self._between(self.waits)
+        return super().wait(seconds)
 
 
 class LogWaiter(logging.Handler):

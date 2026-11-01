@@ -107,7 +107,9 @@ close's transaction, its Session in the run's environment from then on, never
 reset, through the gate as any start. Before its environment is brought up,
 its start writes back what the documents it carries still owe (F65.1), and a
 write-back the controller refused fails it with the controller's reason
-(F125); its Resume owes those again, and sends the continuation's message, not
+(F125), one refused for a reason of the controller's own once its wait has
+passed (`WriteBackService`); its Resume owes those again, and sends the
+continuation's message, not
 "continue", while no Turn of its Session has gone out.
 """
 
@@ -275,14 +277,6 @@ _DONE_STATUSES = ("ended", "error")
 
 _RECORD_PAGE = 32
 """The `server` records one read of a Session's takes, newest first."""
-
-_WAITED_OUT = (
-    ControllerProblemType.CONFLICT,
-    ControllerProblemType.ENVIRONMENT_UNREADABLE,
-)
-"""The controller's refusals of a write-back for its own work on the tree or
-its share unreadable: a continuation's start waits them out, its loop running
-again after its backoff."""
 
 
 @dataclass(frozen=True)
@@ -1399,38 +1393,25 @@ class SessionStartService:
     ) -> bool:
         """Every write-back owed for the documents the Session carries, a
         continuation's, made before its environment is brought up, which the
-        controller refuses a write during (F65.1): each landed, or refused for
-        the file, its path or its environment (`WriteBackService`). One
-        refused so, before this run or by it, fails the start with the
+        controller refuses a write during (F65.1): each landed, or refused,
+        one refused for a reason of the controller's own once its wait has
+        passed, the documents' waits side by side (`WriteBackService`). One
+        refused, before this run or by it, fails the start with the
         controller's reason (F125); a call the controller does not answer
-        returns the Session to `held`, and any other failure fails it.
-        Returns whether the start goes on: False once it is held or failed, or
-        the loop is told to stop.
-
-        Raises:
-            ControllerProblem: The controller refused a write for its own work
-                on the tree (`409 conflict`) or its share unreadable (`503`):
-                the loop runs again after its backoff, the Session `starting`
-        """
+        returns the Session to `held`. Returns whether the start goes on:
+        False once it is held or failed, when the loop is told to stop, and
+        when the Session is no longer `starting` to send the Turn `turn_id`,
+        which ends the writes' wait."""
         with scoped_session(self._container) as db:
             runs = _carried(db, session_id)
         if not runs:
             return True
+        going_on = partial(self._still_sends, session_id, turn_id)
         try:
-            for run_id in runs:
-                self._container.write_back_service().write_back(run_id, handle)
+            self._container.write_back_service().write_back(runs, handle, going_on)
         except ControllerUnreachable as error:
             with scoped_session(self._container) as db:
                 self._hold(db, session_id, error)
-            return False
-        except ExternalServiceException as error:
-            if (
-                isinstance(error, ControllerProblem)
-                and error.problem_type in _WAITED_OUT
-            ):
-                raise
-            with scoped_session(self._container) as db:
-                self._fail(db, session_id, turn_id, str(error), recorded=False)
             return False
         if handle.stopping:
             return False
@@ -1439,7 +1420,13 @@ class SessionStartService:
             if refused is not None:
                 self._fail(db, session_id, turn_id, refused, recorded=False)
                 return False
-        return True
+        return going_on()
+
+    def _still_sends(self, session_id: uuid.UUID, turn_id: int) -> bool:
+        """Whether the Session is still `starting` to send the Turn
+        `turn_id`."""
+        with scoped_session(self._container) as db:
+            return _sends(db, db.get_one(AgentSession, session_id), turn_id)
 
     def _bring_up(self, session_id: uuid.UUID, pending: _Pending) -> bool:
         """The Session's environment brought up as its rows have it, and its
