@@ -115,6 +115,7 @@ test.describe('Create project', () => {
 
     // The draft's D1 stays open: no reason.
     await projects.saveProjectDocument(id, 'draft', draftText(title, `summer-${makeUniqueToken().toLowerCase()}`));
+    await projects.endTurn(id);
     await expect(create).toBeEnabled();
     await expect(create).toHaveAttribute('title', HOW);
     expect((await projects.head(id)).create_refusal).toBeNull();
