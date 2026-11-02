@@ -3,6 +3,7 @@
  * is what app-theme.css reads; under `system` it follows the OS, live.
  */
 
+import { useEffect } from 'react';
 import { browserState, rememberInBrowser, useBrowserState, type Theme } from '@/lib/browser-state';
 
 const systemDark = window.matchMedia('(prefers-color-scheme: dark)');
@@ -25,4 +26,25 @@ export function useTheme(): [Theme, (theme: Theme) => void] {
     applyTheme(chosen);
   };
   return [theme, choose];
+}
+
+/**
+ * While mounted, the browser's own bar takes the page's colour, in either theme (F98.3); after, it
+ * has `index.html`'s `theme-color` back, the top bar's.
+ */
+export function useBrowserBarInPageColour(): void {
+  useEffect(() => {
+    const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')!;
+    const topBar = meta.content;
+    const paint = () => {
+      meta.content = getComputedStyle(document.body).backgroundColor;
+    };
+    paint();
+    const themed = new MutationObserver(paint);
+    themed.observe(document.documentElement, { attributeFilter: ['data-theme'] });
+    return () => {
+      themed.disconnect();
+      meta.content = topBar;
+    };
+  }, []);
 }

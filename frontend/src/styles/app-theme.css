@@ -69,6 +69,8 @@
   --radius: 0.5rem;
   --column: 820px;
   --topbar: 56px;
+  /* A screen's head on a phone, and the drawer's. */
+  --head: 52px;
   --tabs: 264px;
   --panel: 420px;
 }
@@ -138,6 +140,8 @@
   --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
   /* The project list's colour: the muted at half over the background, made opaque. */
   --side: 220 15% 98%;
+  /* What lies behind the open drawer. */
+  --scrim: 0 0% 0% / 0.3;
   /* The avatars' palette (ui-conventions.md, "Answering: the options"): a background at 92–95%
      lightness, initials at 35–38%, every pair at 4.5:1 or better; the primary's tint first, the
      mockup's pink second. Pilot's mark is grey, outside it. */
@@ -202,6 +206,7 @@
   --gold-foreground: 46 92% 72%;
   --gold-edge: 43 65% 34%;
   --side: 218 36% 10.5%;
+  --scrim: 0 0% 0% / 0.8;
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.25);
   --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.25), 0 2px 4px -2px rgb(0 0 0 / 0.25);
   --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.25), 0 4px 6px -4px rgb(0 0 0 / 0.25);

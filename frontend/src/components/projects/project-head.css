@@ -69,10 +69,10 @@
   .feed-head.two-rows .step-anchor { flex: 1; }
   .feed-head.two-rows .plan-pop { right: auto; left: 0; }
 
-  /* A narrow window: the name and auto pilot, then the step, the members and the icons, the repo
-     hidden; the plan opens under the step, within the window. */
+  /* A narrow window: the drawer's button, the name and auto pilot, then the step, the members and
+     the icons, the repo hidden; the plan opens under the step, within the window. */
   @media (max-width: 900px) {
-    .feed-head { flex-direction: column; align-items: stretch; gap: 8px; padding: 8px 14px; }
+    .feed-head { flex-direction: column; align-items: stretch; gap: 8px; padding: 8px 14px 8px 8px; }
     .feed-head .head-row { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
     .feed-head .repo { display: none; }
     .feed-head .step-anchor { flex: 1; }

@@ -4,7 +4,7 @@
  * condition in the top bar, after Pilot's name, its full line its title; the week's halt's, which
  * carries its overrule (F135.2), a button opening a popover that holds its line and the overrule,
  * so that a stray click on the top bar spends no quota. On a phone a line per condition across the
- * window under the top bar, the drawer opening under it, the overrule on the halt's line. Each
+ * page's top, over the screen's head, the drawer opening under it, the overrule on the halt's line. Each
  * stands while its condition holds and goes when it ends; nothing dismisses it. The time a
  * condition began carries its date once that is an earlier day than the viewer's today.
  */
@@ -86,7 +86,7 @@ function GoldBadge({ condition, today }: { condition: Condition; today: string }
   );
 }
 
-/** The phone's lines, across the window under the top bar. */
+/** The phone's lines, across the page's top. */
 export function GoldBar({ conditions }: GoldProps) {
   const today = useToday();
   return (

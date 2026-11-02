@@ -8,8 +8,8 @@
  * It stays live and keeps its scroll; a read that fails reads "The document did not load" (F113).
  * A done line's Open shows the document as it was done (F13.3), its answers closed (F31.2), a
  * finished project's included, with neither *Edited* nor Pilot's dots where Done fixed the text.
- * Switching projects closes it (F1.6), and on a phone it is the whole screen, with no maximize
- * (F98.3). Esc closes what lies over it first. It takes the focus as it opens, keeps Tab off the
+ * Switching projects closes it (F1.6), and on a phone it is the whole screen, with no maximize,
+ * over the head and its drawer's button (F98.3). Esc closes what lies over it first. It takes the focus as it opens, keeps Tab off the
  * timeline under its backdrop, and gives the focus back as it closes.
  */
 
@@ -516,13 +516,31 @@ test.describe('On a phone', () => {
     await expect(overlay.close).toBeVisible();
   });
 
-  test('switching projects from the drawer closes the overlay', async ({ page, people, projects, projectList, shell, overlay }) => {
+  test('the overlay lies over the head and its drawer’s button, which closed it gives back to switch projects', async ({
+    page,
+    people,
+    projects,
+    projectList,
+    shell,
+    overlay,
+  }) => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('First'), members: [me.handle!] });
     const otherName = makeUnique('Second');
     const other = await projects.makeWithSession({ name: otherName, members: [me.handle!] });
     const trip = await projects.place(id, { kind: 'document', title: 'The trip', text: TRIP });
     await overlay.open(id, trip);
+    await expect(overlay.root).toBeVisible();
+
+    // It lies over the head, the drawer's button under it, with no top bar's to open it from.
+    expect(
+      await shell.drawerToggle.evaluate((button) => {
+        const box = button.getBoundingClientRect();
+        return button.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+      }),
+    ).toBe(false);
+    await overlay.close.click();
+    await expect(overlay.root).toHaveCount(0);
 
     await shell.drawerToggle.click();
     await projectList.tab(otherName).click();

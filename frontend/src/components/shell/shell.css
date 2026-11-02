@@ -1,6 +1,10 @@
 /* The frame every screen sits in: the top bar, the gold bar, the side column and the centre, the
-   drawer on a narrow window, the profile menu and the keys list (PilotAppSpecs
-   design/mockup/style.css, "Header", "Layout", "The gold bar" and "Narrow screens"). */
+   drawer, the profile menu and the keys list (PilotAppSpecs design/mockup/style.css, "Header",
+   "Layout", "The gold bar" and "The phone"). */
+
+/* How far the drawer has come in, 0 to 1: a number that transitions, so that the drawer and the
+   page's darkening behind it move as one. */
+@property --drawer { syntax: "<number>"; inherits: true; initial-value: 0; }
 
 @layer components {
   /* ---- The top bar ---------------------------------------------------------------------- */
@@ -64,19 +68,34 @@
     overflow: hidden;
   }
   .gold-pop .gold-line { padding: 10px 14px; border-bottom: 0; }
-  .topbar :focus-visible { outline-color: #fff; }
+  .topbar :focus-visible, .drawer-head :focus-visible { outline-color: #fff; }
   .gold-pop :focus-visible { outline-color: hsl(var(--gold-foreground)); }
-  .drawer-toggle {
-    display: none;
-    padding: 0;
-    border: 0;
-    background: none;
-    color: #fff;
-    font-size: 22px;
-  }
-  .topbar .avatar-btn { padding: 0; border: 0; border-radius: 999px; background: none; font: inherit; }
+  .avatar-btn { padding: 0; border: 0; border-radius: 999px; background: none; font: inherit; }
   /* Before a person takes a palette slot, their avatar is the header's own. */
-  .topbar .avatar:not([data-colour]) { background: rgb(0 0 0 / 0.25); color: #fff; }
+  :is(.topbar, .drawer-head) .avatar:not([data-colour]) { background: rgb(0 0 0 / 0.25); color: #fff; }
+
+  /* ---- The drawer's head, on a phone: the top bar's block of colour, Pilot's icon and name
+     white on the primary, and the avatar --------------------------------------------------- */
+
+  .drawer-head {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: var(--head);
+    padding: 0 12px 0 16px;
+    background: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+  }
+  .drawer-head .logo { width: 28px; height: 28px; }
+  .drawer-head .grow { flex: 1; }
+
+  /* ---- The drawer's button: a head's first part, its icon where a view's arrow back stands; on
+     a screen with no head, alone at the top-left, where a head's stands ---------------------- */
+
+  .head-drawer { --h: 36px; flex: none; align-self: center; margin: 0 -4px 0 0; }
+  .head-drawer .icon { width: 20px; height: 20px; }
+  .drawer-bar { flex: none; display: flex; align-items: center; height: var(--head); padding: 0 12px 0 8px; }
 
   /* ---- The profile menu ----------------------------------------------------------------- */
 
@@ -102,7 +121,7 @@
 
   /* ---- The side column and the centre --------------------------------------------------- */
 
-  /* The side column beside the centre; under the breakpoint the gold bar over both. */
+  /* The side column beside the centre; with a drawer, the gold bar over the centre. */
   .app {
     position: relative;
     flex: 1;
@@ -126,8 +145,8 @@
      .app. */
   .centre { grid-area: 1 / 2 / 3 / 3; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 
-  /* ---- The gold bar on a phone: a line per condition that holds all work, none while nothing
-     does; off a phone the top bar's badges have them ----------------------------------------- */
+  /* ---- The gold bar on a phone, across the page's top: a line per condition that holds all
+     work, none while nothing does; off a phone the top bar's badges have them ----------------- */
 
   .gold-bar { grid-area: 1 / 1 / 2 / 2; min-width: 0; }
   .gold-line {
@@ -175,35 +194,37 @@
   dl.keys { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: var(--text-base); }
   dl.keys dd { margin: 0; color: hsl(var(--muted-foreground)); }
 
-  /* ---- A narrow window: the gold bar across it, under it the side column a drawer over the
-     centre, behind a scrim; the centre's overlay lies over the centre alone ------------------ */
+  /* ---- The drawer, where the frame gives the app one (data-drawer): the side column over the
+     centre, on the project list's tint with no rule at its edge, and behind it a scrim that
+     darkens the page as it comes in, its opacity the share of its way the drawer has come; under
+     reduced motion it comes and goes at once. The centre's overlay lies over the centre alone. -- */
 
-  @media (max-width: 900px) {
-    .drawer-toggle { display: grid; place-items: center; }
-    .gold-badges { display: none; }
-    .app { grid-template-columns: minmax(0, 1fr); }
-    .centre { grid-area: 2 / 1 / 3 / 2; position: relative; }
-    /* Hidden once it has slid out, so a closed drawer takes no focus. Placed in the centre's grid
-       area, which is its containing block. */
-    .tabs {
-      position: absolute;
-      top: 0;
-      bottom: 0;
-      left: 0;
-      z-index: 25;
-      width: min(300px, 85vw);
-      background: hsl(var(--background));
-      box-shadow: var(--shadow-lg);
-      transform: translateX(-105%);
-      visibility: hidden;
-      transition: transform 160ms ease-out, visibility 0s 160ms;
-    }
-    .app[data-drawer="open"] .tabs { transform: none; visibility: visible; transition: transform 160ms ease-out; }
-    .drawer-scrim { position: absolute; grid-area: 2 / 1 / 3 / 2; inset: 0; z-index: 24; background: rgb(0 0 0 / 0.3); }
-    .app:not([data-drawer="open"]) .drawer-scrim { display: none; }
+  .app[data-drawer] { grid-template-columns: minmax(0, 1fr); transition: --drawer 160ms ease-out; }
+  .app[data-drawer="open"] { --drawer: 1; }
+  .app[data-drawer] .centre { grid-area: 2 / 1 / 3 / 2; position: relative; }
+  /* Placed in the centre's grid area, which is its containing block. */
+  .app[data-drawer] .tabs {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 25;
+    width: min(300px, 85vw);
+    border-right: 0;
+    box-shadow: var(--shadow-lg);
+    transform: translateX(calc((var(--drawer) - 1) * 105%));
   }
-  @media (min-width: 901px) {
-    .drawer-scrim { display: none; }
-    .gold-bar { display: none; }
+  .drawer-scrim {
+    position: absolute;
+    grid-area: 2 / 1 / 3 / 2;
+    inset: 0;
+    z-index: 24;
+    background: hsl(var(--scrim));
+    opacity: var(--drawer);
+  }
+  /* Hidden once out of sight, so that a closed drawer takes no focus and its scrim no press. */
+  .app[data-drawer="closed"] :is(.tabs, .drawer-scrim) { visibility: hidden; transition: visibility 0s 160ms; }
+  @media (prefers-reduced-motion: reduce) {
+    .app[data-drawer], .app[data-drawer] :is(.tabs, .drawer-scrim) { transition: none; }
   }
 }

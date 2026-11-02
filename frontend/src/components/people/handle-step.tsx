@@ -1,7 +1,7 @@
 /**
- * The handle step (F137): at a first sign-in it stands under the top bar in place of the app,
- * which opens once the person has chosen their handle. A refused handle's reason is the API's,
- * toasted by the query client.
+ * The handle step (F137): at a first sign-in it stands under the top bar, on a phone under its
+ * block of colour, in place of the app, which opens once the person has chosen their handle. A
+ * refused handle's reason is the API's, toasted by the query client.
  */
 
 import { useEffect, useId, useState, type FormEvent } from 'react';

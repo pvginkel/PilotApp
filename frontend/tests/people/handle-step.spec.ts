@@ -1,6 +1,7 @@
 /**
- * The handle step (F137): at a first sign-in it stands under the top bar, whose user menu works
- * there, and the app opens once the person has chosen their handle.
+ * The handle step (F137): at a first sign-in it stands under the top bar, on a phone under the top
+ * bar's block of colour, whose user menu works there, and the app opens once the person has chosen
+ * their handle.
  */
 
 import { test, expect } from '../support/fixtures';
@@ -51,6 +52,28 @@ test.describe('The handle step', () => {
     await shell.user.click();
     await expect(shell.profileName).toHaveText('Ada Lovelace');
     await expect(shell.profileMenu.getByRole('menuitem')).toHaveText(['Sign out']);
+    const signOut = page.waitForRequest((request) => request.url().includes('/api/auth/logout'));
+    await shell.signOut.click();
+    await signOut;
+  });
+
+  test("on a phone stands under the top bar's block of colour, its menu the theme and Sign out", async ({ page, people, shell, handleStep }) => {
+    await page.setViewportSize({ width: 390, height: 800 });
+    await people.firstSignIn({ name: 'Ada Lovelace' });
+    await shell.open();
+
+    await expect(handleStep.heading).toHaveText('Choose your handle');
+    await expect(shell.topBar).toHaveCount(0);
+    await expect(shell.drawerToggle).toHaveCount(0);
+    expect(await shell.drawerHead.boundingBox()).toMatchObject({ x: 0, y: 0, width: 390 });
+    await expect(shell.drawerBrand).toHaveText('Pilot');
+    expect((await handleStep.root.boundingBox())!.y).toBeGreaterThanOrEqual((await shell.drawerHead.boundingBox())!.height);
+
+    await shell.user.click();
+    await expect(shell.theme).toBeVisible();
+    await expect(shell.profileMenu.getByRole('menuitem')).toHaveText(['Sign out']);
+    await shell.theme.selectOption('dark');
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
     const signOut = page.waitForRequest((request) => request.url().includes('/api/auth/logout'));
     await shell.signOut.click();
     await signOut;

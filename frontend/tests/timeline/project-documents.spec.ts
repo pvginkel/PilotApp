@@ -8,7 +8,8 @@
  * head's icon group, left of the notes button (F2.3, F2.7); a draft has none, nor a handbook
  * (F129.2). A save shows live as it lands, Pilot's dots with it until the turn ends, the project
  * document's renaming the project, and once a stream that went down comes back up. On a phone it
- * is the whole screen (F98.3), and switching projects closes it (F1.6).
+ * is the whole screen, over the head and its drawer's button (F98.3), and switching projects closes
+ * it (F1.6).
  */
 
 import { randomUUID } from 'node:crypto';
@@ -447,13 +448,30 @@ test.describe('On a phone', () => {
     await expect(overlay.close).toBeVisible();
   });
 
-  test('switching projects from the drawer closes it', async ({ page, people, projects, projectList, shell, overlay }) => {
+  test('lies over the head and its drawer’s button, which closed it gives back to switch projects', async ({
+    page,
+    people,
+    projects,
+    projectList,
+    shell,
+    overlay,
+  }) => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('First'), members: [me.handle!] });
     const otherName = makeUnique('Second');
     const other = await projects.makeWithSession({ name: otherName, members: [me.handle!] });
     await overlay.openProjectDocument(id, 'handbook');
     await expect(overlay.root).toBeVisible();
+
+    // It lies over the head, the drawer's button under it, with no top bar's to open it from.
+    expect(
+      await shell.drawerToggle.evaluate((button) => {
+        const box = button.getBoundingClientRect();
+        return button.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+      }),
+    ).toBe(false);
+    await overlay.close.click();
+    await expect(overlay.root).toHaveCount(0);
 
     await shell.drawerToggle.click();
     await projectList.tab(otherName).click();

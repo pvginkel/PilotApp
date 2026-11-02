@@ -6,12 +6,16 @@ type ConditionCode = components['schemas']['ConditionsSchema.6c014b4.ConditionCo
 
 /**
  * The frame every screen sits in: the top bar, its gold badges, the week's halt's popover and its
- * profile menu, the gold bar, the side column, the keys list.
+ * profile menu, the gold bar, the side column, on a phone the drawer with its head and its button,
+ * the keys list.
  */
 export class ShellPage {
   readonly topBar: Locator;
   readonly brand: Locator;
   readonly drawerToggle: Locator;
+  /** On a phone, the drawer's head, the top bar's block of colour, and Pilot's name in it. */
+  readonly drawerHead: Locator;
+  readonly drawerBrand: Locator;
   readonly goldBadges: Locator;
   /** The week's halt's popover off a phone, under its badge: its line, with the overrule. */
   readonly goldPopover: Locator;
@@ -35,6 +39,8 @@ export class ShellPage {
     this.topBar = page.getByTestId('app-shell.topbar');
     this.brand = this.topBar.locator('.brand');
     this.drawerToggle = page.getByTestId('shell.drawer-toggle');
+    this.drawerHead = page.getByTestId('shell.drawer-head');
+    this.drawerBrand = this.drawerHead.locator('.brand');
     this.goldBadges = page.getByTestId('shell.gold-badges');
     this.goldPopover = page.getByTestId('shell.gold-badges.popover');
     this.app = page.getByTestId('shell.app');
@@ -78,6 +84,11 @@ export class ShellPage {
   async open(path = '/'): Promise<void> {
     await this.page.goto(path);
     await waitForUiState(this.page, 'people.self', 'ready');
+  }
+
+  /** The colour the page asks the browser to paint its own bar in. */
+  async browserBarColour(): Promise<string | null> {
+    return this.page.locator('meta[name="theme-color"]').getAttribute('content');
   }
 
   /** The page's theme, as app-theme.css reads it. */

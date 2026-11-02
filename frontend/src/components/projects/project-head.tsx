@@ -11,6 +11,7 @@
  * is disabled, its reason on it, while the head's `create_refusal` gives one (F48.1); pressed, the
  * head is the open project's once it is read again. An archived project's reads as it was left,
  * marked archived, its switch not to be flipped (D012).
+ * On a phone the drawer's button stands first in it (F98.3).
  *
  * In a tight head its parts give way in one order: the repo, the name, the step's name down to its
  * floor, then the members, folding to the first avatars and a count; the ticket, the chips, auto
@@ -29,6 +30,7 @@ import { StepButton } from '@/components/projects/plan-popover';
 import { ProjectMenu } from '@/components/projects/project-menu';
 import { Avatar } from '@/components/shared/avatar';
 import { LinkedText } from '@/components/shared/linked-text';
+import { DrawerButton } from '@/components/shell/drawer';
 import { useChatDot } from '@/hooks/use-chats';
 import type { ProjectHead as Project } from '@/hooks/use-projects';
 import { STOPPABLE } from '@/hooks/use-work-acts';
@@ -67,6 +69,7 @@ export function ProjectHead({ project, chat, documents, draftTab, ref }: Project
   return (
     <header ref={own} className="feed-head" data-testid="project.head">
       <div className="head-row">
+        <DrawerButton />
         <h1 data-testid="project.name">
           <LinkedText text={project.name ?? 'New project'} />
         </h1>

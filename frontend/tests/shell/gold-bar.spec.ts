@@ -2,8 +2,8 @@
  * The gold bar (F125; UC *The gold bar*): with the controller unreachable, it shows in every open
  * browser, at once and with no reload. Off a phone it is a badge in the top bar, left-aligned after
  * Pilot's name, the buttons' corner radius, its full line its title, the light theme's gold in both
- * themes at 4.5:1 or better; below 900px it is a line across the window under the top bar, in gold
- * tokens of its own, light and dark, the drawer opening under it. It goes when the controller
+ * themes at 4.5:1 or better; at 900px and below, with no top bar, it is a line across the page's
+ * top, in gold tokens of its own, light and dark, the drawer opening under it. It goes when the controller
  * answers again, and nothing dismisses it. The time it began carries its date once that is an
  * earlier day than the viewer's today (R9). A stream that comes back up reads it again, covering a
  * turn missed while it was down (design 2 §6.2). A controller that answers about one environment
@@ -28,13 +28,11 @@ const updatingLine = (since: string) =>
   `Pilot is updating its store since ${since}. No chat answers and no job of Pilot’s starts until it is done; work items go on.`;
 const PHONE = { width: 390, height: 844 };
 
-async function boxes(shell: ShellPage) {
-  const [top, brand, badge, bar, side, centre] = await Promise.all(
-    [shell.topBar, shell.brand, shell.goldBadge('outage'), shell.goldBar, shell.side, shell.centre].map((locator) =>
-      locator.boundingBox(),
-    ),
+async function wideBoxes(shell: ShellPage) {
+  const [top, brand, badge, side, centre] = await Promise.all(
+    [shell.topBar, shell.brand, shell.goldBadge('outage'), shell.side, shell.centre].map((locator) => locator.boundingBox()),
   );
-  return { top: top!, brand: brand!, badge, bar, side: side!, centre: centre! };
+  return { top: top!, brand: brand!, badge: badge!, side: side!, centre: centre! };
 }
 
 /** A browser of the same person's beside the spec's, open at `path` with its stream up. */
@@ -85,10 +83,10 @@ test.describe('The gold bar', () => {
 
     // Off a phone: the badge in the top bar, left-aligned after Pilot's name, in the buttons'
     // corner radius; no line over the project list, which starts under the top bar.
-    await expect(shell.goldBar).toBeHidden();
-    const wide = await boxes(shell);
-    expect(wide.badge!.x).toBeCloseTo(wide.brand.x + wide.brand.width + 16, 0);
-    expect(wide.badge!.y + wide.badge!.height / 2).toBeCloseTo(wide.top.y + wide.top.height / 2, 0);
+    await expect(shell.goldBar).toHaveCount(0);
+    const wide = await wideBoxes(shell);
+    expect(wide.badge.x).toBeCloseTo(wide.brand.x + wide.brand.width + 16, 0);
+    expect(wide.badge.y + wide.badge.height / 2).toBeCloseTo(wide.top.y + wide.top.height / 2, 0);
     expect(wide.side.y).toBeCloseTo(wide.top.y + wide.top.height, 0);
     expect(wide.centre.y).toBeCloseTo(wide.side.y, 0);
     await expect(shell.goldBadge('outage')).toHaveCSS('border-radius', await buttonRadius(page));
@@ -114,20 +112,21 @@ test.describe('The gold bar', () => {
     }
     expect(new Set(badgeBackgrounds).size).toBe(1);
 
-    // Below the breakpoint: a line across the window under the top bar, the centre and the drawer
-    // under it, and no badge.
+    // On a phone: no top bar and no badge, a line across the page's top, the centre and the
+    // drawer under it.
     await page.setViewportSize(PHONE);
     await expect.poll(async () => (await shell.goldBar.boundingBox())?.width).toBe(PHONE.width);
-    await expect(shell.goldBadges).toBeHidden();
+    await expect(shell.topBar).toHaveCount(0);
+    await expect(shell.goldBadges).toHaveCount(0);
     await expect(shell.goldLine('outage')).toHaveText(LINE);
-    const narrow = await boxes(shell);
-    expect(narrow.bar!.x).toBe(0);
-    expect(narrow.bar!.y).toBeCloseTo(narrow.top.y + narrow.top.height, 0);
-    expect(narrow.centre.y).toBeCloseTo(narrow.bar!.y + narrow.bar!.height, 0);
-    expect(narrow.centre.width).toBe(PHONE.width);
+    const bar = (await shell.goldBar.boundingBox())!;
+    const centre = (await shell.centre.boundingBox())!;
+    expect(bar).toMatchObject({ x: 0, y: 0 });
+    expect(centre.y).toBeCloseTo(bar.y + bar.height, 0);
+    expect(centre.width).toBe(PHONE.width);
     await shell.drawerToggle.click();
     await expect.poll(async () => (await shell.side.boundingBox())?.x).toBe(0);
-    expect((await shell.side.boundingBox())!.y).toBeCloseTo(narrow.bar!.y + narrow.bar!.height, 0);
+    expect((await shell.side.boundingBox())!.y).toBeCloseTo(bar.y + bar.height, 0);
     await expect(shell.goldLine('outage')).toBeInViewport();
 
     // The line's own gold, at 4.5:1 or better, in either theme; the light one the badge's.
