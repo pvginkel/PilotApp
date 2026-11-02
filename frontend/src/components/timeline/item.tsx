@@ -12,11 +12,12 @@
  * Open (F13.3), its attachments' indicator (F13.6), Undo while the record offers it (F14.1) and
  * Discuss (F13.4), and *In the chat* after a one-ask item's answer given in the chat (F42.3); a
  * work item's is quieter, its Open the session log (F13.5, F26.6), and a job's an Undo withdrew
- * says so (F14.1).
+ * says so (F14.1). On a phone the line has Undo alone among its actions, and a tap on it opens what
+ * Open opens, as a view whose head carries Discuss (F13.9).
  */
 
-import type { AnimationEvent, ReactNode } from 'react';
-import { Link, useParams } from '@tanstack/react-router';
+import type { AnimationEvent, MouseEvent, ReactNode } from 'react';
+import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { Check, FileText, ScrollText, StickyNote, Undo2, X } from 'lucide-react';
 import { DiscussButton } from '@/components/chat/discuss-button';
 import { quoteOfItem } from '@/components/chat/discuss-quotes';
@@ -38,6 +39,7 @@ import { WorkItem } from '@/components/timeline/work';
 import { WriterAsked } from '@/components/timeline/writer-asked';
 import { PilotWriting } from '@/components/timeline/writing';
 import { useRead, useUndo } from '@/hooks/use-marks';
+import { usePhone } from '@/hooks/use-phone';
 import { useArchived } from '@/hooks/use-projects';
 import { blocksOf, isProse, titleOf, type BodyPart, type TimelineItem, type TimelineUser } from '@/hooks/use-timeline';
 import { usePerson } from '@/hooks/use-self';
@@ -195,10 +197,13 @@ function inChatOf(item: TimelineItem) {
  * the record offers it, Discuss, and when it was done; under the title the person's answer to a one-ask item with its note, the other
  * person's after their avatar, and *In the chat* after it, kept whole, where it was given in the
  * chat; under a job's title that an Undo withdrew it (F14.1). A confirmation's Yes leads it with a
- * green check, its No with a red cross (F22.5). It does not expand.
+ * green check, its No with a red cross (F22.5). It does not expand. On a phone Open and Discuss
+ * leave it, and a tap on it anywhere but on a control of its own opens what Open opens (F13.9).
  */
 function DoneLine({ item }: { item: TimelineItem }) {
   const me = usePerson();
+  const phone = usePhone();
+  const openView = useOpenLine(item);
   const title = titleOf(item);
   const said = saidIn(item);
   const place = inChatOf(item);
@@ -206,15 +211,15 @@ function DoneLine({ item }: { item: TimelineItem }) {
   const done = item.done!;
   const closed = item.kind === 'work' ? workClosedLabel(done.cause) : null;
   return (
-    <div className="line" data-testid="timeline.line">
+    <div className="line" onClick={phone ? openView : undefined} data-testid="timeline.line">
       <LineLead item={item} />
       <span className="title" title={title} data-testid="timeline.line.title">
         <LinkedText text={title} />
       </span>
-      <Open item={item} />
+      {!phone && <Open item={item} />}
       <LineAttachments item={item} />
       {done.undo && <Undo item={item} />}
-      <DiscussButton quote={quoteOfItem(item)} testId="timeline.line.discuss" />
+      {!phone && <DiscussButton quote={quoteOfItem(item)} testId="timeline.line.discuss" />}
       <Time at={done.at} format="clock" testId="timeline.line.time" />
       {(said || place) && (
         <span className="said" data-testid="timeline.line.said">
@@ -294,6 +299,20 @@ function Open({ item }: { item: TimelineItem }) {
       <FileText className="icon" aria-hidden="true" />
     </Link>
   );
+}
+
+/** A tap on the line, on a phone: what Open opens, unless the tap is on a control of its own (F13.9). */
+function useOpenLine(item: TimelineItem) {
+  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  const navigate = useNavigate();
+  return (event: MouseEvent) => {
+    if ((event.target as Element).closest('a, button, [role="menu"]') !== null) return;
+    if (item.kind === 'work') {
+      void navigate({ to: '/projects/$projectId/sessions/$sessionId', params: { projectId, sessionId: item.id } });
+    } else {
+      void navigate({ to: '/projects/$projectId/documents/$documentId', params: { projectId, documentId: item.id } });
+    }
+  };
 }
 
 /** Undo, whoever answered, until a session has taken the answer (F14.1). */

@@ -1,6 +1,7 @@
 /**
  * An item's address, under its project's, by its id (F97). The project's route draws its timeline
- * and goes to the item; this route draws nothing of its own.
+ * and goes to the item, and on a phone shows the item alone (F99); this route draws nothing of its
+ * own.
  */
 
 import { createFileRoute } from '@tanstack/react-router';

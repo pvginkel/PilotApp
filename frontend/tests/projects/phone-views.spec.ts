@@ -69,6 +69,7 @@ test.describe('Views on a phone', () => {
     const id = await projects.makeWithSession({ name: makeUnique('A trip to the lake with the whole family and the dog'), members: [me.handle!] });
     const trip = await projects.place(id, { kind: 'document', title: 'The trip', text: TRIP });
     await projectHead.open(id);
+    await expect(projectHead.root).toBeVisible();
     const drawer = (await shell.drawerToggle.boundingBox())!;
     const [head, tabs] = [(await projectHead.root.boundingBox())!, (await phoneTabs.root.boundingBox())!];
 

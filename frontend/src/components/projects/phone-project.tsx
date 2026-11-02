@@ -8,7 +8,8 @@
  * handbook under the project document; Plan the plan popover's content as a page (F3.7), which the
  * head's donut shows too. The Timeline, or a draft's Chat, keeps its place under the other tabs.
  * What opens from a tab is a view pushed over the head and the tabs (F98.4), a view opened from a
- * view on top of it. Discuss and *In the chat* anywhere on it show the Chat tab, a draft's its
+ * view on top of it; an item's address is the item alone (F99), a view too, and never the timeline
+ * gone to the item. Discuss and *In the chat* anywhere on it show the Chat tab, a draft's its
  * Chat, and an ask of the draft gone to the Draft tab at it, every view taken off first. The tab
  * and the views are the entry's in the browser's history (`use-phone-tab.ts`).
  */
@@ -38,13 +39,11 @@ interface PhoneProjectProps {
   project: Project | undefined;
   /** Whether a view the address opens lies over the screen. */
   overlaid: boolean;
-  /** The item, or its block, the address opens the timeline at. */
-  goneTo: { item: string; block: string | null } | null;
   /** The view the address opens. */
   children: ReactNode;
 }
 
-export function PhoneProject({ projectId, project, overlaid, goneTo, children }: PhoneProjectProps) {
+export function PhoneProject({ projectId, project, overlaid, children }: PhoneProjectProps) {
   const draft = project?.state === 'draft';
   const { tab, show, views, back } = usePhoneTab(projectId, draft, overlaid);
   const documents = usePanelDocuments(projectId);
@@ -85,7 +84,7 @@ export function PhoneProject({ projectId, project, overlaid, goneTo, children }:
                       end={<CreateProject project={project} />}
                     />
                   ) : (
-                    <Timeline projectId={projectId} address={goneTo} inert={overlaid || away} />
+                    <Timeline projectId={projectId} address={null} inert={overlaid || away} />
                   )}
                   {(tab === 'chat' || tab === 'documents' || tab === 'draft') && (
                     <PhonePanel projectId={projectId} draft={draft} members={project.members} tab={tab} documents={documents} covered={overlaid} />

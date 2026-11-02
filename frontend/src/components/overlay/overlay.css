@@ -96,6 +96,9 @@
   .attachment-file .sub { font-size: var(--text-sm); color: hsl(var(--muted-foreground)); }
   .attachment-file .btn { flex: none; align-self: center; }
 
+  /* The item alone (item-overlay.tsx): its option rows a thumb's height (F99). */
+  .item-alone .option { min-height: 48px; align-content: center; }
+
   /* A work item's session log (session-log-overlay.tsx; the mockup's `.log-tail`): its turns, each
      ended one closing on its time, then the cue or how it ended. */
   .log-turn + .log-turn { margin-top: 12px; }

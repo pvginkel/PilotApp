@@ -554,6 +554,8 @@
     .option .label { flex: 1; max-width: none; }
     .option .desc { order: 1; flex-basis: 100%; }
     .option .note { order: 2; }
+    /* A tap on a done line opens its view (F13.9). */
+    .item.collapsed .line { cursor: pointer; }
   }
   /* A narrow block head wraps what does not fit, and Answered and In the chat keep their icons
      alone, their words left to a screen reader (F98.3); so do an item head's Urgent and its env

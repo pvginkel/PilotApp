@@ -13,7 +13,9 @@ import { blockParts, settledParts } from './timeline-page';
  * over "Attachment of “<item>”" and, opened from the document, Back; its body the attachment by
  * its type. On a phone it is a view (F98.4): Back is its arrow, with no maximize, cross or
  * backdrop, and an attachment's document is a link in its head. Showing the handbook or the project document (F129.4, F37.4), its head is the title over
- * the project and what it is; its body the prose and Pilot's dots, or *Empty*.
+ * the project and what it is; its body the prose and Pilot's dots, or *Empty*. Showing the item
+ * alone on a phone (F99), its head is the project's name over the item's step; its body the item as
+ * the timeline draws it (`TimelinePage.item(id, overlay.alone)`).
  */
 export class OverlayPage {
   readonly root: Locator;
@@ -47,6 +49,8 @@ export class OverlayPage {
   readonly writing: Locator;
   readonly empty: Locator;
   readonly failed: Locator;
+  /** The item alone (F99), which `TimelinePage.item` reads within. */
+  readonly alone: Locator;
   readonly foot: Locator;
   readonly done: Locator;
   readonly doneTime: Locator;
@@ -97,6 +101,7 @@ export class OverlayPage {
     this.writing = this.root.getByTestId('timeline.writing');
     this.empty = this.root.getByTestId('overlay.empty');
     this.failed = this.root.getByTestId('overlay.failed');
+    this.alone = this.root.getByTestId('item-alone');
     this.foot = this.root.getByTestId('overlay.foot');
     this.done = this.root.getByTestId('overlay.done');
     this.doneTime = this.root.getByTestId('overlay.done.time');

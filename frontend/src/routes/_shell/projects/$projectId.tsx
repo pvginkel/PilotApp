@@ -20,7 +20,9 @@
  * where the overlay lies over it; the head's buttons do, the Documents button being how the panel
  * opens over the overlay below a wide window (F98.2). On a phone the screen is its own
  * (`PhoneProject`), its tabs at the bottom standing for the panel, whose state it leaves alone, and
- * what the address opens in the overlay a view pushed over them (F98.4).
+ * what the address opens in the overlay a view pushed over them (F98.4): there an item's address,
+ * and a block's whose item is read and no card, opens the item alone (F99) rather than the timeline
+ * at it.
  */
 
 import { useEffect, useState, type ReactNode } from 'react';
@@ -28,6 +30,7 @@ import { createFileRoute, useMatch, useNavigate, useParams, useRouterState } fro
 import { ProjectChat } from '@/components/chat/project-chat';
 import { ItemAttachmentOverlay, ProjectAttachmentOverlay } from '@/components/overlay/attachment-overlay';
 import { DocumentOverlay } from '@/components/overlay/document-overlay';
+import { ItemOverlay } from '@/components/overlay/item-overlay';
 import { HandbookOverlay, ProjectDocumentOverlay } from '@/components/overlay/project-document-overlay';
 import { SessionLogOverlay } from '@/components/overlay/session-log-overlay';
 import { Panel } from '@/components/panel/panel';
@@ -64,16 +67,22 @@ function Project() {
   const attached = itemId !== undefined && attachmentId !== undefined ? { itemId, attachmentId } : null;
   const loose = itemId === undefined && documentId === undefined ? (attachmentId ?? null) : null;
   const goneTo = itemId === undefined || attached !== null ? null : { item: itemId, block: blockId ?? null };
+  const phone = usePhone();
+  // A block's address waits for the read, which says whether its item is a card.
+  const alone =
+    phone && goneTo !== null && overlaid === null && (goneTo.block === null || addressed !== undefined) ? { itemId: goneTo.item, block: goneTo.block } : null;
   const handbook = useMatch({ from: '/_shell/projects/$projectId/handbook', shouldThrow: false }) !== undefined;
   const projectDocument = useMatch({ from: '/_shell/projects/$projectId/project-document', shouldThrow: false }) !== undefined;
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const overlay =
-    overlaid !== null || attached !== null || loose !== null || handbook || projectDocument || sessionId !== undefined ? pathname : null;
+    overlaid !== null || attached !== null || loose !== null || alone !== null || handbook || projectDocument || sessionId !== undefined
+      ? pathname
+      : null;
   const toItem = itemId === undefined || attached !== null ? null : `${itemId}/${blockId ?? ''}`;
-  const phone = usePhone();
   const overlays = (
     <>
       {overlaid !== null && <DocumentOverlay projectId={projectId} project={data} {...overlaid} />}
+      {alone !== null && <ItemOverlay projectId={projectId} project={data} {...alone} />}
       {attached !== null && <ItemAttachmentOverlay projectId={projectId} {...attached} />}
       {loose !== null && <ProjectAttachmentOverlay projectId={projectId} attachmentId={loose} />}
       {handbook && <HandbookOverlay projectId={projectId} project={data} />}
@@ -82,7 +91,7 @@ function Project() {
     </>
   );
   return phone ? (
-    <PhoneProject projectId={projectId} project={data} overlaid={overlay !== null} goneTo={goneTo}>
+    <PhoneProject projectId={projectId} project={data} overlaid={overlay !== null}>
       {overlays}
     </PhoneProject>
   ) : (
@@ -189,6 +198,8 @@ function DeskProject({ projectId, project: data, overlay, goneTo, toItem, childr
 }
 
 /** The document a block's address opens in the overlay, at the block: its item, where it is a card. */
-function cardAt(item: TimelineItem | undefined, blockId: string | undefined) {
-  return item !== undefined && blockId !== undefined && isCard(item) ? { documentId: item.id, block: blockId, attachment: null } : null;
+function cardAt(item: TimelineItem | null | undefined, blockId: string | undefined) {
+  return item !== undefined && item !== null && blockId !== undefined && isCard(item)
+    ? { documentId: item.id, block: blockId, attachment: null }
+    : null;
 }

@@ -1,10 +1,13 @@
 /**
  * A console that takes its control's place: the growing field (F115) with Send and a cross inside
  * its border, Ctrl+Enter sending (F110), its words kept in the browser until sent (F133). It lies
- * under everything else in Esc's order, and Esc in its field closes it too. Other's (F17.2, F19.4,
- * F21.2) and a No's reason (F22.3) are consoles.
+ * under everything else in Esc's order, and Esc in its field closes it too. While its field has the
+ * focus, the window shrinking under it — a phone's keyboard opening, which the page's viewport
+ * meets by resizing its content — brings it back into view, above the keyboard (F99). Other's
+ * (F17.2, F19.4, F21.2) and a No's reason (F22.3) are consoles.
  */
 
+import { useEffect, useRef } from 'react';
 import { Send, X } from 'lucide-react';
 import { TextField } from '@/components/shared/text-field';
 import { useUnsentText } from '@/hooks/use-unsent-text';
@@ -31,12 +34,21 @@ interface ConsoleProps {
 export function Console({ field, initial = '', label, placeholder, send, blankSends = false, className, testId, onSend, onClose }: ConsoleProps) {
   const { text, change, sent } = useUnsentText(field, initial);
   useEscape('console', true, onClose);
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const keep = () => {
+      const element = root.current!;
+      if (element.contains(document.activeElement)) element.scrollIntoView({ block: 'nearest' });
+    };
+    window.addEventListener('resize', keep);
+    return () => window.removeEventListener('resize', keep);
+  }, []);
   const held = !blankSends && text.trim() === '';
   const sendIt = () => {
     if (!held) onSend(text, sent);
   };
   return (
-    <div className={cn('console', className)} data-testid={testId}>
+    <div ref={root} className={cn('console', className)} data-testid={testId}>
       <TextField
         value={text}
         onChange={change}

@@ -23,10 +23,14 @@ export function useTimeline(id: string) {
   return query;
 }
 
-/** An item of a project's timeline, from the timeline's read, once read; none for no id. */
-export function useTimelineItem(projectId: string, itemId: string | undefined): TimelineItem | undefined {
-  const { data } = useGetProjectsTimelineByProjectId({ path: { project_id: projectId } });
-  return itemId === undefined ? undefined : data?.items.find((item) => item.id === itemId);
+/**
+ * An item of a project's timeline, from the timeline's read: none for no id or until read; null
+ * where the read has no such item, or failed.
+ */
+export function useTimelineItem(projectId: string, itemId: string | undefined): TimelineItem | null | undefined {
+  const { data, error } = useGetProjectsTimelineByProjectId({ path: { project_id: projectId } });
+  if (itemId === undefined || (data === undefined && error === null)) return undefined;
+  return data?.items.find((item) => item.id === itemId) ?? null;
 }
 
 export const isProse = (part: BodyPart): part is ProsePart => part.type === 'prose';

@@ -86,9 +86,9 @@ export class TimelinePage {
     await read;
   }
 
-  /** The item `id`, open or as its done line, and what it shows. */
-  item(id: string) {
-    const root = this.root.locator(`[data-testid="timeline.item"][data-item-id="${id}"]`);
+  /** The item `id`, open or as its done line, and what it shows: in the timeline, or `within` the item alone's view. */
+  item(id: string, within: Locator = this.root) {
+    const root = within.locator(`[data-testid="timeline.item"][data-item-id="${id}"]`);
     return {
       root,
       head: root.getByTestId('timeline.item.head'),
