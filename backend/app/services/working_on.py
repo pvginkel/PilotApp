@@ -18,6 +18,10 @@ stands failed or stopped otherwise than by the server's own resumable stops;
 a Resume or a Retry holds it again. Until then the Block is held, whether
 something of the run is in flight or the run waits on the person's answer to
 a document it registered.
+
+Every hold is read by one grouped query over the standing namings and the
+Works of their runs (`_holding`), which no Block or Item correlates: a query
+of many items plans and runs it once.
 """
 
 import uuid
@@ -27,7 +31,18 @@ from enum import StrEnum
 from functools import cache
 from typing import Any
 
-from sqlalchemy import ColumnElement, Select, and_, literal, or_, select
+from sqlalchemy import (
+    ColumnElement,
+    Select,
+    Subquery,
+    and_,
+    false,
+    func,
+    literal,
+    or_,
+    select,
+    union_all,
+)
 from sqlalchemy.orm import QueryableAttribute, Session, aliased
 
 from app.engine import claims, researches
@@ -133,10 +148,11 @@ class PilotsWork:
 def in_flight(
     item: type[Item], session: type[AgentSession], work: type[Work]
 ) -> ColumnElement[bool]:
-    """DB 294 on one Work's rows, aliases of one id: its Item open, and its
-    Session `held`, `starting`, `running` or `idle`, or owed its nudge (DB
-    232, 269; the quota wall's `failed` among them), or a job the Store
-    Update not lifted yet stopped, which its lift retries (DB 281)."""
+    """DB 294 on one Work's rows, aliases of one id, true or false on a row
+    that has them: its Item open, and its Session `held`, `starting`,
+    `running` or `idle`, or owed its nudge (DB 232, 269; the quota wall's
+    `failed` among them), or a job the Store Update not lifted yet stopped,
+    which its lift retries (DB 281)."""
     return and_(
         item.done_at.is_(None),
         or_(
@@ -178,13 +194,10 @@ class _Rows:
     def in_flight(self) -> ColumnElement[bool]:
         return in_flight(self.item, self.session, self.work)
 
-    def after(self, run: Select[uuid.UUID]) -> ColumnElement[bool]:
-        """These rows a job after the turn of a Work of `run`, a Retry of it
-        included: the trigger the Retry keeps."""
-        return and_(
-            self.work.trigger_code == WorkTrigger.WORKER_TURN_ENDED,
-            self.work.trigger_item_id.in_(run),
-        )
+    def down(self) -> ColumnElement[bool]:
+        """These rows `failed` or `stopped` and not in flight: a person's
+        Stop, the take-over's, an interrupted turn, a failure (DB 294)."""
+        return and_(self.session.state_code.in_(_DOWN), ~self.in_flight())
 
 
 def run_of(work_id: ColumnElement[uuid.UUID]) -> Select[uuid.UUID]:
@@ -205,154 +218,131 @@ def run_of(work_id: ColumnElement[uuid.UUID]) -> Select[uuid.UUID]:
     )
 
 
-def going_on(work_id: ColumnElement[uuid.UUID]) -> ColumnElement[bool]:
-    """Whether something of the run `work_id` begins is in flight: one of its
-    Works, the job after one of their turns, or a document one of them
-    registered awaiting its read, the job after its turn placed once it is
-    read."""
-    run = run_of(work_id)
-    each, job = _Rows.new(), _Rows.new()
-    document = aliased(Document)
-    registered = aliased(Item)
-    return or_(
-        each.select(each.work.id.in_(run), each.in_flight()).exists(),
-        job.select(job.after(run), job.in_flight()).exists(),
-        select(document.id)
-        .join(registered, registered.id == document.id)
-        .where(
-            registered.created_by_session_id.in_(run),
-            awaiting_read(registered, document),
-        )
-        .correlate_except(document, registered)
-        .exists(),
-    )
-
-
-def pulsing(work_id: ColumnElement[uuid.UUID]) -> ColumnElement[bool]:
-    """Whether a Session of the run `work_id` begins, a Work's or a job's
-    after one of their turns, is queued or held, starting or running."""
-    run = run_of(work_id)
-    each, job = _Rows.new(), _Rows.new()
-    return or_(
-        each.select(
-            each.work.id.in_(run), each.session.state_code.in_(_PULSING)
-        ).exists(),
-        job.select(job.after(run), job.session.state_code.in_(_PULSING)).exists(),
-    )
-
-
-def handed_back(work_id: ColumnElement[uuid.UUID]) -> ColumnElement[bool]:
-    """Whether the run `work_id` begins hands its Blocks back at once: one of
-    its Works, or the latest job after one of their turns, stands failed or
-    stopped and is not in flight — a person's Stop, the take-over's, an
-    interrupted turn, a failure (DB 294) — for as long as it stands so."""
-    run = run_of(work_id)
-    each, job = _Rows.new(), _Rows.new()
-    return or_(
-        each.select(
-            each.work.id.in_(run),
-            each.session.state_code.in_(_DOWN),
-            ~each.in_flight(),
-        ).exists(),
-        job.select(
-            job.after(run),
-            job.work.retried_by_id.is_(None),
-            job.session.state_code.in_(_DOWN),
-            ~job.in_flight(),
-        ).exists(),
-    )
-
-
-def done_with(work_id: ColumnElement[uuid.UUID]) -> ColumnElement[bool]:
-    """Whether the run `work_id` begins is done with its Blocks: the latest
-    job after the turn of one of its Works, a clarification run's never, has
-    ended, and that turn asked the person nothing, registering no document
-    with a Block in it."""
-    each, job = _Rows.new(), _Rows.new()
-    clarification = aliased(ClarificationRun)
-    asked = aliased(Block)
-    registered = aliased(Item)
-    return each.select(
-        each.work.id.in_(run_of(work_id)),
-        each.item.done_cause_code == TURN_ENDED,
-        ~select(clarification.id)
-        .where(clarification.id == each.work.id)
-        .correlate_except(clarification)
-        .exists(),
-        job.select(
-            job.work.trigger_code == WorkTrigger.WORKER_TURN_ENDED,
-            job.work.trigger_item_id == each.work.id,
-            job.work.retried_by_id.is_(None),
-            job.item.done_at.is_not(None),
-        ).exists(),
-        ~select(asked.id)
-        .join(registered, registered.id == asked.document_id)
-        .where(registered.created_by_session_id == each.work.id)
-        .correlate_except(asked, registered)
-        .exists(),
-    ).exists()
-
-
-def holds_its_blocks(work_id: ColumnElement[uuid.UUID]) -> ColumnElement[bool]:
-    """Whether the run `work_id` begins holds the Blocks the work item
-    `work_id` is named for: it has neither handed them back nor is done with
-    them."""
-    return and_(~handed_back(work_id), ~done_with(work_id))
-
-
-def _asked_in(work_id: ColumnElement[uuid.UUID]) -> ColumnElement[uuid.UUID]:
-    """The first open registered document of the run `work_id` begins on the
-    timeline: while the run holds a Block with nothing of it in flight, the
-    one the person answers."""
-    document = aliased(Document)
-    registered = aliased(Item)
-    return (
-        select(registered.id)
-        .join(document, document.id == registered.id)
-        .where(
-            registered.created_by_session_id.in_(run_of(work_id)),
-            registered.done_at.is_(None),
-            document.source_path.is_not(None),
-        )
-        .order_by(registered.seq)
-        .limit(1)
-        .correlate_except(registered, document)
-        .scalar_subquery()
-    )
-
-
 def _researchable() -> ColumnElement[bool]:
     """A Block with neither an answer, a claim included, nor a `done`: one a
     standing research holds (DB 293)."""
     return and_(Block.answer.is_(None), Block.done_at.is_(None))
 
 
-def held() -> ColumnElement[bool]:
-    """Whether a Block is held, as a query's condition on it, true or false
-    and never null, so that its negation holds too: a claimed action whose
-    standing Claim Assignment's run holds it, or one with neither an answer
-    nor a `done` whose standing Research Assignment's run does (DB 295, held
-    through the run)."""
+def _standing() -> Subquery:
+    """The standing namings that still apply, one per Block: a claimed
+    action's standing Claim Assignment (DB 260), and the standing Research
+    Assignment of a Block with neither an answer nor a `done` (DB 292); the
+    Block's id, the Work's and whether it is a research."""
     claim = claims.standing().subquery()
     research = researches.standing().subquery()
-    return or_(
-        select(claim.c.work_id)
-        .where(
-            claim.c.block_id == Block.id,
-            claimed(),
-            holds_its_blocks(claim.c.work_id),
+    return union_all(
+        select(claim.c.block_id, claim.c.work_id, literal(False).label("research"))
+        .join(Block, Block.id == claim.c.block_id)
+        .where(claimed()),
+        select(
+            research.c.block_id,
+            research.c.work_id,
+            literal(True).label("research"),
         )
-        .correlate_except(claim)
-        .exists(),
-        select(research.c.work_id)
-        .where(
-            research.c.block_id == Block.id,
-            _researchable(),
-            holds_its_blocks(research.c.work_id),
-        )
-        .correlate_except(research)
-        .exists(),
+        .join(Block, Block.id == research.c.block_id)
+        .where(_researchable()),
+    ).subquery()
+
+
+def _any(condition: ColumnElement[bool]) -> ColumnElement[bool]:
+    """Whether `condition` holds on a row of the group, false where no row
+    has the columns it reads."""
+    return func.coalesce(func.bool_or(condition), false())
+
+
+def _holding() -> Subquery:
+    """Each standing naming that still applies, with what its run makes of
+    its Block, one row per Block: `holding`, the run neither handing it back
+    nor done with it; `going_on`, something of the run in flight, a document
+    of it awaiting its read among them, the job after its turn placed once
+    it is read; `pulse`, a Session of the run, a Work's or the latest job's
+    after one of their turns, queued or held, starting or running."""
+    standing = _standing()
+    named = aliased(AgentSession)
+    member = _Rows.new()
+    job = _Rows.new()
+    clarification = aliased(ClarificationRun)
+    asked = aliased(Block)
+    registered = aliased(Item)
+    document = aliased(Document)
+    unread = aliased(Item)
+    asked_nothing = ~(
+        select(asked.id)
+        .join(registered, registered.id == asked.document_id)
+        .where(registered.created_by_session_id == member.work.id)
+        .correlate_except(asked, registered)
+        .exists()
     )
+    awaiting = (
+        select(document.id)
+        .join(unread, unread.id == document.id)
+        .where(
+            unread.created_by_session_id == member.work.id,
+            awaiting_read(unread, document),
+        )
+        .correlate_except(document, unread)
+        .exists()
+    )
+    done_with = and_(
+        member.item.done_cause_code == TURN_ENDED,
+        clarification.id.is_(None),
+        job.item.done_at.is_not(None),
+        asked_nothing,
+    )
+    return (
+        select(
+            standing.c.block_id,
+            standing.c.work_id,
+            standing.c.research,
+            and_(~_any(member.down()), ~_any(job.down()), ~_any(done_with)).label(
+                "holding"
+            ),
+            or_(_any(member.in_flight()), _any(job.in_flight()), _any(awaiting)).label(
+                "going_on"
+            ),
+            or_(
+                _any(member.session.state_code.in_(_PULSING)),
+                _any(job.session.state_code.in_(_PULSING)),
+            ).label("pulse"),
+        )
+        .select_from(standing)
+        .join(named, named.id == standing.c.work_id)
+        .join(
+            member.session,
+            and_(
+                member.session.kind_code == WORK_KIND,
+                or_(
+                    member.session.id == standing.c.work_id,
+                    member.session.conversation_id == named.conversation_id,
+                ),
+            ),
+        )
+        .join(member.work, member.work.id == member.session.id)
+        .join(member.item, member.item.id == member.session.id)
+        .outerjoin(
+            job.work,
+            and_(
+                job.work.trigger_code == WorkTrigger.WORKER_TURN_ENDED,
+                job.work.trigger_item_id == member.work.id,
+                job.work.retried_by_id.is_(None),
+            ),
+        )
+        .outerjoin(job.item, job.item.id == job.work.id)
+        .outerjoin(job.session, job.session.id == job.work.id)
+        .outerjoin(clarification, clarification.id == member.work.id)
+        .group_by(standing.c.block_id, standing.c.work_id, standing.c.research)
+        .subquery()
+    )
+
+
+def held() -> ColumnElement[bool]:
+    """Whether a Block is held, as a query's condition on it, true or false
+    and never null: its standing Claim Assignment's run holds the claimed
+    action, or its standing Research Assignment's run holds the Block with
+    neither an answer nor a `done` (DB 295, held through the run)."""
+    holding = _holding()
+    return Block.id.in_(select(holding.c.block_id).where(holding.c.holding))
 
 
 def unanswered() -> ColumnElement[bool]:
@@ -453,51 +443,63 @@ def pilots(document: type[Item] = Item) -> ColumnElement[bool]:
     )
 
 
+def _asked_in(work_id: ColumnElement[uuid.UUID]) -> ColumnElement[uuid.UUID]:
+    """The first open registered document of the run `work_id` begins on the
+    timeline: while the run holds a Block with nothing of it in flight, the
+    one the person answers."""
+    document = aliased(Document)
+    registered = aliased(Item)
+    return (
+        select(registered.id)
+        .join(document, document.id == registered.id)
+        .where(
+            registered.created_by_session_id.in_(run_of(work_id)),
+            registered.done_at.is_(None),
+            document.source_path.is_not(None),
+        )
+        .order_by(registered.seq)
+        .limit(1)
+        .correlate_except(registered, document)
+        .scalar_subquery()
+    )
+
+
 def holds(db: Session, document_ids: Collection[uuid.UUID]) -> Holds:
     """The named Blocks of the documents `document_ids` as the reading reads
     them: the held ones, each document's in its order, and the claimed
     actions handed back."""
-    claim = claims.standing().subquery()
-    research = researches.standing().subquery()
-    found: dict[int, tuple[int, Hold]] = {}
+    holding = _holding()
+    rows = db.execute(
+        select(
+            Block.id.label("block_id"),
+            Block.document_id.label("document_id"),
+            holding.c.work_id,
+            holding.c.research,
+            holding.c.holding,
+            holding.c.going_on,
+            holding.c.pulse,
+            _asked_in(holding.c.work_id).label("asked_in"),
+        )
+        .join(holding, holding.c.block_id == Block.id)
+        .where(Block.document_id.in_(list(document_ids)))
+        .order_by(Block.document_id, Block.position)
+    ).all()
+    held: dict[int, Hold] = {}
     undone: set[int] = set()
-    for standing, is_research, named in (
-        (claim, False, claimed()),
-        (research, True, _researchable()),
-    ):
-        work_id = standing.c.work_id
-        rows = db.execute(
-            select(
-                Block.id.label("block_id"),
-                Block.document_id.label("document_id"),
-                Block.position.label("position"),
-                work_id.label("work_id"),
-                holds_its_blocks(work_id).label("holding"),
-                going_on(work_id).label("going_on"),
-                pulsing(work_id).label("pulse"),
-                _asked_in(work_id).label("asked_in"),
-            )
-            .join(standing, standing.c.block_id == Block.id)
-            .where(Block.document_id.in_(list(document_ids)), named)
-        ).all()
-        for row in rows:
-            if not row.holding:
-                if not is_research:
-                    undone.add(row.block_id)
-                continue
-            found[row.block_id] = (
-                row.position,
-                Hold(
-                    document_id=row.document_id,
-                    work_id=row.work_id,
-                    research=is_research,
-                    going_on=row.going_on,
-                    pulse=row.pulse,
-                    asked_in=None if row.going_on else row.asked_in,
-                ),
-            )
-    ordered = sorted(found.items(), key=lambda each: each[1][0])
-    return Holds({block_id: hold for block_id, (_, hold) in ordered}, frozenset(undone))
+    for row in rows:
+        if not row.holding:
+            if not row.research:
+                undone.add(row.block_id)
+            continue
+        held[row.block_id] = Hold(
+            document_id=row.document_id,
+            work_id=row.work_id,
+            research=row.research,
+            going_on=row.going_on,
+            pulse=row.pulse,
+            asked_in=None if row.going_on else row.asked_in,
+        )
+    return Holds(held, frozenset(undone))
 
 
 def pilots_work(
@@ -565,29 +567,15 @@ def handed_back_in(db: Session, run_id: uuid.UUID) -> list[tuple[uuid.UUID, str,
     item `run_id` and which that run no longer holds, a claim's `done`
     unwritten or a research's Block unanswered: each its document's id and
     path and its local id, in timeline order."""
-    found: list[tuple[int, int, uuid.UUID, str, str]] = []
-    for standing, named in (
-        (claims.standing().subquery(), claimed()),
-        (researches.standing().subquery(), _researchable()),
-    ):
-        work_id = standing.c.work_id
-        found.extend(
-            (seq, position, document_id, path, local_id)
-            for seq, position, document_id, path, local_id in db.execute(
-                select(
-                    Item.seq, Block.position, Document.id, Document.path, Block.local_id
-                )
-                .join(Block, Block.document_id == Document.id)
-                .join(Item, Item.id == Document.id)
-                .join(standing, standing.c.block_id == Block.id)
-                .where(
-                    work_id.in_(run_of(literal(run_id))),
-                    named,
-                    ~holds_its_blocks(work_id),
-                )
-            )
-        )
+    holding = _holding()
     return [
         (document_id, path, local_id)
-        for *_, document_id, path, local_id in sorted(found)
+        for document_id, path, local_id in db.execute(
+            select(Document.id, Document.path, Block.local_id)
+            .join(Block, Block.document_id == Document.id)
+            .join(Item, Item.id == Document.id)
+            .join(holding, holding.c.block_id == Block.id)
+            .where(holding.c.work_id.in_(run_of(literal(run_id))), ~holding.c.holding)
+            .order_by(Item.seq, Block.position)
+        )
     ]

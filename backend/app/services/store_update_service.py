@@ -9,7 +9,7 @@ stopped are derived from their stop, never linked (`stopped_by`).
 
 from datetime import UTC, datetime
 
-from sqlalchemy import ColumnElement, and_, exists, or_, select, text
+from sqlalchemy import ColumnElement, and_, exists, func, or_, select, text
 from sqlalchemy.orm import Session, aliased
 
 from app.engine.record import FINISHED
@@ -58,34 +58,37 @@ def stopped_for_update() -> ColumnElement[bool]:
 
 
 def stopped_for_unlifted(session: type[AgentSession]) -> ColumnElement[bool]:
-    """Whether the Session `session`, an alias, is a job the Store Update not
-    lifted yet stopped (DB 280): one its lift retries unless a Work retries it
-    first (DB 281)."""
-    update = aliased(StoreUpdate)
+    """Whether the Session `session`, an alias, its Item open, is a job the
+    Store Update not lifted yet stopped (DB 280), one its lift retries
+    unless a Work retries it first (DB 281): true or false, never null. A
+    Finish's stop, which DB 280 leaves out, closed its Item."""
+    made = (
+        select(StoreUpdate.made_at)
+        .where(StoreUpdate.lifted_at.is_(None))
+        .scalar_subquery()
+    )
+    pilot = select(User.id).where(User.kind_code == UserKind.AGENT).scalar_subquery()
     return and_(
-        _stopped_by_pilot(session),
-        exists().where(
-            update.lifted_at.is_(None), update.made_at <= session.stopped_at
-        ),
+        session.kind_code == JOB_KIND,
+        session.stopped_by_user_id.is_not_distinct_from(pilot),
+        func.coalesce(session.stopped_at >= made, False),
     )
 
 
-def _stopped_by_pilot(
-    session: type[AgentSession] = AgentSession,
-) -> ColumnElement[bool]:
+def _stopped_by_pilot() -> ColumnElement[bool]:
     """A job's Session stopped by Pilot, but at a Finish, which closes its
     Item at the instant it stops it (DB 280)."""
     # An alias of its own, so that a caller's select may join Item too.
     line = aliased(Item)
     return and_(
-        session.kind_code == JOB_KIND,
-        session.stopped_by_user_id.in_(
+        AgentSession.kind_code == JOB_KIND,
+        AgentSession.stopped_by_user_id.in_(
             select(User.id).where(User.kind_code == UserKind.AGENT)
         ),
         ~exists().where(
-            line.id == session.id,
+            line.id == AgentSession.id,
             line.done_cause_code == FINISHED,
-            line.done_at == session.stopped_at,
+            line.done_at == AgentSession.stopped_at,
         ),
     )
 
