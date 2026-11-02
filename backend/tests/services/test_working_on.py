@@ -312,6 +312,31 @@ class TestAwaitingItsRead:
 
         assert camp.reading(read, failed) == {}
 
+    def test_a_read_document_is_pilots_while_another_of_its_run_awaits_its_read(
+        self, camp: _Camp
+    ) -> None:
+        run = camp.worker()
+        first = camp.registered(run, read=False)
+        second = camp.registered(run, read=False)
+        camp.ended(run)
+        camp.container.document_service().publish_read(
+            camp.session.get_one(Document, first.id), QUESTION, run.id
+        )
+
+        awaiting = PilotsWork(Doing.AWAITING_RUN, run.id, False, None)
+        assert camp.reading(first, second) == {first.id: awaiting, second.id: awaiting}
+
+    def test_a_stopped_work_item_whose_document_awaits_its_read_is_the_persons(
+        self, camp: _Camp
+    ) -> None:
+        run = camp.worker()
+        awaiting = camp.registered(run, read=False)
+        camp.stopped(run, by=camp.pilot())
+
+        assert camp.reading(camp.session.get_one(Item, run.id), awaiting) == {
+            awaiting.id: PilotsWork(Doing.AWAITING_RUN, run.id, False, None)
+        }
+
 
 class TestThePass:
     @pytest.mark.parametrize(
@@ -748,6 +773,39 @@ class TestWhatWaits:
         assert ProjectChanged(camp.project.id) in engine_events
         assert self._waits(camp, person) == (
             Badge(1, False),
+            ProjectStatus.WAITING_ON_YOU,
+            NotificationPriority.DEFAULT,
+        )
+
+    def test_a_document_read_waits_on_no_one_until_its_runs_last_read_and_pass(
+        self, camp: _Camp, person: User
+    ) -> None:
+        person.notification_token = camp.container.notification_token_cipher().seal(
+            "token-of-ada"
+        )
+        run = camp.worker()
+        first = camp.registered(run, read=False)
+        second = camp.registered(run, read=False)
+        camp.ended(run)
+        documents = camp.container.document_service()
+        documents.publish_read(
+            camp.session.get_one(Document, first.id), QUESTION, run.id
+        )
+        idle = (None, ProjectStatus.IDLE, NotificationPriority.MIN)
+
+        assert self._waits(camp, person) == idle
+
+        documents.publish_read(
+            camp.session.get_one(Document, second.id), REPORT, run.id
+        )
+        job = camp.job_after(run, SessionState.HELD)
+
+        assert self._waits(camp, person) == idle
+
+        camp.ended(job)
+
+        assert self._waits(camp, person) == (
+            Badge(2, False),
             ProjectStatus.WAITING_ON_YOU,
             NotificationPriority.DEFAULT,
         )

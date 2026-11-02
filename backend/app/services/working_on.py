@@ -85,7 +85,8 @@ class Doing(StrEnum):
     """What Pilot does on an item that is Pilot's (DB 296)."""
 
     AWAITING_RUN = "awaiting_run"
-    """Its read awaited at the end of the run that registered it."""
+    """Its read, or another's of the run that registered it, awaited at
+    that run's end."""
     PRE_RULING = "pre_ruling"
     """Its pass in flight, or the pass after the writer's reply."""
     ASKING_WRITER = "asking_writer"
@@ -363,13 +364,23 @@ def _all_held(document: type[Item]) -> ColumnElement[bool]:
 
 
 def _awaiting(document: type[Item]) -> ColumnElement[bool]:
-    """The registered document `document` awaits its read (DB 246)."""
+    """The registered document `document`, or another its run registered,
+    awaits its read (DB 246): the pass over them is placed only once none
+    does (`TurnEndReadService`)."""
+    own = aliased(Document)
     row = aliased(Document)
-    return (
-        select(row.id)
-        .where(row.id == document.id, awaiting_read(document, row))
-        .correlate_except(row)
-        .exists()
+    unread = aliased(Item)
+    return and_(
+        select(own.id)
+        .where(own.id == document.id, own.source_path.is_not(None))
+        .correlate_except(own)
+        .exists(),
+        document.created_by_session_id.in_(
+            select(unread.created_by_session_id)
+            .join(row, row.id == unread.id)
+            .where(awaiting_read(unread, row))
+            .correlate_except(unread, row)
+        ),
     )
 
 
@@ -427,7 +438,8 @@ def _after_reply(document: type[Item], job: _Rows) -> Select[uuid.UUID]:
 @cache
 def pilots(document: type[Item] = Item) -> ColumnElement[bool]:
     """Whether the Item `document` is Pilot's (DB 296), as a query's
-    condition on it: open, and awaiting its read; or a pass over it in
+    condition on it: open, and it or another document of its run awaiting
+    its read; or a pass over it in
     flight, its Retry included; or the clarification run that asks its
     writer, or the job after that run's turn; or with a Block unanswered and
     every one held. Every other open Item is the person's."""
