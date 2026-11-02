@@ -9,7 +9,7 @@
  * window 1200 px wide or more. On a wide window it stands beside the timeline and the overlay
  * beside it, and Esc never closes it (F98.1); below that it lies over the timeline, it and the
  * overlay the one opened last on top and the first Esc closes, and going to an item closes it
- * (F98.2); on a phone it is the whole screen (F98.3). The tab's lists wait on its read, the
+ * (F98.2); on a phone its tabs are among the tabs at the bottom (tests/projects/phone-tabs.spec.ts). The tab's lists wait on its read, the
  * timeline's and the project document's: nothing under the headings while it is on its way, the
  * project document's row "Project document" until its title is read, and "The documents did not
  * load" in the lists' place where the read fails (F113).
@@ -442,42 +442,6 @@ test.describe('The side panel below 1200 px', () => {
     const [side, feed] = await Promise.all([panel.root.boundingBox(), timeline.root.boundingBox()]);
     expect(feed!.x + feed!.width).toBeLessThanOrEqual(side!.x + 1);
     await page.setViewportSize({ width: 1199, height: 800 });
-    await expect(panel.root).toHaveCount(0);
-  });
-});
-
-test.describe('The side panel on a phone', () => {
-  test.use({ viewport: { width: 390, height: 844 } });
-
-  test('is the whole screen, the overlay over it when a row opens, Esc showing it again, and its cross closes it', async ({
-    page,
-    people,
-    projects,
-    projectHead,
-    timeline,
-    overlay,
-    panel,
-  }) => {
-    const p = await placed(people, projects);
-    await timeline.open(p.id);
-    await expect(panel.root).toHaveCount(0);
-
-    await projectHead.documentsButton.click();
-    await expect(panel.root).toBeVisible();
-    const side = (await panel.root.boundingBox())!;
-    expect(side.x).toBe(0);
-    expect(side.width).toBeCloseTo(390, 0);
-    expect(side.y + side.height).toBeCloseTo(844, 0);
-
-    await panel.document(p.survey).root.click();
-    await expect(overlay.title).toHaveText('Campsites');
-    expect(await isOnTop(overlay.root)).toBe(true);
-    await expect(overlay.maximize).toBeHidden();
-    await page.keyboard.press('Escape');
-    await expect(overlay.root).toHaveCount(0);
-    expect(await isOnTop(panel.root)).toBe(true);
-
-    await panel.close.click();
     await expect(panel.root).toHaveCount(0);
   });
 });

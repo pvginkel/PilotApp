@@ -10,7 +10,8 @@
  * toggle, toggling the side panel's Draft tab (F46.2), and its menu; its Create project stands at
  * its definition chat's end (`create-project.tsx`). An archived project's reads as it was left,
  * marked archived, its switch not to be flipped (D012).
- * On a phone the drawer's button stands first in it (F98.3).
+ * On a phone the drawer's button stands first in it, and the tabs at the bottom stand for Discuss,
+ * the Documents button and the draft-panel toggle, which it has not (F2.3, F98.3).
  *
  * In a tight head its parts give way in one order: the repo, the name, the step's name down to its
  * floor, then the members, folding to the first avatars and a count; the ticket, the chips, auto
@@ -45,16 +46,12 @@ interface Toggled {
 
 interface ProjectHeadProps {
   project: Project;
-  /** The side panel's Chat tab. */
-  chat: Toggled;
-  /** The side panel's Documents tab. */
-  documents: Toggled;
-  /** A draft's side panel's Draft tab. */
-  draftTab: Toggled;
+  /** The side panel's Chat tab, Documents tab and a draft's Draft tab: none on a phone. */
+  panel?: { chat: Toggled; documents: Toggled; draftTab: Toggled };
   ref?: (element: HTMLElement | null) => void;
 }
 
-export function ProjectHead({ project, chat, documents, draftTab, ref }: ProjectHeadProps) {
+export function ProjectHead({ project, panel, ref }: ProjectHeadProps) {
   const draft = project.state === 'draft';
   const [head, setHead] = useState<HTMLElement | null>(null);
   useRows(head);
@@ -99,11 +96,11 @@ export function ProjectHead({ project, chat, documents, draftTab, ref }: Project
       <div className="head-row">
         {!draft && <StepButton tasks={project.tasks} />}
         <Members members={project.members} />
-        {!draft && <DiscussButton projectId={project.id} {...chat} />}
-        {!draft && <DocumentsButton {...documents} />}
+        {!draft && panel && <DiscussButton projectId={project.id} {...panel.chat} />}
+        {!draft && panel && <DocumentsButton {...panel.documents} />}
         {!draft && <HandbookButton projectId={project.id} />}
         {!draft && <NotesButton notes={project.notes} />}
-        {draft && <DraftButton {...draftTab} />}
+        {draft && panel && <DraftButton {...panel.draftTab} />}
         <ProjectMenu project={project} />
       </div>
     </header>

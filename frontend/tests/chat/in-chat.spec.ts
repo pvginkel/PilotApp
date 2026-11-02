@@ -152,13 +152,14 @@ test.describe('In the chat', () => {
 test.describe('In the chat on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test('keeps its icon alone in a block head, as Answered does, Discuss staying there, and opens the Chat tab, the whole screen, at the message', async ({
+  test('keeps its icon alone in a block head, as Answered does, Discuss staying there, and shows the Chat tab at the message', async ({
     people,
     projects,
     controller,
     timeline,
     chat,
     chats,
+    phoneTabs,
   }) => {
     const me = await people.signIn();
     const project = await projects.makeWithSession({ name: makeUnique('Phone'), members: [me.handle!] });
@@ -182,6 +183,7 @@ test.describe('In the chat on a phone', () => {
     expect(discuss!.y + discuss!.height).toBeLessThanOrEqual(head!.y + head!.height + 0.5);
 
     await stove.inChat.click();
+    await expect(phoneTabs.tab('chat')).toHaveAttribute('aria-selected', 'true');
     await expect(chat.root).toBeInViewport();
     await expect(chat.messageTexts.first()).toHaveClass(/\bflash\b/);
     await expect(chat.messages.first()).toBeInViewport();

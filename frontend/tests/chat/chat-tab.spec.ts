@@ -394,15 +394,15 @@ test.describe('The Chat tab’s read', () => {
 test.describe('The Chat tab on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test('is the same column, the whole screen: the message on the right, the reply bare from the left, nothing more collapsed', async ({
+  test('is the same column, between the head and the tabs at the bottom: the message on the right, the reply bare from the left, nothing more collapsed', async ({
     people,
     projects,
-    projectHead,
     controller,
     timeline,
     panel,
     chat,
     chats,
+    phoneTabs,
   }) => {
     const me = await people.signIn();
     const project = await projects.make({ name: makeUnique('Phone'), members: [me.handle!] });
@@ -410,8 +410,7 @@ test.describe('The Chat tab on a phone', () => {
     await controller.play(chats.store, session, [text('one', 'The dome is lighter.')]);
     await controller.finish(chats.store, session, 'success', 'The dome is lighter.');
     await timeline.open(project);
-    await projectHead.documentsButton.click();
-    await chat.tab.click();
+    await phoneTabs.tab('chat').click();
 
     await expect(chat.messageTexts).toHaveText(['Which tent do we take?']);
     await expect(chat.texts).toHaveText(['The dome is lighter.']);
@@ -424,10 +423,11 @@ test.describe('The Chat tab on a phone', () => {
     expect(message.x + message.width).toBeGreaterThan(390 - 40);
     expect(message.x).toBeGreaterThan(390 * 0.09);
     expect(reply.x).toBeLessThan(32);
-    // The composer under it, across the column at the screen's foot.
-    const composer = (await chat.composer.boundingBox())!;
-    expect(composer.x).toBe(0);
-    expect(composer.width).toBeCloseTo(390, 0);
-    expect(composer.y + composer.height).toBeCloseTo(side.y + side.height, 0);
+    // The composer under it, across the column at its foot, over the tabs.
+    const [composer, tabs] = await Promise.all([chat.composer.boundingBox(), phoneTabs.root.boundingBox()]);
+    expect(composer!.x).toBe(0);
+    expect(composer!.width).toBeCloseTo(390, 0);
+    expect(composer!.y + composer!.height).toBeCloseTo(side.y + side.height, 0);
+    expect(side.y + side.height).toBeCloseTo(tabs!.y, 0);
   });
 });

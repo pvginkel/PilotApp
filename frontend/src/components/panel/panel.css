@@ -104,8 +104,56 @@
     .project[data-front="overlay"] .sheet-backdrop { z-index: 22; }
     .project[data-front="overlay"] .sheet { z-index: 23; }
   }
-  /* A phone: the whole screen (F98.3). */
+  /* A phone: the tab showing between the project's head and the tabs at the bottom (F98.3). */
   @media (max-width: 900px) {
     .panel { left: 0; width: auto; border-left: 0; }
+  }
+
+  /* ---- A project on a phone: the tab showing, and the tabs at the bottom (the mockup's
+     .phone-tabs and .ttab) ------------------------------------------------------------------ */
+
+  /* The Timeline, or a draft's Chat, keeps its place and its scroll under the other tabs. Its own
+     stacking, so that the overlay lies over the panel in it. */
+  .phone-page { position: relative; isolation: isolate; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .phone-page:not([data-tab="timeline"]) > :is(.feed, .project-chat) { visibility: hidden; }
+  .phone-page > .panel { box-shadow: none; }
+
+  /* Each its icon over its name; the one showing in the primary's tint, its icon on a pill. */
+  .phone-tabs { flex: none; display: flex; height: 60px; border-top: 1px solid hsl(var(--border)); background: hsl(var(--side)); }
+  .ttab {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: hsl(var(--muted-foreground));
+    font: inherit;
+    font-size: var(--text-xs);
+    font-weight: 500;
+    line-height: 1.2;
+    cursor: pointer;
+  }
+  .ttab .pill { position: relative; display: grid; place-items: center; width: 56px; height: 28px; border-radius: 999px; }
+  .ttab .pill .icon { width: 20px; height: 20px; }
+  .ttab:hover .pill { background: hsl(var(--accent)); }
+  .ttab.on { color: hsl(var(--primary-muted-foreground)); font-weight: 600; }
+  .ttab.on .pill { background: hsl(var(--primary-muted-strong)); }
+  /* The Chat tab's dot and the Documents tab's count sit on the icon's corner. */
+  .ttab .unread { position: absolute; top: 3px; right: 15px; box-shadow: 0 0 0 2px hsl(var(--side)); }
+  .ttab .ptab-count {
+    position: absolute;
+    top: -3px;
+    left: 33px;
+    min-width: 17px;
+    height: 17px;
+    padding: 0 4px;
+    font-size: 10.5px;
+    font-weight: 600;
+    box-shadow: 0 0 0 2px hsl(var(--side));
   }
 }

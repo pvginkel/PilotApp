@@ -18,7 +18,7 @@ import { stepMarkLabel, stepReading, type StepMark } from '@/lib/utils/status-la
 
 type Note = ProjectHead['notes'][number];
 
-interface Step {
+export interface Step {
   id: string;
   title: string;
   mark: StepMark;
@@ -131,7 +131,7 @@ function StepRing({ done, now, total, testId }: { done: number; now: number; tot
   );
 }
 
-function StepRow({ step, testId }: { step: Step; testId: string }) {
+export function StepRow({ step, testId }: { step: Step; testId: string }) {
   const { mark } = step;
   // The notes list while the mouse is over the icon, or after a tap or a click on it until the next.
   const [hovered, setHovered] = useState(false);

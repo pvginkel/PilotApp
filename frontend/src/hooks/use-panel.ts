@@ -106,7 +106,7 @@ export interface PanelLists {
 /** The tab's read, its timeline's and its project document's together: its lists once both landed. */
 export type PanelRead = PanelLists | 'pending' | 'failed';
 
-interface PanelDocuments {
+export interface PanelDocuments {
   /** The project document's title: its text's, once read; none until then, and where its text gives none. */
   projectDocument: string | null;
   /** `pending` while either read has nothing yet, `failed` while either's latest read failed (F113). */

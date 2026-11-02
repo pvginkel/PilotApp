@@ -7,6 +7,7 @@
  * screen sits in, `handleStep` and `profile` the person's own pages, `projectList` the side column's
  * list, `projectHead` a project's head, `timeline` its timeline, `overlay` the overlay over it,
  * `sessionLog` a work item's session log in it, `panel` the side panel beside it, `chat` its Chat tab,
+ * `phoneTabs` a phone's tabs at the bottom and the page over them,
  * `chats` puts a project's chats in the store's fake environment and sends their messages,
  * `bridge` adds registrations to the worker's fake notification bridge and reads what they show, and
  * `storeUpdate` makes the store's update and asks its lift, lifting one a spec left standing.
@@ -23,6 +24,7 @@ import { ChatPage } from './page-objects/chat-page';
 import { HandleStepPage } from './page-objects/handle-step-page';
 import { OverlayPage } from './page-objects/overlay-page';
 import { PanelPage } from './page-objects/panel-page';
+import { PhoneTabsPage } from './page-objects/phone-tabs-page';
 import { ProfilePage } from './page-objects/profile-page';
 import { ProjectHeadPage } from './page-objects/project-head-page';
 import { ProjectListPage } from './page-objects/project-list-page';
@@ -47,6 +49,7 @@ interface DomainFixtures {
   overlay: OverlayPage;
   sessionLog: SessionLogPage;
   panel: PanelPage;
+  phoneTabs: PhoneTabsPage;
   chat: ChatPage;
   definitionChat: ChatPage;
   chats: Chats;
@@ -112,6 +115,9 @@ export const test = infrastructureFixtures.extend<DomainFixtures, DomainWorkerFi
   },
   panel: async ({ page }, use) => {
     await use(new PanelPage(page));
+  },
+  phoneTabs: async ({ page }, use) => {
+    await use(new PhoneTabsPage(page));
   },
   chat: async ({ page }, use) => {
     await use(new ChatPage(page));

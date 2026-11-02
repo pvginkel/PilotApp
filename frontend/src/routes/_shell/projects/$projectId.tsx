@@ -18,10 +18,11 @@
  * ask of the draft gone to from its chat opens the Draft tab at it, and past Create the project
  * document. While an overlay is open, the timeline under its backdrop takes no focus, nor the panel
  * where the overlay lies over it; the head's buttons do, the Documents button being how the panel
- * opens over the overlay below a wide window (F98.2).
+ * opens over the overlay below a wide window (F98.2). On a phone the screen is its own
+ * (`PhoneProject`), its tabs at the bottom standing for the panel, whose state it leaves alone.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { createFileRoute, useMatch, useNavigate, useParams, useRouterState } from '@tanstack/react-router';
 import { ProjectChat } from '@/components/chat/project-chat';
 import { ItemAttachmentOverlay, ProjectAttachmentOverlay } from '@/components/overlay/attachment-overlay';
@@ -30,6 +31,7 @@ import { HandbookOverlay, ProjectDocumentOverlay } from '@/components/overlay/pr
 import { SessionLogOverlay } from '@/components/overlay/session-log-overlay';
 import { Panel } from '@/components/panel/panel';
 import { CreateProject } from '@/components/projects/create-project';
+import { PhoneProject } from '@/components/projects/phone-project';
 import { ProjectHead } from '@/components/projects/project-head';
 import { isCard } from '@/components/timeline/document-state';
 import { Timeline } from '@/components/timeline/timeline';
@@ -37,7 +39,8 @@ import { discussIn, DiscussContext } from '@/hooks/use-discuss';
 import { DraftBlockContext, goToDraftBlock } from '@/hooks/use-draft-place';
 import { goToChat, InChatContext, type ChatPlace } from '@/hooks/use-in-chat';
 import { usePanel, useWideWindow } from '@/hooks/use-panel';
-import { useProjectHead } from '@/hooks/use-projects';
+import { usePhone } from '@/hooks/use-phone';
+import { useProjectHead, type ProjectHead as ProjectHeadOf } from '@/hooks/use-projects';
 import { useTimelineItem, type TimelineItem } from '@/hooks/use-timeline';
 import { rememberInBrowser } from '@/lib/browser-state';
 import type { QuoteRef } from '@/lib/chat/quotes';
@@ -66,6 +69,42 @@ function Project() {
   const overlay =
     overlaid !== null || attached !== null || loose !== null || handbook || projectDocument || sessionId !== undefined ? pathname : null;
   const toItem = itemId === undefined || attached !== null ? null : `${itemId}/${blockId ?? ''}`;
+  const phone = usePhone();
+  const overlays = (
+    <>
+      {overlaid !== null && <DocumentOverlay projectId={projectId} project={data} {...overlaid} />}
+      {attached !== null && <ItemAttachmentOverlay projectId={projectId} {...attached} />}
+      {loose !== null && <ProjectAttachmentOverlay projectId={projectId} attachmentId={loose} />}
+      {handbook && <HandbookOverlay projectId={projectId} project={data} />}
+      {projectDocument && <ProjectDocumentOverlay projectId={projectId} project={data} />}
+      {sessionId !== undefined && <SessionLogOverlay projectId={projectId} sessionId={sessionId} />}
+    </>
+  );
+  return phone ? (
+    <PhoneProject projectId={projectId} project={data} overlaid={overlay !== null} goneTo={goneTo}>
+      {overlays}
+    </PhoneProject>
+  ) : (
+    <DeskProject projectId={projectId} project={data} overlay={overlay} goneTo={goneTo} toItem={toItem}>
+      {overlays}
+    </DeskProject>
+  );
+}
+
+interface DeskProjectProps {
+  projectId: string;
+  project: ProjectHeadOf | undefined;
+  /** What the overlay shows, by its address, or none. */
+  overlay: string | null;
+  goneTo: { item: string; block: string | null } | null;
+  /** The item, or its block, the address goes to, by its ids, or none. */
+  toItem: string | null;
+  /** The overlays the address opens. */
+  children: ReactNode;
+}
+
+/** Off a phone: the head over the timeline, or a draft's definition chat, and the side panel beside them. */
+function DeskProject({ projectId, project: data, overlay, goneTo, toItem, children }: DeskProjectProps) {
   const draft = data?.state === 'draft';
   const { panel, front, covered, show, close, toggle, overlayOnTop } = usePanel(projectId, draft, overlay, toItem);
   const wide = useWideWindow();
@@ -107,9 +146,11 @@ function Project() {
                 <ProjectHead
                   ref={setHead}
                   project={data}
-                  chat={{ shown: chatShown, toggle: () => (chatShown ? close() : discuss(null)) }}
-                  documents={{ shown: panelShown && panel.tab === 'documents', toggle: () => toggle('documents') }}
-                  draftTab={{ shown: panelShown && panel.tab === 'draft', toggle: () => toggle('draft') }}
+                  panel={{
+                    chat: { shown: chatShown, toggle: () => (chatShown ? close() : discuss(null)) },
+                    documents: { shown: panelShown && panel.tab === 'documents', toggle: () => toggle('documents') },
+                    draftTab: { shown: panelShown && panel.tab === 'draft', toggle: () => toggle('draft') },
+                  }}
                 />
               )}
               {data !== undefined &&
@@ -138,12 +179,7 @@ function Project() {
                 covered={covered}
               />
             )}
-            {overlaid !== null && <DocumentOverlay projectId={projectId} project={data} {...overlaid} />}
-            {attached !== null && <ItemAttachmentOverlay projectId={projectId} {...attached} />}
-            {loose !== null && <ProjectAttachmentOverlay projectId={projectId} attachmentId={loose} />}
-            {handbook && <HandbookOverlay projectId={projectId} project={data} />}
-            {projectDocument && <ProjectDocumentOverlay projectId={projectId} project={data} />}
-            {sessionId !== undefined && <SessionLogOverlay projectId={projectId} sessionId={sessionId} />}
+            {children}
           </div>
         </DraftBlockContext.Provider>
       </InChatContext.Provider>
