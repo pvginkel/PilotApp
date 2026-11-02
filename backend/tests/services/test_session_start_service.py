@@ -46,6 +46,7 @@ from app.models import (
     ProgressStep,
     Project,
     ProjectTransition,
+    StoreUpdate,
     Turn,
     UsageReading,
     User,
@@ -98,6 +99,7 @@ from app.services.session_start_service import (
     SessionStartService,
 )
 from app.services.start_gate import Held, WorkSlots, queued
+from app.services.store_update_service import stopped_by
 from app.services.supervisor import LoopHandle
 from app.services.timeline_service import work_status
 from app.services.turn_end_read_service import READ_JOB, TurnEndReadService
@@ -124,6 +126,7 @@ from tests.support.supervisor import (
     listening,
     wait_until,
 )
+from tests.support.working_on import AT, Camp
 
 REPO = "example/Example"
 SLUG = "camp"
@@ -8474,3 +8477,150 @@ class TestStopForUpdate:
 
         after = _read(session, run.id)
         assert (after.state_code, after.stopped_at) == (SessionState.RUNNING, None)
+
+
+@pytest.mark.usefixtures("person")
+class TestTakeOver:
+    """A person's Stop and take over of the Works that make a document
+    Pilot's, a job's among them (F28.9, F26.3; DB 294)."""
+
+    @pytest.fixture
+    def camp(self, container: ServiceContainer, session: DbSession) -> Camp:
+        return Camp(container, session)
+
+    def _pass(self, camp: Camp, state: SessionState) -> models.Session:
+        run = camp.worker()
+        camp.registered(run, "# Where?\n\n```question id=Q1\n```\n")
+        camp.ended(run)
+        return camp.job_after(run, state)
+
+    def test_a_running_job_is_stopped_by_the_person_its_turn_left_to_its_relay(
+        self, starts: SessionStartService, camp: Camp, person: User
+    ) -> None:
+        job = self._pass(camp, SessionState.RUNNING)
+        before = datetime.now(UTC)
+
+        starts.take_over(camp.session, [job.id], person)
+
+        assert job.state_code == SessionState.STOPPED
+        assert job.stopped_by_user_id == person.id
+        assert job.stopped_at is not None and job.stopped_at >= before
+        assert "_InterruptStart" in _callbacks()
+
+    def test_a_job_queued_at_the_gate_is_stopped_before_its_brief(
+        self, starts: SessionStartService, camp: Camp, person: User
+    ) -> None:
+        job = self._pass(camp, SessionState.HELD)
+
+        starts.take_over(camp.session, [job.id], person)
+
+        assert (job.state_code, job.stopped_by_user_id) == (
+            SessionState.STOPPED,
+            person.id,
+        )
+        assert "_InterruptStart" not in _callbacks()
+
+    def test_a_work_item_idle_on_its_nudge_is_stopped_its_nudge_owed_no_more(
+        self, starts: SessionStartService, camp: Camp, person: User
+    ) -> None:
+        run = camp.worker(SessionState.IDLE)
+        run.nudge_owed_at = run.turn_ended_at = AT
+        camp.session.flush()
+
+        starts.take_over(camp.session, [run.id], person)
+
+        assert (run.state_code, run.stopped_by_user_id, run.nudge_owed_at) == (
+            SessionState.STOPPED,
+            person.id,
+            None,
+        )
+        assert run.turn_ended_at == AT
+
+    def test_one_the_hard_stop_stopped_is_the_persons_stop_its_nudge_owed_no_more(
+        self, starts: SessionStartService, camp: Camp, person: User
+    ) -> None:
+        run = camp.worker()
+        camp.stopped(run, by=camp.pilot())
+        run.nudge_owed_at = AT
+        camp.session.flush()
+        before = datetime.now(UTC)
+
+        starts.take_over(camp.session, [run.id], person)
+
+        assert (run.state_code, run.stopped_by_user_id, run.nudge_owed_at) == (
+            SessionState.STOPPED,
+            person.id,
+            None,
+        )
+        assert run.stopped_at is not None and run.stopped_at >= before
+
+    def test_a_job_the_unlifted_update_stopped_is_one_its_lift_retries_no_more(
+        self, starts: SessionStartService, camp: Camp, person: User
+    ) -> None:
+        update = StoreUpdate(made_at=AT)
+        camp.session.add(update)
+        job = self._pass(camp, SessionState.RUNNING)
+        camp.stopped(job, by=camp.pilot())
+        job.stopped_at = datetime.now(UTC)
+        camp.session.flush()
+        stopped_for_it = select(models.Session.id).where(
+            stopped_by(update), models.Session.id == job.id
+        )
+        assert camp.session.scalar(stopped_for_it) == job.id
+
+        starts.take_over(camp.session, [job.id], person)
+
+        assert (job.state_code, job.stopped_by_user_id) == (
+            SessionState.STOPPED,
+            person.id,
+        )
+        assert camp.session.scalar(stopped_for_it) is None
+
+    def test_one_failed_at_the_quota_wall_stays_failed_its_nudge_owed_no_more(
+        self, starts: SessionStartService, camp: Camp, person: User
+    ) -> None:
+        job = self._pass(camp, SessionState.FAILED)
+        job.nudge_owed_at = AT
+        camp.session.flush()
+
+        starts.take_over(camp.session, [job.id], person)
+
+        assert (job.state_code, job.stopped_by_user_id, job.nudge_owed_at) == (
+            SessionState.FAILED,
+            None,
+            None,
+        )
+
+    def test_one_no_longer_in_flight_under_its_lock_is_left_as_it_is(
+        self, starts: SessionStartService, camp: Camp, person: User
+    ) -> None:
+        ended = camp.worker()
+        camp.ended(ended)
+        stopped = camp.worker()
+        camp.stopped(stopped)
+
+        starts.take_over(camp.session, [ended.id, stopped.id], person)
+
+        assert (ended.state_code, ended.stopped_at) == (SessionState.IDLE, None)
+        assert (stopped.stopped_at, stopped.stopped_by_user_id) == (AT, None)
+
+    def test_it_moves_each_item_and_its_state(
+        self,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        camp: Camp,
+        person: User,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        job = self._pass(camp, SessionState.FAILED)
+        job.nudge_owed_at = AT
+        run = camp.worker()
+        engine_events.clear()
+
+        with scoped_session(container) as db:
+            starts.take_over(db, [job.id, run.id], person)
+
+        moves = _moves(engine_events)
+        assert WorkMoved(camp.project.id, job.id) in moves
+        assert WorkMoved(camp.project.id, run.id) in moves
+        assert ProjectChanged(camp.project.id) in moves

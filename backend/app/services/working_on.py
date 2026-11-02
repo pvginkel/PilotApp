@@ -554,6 +554,51 @@ def pilots_work(
     return found
 
 
+def flying(db: Session, work_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
+    """Which of the Works `work_ids` are in flight (DB 294), as their rows
+    stand."""
+    rows = _Rows.new()
+    return set(
+        db.scalars(rows.select(rows.in_flight(), rows.work.id.in_(list(work_ids))))
+    )
+
+
+def holding_work(db: Session, document_id: uuid.UUID) -> list[uuid.UUID]:
+    """The Works in flight that make the Item `document_id` Pilot's, which
+    its Stop and take over stops (F28.9): the jobs of the pass over it, a
+    Retry's included, the clarification runs that ask its writer and the
+    jobs after their turns; and while every open Block is held, what of each
+    holding run is in flight, a Work of it or a job after one of their
+    turns. In id order. A document awaiting its read, or with its every
+    Block held by a run that waits on the person, has none."""
+    found: set[uuid.UUID] = set()
+    for states in (_passing, _asking, _after_reply):
+        found.update(
+            db.scalars(states(Item, _Rows.new()).where(Item.id == document_id))
+        )
+    if db.scalar(select(Item.id).where(Item.id == document_id, _all_held(Item))):
+        for work_id in {
+            hold.work_id for hold in holds(db, [document_id]).held.values()
+        }:
+            run = run_of(literal(work_id))
+            rows = _Rows.new()
+            found.update(
+                db.scalars(
+                    rows.select(
+                        rows.in_flight(),
+                        or_(
+                            rows.work.id.in_(run),
+                            and_(
+                                rows.work.trigger_code == WorkTrigger.WORKER_TURN_ENDED,
+                                rows.work.trigger_item_id.in_(run),
+                            ),
+                        ),
+                    )
+                )
+            )
+    return sorted(found)
+
+
 def handed_back_in(db: Session, run_id: uuid.UUID) -> list[tuple[uuid.UUID, str, str]]:
     """The Blocks whose standing naming names a Work of the run of the work
     item `run_id` and which that run no longer holds, a claim's `done`

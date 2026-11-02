@@ -72,7 +72,9 @@ sent afterwards. Finish and Archive stop every Session of the project so (F5.1,
 F128.1), and Reopen a finished project's chat (F5.5); a usage halt's hard stop
 every running work item, by Pilot, its nudge owed (F135.6; DB 269); and the
 store's update every job and Chat running or starting, by Pilot (F144.3; DB
-279, 280). Its Resume
+279, 280). A person stops a job only by Stop and take over on a document that
+is Pilot's (F28.9, F26.3), which also stops, by them, what the server would
+go on with from rest: a nudge owed, the lift's retry. Its Resume
 writes a server-own Turn, "continue", or the ended Turn's
 message while the Session has no conversation (R15's rule), and passes the gate
 as a start does (F67.2): `held`, or `starting`, its loop sending the Turn to
@@ -118,6 +120,7 @@ continuation's message, not
 import logging
 import time
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import partial
@@ -188,7 +191,7 @@ from app.services.store_update_service import unlifted
 from app.services.supervisor import LoopHandle, Supervisor
 from app.services.usage_halts import UsageHalts
 from app.services.work_status import work_moved
-from app.services.working_on import handed_back_in
+from app.services.working_on import flying, handed_back_in
 from app.services.write_back_service import WRITE_BACK_REFUSED
 from app.utils.after_commit import after_commit
 
@@ -994,6 +997,39 @@ class SessionStartService:
             )
         self._stop(db, session, person, datetime.now(UTC))
         return session
+
+    def take_over(
+        self, db: Session, work_ids: Collection[uuid.UUID], person: User
+    ) -> None:
+        """`person`'s Stop and take over of the Works `work_ids`, a job's
+        among them (F28.9, F26.3), in the caller's transaction, which holds
+        their project's row: each under its lock, taken in id order, while
+        it is still in flight (DB 294). One running, starting or held is
+        stopped as a Stop stops it (`_stop`). One the server would go on with
+        from rest, idle or stopped with its nudge owed, or a job the unlifted
+        Store Update stopped, is `stopped` by `person` now, its turn as it
+        ended; one failed at the quota wall stays `failed`. None is owed its
+        nudge afterwards, and the lift retries none: it retries Pilot's stops
+        alone (DB 280, 281)."""
+        records = self._records(db)
+        for work_id in sorted(work_ids):
+            records.lock_session(work_id)
+        at = datetime.now(UTC)
+        for work_id in sorted(flying(db, work_ids)):
+            session = db.get_one(AgentSession, work_id)
+            before = session.state_code
+            if before in STOPPABLE:
+                self._stop(db, session, person, at)
+            else:
+                if before in (SessionState.IDLE, SessionState.STOPPED):
+                    session.state_code = SessionState.STOPPED
+                    session.stopped_at = at
+                    session.stopped_by_user_id = person.id
+                self._moved(session, state=True)
+            session.nudge_owed_at = None
+            logger.info(
+                "Session %s taken over by %s, %s", work_id, person.handle, before
+            )
 
     def stop_chat(
         self, db: Session, session_id: uuid.UUID, person: User, operation: str

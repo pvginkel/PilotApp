@@ -1,8 +1,10 @@
 /**
  * An action of a registered document Pilot claimed (F21.6): open until its Done, Pilot's, its block
  * reading "Pilot does it" with the claim's note and a link to the work item the claim names, inline
- * and in the overlay, over a person's controls; the document's *Send answers* waits on it. A
- * person who does it meanwhile marks it Done as any action's Done, the claim gone.
+ * and in the overlay, over a person's controls; the document's *Send answers* waits on it. Once the
+ * work doing it is stopped, the action is the person's again, and their Done marks it done as any
+ * action's Done, the claim gone; while that work is in flight the server takes no Done on it (DB
+ * 295).
  */
 
 import { test, expect } from '../support/fixtures';
@@ -108,14 +110,15 @@ test.describe('A claimed action', () => {
     await expect(page).toHaveURL(addressOf(project, rotating));
   });
 
-  test('a person’s Done marks it done as any action’s, the claim gone, and the document’s answers can be sent', async ({
+  test('once the work doing it is stopped, a person’s Done marks it done as any action’s, the claim gone, and the document’s answers can be sent', async ({
     people,
     projects,
     controller,
     chats,
     timeline,
   }) => {
-    const { project, document } = await claimed({ people, projects, controller, chats });
+    const { project, document, rotating } = await claimed({ people, projects, controller, chats });
+    await projects.stop(rotating);
     await timeline.open(project);
 
     const item = timeline.item(document);

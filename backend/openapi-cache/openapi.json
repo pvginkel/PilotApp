@@ -10388,7 +10388,7 @@
     },
     "/api/items/{item_id}/blocks/{block_id}/answer": {
       "post": {
-        "description": "A one-ask item is done by its answer.\n\nReturns:     204: The answer is recorded     400: The body is not an answer     401: No one is signed in     403: The caller lacks the editor role     404: No item has the id, or it has no block of the id     409: The caller has not chosen a handle, the item is done, or the         block takes no such answer",
+        "description": "A one-ask item is done by its answer.\n\nReturns:     204: The answer is recorded     400: The body is not an answer     401: No one is signed in     403: The caller lacks the editor role     404: No item has the id, or it has no block of the id     409: The caller has not chosen a handle, the item is done, Pilot is         working on it or holds the block, or the block takes no such         answer",
         "operationId": "post__api_items_{item_id}_blocks_{block_id}_answer",
         "parameters": [
           {
@@ -10488,7 +10488,7 @@
     },
     "/api/items/{item_id}/blocks/{block_id}/done": {
       "post": {
-        "description": "A one-ask item is done by its action's Done.\n\nReturns:     204: The Done is recorded     400: The body is not a Done     401: No one is signed in     403: The caller lacks the editor role     404: No item has the id, or it has no block of the id     409: The caller has not chosen a handle, the item is done, or the         block is no action without options",
+        "description": "A one-ask item is done by its action's Done.\n\nReturns:     204: The Done is recorded     400: The body is not a Done     401: No one is signed in     403: The caller lacks the editor role     404: No item has the id, or it has no block of the id     409: The caller has not chosen a handle, the item is done, Pilot is         working on it or holds the action, or the block is no action         without options",
         "operationId": "post__api_items_{item_id}_blocks_{block_id}_done",
         "parameters": [
           {
@@ -10666,7 +10666,7 @@
     },
     "/api/items/{item_id}/done": {
       "post": {
-        "description": "Returns:     204: The document is done     401: No one is signed in     403: The caller lacks the editor role     404: No item has the id     409: The caller has not chosen a handle, the item is done or no         document, or a block has neither an answer nor a recommendation",
+        "description": "Returns:     204: The document is done     401: No one is signed in     403: The caller lacks the editor role     404: No item has the id     409: The caller has not chosen a handle, the item is done or no         document, Pilot is working on it or holds a block of it, or a         block has neither an answer nor a recommendation",
         "operationId": "post__api_items_{item_id}_done",
         "parameters": [
           {
@@ -10984,6 +10984,87 @@
           }
         ],
         "summary": "Mark a review Reviewed as the signed-in person, now.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/items/{item_id}/take-over": {
+      "post": {
+        "description": "Returns:     204: The document is the caller's     401: No one is signed in     403: The caller lacks the editor role     404: No item has the id, or it has no document     409: The caller has not chosen a handle; Pilot is not working on it;         it, or another document its run registered, awaits its read; or         nothing of the run holding its blocks is in flight, the run         waiting on an answer to one of its documents, or one of them         awaiting its read",
+        "operationId": "post__api_items_{item_id}_take-over",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Stop and take over a document Pilot is working on, as the signed-in person: what of Pilot's work holds it stops, by them, so that it is theirs at once, and so is every other document the same pass covers. That is the pass's job, its clarification run, the job after the writer's reply, or what of the run holding its blocks is in flight; one owed its nudge, or a job the store's update stopped, is not carried on afterwards. What it stops shows as any stopped work does, a job with Retry. A turn in flight is interrupted once the request commits.",
         "tags": [],
         "x-required-role": "editor"
       }

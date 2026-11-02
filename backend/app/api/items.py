@@ -1,9 +1,11 @@
 """What the signed-in person does to a timeline's items (F14, F17, F32.4):
 answer a block, mark an action Done, mark a document Done, a notice Read, a
-review Reviewed, and undo; and request a wait's firing (F27.3). Each is the record's own write; its refusals
-answer as the API's errors. A block is addressed under its item, by its
-local id (F30.7). And an item's document, read on its own as the overlay
-draws it (F28, F13.3)."""
+review Reviewed, and undo; and request a wait's firing (F27.3). Each is the
+record's own write; its refusals answer as the API's errors, a document Pilot
+is working on and a block it holds refusing an answer, Done or paste-back (DB
+295). A block is addressed under its item, by its local id (F30.7). Stop and
+take over hands a document Pilot is working on to the person (F28.9). And an
+item's document, read on its own as the overlay draws it (F28, F13.3)."""
 
 import uuid
 from typing import Any
@@ -79,8 +81,9 @@ def answer_block(
         401: No one is signed in
         403: The caller lacks the editor role
         404: No item has the id, or it has no block of the id
-        409: The caller has not chosen a handle, the item is done, or the
-            block takes no such answer
+        409: The caller has not chosen a handle, the item is done, Pilot is
+            working on it or holds the block, or the block takes no such
+            answer
     """
     body = AnswerRequestSchema.model_validate(request.get_json())
     item_service.answer(caller(), item_id, block_id, body.answer, body.note)
@@ -116,8 +119,9 @@ def mark_action_done(
         401: No one is signed in
         403: The caller lacks the editor role
         404: No item has the id, or it has no block of the id
-        409: The caller has not chosen a handle, the item is done, or the
-            block is no action without options
+        409: The caller has not chosen a handle, the item is done, Pilot is
+            working on it or holds the action, or the block is no action
+            without options
     """
     body = ActionDoneRequestSchema.model_validate(request.get_json())
     item_service.done_action(caller(), item_id, block_id, body.note)
@@ -150,7 +154,8 @@ def mark_document_done(
         403: The caller lacks the editor role
         404: No item has the id
         409: The caller has not chosen a handle, the item is done or no
-            document, or a block has neither an answer nor a recommendation
+            document, Pilot is working on it or holds a block of it, or a
+            block has neither an answer nor a recommendation
     """
     item_service.done(caller(), item_id)
     return "", 204
@@ -195,6 +200,37 @@ def mark_reviewed(
             review
     """
     item_service.reviewed(caller(), item_id)
+    return "", 204
+
+
+@items_bp.route("/<uuid:item_id>/take-over", methods=["POST"])
+@api.validate(resp=_MARK_RESPONSES)
+@inject
+def take_over(
+    item_id: uuid.UUID,
+    item_service: ItemService = Provide[ServiceContainer.item_service],
+) -> tuple[str, int]:
+    """Stop and take over a document Pilot is working on, as the signed-in
+    person: what of Pilot's work holds it stops, by them, so that it is
+    theirs at once, and so is every other document the same pass covers.
+    That is the pass's job, its clarification run, the job after the
+    writer's reply, or what of the run holding its blocks is in flight; one
+    owed its nudge, or a job the store's update stopped, is not carried on
+    afterwards. What it stops shows as any stopped work does, a job with
+    Retry. A turn in flight is interrupted once the request commits.
+
+    Returns:
+        204: The document is the caller's
+        401: No one is signed in
+        403: The caller lacks the editor role
+        404: No item has the id, or it has no document
+        409: The caller has not chosen a handle; Pilot is not working on it;
+            it, or another document its run registered, awaits its read; or
+            nothing of the run holding its blocks is in flight, the run
+            waiting on an answer to one of its documents, or one of them
+            awaiting its read
+    """
+    item_service.take_over(caller(), item_id)
     return "", 204
 
 

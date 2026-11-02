@@ -10,12 +10,23 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
+from app.engine.paths import tree_path
 from app.exceptions import InvalidOperationException, RecordNotFoundException
 from app.models import Document, Item, Project, ProjectTransition, User, WaitFiring
-from app.models.reference import FiringCause, ProjectState, TransitionKind
+from app.models.reference import FiringCause, ProjectState, SessionState, TransitionKind
 from app.schemas.testing_record import InventedProjectCreateSchema
 from app.services.auth_service import AuthContext
 from app.services.container import ServiceContainer
+from app.services.item_service import (
+    HOLDING_UNREAD,
+    NOT_PILOTS,
+    PILOTS_ITEM,
+    UNREAD,
+    WAITS_ON,
+)
+from app.services.timeline_service import waiting
+from app.services.working_on import holds
+from tests.support.working_on import Camp
 
 ADA = AuthContext(
     subject="subject-ada", email=None, name="Ada Example", roles={"editor"}
@@ -650,3 +661,289 @@ class TestItemServiceRequest:
             container.item_service().request(ADA, wait.id)
 
         assert refused.value.cause == "Pilot is checking"
+
+
+CLAIMED = """# The cut-over
+
+```action id=A1
+answer: Pilot does it
+by: agent
+at: 2026-11-02T09:00:00Z
+```
+
+```action id=A2
+```
+"""
+"""An action the pass claimed beside one that waits on the person."""
+
+CLAIMED_ALONE = """# The cut-over
+
+```action id=A1
+answer: Pilot does it
+by: agent
+at: 2026-11-02T09:00:00Z
+```
+"""
+
+PITCH = """# Where do we pitch?
+
+```question id=Q1
+```
+
+```decision id=D1
+options:
+  - Lake
+  - Hill
+```
+"""
+"""A question a research checks a fact for, beside a decision."""
+
+QUESTION = "# Which lake?\n\n```question id=Q1\n```\n"
+
+
+@pytest.fixture
+def camp(container: ServiceContainer, session: DbSession, person: User) -> Camp:
+    return Camp(container, session)
+
+
+def _passed(camp: Camp, text: str) -> Item:
+    """A document a worker registered and its pass went over."""
+    writer = camp.worker()
+    document = camp.registered(writer, text)
+    camp.ended(writer)
+    camp.ended(camp.job_after(writer))
+    return document
+
+
+def _claimed(camp: Camp, text: str = CLAIMED) -> tuple[Item, models.Session]:
+    """`text` registered, its pass over, and its action A1 claimed by a work
+    item running on a conversation of its own."""
+    document = _passed(camp, text)
+    doing = camp.worker(conversation="conversation-2")
+    camp.claim(document, "A1", doing)
+    return document, doing
+
+
+def _waits(camp: Camp, item: Item) -> bool:
+    return (
+        camp.session.scalar(select(Item.id).where(Item.id == item.id, waiting()))
+        is not None
+    )
+
+
+class TestItemServiceTakeOver:
+    """Stop and take over (F28.9, F26.3): what of Pilot's work holds the
+    document, in flight, stopped by the person, the document theirs at
+    once."""
+
+    def test_the_pass_is_stopped_and_every_document_it_covers_is_the_persons(
+        self, container: ServiceContainer, camp: Camp, person: User
+    ) -> None:
+        run = camp.worker()
+        pitch, lake = camp.registered(run, PITCH), camp.registered(run, QUESTION)
+        camp.ended(run)
+        job = camp.job_after(run)
+
+        container.item_service().take_over(ADA, pitch.id)
+
+        assert (job.state_code, job.stopped_by_user_id) == (
+            SessionState.STOPPED,
+            person.id,
+        )
+        assert camp.reading(pitch, lake) == {}
+        # A stopped job shows with Retry, and counts until retried.
+        assert _waits(camp, camp.session.get_one(Item, job.id))
+        assert _waits(camp, pitch) and _waits(camp, lake)
+
+    def test_the_clarification_run_asking_its_writer_is_stopped(
+        self, container: ServiceContainer, camp: Camp, person: User
+    ) -> None:
+        run = camp.worker(conversation="conversation-1")
+        pitch = camp.registered(run, PITCH)
+        camp.ended(run)
+        pass_ = camp.job_after(run)
+        camp.ask_writer(pass_, pitch, "Q1")
+        camp.ended(pass_)
+        clarifying = camp.clarification(pass_, run)
+
+        container.item_service().take_over(ADA, pitch.id)
+
+        assert (clarifying.state_code, clarifying.stopped_by_user_id) == (
+            SessionState.STOPPED,
+            person.id,
+        )
+        assert camp.of(pitch) is None
+
+    def test_the_holding_runs_work_item_is_stopped_and_its_claim_handed_back(
+        self, container: ServiceContainer, camp: Camp, person: User
+    ) -> None:
+        cut_over, doing = _claimed(camp, CLAIMED_ALONE)
+        items = container.item_service()
+
+        items.take_over(ADA, cut_over.id)
+
+        assert (doing.state_code, doing.stopped_by_user_id) == (
+            SessionState.STOPPED,
+            person.id,
+        )
+        assert camp.of(cut_over) is None
+        assert holds(camp.session, [cut_over.id]).undone == {
+            camp.block(cut_over, "A1").id
+        }
+        items.done_action(ADA, cut_over.id, "A1", "Done by hand.")
+        assert _block(camp.session, cut_over, "A1").done is not None
+
+    def test_the_job_after_the_holding_runs_turn_is_stopped(
+        self, container: ServiceContainer, camp: Camp, person: User
+    ) -> None:
+        cut_over, doing = _claimed(camp, CLAIMED_ALONE)
+        camp.ended(doing)
+        job = camp.job_after(doing)
+
+        container.item_service().take_over(ADA, cut_over.id)
+
+        assert (job.state_code, job.stopped_by_user_id) == (
+            SessionState.STOPPED,
+            person.id,
+        )
+        assert camp.of(cut_over) is None
+
+    def test_a_document_pilot_is_not_working_on_is_refused(
+        self, container: ServiceContainer, camp: Camp
+    ) -> None:
+        pitch = _passed(camp, PITCH)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.item_service().take_over(ADA, pitch.id)
+
+        assert refused.value.cause == NOT_PILOTS
+
+    def test_a_document_of_a_run_awaiting_its_read_is_refused(
+        self, container: ServiceContainer, camp: Camp
+    ) -> None:
+        run = camp.worker()
+        pitch = camp.registered(run, PITCH)
+        camp.registered(run, read=False)
+        camp.ended(run)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.item_service().take_over(ADA, pitch.id)
+
+        assert refused.value.cause == UNREAD
+
+    def test_one_whose_holding_run_waits_on_the_person_is_refused_naming_its_document(
+        self, container: ServiceContainer, camp: Camp
+    ) -> None:
+        cut_over, doing = _claimed(camp, CLAIMED_ALONE)
+        asked = camp.registered(doing, QUESTION)
+        camp.ended(doing)
+        camp.ended(camp.job_after(doing))
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.item_service().take_over(ADA, cut_over.id)
+
+        path = tree_path(camp.project, camp.session.get_one(Document, asked.id).path)
+        assert refused.value.cause == WAITS_ON.format(document=path)
+        assert camp.of(cut_over) is not None
+
+    def test_one_whose_holding_run_registered_a_document_not_read_yet_is_refused(
+        self, container: ServiceContainer, camp: Camp
+    ) -> None:
+        cut_over, doing = _claimed(camp, CLAIMED_ALONE)
+        camp.registered(doing, read=False)
+        camp.ended(doing)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.item_service().take_over(ADA, cut_over.id)
+
+        assert refused.value.cause == HOLDING_UNREAD
+
+    def test_an_item_with_no_document_is_not_found(
+        self, container: ServiceContainer, camp: Camp
+    ) -> None:
+        run = camp.worker()
+
+        with pytest.raises(RecordNotFoundException):
+            container.item_service().take_over(ADA, run.id)
+
+    def test_an_unknown_item_is_not_found(self, container: ServiceContainer) -> None:
+        with pytest.raises(RecordNotFoundException):
+            container.item_service().take_over(ADA, uuid.uuid4())
+
+    def test_a_caller_with_no_handle_is_refused(
+        self, container: ServiceContainer, camp: Camp
+    ) -> None:
+        run = camp.worker()
+        pitch = camp.registered(run, PITCH)
+        camp.ended(run)
+        camp.job_after(run)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.item_service().take_over(NEWCOMER, pitch.id)
+
+        assert refused.value.cause == NO_HANDLE
+
+
+class TestItemServiceWhilePilotWorks:
+    """A document that is Pilot's and a held block take no answer, Done or
+    paste-back from the app's controls (DB 295)."""
+
+    def test_a_document_under_its_pass_takes_no_answer_done_or_paste_back(
+        self, container: ServiceContainer, camp: Camp
+    ) -> None:
+        run = camp.worker()
+        pitch = camp.registered(run, PITCH)
+        camp.ended(run)
+        camp.job_after(run)
+        items = container.item_service()
+
+        for act in (
+            lambda: items.answer(ADA, pitch.id, "D1", "Lake", None),
+            lambda: items.done(ADA, pitch.id),
+        ):
+            with pytest.raises(InvalidOperationException) as refused:
+                act()
+            assert refused.value.cause == PILOTS_ITEM
+
+    def test_a_held_block_takes_no_answer_its_neighbour_does(
+        self, container: ServiceContainer, camp: Camp
+    ) -> None:
+        pitch = _passed(camp, PITCH)
+        camp.research(pitch, "Q1", camp.worker(conversation="conversation-2"))
+        items = container.item_service()
+
+        with pytest.raises(InvalidOperationException) as refused:
+            items.answer(ADA, pitch.id, "Q1", "The lake", None)
+
+        assert str(refused.value) == (
+            f"Cannot answer block Q1 of item {pitch.id} because Pilot is working"
+            " on block Q1"
+        )
+        items.answer(ADA, pitch.id, "D1", "Lake", None)
+        assert _block(camp.session, pitch, "D1").answer == "Lake"
+
+    def test_a_held_action_takes_no_done_until_its_work_fails(
+        self, container: ServiceContainer, camp: Camp
+    ) -> None:
+        cut_over, doing = _claimed(camp)
+        items = container.item_service()
+
+        with pytest.raises(InvalidOperationException) as refused:
+            items.done_action(ADA, cut_over.id, "A1", "Rotated by hand.")
+        assert refused.value.cause == "Pilot is working on block A1"
+
+        doing.state_code = SessionState.FAILED
+        camp.session.flush()
+        items.done_action(ADA, cut_over.id, "A1", "Rotated by hand.")
+
+        assert _block(camp.session, cut_over, "A1").note == "Rotated by hand."
+
+    def test_a_document_with_a_held_block_takes_no_done(
+        self, container: ServiceContainer, camp: Camp
+    ) -> None:
+        cut_over, _ = _claimed(camp)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.item_service().done(ADA, cut_over.id)
+
+        assert refused.value.cause == "Pilot is working on block A1"

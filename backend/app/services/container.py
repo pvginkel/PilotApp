@@ -699,6 +699,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         record_service=record_service,
         project_service=project_service,
         wait_service=wait_service,
+        session_start_service=session_start_service,
     )
     # The waits' timer and the batcher (design 2 §8.2); each registers on the
     # supervisor when built, before STARTUP.

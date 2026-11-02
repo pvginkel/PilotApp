@@ -5,7 +5,8 @@
  * where it kept the headings asked for and whole where it did not; each asked block's head says so,
  * and the document's line on the timeline stays. The run's continuation, placed while the
  * clarification run runs on the same conversation, waits for it: "Waiting for the run before it"
- * (DB 183).
+ * (DB 183). While Pilot asks the writer the document takes nothing from the app's controls (DB
+ * 295), so its answers come through the project's chat, and Pilot's Done closes it.
  */
 
 import { test, expect } from '../support/fixtures';
@@ -73,7 +74,7 @@ async function written({ people, projects, controller, chats }: Fixtures, files:
   await controller.finish(environment, 'claude-1');
   for (const document of documents) await expect.poll(async () => (await projects.item(project, document)).awaiting_read).toBe(false);
   await passed();
-  return { project, work, environment, documents };
+  return { project, work, environment, documents, handle: me.handle! };
 }
 
 test.describe('Pilot asking the writer', () => {
@@ -132,7 +133,7 @@ test.describe('Pilot asking the writer', () => {
     await expect(overlay.blockAt('D2').writerAsked).toHaveCount(0);
   });
 
-  test('holds the questions alone until the clarification run’s turn ends, the reply joining them live; the run’s continuation, placed meanwhile, reads “Waiting for the run before it” and starts after it', async ({
+  test('holds the questions alone until the clarification run’s turn ends, the reply joining them live; the run’s continuation, placed meanwhile through the chat, reads “Waiting for the run before it” and starts after it', async ({
     people,
     projects,
     controller,
@@ -146,6 +147,7 @@ test.describe('Pilot asking the writer', () => {
       work,
       environment,
       documents: [kit],
+      handle,
     } = await written({ people, projects, controller, chats }, [[KIT_PATH, KIT]]);
     await projects.askWriter(kit, [{ block: 'D2', question: STOVE }]);
     const clarifying = await projects.clarify(kit);
@@ -159,15 +161,16 @@ test.describe('Pilot asking the writer', () => {
     await expect(section.replies).toHaveCount(0);
     await expect(timeline.item(clarifying).title).toHaveText('Clarify kit.md');
 
+    await chats.start(project, 'Answer the kit for me.');
     for (const [block, answer] of [
       ['D1', 'Dome'],
       ['D2', 'Gas'],
       ['D3', 'Two'],
       ['D4', 'Rope'],
     ]) {
-      await projects.answer(kit, block, answer);
+      await chats.answer(project, `${kit}/${block}`, answer, handle);
     }
-    await projects.send(kit);
+    await projects.doneByPilot(kit);
     // The run's continuation: its other work item but the clarification run, Pilot's own jobs aside.
     const others = async () =>
       (await projects.timeline(project)).items.filter(

@@ -31,7 +31,9 @@ from app.services.timeline_service import Badge
 from app.services.working_on import (
     Doing,
     PilotsWork,
+    flying,
     handed_back_in,
+    holding_work,
     holds,
 )
 from app.utils.after_commit import clear_after_commit_callbacks
@@ -621,3 +623,101 @@ class TestWhatWaits:
             ProjectStatus.WAITING_ON_YOU,
             NotificationPriority.DEFAULT,
         )
+
+
+class TestFlying:
+    def test_it_finds_the_works_in_flight_among_those_named(
+        self, camp: Camp, person: User
+    ) -> None:
+        running = camp.worker()
+        owed = camp.worker()
+        camp.stopped(owed, by=camp.pilot())
+        owed.nudge_owed_at = AT
+        stopped = camp.worker()
+        camp.stopped(stopped, by=person)
+        done = camp.worker()
+        camp.ended(done)
+
+        assert flying(camp.session, [running.id, owed.id, stopped.id, done.id]) == {
+            running.id,
+            owed.id,
+        }
+
+
+class TestHoldingWork:
+    """What Stop and take over stops on a document that is Pilot's (F28.9)."""
+
+    def test_the_pass_over_it_a_retry_included(self, camp: Camp) -> None:
+        run = camp.worker()
+        pitch = camp.registered(run, QUESTION)
+        camp.ended(run)
+        job = camp.job_after(run)
+        job.state_code = SessionState.FAILED
+        retry = camp.retried(job, SessionState.HELD)
+
+        assert holding_work(camp.session, pitch.id) == [retry.id]
+
+    def test_the_clarification_run_asking_its_writer_then_the_job_after_its_reply(
+        self, camp: Camp
+    ) -> None:
+        run = camp.worker(conversation="conversation-1")
+        pitch = camp.registered(run, QUESTION)
+        camp.ended(run)
+        pass_ = camp.job_after(run)
+        camp.ask_writer(pass_, pitch, "Q1")
+        camp.ended(pass_)
+        clarifying = camp.clarification(pass_, run)
+
+        assert holding_work(camp.session, pitch.id) == [clarifying.id]
+
+        camp.ended(clarifying)
+        after = camp.job_after(clarifying)
+
+        assert holding_work(camp.session, pitch.id) == [after.id]
+
+    def test_what_of_the_run_holding_every_open_block_is_in_flight(
+        self, camp: Camp
+    ) -> None:
+        writer = camp.worker()
+        cut_over = camp.registered(writer, CLAIMED)
+        camp.ended(writer)
+        camp.ended(camp.job_after(writer))
+        doing = camp.worker(conversation="conversation-2")
+        camp.claim(cut_over, "A1", doing)
+
+        assert holding_work(camp.session, cut_over.id) == [doing.id]
+
+        camp.ended(doing)
+        job = camp.job_after(doing)
+
+        assert holding_work(camp.session, cut_over.id) == [job.id]
+
+    def test_none_while_the_holding_run_waits_on_the_person(self, camp: Camp) -> None:
+        writer = camp.worker()
+        cut_over = camp.registered(writer, CLAIMED)
+        camp.ended(writer)
+        camp.ended(camp.job_after(writer))
+        doing = camp.worker(conversation="conversation-2")
+        camp.claim(cut_over, "A1", doing)
+        camp.registered(doing, QUESTION)
+        camp.ended(doing)
+        camp.ended(camp.job_after(doing))
+
+        assert camp.of(cut_over) is not None
+        assert holding_work(camp.session, cut_over.id) == []
+
+    def test_none_for_a_held_block_beside_an_open_one(self, camp: Camp) -> None:
+        writer = camp.worker()
+        cut_over = camp.registered(writer, CLAIMED_AND_OPEN)
+        camp.ended(writer)
+        camp.ended(camp.job_after(writer))
+        camp.claim(cut_over, "A1", camp.worker(conversation="conversation-2"))
+
+        assert holding_work(camp.session, cut_over.id) == []
+
+    def test_none_while_it_awaits_its_read(self, camp: Camp) -> None:
+        run = camp.worker()
+        pitch = camp.registered(run, read=False)
+        camp.ended(run)
+
+        assert holding_work(camp.session, pitch.id) == []

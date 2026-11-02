@@ -1,8 +1,9 @@
 """/api/items: what the signed-in person does to a timeline's items — answer
 a block, mark an action Done, mark a document Done, a notice Read, a review
-Reviewed, and undo (F14, F17, F32.4); and the live event each sends (F80.2).
-And an item's document read on its own (F28, F13.3), and a person's request
-of a wait (F27.3)."""
+Reviewed, and undo (F14, F17, F32.4), none of it on a document Pilot is
+working on or a block it holds (DB 295); Stop and take over (F28.9); and the
+live event each sends (F80.2). And an item's document read on its own (F28,
+F13.3), and a person's request of a wait (F27.3)."""
 
 import json
 import uuid
@@ -25,6 +26,7 @@ from app.services.container import ServiceContainer
 from app.services.project_event_service import ProjectEventService
 from app.services.sse_connection_manager import SSEConnection
 from app.utils.after_commit import clear_after_commit_callbacks
+from tests.support.working_on import Camp
 
 ITEMS = "/api/items"
 
@@ -1169,7 +1171,130 @@ class TestRequest:
 
         assert client.post(f"{ITEMS}/{wait.id}/request").status_code == 403
 
+
+PITCH = """# Where do we pitch?
+
+```question id=Q1
+```
+
+```decision id=D1
+options:
+  - Lake
+  - Hill
+```
+"""
+
+
+@pytest.fixture
+def working(container: ServiceContainer, session: Session, person: User) -> Camp:
+    """A project's record of Pilot's work, ada a member."""
+    return Camp(container, session)
+
+
+def _under_its_pass(working: Camp) -> tuple[Item, models.Session]:
+    """A document a worker registered, read, and its pass running."""
+    run = working.worker()
+    pitch = working.registered(run, PITCH)
+    working.ended(run)
+    return pitch, working.job_after(run)
+
+
+class TestTakeOver:
+    def test_it_stops_the_pass_and_the_document_is_the_callers(
+        self,
+        client: FlaskClient,
+        working: Camp,
+        person: User,
+        second_browser: SSEConnection,
+    ) -> None:
+        pitch, job = _under_its_pass(working)
+        _sign_in(client)
+        clear_after_commit_callbacks()
+        _heard(second_browser)
+
+        response = client.post(f"{ITEMS}/{pitch.id}/take-over")
+
+        assert response.status_code == 204
+        assert response.data == b""
+        working.session.refresh(job)
+        assert (job.state_code, job.stopped_by_user_id) == (
+            SessionState.STOPPED,
+            person.id,
+        )
+        assert _entry(client, working.project, pitch)["pilots_work"] is None
+        assert {
+            "type": "project_changed",
+            "payload": {"project_id": str(working.project.id)},
+        } in _heard(second_browser)
+
+    def test_a_document_pilot_is_not_working_on_is_refused_with_why(
+        self, client: FlaskClient, working: Camp
+    ) -> None:
+        pitch, job = _under_its_pass(working)
+        working.ended(job)
+        _sign_in(client)
+
+        response = client.post(f"{ITEMS}/{pitch.id}/take-over")
+
+        assert response.status_code == 409
+        assert _error(response) == (
+            f"Cannot stop and take over item {pitch.id} because Pilot is not"
+            " working on it"
+        )
+
+    def test_an_unknown_item_is_not_found(self, client: FlaskClient) -> None:
+        _sign_in(client)
+
+        response = client.post(f"{ITEMS}/{uuid.uuid4()}/take-over")
+
+        assert response.status_code == 404
+
+    def test_without_the_editor_role_it_is_forbidden(
+        self, client: FlaskClient, working: Camp
+    ) -> None:
+        pitch, job = _under_its_pass(working)
+        _sign_in(client, roles=())
+
+        assert client.post(f"{ITEMS}/{pitch.id}/take-over").status_code == 403
+        assert job.state_code == SessionState.RUNNING
+
     def test_without_a_token_it_is_unauthenticated(
         self, oidc_client: FlaskClient
     ) -> None:
         assert oidc_client.post(f"{ITEMS}/{uuid.uuid4()}/request").status_code == 401
+        response = oidc_client.post(f"{ITEMS}/{uuid.uuid4()}/take-over")
+
+        assert response.status_code == 401
+
+
+class TestWhilePilotWorks:
+    def test_an_answer_on_a_document_under_its_pass_is_refused_with_why(
+        self, client: FlaskClient, working: Camp
+    ) -> None:
+        pitch, _ = _under_its_pass(working)
+        _sign_in(client)
+
+        response = client.post(
+            f"{ITEMS}/{pitch.id}/blocks/D1/answer", json={"answer": "Lake"}
+        )
+
+        assert response.status_code == 409
+        assert _error(response) == (
+            f"Cannot answer block D1 of item {pitch.id} because Pilot is working"
+            " on the item"
+        )
+
+    def test_an_answer_on_a_held_block_is_refused_with_why(
+        self, client: FlaskClient, working: Camp
+    ) -> None:
+        pitch, job = _under_its_pass(working)
+        working.ended(job)
+        working.research(pitch, "Q1", working.worker(conversation="conversation-2"))
+        _sign_in(client)
+
+        response = client.post(
+            f"{ITEMS}/{pitch.id}/blocks/Q1/answer", json={"answer": "The lake"}
+        )
+
+        assert response.status_code == 409
+        assert _error(response).endswith("because Pilot is working on block Q1")
