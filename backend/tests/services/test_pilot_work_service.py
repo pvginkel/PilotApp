@@ -2,7 +2,8 @@
 `register_document` (TD §4.5, F84, F85.1, ruling D1) and `attach_file`
 (F85.2, F36.1), each call's Effects (R18, F41), against the fake controller,
 and `set_progress` and `set_progress_step`, the work item's steps (F85.3,
-F85.4, F145.1; DB 285 to 289)."""
+F85.4, F145.1; DB 285 to 289), each change moving its status alone
+(F145.4)."""
 
 import uuid
 from datetime import UTC, datetime
@@ -18,6 +19,7 @@ from sqlalchemy.orm import Session as DbSession
 from app import models
 from app.database import scoped_session
 from app.engine.attachments import MAX_CALL_FILES, MAX_CALL_SIZE
+from app.engine.bus import EngineEvent, WorkMoved
 from app.exceptions import (
     AuthenticationException,
     AuthorizationException,
@@ -57,6 +59,7 @@ from app.services.controller_client import (
 from app.services.pilot_server import token_hash
 from app.services.pilot_work_service import Worker
 from app.services.session_record_service import read_records
+from app.utils.after_commit import clear_after_commit_callbacks
 from tests.support.fake_controller import ServedFakeController
 from tests.support.locks import in_thread, lock_waits
 from tests.support.supervisor import wait_until
@@ -1435,6 +1438,97 @@ class TestPilotWorkServiceProgressRecordsNoEffect:
 
         assert _effect_records(session, run) == []
         assert _effects(session) == []
+
+
+class TestPilotWorkServiceProgressMovesTheWork:
+    """A call that changes the list tells the browsers once it commits, the
+    work item's status alone, not the project's tab or head (F145.4)."""
+
+    def test_each_change_moves_the_work_items_status_alone(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        run = _session(session, container, project, environment)
+        clear_after_commit_callbacks()
+        pilot_work = container.pilot_work_service()
+        changes = [
+            lambda: pilot_work.set_progress(
+                _worker(run), [_step("test", "Test"), _step("docs", "Docs")]
+            ),
+            lambda: pilot_work.set_progress(
+                _worker(run), [_step("test", "Test, again"), _step("docs", "Docs")]
+            ),
+            lambda: pilot_work.set_progress(
+                _worker(run), [_step("docs", "Docs"), _step("test", "Test, again")]
+            ),
+            lambda: pilot_work.set_progress(
+                _worker(run),
+                [_step("docs", "Docs", ACTIVE), _step("test", "Test, again")],
+            ),
+            lambda: pilot_work.set_progress_step(_worker(run), "docs", DONE),
+            lambda: pilot_work.set_progress(_worker(run), [_step("docs", "Docs")]),
+            lambda: pilot_work.set_progress(_worker(run), []),
+        ]
+        moved = []
+
+        for change in changes:
+            engine_events.clear()
+            with scoped_session(container):
+                change()
+            moved.append(list(engine_events))
+
+        assert moved == [[WorkMoved(project.id, run.id)]] * len(changes)
+
+    def test_a_call_that_changes_nothing_moves_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        run = _session(session, container, project, environment)
+        pilot_work = container.pilot_work_service()
+        with scoped_session(container):
+            pilot_work.set_progress(_worker(run), [])
+        listed = [_step("test", "Test", ACTIVE), _step("docs", "Docs")]
+        with scoped_session(container):
+            pilot_work.set_progress(_worker(run), listed)
+        engine_events.clear()
+
+        with scoped_session(container):
+            pilot_work.set_progress(_worker(run), listed)
+            pilot_work.set_progress(
+                _worker(run), [_step("test", "Test"), _step("docs", "Docs")]
+            )
+            pilot_work.set_progress_step(_worker(run), "test", ACTIVE)
+
+        assert engine_events == []
+
+    def test_a_refused_call_moves_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        run = _session(session, container, project, environment)
+        clear_after_commit_callbacks()
+        pilot_work = container.pilot_work_service()
+
+        with pytest.raises(InvalidOperationException):
+            pilot_work.set_progress(_worker(run), [_step("test"), _step("test")])
+        with pytest.raises(RecordNotFoundException):
+            pilot_work.set_progress_step(_worker(run), "docs", DONE)
+        with scoped_session(container):
+            pass
+
+        assert engine_events == []
 
 
 def _committed_work(app: Flask) -> Worker:

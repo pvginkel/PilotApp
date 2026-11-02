@@ -2,7 +2,8 @@
 Session was created with resolved to the Session, `register_document`
 (ruling D1) and `attach_file`, each call that changed the record writing its
 Effects (F41), and `set_progress` and `set_progress_step`, its work item's
-steps (F145), which write none."""
+steps (F145), which write none, a change of the steps moving the work item's
+status alone (F145.4)."""
 
 import uuid
 from collections.abc import Callable, Sequence
@@ -20,6 +21,7 @@ from app.engine.attachments import (
     Copy,
     copied,
 )
+from app.engine.bus import EngineBus
 from app.engine.documents import DocumentService, Registration, listed
 from app.engine.ingest import IngestService
 from app.exceptions import (
@@ -38,6 +40,7 @@ from app.services.controller_client import (
 )
 from app.services.effect_service import Change, EffectLine, EffectService
 from app.services.pilot_server import bearer_session, no_turn
+from app.services.work_status import work_moved
 
 REGISTERED = "Registered"
 ATTACHED = "Attached"
@@ -76,6 +79,7 @@ class PilotWorkService:
         ingest_service: IngestService,
         attach_service: AttachService,
         effect_service: EffectService,
+        engine_bus: EngineBus,
     ) -> None:
         self.db = db
         self.controller_client = controller_client
@@ -83,6 +87,7 @@ class PilotWorkService:
         self.ingest_service = ingest_service
         self.attach_service = attach_service
         self.effect_service = effect_service
+        self.engine_bus = engine_bus
 
     def admit(self, authorization: str | None) -> Worker:
         """The work item's Session whose bearer `authorization` carries,
@@ -232,7 +237,8 @@ class PilotWorkService:
         stamps and, where its step gives no state, its state; a new code
         starts `pending`, or in the state its step gives; a code left out
         goes, and no steps remove the list. Each change of a state is stamped
-        by the server's clock (DB 287). No Effect is recorded (DB 289).
+        by the server's clock (DB 287). No Effect is recorded (DB 289); a
+        call that changed the list moves the work item's status (`work_moved`).
 
         Returns:
             The list as it stands, in order.
@@ -250,9 +256,11 @@ class PilotWorkService:
                     operation, f"code {given.code} is repeated"
                 )
             codes.add(given.code)
-        self._holding_its_turn(worker)
+        session = self._holding_its_turn(worker)
         at = datetime.now(UTC)
-        standing = {step.code: step for step in self._steps(worker)}
+        before = self._steps(worker)
+        shown = _shown(before)
+        standing = {step.code: step for step in before}
         for position, given in enumerate(steps, start=1):
             step = standing.pop(given.code, None)
             if step is None:
@@ -269,14 +277,18 @@ class PilotWorkService:
         for left_out in standing.values():
             self.db.delete(left_out)
         self.db.flush()
-        return self._steps(worker)
+        after = self._steps(worker)
+        if _shown(after) != shown:
+            work_moved(self.engine_bus, session)
+        return after
 
     def set_progress_step(
         self, worker: Worker, code: str, state: ProgressState
     ) -> list[ProgressStep]:
         """The step `code` of the worker's own work item's list moved to
         `state`, stamped by the server's clock (F85.4, DB 287); every step
-        keeps its place (DB 285). No Effect is recorded (DB 289).
+        keeps its place (DB 285). No Effect is recorded (DB 289); a step
+        that moved moves the work item's status (`work_moved`).
 
         Returns:
             The list as it stands, in order.
@@ -286,19 +298,20 @@ class PilotWorkService:
             AuthorizationException: the worker's Session has no turn running
                 once its row is held, nothing changed.
         """
-        self._holding_its_turn(worker)
+        session = self._holding_its_turn(worker)
         step = self.db.get(
             ProgressStep, (worker.work_item_id, code), populate_existing=True
         )
         if step is None:
             raise RecordNotFoundException("Progress step", code)
-        _move(step, state, datetime.now(UTC))
+        if _move(step, state, datetime.now(UTC)):
+            work_moved(self.engine_bus, session)
         self.db.flush()
         return self._steps(worker)
 
-    def _holding_its_turn(self, worker: Worker) -> None:
-        """Hold the worker's Session's row until the transaction ends, read
-        as the lock found it, and refuse the call unless its turn still runs.
+    def _holding_its_turn(self, worker: Worker) -> AgentSession:
+        """The worker's Session, its row held until the transaction ends,
+        read as the lock found it; the call refused unless its turn still runs.
         Every change of the Session's state takes the row, so a call that
         waited on one reads its outcome; and two calls on the Work's list are
         served one after the other, the second reading the list the first
@@ -315,6 +328,7 @@ class PilotWorkService:
         )
         if session.state_code != SessionState.RUNNING:
             raise AuthorizationException(no_turn(Surface.WORK, session.id))
+        return session
 
     def _steps(self, worker: Worker) -> list[ProgressStep]:
         """The worker's own work item's list of steps, in order."""
@@ -328,17 +342,23 @@ class PilotWorkService:
         )
 
 
-def _move(step: ProgressStep, state: ProgressState, at: datetime) -> None:
+def _move(step: ProgressStep, state: ProgressState, at: datetime) -> bool:
     """`step` moved to `state` at `at` (DB 287): its start written when it
     first goes `active` or `done`, never changed after; its end written when
     it goes `done`, cleared when it leaves it. A step already in `state` is
-    left as it is."""
+    left as it is, and answers False."""
     if step.state_code == state:
-        return
+        return False
     if state is not ProgressState.PENDING and step.started_at is None:
         step.started_at = at
     step.ended_at = at if state is ProgressState.DONE else None
     step.state_code = state
+    return True
+
+
+def _shown(steps: Sequence[ProgressStep]) -> list[tuple[str, str, ProgressState]]:
+    """What the work item's status shows of its steps, in order."""
+    return [(step.code, step.label, step.state_code) for step in steps]
 
 
 def material(

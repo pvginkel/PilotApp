@@ -4,7 +4,7 @@ UI cannot make (TEST-6), on every stage but prd, behind the API's sign-in
 saves of the project's draft and handbook, Pilot's Done, a work item placed by
 repository, started in an environment of Pilot's own the stage's own
 controller creates, its worker's registrations and attachments with their
-effects, a pre-ruling pass's questions to a registered document's
+effects and the list of steps it publishes, a pre-ruling pass's questions to a registered document's
 writer, and the store's update and its lift, as `update-store` makes and asks
 them."""
 
@@ -32,6 +32,7 @@ from app.models import (
     Environment,
     Item,
     ItemAttachment,
+    ProgressStep,
     Project,
     StoreUpdate,
     Turn,
@@ -39,7 +40,13 @@ from app.models import (
     Work,
     WriterQuestion,
 )
-from app.models.reference import ProjectState, SessionState, VersionCause, WorkTrigger
+from app.models.reference import (
+    ProgressState,
+    ProjectState,
+    SessionState,
+    VersionCause,
+    WorkTrigger,
+)
 from app.schemas.testing_record import OPENING_WORDS
 from app.services.chat_close_service import ChatCloseService
 from app.services.container import ServiceContainer
@@ -109,6 +116,10 @@ def _work_path(project_id: uuid.UUID | str) -> str:
 
 def _registrations_path(item_id: uuid.UUID | str) -> str:
     return f"/api/testing/items/{item_id}/registrations"
+
+
+def _progress_path(item_id: uuid.UUID | str) -> str:
+    return f"/api/testing/items/{item_id}/progress"
 
 
 def _worker_attachments_path(item_id: uuid.UUID | str) -> str:
@@ -1702,6 +1713,7 @@ ENDPOINTS = [
     (_work_path(NO_ROW), WORK),
     (_registrations_path(NO_ROW), {"path": "/work/Camp/notes.md"}),
     (_worker_attachments_path(NO_ROW), {"path": "/work/Camp/notes.md"}),
+    (_progress_path(NO_ROW), {"steps": []}),
     (
         _writer_questions_path(NO_ROW),
         {"questions": [{"block": "Q1", "question": "Which?"}]},
@@ -1988,6 +2000,183 @@ class TestCreateWorkerAttachment:
 
 
 QUESTIONED = "```question id=Q1\n```\n\n```question id=Q2\n```\n"
+
+
+@pytest.mark.usefixtures("person")
+class TestCreateProgress:
+    @pytest.fixture
+    def work_item(
+        self,
+        session: Session,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> models.Session:
+        """A work item's Session, its turn running."""
+        run = models.Session(
+            project_id=project.id,
+            environment_id=environment.id,
+            kind_code="work",
+            cwd="/work/Camp",
+            token_hash="2" * 64,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(run)
+        session.flush()
+        container.record_service().place_work(
+            project, run, "Building the camp", repo=WORK_REPO
+        )
+        return run
+
+    def test_it_replaces_the_list_as_the_worker_does_and_answers_it(
+        self, client: FlaskClient, session: Session, work_item: models.Session
+    ) -> None:
+        published = client.post(
+            _progress_path(work_item.id),
+            json={
+                "steps": [
+                    {"code": "P1.code", "label": "P1 · code", "state": "done"},
+                    {"code": "test", "label": "Test", "state": "active"},
+                ]
+            },
+        )
+
+        response = client.post(
+            _progress_path(work_item.id),
+            json={
+                "steps": [
+                    {"code": "P1.code", "label": "P1 · code"},
+                    {"code": "test", "label": "Test"},
+                    {"code": "docs", "label": "Docs"},
+                ]
+            },
+        )
+
+        assert published.status_code == 200, published.get_json()
+        assert (response.status_code, response.get_json()) == (
+            200,
+            {
+                "steps": [
+                    {"code": "P1.code", "label": "P1 · code", "state": "done"},
+                    {"code": "test", "label": "Test", "state": "active"},
+                    {"code": "docs", "label": "Docs", "state": "pending"},
+                ]
+            },
+        )
+        assert [
+            (step.code, step.state_code)
+            for step in session.scalars(
+                select(ProgressStep)
+                .where(ProgressStep.work_id == work_item.id)
+                .order_by(ProgressStep.position)
+            )
+        ] == [
+            ("P1.code", ProgressState.DONE),
+            ("test", ProgressState.ACTIVE),
+            ("docs", ProgressState.PENDING),
+        ]
+
+    def test_no_steps_remove_the_list(
+        self, client: FlaskClient, session: Session, work_item: models.Session
+    ) -> None:
+        client.post(
+            _progress_path(work_item.id),
+            json={"steps": [{"code": "test", "label": "Test"}]},
+        )
+
+        response = client.post(_progress_path(work_item.id), json={"steps": []})
+
+        assert (response.status_code, response.get_json()) == (200, {"steps": []})
+        assert _count(session, ProgressStep) == 0
+
+    def test_an_item_that_is_no_work_item_is_not_found(
+        self, client: FlaskClient, item: Item
+    ) -> None:
+        for item_id in (item.id, uuid.uuid4()):
+            response = client.post(_progress_path(item_id), json={"steps": []})
+
+            assert response.status_code == 404
+
+    def test_a_session_with_no_turn_running_is_refused(
+        self, client: FlaskClient, session: Session, work_item: models.Session
+    ) -> None:
+        work_item.state_code = SessionState.STOPPED
+        session.flush()
+
+        response = client.post(
+            _progress_path(work_item.id),
+            json={"steps": [{"code": "test", "label": "Test"}]},
+        )
+
+        assert response.status_code == 403
+        assert _count(session, ProgressStep) == 0
+
+    def test_a_work_item_whose_start_gave_it_no_environment_conflicts(
+        self, client: FlaskClient, session: Session, work_item: models.Session
+    ) -> None:
+        work_item.environment_id = None
+        session.flush()
+
+        response = client.post(_progress_path(work_item.id), json={"steps": []})
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            f"Cannot set the progress of work item {work_item.id} because work"
+            f" item {work_item.id} has no environment yet"
+        )
+
+    def test_a_repeated_code_conflicts_and_changes_nothing(
+        self, client: FlaskClient, session: Session, work_item: models.Session
+    ) -> None:
+        response = client.post(
+            _progress_path(work_item.id),
+            json={
+                "steps": [
+                    {"code": "test", "label": "Test"},
+                    {"code": "test", "label": "Test again"},
+                ]
+            },
+        )
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            f"Cannot set the progress of work item {work_item.id} because code"
+            " test is repeated"
+        )
+        assert _count(session, ProgressStep) == 0
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {},
+            {"steps": [{"code": "", "label": "Test"}]},
+            {"steps": [{"code": "test", "label": ""}]},
+            {"steps": [{"code": "test", "label": "Test", "state": "failed"}]},
+            {"steps": [{"code": "c" * 65, "label": "Test"}]},
+            {"steps": [{"code": "test", "label": "l" * 121}]},
+            {"steps": [{"code": f"s{n}", "label": "Step"} for n in range(101)]},
+        ],
+        ids=[
+            "no steps",
+            "an empty code",
+            "an empty label",
+            "a state outside the three",
+            "a code past 64",
+            "a label past 120",
+            "a list past 100",
+        ],
+    )
+    def test_a_body_the_worker_s_call_refuses_is_invalid(
+        self,
+        client: FlaskClient,
+        session: Session,
+        work_item: models.Session,
+        body: dict[str, Any],
+    ) -> None:
+        response = client.post(_progress_path(work_item.id), json=body)
+
+        assert response.status_code == 400
+        assert _count(session, ProgressStep) == 0
 
 
 @pytest.mark.usefixtures("person")

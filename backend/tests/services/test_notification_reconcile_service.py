@@ -18,10 +18,17 @@ import pytest
 from flask import Flask
 from sqlalchemy import select
 
+from app import models
 from app.database import scoped_session
 from app.engine.bus import EngineBus, ProjectChanged, WorkMoved
-from app.models import ProjectMember, User
-from app.models.reference import NotificationPriority, TransitionKind
+from app.models import Project, ProjectMember, User
+from app.models.reference import (
+    NotificationPriority,
+    ProgressState,
+    SessionState,
+    TransitionKind,
+)
+from app.schemas.pilot_work import ProgressStepRequestSchema
 from app.schemas.testing_record import InventedProjectCreateSchema
 from app.services.auth_service import AuthContext
 from app.services.container import ServiceContainer
@@ -33,6 +40,7 @@ from app.services.notification_reconcile_service import (
     NOTIFICATION_RECONCILES_TOTAL,
     NotificationReconcileService,
 )
+from app.services.pilot_work_service import Worker
 from app.services.supervisor import LoopHandle, Supervisor
 from app.utils.after_commit import clear_after_commit_callbacks
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
@@ -189,6 +197,26 @@ def _answer(
         container.item_service().answer(
             _auth(_person(container, handle)), item_id, "D1", answer, None
         )
+
+
+def _running_work(container: ServiceContainer, project_id: uuid.UUID) -> Worker:
+    """A work item of the project, its session's turn running in the
+    environment, committed: its worker."""
+    with scoped_session(container) as db:
+        run = models.Session(
+            project_id=project_id,
+            environment_id=ENV,
+            kind_code="work",
+            cwd="/work/Camp",
+            token_hash=uuid.uuid4().hex * 2,
+            state_code=SessionState.RUNNING,
+        )
+        db.add(run)
+        db.flush()
+        container.record_service().place_work(
+            db.get_one(Project, project_id), run, "Building the camp"
+        )
+        return Worker(run.id, project_id, ENV, run.id)
 
 
 def _leave(container: ServiceContainer, handle: str, project_id: uuid.UUID) -> None:
@@ -793,6 +821,52 @@ class TestNotificationReconcileServiceBus:
         bridge.unreachable(on=False)
         log.wait_for(rf"Loop {NOTIFICATION_JOB}:{project_id} ended", 2)
         assert _shown(bridge, project_id).url.endswith(f"/items/{item_id}")
+
+
+class TestNotificationReconcileServiceProgress:
+    def test_a_change_of_a_work_items_steps_sends_nothing(
+        self,
+        container: ServiceContainer,
+        bridge: WatchedFakeNotificationBridge,
+        supervise: Supervise,
+    ) -> None:
+        """F145.4, R7: the notification never names a work item's progress,
+        so a change of it, heard on the bus and reconciled after, sends
+        nothing. A question waits on Ada, so that her notification stands."""
+        project_id = _project(container)
+        _give_token(container, "ada", ADA_TOKEN)
+        _bear(container, project_id, "question", "Your boots?", QUESTION)
+        worker = _running_work(container, project_id)
+        service, _, _ = _service(
+            container, supervise, engine_bus=container.engine_bus()
+        )
+        _reconcile(service, project_id)
+        standing = bridge.calls("ada")
+        assert standing != []
+        lists = [
+            [
+                ProgressStepRequestSchema(
+                    code="test", label="Test", state=ProgressState.ACTIVE
+                ),
+                ProgressStepRequestSchema(code="docs", label="Docs", state=None),
+            ],
+            [
+                ProgressStepRequestSchema(
+                    code="test", label="Test", state=ProgressState.DONE
+                ),
+                ProgressStepRequestSchema(
+                    code="docs", label="Docs", state=ProgressState.ACTIVE
+                ),
+            ],
+            [],
+        ]
+
+        for steps in lists:
+            with scoped_session(container):
+                container.pilot_work_service().set_progress(worker, steps)
+            _reconcile(service, project_id)
+
+        assert bridge.calls("ada") == standing
 
 
 class TestNotificationReconcileServiceSubmitAll:

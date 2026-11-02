@@ -12,8 +12,16 @@ from app.engine.paths import sha256_hex
 from app.engine.tree import ManifestEntry, TreeDocument, TreeFile, TreePlan
 from app.exceptions import RecordNotFoundException
 from app.models import Attachment, Document, Environment, Project, SaveError, User
-from app.models.reference import AttachmentSource, ErrorKind, ProjectState
+from app.models.reference import (
+    AttachmentSource,
+    ErrorKind,
+    ProgressState,
+    ProjectState,
+    SessionState,
+)
+from app.schemas.pilot_work import ProgressStepRequestSchema
 from app.services.container import ServiceContainer
+from app.services.pilot_work_service import Worker
 
 _HELD = "```decision id=D1\nproposal: [\n```\n"
 
@@ -120,6 +128,42 @@ class TestTreeService:
             f"{folder}/project.md": sha256_hex(""),
             f"{folder}/timeline.json": container.view_service().timeline(project).hash,
         }
+
+    def test_a_work_items_steps_move_no_path_of_its_folder(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """F145.4, DB 289: a work item's list of steps is not projected, the
+        brain reading its line alone (D054)."""
+        container.document_service().bear_draft(project)
+        run = models.Session(
+            project_id=project.id,
+            environment_id=environment.id,
+            kind_code="work",
+            cwd="/work/Example",
+            token_hash="3" * 64,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(run)
+        session.flush()
+        container.record_service().place_work(project, run, "Refining the camp")
+        tree = container.tree_service()
+        unlisted = tree.hashes(project)
+
+        container.pilot_work_service().set_progress(
+            Worker(run.id, project.id, environment.id, run.id),
+            [
+                ProgressStepRequestSchema(
+                    code="test", label="Test", state=ProgressState.ACTIVE
+                ),
+                ProgressStepRequestSchema(code="docs", label="Docs", state=None),
+            ],
+        )
+
+        assert tree.hashes(project) == unlisted
 
     def test_an_open_projects_folder_holds_every_path(
         self,

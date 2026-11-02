@@ -7,7 +7,7 @@ the end of its turn; and a work item placed by repository, started in an
 environment of Pilot's own the stage's own controller creates, named for the
 claimed actions it does, and the
 documents and the material its session registers and attaches there, each with
-its effect; a pre-ruling pass's questions to a registered document's writer,
+its effect, and the list of steps it publishes; a pre-ruling pass's questions to a registered document's writer,
 and its clarification run, with the writer's reply or to run; a person's
 answer the brain records through the project's open chat, with
 its effect; and the store's update, made or its lift asked, as `update-store`
@@ -33,6 +33,11 @@ from app.exceptions import RouteNotAvailableException
 from app.models.reference import DocumentRole
 from app.schemas.common import ApiErrorResponseSchema
 from app.schemas.pilot_store import RecordedSchema
+from app.schemas.pilot_work import (
+    ProgressSchema,
+    ProgressStepSchema,
+    SetProgressRequestSchema,
+)
 from app.schemas.testing_record import (
     InventedAttachmentsCreateSchema,
     InventedAttachmentsSchema,
@@ -547,6 +552,46 @@ def create_worker_attachment(
     return InventedWorkerAttachmentsSchema(
         ids=[attachment.id for attachment in attachments]
     ).model_dump(mode="json"), 201
+
+
+@testing_record_bp.route("/items/<uuid:item_id>/progress", methods=["POST"])
+@api.validate(
+    json=SetProgressRequestSchema,
+    resp=SpectreeResponse(
+        HTTP_200=ProgressSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def create_progress(
+    item_id: uuid.UUID,
+    test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
+) -> Any:
+    """Replace the work item's list of steps, as its worker's `set_progress`
+    does (F85.3, F145.1): in the call's order, its status moved on every
+    browser through the live event, while the session's turn is in flight.
+
+    Returns:
+        200: The list as it stands
+        400: The body is not a list of at most 100 steps, each a code of 1 to
+            64 characters, a label of 1 to 120 and an optional state, or the
+            stage is prd
+        403: Its session has no turn running
+        404: No work item has the id
+        409: Its session has no environment yet, or a code is repeated,
+            nothing changed: the reason
+    """
+    data = SetProgressRequestSchema.model_validate(request.get_json())
+    steps = test_data_service.set_progress(item_id, data.steps)
+    return ProgressSchema(
+        steps=[
+            ProgressStepSchema(code=step.code, label=step.label, state=step.state_code)
+            for step in steps
+        ]
+    ).model_dump(mode="json"), 200
 
 
 @testing_record_bp.route("/items/<uuid:item_id>/writer-questions", methods=["POST"])

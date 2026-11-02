@@ -17,8 +17,10 @@ from app import models
 from app.database import scoped_session
 from app.engine.bus import ProjectChanged, TreeHashMoved, WorkMoved
 from app.models import Document, Project, User
-from app.models.reference import SessionState
+from app.models.reference import ProgressState, SessionState
+from app.schemas.pilot_work import ProgressStepRequestSchema
 from app.services.container import ServiceContainer
+from app.services.pilot_work_service import Worker
 from app.services.project_event_service import ProjectEventService
 from app.services.sse_connection_manager import SSEConnection, SSEConnectionManager
 from app.utils.after_commit import clear_after_commit_callbacks
@@ -290,10 +292,53 @@ class TestProjectEventService:
                     "stopped_cause": None,
                     "nudge_owed": False,
                     "retried": None,
+                    "progress": [],
                 },
             },
         }
         assert (frames(ada_tab), frames(ben_tab)) == ([moved], [moved])
+
+    def test_a_change_of_a_work_items_steps_carries_its_list_and_nothing_else(
+        self,
+        container: ServiceContainer,
+        connect: Connect,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        """F145.4: the list moves the item's tile through the live event, and
+        nothing else of the project's screens."""
+        container.record_service().place_work(project, project_session, "Camp")
+        clear_after_commit_callbacks()
+        tab = connect("ada-1", person.subject)
+        assert project_session.environment_id is not None
+        worker = Worker(
+            project_session.id,
+            project.id,
+            project_session.environment_id,
+            project_session.id,
+        )
+
+        with scoped_session(container):
+            container.pilot_work_service().set_progress(
+                worker,
+                [
+                    ProgressStepRequestSchema(
+                        code="test", label="Test", state=ProgressState.ACTIVE
+                    ),
+                    ProgressStepRequestSchema(code="docs", label="Docs", state=None),
+                ],
+            )
+
+        [frame] = frames(tab)
+        assert (frame["type"], frame["payload"]["item_id"]) == (
+            "work_moved",
+            str(project_session.id),
+        )
+        assert frame["payload"]["work"]["progress"] == [
+            {"code": "test", "label": "Test", "state": "active"},
+            {"code": "docs", "label": "Docs", "state": "pending"},
+        ]
 
     def test_a_move_of_a_session_with_no_work_item_sends_nothing(
         self,

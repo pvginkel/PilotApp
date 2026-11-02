@@ -66,8 +66,8 @@ class ProjectChanged(EngineEvent):
 @dataclass(frozen=True)
 class WorkMoved(EngineEvent):
     """What a work item's line shows of its Session moved: its state, its one
-    current line, its start or its error (F80.2's work status). It moves
-    nothing else of the project's screens."""
+    current line, its start, its error or its steps (F80.2's work status,
+    F145.4). It moves nothing else of the project's screens."""
 
     project_id: uuid.UUID
     work_id: uuid.UUID

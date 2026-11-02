@@ -46,6 +46,7 @@ from app.models import (
     Item,
     PlanNote,
     PlanTask,
+    ProgressStep,
     Project,
     ProjectMember,
     ProjectTransition,
@@ -64,6 +65,7 @@ from app.models.reference import (
     UserKind,
     WorkTrigger,
 )
+from app.schemas.pilot_work import ProgressStepRequestSchema
 from app.schemas.testing_record import (
     InventedFileSchema,
     InventedProjectCreateSchema,
@@ -868,6 +870,28 @@ class TestDataService:
         """
         worker = self._worker(item_id, f"attach {path}")
         return self.pilot_work_service.attach_file(worker, path, to, tool_use_id)
+
+    def set_progress(
+        self, item_id: uuid.UUID, steps: Sequence[ProgressStepRequestSchema]
+    ) -> list[ProgressStep]:
+        """The work item's list of steps replaced by `steps`, in their order,
+        as its worker's `set_progress` replaces it (F85.3, F145.1), its status
+        moved on every browser once this commits, while the session's turn is
+        in flight.
+
+        Returns:
+            The list as it stands, in order.
+
+        Raises:
+            RecordNotFoundException: no work item has the id.
+            AuthorizationException: its session has no turn running, as
+                `PilotWorkService.set_progress` refuses it.
+            InvalidOperationException: its start has given its session no
+                environment yet, or a code is repeated, as
+                `PilotWorkService.set_progress` refuses it.
+        """
+        worker = self._worker(item_id, f"set the progress of work item {item_id}")
+        return self.pilot_work_service.set_progress(worker, steps)
 
     def work(
         self,

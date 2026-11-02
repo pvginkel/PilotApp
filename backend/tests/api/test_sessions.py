@@ -17,11 +17,13 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.database import scoped_session
-from app.models import Environment, Project, Turn, User
-from app.models.reference import RecordKind, SessionState, WorkTrigger
+from app.models import Environment, ProgressStep, Project, Turn, User
+from app.models.reference import ProgressState, RecordKind, SessionState, WorkTrigger
+from app.schemas.pilot_work import ProgressStepRequestSchema
 from app.services.chat_close_service import ChatCloseService
 from app.services.container import ServiceContainer
 from app.services.environment_service import EnvironmentService
+from app.services.pilot_work_service import Worker
 from app.services.relay_service import CONTINUE, RelayService
 from app.services.session_record_service import SessionRecordService
 from app.services.session_start_service import NOT_PILOTS, SessionStartService
@@ -35,6 +37,12 @@ from tests.support.supervisor import Supervise, metric_value
 
 LOCAL_ADMIN = "local-user"
 SUBJECT = "subject-ada"
+
+STEPS = [
+    {"code": "test", "label": "Test", "state": "active"},
+    {"code": "docs", "label": "Docs", "state": "pending"},
+]
+"""A work item's list of steps, as its status carries it."""
 
 type Connect = Callable[..., SSEConnection]
 
@@ -657,6 +665,36 @@ class TestStopSession:
         assert body["stopped_by"]["handle"] == "ada"
         assert session.get_one(models.Session, run.id).stopped_by_user_id == person.id
 
+    def test_the_stopped_work_item_keeps_its_steps(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        """F145.1: Stop then Resume keeps the list (F26.7)."""
+        run = _work_item(
+            container, session, project, project_session, SessionState.RUNNING
+        )
+        assert run.environment_id is not None
+        container.pilot_work_service().set_progress(
+            Worker(run.id, project.id, run.environment_id, run.id),
+            [
+                ProgressStepRequestSchema(
+                    code="test", label="Test", state=ProgressState.ACTIVE
+                ),
+                ProgressStepRequestSchema(code="docs", label="Docs", state=None),
+            ],
+        )
+        sign_in(client, SUBJECT)
+
+        response = client.post(f"/api/sessions/{run.id}/stop")
+
+        assert response.status_code == 200, response.get_json()
+        assert response.get_json()["progress"] == STEPS
+
     def test_a_held_work_item_with_no_environment_yet_answers_its_status(
         self,
         client: FlaskClient,
@@ -832,6 +870,50 @@ class TestResumeSession:
                 select(Turn).where(Turn.session_id == run.id).order_by(Turn.seq)
             )
         ] == ["The brief", CONTINUE]
+
+    def test_the_resumed_work_item_keeps_its_steps(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: DbSession,
+        person: User,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        """F145.1: Stop then Resume keeps the list (F26.7)."""
+        run = _in_pilots_own(
+            session,
+            _work_item(
+                container, session, project, project_session, SessionState.STOPPED
+            ),
+        )
+        started = datetime.now(UTC)
+        session.add_all(
+            [
+                ProgressStep(
+                    work_id=run.id,
+                    code="test",
+                    label="Test",
+                    position=1,
+                    state_code=ProgressState.ACTIVE,
+                    started_at=started,
+                ),
+                ProgressStep(
+                    work_id=run.id,
+                    code="docs",
+                    label="Docs",
+                    position=2,
+                    state_code=ProgressState.PENDING,
+                ),
+            ]
+        )
+        session.flush()
+        sign_in(client, SUBJECT)
+
+        response = client.post(f"/api/sessions/{run.id}/resume")
+
+        assert response.status_code == 200, response.get_json()
+        assert response.get_json()["progress"] == STEPS
 
     def test_in_a_paused_project_it_answers_the_work_item_held(
         self,

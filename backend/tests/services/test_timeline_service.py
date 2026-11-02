@@ -45,6 +45,7 @@ from app.models.reference import (
     DocumentRole,
     EffectKind,
     ErrorKind,
+    ProgressState,
     RecordKind,
     SessionState,
     TransitionKind,
@@ -52,6 +53,7 @@ from app.models.reference import (
     VersionCause,
     WorkTrigger,
 )
+from app.schemas.pilot_work import ProgressStepRequestSchema, ProgressStepSchema
 from app.schemas.testing_record import InventedFileSchema, InventedProjectCreateSchema
 from app.schemas.timeline import (
     AttachmentSchema,
@@ -65,6 +67,7 @@ from app.services.auth_service import AuthContext
 from app.services.container import ServiceContainer
 from app.services.controller_outage import ControllerOutage
 from app.services.effect_service import Change, EffectLine
+from app.services.pilot_work_service import Worker
 from app.services.relay_service import ENVIRONMENT_STOPPED
 from app.services.session_record_service import SessionRecordService
 from app.services.start_gate import WorkSlots
@@ -329,6 +332,17 @@ def _run(
     session.add(run)
     session.flush()
     return run
+
+
+def _worker(work: Item, environment: Environment) -> Worker:
+    """The work item's session, as its bearer names it to `pilot-work`."""
+    return Worker(work.id, work.project_id, environment.id, work.id)
+
+
+def _step(
+    code: str, label: str, state: ProgressState | None = None
+) -> ProgressStepRequestSchema:
+    return ProgressStepRequestSchema(code=code, label=label, state=state)
 
 
 def _work(
@@ -1982,6 +1996,7 @@ class TestTimeline:
             "stopped_cause": None,
             "nudge_owed": False,
             "retried": None,
+            "progress": [],
         }
 
     def test_a_job_is_pilots_own_work(
@@ -2188,6 +2203,64 @@ class TestWorkStatus:
         assert (
             work_status(session, [], unreachable=False, halts=HALTS, slots=SLOTS) == {}
         )
+
+    def test_each_work_item_carries_its_own_steps_in_order(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        """F145.1: the list its session published, each step's code, label
+        and state, in order; one that published none lists none."""
+        project = _make(container)
+        first, second, quiet = (
+            _work(session, project, environment, SessionState.RUNNING) for _ in range(3)
+        )
+        publish = container.pilot_work_service().set_progress
+        publish(
+            _worker(first, environment),
+            [
+                _step("P1.code", "P1 · code", ProgressState.DONE),
+                _step("test", "Test", ProgressState.ACTIVE),
+                _step("docs", "Docs"),
+            ],
+        )
+        publish(_worker(second, environment), [_step("write", "Write")])
+
+        found = work_status(
+            session,
+            [first.id, second.id, quiet.id],
+            unreachable=False,
+            halts=HALTS,
+            slots=SLOTS,
+        )
+
+        assert found[first.id].progress == [
+            ProgressStepSchema(
+                code="P1.code", label="P1 · code", state=ProgressState.DONE
+            ),
+            ProgressStepSchema(code="test", label="Test", state=ProgressState.ACTIVE),
+            ProgressStepSchema(code="docs", label="Docs", state=ProgressState.PENDING),
+        ]
+        assert found[second.id].progress == [
+            ProgressStepSchema(code="write", label="Write", state=ProgressState.PENDING)
+        ]
+        assert found[quiet.id].progress == []
+
+    def test_a_list_emptied_lists_none(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        work = _work(session, project, environment, SessionState.RUNNING)
+        publish = container.pilot_work_service().set_progress
+        publish(_worker(work, environment), [_step("test", "Test")])
+
+        publish(_worker(work, environment), [])
+
+        assert container.timeline_service().work(work.id).progress == []
 
     def test_a_retried_job_names_the_job_its_retry_placed_and_the_press(
         self,

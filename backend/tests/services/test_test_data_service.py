@@ -19,9 +19,10 @@ from sqlalchemy.orm import Session as DbSession
 from app import models
 from app.app import App
 from app.database import scoped_session
-from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved
+from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved, WorkMoved
 from app.engine.tree import TreeDocument, TreeFile, TreePlan
 from app.exceptions import (
+    AuthorizationException,
     InvalidOperationException,
     RecordNotFoundException,
     ResourceConflictException,
@@ -39,6 +40,7 @@ from app.models import (
     ItemAttachment,
     ItemKind,
     PlanTask,
+    ProgressStep,
     Project,
     ProjectMember,
     ProjectTransition,
@@ -51,6 +53,7 @@ from app.models.reference import (
     AnswerChannel,
     AttachmentSource,
     DocumentRole,
+    ProgressState,
     ProjectState,
     SessionState,
     TaskStatus,
@@ -59,6 +62,7 @@ from app.models.reference import (
     VersionCause,
     WorkTrigger,
 )
+from app.schemas.pilot_work import ProgressStepRequestSchema
 from app.schemas.testing_record import (
     OPENING_WORDS,
     InventedFileSchema,
@@ -1847,6 +1851,90 @@ class TestAttachAsWorker:
             )
 
         assert raised.value.cause == f"work item {work_item.id} has no environment yet"
+
+
+class TestSetProgress:
+    @pytest.fixture
+    def work_item(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> models.Session:
+        """A work item's Session, its turn running."""
+        run = models.Session(
+            project_id=project.id,
+            environment_id=environment.id,
+            kind_code="work",
+            cwd="/work/Camp",
+            token_hash="2" * 64,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(run)
+        session.flush()
+        container.record_service().place_work(
+            project, run, "Building the camp", repo="example/Camp"
+        )
+        return run
+
+    def test_the_list_is_replaced_as_the_worker_replaces_it_and_moves_its_work(
+        self,
+        container: ServiceContainer,
+        project: Project,
+        work_item: models.Session,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        steps = [
+            ProgressStepRequestSchema(code="P1.code", label="P1 · code", state=None),
+            ProgressStepRequestSchema(
+                code="test", label="Test", state=ProgressState.ACTIVE
+            ),
+        ]
+
+        with scoped_session(container):
+            listed = container.test_data_service().set_progress(work_item.id, steps)
+
+        assert [(step.code, step.position, step.state_code) for step in listed] == [
+            ("P1.code", 1, ProgressState.PENDING),
+            ("test", 2, ProgressState.ACTIVE),
+        ]
+        assert engine_events == [WorkMoved(project.id, work_item.id)]
+
+    def test_an_item_that_is_no_work_item_is_not_found(
+        self, container: ServiceContainer, item: Item
+    ) -> None:
+        with pytest.raises(RecordNotFoundException):
+            container.test_data_service().set_progress(item.id, [])
+
+    def test_a_work_item_with_no_environment_yet_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        work_item: models.Session,
+    ) -> None:
+        work_item.environment_id = None
+        session.flush()
+
+        with pytest.raises(InvalidOperationException) as raised:
+            container.test_data_service().set_progress(work_item.id, [])
+
+        assert raised.value.cause == f"work item {work_item.id} has no environment yet"
+
+    def test_a_session_with_no_turn_running_is_refused_and_lists_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        work_item: models.Session,
+    ) -> None:
+        work_item.state_code = SessionState.IDLE
+        session.flush()
+        step = ProgressStepRequestSchema(code="test", label="Test", state=None)
+
+        with pytest.raises(AuthorizationException):
+            container.test_data_service().set_progress(work_item.id, [step])
+
+        assert session.scalars(select(ProgressStep)).all() == []
 
 
 QUESTIONED = "```question id=Q1\n```\n\n```question id=Q2\n```\n"

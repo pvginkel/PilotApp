@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from app.models.reference import AnswerChannel, BlockKind, SessionState, UserKind
 from app.schemas.links import EnvironmentNameSchema
+from app.schemas.pilot_work import ProgressStepSchema
 
 ItemKindCode = Literal[
     "opening",
@@ -510,6 +511,14 @@ class WorkSchema(BaseModel):
             "The job a person's Retry of this failed or stopped job placed, at "
             "the project's next place, which its line names: it offers Retry no "
             "more, and no badge counts it (F94.5); null while it is not retried"
+        )
+    )
+    progress: list[ProgressStepSchema] = Field(
+        description=(
+            "The steps its run says it goes through, in order, as its session "
+            "last published them through `set_progress` and "
+            "`set_progress_step`; empty while it has published none, or once it "
+            "emptied the list (F145.1)"
         )
     )
 

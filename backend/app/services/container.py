@@ -527,6 +527,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         ingest_service=ingest_service,
         attach_service=attach_service,
         effect_service=effect_service,
+        engine_bus=engine_bus,
     )
 
     # The signed-in person on the record (F137), and what links in text (F93)

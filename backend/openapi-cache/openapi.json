@@ -3465,6 +3465,51 @@
         "title": "OptionSchema",
         "type": "object"
       },
+      "ItemDocumentSchema.1fdd8ae.ProgressState": {
+        "description": "Where a step of a run's list stands; not Task Status, the plan's own.",
+        "enum": [
+          "pending",
+          "active",
+          "done"
+        ],
+        "title": "ProgressState",
+        "type": "string"
+      },
+      "ItemDocumentSchema.1fdd8ae.ProgressStepSchema": {
+        "description": "A step of the work item's list.",
+        "properties": {
+          "code": {
+            "description": "The run's name for the step",
+            "examples": [
+              "P3.review-2"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "label": {
+            "description": "The step's words on the tile",
+            "examples": [
+              "P3 · second review"
+            ],
+            "title": "Label",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.ProgressState",
+            "description": "Where it stands",
+            "examples": [
+              "active"
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "state"
+        ],
+        "title": "ProgressStepSchema",
+        "type": "object"
+      },
       "ItemDocumentSchema.1fdd8ae.ProsePartSchema": {
         "description": "Markdown between blocks, drawn as GFM (F29.1).",
         "properties": {
@@ -3740,6 +3785,14 @@
             "title": "Pilots Own",
             "type": "boolean"
           },
+          "progress": {
+            "description": "The steps its run says it goes through, in order, as its session last published them through `set_progress` and `set_progress_step`; empty while it has published none, or once it emptied the list (F145.1)",
+            "items": {
+              "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.ProgressStepSchema"
+            },
+            "title": "Progress",
+            "type": "array"
+          },
           "retried": {
             "anyOf": [
               {
@@ -3818,7 +3871,8 @@
           "stopped_by",
           "stopped_cause",
           "nudge_owed",
-          "retried"
+          "retried",
+          "progress"
         ],
         "title": "WorkSchema",
         "type": "object"
@@ -7741,6 +7795,51 @@
         "title": "OptionSchema",
         "type": "object"
       },
+      "TimelineSchema.1fdd8ae.ProgressState": {
+        "description": "Where a step of a run's list stands; not Task Status, the plan's own.",
+        "enum": [
+          "pending",
+          "active",
+          "done"
+        ],
+        "title": "ProgressState",
+        "type": "string"
+      },
+      "TimelineSchema.1fdd8ae.ProgressStepSchema": {
+        "description": "A step of the work item's list.",
+        "properties": {
+          "code": {
+            "description": "The run's name for the step",
+            "examples": [
+              "P3.review-2"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "label": {
+            "description": "The step's words on the tile",
+            "examples": [
+              "P3 · second review"
+            ],
+            "title": "Label",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.ProgressState",
+            "description": "Where it stands",
+            "examples": [
+              "active"
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "state"
+        ],
+        "title": "ProgressStepSchema",
+        "type": "object"
+      },
       "TimelineSchema.1fdd8ae.ProsePartSchema": {
         "description": "Markdown between blocks, drawn as GFM (F29.1).",
         "properties": {
@@ -8333,6 +8432,14 @@
             "title": "Pilots Own",
             "type": "boolean"
           },
+          "progress": {
+            "description": "The steps its run says it goes through, in order, as its session last published them through `set_progress` and `set_progress_step`; empty while it has published none, or once it emptied the list (F145.1)",
+            "items": {
+              "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.ProgressStepSchema"
+            },
+            "title": "Progress",
+            "type": "array"
+          },
           "retried": {
             "anyOf": [
               {
@@ -8411,7 +8518,8 @@
           "stopped_by",
           "stopped_cause",
           "nudge_owed",
-          "retried"
+          "retried",
+          "progress"
         ],
         "title": "WorkSchema",
         "type": "object"
@@ -8716,6 +8824,14 @@
             "title": "Pilots Own",
             "type": "boolean"
           },
+          "progress": {
+            "description": "The steps its run says it goes through, in order, as its session last published them through `set_progress` and `set_progress_step`; empty while it has published none, or once it emptied the list (F145.1)",
+            "items": {
+              "$ref": "#/components/schemas/WorkSchema.1fdd8ae.ProgressStepSchema"
+            },
+            "title": "Progress",
+            "type": "array"
+          },
           "retried": {
             "anyOf": [
               {
@@ -8794,7 +8910,8 @@
           "stopped_by",
           "stopped_cause",
           "nudge_owed",
-          "retried"
+          "retried",
+          "progress"
         ],
         "title": "WorkSchema",
         "type": "object"
@@ -8985,6 +9102,51 @@
           "input"
         ],
         "title": "LineStepSchema",
+        "type": "object"
+      },
+      "WorkSchema.1fdd8ae.ProgressState": {
+        "description": "Where a step of a run's list stands; not Task Status, the plan's own.",
+        "enum": [
+          "pending",
+          "active",
+          "done"
+        ],
+        "title": "ProgressState",
+        "type": "string"
+      },
+      "WorkSchema.1fdd8ae.ProgressStepSchema": {
+        "description": "A step of the work item's list.",
+        "properties": {
+          "code": {
+            "description": "The run's name for the step",
+            "examples": [
+              "P3.review-2"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "label": {
+            "description": "The step's words on the tile",
+            "examples": [
+              "P3 · second review"
+            ],
+            "title": "Label",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/WorkSchema.1fdd8ae.ProgressState",
+            "description": "Where it stands",
+            "examples": [
+              "active"
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "state"
+        ],
+        "title": "ProgressStepSchema",
         "type": "object"
       },
       "WorkSchema.1fdd8ae.RetriedSchema": {
@@ -13246,6 +13408,94 @@
           }
         ],
         "summary": "Mark a document Done as Pilot, by the project's session, as its `mark` does a document it settled or deferred whole: the text as it stands fixed in a `done` Version, the item done by Pilot.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/items/{item_id}/progress": {
+      "post": {
+        "description": "Returns:     200: The list as it stands     400: The body is not a list of at most 100 steps, each a code of 1 to         64 characters, a label of 1 to 120 and an optional state, or the         stage is prd     403: Its session has no turn running     404: No work item has the id     409: Its session has no environment yet, or a code is repeated,         nothing changed: the reason",
+        "operationId": "post__api_testing_items_{item_id}_progress",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetProgressRequestSchema.ce33d8b"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProgressSchema.ce33d8b"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Replace the work item's list of steps, as its worker's `set_progress` does (F85.3, F145.1): in the call's order, its status moved on every browser through the live event, while the session's turn is in flight.",
         "tags": [],
         "x-required-role": "editor"
       }

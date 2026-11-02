@@ -43,6 +43,7 @@ from app.models import (
     Environment,
     Item,
     PlanTask,
+    ProgressStep,
     Project,
     ProjectTransition,
     Turn,
@@ -53,6 +54,7 @@ from app.models import (
     WriterQuestion,
 )
 from app.models.reference import (
+    ProgressState,
     ProjectState,
     RecordKind,
     SessionState,
@@ -62,6 +64,7 @@ from app.models.reference import (
     UserKind,
     WorkTrigger,
 )
+from app.schemas.pilot_work import ProgressStepSchema
 from app.schemas.timeline import HeldReason, StopCause
 from app.services.auth_service import AuthContext
 from app.services.chat_close_service import ChatCloseService
@@ -6834,6 +6837,47 @@ class TestContinueRun:
             continuation.id,
         ]
         assert fake.calls == []
+
+    def test_it_starts_with_no_steps_and_the_run_keeps_its_own(
+        self,
+        container: ServiceContainer,
+        fake: _Recording,
+        session: DbSession,
+        project: Project,
+        person: User,
+    ) -> None:
+        """F145.1: each work item a list of its own, a resume after Done
+        starting with none."""
+        run = _ended_run(session, container, fake, project)
+        refinement = _read_at_its_end(
+            session, container, fake, project, run, REFINEMENT, REFINEMENT_TEXT
+        )
+        done = datetime.now(UTC)
+        session.add(
+            ProgressStep(
+                work_id=run.id,
+                code="P1.code",
+                label="P1 · code",
+                position=1,
+                state_code=ProgressState.DONE,
+                started_at=done,
+                ended_at=done,
+            )
+        )
+        session.flush()
+
+        container.record_service().answer(
+            session.get_one(Document, refinement.id), "D1", person, "The lake"
+        )
+
+        continuation = _continuation(session, run)
+        timeline = container.timeline_service()
+        assert timeline.work(continuation.id).progress == []
+        assert timeline.work(run.id).progress == [
+            ProgressStepSchema(
+                code="P1.code", label="P1 · code", state=ProgressState.DONE
+            )
+        ]
 
     def test_it_is_placed_on_the_runs_plan_task(
         self,

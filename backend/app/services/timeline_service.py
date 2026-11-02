@@ -34,6 +34,7 @@ from app.models import (
     ItemAttachment,
     ItemKind,
     PlanTask,
+    ProgressStep,
     Project,
     ProjectMember,
     ProjectTransition,
@@ -60,6 +61,7 @@ from app.models.reference import (
     WorkTrigger,
 )
 from app.schemas.links import EnvironmentNameSchema
+from app.schemas.pilot_work import ProgressStepSchema
 from app.schemas.timeline import (
     AttachmentSchema,
     BlockPartSchema,
@@ -257,7 +259,8 @@ def work_status(
     pause and the store's update; one Finish closed owes none, its nudge
     never sent to a done item. One whose start has no environment yet has
     none (DB 107). A job's is Pilot's own (F59.1); a retried one's names the
-    job its Retry placed, created at the press."""
+    job its Retry placed, created at the press. Its progress is its list of
+    steps, in order (F145.1)."""
     stopper = aliased(User)
     retry = aliased(AgentSession)
     rows = db.execute(
@@ -279,6 +282,15 @@ def work_status(
         .outerjoin(retry, retry.id == Work.retried_by_id)
         .where(AgentSession.id.in_(list(item_ids)))
     ).all()
+    progress: dict[uuid.UUID, list[ProgressStepSchema]] = {}
+    for step in db.scalars(
+        select(ProgressStep)
+        .where(ProgressStep.work_id.in_(list(item_ids)))
+        .order_by(ProgressStep.work_id, ProgressStep.position)
+    ):
+        progress.setdefault(step.work_id, []).append(
+            ProgressStepSchema(code=step.code, label=step.label, state=step.state_code)
+        )
     failed = [
         session.id for session, *_ in rows if session.state_code is SessionState.FAILED
     ]
@@ -433,6 +445,7 @@ def work_status(
             retried=(
                 None if retry_id is None else RetriedSchema(id=retry_id, at=retried_at)
             ),
+            progress=progress.get(session.id, []),
         )
         for (
             session,
