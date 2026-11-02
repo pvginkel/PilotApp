@@ -1,13 +1,16 @@
 """`pilot-work`, a worker session's tools (TD §4.5, F85): the bearer its
 Session was created with resolved to the Session, `register_document`
 (ruling D1) and `attach_file`, each call that changed the record writing its
-Effects (F41)."""
+Effects (F41), and `set_progress` and `set_progress_step`, its work item's
+steps (F145), which write none."""
 
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import PurePosixPath
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.engine.attachments import (
@@ -24,9 +27,10 @@ from app.exceptions import (
     InvalidOperationException,
     RecordNotFoundException,
 )
-from app.models import Attachment, Document, Item, Project, Work
+from app.models import Attachment, Document, Item, ProgressStep, Project, Work
 from app.models import Session as AgentSession
-from app.models.reference import EffectKind, SessionState, Surface
+from app.models.reference import EffectKind, ProgressState, SessionState, Surface
+from app.schemas.pilot_work import ProgressStepRequestSchema
 from app.services.controller_client import (
     ControllerClient,
     ControllerProblem,
@@ -219,6 +223,122 @@ class PilotWorkService:
             ],
         )
         return attachments
+
+    def set_progress(
+        self, worker: Worker, steps: Sequence[ProgressStepRequestSchema]
+    ) -> list[ProgressStep]:
+        """The worker's own work item's list of steps replaced by `steps`, in
+        their order (F85.3, DB 288): a code on the list keeps its row, its
+        stamps and, where its step gives no state, its state; a new code
+        starts `pending`, or in the state its step gives; a code left out
+        goes, and no steps remove the list. Each change of a state is stamped
+        by the server's clock (DB 287). No Effect is recorded (DB 289).
+
+        Returns:
+            The list as it stands, in order.
+
+        Raises:
+            InvalidOperationException: a code is repeated, nothing changed.
+            AuthorizationException: the worker's Session has no turn running
+                once its row is held, nothing changed.
+        """
+        operation = f"set the progress of work item {worker.work_item_id}"
+        codes: set[str] = set()
+        for given in steps:
+            if given.code in codes:
+                raise InvalidOperationException(
+                    operation, f"code {given.code} is repeated"
+                )
+            codes.add(given.code)
+        self._holding_its_turn(worker)
+        at = datetime.now(UTC)
+        standing = {step.code: step for step in self._steps(worker)}
+        for position, given in enumerate(steps, start=1):
+            step = standing.pop(given.code, None)
+            if step is None:
+                step = ProgressStep(
+                    work_id=worker.work_item_id,
+                    code=given.code,
+                    state_code=ProgressState.PENDING,
+                )
+                self.db.add(step)
+            step.label = given.label
+            step.position = position
+            if given.state is not None:
+                _move(step, given.state, at)
+        for left_out in standing.values():
+            self.db.delete(left_out)
+        self.db.flush()
+        return self._steps(worker)
+
+    def set_progress_step(
+        self, worker: Worker, code: str, state: ProgressState
+    ) -> list[ProgressStep]:
+        """The step `code` of the worker's own work item's list moved to
+        `state`, stamped by the server's clock (F85.4, DB 287); every step
+        keeps its place (DB 285). No Effect is recorded (DB 289).
+
+        Returns:
+            The list as it stands, in order.
+
+        Raises:
+            RecordNotFoundException: the list has no step `code`.
+            AuthorizationException: the worker's Session has no turn running
+                once its row is held, nothing changed.
+        """
+        self._holding_its_turn(worker)
+        step = self.db.get(
+            ProgressStep, (worker.work_item_id, code), populate_existing=True
+        )
+        if step is None:
+            raise RecordNotFoundException("Progress step", code)
+        _move(step, state, datetime.now(UTC))
+        self.db.flush()
+        return self._steps(worker)
+
+    def _holding_its_turn(self, worker: Worker) -> None:
+        """Hold the worker's Session's row until the transaction ends, read
+        as the lock found it, and refuse the call unless its turn still runs.
+        Every change of the Session's state takes the row, so a call that
+        waited on one reads its outcome; and two calls on the Work's list are
+        served one after the other, the second reading the list the first
+        left (DB 286).
+
+        Raises:
+            AuthorizationException: the Session has no turn running.
+        """
+        session = self.db.get_one(
+            AgentSession,
+            worker.session_id,
+            with_for_update={"key_share": True},
+            populate_existing=True,
+        )
+        if session.state_code != SessionState.RUNNING:
+            raise AuthorizationException(no_turn(Surface.WORK, session.id))
+
+    def _steps(self, worker: Worker) -> list[ProgressStep]:
+        """The worker's own work item's list of steps, in order."""
+        return list(
+            self.db.scalars(
+                select(ProgressStep)
+                .where(ProgressStep.work_id == worker.work_item_id)
+                .order_by(ProgressStep.position)
+                .execution_options(populate_existing=True)
+            )
+        )
+
+
+def _move(step: ProgressStep, state: ProgressState, at: datetime) -> None:
+    """`step` moved to `state` at `at` (DB 287): its start written when it
+    first goes `active` or `done`, never changed after; its end written when
+    it goes `done`, cleared when it leaves it. A step already in `state` is
+    left as it is."""
+    if step.state_code == state:
+        return
+    if state is not ProgressState.PENDING and step.started_at is None:
+        step.started_at = at
+    step.ended_at = at if state is ProgressState.DONE else None
+    step.state_code = state
 
 
 def material(

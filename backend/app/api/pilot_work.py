@@ -4,23 +4,29 @@ makes for a worker session's tools, under the session's bearer.
 Registered on the app, not on `api_bp`, so the OIDC gate never sees them, and
 outside `/api/`, the one prefix the site's nginx forwards, so that only the
 pod's loopback reaches them, as it reaches `/metrics` (review 2). Every call
-passes the gate below first, and carries the tool call's id in the
-`Tool-Use-Id` header where Claude Code gave one, which its effect's record
-names.
+passes the gate below first, and a call that records an effect carries the
+tool call's id in the `Tool-Use-Id` header where Claude Code gave one, which
+its effect's record names.
 """
 
+from collections.abc import Sequence
 from typing import Any
 
 from dependency_injector.wiring import Provide, inject
 from flask import Blueprint, g, request
 from spectree import Response as SpectreeResponse
 
+from app.models import ProgressStep
 from app.schemas.common import ApiErrorResponseSchema
 from app.schemas.pilot_work import (
     AttachedFilesSchema,
     AttachFileRequestSchema,
+    ProgressSchema,
+    ProgressStepSchema,
     RegisterDocumentRequestSchema,
     RegisteredDocumentSchema,
+    SetProgressRequestSchema,
+    SetProgressStepRequestSchema,
 )
 from app.services.container import ServiceContainer
 from app.services.effect_service import TOOL_USE_ID_HEADER
@@ -119,3 +125,76 @@ def attach_file(
     )
     answer = AttachedFilesSchema(ids=[attachment.id for attachment in attachments])
     return answer.model_dump(mode="json"), 201
+
+
+@pilot_work_bp.route("/progress", methods=["PUT"])
+@public
+@api.validate(
+    json=SetProgressRequestSchema,
+    resp=SpectreeResponse(
+        HTTP_200=ProgressSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def set_progress(
+    pilot_work_service: PilotWorkService = Provide[ServiceContainer.pilot_work_service],
+) -> Any:
+    """`set_progress(steps)` (F85.3, F145.1): the session's own work item's
+    list of steps replaced, in the call's order; no effect.
+
+    Returns:
+        200: The list as it stands
+        400: The body is not a list of at most 100 steps, each a code of 1 to
+            64 characters, a label of 1 to 120 and an optional state
+        401: No bearer, or one no session has
+        403: The bearer's session is not a work item's, or has no turn running
+        409: A code is repeated, nothing changed: the reason
+    """
+    body = SetProgressRequestSchema.model_validate(request.get_json())
+    steps = pilot_work_service.set_progress(g.worker, body.steps)
+    return _progress(steps), 200
+
+
+@pilot_work_bp.route("/progress", methods=["PATCH"])
+@public
+@api.validate(
+    json=SetProgressStepRequestSchema,
+    resp=SpectreeResponse(
+        HTTP_200=ProgressSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def set_progress_step(
+    pilot_work_service: PilotWorkService = Provide[ServiceContainer.pilot_work_service],
+) -> Any:
+    """`set_progress_step(code, state)` (F85.4, F145.1): one step's state on
+    the session's own work item's list; no effect.
+
+    Returns:
+        200: The list as it stands
+        400: The body is not a code and a state
+        401: No bearer, or one no session has
+        403: The bearer's session is not a work item's, or has no turn running
+        404: The list has no step of the code, nothing changed
+    """
+    body = SetProgressStepRequestSchema.model_validate(request.get_json())
+    steps = pilot_work_service.set_progress_step(g.worker, body.code, body.state)
+    return _progress(steps), 200
+
+
+def _progress(steps: Sequence[ProgressStep]) -> dict[str, Any]:
+    answer = ProgressSchema(
+        steps=[
+            ProgressStepSchema(code=step.code, label=step.label, state=step.state_code)
+            for step in steps
+        ]
+    )
+    return answer.model_dump(mode="json")

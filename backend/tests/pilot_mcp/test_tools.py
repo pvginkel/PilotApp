@@ -1,7 +1,7 @@
-"""`pilot-work`'s tools (F85, ruling D1) and `pilot-store`'s (F86) driven
-through a real MCP client to the API's routes: each one REST call under the
-caller's bearer as it came, its answer the route's, and the route's refusal the
-tool's error, its reason whole."""
+"""`pilot-work`'s tools (F85, ruling D1, F85.3, F85.4) and `pilot-store`'s
+(F86) driven through a real MCP client to the API's routes: each one REST call
+under the caller's bearer as it came, its answer the route's, and the route's
+refusal the tool's error, its reason whole."""
 
 import json
 import uuid
@@ -350,6 +350,147 @@ class TestAttachFile:
         result = await call(mcp_app, "attach_file", arguments)
 
         assert error_text(result).startswith("Error executing tool attach_file: ")
+        assert routes.calls == []
+
+
+_PUBLISHED = [
+    {"code": "P1.code", "label": "P1 · the client", "state": "done"},
+    {"code": "test", "label": "Test"},
+]
+
+
+@pytest.mark.anyio
+class TestSetProgress:
+    async def test_the_list_is_replaced_through_its_route_naming_no_call(
+        self, mcp_app: Starlette, routes: ApiRoutes, worker: models.Session
+    ) -> None:
+        """The call records no effect, so its tool-use id goes nowhere."""
+        result = await call(
+            mcp_app,
+            "set_progress",
+            {"steps": _PUBLISHED},
+            meta={TOOL_USE_ID_META: "toolu_01ABC"},
+        )
+
+        assert not result.isError
+        [(request, answer)] = routes.calls
+        assert (request.method, str(request.url)) == (
+            "PUT",
+            f"{API_URL}/tools/pilot-work/progress",
+        )
+        assert request.headers["authorization"] == BEARER["Authorization"]
+        assert "tool-use-id" not in request.headers
+        assert json.loads(request.content) == {"steps": _PUBLISHED}
+        assert answer.status_code == 200
+        assert result.structuredContent == answer.json()
+        assert answer.json() == {
+            "steps": [
+                {"code": "P1.code", "label": "P1 · the client", "state": "done"},
+                {"code": "test", "label": "Test", "state": "pending"},
+            ]
+        }
+
+    async def test_a_repeated_code_is_the_routes_refusal_its_reason_whole(
+        self, mcp_app: Starlette, routes: ApiRoutes, worker: models.Session
+    ) -> None:
+        result = await call(
+            mcp_app, "set_progress", {"steps": [*_PUBLISHED, _PUBLISHED[1]]}
+        )
+
+        assert routes.calls[-1][1].status_code == 409
+        assert error_text(result) == _refusal(routes, "set_progress")
+        assert error_text(result) == (
+            f"Error executing tool set_progress: Cannot set the progress of work"
+            f" item {worker.id} because code test is repeated"
+        )
+
+    @pytest.mark.parametrize(
+        "steps",
+        [
+            [{"code": "", "label": "Test"}],
+            [{"code": "c" * 65, "label": "Test"}],
+            [{"code": "test", "label": ""}],
+            [{"code": "test", "label": "l" * 121}],
+            [{"code": "test", "label": "Test", "state": "failed"}],
+            [{"code": f"s{n}", "label": "Step"} for n in range(101)],
+            [{"code": "test", "label": "Test", "note": "x"}],
+        ],
+        ids=[
+            "empty-code",
+            "long-code",
+            "empty-label",
+            "long-label",
+            "state",
+            "long-list",
+            "extra-field",
+        ],
+    )
+    async def test_steps_outside_the_limits_are_refused_without_calling_the_api(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        worker: models.Session,
+        steps: list[dict[str, str]],
+    ) -> None:
+        result = await call(mcp_app, "set_progress", {"steps": steps})
+
+        assert error_text(result).startswith("Error executing tool set_progress: ")
+        assert routes.calls == []
+
+
+@pytest.mark.anyio
+class TestSetProgressStep:
+    async def test_the_steps_state_is_set_through_its_route(
+        self, mcp_app: Starlette, routes: ApiRoutes, worker: models.Session
+    ) -> None:
+        async with mcp_session(mcp_app) as (mcp, _):
+            await mcp.call_tool("set_progress", {"steps": _PUBLISHED})
+            result = await mcp.call_tool(
+                "set_progress_step", {"code": "test", "state": "active"}
+            )
+
+        assert not result.isError
+        request, answer = routes.calls[-1]
+        assert (request.method, str(request.url)) == (
+            "PATCH",
+            f"{API_URL}/tools/pilot-work/progress",
+        )
+        assert request.headers["authorization"] == BEARER["Authorization"]
+        assert json.loads(request.content) == {"code": "test", "state": "active"}
+        assert result.structuredContent == answer.json()
+        assert answer.json()["steps"][1] == {
+            "code": "test",
+            "label": "Test",
+            "state": "active",
+        }
+
+    async def test_a_code_not_on_the_list_is_the_routes_refusal(
+        self, mcp_app: Starlette, routes: ApiRoutes, worker: models.Session
+    ) -> None:
+        result = await call(
+            mcp_app, "set_progress_step", {"code": "docs", "state": "done"}
+        )
+
+        assert routes.calls[-1][1].status_code == 404
+        assert error_text(result) == (
+            "Error executing tool set_progress_step: Progress step docs was not found"
+        )
+
+    @pytest.mark.parametrize(
+        "arguments",
+        [{"code": "test", "state": "skipped"}, {"code": "", "state": "done"}],
+        ids=["state", "empty-code"],
+    )
+    async def test_arguments_the_route_would_refuse_are_refused_without_calling_it(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        worker: models.Session,
+        arguments: dict[str, str],
+    ) -> None:
+        result = await call(mcp_app, "set_progress_step", arguments)
+
+        assert error_text(result).startswith("Error executing tool set_progress_step: ")
         assert routes.calls == []
 
 

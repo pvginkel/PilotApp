@@ -40,8 +40,50 @@ _TO = {
 
 _UUID = {"format": "uuid", "type": "string"}
 
+_STEP_STATE = {"enum": ["pending", "active", "done"], "type": "string"}
+
+_PROGRESS = {
+    "$defs": {
+        "PublishedStep": {
+            "description": "A step of your work item's list as it stands.",
+            "properties": {
+                "code": {
+                    "description": "Your name for the step",
+                    "title": "Code",
+                    "type": "string",
+                },
+                "label": {
+                    "description": "Its words on the tile",
+                    "title": "Label",
+                    "type": "string",
+                },
+                "state": {
+                    **_STEP_STATE,
+                    "description": "`pending`, `active` or `done`",
+                    "title": "State",
+                },
+            },
+            "required": ["code", "label", "state"],
+            "title": "PublishedStep",
+            "type": "object",
+        }
+    },
+    "description": "Your work item's list of steps as it stands.",
+    "properties": {
+        "steps": {
+            "description": "Its steps, in order",
+            "items": {"$ref": "#/$defs/PublishedStep"},
+            "title": "Steps",
+            "type": "array",
+        }
+    },
+    "required": ["steps"],
+    "title": "Progress",
+    "type": "object",
+}
+
 # Each tool: its parameters, its result and its description, the words as the
-# worker reads them (FM §5 step 1, F65.3, F85).
+# worker reads them (FM §5 step 1, F65.3, F85, F85.3, F85.4).
 WORK_SURFACE = {
     "register_document": (
         {
@@ -117,6 +159,105 @@ WORK_SURFACE = {
         " folder's in its files' path order. Once you have registered your"
         " documents and attached what backs them, end your turn; never wait for the"
         " answers.",
+    ),
+    "set_progress": (
+        {
+            "$defs": {
+                "Step": {
+                    "additionalProperties": False,
+                    "description": "A step of your work item's list.",
+                    "properties": {
+                        "code": {
+                            "description": (
+                                "Your name for the step, unique in the list, at"
+                                " most 64 characters: `set_progress_step` takes it"
+                            ),
+                            "maxLength": 64,
+                            "minLength": 1,
+                            "title": "Code",
+                            "type": "string",
+                        },
+                        "label": {
+                            "description": (
+                                "The step's words on the tile, at most 120 characters"
+                            ),
+                            "maxLength": 120,
+                            "minLength": 1,
+                            "title": "Label",
+                            "type": "string",
+                        },
+                        "state": {
+                            "anyOf": [_STEP_STATE, {"type": "null"}],
+                            "default": None,
+                            "description": (
+                                "`pending`, `active` or `done`; without it, a code"
+                                " already on the list keeps its state and a new one"
+                                " starts `pending`"
+                            ),
+                            "title": "State",
+                        },
+                    },
+                    "required": ["code", "label"],
+                    "title": "Step",
+                    "type": "object",
+                }
+            },
+            "properties": {
+                "steps": {
+                    "description": (
+                        "Your work item's steps, in order, at most 100; `[]` removes"
+                        " the list"
+                    ),
+                    "items": {"$ref": "#/$defs/Step"},
+                    "maxItems": 100,
+                    "title": "Steps",
+                    "type": "array",
+                }
+            },
+            "required": ["steps"],
+            "title": "set_progressArguments",
+            "type": "object",
+        },
+        _PROGRESS,
+        "Publish your work item's steps as your run moves through them, shown on its"
+        " tile in Pilot: the whole list, in order, each step a `code`, your name for"
+        " it, a `label`, its words, and a `state`, `pending`, `active` or `done`."
+        " The list replaces the one standing: a code already on it keeps its state"
+        " where you give none, a new code starts `pending`, a code left out goes, and"
+        " `[]` removes the list. Where the work grows, add a step; a second round of"
+        " a step is a step of its own. Pilot stamps each step's start and end by its"
+        " own clock. An empty or repeated code, an empty label, a state outside the"
+        " three, a code over 64 characters, a label over 120 or a list over 100"
+        " steps is refused with the reason, and nothing changes. Answers `{steps}`,"
+        " the list as it stands.",
+    ),
+    "set_progress_step": (
+        {
+            "properties": {
+                "code": {
+                    "description": "The code of a step on your work item's list",
+                    "maxLength": 64,
+                    "minLength": 1,
+                    "title": "Code",
+                    "type": "string",
+                },
+                "state": {
+                    **_STEP_STATE,
+                    "description": "`pending`, `active` or `done`",
+                    "title": "State",
+                },
+            },
+            "required": ["code", "state"],
+            "title": "set_progress_stepArguments",
+            "type": "object",
+        },
+        _PROGRESS,
+        "Move one step of your work item's list to `pending`, `active` or `done`, by"
+        " its code, as your run moves through it; every step keeps its place. Pilot"
+        " stamps each step's start and end by its own clock. A code not on the list"
+        " or a state outside the three is refused with the reason, and nothing"
+        " changes; `set_progress` adds a step. Answers `{steps}`, the list as it"
+        " stands.",
     ),
 }
 

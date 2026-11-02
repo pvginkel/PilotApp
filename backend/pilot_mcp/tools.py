@@ -5,7 +5,8 @@ A tool's docstring is the description the session reads, and each parameter's
 is in its annotation: they are the surface, not commentary
 (`tests/pilot_mcp/test_server.py` pins them). The bearer a call carries is the
 API's to resolve; a tool passes it on as it came, with the tool-use id Claude
-Code sends in the call's `_meta`, which the call's effect names.
+Code sends in the call's `_meta`, which the call's effect names, where it
+records one.
 """
 
 import functools
@@ -20,6 +21,8 @@ from starlette.requests import Request
 
 from pilot_mcp.api import (
     BLOCK_ID,
+    MAX_STEP_CODE,
+    MAX_STEPS,
     SOURCE,
     Added,
     Asked,
@@ -29,8 +32,11 @@ from pilot_mcp.api import (
     NewItem,
     PilotStoreApi,
     PilotWorkApi,
+    Progress,
     Recorded,
     RegisteredDocument,
+    Step,
+    StepState,
 )
 
 Call = Context[ServerSession, object, Request]
@@ -144,6 +150,55 @@ def register_work_tools(mcp: FastMCP, api: PilotWorkApi) -> None:
         Once you have registered your documents and attached what backs them,
         end your turn; never wait for the answers."""
         return await api.attach_file(_authorization(ctx), _tool_use_id(ctx), path, to)
+
+    @mcp.tool()
+    async def set_progress(
+        steps: Annotated[
+            list[Step],
+            Field(
+                max_length=MAX_STEPS,
+                description=(
+                    "Your work item's steps, in order, at most 100; `[]` removes"
+                    " the list"
+                ),
+            ),
+        ],
+        ctx: Call,
+    ) -> Progress:
+        """Publish your work item's steps as your run moves through them,
+        shown on its tile in Pilot: the whole list, in order, each step a
+        `code`, your name for it, a `label`, its words, and a `state`,
+        `pending`, `active` or `done`. The list replaces the one standing: a
+        code already on it keeps its state where you give none, a new code
+        starts `pending`, a code left out goes, and `[]` removes the list.
+        Where the work grows, add a step; a second round of a step is a step
+        of its own. Pilot stamps each step's start and end by its own clock.
+        An empty or repeated code, an empty label, a state outside the three,
+        a code over 64 characters, a label over 120 or a list over 100 steps
+        is refused with the reason, and nothing changes. Answers `{steps}`,
+        the list as it stands."""
+        return await api.set_progress(_authorization(ctx), steps)
+
+    @mcp.tool()
+    async def set_progress_step(
+        code: Annotated[
+            str,
+            Field(
+                min_length=1,
+                max_length=MAX_STEP_CODE,
+                description="The code of a step on your work item's list",
+            ),
+        ],
+        state: Annotated[StepState, Field(description="`pending`, `active` or `done`")],
+        ctx: Call,
+    ) -> Progress:
+        """Move one step of your work item's list to `pending`, `active` or
+        `done`, by its code, as your run moves through it; every step keeps
+        its place. Pilot stamps each step's start and end by its own clock. A
+        code not on the list or a state outside the three is refused with the
+        reason, and nothing changes; `set_progress` adds a step. Answers
+        `{steps}`, the list as it stands."""
+        return await api.set_progress_step(_authorization(ctx), code, state)
 
 
 def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:

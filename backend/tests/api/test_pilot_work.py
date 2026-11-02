@@ -1,6 +1,7 @@
 """`pilot-work`'s routes (TD §4.5, F85): the REST calls Pilot's MCP server
 makes for a worker session's tools, under the session's bearer, outside `/api/`
-(review 2), pinned as the surface they are."""
+(review 2), pinned as the surface they are, a work item's progress among them
+(F85.3, F85.4)."""
 
 import uuid
 from datetime import UTC, datetime
@@ -15,13 +16,15 @@ from app import models
 from app.models import (
     Attachment,
     Document,
+    Effect,
     Environment,
     Item,
     ItemAttachment,
+    ProgressStep,
     Project,
     Turn,
 )
-from app.models.reference import SessionState
+from app.models.reference import ProgressState, SessionState
 from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerClient
 from app.services.pilot_server import token_hash
@@ -31,6 +34,8 @@ from tests.support.fake_controller import ServedFakeController, client_of
 DOCUMENTS = "/tools/pilot-work/documents"
 
 ATTACHMENTS = "/tools/pilot-work/attachments"
+
+PROGRESS = "/tools/pilot-work/progress"
 
 TOKEN = "worker-token"
 
@@ -74,14 +79,19 @@ def _file(fake_controller: ServedFakeController, environment: Environment) -> No
 
 
 class TestPilotWorkRoutes:
-    def test_the_surface_is_two_routes_outside_the_api(self, app: Flask) -> None:
+    def test_the_surface_is_four_routes_outside_the_api(self, app: Flask) -> None:
         routes = sorted(
             (rule.rule, sorted(rule.methods - {"HEAD", "OPTIONS"}))
             for rule in app.url_map.iter_rules()
             if rule.endpoint.startswith("pilot_work.")
         )
 
-        assert routes == [(ATTACHMENTS, ["POST"]), (DOCUMENTS, ["POST"])]
+        assert routes == [
+            (ATTACHMENTS, ["POST"]),
+            (DOCUMENTS, ["POST"]),
+            (PROGRESS, ["PATCH"]),
+            (PROGRESS, ["PUT"]),
+        ]
 
     def test_the_routes_are_outside_the_oidc_gate(
         self,
@@ -488,6 +498,330 @@ class TestAttachFile:
 
         assert response.status_code == 502
         assert "503 environment-unreadable" in response.get_json()["error"]
+
+
+def _steps(session: DbSession, run: models.Session) -> list[tuple[str, str, str]]:
+    return [
+        (step.code, step.label, step.state_code)
+        for step in session.scalars(
+            select(ProgressStep)
+            .where(ProgressStep.work_id == run.id)
+            .order_by(ProgressStep.position)
+        )
+    ]
+
+
+_PUBLISHED = {
+    "steps": [
+        {"code": "P1.code", "label": "P1 · the client", "state": "done"},
+        {"code": "P1.review", "label": "P1 · review", "state": "active"},
+        {"code": "test", "label": "Test"},
+    ]
+}
+
+_ANSWERED = {
+    "steps": [
+        {"code": "P1.code", "label": "P1 · the client", "state": "done"},
+        {"code": "P1.review", "label": "P1 · review", "state": "active"},
+        {"code": "test", "label": "Test", "state": "pending"},
+    ]
+}
+
+
+class TestSetProgress:
+    """`PUT /tools/pilot-work/progress`: `set_progress(steps)`."""
+
+    def test_the_list_replaced_is_200_with_the_list_as_it_stands(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+
+        response = client.put(PROGRESS, json=_PUBLISHED, headers=_bearer())
+
+        assert response.status_code == 200
+        assert response.get_json() == _ANSWERED
+        assert _steps(session, run) == [
+            ("P1.code", "P1 · the client", ProgressState.DONE),
+            ("P1.review", "P1 · review", ProgressState.ACTIVE),
+            ("test", "Test", ProgressState.PENDING),
+        ]
+
+    def test_no_steps_remove_the_list(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        client.put(PROGRESS, json=_PUBLISHED, headers=_bearer())
+
+        response = client.put(PROGRESS, json={"steps": []}, headers=_bearer())
+
+        assert response.status_code == 200
+        assert response.get_json() == {"steps": []}
+        assert _steps(session, run) == []
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {},
+            {"steps": [{"code": "", "label": "Test"}]},
+            {"steps": [{"code": "c" * 65, "label": "Test"}]},
+            {"steps": [{"code": "test", "label": ""}]},
+            {"steps": [{"code": "test", "label": "l" * 121}]},
+            {"steps": [{"code": "test", "label": "Test", "state": "failed"}]},
+            {"steps": [{"code": f"s{n}", "label": "Step"} for n in range(101)]},
+            {"steps": [{"code": "test", "label": "Test", "note": "x"}]},
+        ],
+        ids=[
+            "no-steps",
+            "empty-code",
+            "long-code",
+            "empty-label",
+            "long-label",
+            "state",
+            "long-list",
+            "extra-field",
+        ],
+    )
+    def test_a_body_that_is_not_a_list_of_steps_is_400_and_changes_nothing(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        body: dict[str, object],
+    ) -> None:
+        run = _session(session, container, project, environment)
+        client.put(PROGRESS, json=_PUBLISHED, headers=_bearer())
+
+        response = client.put(PROGRESS, json=body, headers=_bearer())
+
+        assert response.status_code == 400
+        assert len(_steps(session, run)) == 3
+
+    def test_the_limits_themselves_are_taken(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        steps = [{"code": f"{n:064d}", "label": "l" * 120} for n in range(100)]
+
+        response = client.put(PROGRESS, json={"steps": steps}, headers=_bearer())
+
+        assert response.status_code == 200
+        assert len(_steps(session, run)) == 100
+
+    def test_a_repeated_code_is_409_with_the_reason_and_changes_nothing(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        client.put(PROGRESS, json=_PUBLISHED, headers=_bearer())
+        repeated = {
+            "steps": [{"code": "test", "label": "Test"}, {"code": "test", "label": "T"}]
+        }
+
+        response = client.put(PROGRESS, json=repeated, headers=_bearer())
+
+        assert response.status_code == 409
+        assert response.get_json()["error"] == (
+            f"Cannot set the progress of work item {run.id} because code test is"
+            " repeated"
+        )
+        assert len(_steps(session, run)) == 3
+
+    def test_no_bearer_is_401(self, client: FlaskClient) -> None:
+        response = client.put(PROGRESS, json=_PUBLISHED)
+
+        assert response.status_code == 401
+
+    @pytest.mark.parametrize(
+        ("kind", "state", "error"),
+        [
+            ("chat", SessionState.RUNNING, "is a chat session, not a work item's"),
+            ("work", SessionState.STOPPED, "has no turn running"),
+        ],
+        ids=["chat", "stopped"],
+    )
+    def test_a_session_that_is_not_a_running_work_items_is_403_and_lists_nothing(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        kind: str,
+        state: SessionState,
+        error: str,
+    ) -> None:
+        run = _session(session, container, project, environment, kind, state)
+
+        response = client.put(PROGRESS, json=_PUBLISHED, headers=_bearer())
+
+        assert response.status_code == 403
+        assert response.get_json()["error"] == (
+            f"Cannot call pilot-work because session {run.id} {error}"
+        )
+        assert session.scalars(select(ProgressStep)).all() == []
+
+
+class TestSetProgressStep:
+    """`PATCH /tools/pilot-work/progress`: `set_progress_step(code, state)`."""
+
+    def test_the_steps_state_set_is_200_with_the_list_as_it_stands(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        client.put(PROGRESS, json=_PUBLISHED, headers=_bearer())
+
+        response = client.patch(
+            PROGRESS, json={"code": "P1.review", "state": "done"}, headers=_bearer()
+        )
+
+        assert response.status_code == 200
+        assert [step["state"] for step in response.get_json()["steps"]] == [
+            "done",
+            "done",
+            "pending",
+        ]
+        assert _steps(session, run)[1] == (
+            "P1.review",
+            "P1 · review",
+            ProgressState.DONE,
+        )
+
+    def test_a_code_not_on_the_list_is_404_and_changes_nothing(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        client.put(PROGRESS, json=_PUBLISHED, headers=_bearer())
+
+        response = client.patch(
+            PROGRESS, json={"code": "docs", "state": "active"}, headers=_bearer()
+        )
+
+        assert response.status_code == 404
+        assert response.get_json()["error"] == "Progress step docs was not found"
+        assert [state for _, _, state in _steps(session, run)] == [
+            ProgressState.DONE,
+            ProgressState.ACTIVE,
+            ProgressState.PENDING,
+        ]
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"code": "test"},
+            {"code": "test", "state": "skipped"},
+            {"code": "", "state": "done"},
+            {"state": "done"},
+        ],
+        ids=["no-state", "state", "empty-code", "no-code"],
+    )
+    def test_a_body_that_is_not_a_code_and_a_state_is_400(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        body: dict[str, str],
+    ) -> None:
+        run = _session(session, container, project, environment)
+        client.put(PROGRESS, json=_PUBLISHED, headers=_bearer())
+
+        response = client.patch(PROGRESS, json=body, headers=_bearer())
+
+        assert response.status_code == 400
+        assert _steps(session, run)[2][2] == ProgressState.PENDING
+
+    def test_no_bearer_is_401(self, client: FlaskClient) -> None:
+        response = client.patch(PROGRESS, json={"code": "test", "state": "done"})
+
+        assert response.status_code == 401
+
+    def test_a_session_whose_turn_has_ended_is_403_and_changes_nothing(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        client.put(PROGRESS, json=_PUBLISHED, headers=_bearer())
+        run.state_code = SessionState.IDLE
+        session.flush()
+
+        response = client.patch(
+            PROGRESS, json={"code": "test", "state": "active"}, headers=_bearer()
+        )
+
+        assert response.status_code == 403
+        assert _steps(session, run)[2][2] == ProgressState.PENDING
+
+
+class TestTheProgressRecordsNothing:
+    """Neither progress call records an Effect or a line of the server's in
+    the session's records, its turn in flight (F145.4; DB 289)."""
+
+    def test_neither_call_writes_an_effect_or_a_record(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        session.add(
+            Turn(
+                session_id=run.id,
+                seq=1,
+                message="Refine the camp.",
+                started_at=datetime.now(UTC),
+            )
+        )
+        session.flush()
+        tool_use = {"Tool-Use-Id": "toolu_01ABC"}
+
+        published = client.put(PROGRESS, json=_PUBLISHED, headers=_bearer() | tool_use)
+        moved = client.patch(
+            PROGRESS,
+            json={"code": "test", "state": "active"},
+            headers=_bearer() | tool_use,
+        )
+
+        assert (published.status_code, moved.status_code) == (200, 200)
+        assert read_records(session, run.id, limit=10) == []
+        assert session.scalars(select(Effect)).all() == []
 
 
 class TestTheToolUseId:

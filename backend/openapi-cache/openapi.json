@@ -4077,6 +4077,69 @@
         "title": "NotificationTokenSchema",
         "type": "object"
       },
+      "ProgressSchema.ce33d8b": {
+        "description": "The work item's list of steps as it stands.",
+        "properties": {
+          "steps": {
+            "description": "Its steps, in order",
+            "items": {
+              "$ref": "#/components/schemas/ProgressSchema.ce33d8b.ProgressStepSchema"
+            },
+            "title": "Steps",
+            "type": "array"
+          }
+        },
+        "required": [
+          "steps"
+        ],
+        "title": "ProgressSchema",
+        "type": "object"
+      },
+      "ProgressSchema.ce33d8b.ProgressState": {
+        "description": "Where a step of a run's list stands; not Task Status, the plan's own.",
+        "enum": [
+          "pending",
+          "active",
+          "done"
+        ],
+        "title": "ProgressState",
+        "type": "string"
+      },
+      "ProgressSchema.ce33d8b.ProgressStepSchema": {
+        "description": "A step of the work item's list.",
+        "properties": {
+          "code": {
+            "description": "The run's name for the step",
+            "examples": [
+              "P3.review-2"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "label": {
+            "description": "The step's words on the tile",
+            "examples": [
+              "P3 · second review"
+            ],
+            "title": "Label",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ProgressSchema.ce33d8b.ProgressState",
+            "description": "Where it stands",
+            "examples": [
+              "active"
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "state"
+        ],
+        "title": "ProgressStepSchema",
+        "type": "object"
+      },
       "ProjectDocumentSchema.1fdd8ae": {
         "description": "The project's draft, `project.md`, or its handbook, `handbook.md`,\nread only, as the overlay draws it (F37.4, F129.4).",
         "properties": {
@@ -5946,6 +6009,122 @@
         ],
         "title": "SessionStreamViewSchema",
         "type": "object"
+      },
+      "SetProgressRequestSchema.ce33d8b": {
+        "additionalProperties": false,
+        "description": "The work item's list of steps, to replace the one standing.",
+        "properties": {
+          "steps": {
+            "description": "The steps in order; none removes the list",
+            "items": {
+              "$ref": "#/components/schemas/SetProgressRequestSchema.ce33d8b.ProgressStepRequestSchema"
+            },
+            "maxItems": 100,
+            "title": "Steps",
+            "type": "array"
+          }
+        },
+        "required": [
+          "steps"
+        ],
+        "title": "SetProgressRequestSchema",
+        "type": "object"
+      },
+      "SetProgressRequestSchema.ce33d8b.ProgressState": {
+        "description": "Where a step of a run's list stands; not Task Status, the plan's own.",
+        "enum": [
+          "pending",
+          "active",
+          "done"
+        ],
+        "title": "ProgressState",
+        "type": "string"
+      },
+      "SetProgressRequestSchema.ce33d8b.ProgressStepRequestSchema": {
+        "additionalProperties": false,
+        "description": "A step of the list, as the call gives it.",
+        "properties": {
+          "code": {
+            "description": "The run's name for the step, unique in the list",
+            "examples": [
+              "P3.review-2"
+            ],
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "label": {
+            "description": "The step's words on the tile",
+            "examples": [
+              "P3 · second review"
+            ],
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SetProgressRequestSchema.ce33d8b.ProgressState"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Where the step stands; without it, a code on the list keeps its state and a new one starts `pending`",
+            "examples": [
+              "active"
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "label"
+        ],
+        "title": "ProgressStepRequestSchema",
+        "type": "object"
+      },
+      "SetProgressStepRequestSchema.ce33d8b": {
+        "additionalProperties": false,
+        "description": "One step's state, to set.",
+        "properties": {
+          "code": {
+            "description": "The code of a step on the list",
+            "examples": [
+              "P3.review-2"
+            ],
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/SetProgressStepRequestSchema.ce33d8b.ProgressState",
+            "description": "Where the step stands now",
+            "examples": [
+              "done"
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "state"
+        ],
+        "title": "SetProgressStepRequestSchema",
+        "type": "object"
+      },
+      "SetProgressStepRequestSchema.ce33d8b.ProgressState": {
+        "description": "Where a step of a run's list stands; not Task Status, the plan's own.",
+        "enum": [
+          "pending",
+          "active",
+          "done"
+        ],
+        "title": "ProgressState",
+        "type": "string"
       },
       "StopRequestSchema.4ff8b5e": {
         "additionalProperties": false,
@@ -15399,6 +15578,146 @@
           }
         },
         "summary": "`register_document(path)` (F85.1, ruling D1): the file the worker wrote at `path` in its environment, read and parsed now, registered as a document on its project's timeline, its text read at the end of the turn.",
+        "tags": []
+      }
+    },
+    "/tools/pilot-work/progress": {
+      "patch": {
+        "description": "Returns:     200: The list as it stands     400: The body is not a code and a state     401: No bearer, or one no session has     403: The bearer's session is not a work item's, or has no turn running     404: The list has no step of the code, nothing changed",
+        "operationId": "patch__tools_pilot-work_progress",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetProgressStepRequestSchema.ce33d8b"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProgressSchema.ce33d8b"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "`set_progress_step(code, state)` (F85.4, F145.1): one step's state on the session's own work item's list; no effect.",
+        "tags": []
+      },
+      "put": {
+        "description": "Returns:     200: The list as it stands     400: The body is not a list of at most 100 steps, each a code of 1 to         64 characters, a label of 1 to 120 and an optional state     401: No bearer, or one no session has     403: The bearer's session is not a work item's, or has no turn running     409: A code is repeated, nothing changed: the reason",
+        "operationId": "put__tools_pilot-work_progress",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetProgressRequestSchema.ce33d8b"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProgressSchema.ce33d8b"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "summary": "`set_progress(steps)` (F85.3, F145.1): the session's own work item's list of steps replaced, in the call's order; no effect.",
         "tags": []
       }
     }

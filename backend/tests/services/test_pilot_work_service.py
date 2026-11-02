@@ -1,10 +1,12 @@
 """`pilot-work`: a bearer resolved to its work item's Session,
 `register_document` (TD §4.5, F84, F85.1, ruling D1) and `attach_file`
-(F85.2, F36.1), each call's Effects (R18, F41), against the fake controller."""
+(F85.2, F36.1), each call's Effects (R18, F41), against the fake controller,
+and `set_progress` and `set_progress_step`, the work item's steps (F85.3,
+F85.4, F145.1; DB 285 to 289)."""
 
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 from dependency_injector import providers
@@ -30,11 +32,19 @@ from app.models import (
     Environment,
     Item,
     ItemAttachment,
+    ProgressStep,
     Project,
     Turn,
     User,
 )
-from app.models.reference import EffectKind, RecordKind, SessionState, UserKind
+from app.models.reference import (
+    EffectKind,
+    ProgressState,
+    RecordKind,
+    SessionState,
+    UserKind,
+)
+from app.schemas.pilot_work import ProgressStepRequestSchema
 from app.services.container import ServiceContainer
 from app.services.controller_client import (
     FILE_SIZE_CAP,
@@ -1078,3 +1088,460 @@ class TestPilotWorkServiceEffects:
         assert attachment.id is not None
         assert _effect_records(session, run) == []
         assert _effects(session) == []
+
+
+PENDING, ACTIVE, DONE = ProgressState.PENDING, ProgressState.ACTIVE, ProgressState.DONE
+
+EARLIER = datetime(2026, 11, 1, 9, 30, tzinfo=UTC)
+"""A stamp a test writes before its call, which the call keeps or replaces."""
+
+
+def _step(
+    code: str, label: str | None = None, state: ProgressState | None = None
+) -> ProgressStepRequestSchema:
+    return ProgressStepRequestSchema(code=code, label=label or code, state=state)
+
+
+def _listed(steps: list[ProgressStep]) -> list[tuple[str, str, int, ProgressState]]:
+    return [(step.code, step.label, step.position, step.state_code) for step in steps]
+
+
+def _stored(session: DbSession, run: models.Session) -> list[ProgressStep]:
+    return list(
+        session.scalars(
+            select(ProgressStep)
+            .where(ProgressStep.work_id == run.id)
+            .order_by(ProgressStep.position)
+        )
+    )
+
+
+class _Clock:
+    """The server's clock around a call: a stamp it wrote lies between."""
+
+    def __enter__(self) -> "_Clock":
+        self.before = datetime.now(UTC)
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.after = datetime.now(UTC)
+
+    def stamped(self, at: datetime | None) -> bool:
+        return at is not None and self.before <= at <= self.after
+
+
+class TestPilotWorkServiceSetProgress:
+    def test_a_list_published_to_a_new_work_is_stamped_at_the_call(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """Steps already done when a list is published whole, as a resume
+        after Done publishes it, are stamped at that call (DB 287)."""
+        run = _session(session, container, project, environment)
+
+        with _Clock() as clock:
+            answered = container.pilot_work_service().set_progress(
+                _worker(run),
+                [
+                    _step("P1.code", "P1 · the client", DONE),
+                    _step("test", "Test", ACTIVE),
+                    _step("docs", "Docs"),
+                ],
+            )
+
+        assert _listed(answered) == [
+            ("P1.code", "P1 · the client", 1, DONE),
+            ("test", "Test", 2, ACTIVE),
+            ("docs", "Docs", 3, PENDING),
+        ]
+        assert _listed(_stored(session, run)) == _listed(answered)
+        code, test, docs = answered
+        assert clock.stamped(code.started_at)
+        assert code.ended_at == code.started_at
+        assert clock.stamped(test.started_at)
+        assert test.ended_at is None
+        assert (docs.started_at, docs.ended_at) == (None, None)
+
+    def test_a_kept_code_keeps_its_row_its_stamps_and_where_none_is_given_its_state(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        pilot_work = container.pilot_work_service()
+        pilot_work.set_progress(
+            _worker(run), [_step("P1.code", state=DONE), _step("test", state=ACTIVE)]
+        )
+        [code, test] = _stored(session, run)
+        code.started_at = code.ended_at = test.started_at = EARLIER
+        session.flush()
+
+        answered = pilot_work.set_progress(
+            _worker(run),
+            [
+                _step("P1.review", "P1 · review"),
+                _step("test", "Test, again"),
+                _step("P1.code", "P1 · the client"),
+            ],
+        )
+
+        assert _listed(answered) == [
+            ("P1.review", "P1 · review", 1, PENDING),
+            ("test", "Test, again", 2, ACTIVE),
+            ("P1.code", "P1 · the client", 3, DONE),
+        ]
+        _, test, code = _stored(session, run)
+        assert (test.started_at, test.ended_at) == (EARLIER, None)
+        assert (code.started_at, code.ended_at) == (EARLIER, EARLIER)
+
+    def test_a_kept_steps_given_state_moves_it_and_back_keeps_its_start(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        pilot_work = container.pilot_work_service()
+        pilot_work.set_progress(_worker(run), [_step("test", state=DONE)])
+        [test] = _stored(session, run)
+        test.started_at = test.ended_at = EARLIER
+        session.flush()
+
+        [moved] = pilot_work.set_progress(_worker(run), [_step("test", state=ACTIVE)])
+
+        assert (moved.state_code, moved.started_at, moved.ended_at) == (
+            ACTIVE,
+            EARLIER,
+            None,
+        )
+
+    def test_a_code_left_out_goes_and_no_steps_remove_the_list(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        pilot_work = container.pilot_work_service()
+        pilot_work.set_progress(
+            _worker(run), [_step("P1.code"), _step("test"), _step("docs")]
+        )
+
+        kept = pilot_work.set_progress(_worker(run), [_step("docs"), _step("P1.code")])
+
+        assert _listed(kept) == [
+            ("docs", "docs", 1, PENDING),
+            ("P1.code", "P1.code", 2, PENDING),
+        ]
+        assert pilot_work.set_progress(_worker(run), []) == []
+        assert _stored(session, run) == []
+
+    def test_a_repeated_code_is_refused_and_changes_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        pilot_work = container.pilot_work_service()
+        pilot_work.set_progress(_worker(run), [_step("test", state=ACTIVE)])
+
+        with pytest.raises(InvalidOperationException) as refused:
+            pilot_work.set_progress(
+                _worker(run), [_step("test"), _step("docs"), _step("test", "Test")]
+            )
+
+        assert refused.value.message == (
+            f"Cannot set the progress of work item {run.id} because code test is"
+            " repeated"
+        )
+        assert _listed(_stored(session, run)) == [("test", "test", 1, ACTIVE)]
+
+    def test_a_turn_ended_after_the_gate_changes_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        worker = _worker(run)
+        run.state_code = SessionState.STOPPED
+        session.flush()
+
+        with pytest.raises(AuthorizationException) as refused:
+            container.pilot_work_service().set_progress(worker, [_step("test")])
+
+        assert refused.value.message == (
+            f"Cannot call pilot-work because session {run.id} has no turn running"
+        )
+        assert _stored(session, run) == []
+
+    def test_only_the_workers_own_work_item_is_listed(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """Each work item a list of its own (F145.1); no Session writes
+        another Work's steps (DB 286)."""
+        run = _session(session, container, project, environment)
+        other = _session(session, container, project, environment, token="other")
+        pilot_work = container.pilot_work_service()
+        pilot_work.set_progress(_worker(other), [_step("reproduce", state=ACTIVE)])
+
+        pilot_work.set_progress(_worker(run), [_step("test")])
+
+        assert _listed(_stored(session, other)) == [
+            ("reproduce", "reproduce", 1, ACTIVE)
+        ]
+        assert _listed(_stored(session, run)) == [("test", "test", 1, PENDING)]
+
+
+_Stamp = Literal["earlier", "now"] | None
+
+
+class TestPilotWorkServiceSetProgressStep:
+    @pytest.mark.parametrize(
+        ("before", "after", "started", "ended"),
+        [
+            (PENDING, ACTIVE, "now", None),
+            (PENDING, DONE, "now", "now"),
+            (ACTIVE, DONE, "earlier", "now"),
+            (DONE, ACTIVE, "earlier", None),
+            (DONE, PENDING, "earlier", None),
+            (ACTIVE, PENDING, "earlier", None),
+            (DONE, DONE, "earlier", "earlier"),
+            (ACTIVE, ACTIVE, "earlier", None),
+            (PENDING, PENDING, None, None),
+        ],
+    )
+    def test_the_step_moves_its_start_written_once_its_end_while_done(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        before: ProgressState,
+        after: ProgressState,
+        started: _Stamp,
+        ended: _Stamp,
+    ) -> None:
+        """DB 287: the start written when the step first goes `active` or
+        `done`, never changed after; the end written when it goes `done`,
+        cleared when it leaves it."""
+        run = _session(session, container, project, environment)
+        pilot_work = container.pilot_work_service()
+        pilot_work.set_progress(_worker(run), [_step("test", state=before)])
+        [test] = _stored(session, run)
+        test.started_at = None if before is PENDING else EARLIER
+        test.ended_at = EARLIER if before is DONE else None
+        session.flush()
+
+        with _Clock() as clock:
+            [moved] = pilot_work.set_progress_step(_worker(run), "test", after)
+
+        assert moved.state_code == after
+        for stamp, expected in ((moved.started_at, started), (moved.ended_at, ended)):
+            if expected == "now":
+                assert clock.stamped(stamp)
+            else:
+                assert stamp == (EARLIER if expected == "earlier" else None)
+
+    def test_every_step_keeps_its_place(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        pilot_work = container.pilot_work_service()
+        pilot_work.set_progress(
+            _worker(run), [_step("P1.code", state=DONE), _step("test"), _step("docs")]
+        )
+
+        answered = pilot_work.set_progress_step(_worker(run), "docs", ACTIVE)
+
+        assert _listed(answered) == [
+            ("P1.code", "P1.code", 1, DONE),
+            ("test", "test", 2, PENDING),
+            ("docs", "docs", 3, ACTIVE),
+        ]
+        assert _listed(_stored(session, run)) == _listed(answered)
+
+    def test_a_code_not_on_the_list_is_refused_and_changes_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        pilot_work = container.pilot_work_service()
+        pilot_work.set_progress(_worker(run), [_step("test")])
+
+        with pytest.raises(RecordNotFoundException) as refused:
+            pilot_work.set_progress_step(_worker(run), "docs", DONE)
+
+        assert refused.value.message == "Progress step docs was not found"
+        assert _listed(_stored(session, run)) == [("test", "test", 1, PENDING)]
+
+    def test_a_turn_ended_after_the_gate_changes_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _session(session, container, project, environment)
+        pilot_work = container.pilot_work_service()
+        pilot_work.set_progress(_worker(run), [_step("test")])
+        run.state_code = SessionState.IDLE
+        session.flush()
+
+        with pytest.raises(AuthorizationException):
+            pilot_work.set_progress_step(_worker(run), "test", ACTIVE)
+
+        assert _listed(_stored(session, run)) == [("test", "test", 1, PENDING)]
+
+
+class TestPilotWorkServiceProgressRecordsNoEffect:
+    def test_neither_call_records_an_effect_or_a_line_of_the_servers(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        """F145.4; DB 289: a change of the list is no Effect, and writes no
+        `server` record into the turn the call ran in."""
+        run = _session(session, container, project, environment)
+        _turn_in_flight(session, run)
+        pilot_work = container.pilot_work_service()
+
+        pilot_work.set_progress(_worker(run), [_step("test"), _step("docs")])
+        pilot_work.set_progress_step(_worker(run), "test", ACTIVE)
+        pilot_work.set_progress(_worker(run), [])
+
+        assert _effect_records(session, run) == []
+        assert _effects(session) == []
+
+
+def _committed_work(app: Flask) -> Worker:
+    """A running work Session of a draft project and its Work, committed: its
+    worker."""
+    project_id, run_id = _committed_run(app)
+    with scoped_session(app.container) as db_session:
+        app.container.record_service().place_work(
+            db_session.get_one(Project, project_id),
+            db_session.get_one(models.Session, run_id),
+            "Refining the camp",
+            repo="example/Example",
+        )
+    return Worker(run_id, project_id, ENVIRONMENT_ID, run_id)
+
+
+_Listed = list[tuple[str, ProgressState]]
+
+
+class TestPilotWorkServiceProgressAtOnce:
+    """A script's call from its loop's `wait` and the agent's own, on one
+    work item's list at once, are served one after the other under the
+    Session's row (V07)."""
+
+    def test_a_code_added_by_both_lands_once_the_second_reading_the_first(
+        self, committed_app: Flask
+    ) -> None:
+        container = committed_app.container
+        worker = _committed_work(committed_app)
+
+        def script() -> _Listed:
+            with scoped_session(container):
+                steps = container.pilot_work_service().set_progress(
+                    worker, [_step("P1.code"), _step("test"), _step("docs")]
+                )
+                return [(step.code, step.state_code) for step in steps]
+
+        with scoped_session(container):
+            agents = container.pilot_work_service().set_progress(
+                worker, [_step("P1.code"), _step("test", state=ACTIVE)]
+            )
+            first = [(step.code, step.state_code) for step in agents]
+            second = in_thread(script)
+            wait_until(lambda: lock_waits(container) == 1, "the script's call waiting")
+
+        assert first == [("P1.code", PENDING), ("test", ACTIVE)]
+        assert second.result() == [
+            ("P1.code", PENDING),
+            ("test", ACTIVE),
+            ("docs", PENDING),
+        ]
+
+    def test_a_step_moved_while_the_list_is_published_is_kept(
+        self, committed_app: Flask
+    ) -> None:
+        container = committed_app.container
+        worker = _committed_work(committed_app)
+        with scoped_session(container):
+            container.pilot_work_service().set_progress(
+                worker, [_step("P1.code", state=ACTIVE), _step("test")]
+            )
+
+        def script() -> _Listed:
+            with scoped_session(container):
+                steps = container.pilot_work_service().set_progress(
+                    worker, [_step("P1.code"), _step("test"), _step("docs")]
+                )
+                return [(step.code, step.state_code) for step in steps]
+
+        with scoped_session(container):
+            container.pilot_work_service().set_progress_step(worker, "P1.code", DONE)
+            second = in_thread(script)
+            wait_until(lambda: lock_waits(container) == 1, "the script's call waiting")
+
+        assert second.result() == [
+            ("P1.code", DONE),
+            ("test", PENDING),
+            ("docs", PENDING),
+        ]
+
+    def test_a_call_that_waited_out_a_stop_changes_nothing(
+        self, committed_app: Flask
+    ) -> None:
+        """Every change of the Session's state takes its row: a call admitted
+        while its turn ran, then waiting on the row, reads the stop there and
+        lists nothing (DB 286)."""
+        container = committed_app.container
+        worker = _committed_work(committed_app)
+        with committed_app.app_context():
+            engine = db.engine
+
+        def publish() -> object:
+            with scoped_session(container):
+                return container.pilot_work_service().set_progress(
+                    worker, [_step("test", state=ACTIVE)]
+                )
+
+        with engine.connect() as stop:
+            stop.execute(
+                sql("UPDATE sessions SET state_code = 'stopped' WHERE id = :id"),
+                {"id": worker.session_id},
+            )
+            call = in_thread(publish)
+            wait_until(lambda: lock_waits(container) == 1, "the call waiting")
+            stop.commit()
+
+        with pytest.raises(AuthorizationException):
+            call.result()
+        with scoped_session(container) as db_session:
+            assert db_session.scalars(select(ProgressStep)).all() == []

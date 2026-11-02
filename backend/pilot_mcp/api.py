@@ -35,6 +35,14 @@ _ATTACHMENT = r"^([0-9A-Fa-f-]{36}|[^:\s/]+:/.*)$"
 BLOCK_ID = r"^[0-9A-Fa-f-]{36}/\S+$"
 """A block's id (TD §4.9), `<item id>/<local id>`."""
 
+StepState = Literal["pending", "active", "done"]
+
+MAX_STEP_CODE = 64
+MAX_STEP_LABEL = 120
+MAX_STEPS = 100
+"""The limits of a work item's list of steps, as its route takes them
+(`app/schemas/pilot_work.py`)."""
+
 
 class NewItem(BaseModel):
     """An item to add, in `timeline.json`'s shape."""
@@ -246,6 +254,47 @@ class Asked(BaseModel):
     )
 
 
+class Step(BaseModel):
+    """A step of your work item's list."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = Field(
+        min_length=1,
+        max_length=MAX_STEP_CODE,
+        description=(
+            "Your name for the step, unique in the list, at most 64 characters:"
+            " `set_progress_step` takes it"
+        ),
+    )
+    label: str = Field(
+        min_length=1,
+        max_length=MAX_STEP_LABEL,
+        description="The step's words on the tile, at most 120 characters",
+    )
+    state: StepState | None = Field(
+        default=None,
+        description=(
+            "`pending`, `active` or `done`; without it, a code already on the"
+            " list keeps its state and a new one starts `pending`"
+        ),
+    )
+
+
+class PublishedStep(BaseModel):
+    """A step of your work item's list as it stands."""
+
+    code: str = Field(description="Your name for the step")
+    label: str = Field(description="Its words on the tile")
+    state: StepState = Field(description="`pending`, `active` or `done`")
+
+
+class Progress(BaseModel):
+    """Your work item's list of steps as it stands."""
+
+    steps: list[PublishedStep] = Field(description="Its steps, in order")
+
+
 class _Routes:
     """One surface's routes, under `/tools/<surface>/`."""
 
@@ -271,12 +320,22 @@ class _Routes:
         tool_use_id: str | None,
         body: dict[str, Any],
     ) -> Any:
+        return await self._send("POST", route, authorization, tool_use_id, body)
+
+    async def _send(
+        self,
+        method: str,
+        route: str,
+        authorization: str,
+        tool_use_id: str | None,
+        body: dict[str, Any],
+    ) -> Any:
         headers = {"Authorization": authorization}
         if tool_use_id is not None:
             headers[TOOL_USE_ID_HEADER] = tool_use_id
         try:
-            response = await self._http.post(
-                f"/tools/{self._surface}/{route}", json=body, headers=headers
+            response = await self._http.request(
+                method, f"/tools/{self._surface}/{route}", json=body, headers=headers
             )
         except httpx.RequestError as exc:
             raise ToolError(
@@ -313,6 +372,20 @@ class PilotWorkApi(_Routes):
         body = {"path": path} if to is None else {"path": path, "to": str(to)}
         answer = await self._post("attachments", authorization, tool_use_id, body)
         return AttachedFiles.model_validate(answer)
+
+    async def set_progress(self, authorization: str, steps: list[Step]) -> Progress:
+        """No tool-use id is sent: the call records no effect to name it."""
+        body = {"steps": [step.model_dump(exclude_none=True) for step in steps]}
+        answer = await self._send("PUT", "progress", authorization, None, body)
+        return Progress.model_validate(answer)
+
+    async def set_progress_step(
+        self, authorization: str, code: str, state: StepState
+    ) -> Progress:
+        """No tool-use id is sent: the call records no effect to name it."""
+        body = {"code": code, "state": state}
+        answer = await self._send("PATCH", "progress", authorization, None, body)
+        return Progress.model_validate(answer)
 
 
 class PilotStoreApi(_Routes):

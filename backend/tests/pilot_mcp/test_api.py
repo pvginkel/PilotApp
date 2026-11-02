@@ -10,8 +10,11 @@ import pytest
 from mcp.server.fastmcp.exceptions import ToolError
 
 from app import models
+from app.models.reference import ProgressState
+from app.schemas import pilot_work
 from app.schemas.timeline import HeldReason
-from pilot_mcp.api import Added, PilotStoreApi, PilotWorkApi
+from pilot_mcp import api as pilot_mcp_api
+from pilot_mcp.api import Added, PilotStoreApi, PilotWorkApi, StepState
 from pilot_mcp.config import McpSettings
 from tests.support.pilot_mcp import API_URL, BEARER, ApiRoutes
 
@@ -34,6 +37,15 @@ def test_an_added_work_items_held_takes_every_reason_the_gate_holds_its_start() 
         if reason
         not in (HeldReason.QUEUE, HeldReason.CONVERSATION, HeldReason.STORE_UPDATE)
     }
+
+
+def test_a_steps_state_takes_every_progress_state() -> None:
+    assert set(get_args(StepState)) == {state.value for state in ProgressState}
+
+
+@pytest.mark.parametrize("limit", ["MAX_STEP_CODE", "MAX_STEP_LABEL", "MAX_STEPS"])
+def test_a_steps_limits_are_its_routes(limit: str) -> None:
+    assert getattr(pilot_mcp_api, limit) == getattr(pilot_work, limit)
 
 
 @pytest.mark.anyio
