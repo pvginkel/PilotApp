@@ -235,10 +235,11 @@ test.describe('The setup', () => {
     await expect(setup.title).toHaveText(SETUP);
     await expect(setup.work.running).toBeVisible();
     await expect(setup.work.line).toBeVisible();
-    await expect(setup.work.sessionLog).toBeVisible();
+    await expect(setup.head.getByTestId('timeline.work.session-log')).toHaveAccessibleName('Session log');
     await expect(setup.work.environment).toHaveCount(0);
     await expect(setup.work.stop).toHaveCount(0);
     await expect(setup.work.resume).toHaveCount(0);
+    await expect(setup.work.row).toHaveCount(0);
 
     await setup.work.sessionLog.click();
     await expect(sessionLog.item).toHaveText(SETUP);
@@ -317,7 +318,7 @@ test.describe('The setup', () => {
 
     await controller.finish(chats.store, session, 'error', 'The model is overloaded.');
     await expect(setup.work.line).toHaveText('Failed · The model is overloaded.');
-    await expect(setup.work.retry).toHaveText('Retry');
+    await expect(setup.work.row).toHaveText('Retry');
     await expect(setup.work.resume).toHaveCount(0);
     await expect(setup.work.retried).toHaveCount(0);
 
@@ -325,6 +326,7 @@ test.describe('The setup', () => {
     await setup.work.retry.click();
     const again = await restarted();
     await expect(setup.work.retry).toHaveCount(0);
+    await expect(setup.work.row).toHaveCount(0);
     await expect(setup.work.sessionLog).toBeFocused();
     await expect(setup.work.retried).toContainText('Retried as a new job below');
     await expect(setup.work.line).toHaveText('Failed · The model is overloaded.');

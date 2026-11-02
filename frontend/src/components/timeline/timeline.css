@@ -107,6 +107,11 @@
   /* Discuss at the head's end, pushed there by its margin, which costs no gap as a spacer would. */
   .item-head .item-discuss { margin-left: auto; }
   .item-head .btn { align-self: center; }
+  /* A work item's Session log and Stop stand with Discuss at the head's end, pushed there in its
+     place; Stop's square is the red of the session log's failed turn end. */
+  .item-head .work-log { margin-left: auto; }
+  .item-head .work-log ~ .item-discuss { margin-left: 0; }
+  .item-head .work-stop .icon { color: hsl(var(--destructive-text)); }
   .chip.for { background: hsl(330 60% 50% / 0.12); color: hsl(330 55% 38%); }
   :root[data-theme="dark"] .chip.for { color: hsl(330 70% 78%); }
   .chip.urgent { background: hsl(var(--urgent) / 0.15); color: hsl(var(--urgent-text)); font-weight: 600; }
@@ -116,7 +121,7 @@
   .item-sub { margin: 0 0 6px; font-size: var(--text-base); color: hsl(var(--muted-foreground)); }
   .item-after { margin-top: 12px; }
   .item-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
-  /* A question asked in the actions' place: Stop's. */
+  /* A question asked in the actions' place: Stop's, in a work item's row under its line. */
   .item-actions.confirm .confirm-text { flex: 1 1 260px; font-size: var(--text-base); color: hsl(var(--muted-foreground)); }
   /* The attachments hung on an item, a chip each (attachments.tsx). */
   .attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }

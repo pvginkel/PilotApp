@@ -3,8 +3,9 @@
  * goes under its label, Recommended staying at the label's end; a block head wraps what does not
  * fit, and Answered keeps its icon alone; an item's head keeps to its card on one line, Urgent its
  * triangle and *Edited* a pencil, their words kept for a screen reader, and the page scrolls no
- * wider than itself; on the narrowest an item's head wraps rather than leave its card. A wide
- * window keeps the line beside the label and every word.
+ * wider than itself; on the narrowest an item's head, a work item's with its Session log and Stop
+ * icons too, wraps rather than leave its card. A wide window keeps the line beside the label and
+ * every word.
  */
 
 import type { Locator } from '@playwright/test';
@@ -140,7 +141,7 @@ test.describe('On the narrowest phone', () => {
   });
 
   test('an item’s head wraps what does not fit, none of it leaving the card', async ({ people, projects, timeline }) => {
-    const { document } = await crowded(people, projects, timeline);
+    const { document, work } = await crowded(people, projects, timeline);
     const doc = timeline.item(document);
     await expect(doc.edited).toBeVisible();
 
@@ -151,6 +152,20 @@ test.describe('On the narrowest phone', () => {
     expect(discuss.y).toBeGreaterThanOrEqual(kind.y + kind.height - 1);
     expect(discuss.x + discuss.width).toBeLessThanOrEqual(card.x + card.width);
     expect(await doc.head.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(0);
+
+    // A running work item's head, with Session log's and Stop's icons, wraps too.
+    const running = timeline.item(work);
+    await expect(running.work.running).toBeVisible();
+    const workCard = (await running.root.boundingBox())!;
+    const workKind = (await running.kind.boundingBox())!;
+    const workDiscuss = (await running.discuss.boundingBox())!;
+    expect(workKind.height).toBeLessThan(30);
+    expect(workDiscuss.y).toBeGreaterThanOrEqual(workKind.y + workKind.height - 1);
+    for (const part of [running.work.sessionLog, running.work.stop, running.discuss]) {
+      const box = (await part.boundingBox())!;
+      expect(box.x + box.width).toBeLessThanOrEqual(workCard.x + workCard.width);
+    }
+    expect(await running.head.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(0);
     expect(await timeline.root.evaluate((feed) => feed.scrollWidth - feed.clientWidth)).toBe(0);
   });
 });

@@ -88,6 +88,7 @@ test.describe("A run halted at its turn’s end", () => {
     await expect(item.root).toHaveAttribute("data-state", "open");
     await expect(item.work.stop).toHaveCount(0);
     await expect(item.work.resume).toHaveCount(0);
+    await expect(item.work.row).toHaveCount(0);
     await expect(projectList.badge(name)).toHaveCount(0);
     await expect
       .poll(() => controller.fileText(environment, HALT_FILE))

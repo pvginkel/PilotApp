@@ -15,8 +15,9 @@ import { waitTestEvent } from '../helpers';
  * (F10.2, F11), a finished timeline's end (F5.3) with the archive question under it (F5.6), a new
  * project's ready line under its setup (D083), and where it stands scrolled; opened at its
  * project's address or at an item's or a block's under it (F97). A work item open shows its env
- * chip, its running time, its one line — the working cue and the latest step — its Session log
- * (F26), and Stop with its question or Resume (F67).
+ * chip, its running time, Session log's and Stop's icons in its head, its one line — the working
+ * cue and the latest step — and the row under it, with Stop's question or Resume or Retry (F26,
+ * F26.8, F67).
  */
 export class TimelinePage {
   readonly root: Locator;
@@ -155,13 +156,16 @@ export class TimelinePage {
         line: root.getByTestId('timeline.work.line'),
         cue: root.getByTestId('timeline.work.line').getByTestId('chat.cue'),
         step: root.getByTestId('timeline.work.step'),
+        /** Session log's and Stop's icons, in the head. */
         sessionLog: root.getByTestId('timeline.work.session-log'),
         stop: root.getByTestId('timeline.work.stop'),
+        /** The row under the line, and Resume in it. */
+        row: root.getByTestId('timeline.work.row'),
         resume: root.getByTestId('timeline.work.resume'),
         /** A job's Retry, once it stopped or failed, and the line saying a Retry placed a new one. */
         retry: root.getByTestId('timeline.work.retry'),
         retried: root.getByTestId('timeline.work.retried'),
-        /** Stop's question, in the actions' place: its words, Stop it and Cancel. */
+        /** Stop's question, in the row's place: its words, Stop it and Cancel. */
         stopConfirm: {
           root: root.getByTestId('timeline.work.stop-confirm'),
           text: root.getByTestId('timeline.work.stop-confirm.text'),

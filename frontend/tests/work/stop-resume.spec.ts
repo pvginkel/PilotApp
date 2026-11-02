@@ -1,14 +1,16 @@
 /**
- * Stop and Resume on a work item (F67): Stop, on an item that runs, starts or is held, asks first in
- * the item's actions' place, Esc and Cancel dismissing the question (UC, *Keys*); Stop it ends the
- * session where it is, the item "Stopped · <time>" and waiting on you, Resume in Stop's place.
+ * Stop and Resume on a work item (F67, F26.8): Stop, on an item that runs, starts or is held, an
+ * icon in the item's head after Session log's, before Discuss, its square red, asks first in the
+ * row under the line, Esc and Cancel dismissing the question (UC, *Keys*); Stop it ends the session
+ * where it is, the item "Stopped · <time>" and waiting on you, Resume in the row under the line.
  * Resume, on a stopped item, a failed start or a turn ended in error, carries it on in the same
  * item through the gate, held while the project is paused, disabled while it is archived; a held
- * start stopped starts no more. A refusal shows as the API words it. Once this browser's Stop or
- * Resume lands, the keyboard focus on the button that went is on Resume, or on Stop; one made
- * elsewhere, or a focus moved meanwhile, moves no focus.
+ * start stopped starts no more. A refusal shows as the API words it. A running item has no row.
+ * Once this browser's Stop or Resume lands, the keyboard focus on the button that went is on
+ * Resume, or on Stop's icon; one made elsewhere, or a focus moved meanwhile, moves no focus.
  */
 
+import type { Locator, Page } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import { slowNetwork } from '../support/network';
@@ -42,13 +44,35 @@ async function startIn(projects: Projects, project: string, state = 'running', t
   return work;
 }
 
+/** `--destructive-text` as the browser computes a colour: the session log's failed turn end's red. */
+async function destructiveText(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const probe = document.createElement('span');
+    probe.style.color = 'hsl(var(--destructive-text))';
+    document.body.append(probe);
+    const colour = getComputedStyle(probe).color;
+    probe.remove();
+    return colour;
+  });
+}
+
+/** The test ids of the head's last four parts, in order. */
+async function headEnd(head: Locator): Promise<(string | null)[]> {
+  return (await head.locator('> *').evaluateAll((parts) => parts.map((part) => part.getAttribute('data-testid')))).slice(-4);
+}
+
+/** The classes of the item body's parts, in order. */
+async function bodyParts(item: Locator): Promise<string[]> {
+  return item.locator('.item-body > *').evaluateAll((parts) => parts.map((part) => part.className));
+}
+
 /** Resolves once the relay has recorded the result that ends the item's stopped turn: Resume is refused until then. */
 async function turnEnded(projects: Projects, work: string): Promise<void> {
   await expect.poll(async () => (await projects.records(work)).records.at(-1)?.kind).toBe('result');
 }
 
 test.describe('Stop', () => {
-  test('asks first in the actions’ place, Cancel taking the focus; Esc and Cancel dismiss the question, and nothing stops', async ({
+  test('is a red icon in the head after Session log’s, the item no row; asks first in the row under the line, Cancel taking the focus; Esc and Cancel dismiss the question, and nothing stops', async ({
     people,
     projects,
     timeline,
@@ -57,22 +81,36 @@ test.describe('Stop', () => {
     const { project } = await setUp({ people, projects });
     const work = await startIn(projects, project);
     await timeline.open(project);
-    const item = timeline.item(work).work;
-    await expect(item.stop).toHaveText('Stop');
+    const tile = timeline.item(work);
+    const item = tile.work;
+    await expect(item.running).toBeVisible();
+    expect(await headEnd(tile.head)).toEqual(['timeline.work.running', 'timeline.work.session-log', 'timeline.work.stop', 'timeline.item.discuss']);
+    await expect(item.stop).toHaveText('');
+    await expect(item.stop).toHaveAttribute('title', 'Stop');
+    await expect(item.stop).toHaveAccessibleName('Stop');
+    await expect(item.stop.locator('svg')).toHaveCSS('color', await destructiveText(page));
+    await expect(item.sessionLog).toHaveText('');
+    await expect(item.sessionLog).toHaveAttribute('title', 'Session log');
+    await expect(item.sessionLog).toHaveAccessibleName('Session log');
     await expect(item.resume).toHaveCount(0);
+    await expect(item.row).toHaveCount(0);
 
     await item.stop.click();
     await expect(item.stopConfirm.text).toHaveText(QUESTION);
     await expect(item.stopConfirm.yes).toHaveText('Stop it');
     await expect(item.stopConfirm.cancel).toHaveText('Cancel');
     await expect(item.stopConfirm.cancel).toBeFocused();
-    await expect(item.sessionLog).toHaveCount(0);
-    await expect(item.stop).toHaveCount(0);
+    expect(await bodyParts(tile.root)).toEqual(['item-head', 'item-title', 'work-line', 'item-actions confirm']);
+    await expect(item.sessionLog).toBeVisible();
+    await expect(item.stop).toBeVisible();
+    // Stop pressed again keeps the question, its Cancel focused.
+    await item.stop.press('Enter');
+    await expect(item.stopConfirm.cancel).toBeFocused();
 
     await page.keyboard.press('Escape');
     await expect(item.stopConfirm.root).toHaveCount(0);
     await expect(item.stop).toBeFocused();
-    await expect(item.sessionLog).toBeVisible();
+    await expect(item.row).toHaveCount(0);
 
     await item.stop.click();
     await item.stopConfirm.cancel.click();
@@ -92,7 +130,8 @@ test.describe('Stop', () => {
     const work = await startIn(projects, project);
     await timeline.open(project);
     await deploymentSse.ensureConnected();
-    const item = timeline.item(work).work;
+    const tile = timeline.item(work);
+    const item = tile.work;
     await expect(projectList.badge(name)).toHaveCount(0);
 
     await item.stop.click();
@@ -102,14 +141,16 @@ test.describe('Stop', () => {
     await expect(item.line).toHaveText(`Stopped · ${clock(stopped_at!)}`);
     await expect(item.stopConfirm.root).toHaveCount(0);
     await expect(item.stop).toHaveCount(0);
-    await expect(item.resume).toHaveText('Resume');
+    await expect(item.row).toHaveText('Resume');
     await expect(item.resume).toBeFocused();
-    await expect(item.sessionLog).toBeVisible();
+    expect(await bodyParts(tile.root)).toEqual(['item-head', 'item-title', 'work-line ended', 'item-actions']);
+    await expect(tile.head.getByTestId('timeline.work.session-log')).toBeVisible();
     await expect(projectList.badge(name)).toHaveText('1');
 
     await turnEnded(projects, work);
     await item.resume.click();
     await expect(item.resume).toHaveCount(0);
+    await expect(item.row).toHaveCount(0);
     await expect(item.stop).toBeVisible();
     await expect(item.stop).toBeFocused();
     await expect(item.cue).toBeVisible();
