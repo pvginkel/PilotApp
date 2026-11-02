@@ -176,7 +176,8 @@ const AUTOPILOT_FORM = 'project.autopilot';
 /**
  * Each flip is a transition on the record, by the person, when they flip it (F4.1). Turning it on
  * while confirmations it would have taken are open asks first in its dialog, whose answer turns it
- * on (F4.2). On a phone the switch has no label: its name is its accessible one.
+ * on (F4.2). On a phone the switch has no label, its name its accessible one, and the Finished chip
+ * shows its icon alone.
  */
 export function Autopilot({ project, phone = false }: { project: Project; phone?: boolean }) {
   const queryClient = useQueryClient();
@@ -189,9 +190,9 @@ export function Autopilot({ project, phone = false }: { project: Project; phone?
   if (asking && (project.autopilot || project.state === 'finished' || project.archived)) setAsking(false);
   if (project.state === 'finished') {
     return (
-      <span className="chip finished-chip" data-testid="project.finished">
+      <span className="chip finished-chip" title={phone ? 'Finished' : undefined} data-testid="project.finished">
         <Flag className="icon" aria-hidden="true" />
-        Finished
+        <span className="chip-label">Finished</span>
       </span>
     );
   }

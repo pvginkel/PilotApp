@@ -8,7 +8,7 @@
  * then the members folding to a count, then standing in two rows, its menu clear of the panel;
  * everything it opens closed on another project (F1.6); on a phone one line (F2.8): the switch
  * without its label, the donut alone showing the Plan tab (F3.7), the members two circles at most,
- * the name giving way, a draft's, a finished and an archived project's.
+ * the name giving way, a draft's, a finished and an archived project's, their chips their icon alone.
  */
 
 import type { Locator, Page } from '@playwright/test';
@@ -859,20 +859,52 @@ test.describe('The head on a phone', () => {
     expect(parts[4].x + parts[4].width).toBeLessThanOrEqual(390);
   });
 
-  test('a finished project shows the Finished chip in the switch’s place, an archived one its chip after the name', async ({ people, projects, projectHead }) => {
+  test('a finished project shows the Finished chip in the switch’s place, an archived one its chip after the name, each its icon alone, its word on the tooltip and to a screen reader', async ({
+    people,
+    projects,
+    projectHead,
+  }) => {
     const me = await people.signIn();
     const finished = await projects.make({ name: makeUnique('Done'), state: 'finished', members: [me.handle!], tasks: [step('a', 'done')] });
     const archived = await projects.make({ name: makeUnique('Archived'), archived: true, members: [me.handle!] });
 
     await projectHead.open(finished);
     await expect(projectHead.finished).toHaveText('Finished');
+    await expect(projectHead.finished).toHaveAttribute('title', 'Finished');
+    await expect(projectHead.finished.locator('svg')).toBeVisible();
+    expect((await boxOf(projectHead.finished)).width).toBeLessThan(30);
     await expect(projectHead.autopilot).toHaveCount(0);
     await expect(projectHead.donut).toBeVisible();
 
     await projectHead.open(archived);
     await expect(projectHead.archived).toHaveText('Archived');
+    await expect(projectHead.archived).toHaveAttribute('title', 'Archived');
+    await expect(projectHead.archived.locator('svg')).toBeVisible();
+    expect((await boxOf(projectHead.archived)).width).toBeLessThan(30);
     await expect(projectHead.autopilot).toBeDisabled();
     expect((await boxOf(projectHead.archived)).x).toBeGreaterThan((await boxOf(projectHead.name)).x);
+  });
+
+  test('an archived and a finished head with a ticket, three members and the notes’ button hold one line, the menu inside the head', async ({
+    people,
+    projects,
+    projectHead,
+  }) => {
+    const me = await people.signIn();
+    const parts = { ticket: 'PL-1234', members: [me.handle!, 'ada', 'ben'], tasks: [step('a', 'done')], notes: [note('one')] };
+    const archived = await projects.make({ name: makeUnique('Shelved'), archived: true, ...parts });
+    const finished = await projects.make({ name: makeUnique('Ended'), state: 'finished', ...parts });
+
+    for (const id of [archived, finished]) {
+      await projectHead.open(id);
+      await expect(projectHead.menuButton).toBeVisible();
+      await expect(projectHead.notesButton).toBeVisible();
+      const head = await boxOf(projectHead.root);
+      expect(head.height).toBe(52);
+      const menu = await boxOf(projectHead.menuButton);
+      expect(menu.x + menu.width).toBeLessThanOrEqual(390);
+      expect(menu.y + menu.height / 2).toBeCloseTo(head.y + head.height / 2, -1);
+    }
   });
 });
 

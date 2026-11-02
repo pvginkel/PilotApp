@@ -1,7 +1,8 @@
 /**
  * A project's head on a phone (F2.8, F98.3), one line: the drawer's button; the name, its chip and
  * the ticket, the repo hidden; the auto pilot switch without its label, its warning triangle after
- * it (F4.3), or the Finished chip in its place; the plan's donut alone, a tap on it showing the Plan
+ * it (F4.3), or the Finished chip in its place, the Archived and Finished chips their icon alone,
+ * their word the tooltip's and a screen reader's; the plan's donut alone, a tap on it showing the Plan
  * tab (F3.7); the members, two circles at most (F2.5); the plan's notes button while it shows (F2.7);
  * the project's menu (F2.4). A draft's has its name, the Draft chip, its members and its menu. The
  * tabs at the bottom stand for Discuss, the Documents button and the draft-panel toggle, and the
@@ -38,9 +39,9 @@ export function PhoneHead({ project, onPlan }: PhoneHeadProps) {
         </span>
       )}
       {project.archived && (
-        <span className="chip archived-chip" data-testid="project.archived">
+        <span className="chip archived-chip" title="Archived" data-testid="project.archived">
           <Archive className="icon" aria-hidden="true" />
-          Archived
+          <span className="chip-label">Archived</span>
         </span>
       )}
       {project.ticket && (

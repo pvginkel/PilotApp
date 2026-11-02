@@ -83,6 +83,10 @@
   .phone-head .grow { margin-right: -10px; }
   .phone-head .members { flex: none; }
   .phone-head .switch, .phone-head .chip { align-self: center; }
+  /* The Archived and Finished chips show their icon alone, their word left to the tooltip and a
+     screen reader, so that an archived head with its ticket, three members and the notes' button
+     holds one line at 390px. */
+  .phone-head .chip-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .phone-head .head-icon + .head-icon { margin-left: -10px; }
   /* The second circle is the count of the rest, where there are more than two. */
   .phone-head .members .more { font-size: 12.5px; letter-spacing: -0.02em; }
