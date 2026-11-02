@@ -647,7 +647,9 @@ class TestProgressStep:
                     started_at=STARTED,
                     ended_at=ENDED,
                 ),
-                _step(run, "test", 2, state_code=ProgressState.ACTIVE, started_at=ENDED),
+                _step(
+                    run, "test", 2, state_code=ProgressState.ACTIVE, started_at=ENDED
+                ),
             ]
         )
         session.flush()
