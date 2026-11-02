@@ -18,7 +18,7 @@
  */
 
 import { useEffect } from 'react';
-import { useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { useQueryClient, type QueryClient, type QueryKey } from '@tanstack/react-query';
 import { useSseContext } from '@/contexts/sse-context';
 import type { ItemDocument } from '@/hooks/use-document';
 import type { components } from '@/lib/api/generated/types';
@@ -49,11 +49,22 @@ const HANDBOOK = 'getProjectsHandbookByProjectId';
 const DRAFT = 'getProjectsDraftByProjectId';
 const CHATS = 'getProjectsChatsByProjectId';
 
+/**
+ * The queries under `queryKey` read again. A first read still under way may predate the event, and
+ * an invalidation hands back that read rather than a new one (TanStack Query reuses the fetch in
+ * flight of a query holding no data yet), so it is cancelled first.
+ */
+function invalidate(queryClient: QueryClient, queryKey: QueryKey): void {
+  void queryClient
+    .cancelQueries({ queryKey, predicate: (query) => query.state.data === undefined })
+    .then(() => queryClient.invalidateQueries({ queryKey }));
+}
+
 function readAgain(queryClient: QueryClient, projects: ReadonlySet<string>): void {
-  void queryClient.invalidateQueries({ queryKey: LISTS });
+  invalidate(queryClient, LISTS);
   for (const project_id of projects) {
     for (const key of [HEAD, TIMELINE, HANDBOOK, DRAFT, CHATS]) {
-      void queryClient.invalidateQueries({ queryKey: [key, { path: { project_id } }] });
+      invalidate(queryClient, [key, { path: { project_id } }]);
     }
   }
   // A document's read is keyed by its item; what it read names its project.
