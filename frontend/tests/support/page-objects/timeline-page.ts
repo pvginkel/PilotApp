@@ -16,8 +16,8 @@ import { waitTestEvent } from '../helpers';
  * project's ready line under its setup (D083), and where it stands scrolled; opened at its
  * project's address or at an item's or a block's under it (F97). A work item open shows its env
  * chip, its running time, Session log's and Stop's icons in its head, its one line — the working
- * cue and the latest step — and the row under it, with Stop's question or Resume or Retry (F26,
- * F26.8, F67).
+ * cue and the latest step — and the row under it, with Stop's question, or the progress button and
+ * its popover and Resume or Retry (F26, F26.8, F67, F145.2, F145.3).
  */
 export class TimelinePage {
   readonly root: Locator;
@@ -161,6 +161,15 @@ export class TimelinePage {
         stop: root.getByTestId('timeline.work.stop'),
         /** The row under the line, and Resume in it. */
         row: root.getByTestId('timeline.work.row'),
+        /** The progress button, its donut and its name, and the popover listing the steps. */
+        progress: root.getByTestId('timeline.work.progress'),
+        progressRing: root.getByTestId('timeline.work.progress.ring'),
+        progressName: root.getByTestId('timeline.work.progress.name'),
+        steps: {
+          root: root.getByTestId('timeline.work.steps'),
+          heading: root.getByTestId('timeline.work.steps.heading'),
+          items: root.getByTestId('timeline.work.steps.step'),
+        },
         resume: root.getByTestId('timeline.work.resume'),
         /** A job's Retry, once it stopped or failed, and the line saying a Retry placed a new one. */
         retry: root.getByTestId('timeline.work.retry'),

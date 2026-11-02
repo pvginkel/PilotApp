@@ -1,7 +1,7 @@
 /**
  * How a project's standing reads (STATUS-4): the head's step reading (F2.2), a tab's status line
  * (F1.2), derived from the record, never written by the brain (database.md decision 15), a tab's
- * status icon (F1.3, F141.1), and a step's standing in the plan popover (F3.1). How a work item's session reads: its one line on the
+ * status icon (F1.3, F141.1), and a step's standing in the plan popover and in a work item's progress (F3.1, F145.3). How a work item's session reads: its one line on the
  * timeline (F26.1, F26.2, F125), why the gate holds its start (F26.1), why it stopped when no one
  * of the app's people stopped it (F71, F135.6), its session log's tail (F69.2), and a job's line withdrawn by an Undo (F14.1). How a condition that holds all work reads
  * on the gold bar (F125, F135.7), and the week's halt's overrule (F135.2).
@@ -17,6 +17,7 @@ type ProjectTab = components['schemas']['ProjectListResponseSchema.e86ccd6.Proje
 type PlanProgress = components['schemas']['ProjectListResponseSchema.e86ccd6.PlanProgressSchema'];
 type ProjectStatus = NonNullable<ProjectTab['status']>;
 type TaskStatus = components['schemas']['ProjectHeadSchema.e86ccd6.TaskStatus'];
+type ProgressState = components['schemas']['TimelineSchema.1fdd8ae.ProgressState'];
 type Work = components['schemas']['TimelineSchema.1fdd8ae.WorkSchema'];
 type HeldReason = components['schemas']['TimelineSchema.1fdd8ae.HeldReason'];
 type CurrentLine = components['schemas']['TimelineSchema.1fdd8ae.CurrentLineSchema'];
@@ -90,23 +91,52 @@ export function projectStatusIcon(status: ProjectStatus): StatusIconReading {
   }
 }
 
-interface PlanStep {
-  /** The step's mark in the plan popover: ticked once done, highlighted while in progress. */
-  mark: 'done' | 'now' | 'pending';
-  label: string;
-}
+/** A step's mark in its popover: ticked once done, highlighted while in progress. */
+export type StepMark = 'done' | 'now' | 'pending';
 
-export function planStep(status: TaskStatus): PlanStep {
+export function planStepMark(status: TaskStatus): StepMark {
   switch (status) {
     case 'done':
-      return { mark: 'done', label: 'Done' };
+      return 'done';
     case 'in_progress':
-      return { mark: 'now', label: 'In progress' };
+      return 'now';
     case 'pending':
-      return { mark: 'pending', label: 'Not started' };
+      return 'pending';
     default: {
       const unknown: never = status;
-      return { mark: 'pending', label: String(unknown) };
+      return unknown;
+    }
+  }
+}
+
+/** A work item's step's mark (F145.2): an `active` step is in progress. */
+export function progressStepMark(state: ProgressState): StepMark {
+  switch (state) {
+    case 'done':
+      return 'done';
+    case 'active':
+      return 'now';
+    case 'pending':
+      return 'pending';
+    default: {
+      const unknown: never = state;
+      return unknown;
+    }
+  }
+}
+
+/** A step's mark as a screen reader names it. */
+export function stepMarkLabel(mark: StepMark): string {
+  switch (mark) {
+    case 'done':
+      return 'Done';
+    case 'now':
+      return 'In progress';
+    case 'pending':
+      return 'Not started';
+    default: {
+      const unknown: never = mark;
+      return String(unknown);
     }
   }
 }

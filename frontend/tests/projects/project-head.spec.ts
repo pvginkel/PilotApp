@@ -381,7 +381,7 @@ test.describe('An archived project’s head', () => {
 
 test.describe('A tight head beside the side panel', () => {
   const LONG_STEP = { id: 'a', title: 'A step whose title runs on well past what the head has room for', status: 'in_progress' as const, notes: [] };
-  // The step's name gives way down to this width (plan-popover.tsx).
+  // The step's name gives way down to this width (steps-button.tsx).
   const NAME_FLOOR = 28;
   const cut = (locator: Locator) => locator.evaluate((element) => element.scrollWidth > element.clientWidth);
   const width = async (locator: Locator) => (await locator.boundingBox())!.width;

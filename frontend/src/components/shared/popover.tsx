@@ -1,7 +1,8 @@
 /**
  * A popover that drops from its button (the mockup's `.plan-pop`): it closes on a press outside
- * it, on Esc, on its button, and on an action in it that calls `close`; it scrolls inside the
- * window.
+ * it, on Esc, on its button, and on an action in it that calls `close`; it scrolls inside what
+ * holds it, the window or the pane that scrolls it, opening above its button where it does not fit
+ * below and has more room there.
  */
 
 import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
@@ -19,6 +20,10 @@ interface PopoverProps {
   children: ReactNode | ((close: () => void) => ReactNode);
 }
 
+/** The popover's distance from its button, and the least it keeps from its bounds' edge, in pixels. */
+const GAP = 6;
+const EDGE = 12;
+
 /** The head's popovers stand in Esc's order where the plan does. */
 export function Popover({ label, anchorClassName, className, testId, trigger, children }: PopoverProps) {
   const [open, setOpen] = useState(false);
@@ -26,11 +31,19 @@ export function Popover({ label, anchorClassName, className, testId, trigger, ch
   const anchor = useDismiss('plan', open, close);
   const pop = useRef<HTMLDivElement>(null);
 
-  // It runs to 12px above the bottom of the window, and scrolls past that.
+  // It runs to 12px short of its bounds' edge, and scrolls past that.
   useLayoutEffect(() => {
-    if (open && pop.current) {
-      pop.current.style.maxHeight = `${window.innerHeight - pop.current.getBoundingClientRect().top - 12}px`;
+    const own = pop.current;
+    if (!open || !own) return;
+    const bounds = boundsOf(own);
+    const below = bounds.bottom - own.getBoundingClientRect().top - EDGE;
+    const above = own.parentElement!.getBoundingClientRect().top - GAP - bounds.top - EDGE;
+    const up = own.scrollHeight > below && above > below;
+    if (up) {
+      own.style.top = 'auto';
+      own.style.bottom = `calc(100% + ${GAP}px)`;
     }
+    own.style.maxHeight = `${up ? above : below}px`;
   }, [open]);
 
   return (
@@ -43,4 +56,13 @@ export function Popover({ label, anchorClassName, className, testId, trigger, ch
       )}
     </div>
   );
+}
+
+/** The box a popover is seen in: the nearest pane that scrolls it, else the window. */
+function boundsOf(element: HTMLElement): { top: number; bottom: number } {
+  for (let pane = element.parentElement; pane !== null; pane = pane.parentElement) {
+    const { overflowY } = getComputedStyle(pane);
+    if (overflowY === 'auto' || overflowY === 'scroll') return pane.getBoundingClientRect();
+  }
+  return { top: 0, bottom: window.innerHeight };
 }

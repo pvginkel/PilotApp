@@ -1,5 +1,5 @@
-/* A project's head (PilotAppSpecs design/mockup/style.css, "The head's controls", "Auto pilot",
-   the plan's donut and the plan popover, and "Narrow screens"). */
+/* A project's head (PilotAppSpecs design/mockup/style.css, "The head's controls", "Auto pilot"
+   and "Narrow screens"); the plan's donut and the plan popover are shared.css's. */
 
 @layer components {
   /* The head's controls share their text's baseline; its two rows stand in one line. */
@@ -25,7 +25,7 @@
   .chip.finished-chip, .chip.archived-chip { font-weight: 600; }
 
   /* In a tight head its parts give way in one order: the repo, then the name, then the step's name
-     down to its floor (plan-popover.tsx), then the members, folding to a count (project-head.tsx).
+     down to its floor (steps-button.tsx), then the members, folding to a count (project-head.tsx).
      The ticket, the chips, auto pilot or Create project and the icons keep their size.
      Flex items shrink in proportion to factor × size: at a million times the next one's factor,
      each gives way to its floor while the next gives up a millionth as much for its size. */
@@ -50,36 +50,9 @@
   /* Beside the switch while work briefed under its other setting runs (F4.3). */
   .switch-warning { flex: none; margin-left: -6px; font-size: var(--text-sm); color: hsl(var(--warning-text)); }
 
-  /* The step button, a few pixels up from a small button's 28px: its name gives way down to the
-     floor plan-popover.tsx sets on the anchor. */
-  .step-anchor > .btn { --h: 32px; max-width: 100%; }
-  .step-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  /* ", …" when more steps are in progress: it stays when the name gives way, without the gap. */
-  .step-more { flex: none; margin-left: -6px; white-space: pre; }
-  /* The plan's donut. It hangs from the baseline as an icon does, lowered to centre on the capitals. */
-  .plan-ring { position: relative; top: calc(8px - 0.5cap); flex: none; width: 16px; height: 16px; transform: rotate(-90deg); }
-  /* In the step button, the donut 20px. */
+  /* The step button (steps-button.tsx), a few pixels up from a small button's 28px, its donut 20px. */
+  .step-anchor > .btn { --h: 32px; }
   .step-anchor .plan-ring { top: calc(10px - 0.5cap); width: 20px; height: 20px; }
-  .plan-ring circle { fill: none; stroke-width: 3; stroke: hsl(var(--muted-foreground) / 0.3); }
-  .plan-ring .done { stroke: hsl(var(--primary)); }
-  .plan-ring .now { stroke: hsl(var(--primary) / 0.45); }
-
-  /* The plan popover: the steps in order, every step in progress highlighted. */
-  .plan-pop { width: 320px; }
-  .plan-pop ol { margin: 0; padding: 0; list-style: none; }
-  .plan-step { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; padding: 4px 14px; color: hsl(var(--muted-foreground)); }
-  .plan-step.now { color: hsl(var(--foreground)); font-weight: 600; background: hsl(var(--primary-muted)); }
-  .plan-step .step-title { flex: 1; min-width: 0; }
-  /* The mark has no text, so its baseline is its bottom edge; it is lifted to centre on the
-     step's capitals. */
-  .plan-step .mark { position: relative; top: calc(9px - 0.5cap); flex: none; width: 18px; height: 18px; border-radius: 999px; border: 1.5px solid hsl(var(--border)); }
-  .plan-step .mark .icon { position: absolute; inset: 0; margin: auto; width: 11px; height: 11px; }
-  .plan-step.done .mark { border-color: hsl(var(--primary)); background: hsl(var(--primary)); color: #fff; }
-  .plan-step.now .mark { border-color: hsl(var(--primary)); }
-  .plan-step.now .mark::after { content: ''; position: absolute; inset: 3.5px; border-radius: 999px; background: hsl(var(--primary) / 0.45); }
-  .plan-step .step-notes { flex: none; padding: 0; border: 0; background: none; color: hsl(var(--muted-foreground)); font: inherit; cursor: pointer; }
-  .plan-step .step-notes:hover, .plan-step .step-notes[aria-expanded="true"] { color: hsl(var(--foreground)); }
-  .plan-step .note-list { flex-basis: 100%; margin: 4px 0 2px; padding-left: 28px; }
 
   /* A list of notes: each summary, then its content. */
   .note-list { margin: 0; padding: 0; list-style: none; font-size: var(--text-base); font-weight: 400; color: hsl(var(--foreground)); }

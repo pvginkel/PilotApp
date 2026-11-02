@@ -17,10 +17,12 @@
  * the setup, has no env chip and no Stop or Resume (F26.3, F59.1), and Retry where Resume is once
  * it stopped or failed: a fresh job for the same trigger at the project's next place, disabled
  * while the project is archived. Retried, its line says so under its stop or its failure, and
- * offers Retry no more. A tile with nothing for the row has no row. Once this browser's Stop or
- * Resume swaps the two, the keyboard focus on the button that went goes to the other, Resume or
- * Stop's icon, and once its Retry lands, to Session log's icon; a swap another browser's act made
- * moves no focus.
+ * offers Retry no more. The row leads with the progress button once its run published its steps,
+ * the plan's donut and the first step in progress, opening their list (F145.2, F145.3), until the
+ * list is emptied; a job publishes none. A tile with nothing for the row has no row. Once this
+ * browser's Stop or Resume swaps the two, the keyboard focus on the button that went goes to the
+ * other, Resume or Stop's icon, and once its Retry lands, to Session log's icon; a swap another
+ * browser's act made moves no focus.
  */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
@@ -28,6 +30,7 @@ import { Link, useParams } from '@tanstack/react-router';
 import { CircleAlert, Play, RotateCw, ScrollText, Server, Square } from 'lucide-react';
 import { WorkingCue } from '@/components/chat/working-cue';
 import { EnvironmentLink, LinkedText } from '@/components/shared/linked-text';
+import { StepsButton } from '@/components/shared/steps-button';
 import { Time } from '@/components/shared/time';
 import { ItemHead } from '@/components/timeline/item-head';
 import { useNow } from '@/hooks/use-now';
@@ -36,7 +39,7 @@ import { titleOf, type TimelineItem } from '@/hooks/use-timeline';
 import { RESUMABLE, STOPPABLE, useResume, useRetry, useStop } from '@/hooks/use-work-acts';
 import type { components } from '@/lib/api/generated/types';
 import { useEscape } from '@/lib/keys';
-import { workLine } from '@/lib/utils/status-labels';
+import { progressStepMark, workLine } from '@/lib/utils/status-labels';
 
 type Work = components['schemas']['TimelineSchema.1fdd8ae.WorkSchema'];
 
@@ -119,7 +122,7 @@ export function WorkItem({ item }: { item: TimelineItem }) {
           }}
         />
       ) : (
-        <Row item={item} actions={actions} handoff={handoff} />
+        <Row item={item} actions={actions} handoff={handoff} steps={work.progress} />
       )}
     </div>
   );
@@ -212,13 +215,35 @@ function StopQuestion({ item, handoff, cancelButton, onCancel }: StopQuestionPro
   );
 }
 
-/** The row under the line, with Resume or a job's Retry; none where it has neither. */
-function Row({ item, actions, handoff }: { item: TimelineItem; actions: Actions; handoff: Handoff }) {
-  if (actions !== 'resume' && actions !== 'retry') return null;
+interface RowProps {
+  item: TimelineItem;
+  actions: Actions;
+  handoff: Handoff;
+  steps: Work['progress'];
+}
+
+/** The row under the line, with the progress button and Resume or a job's Retry; none where it has neither. */
+function Row({ item, actions, handoff, steps }: RowProps) {
+  if (steps.length === 0 && actions !== 'resume' && actions !== 'retry') return null;
   return (
     <div className="item-actions" data-testid="timeline.work.row">
-      {actions === 'resume' ? <Resume item={item} handoff={handoff} /> : <Retry item={item} handoff={handoff} />}
+      {steps.length > 0 && <Progress steps={steps} />}
+      {actions === 'resume' && <Resume item={item} handoff={handoff} />}
+      {actions === 'retry' && <Retry item={item} handoff={handoff} />}
     </div>
+  );
+}
+
+/** The progress button: the steps the run published, behind the plan's donut and its popover. */
+function Progress({ steps }: { steps: Work['progress'] }) {
+  return (
+    <StepsButton
+      steps={steps.map((step) => ({ id: step.code, title: step.label, mark: progressStepMark(step.state) }))}
+      name="Progress"
+      anchorClassName="progress-anchor"
+      testId="timeline.work.progress"
+      popoverTestId="timeline.work.steps"
+    />
   );
 }
 

@@ -121,6 +121,9 @@
   .item-sub { margin: 0 0 6px; font-size: var(--text-base); color: hsl(var(--muted-foreground)); }
   .item-after { margin-top: 12px; }
   .item-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+  /* A work item's progress button, in the row under its line: its steps open from its left edge,
+     within the card's margins on a phone. */
+  .progress-anchor .plan-pop { right: auto; left: 0; width: min(320px, calc(100vw - 58px)); }
   /* A question asked in the actions' place: Stop's, in a work item's row under its line. */
   .item-actions.confirm .confirm-text { flex: 1 1 260px; font-size: var(--text-base); color: hsl(var(--muted-foreground)); }
   /* The attachments hung on an item, a chip each (attachments.tsx). */

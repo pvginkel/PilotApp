@@ -16,7 +16,8 @@
  * the session log read it; a file its session wrote in that environment is registered as its
  * worker's `register_document` registers it (/api/testing/items/<id>/registrations), and a file or
  * a folder attached as its `attach_file` attaches it (/api/testing/items/<id>/worker-attachments),
- * each the effect of the call a tool-use id names; a registered document's writer is asked about
+ * each the effect of the call a tool-use id names, and its list of steps replaced as its
+ * `set_progress` replaces it (/api/testing/items/<id>/progress); a registered document's writer is asked about
  * its blocks as the pre-ruling pass's `ask_writer` asks (/api/testing/items/<id>/writer-questions),
  * and the pass's clarification run placed, with the writer's reply or to run
  * (/api/testing/items/<id>/clarification).
@@ -37,6 +38,8 @@ type InventedFile = components['schemas']['InventedAttachmentsCreateSchema.6d6b3
 /** A file to attach, its bytes as they are. */
 export type AttachedFile = Omit<InventedFile, 'content'> & { content: string | Buffer };
 type WorkSpec = components['schemas']['InventedWorkCreateSchema.6d6b324'];
+type ProgressStep = components['schemas']['SetProgressRequestSchema.ce33d8b.ProgressStepRequestSchema'];
+type Progress = components['schemas']['ProgressSchema.ce33d8b'];
 type WriterQuestion = components['schemas']['InventedWriterQuestionsCreateSchema.6d6b324.InventedWriterQuestionSchema'];
 type Timeline = components['schemas']['TimelineSchema.1fdd8ae'];
 type TimelineItem = Timeline['items'][number];
@@ -246,6 +249,18 @@ export class Projects {
     });
     expect(response.status(), await response.text()).toBe(201);
     return ((await response.json()) as { ids: string[] }).ids;
+  }
+
+  /**
+   * A work item's list of steps replaced, in order, as its session's `set_progress` replaces it while
+   * its turn runs, `[]` removing it; answers the list as it stands.
+   */
+  async setProgress(workId: string, steps: ProgressStep[]): Promise<Progress['steps']> {
+    const response = await this.page.request.post(`${this.backendUrl}/api/testing/items/${workId}/progress`, {
+      data: { steps },
+    });
+    expect(response.status(), await response.text()).toBe(200);
+    return ((await response.json()) as Progress).steps;
   }
 
   /** A registered document's writer asked about its blocks, by their local ids, as the pre-ruling pass asks. */

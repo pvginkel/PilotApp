@@ -95,7 +95,7 @@ export function ProjectHead({ project, chat, documents, draftTab, ref }: Project
         {draft ? <CreateButton project={project} /> : <Autopilot project={project} />}
       </div>
       <div className="head-row">
-        {!draft && <StepButton progress={project.progress} tasks={project.tasks} />}
+        {!draft && <StepButton tasks={project.tasks} />}
         <Members members={project.members} />
         {!draft && <DiscussButton projectId={project.id} {...chat} />}
         {!draft && <DocumentsButton {...documents} />}

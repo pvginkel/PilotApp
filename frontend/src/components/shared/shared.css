@@ -332,6 +332,37 @@
   }
   .popover h3 { margin: 0 0 6px; padding: 0 14px; font-size: var(--text-sm); color: hsl(var(--muted-foreground)); }
 
+  /* ---- Steps behind a button (steps-button.tsx): the plan's donut and the plan popover
+     (PilotAppSpecs design/mockup/style.css) ------------------------------------------------ */
+
+  /* The button's name gives way down to the floor steps-button.tsx sets on the anchor. */
+  .steps-anchor > .btn { max-width: 100%; }
+  .step-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  /* ", …" when more steps are in progress: it stays when the name gives way, without the gap. */
+  .step-more { flex: none; margin-left: -6px; white-space: pre; }
+  /* The donut. It hangs from the baseline as an icon does, lowered to centre on the capitals. */
+  .plan-ring { position: relative; top: calc(8px - 0.5cap); flex: none; width: 16px; height: 16px; transform: rotate(-90deg); }
+  .plan-ring circle { fill: none; stroke-width: 3; stroke: hsl(var(--muted-foreground) / 0.3); }
+  .plan-ring .done { stroke: hsl(var(--primary)); }
+  .plan-ring .now { stroke: hsl(var(--primary) / 0.45); }
+
+  /* The popover: the steps in order, every step in progress highlighted. */
+  .plan-pop { width: 320px; }
+  .plan-pop ol { margin: 0; padding: 0; list-style: none; }
+  .plan-step { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; padding: 4px 14px; color: hsl(var(--muted-foreground)); }
+  .plan-step.now { color: hsl(var(--foreground)); font-weight: 600; background: hsl(var(--primary-muted)); }
+  .plan-step .step-title { flex: 1; min-width: 0; }
+  /* The mark has no text, so its baseline is its bottom edge; it is lifted to centre on the
+     step's capitals. */
+  .plan-step .mark { position: relative; top: calc(9px - 0.5cap); flex: none; width: 18px; height: 18px; border-radius: 999px; border: 1.5px solid hsl(var(--border)); }
+  .plan-step .mark .icon { position: absolute; inset: 0; margin: auto; width: 11px; height: 11px; }
+  .plan-step.done .mark { border-color: hsl(var(--primary)); background: hsl(var(--primary)); color: #fff; }
+  .plan-step.now .mark { border-color: hsl(var(--primary)); }
+  .plan-step.now .mark::after { content: ''; position: absolute; inset: 3.5px; border-radius: 999px; background: hsl(var(--primary) / 0.45); }
+  .plan-step .step-notes { flex: none; padding: 0; border: 0; background: none; color: hsl(var(--muted-foreground)); font: inherit; cursor: pointer; }
+  .plan-step .step-notes:hover, .plan-step .step-notes[aria-expanded="true"] { color: hsl(var(--foreground)); }
+  .plan-step .note-list { flex-basis: 100%; margin: 4px 0 2px; padding-left: 28px; }
+
   /* ---- Dialogs (dialog.tsx) ------------------------------------------------------------- */
 
   .overlay {
