@@ -1,5 +1,6 @@
 /**
- * The panel's Documents tab (F37): the project document first, read only (F37.4); then the
+ * The panel's Documents tab (F37): the project document first, read only (F37.4), on a phone the
+ * handbook under it (F129.4), named by its title once read, as the project document is; then the
  * attachments, newest first, each with its title and its item and stamp, the files attached in one
  * call together under their folder (F37.1); then the timeline's documents and reviews, newest
  * first, each with its state, Open, *Unsent* (D026) or Done, and its stamp (F37.2). Each opens in
@@ -12,22 +13,25 @@
 
 import type { ReactNode } from 'react';
 import { Link } from '@tanstack/react-router';
-import { BookOpen, FileText, Folder, Paperclip } from 'lucide-react';
+import { BookOpen, FileText, Folder, NotebookText, Paperclip } from 'lucide-react';
 import { Time } from '@/components/shared/time';
 import { isUnsent } from '@/components/timeline/document-state';
 import type { Batch, PanelRead } from '@/hooks/use-panel';
 import { titleOf, type Attachment, type TimelineItem } from '@/hooks/use-timeline';
+import { useGetProjectsHandbookByProjectId } from '@/lib/api/generated/hooks';
 
 interface DocumentsTabProps {
   projectId: string;
   /** The project is a draft. */
   draft: boolean;
   documents: { projectDocument: string | null; lists: PanelRead };
+  /** The handbook is listed under the project document: a phone's, whose head has no button for it. */
+  handbook: boolean;
   /** A row was opened in the overlay. */
   onOpen: () => void;
 }
 
-export function DocumentsTab({ projectId, draft, documents: { projectDocument, lists }, onOpen }: DocumentsTabProps) {
+export function DocumentsTab({ projectId, draft, documents: { projectDocument, lists }, handbook, onOpen }: DocumentsTabProps) {
   return (
     <div className="docs" data-testid="panel.documents">
       {!draft && (
@@ -45,6 +49,11 @@ export function DocumentsTab({ projectId, draft, documents: { projectDocument, l
               </Row>
             </Link>
           </li>
+          {handbook && (
+            <li>
+              <HandbookRow projectId={projectId} onOpen={onOpen} />
+            </li>
+          )}
         </ul>
       )}
       {lists === 'failed' ? (
@@ -60,6 +69,18 @@ export function DocumentsTab({ projectId, draft, documents: { projectDocument, l
         </>
       )}
     </div>
+  );
+}
+
+/** The handbook, opening at its address as the project document does. */
+function HandbookRow({ projectId, onOpen }: { projectId: string; onOpen: () => void }) {
+  const { data } = useGetProjectsHandbookByProjectId({ path: { project_id: projectId } }, { refetchOnWindowFocus: 'always' });
+  return (
+    <Link to="/projects/$projectId/handbook" params={{ projectId }} className="doc-row" onClick={onOpen} data-testid="panel.handbook">
+      <Row icon={<NotebookText className="icon" aria-hidden="true" />} title={data?.title ?? 'Handbook'}>
+        Handbook
+      </Row>
+    </Link>
   );
 }
 

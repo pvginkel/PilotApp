@@ -55,7 +55,7 @@ export function StepsButton({ steps, name, anchorClassName, testId, popoverTestI
     const width = own.querySelector('.step-name')!.getBoundingClientRect().width;
     anchor.style.minWidth = `${own.getBoundingClientRect().width - width + Math.min(NAME_FLOOR, width)}px`;
   }, [reading.text, reading.more]);
-  const tooltip = `${done} of ${steps.length} steps done${going.length > 0 ? ` · in progress: ${going.join('; ')}` : ''}`;
+  const tooltip = stepsTooltip(done, steps.length, going);
   return (
     <Popover
       label={name}
@@ -94,6 +94,10 @@ export function StepsButton({ steps, name, anchorClassName, testId, popoverTestI
   );
 }
 
+/** The button's title: how many steps are done and which are in progress. */
+export const stepsTooltip = (done: number, total: number, going: string[]) =>
+  `${done} of ${total} steps done${going.length > 0 ? ` · in progress: ${going.join('; ')}` : ''}`;
+
 const RADIUS = 6;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
@@ -101,7 +105,7 @@ const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
  * The steps as a donut from twelve o'clock: those done, then those in progress, then the rest.
  * Counts, not places: steps run side by side.
  */
-function StepRing({ done, now, total, testId }: { done: number; now: number; total: number; testId: string }) {
+export function StepRing({ done, now, total, testId }: { done: number; now: number; total: number; testId: string }) {
   const counted = (
     [
       ['done', done],

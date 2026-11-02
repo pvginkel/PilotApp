@@ -6,7 +6,9 @@
  * toggle (F46.2; its panel in draft-panel.spec.ts), and an archived project's head (D012); a tight head
  * beside the side panel giving way in one order, the repo, the name, the step's name to its floor,
  * then the members folding to a count, then standing in two rows, its menu clear of the panel;
- * everything it opens closed on another project (F1.6); two rows on a narrow window.
+ * everything it opens closed on another project (F1.6); on a phone one line (F2.8): the switch
+ * without its label, the donut alone showing the Plan tab (F3.7), the members two circles at most,
+ * the name giving way, a draft's, a finished and an archived project's.
  */
 
 import type { Locator, Page } from '@playwright/test';
@@ -683,61 +685,197 @@ test.describe('Switching projects', () => {
   });
 });
 
-test.describe('The head on a narrow window', () => {
+test.describe('The head on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
 
-  test('keeps two rows, the name and auto pilot, then the step, the members and the icons, the repo hidden', async ({
+  test('is one line: the drawer’s button, the name and the ticket, the switch without its label, the donut alone, the members, the notes’ button and the menu, with no repo, step button, Discuss, Documents, handbook or Draft button', async ({
+    people,
+    projects,
+    projectHead,
+    shell,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.make({
+      name: makeUnique('Line'),
+      ticket: 'PL-7',
+      repo: 'pvginkel/Example',
+      members: [me.handle!, 'ada'],
+      tasks: [step('a', 'done'), step('b', 'in_progress')],
+      notes: [note('one')],
+    });
+    await projectHead.open(id);
+
+    for (const absent of [
+      projectHead.repo,
+      projectHead.step,
+      projectHead.discussButton,
+      projectHead.documentsButton,
+      projectHead.handbookButton,
+      projectHead.draftPanelButton,
+    ]) {
+      await expect(absent).toHaveCount(0);
+    }
+    await expect(projectHead.autopilot).toHaveText('');
+    await expect(projectHead.autopilot).toHaveAccessibleName('Auto pilot');
+    await expect(projectHead.donut).toHaveText('');
+    await expect(projectHead.donut).toHaveAttribute('title', '1 of 2 steps done · in progress: Step b');
+    await expect(projectHead.donut).toHaveAccessibleName('The plan: 1 of 2 steps done · in progress: Step b');
+    await expect(projectHead.donut.getByTestId('project.step.ring')).toBeVisible();
+    await expect(projectHead.memberAvatars).toHaveCount(2);
+    await expect(projectHead.membersMore).toHaveCount(0);
+
+    const head = await boxOf(projectHead.root);
+    expect(head.height).toBe(52);
+    const parts = [
+      shell.drawerToggle,
+      projectHead.name,
+      projectHead.ticket,
+      projectHead.autopilot,
+      projectHead.donut,
+      projectHead.members,
+      projectHead.notesButton,
+      projectHead.menuButton,
+    ];
+    const boxes = await Promise.all(parts.map(boxOf));
+    for (const [index, box] of boxes.entries()) {
+      expect(box.y + box.height / 2, `part ${index}`).toBeCloseTo(head.y + head.height / 2, -1);
+      if (index > 0) expect(box.x, `part ${index}`).toBeGreaterThanOrEqual(boxes[index - 1].x + boxes[index - 1].width - 0.5);
+    }
+    expect(boxes.at(-1)!.x + boxes.at(-1)!.width).toBeLessThanOrEqual(390);
+
+    await projectHead.notesButton.tap();
+    await expect(projectHead.notes.getByTestId('project.notes.list.note.summary')).toHaveText(['Summary one']);
+    const notes = await boxOf(projectHead.notes);
+    expect(notes.x).toBeGreaterThanOrEqual(0);
+    expect(notes.x + notes.width).toBeLessThanOrEqual(390);
+  });
+
+  test('a tap on the donut shows the Plan tab', async ({ people, projects, projectHead, phoneTabs }) => {
+    const me = await people.signIn();
+    const id = await projects.make({ name: makeUnique('Donut'), members: [me.handle!], tasks: [step('a', 'in_progress')] });
+    await projectHead.open(id);
+    await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
+
+    await projectHead.donut.tap();
+    await expect(phoneTabs.tab('plan')).toHaveAttribute('aria-selected', 'true');
+    await expect(phoneTabs.plan.steps.getByTestId('project.plan.step.title')).toHaveText(['Step a']);
+    await expect(projectHead.plan).toHaveCount(0);
+    await projectHead.donut.tap();
+    await expect(phoneTabs.tab('plan')).toHaveAttribute('aria-selected', 'true');
+  });
+
+  test('the members are two circles at most: the first member’s avatar, then the second’s, or a “+N” naming the rest on its tooltip and to a screen reader', async ({
     people,
     projects,
     projectHead,
   }) => {
+    const me = await people.signIn({ name: 'Test Person' });
+    const many = await projects.make({ name: makeUnique('Many'), members: [me.handle!, 'ada', 'ben'] });
+    const two = await projects.make({ name: makeUnique('Two'), members: ['ada', 'ben'] });
+    const one = await projects.make({ name: makeUnique('One'), members: [me.handle!] });
+
+    await projectHead.open(many);
+    await expect(projectHead.memberAvatars).toHaveText(['TP']);
+    await expect(projectHead.membersMore).toHaveText('+2');
+    await expect(projectHead.membersMore).toHaveAttribute('title', 'Ada Example, Ben Example');
+    await expect(projectHead.membersMore).toHaveAccessibleName('2 more: Ada Example, Ben Example');
+    const [first, more] = [await boxOf(projectHead.memberAvatars.first()), await boxOf(projectHead.membersMore)];
+    expect(more.x).toBeCloseTo(first.x + first.width - 2, 1);
+    expect(more.width).toBe(first.width);
+
+    await projectHead.open(two);
+    await expect(projectHead.memberAvatars).toHaveText(['AE', 'BE']);
+    await expect(projectHead.membersMore).toHaveCount(0);
+
+    await projectHead.open(one);
+    await expect(projectHead.members.locator('.avatar')).toHaveText(['TP']);
+  });
+
+  test('the warning triangle stands after the switch while work briefed under its other setting is held', async ({ people, projects, projectHead }) => {
+    const me = await people.signIn();
+    const project = await projects.make({ name: makeUnique('Warned'), members: [me.handle!], autopilot: true, paused: true });
+    const work = await projects.startWork(project, { title: 'Surveying', brief: 'Survey it.', cwd: '/work/Example' });
+    await expect.poll(async () => (await projects.work(project, work)).state).toBe('held');
+    await projectHead.open(project);
+
+    await projectHead.autopilot.tap();
+    await expect(projectHead.autopilot).toHaveAttribute('aria-checked', 'false');
+    await expect(projectHead.autopilotWarning).toBeVisible();
+    const [autopilot, warning, donut] = await Promise.all([projectHead.autopilot, projectHead.autopilotWarning, projectHead.donut].map(boxOf));
+    expect(warning.x).toBeGreaterThanOrEqual(autopilot.x + autopilot.width - 6.5);
+    expect(donut.x).toBeGreaterThan(warning.x + warning.width);
+    expect(warning.y + warning.height / 2).toBeCloseTo(autopilot.y + autopilot.height / 2, -1);
+  });
+
+  test('a tight head gives way in the name, cut to nothing, the drawer’s button and every other part keeping its size, the menu inside the head', async ({
+    page,
+    people,
+    projects,
+    projectHead,
+    shell,
+  }) => {
     const me = await people.signIn();
     const id = await projects.make({
-      name: makeUnique('Phone'),
-      ticket: 'PL-7',
-      repo: 'pvginkel/Example',
-      members: [me.handle!, 'ada'],
+      name: `A rather long project name that cannot fit ${makeUnique('Tight')}`,
+      ticket: 'PL-1234',
+      members: [me.handle!, 'ada', 'ben'],
       tasks: [step('a', 'in_progress')],
       notes: [note('one')],
     });
     await projectHead.open(id);
 
-    await expect(projectHead.ticket).toBeVisible();
-    await expect(projectHead.repo).toBeHidden();
-    const [name, autopilot, stepButton, members, handbook, notes] = await Promise.all(
-      [projectHead.name, projectHead.autopilot, projectHead.step, projectHead.members, projectHead.handbookButton, projectHead.notesButton].map(
-        async (locator) => (await locator.boundingBox())!,
-      ),
-    );
-    const middle = (box: { y: number; height: number }) => box.y + box.height / 2;
-    expect(middle(autopilot)).toBeCloseTo(middle(name), -1);
-    expect(stepButton.y).toBeGreaterThanOrEqual(autopilot.y + autopilot.height);
-    expect(middle(members)).toBeCloseTo(middle(stepButton), -1);
-    expect(middle(handbook)).toBeCloseTo(middle(stepButton), -1);
-    expect(handbook.x).toBeGreaterThan(members.x + members.width);
-    expect(middle(notes)).toBeCloseTo(middle(stepButton), -1);
-    expect(notes.x + notes.width).toBeLessThanOrEqual(390);
+    await expect(projectHead.menuButton).toBeVisible();
+    const kept = [shell.drawerToggle, projectHead.ticket, projectHead.autopilot, projectHead.donut, projectHead.members, projectHead.notesButton, projectHead.menuButton];
+    const widths = async () => Promise.all(kept.map(async (locator) => (await boxOf(locator)).width));
+    const whole = await widths();
+    expect(whole[0]).toBe(36);
+    expect(await projectHead.name.evaluate((name) => name.scrollWidth > name.clientWidth)).toBe(true);
+    const wide = await boxOf(projectHead.name);
+
+    // A window as wide as the rest of the head: the name gives it every pixel, down to nothing.
+    const rest = Math.ceil(390 - wide.width);
+    await page.setViewportSize({ width: rest, height: 844 });
+    await expect.poll(async () => (await boxOf(projectHead.name)).width).toBeLessThan(1);
+    expect(await widths()).toEqual(whole);
+    const menu = await boxOf(projectHead.menuButton);
+    expect(menu.x + menu.width).toBeLessThanOrEqual(rest);
+    expect((await boxOf(projectHead.root)).height).toBe(52);
   });
 
-  test('a tap on a step’s sticky-note icon lists its notes, the plan within the window', async ({ people, projects, projectHead }) => {
+  test('a draft’s is its drawer’s button, its name and Draft chip, its members and its menu', async ({ people, projects, projectHead, shell }) => {
     const me = await people.signIn();
-    const id = await projects.make({
-      name: makeUnique('Tap'),
-      members: [me.handle!],
-      tasks: [step('a', 'in_progress', [note('tapped')])],
-    });
+    const name = makeUnique('Draft');
+    const id = await projects.make({ name, state: 'draft', members: [me.handle!] });
     await projectHead.open(id);
 
-    await projectHead.step.tap();
-    const box = (await projectHead.plan.boundingBox())!;
-    expect(box.x).toBeGreaterThanOrEqual(0);
-    expect(box.x + box.width).toBeLessThanOrEqual(390);
+    await expect(projectHead.name).toHaveText(name);
+    await expect(projectHead.draft).toHaveText('Draft');
+    for (const absent of [projectHead.autopilot, projectHead.donut, projectHead.notesButton, projectHead.draftPanelButton, projectHead.handbookButton]) {
+      await expect(absent).toHaveCount(0);
+    }
+    const head = await boxOf(projectHead.root);
+    const parts = await Promise.all([shell.drawerToggle, projectHead.name, projectHead.draft, projectHead.members, projectHead.menuButton].map(boxOf));
+    for (const box of parts) expect(box.y + box.height / 2).toBeCloseTo(head.y + head.height / 2, -1);
+    expect(parts[4].x + parts[4].width).toBeLessThanOrEqual(390);
+  });
 
-    const noted = projectHead.planStep('Step a');
-    await noted.notesButton.tap();
-    await expect(noted.notes.getByTestId('project.plan.step.notes.note.summary')).toHaveText(['Summary tapped']);
-    await noted.notesButton.tap();
-    await expect(noted.notes).toHaveCount(0);
-    await expect(projectHead.plan).toBeVisible();
+  test('a finished project shows the Finished chip in the switch’s place, an archived one its chip after the name', async ({ people, projects, projectHead }) => {
+    const me = await people.signIn();
+    const finished = await projects.make({ name: makeUnique('Done'), state: 'finished', members: [me.handle!], tasks: [step('a', 'done')] });
+    const archived = await projects.make({ name: makeUnique('Archived'), archived: true, members: [me.handle!] });
+
+    await projectHead.open(finished);
+    await expect(projectHead.finished).toHaveText('Finished');
+    await expect(projectHead.autopilot).toHaveCount(0);
+    await expect(projectHead.donut).toBeVisible();
+
+    await projectHead.open(archived);
+    await expect(projectHead.archived).toHaveText('Archived');
+    await expect(projectHead.autopilot).toBeDisabled();
+    expect((await boxOf(projectHead.archived)).x).toBeGreaterThan((await boxOf(projectHead.name)).x);
   });
 });
+
+async function boxOf(locator: Locator): Promise<{ x: number; y: number; width: number; height: number }> {
+  return (await locator.boundingBox())!;
+}

@@ -1,5 +1,5 @@
 /* A project's head (PilotAppSpecs design/mockup/style.css, "The head's controls", "Auto pilot"
-   and "Narrow screens"); the plan's donut and the plan popover are shared.css's. */
+   and "Narrow screens", whose head is a phone's); the plan's donut and the plan popover are shared.css's. */
 
 @layer components {
   /* The head's controls share their text's baseline; its two rows stand in one line. */
@@ -76,14 +76,20 @@
   .feed-head.two-rows .step-anchor { flex: 1; }
   .feed-head.two-rows .plan-pop { right: auto; left: 0; }
 
-  /* A narrow window: the drawer's button, the name and auto pilot, then the step, the members and
-     the icons, the repo hidden; the plan opens under the step, within the window. */
-  @media (max-width: 900px) {
-    .feed-head { flex-direction: column; align-items: stretch; gap: 8px; padding: 8px 14px 8px 8px; }
-    .feed-head .head-row { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
-    .feed-head .repo { display: none; }
-    .feed-head .step-anchor { flex: 1; }
-    .plan-pop { right: auto; left: 0; width: min(320px, calc(100vw - 28px)); }
-    .notes-pop { width: min(340px, calc(100vw - 28px)); }
-  }
+  /* A phone's head (phone-head.tsx), one line: the name gives way, cut to nothing; the rest keeps
+     its size. The drawer's button stands 8px from the head's left and top, where a view's arrow
+     back stands. */
+  .phone-head { height: var(--head); min-height: 0; padding: 12px 12px 11px 8px; gap: 10px; }
+  .phone-head .grow { margin-right: -10px; }
+  .phone-head .members { flex: none; }
+  .phone-head .switch, .phone-head .chip { align-self: center; }
+  .phone-head .head-icon + .head-icon { margin-left: -10px; }
+  /* The second circle is the count of the rest, where there are more than two. */
+  .phone-head .members .more { font-size: 12.5px; letter-spacing: -0.02em; }
+  .phone-head .notes-pop { width: min(340px, calc(100vw - 28px)); }
+  /* The donut alone: no button's chrome, no step's name; its ring's outer edge 25px, a little under
+     the members' avatars beside it. */
+  .head-ring { flex: none; align-self: center; display: grid; place-items: center; width: 36px; height: 36px; margin: 0 -4px; padding: 0; border: 0; border-radius: 999px; background: none; cursor: pointer; }
+  .head-ring:hover { background: hsl(var(--accent)); }
+  .head-ring .plan-ring { top: 0; width: 27px; height: 27px; }
 }

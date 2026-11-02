@@ -4,7 +4,8 @@
  * On a wide window it stands beside the timeline, its head as tall as the project's head and its
  * tab's text on the project name's baseline, in whatever font (F98.1); below one it lies over the
  * timeline, with a head of its own height (F98.2). On a phone its tab stands alone between the
- * project's head and the tabs at the bottom, which carry the names, the dot and the count (F98.3).
+ * project's head and the tabs at the bottom, which carry the names, the dot and the count, and its
+ * Documents tab lists the handbook, which the phone's head has no button for (F98.3, F129.4).
  */
 
 import { useLayoutEffect, useRef, type RefObject } from 'react';
@@ -84,7 +85,7 @@ export function Panel({ projectId, draft, members, tab, head, onTab, onClose, on
           <X className="icon" aria-hidden="true" />
         </button>
       </div>
-      <PanelBody projectId={projectId} draft={draft} members={members} tab={tab} documents={documents} onOpen={onOpen} covered={covered} />
+      <PanelBody projectId={projectId} draft={draft} members={members} tab={tab} documents={documents} handbook={false} onOpen={onOpen} covered={covered} />
     </aside>
   );
 }
@@ -101,16 +102,29 @@ const overlayOnTop = () => undefined;
 export function PhonePanel({ projectId, draft, members, tab, documents, covered }: PhonePanelProps) {
   return (
     <aside className="panel" aria-label={labelOf(draft)} inert={covered} data-testid="panel">
-      <PanelBody projectId={projectId} draft={draft} members={members} tab={tab} documents={documents} onOpen={overlayOnTop} covered={covered} />
+      <PanelBody
+        projectId={projectId}
+        draft={draft}
+        members={members}
+        tab={tab}
+        documents={documents}
+        handbook
+        onOpen={overlayOnTop}
+        covered={covered}
+      />
     </aside>
   );
 }
 
 const labelOf = (draft: boolean) => (draft ? 'The draft and its documents' : 'The project’s chat and documents');
 
-type PanelBodyProps = Omit<PanelProps, 'head' | 'onTab' | 'onClose'> & { documents: PanelDocuments };
+type PanelBodyProps = Omit<PanelProps, 'head' | 'onTab' | 'onClose'> & {
+  documents: PanelDocuments;
+  /** The Documents tab lists the handbook. */
+  handbook: boolean;
+};
 
-function PanelBody({ projectId, draft, members, tab, documents, onOpen, covered }: PanelBodyProps) {
+function PanelBody({ projectId, draft, members, tab, documents, handbook, onOpen, covered }: PanelBodyProps) {
   return (
     <div className={cn('panel-body', tab === 'chat' && 'chat')} role="tabpanel" data-testid="panel.body">
       {tab === 'chat' ? (
@@ -118,7 +132,7 @@ function PanelBody({ projectId, draft, members, tab, documents, onOpen, covered 
       ) : tab === 'draft' ? (
         <DraftTab projectId={projectId} />
       ) : (
-        <DocumentsTab projectId={projectId} draft={draft} documents={documents} onOpen={onOpen} />
+        <DocumentsTab projectId={projectId} draft={draft} documents={documents} handbook={handbook} onOpen={onOpen} />
       )}
     </div>
   );

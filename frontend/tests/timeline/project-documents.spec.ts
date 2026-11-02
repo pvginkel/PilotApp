@@ -5,11 +5,12 @@
  * "The document did not load" for a read that fails (F113). Its asks stand in their places, read
  * only (D1): an answered one closed, its answer and who gave it showing, an open one open, and
  * nothing in either to press; a text of asks alone is no longer *Empty*. The handbook's button stands in the
- * head's icon group, left of the notes button (F2.3, F2.7); a draft has none, nor a handbook
- * (F129.2). A save shows live as it lands, Pilot's dots with it until the turn ends, the project
- * document's renaming the project, and once a stream that went down comes back up. On a phone it
- * is the whole screen, over the head and its drawer's button (F98.3), and switching projects closes
- * it (F1.6).
+ * head's icon group, left of the notes button (F2.3, F2.7), and the side panel's Documents lists
+ * none; a draft has none, nor a handbook (F129.2). A save shows live as it lands, Pilot's dots with
+ * it until the turn ends, the project document's renaming the project, and once a stream that went
+ * down comes back up. On a phone the Documents tab lists the handbook under the project document,
+ * by its title, and neither the head nor the project's menu has it; it is the whole screen, over
+ * the head and its drawer's button (F98.3), and switching projects closes it (F1.6).
  */
 
 import { randomUUID } from 'node:crypto';
@@ -21,13 +22,14 @@ const HANDBOOK = '# Handbook\n\nHow the trip is planned.\n\n- We **always** pack
 const NOTE = { id: 'one', summary: 'Summary one', content: 'Content one' };
 
 test.describe('The handbook', () => {
-  test('a button in the head’s icon group, left of the notes button, opens it at its address in the overlay over the timeline: rendered, read only, no foot', async ({
+  test('a button in the head’s icon group, left of the notes button, opens it at its address in the overlay over the timeline: rendered, read only, no foot; the side panel’s Documents lists none', async ({
     page,
     people,
     projects,
     projectHead,
     timeline,
     overlay,
+    panel,
   }) => {
     const me = await people.signIn();
     const name = makeUnique('Handbook');
@@ -45,6 +47,9 @@ test.describe('The handbook', () => {
     expect(handbook.x).toBeGreaterThan(members.x + members.width);
     // Icon buttons side by side touch.
     expect(notes.x).toBeCloseTo(handbook.x + handbook.width, 0);
+    await projectHead.documentsButton.click();
+    await expect(panel.projectDocument.root).toBeVisible();
+    await expect(panel.handbook.root).toHaveCount(0);
 
     await projectHead.handbookButton.click();
     await expect(page).toHaveURL(handbookAddress(id));
@@ -422,21 +427,40 @@ test.describe('A stream that comes back up', () => {
 test.describe('On a phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
 
-  test('the handbook is the whole screen, with no maximize, from the head’s button within the window', async ({
+  test('the Documents tab lists the handbook by its title right under the project document, opening it as the whole screen with no maximize; neither the head nor the project’s menu has it, nor a draft’s Documents', async ({
+    page,
     people,
     projects,
     projectHead,
     shell,
     overlay,
+    panel,
+    phoneTabs,
   }) => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Phone'), members: [me.handle!], notes: [NOTE] });
-    await projects.saveProjectDocument(id, 'handbook', HANDBOOK);
+    await projects.saveProjectDocument(id, 'handbook', '# How we travel\n\nHow the trip is planned.\n');
+    const draft = await projects.make({ name: makeUnique('Draft'), state: 'draft', members: [me.handle!] });
     await projectHead.open(id);
 
-    const button = (await projectHead.handbookButton.boundingBox())!;
-    expect(button.x + button.width).toBeLessThanOrEqual(390);
-    await projectHead.handbookButton.tap();
+    await expect(projectHead.handbookButton).toHaveCount(0);
+    await projectHead.menuButton.tap();
+    await expect(projectHead.menuItems.first()).toBeVisible();
+    await expect(projectHead.menuItems.filter({ hasText: /handbook/i })).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(projectHead.menu).toHaveCount(0);
+
+    await phoneTabs.tab('documents').tap();
+    await expect(panel.handbook.title).toHaveText('How we travel');
+    await expect(panel.handbook.sub).toHaveText('Handbook');
+    await expect(panel.body.locator('.doc-row').first()).toHaveAttribute('data-testid', 'panel.project-document');
+    await expect(panel.body.locator('.doc-row').nth(1)).toHaveAttribute('data-testid', 'panel.handbook');
+    const [projectDocument, handbook] = [await panel.projectDocument.root.boundingBox(), await panel.handbook.root.boundingBox()];
+    expect(handbook!.y).toBeCloseTo(projectDocument!.y + projectDocument!.height, 0);
+
+    await panel.handbook.root.tap();
+    await expect(page).toHaveURL(handbookAddress(id));
+    await expect(overlay.title).toHaveText('How we travel');
     await expect(overlay.document).toContainText('How the trip is planned.');
     const box = (await overlay.root.boundingBox())!;
     const app = (await shell.app.boundingBox())!;
@@ -446,6 +470,12 @@ test.describe('On a phone', () => {
     expect(box.y + box.height).toBe(app.y + app.height);
     await expect(overlay.maximize).toBeHidden();
     await expect(overlay.close).toBeVisible();
+
+    await projectHead.open(draft);
+    await phoneTabs.tab('documents').tap();
+    await expect(panel.noAttachments).toBeVisible();
+    await expect(panel.projectDocument.root).toHaveCount(0);
+    await expect(panel.handbook.root).toHaveCount(0);
   });
 
   test('lies over the head and its drawer’s button, which closed it gives back to switch projects', async ({

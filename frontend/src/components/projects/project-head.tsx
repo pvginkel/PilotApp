@@ -9,15 +9,12 @@
  * has no handbook (F129.2), has in its head its name, the Draft chip, its members, the draft-panel
  * toggle, toggling the side panel's Draft tab (F46.2), and its menu; its Create project stands at
  * its definition chat's end (`create-project.tsx`). An archived project's reads as it was left,
- * marked archived, its switch not to be flipped (D012).
- * On a phone the drawer's button stands first in it, and the tabs at the bottom stand for Discuss,
- * the Documents button and the draft-panel toggle, which it has not (F2.3, F98.3).
+ * marked archived, its switch not to be flipped (D012). A phone's head is `phone-head.tsx`'s.
  *
  * In a tight head its parts give way in one order: the repo, the name, the step's name down to its
  * floor, then the members, folding to the first avatars and a count; the ticket, the chips, auto
  * pilot and the icons keep their size. Where they still run past the head, it stands in its two
- * rows, as on a narrow window: the name and auto pilot, then the step, the members and the icons; a
- * narrow window hides the repo.
+ * rows: the name and auto pilot, then the step, the members and the icons.
  */
 
 import { useCallback, useLayoutEffect, useState } from 'react';
@@ -30,7 +27,6 @@ import { StepButton } from '@/components/projects/plan-popover';
 import { ProjectMenu } from '@/components/projects/project-menu';
 import { Avatar } from '@/components/shared/avatar';
 import { LinkedText } from '@/components/shared/linked-text';
-import { DrawerButton } from '@/components/shell/drawer';
 import { useChatDot } from '@/hooks/use-chats';
 import type { ProjectHead as Project } from '@/hooks/use-projects';
 import { STOPPABLE } from '@/hooks/use-work-acts';
@@ -46,8 +42,8 @@ interface Toggled {
 
 interface ProjectHeadProps {
   project: Project;
-  /** The side panel's Chat tab, Documents tab and a draft's Draft tab: none on a phone. */
-  panel?: { chat: Toggled; documents: Toggled; draftTab: Toggled };
+  /** The side panel's Chat tab, Documents tab and a draft's Draft tab. */
+  panel: { chat: Toggled; documents: Toggled; draftTab: Toggled };
   ref?: (element: HTMLElement | null) => void;
 }
 
@@ -65,7 +61,6 @@ export function ProjectHead({ project, panel, ref }: ProjectHeadProps) {
   return (
     <header ref={own} className="feed-head" data-testid="project.head">
       <div className="head-row">
-        <DrawerButton />
         <h1 data-testid="project.name">
           <LinkedText text={project.name ?? 'New project'} />
         </h1>
@@ -96,11 +91,11 @@ export function ProjectHead({ project, panel, ref }: ProjectHeadProps) {
       <div className="head-row">
         {!draft && <StepButton tasks={project.tasks} />}
         <Members members={project.members} />
-        {!draft && panel && <DiscussButton projectId={project.id} {...panel.chat} />}
-        {!draft && panel && <DocumentsButton {...panel.documents} />}
+        {!draft && <DiscussButton projectId={project.id} {...panel.chat} />}
+        {!draft && <DocumentsButton {...panel.documents} />}
         {!draft && <HandbookButton projectId={project.id} />}
         {!draft && <NotesButton notes={project.notes} />}
-        {draft && panel && <DraftButton {...panel.draftTab} />}
+        {draft && <DraftButton {...panel.draftTab} />}
         <ProjectMenu project={project} />
       </div>
     </header>
@@ -181,9 +176,9 @@ const AUTOPILOT_FORM = 'project.autopilot';
 /**
  * Each flip is a transition on the record, by the person, when they flip it (F4.1). Turning it on
  * while confirmations it would have taken are open asks first in its dialog, whose answer turns it
- * on (F4.2).
+ * on (F4.2). On a phone the switch has no label: its name is its accessible one.
  */
-function Autopilot({ project }: { project: Project }) {
+export function Autopilot({ project, phone = false }: { project: Project; phone?: boolean }) {
   const queryClient = useQueryClient();
   // The flip stays pending until every query is read again, the head included: until then, a
   // second flip would ask for the same change.
@@ -230,13 +225,14 @@ function Autopilot({ project }: { project: Project }) {
         aria-disabled={flip.isPending || undefined}
         disabled={project.archived}
         title="Auto pilot hands the project to Pilot; it still asks on the held column"
+        aria-label={phone ? 'Auto pilot' : undefined}
         onClick={toggle}
         data-testid="project.autopilot"
       >
         <span className="track">
           <span className="knob" />
         </span>
-        Auto pilot
+        {!phone && 'Auto pilot'}
       </button>
       <BriefedOtherwise project={project} />
       {asking && (

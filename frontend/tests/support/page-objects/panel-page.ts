@@ -12,7 +12,7 @@ interface PanelRow {
 
 /**
  * The side panel (F38.1): its head with the Documents tab, the tab's count and the close cross;
- * the Documents tab (F37) with the project document, the attachments, a batch of several under its
+ * the Documents tab (F37) with the project document, on a phone the handbook, the attachments, a batch of several under its
  * folder, and the timeline's documents and reviews, each a row with its title and the line under
  * it, "None yet" where a list is empty, and the line in the lists' place where the tab's read failed.
  * A draft's has the Draft tab in the Chat tab's place (F46.3): the draft's title, its text and its
@@ -31,6 +31,8 @@ export class PanelPage {
   /** The lists' headings. */
   readonly headings: Locator;
   readonly projectDocument: PanelRow;
+  /** The handbook under the project document: a phone's. */
+  readonly handbook: PanelRow;
   /** Every attachment's row, a batch's files included, in their order. */
   readonly attachments: Locator;
   readonly noAttachments: Locator;
@@ -66,6 +68,7 @@ export class PanelPage {
     this.body = this.root.getByTestId('panel.body');
     this.headings = this.body.locator('h3');
     this.projectDocument = rowOf(this.body.getByTestId('panel.project-document'));
+    this.handbook = rowOf(this.body.getByTestId('panel.handbook'));
     this.attachments = this.body.getByTestId('panel.attachment');
     this.noAttachments = this.body.getByTestId('panel.attachments.none');
     this.batches = this.body.getByTestId('panel.batch');

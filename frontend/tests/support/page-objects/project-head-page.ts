@@ -10,7 +10,8 @@ type Ask = Exclude<Act, 'join' | 'leave'>;
  * step button opens (F3), Discuss and its unread dot (F2.3, F39.2, F43), the Documents button
  * (F2.3), the handbook's button (F129.4), the plan's notes (F2.7), the members and the count they
  * fold to in a tight head (F2.5), a draft's draft-panel toggle (F46.2), and the project's menu and
- * the dialogs it opens (F2.4).
+ * the dialogs it opens (F2.4). On a phone the head is one line, its donut alone standing for the step
+ * button (F2.8, F3.7).
  */
 export class ProjectHeadPage {
   readonly root: Locator;
@@ -26,6 +27,8 @@ export class ProjectHeadPage {
   readonly autopilotDialog: { root: Locator; backdrop: Locator; title: Locator; lines: Locator; note: Locator; no: Locator; yes: Locator };
   readonly step: Locator;
   readonly ring: Locator;
+  /** A phone's donut, alone, showing the Plan tab. */
+  readonly donut: Locator;
   readonly plan: Locator;
   readonly planHeading: Locator;
   readonly planSteps: Locator;
@@ -64,6 +67,7 @@ export class ProjectHeadPage {
     };
     this.step = page.getByTestId('project.step');
     this.ring = page.getByTestId('project.step.ring');
+    this.donut = page.getByTestId('project.donut');
     this.plan = page.getByTestId('project.plan');
     this.planHeading = page.getByTestId('project.plan.heading');
     this.planSteps = page.getByTestId('project.plan.step');

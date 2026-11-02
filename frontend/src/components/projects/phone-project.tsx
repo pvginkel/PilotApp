@@ -1,13 +1,15 @@
 /**
- * A project's screen on a phone (F98.3): its head, the tab showing, and the tabs at the bottom —
- * Timeline, Chat, Plan and Documents; a draft's Chat, the definition chat in the timeline's place,
- * Create project at its end (D119), Draft and Documents. Each tab is its icon over its name, the one
- * showing in the primary's tint, its icon on a pill; Chat carries the unread dot (F43) and Documents
- * its count (F37.3) on the icon's corner. Chat, Documents and Draft are the side panel's tabs without
- * its head (F38.1), Plan the plan popover's content as a page (F3.7). The Timeline, or a draft's
- * Chat, keeps its place under the other tabs. Discuss and *In the chat* anywhere on it show the Chat
- * tab, a draft's its Chat, and an ask of the draft gone to the Draft tab at it; where they stand in
- * the overlay, it is taken off. The tab is the entry's in the browser's history (`use-phone-tab.ts`).
+ * A project's screen on a phone (F98.3): its head in one line (`phone-head.tsx`), the tab showing,
+ * and the tabs at the bottom — Timeline, Chat, Plan and Documents; a draft's Chat, the definition
+ * chat in the timeline's place, Create project at its end (D119), Draft and Documents. Each tab is
+ * its icon over its name, the one showing in the primary's tint, its icon on a pill; Chat carries
+ * the unread dot (F43) and Documents its count (F37.3) on the icon's corner. Chat, Documents and
+ * Draft are the side panel's tabs without its head (F38.1), the phone's Documents listing the
+ * handbook under the project document; Plan the plan popover's content as a page (F3.7), which the
+ * head's donut shows too. The Timeline, or a draft's Chat, keeps its place under the other tabs.
+ * Discuss and *In the chat* anywhere on it show the Chat tab, a draft's its Chat, and an ask of the
+ * draft gone to the Draft tab at it; where they stand in the overlay, it is taken off. The tab is
+ * the entry's in the browser's history (`use-phone-tab.ts`).
  */
 
 import type { ReactNode } from 'react';
@@ -16,8 +18,8 @@ import { Files, FileText, List, ListChecks, MessagesSquare, type LucideIcon } fr
 import { ProjectChat } from '@/components/chat/project-chat';
 import { PhonePanel } from '@/components/panel/panel';
 import { CreateProject } from '@/components/projects/create-project';
+import { PhoneHead } from '@/components/projects/phone-head';
 import { PlanPage } from '@/components/projects/plan-popover';
-import { ProjectHead } from '@/components/projects/project-head';
 import { Timeline } from '@/components/timeline/timeline';
 import { useChatDot } from '@/hooks/use-chats';
 import { discussIn, DiscussContext } from '@/hooks/use-discuss';
@@ -71,7 +73,7 @@ export function PhoneProject({ projectId, project, overlaid, goneTo, children }:
           <div className="project">
             {project && (
               <div className="project-main">
-                <ProjectHead project={project} />
+                <PhoneHead project={project} onPlan={() => show('plan')} />
                 <div className="phone-page" data-tab={tab} data-testid="project.phone-page">
                   {draft ? (
                     <ProjectChat

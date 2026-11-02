@@ -1,10 +1,10 @@
 /**
  * The step button (F2.2) and the plan it opens (F3.1): the plan's steps behind the steps' button,
- * each step's open notes beside it (F3.6). On the phone the Plan tab is the plan as a page, its
- * rows a thumb's height (F3.7).
+ * each step's open notes beside it (F3.6). On the phone the head's donut alone stands for the button,
+ * a tap on it showing the Plan tab, the plan as a page, its rows a thumb's height (F3.7).
  */
 
-import { StepRow, StepsButton, type Step } from '@/components/shared/steps-button';
+import { StepRing, StepRow, StepsButton, stepsTooltip, type Step } from '@/components/shared/steps-button';
 import type { ProjectHead } from '@/hooks/use-projects';
 import { planStepMark } from '@/lib/utils/status-labels';
 
@@ -15,6 +15,19 @@ const stepsOf = (tasks: Task[]): Step[] =>
 
 export function StepButton({ tasks }: { tasks: Task[] }) {
   return <StepsButton steps={stepsOf(tasks)} name="The plan" anchorClassName="step-anchor" testId="project.step" popoverTestId="project.plan" />;
+}
+
+/** The phone head's donut, with neither the step button's chrome nor the step's name: a tap shows the Plan tab. */
+export function PlanDonut({ tasks, onShow }: { tasks: Task[]; onShow: () => void }) {
+  const steps = stepsOf(tasks);
+  const done = steps.filter((step) => step.mark === 'done').length;
+  const going = steps.filter((step) => step.mark === 'now');
+  const tooltip = stepsTooltip(done, steps.length, going.map((step) => step.title));
+  return (
+    <button type="button" className="head-ring" title={tooltip} aria-label={`The plan: ${tooltip}`} onClick={onShow} data-testid="project.donut">
+      <StepRing done={done} now={going.length} total={steps.length} testId="project.step.ring" />
+    </button>
+  );
 }
 
 /** The Plan tab on the phone: the popover's heading and steps as a page, "No steps yet." while it has none. */
