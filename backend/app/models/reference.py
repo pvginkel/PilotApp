@@ -1,7 +1,7 @@
 """The reference entities (DB §2.4).
 
 A reference entity with a fact about the category is a table: Item Kind, Done
-Cause, Confirmation Reason and Session Kind. The other twenty-two are PostgreSQL
+Cause, Confirmation Reason and Session Kind. The other twenty-three are PostgreSQL
 enums (DB §7.2). The revisions are the one place a value is added, a table's
 rows included.
 """
@@ -183,6 +183,14 @@ class TokenKind(StrEnum):
     OUTPUT = "output"
 
 
+class ProgressState(StrEnum):
+    """Where a step of a run's list stands; not Task Status, the plan's own."""
+
+    PENDING = "pending"
+    ACTIVE = "active"
+    DONE = "done"
+
+
 def _enum_type(enum_class: type[StrEnum], name: str) -> Enum:
     # The database holds the values, not the member names.
     return Enum(
@@ -215,6 +223,7 @@ NOTIFICATION_PRIORITY = _enum_type(NotificationPriority, "notification_priority"
 CONDITION = _enum_type(Condition, "condition")
 USAGE_WINDOW = _enum_type(UsageWindow, "usage_window")
 TOKEN_KIND = _enum_type(TokenKind, "token_kind")
+PROGRESS_STATE = _enum_type(ProgressState, "progress_state")
 
 # Autogenerate compares no enum type, so the schema tests check these against
 # the database's.
@@ -241,6 +250,7 @@ ENUM_TYPES = (
     CONDITION,
     USAGE_WINDOW,
     TOKEN_KIND,
+    PROGRESS_STATE,
 )
 
 

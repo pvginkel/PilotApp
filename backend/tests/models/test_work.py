@@ -1,21 +1,24 @@
-"""Work and Clarification Run: what a row must hold."""
+"""Work, Progress Step and Clarification Run: what a row must hold."""
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DbSession
 
 from app.models import (
     ClarificationRun,
     Environment,
     Item,
+    ProgressStep,
     Project,
     Session,
     User,
     Work,
 )
-from app.models.reference import SessionState, WorkTrigger
+from app.models.reference import ProgressState, SessionState, WorkTrigger
 from tests.support.database import violated_constraint
 
 
@@ -585,3 +588,197 @@ class TestClarificationRun:
         session.add(ClarificationRun(id=uuid.uuid4(), pass_id=passed))
 
         assert violated_constraint(session) == "clarification_runs_id_fkey"
+
+
+STARTED = datetime(2026, 11, 2, 11, 20, tzinfo=UTC)
+ENDED = STARTED + timedelta(minutes=21)
+
+
+def _step(
+    work_id: uuid.UUID, code: str, position: int, **overrides: object
+) -> ProgressStep:
+    values: dict[str, object] = {
+        "work_id": work_id,
+        "code": code,
+        "label": f"Step {code}",
+        "position": position,
+        "state_code": ProgressState.PENDING,
+    }
+    values.update(overrides)
+    return ProgressStep(**values)
+
+
+def _violated_at_commit(session: DbSession) -> str:
+    """Flush, check the deferred constraints as a commit does, and return the
+    name of the one violated."""
+    session.flush()
+    with pytest.raises(IntegrityError) as raised:
+        session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
+    return raised.value.orig.diag.constraint_name
+
+
+class TestProgressStep:
+    """The steps a Work's run lists (DB decision 69, assertions 283 to 288)."""
+
+    @pytest.fixture
+    def run(
+        self,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        project_session: Session,
+    ) -> uuid.UUID:
+        return _job(
+            session, project, environment, project_session, seq=2, kind_code="work"
+        )
+
+    def test_a_work_lists_its_steps_in_order_with_their_states_and_stamps(
+        self, session: DbSession, run: uuid.UUID
+    ) -> None:
+        session.add_all(
+            [
+                _step(run, "docs", 3),
+                _step(
+                    run,
+                    "P1.code",
+                    1,
+                    label="P1 · the v4 client",
+                    state_code=ProgressState.DONE,
+                    started_at=STARTED,
+                    ended_at=ENDED,
+                ),
+                _step(run, "test", 2, state_code=ProgressState.ACTIVE, started_at=ENDED),
+            ]
+        )
+        session.flush()
+        session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
+        session.expire_all()
+
+        steps = session.scalars(
+            select(ProgressStep)
+            .where(ProgressStep.work_id == run)
+            .order_by(ProgressStep.position)
+        ).all()
+
+        assert [
+            (step.code, step.label, step.state_code, step.started_at, step.ended_at)
+            for step in steps
+        ] == [
+            ("P1.code", "P1 · the v4 client", ProgressState.DONE, STARTED, ENDED),
+            ("test", "Step test", ProgressState.ACTIVE, ENDED, None),
+            ("docs", "Step docs", ProgressState.PENDING, None, None),
+        ]
+
+    def test_its_code_is_unique_in_its_work(
+        self, session: DbSession, run: uuid.UUID
+    ) -> None:
+        session.add(_step(run, "test", 1))
+        session.flush()
+        session.add(_step(run, "test", 2))
+
+        assert violated_constraint(session) == "progress_steps_pkey"
+
+    def test_two_works_may_list_one_code(
+        self,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        project_session: Session,
+        run: uuid.UUID,
+    ) -> None:
+        other = _job(
+            session, project, environment, project_session, seq=3, kind_code="work"
+        )
+        session.add_all([_step(run, "test", 1), _step(other, "test", 1)])
+        session.flush()
+        session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
+
+        assert session.get(ProgressStep, (other, "test")) is not None
+
+    def test_its_position_is_unique_in_its_work(
+        self, session: DbSession, run: uuid.UUID
+    ) -> None:
+        session.add_all([_step(run, "test", 1), _step(run, "docs", 1)])
+
+        assert _violated_at_commit(session) == "uq_progress_steps_work_id_position"
+
+    def test_a_whole_list_is_reordered_in_one_transaction(
+        self, session: DbSession, run: uuid.UUID
+    ) -> None:
+        """The positions' uniqueness is checked at the commit, so a replace's
+        updates may pass through a repeated position on the way."""
+        first, second = _step(run, "test", 1), _step(run, "docs", 2)
+        session.add_all([first, second])
+        session.flush()
+        first.position = 2
+        session.flush()
+        second.position = 1
+        session.flush()
+        session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
+        session.expire_all()
+
+        assert session.scalars(
+            select(ProgressStep.code)
+            .where(ProgressStep.work_id == run)
+            .order_by(ProgressStep.position)
+        ).all() == ["docs", "test"]
+
+    def test_its_position_starts_at_one(
+        self, session: DbSession, run: uuid.UUID
+    ) -> None:
+        session.add(_step(run, "test", 0))
+
+        assert violated_constraint(session) == "ck_progress_steps_position"
+
+    def test_an_active_step_has_its_start(
+        self, session: DbSession, run: uuid.UUID
+    ) -> None:
+        session.add(_step(run, "test", 1, state_code=ProgressState.ACTIVE))
+
+        assert violated_constraint(session) == "ck_progress_steps_started"
+
+    def test_a_done_step_has_its_start(
+        self, session: DbSession, run: uuid.UUID
+    ) -> None:
+        session.add(
+            _step(run, "test", 1, state_code=ProgressState.DONE, ended_at=ENDED)
+        )
+
+        assert violated_constraint(session) == "ck_progress_steps_started"
+
+    def test_a_step_moved_back_to_pending_keeps_its_start(
+        self, session: DbSession, run: uuid.UUID
+    ) -> None:
+        session.add(_step(run, "test", 1, started_at=STARTED))
+        session.flush()
+        session.expire_all()
+
+        assert session.get_one(ProgressStep, (run, "test")).started_at == STARTED
+
+    def test_a_done_step_has_its_end(self, session: DbSession, run: uuid.UUID) -> None:
+        session.add(
+            _step(run, "test", 1, state_code=ProgressState.DONE, started_at=STARTED)
+        )
+
+        assert violated_constraint(session) == "ck_progress_steps_ended"
+
+    def test_only_a_done_step_has_an_end(
+        self, session: DbSession, run: uuid.UUID
+    ) -> None:
+        session.add(
+            _step(
+                run,
+                "test",
+                1,
+                state_code=ProgressState.ACTIVE,
+                started_at=STARTED,
+                ended_at=ENDED,
+            )
+        )
+
+        assert violated_constraint(session) == "ck_progress_steps_ended"
+
+    def test_it_is_a_works_step(self, session: DbSession) -> None:
+        session.add(_step(uuid.uuid4(), "test", 1))
+
+        assert violated_constraint(session) == "progress_steps_work_id_fkey"

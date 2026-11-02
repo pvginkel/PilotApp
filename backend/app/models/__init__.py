@@ -30,4 +30,4 @@ from app.models.session import (
 from app.models.store_update import StoreUpdate
 from app.models.usage import UsageReading, WindowShare
 from app.models.user import Alarm, User
-from app.models.work import ClaimAssignment, ClarificationRun, Work
+from app.models.work import ClaimAssignment, ClarificationRun, ProgressStep, Work

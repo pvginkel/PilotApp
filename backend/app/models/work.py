@@ -1,5 +1,6 @@
-"""Work (DB §2.2), the subtype of Item and of Session, Claim Assignment, and
-Clarification Run, a role of a Work (DB §2.3).
+"""Work (DB §2.2), the subtype of Item and of Session, Claim Assignment,
+Progress Step, a characteristic of Work, and Clarification Run, a role of a
+Work (DB §2.3).
 
 `work` is the extension table keyed by the id a Work's Item and Session share
 (DB §7.3).
@@ -16,13 +17,19 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     Index,
+    Integer,
     Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.extensions import db
-from app.models.reference import WORK_TRIGGER, WorkTrigger
+from app.models.reference import (
+    PROGRESS_STATE,
+    WORK_TRIGGER,
+    ProgressState,
+    WorkTrigger,
+)
 
 
 class Work(db.Model):  # type: ignore[name-defined]
@@ -111,6 +118,52 @@ class ClaimAssignment(db.Model):  # type: ignore[name-defined]
     block_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("blocks.id"), primary_key=True
     )
+
+
+class ProgressStep(db.Model):  # type: ignore[name-defined]
+    """One step of a Work's run, as the run's `set_progress` lists it (DB
+    decision 69): its code the run's name for it, its position its place in
+    the list, from 1 without a gap (DB 285), which no constraint holds.
+
+    `started_at` is the server's clock when the step first went `active`, or
+    went straight to `done`, never changed once written; `ended_at` when it
+    last went `done` (DB 287).
+
+    That the Work is a worker's run whose own Session writes it (DB 286) is
+    the server's check at the call: no key reaches the Session Kind from this
+    row.
+    """
+
+    __tablename__ = "progress_steps"
+    __table_args__ = (
+        # Checked at the commit, so a replace reorders a whole list in its
+        # transaction.
+        UniqueConstraint(
+            "work_id",
+            "position",
+            name="uq_progress_steps_work_id_position",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+        CheckConstraint("position >= 1", name="ck_progress_steps_position"),
+        CheckConstraint(
+            "state_code = 'pending' OR started_at IS NOT NULL",
+            name="ck_progress_steps_started",
+        ),
+        # A step has an end exactly while it is done (DB 287).
+        CheckConstraint(
+            "(state_code = 'done') = (ended_at IS NOT NULL)",
+            name="ck_progress_steps_ended",
+        ),
+    )
+
+    work_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("work.id"), primary_key=True)
+    code: Mapped[str] = mapped_column(Text, primary_key=True)
+    label: Mapped[str] = mapped_column(Text)
+    position: Mapped[int] = mapped_column(Integer)
+    state_code: Mapped[ProgressState] = mapped_column(PROGRESS_STATE)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class ClarificationRun(db.Model):  # type: ignore[name-defined]
