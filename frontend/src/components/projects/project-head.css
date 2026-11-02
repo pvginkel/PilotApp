@@ -25,7 +25,7 @@
   .chip.finished-chip, .chip.archived-chip { font-weight: 600; }
 
   /* In a tight head its parts give way in one order: the repo, then the name, then the step's name
-     down to its floor (steps-button.tsx), then the members, folding to a count (project-head.tsx).
+     down to its floor (plan-popover.tsx), then the members, folding to a count (project-head.tsx).
      The ticket, the chips, auto pilot or Create project and the icons keep their size.
      Flex items shrink in proportion to factor × size: at a million times the next one's factor,
      each gives way to its floor while the next gives up a millionth as much for its size. */
@@ -33,7 +33,7 @@
   .feed-head h1 { flex-shrink: 1e12; }
   .feed-head .step-anchor { flex-shrink: 1e6; }
   .feed-head .members { flex-shrink: 1; justify-content: flex-end; }
-  .feed-head .ticket, .feed-head .chip, .feed-head .switch, .feed-head .head-create, .feed-head .head-icon { flex: none; }
+  .feed-head .ticket, .feed-head .chip, .feed-head .switch, .feed-head .head-icon { flex: none; }
   .feed-head .head-icon { align-self: center; }
   /* Icon buttons side by side touch: the row's gap stands only between them and the rest. */
   .feed-head .head-icon + .head-icon { margin-left: -12px; }

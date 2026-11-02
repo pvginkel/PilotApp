@@ -6,24 +6,23 @@
  * (F2.5); Discuss, toggling the side panel's Chat tab with nothing quoted and carrying the unread
  * dot (F2.3, F39.2, F43), the Documents button, toggling its Documents tab, and the handbook,
  * opening in the overlay (F2.3, F129.4); the plan's notes (F2.7); the project's menu (F2.4). A draft, which
- * has no handbook (F129.2), has in its head its name, the Draft chip, Create project, its members,
- * the draft-panel toggle, toggling the side panel's Draft tab (F46.2), and its menu. Create project
- * is disabled, its reason on it, while the head's `create_refusal` gives one (F48.1); pressed, the
- * head is the open project's once it is read again. An archived project's reads as it was left,
+ * has no handbook (F129.2), has in its head its name, the Draft chip, its members, the draft-panel
+ * toggle, toggling the side panel's Draft tab (F46.2), and its menu; its Create project stands at
+ * its definition chat's end (`create-project.tsx`). An archived project's reads as it was left,
  * marked archived, its switch not to be flipped (D012).
  * On a phone the drawer's button stands first in it (F98.3).
  *
  * In a tight head its parts give way in one order: the repo, the name, the step's name down to its
  * floor, then the members, folding to the first avatars and a count; the ticket, the chips, auto
- * pilot or Create project and the icons keep their size. Where they still run past the head, it
- * stands in its two rows, as on a narrow window: the name and auto pilot, then the step, the
- * members and the icons; a narrow window hides the repo.
+ * pilot and the icons keep their size. Where they still run past the head, it stands in its two
+ * rows, as on a narrow window: the name and auto pilot, then the step, the members and the icons; a
+ * narrow window hides the repo.
  */
 
 import { useCallback, useLayoutEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import { Archive, FileText, Files, Flag, MessagesSquare, NotebookText, Plus, TriangleAlert } from 'lucide-react';
+import { Archive, FileText, Files, Flag, MessagesSquare, NotebookText, TriangleAlert } from 'lucide-react';
 import { AutopilotDialog } from '@/components/projects/autopilot-dialog';
 import { NotesButton } from '@/components/projects/plan-notes';
 import { StepButton } from '@/components/projects/plan-popover';
@@ -95,7 +94,7 @@ export function ProjectHead({ project, chat, documents, draftTab, ref }: Project
           </span>
         )}
         <div className="grow" />
-        {draft ? <CreateButton project={project} /> : <Autopilot project={project} />}
+        {!draft && <Autopilot project={project} />}
       </div>
       <div className="head-row">
         {!draft && <StepButton tasks={project.tasks} />}
@@ -177,42 +176,6 @@ function HandbookButton({ projectId }: { projectId: string }) {
     >
       <NotebookText className="icon" aria-hidden="true" />
     </Link>
-  );
-}
-
-const CREATE_FORM = 'project.create';
-
-const CREATE_HOW = 'Hand the project to Pilot: it sets it up and starts the plan';
-
-/** Create project (F48): an `opened` transition, by the person, when they press it. */
-function CreateButton({ project }: { project: Project }) {
-  const queryClient = useQueryClient();
-  // Pending until every query is read again, the head included: until then a second press would
-  // ask for the same change. Succeeded here, not in `mutate`'s callbacks: the head read open
-  // unmounts the button, and `mutate`'s callbacks with it.
-  const create = usePostProjectsTransitionsByProjectId({
-    onSuccess: async () => {
-      await queryClient.invalidateQueries();
-      trackFormSuccess(CREATE_FORM);
-    },
-  });
-  const refusal = project.create_refusal;
-  const press = () => {
-    trackFormSubmit(CREATE_FORM);
-    create.mutate({ path: { project_id: project.id }, body: { kind: 'opened' } }, { onError: () => trackFormError(CREATE_FORM) });
-  };
-  return (
-    <button
-      type="button"
-      className="btn btn-primary btn-sm head-create"
-      disabled={refusal !== null || create.isPending}
-      title={refusal === null ? CREATE_HOW : `Cannot create ${project.name ?? 'New project'} because ${refusal}`}
-      onClick={press}
-      data-testid="project.create"
-    >
-      <Plus className="icon" aria-hidden="true" />
-      Create project
-    </button>
   );
 }
 

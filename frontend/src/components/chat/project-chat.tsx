@@ -19,7 +19,7 @@
  * column (decision 12).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ChevronUp } from 'lucide-react';
 import { useFlashes } from '@/components/timeline/flash';
 import { useChatSeen, useProjectChats } from '@/hooks/use-chats';
@@ -45,9 +45,11 @@ interface ProjectChatProps {
   home: ChatHome;
   /** It lies under the overlay and its backdrop: it takes no focus. */
   covered: boolean;
+  /** What stands at the transcript's end, after its last chat, scrolling with it. */
+  end?: ReactNode;
 }
 
-export function ProjectChat({ projectId, members, home, covered }: ProjectChatProps) {
+export function ProjectChat({ projectId, members, home, covered, end }: ProjectChatProps) {
   const read = useProjectChats(projectId);
   const person = usePerson();
   const people = useMemo(() => chatPeople(person, members), [person, members]);
@@ -183,6 +185,7 @@ export function ProjectChat({ projectId, members, home, covered }: ProjectChatPr
               ))}
             </>
           )}
+          {end}
         </div>
       </div>
       <Composer

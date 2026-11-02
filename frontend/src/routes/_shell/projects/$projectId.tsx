@@ -9,8 +9,8 @@
  * (F36.6). The handbook's address, and the project document's, open it in the overlay over the
  * timeline (F129.4, F37.4), and a work item's session log's opens it there (F69). Another
  * project's address closes it. A draft has its definition chat in the timeline's place (F46.1),
- * once the head says it is one. Beside the head and the timeline stands the side panel, the
- * project's own (F38.1); Discuss anywhere on the project's screens opens it on the Chat tab, on
+ * once the head says it is one, Create project at its end once the project can be created (D119).
+ * Beside the head and the timeline stands the side panel, the project's own (F38.1); Discuss anywhere on the project's screens opens it on the Chat tab, on
  * top, with what it quotes in the composer (F39), and *In the chat* on a block answered in the chat
  * opens it there at the message that gave the answer (F42.3). A draft's panel has the Draft and
  * Documents tabs (F46.3), its chat standing in the timeline's place: there Discuss and *In the chat*
@@ -29,6 +29,7 @@ import { DocumentOverlay } from '@/components/overlay/document-overlay';
 import { HandbookOverlay, ProjectDocumentOverlay } from '@/components/overlay/project-document-overlay';
 import { SessionLogOverlay } from '@/components/overlay/session-log-overlay';
 import { Panel } from '@/components/panel/panel';
+import { CreateProject } from '@/components/projects/create-project';
 import { ProjectHead } from '@/components/projects/project-head';
 import { isCard } from '@/components/timeline/document-state';
 import { Timeline } from '@/components/timeline/timeline';
@@ -113,7 +114,13 @@ function Project() {
               )}
               {data !== undefined &&
                 (draft ? (
-                  <ProjectChat projectId={projectId} members={data.members} home="feed" covered={overlay !== null} />
+                  <ProjectChat
+                    projectId={projectId}
+                    members={data.members}
+                    home="feed"
+                    covered={overlay !== null}
+                    end={<CreateProject project={data} />}
+                  />
                 ) : (
                   <Timeline projectId={projectId} address={goneTo} inert={overlay !== null} />
                 ))}

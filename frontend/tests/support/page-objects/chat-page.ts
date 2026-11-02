@@ -11,7 +11,8 @@ import { waitTestEvent } from '../helpers';
  * composer (F44): the quote Discuss put over its field and its remove (F39.3), its field, Send or
  * Stop in its place, and why an archived project's takes no message. The tab carries the unread dot
  * (F43). A draft's definition chat is the same, standing in the timeline's place (`feed`, F46.1),
- * its empty state "Tell Pilot what to manage" (F113) and no tab.
+ * its empty state "Tell Pilot what to manage" (F113) and no tab, and at its end, once the project
+ * can be created, Create project's box, its button and its line (F48; D119).
  */
 export class ChatPage {
   readonly tab: Locator;
@@ -45,6 +46,9 @@ export class ChatPage {
   readonly send: Locator;
   readonly stop: Locator;
   readonly archived: Locator;
+  readonly createReady: Locator;
+  readonly createButton: Locator;
+  readonly createLine: Locator;
 
   constructor(
     private readonly page: Page,
@@ -80,6 +84,16 @@ export class ChatPage {
     this.send = this.composer.getByTestId('chat.composer.send');
     this.stop = this.composer.getByTestId('chat.composer.stop');
     this.archived = this.composer.getByTestId('chat.composer.archived');
+    this.createReady = this.root.getByTestId('project.create-ready');
+    this.createButton = this.createReady.getByTestId('project.create');
+    this.createLine = this.createReady.getByTestId('project.create-ready.line');
+  }
+
+  /** Presses Create project, done once the head is read again: the open project's. */
+  async create(): Promise<void> {
+    const done = waitTestEvent<FormTestEvent>(this.page, 'form', (event) => event.formId === 'project.create' && event.phase === 'success');
+    await this.createButton.click();
+    await done;
   }
 
   /** The server's next answer taking the composer's `send` or `stop`, or the chat marked seen at its end (`read`), as the browser has it. */

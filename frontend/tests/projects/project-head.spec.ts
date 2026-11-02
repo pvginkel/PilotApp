@@ -636,7 +636,7 @@ test.describe('A tight head beside the side panel', () => {
     await clear(projectHead, panel);
   });
 
-  test('a draft’s Create project, its members and its menu stay inside the head', async ({ page, people, projects, projectHead, panel }) => {
+  test('a draft’s chip, its members and its menu stay inside the head', async ({ page, people, projects, projectHead, panel }) => {
     await page.setViewportSize({ width: 1200, height: 720 });
     const me = await people.signIn({ name: 'Test Person' });
     const { handles } = await six(people, me.handle!);
@@ -649,7 +649,7 @@ test.describe('A tight head beside the side panel', () => {
     await expect(panel.root).toBeVisible();
 
     expect(await cut(projectHead.name)).toBe(true);
-    for (const whole of [projectHead.draft, projectHead.createButton]) expect(await cut(whole)).toBe(false);
+    expect(await cut(projectHead.draft)).toBe(false);
     await clear(projectHead, panel);
   });
 });
