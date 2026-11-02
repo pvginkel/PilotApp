@@ -1,7 +1,7 @@
 """Pilot's MCP server as a headless create hands it to a session (TD §4.5;
-F84, V02): the token minted for the create, its hash, and the `mcpConfig`
-entry that names the server at its surface's endpoint; and a bearer resolved
-to its Session."""
+F84, F84.1, V02): the token minted for the create, its hash, the `mcpConfig`
+entry that names the server at its surface's endpoint, and the endpoint beside
+the token in the `env`; and a bearer resolved to its Session."""
 
 import hashlib
 import json
@@ -46,7 +46,7 @@ class TestTokenHash:
 
 
 class TestInject:
-    def test_the_create_carries_the_token_in_its_env_and_the_server_in_its_mcp_config(
+    def test_the_create_carries_the_token_and_the_endpoint_in_its_env_and_the_server_in_its_mcp_config(
         self,
     ) -> None:
         injected = PilotServer(URL).inject(
@@ -54,7 +54,7 @@ class TestInject:
         )
 
         token = _token(injected.request)
-        assert injected.request.env == [f"PILOT_TOKEN={token}"]
+        assert injected.request.env == [f"PILOT_TOKEN={token}", f"PILOT_MCP_URL={URL}"]
         assert injected.request.mcp_config is not None
         (entry,) = injected.request.mcp_config
         # The shape of KubeCoder's own fleet registration: `claude` expands the
@@ -106,7 +106,11 @@ class TestInject:
         )
 
         token = _token(injected.request)
-        assert injected.request.env == ["EXAMPLE=1", f"PILOT_TOKEN={token}"]
+        assert injected.request.env == [
+            "EXAMPLE=1",
+            f"PILOT_TOKEN={token}",
+            f"PILOT_MCP_URL={URL}",
+        ]
         assert injected.request.mcp_config is not None
         assert injected.request.mcp_config[0] == "/work/mcp.json"
         assert len(injected.request.mcp_config) == 2
@@ -158,7 +162,7 @@ class TestInject:
         ],
         ids=["pilot-work", "pilot-store", "pilot-store-under-a-slash"],
     )
-    def test_the_server_is_named_at_its_surfaces_endpoint(
+    def test_the_server_is_named_at_its_surfaces_endpoint_and_the_env_carries_it(
         self, url: str, surface: Surface, endpoint: str
     ) -> None:
         injected = PilotServer(url).inject(
@@ -174,6 +178,10 @@ class TestInject:
                 "headers": {"Authorization": "Bearer ${PILOT_TOKEN}"},
             }
         }
+        assert injected.request.env == [
+            f"PILOT_TOKEN={_token(injected.request)}",
+            f"PILOT_MCP_URL={endpoint}",
+        ]
 
     def test_each_surfaces_endpoint_is_the_path_the_mcp_process_serves_it_at(
         self,

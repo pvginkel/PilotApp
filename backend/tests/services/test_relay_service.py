@@ -260,10 +260,12 @@ def _claude(db: DbSession, run_id: uuid.UUID) -> list[tuple[int | None, Any]]:
 
 
 def _token(body: dict[str, Any]) -> str:
-    """The token a headless create's body carries as `PILOT_TOKEN`."""
-    (entry,) = body["env"]
-    name, _, token = entry.partition("=")
+    """The token a headless create's body carries as `PILOT_TOKEN`, the
+    server's endpoint as `PILOT_MCP_URL` beside it."""
+    token_entry, url_entry = body["env"]
+    name, _, token = token_entry.partition("=")
     assert name == "PILOT_TOKEN"
+    assert url_entry.partition("=")[0] == "PILOT_MCP_URL"
     return token
 
 
@@ -657,6 +659,7 @@ class TestSend:
         (body,) = fake.create_bodies
         (entry,) = body["mcpConfig"]
         assert json.loads(entry)["mcpServers"]["pilot"]["url"] == endpoint
+        assert body["env"][-1] == f"PILOT_MCP_URL={endpoint}"
 
     def test_a_chats_re_create_keeps_its_box_and_its_project(
         self,
@@ -685,10 +688,11 @@ class TestSend:
             True,
             ["/work/Projects/soup-club"],
         )
-        project_entry, session_entry, token_entry = body["env"]
+        project_entry, session_entry, token_entry, url_entry = body["env"]
         assert project_entry == "PILOT_PROJECT=/work/Projects/soup-club"
         assert session_entry == f"PILOT_SESSION={run.id}"
         assert token_entry.startswith("PILOT_TOKEN=")
+        assert url_entry == f"PILOT_MCP_URL={MCP_URL}/store"
         (created,) = fake.sessions(ENV)
         assert created.box is not None
 

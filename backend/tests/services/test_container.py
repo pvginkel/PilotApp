@@ -945,8 +945,9 @@ class TestSessionStartWiring:
             assert json.loads(entry)["mcpServers"]["pilot"]["url"] == (
                 "https://pilot-mcp.example.com/mcp"
             )
-            (token,) = body["env"]
+            token, url = body["env"]
             assert run.token_hash == token_hash(token.removeprefix("PILOT_TOKEN="))
+            assert url == "PILOT_MCP_URL=https://pilot-mcp.example.com/mcp"
 
 
 class TestNotificationReconcileWiring:

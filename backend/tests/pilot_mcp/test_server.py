@@ -1,14 +1,24 @@
 """Pilot's MCP server (F83): its two surfaces pinned, `pilot-work`'s and
 `pilot-store`'s, as a contract the sessions they are handed to are written
-against, the bearer it requires, and the probes that answer without one."""
+against, the bearer it requires, the probes that answer without one, and a
+script's lone call with no MCP client (F84.1)."""
 
+import json
 from typing import Any
 
+import httpx
 import pytest
 from starlette.applications import Starlette
 
+from app import models
 from pilot_mcp.server import STORE_PATH, WORK_PATH
-from tests.support.pilot_mcp import BEARER, ApiRoutes, http_client, mcp_session
+from tests.support.pilot_mcp import (
+    BEARER,
+    TOKEN,
+    ApiRoutes,
+    http_client,
+    mcp_session,
+)
 
 _PATH = {
     "description": "The document's absolute path in this environment, under `/work`",
@@ -885,3 +895,121 @@ class TestTheBearer:
             assert (await http.get("/")).status_code == 401
         async with http_client(mcp_app, BEARER) as http:
             assert (await http.get("/")).status_code == 404
+
+
+_SET_PROGRESS = {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/call",
+    "params": {
+        "name": "set_progress",
+        "arguments": {
+            "steps": [
+                {"code": "P1.code", "label": "P1 · the client", "state": "done"},
+                {"code": "P1.review", "label": "P1 · review", "state": "active"},
+                {"code": "test", "label": "Test"},
+            ]
+        },
+    },
+}
+
+_SCRIPTS_HEADERS = {
+    "Authorization": f"Bearer {TOKEN}",
+    "Accept": "application/json, text/event-stream",
+    "Content-Type": "application/json",
+}
+"""Every header a script's call sends: the suite's shared ones are not taken,
+so that the test witnesses what the transport admits."""
+
+
+def _scripts_headers_with(name: str, value: str | None) -> dict[str, str]:
+    """A script's headers with `name` set to `value`, or left out for None."""
+    headers = {key: kept for key, kept in _SCRIPTS_HEADERS.items() if key != name}
+    return headers if value is None else {**headers, name: value}
+
+
+async def _scripts_post(app: Starlette, headers: dict[str, str]) -> httpx.Response:
+    """`_SET_PROGRESS` POSTed alone to `pilot-work`, with no `initialize` before
+    it, under `headers` and httpx's defaults alone."""
+    async with http_client(app) as http, app.router.lifespan_context(app):
+        return await http.post(
+            WORK_PATH, content=json.dumps(_SET_PROGRESS).encode(), headers=headers
+        )
+
+
+@pytest.mark.anyio
+class TestAScriptsCall:
+    """A script the session runs calls a tool with no MCP client (F84.1): one
+    JSON-RPC `tools/call` POSTed to `$PILOT_MCP_URL` under `$PILOT_TOKEN`, as
+    AIWF-128's client will."""
+
+    async def test_a_lone_tools_call_is_answered_with_the_list_on_the_events_data_line(
+        self, mcp_app: Starlette, routes: ApiRoutes, worker: models.Session
+    ) -> None:
+        response = await _scripts_post(mcp_app, _SCRIPTS_HEADERS)
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        (data,) = [
+            line.removeprefix("data:").strip()
+            for line in response.text.splitlines()
+            if line.startswith("data:")
+        ]
+        answer = json.loads(data)
+        assert (answer["jsonrpc"], answer["id"]) == ("2.0", 1)
+        assert answer["result"]["isError"] is False
+        assert answer["result"]["structuredContent"] == {
+            "steps": [
+                {"code": "P1.code", "label": "P1 · the client", "state": "done"},
+                {"code": "P1.review", "label": "P1 · review", "state": "active"},
+                {"code": "test", "label": "Test", "state": "pending"},
+            ]
+        }
+        [(request, _)] = routes.calls
+        assert (request.method, request.url.path) == (
+            "PUT",
+            "/tools/pilot-work/progress",
+        )
+        assert request.headers["authorization"] == f"Bearer {TOKEN}"
+
+    @pytest.mark.parametrize(
+        "accept",
+        ["application/json", "text/event-stream", None],
+        ids=["no-event-stream", "no-json", "none"],
+    )
+    async def test_a_call_not_accepting_both_json_and_the_event_stream_is_refused(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        worker: models.Session,
+        accept: str | None,
+    ) -> None:
+        """Without its own `Accept`, httpx sends `*/*`."""
+        response = await _scripts_post(mcp_app, _scripts_headers_with("Accept", accept))
+
+        assert response.status_code == 406
+        assert response.json()["error"]["message"] == (
+            "Not Acceptable: Client must accept both application/json and"
+            " text/event-stream"
+        )
+        assert routes.calls == []
+
+    @pytest.mark.parametrize("content_type", ["text/plain", None], ids=["text", "none"])
+    async def test_a_call_whose_body_is_not_said_to_be_json_is_refused(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        worker: models.Session,
+        content_type: str | None,
+    ) -> None:
+        """Refused by the SDK's transport security, ahead of the transport's
+        own 415."""
+        response = await _scripts_post(
+            mcp_app, _scripts_headers_with("Content-Type", content_type)
+        )
+
+        assert (response.status_code, response.text) == (
+            400,
+            "Invalid Content-Type header",
+        )
+        assert routes.calls == []

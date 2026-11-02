@@ -385,10 +385,12 @@ def _start(
 
 
 def _token(body: dict[str, Any]) -> str:
-    """The token a headless create's body carries as `PILOT_TOKEN`."""
-    (entry,) = body["env"]
-    name, _, token = entry.partition("=")
+    """The token a headless create's body carries as `PILOT_TOKEN`, the
+    server's endpoint as `PILOT_MCP_URL` beside it."""
+    token_entry, url_entry = body["env"]
+    name, _, token = token_entry.partition("=")
     assert name == "PILOT_TOKEN"
+    assert url_entry.partition("=")[0] == "PILOT_MCP_URL"
     return token
 
 
@@ -1118,6 +1120,7 @@ class TestPilotServerHanded:
 
         (body,) = fake.create_bodies
         token = _token(body)
+        assert body["env"] == [f"PILOT_TOKEN={token}", f"PILOT_MCP_URL={MCP_URL}"]
         (entry,) = body["mcpConfig"]
         assert json.loads(entry) == {
             "mcpServers": {
@@ -7543,6 +7546,7 @@ class TestRunBrain:
                 f"PILOT_PROJECT={CAMP_FOLDER}",
                 f"PILOT_SESSION={run.id}",
                 f"PILOT_TOKEN={env['PILOT_TOKEN']}",
+                f"PILOT_MCP_URL={MCP_URL}/store",
             ],
             "mcpConfig": body["mcpConfig"],
             "sandboxReadOnlyCwd": True,

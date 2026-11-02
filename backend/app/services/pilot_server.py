@@ -7,12 +7,14 @@ The create's `mcpConfig` gets one inline entry naming the server at the
 endpoint of the create's surface, `pilot-work` at the server's URL and
 `pilot-store` at `<URL>/store`, its bearer `${PILOT_TOKEN}`, which `claude`
 expands from the environment of the process the controller spawns, so the
-token is in neither argv nor a file. `strictMcpConfig` is left unset, and the
-session keeps its environment's own servers. The token's sha256 is the
-Session's `token_hash`, which its creator writes with the controller session
-the create made. A create with no surface, a finished project's brain
-session's (F5.5), or with no server's URL configured, carries neither the
-token nor the entry, so no bearer reaches either surface's routes from it.
+token is in neither argv nor a file. The same endpoint goes into the `env`
+beside the token as `PILOT_MCP_URL=<endpoint>`, for a process the session
+runs that calls a tool with no MCP client (F84.1). `strictMcpConfig` is left
+unset, and the session keeps its environment's own servers. The token's sha256
+is the Session's `token_hash`, which its creator writes with the controller
+session the create made. A create with no surface, a finished project's brain
+session's (F5.5), or with no server's URL configured, carries neither variable
+nor the entry, so no bearer reaches either surface's routes from it.
 """
 
 import hashlib
@@ -32,6 +34,8 @@ from app.services.controller_client import HeadlessCreateRequest
 from app.services.session_scope import ScopedCreate
 
 TOKEN_VARIABLE = "PILOT_TOKEN"
+
+URL_VARIABLE = "PILOT_MCP_URL"
 
 SERVER_KEY = "pilot"
 """The server's `mcpServers` key, whichever its surface: `claude` names each of
@@ -112,18 +116,20 @@ class PilotServer:
         self._url = url
 
     def inject(self, create: ScopedCreate) -> Injected:
-        """`create`'s request with a token minted for it, and the server of its
-        surface named in its `mcpConfig` with the token as its bearer; a
-        create with no surface is handed neither."""
+        """`create`'s request with a token minted for it, the server of its
+        surface named in its `mcpConfig` with the token as its bearer, and the
+        token and the server's endpoint in its `env`; a create with no surface
+        is handed none of them."""
         token = secrets.token_urlsafe(32)
         request = create.request
         if self._url is None or create.surface is None:
             return Injected(request, token_hash(token))
+        endpoint = self._endpoint(self._url, create.surface)
         registration = {
             "mcpServers": {
                 SERVER_KEY: {
                     "type": "http",
-                    "url": self._endpoint(self._url, create.surface),
+                    "url": endpoint,
                     "headers": {"Authorization": f"Bearer ${{{TOKEN_VARIABLE}}}"},
                 }
             }
@@ -131,7 +137,11 @@ class PilotServer:
         return Injected(
             request.model_copy(
                 update={
-                    "env": [*(request.env or []), f"{TOKEN_VARIABLE}={token}"],
+                    "env": [
+                        *(request.env or []),
+                        f"{TOKEN_VARIABLE}={token}",
+                        f"{URL_VARIABLE}={endpoint}",
+                    ],
                     "mcp_config": [
                         *(request.mcp_config or []),
                         json.dumps(registration),
