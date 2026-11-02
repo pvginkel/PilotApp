@@ -79,6 +79,7 @@ from app.services.wait_service import ReportedTransition
 from tests.support.chats import ChatWriter, open_chat
 from tests.support.store_updates import hold, lift, stopped_job
 from tests.support.turns import end_turns, turn_in_flight
+from tests.support.working_on import Camp
 
 ENVIRONMENT_CAUSES = [
     StopCause.ENVIRONMENT_STOPPED,
@@ -853,6 +854,7 @@ class TestTimeline:
                     "in_chat": None,
                     "done": None,
                     "claim": None,
+                    "held": None,
                     "deferral": None,
                     "writer_asked": False,
                     "section": None,
@@ -1266,12 +1268,14 @@ class TestTimeline:
         environment: Environment,
     ) -> None:
         project = _make(container)
-        run = _run(session, project, environment)
+        work = _work(session, project, environment, SessionState.RUNNING)
         container.document_service().register(
-            project, run, "/work/Camp/docs/refinement.md"
+            project,
+            session.get_one(models.Session, work.id),
+            "/work/Camp/docs/refinement.md",
         )
 
-        _opening, line = _items(container, project)
+        _opening, _work_item, line = _items(container, project)
 
         assert (line["kind"], line["title"], line["file_name"]) == (
             "review",
@@ -3153,7 +3157,8 @@ class TestClaims:
 
         for read in (_blocks(line), _blocks(_read(container, document))):
             assert read["A1"]["claim"] == {
-                "work": {"id": str(retry.id), "title": "Rotating the CI token"}
+                "work": {"id": str(retry.id), "title": "Rotating the CI token"},
+                "undone": False,
             }
             assert read["A1"]["answer"] == "Pilot does it"
             assert read["A2"]["claim"] is None
@@ -3172,8 +3177,190 @@ class TestClaims:
 
         blocks = _blocks(_read(container, document))
 
-        assert blocks["A1"]["claim"] == {"work": None}
+        assert blocks["A1"]["claim"] == {"work": None, "undone": False}
         assert blocks["A2"]["claim"] is None
+
+
+_PITCH = "# Where do we pitch?\n\n```question id=Q1\n```\n"
+"""A question, the document's one block: what a research checks a fact for,
+or what a run asks the person."""
+
+_SURVEY = "# The survey\n\nNine of ten want the lake.\n"
+"""A document with no block: a report."""
+
+_CUT_OVER = """# The cut-over
+
+```action id=A1
+answer: Pilot does it
+by: agent
+at: 2026-11-02T09:00:00Z
+```
+"""
+"""An action the pass claimed, the document's one block."""
+
+_TWO_QUESTIONS = """# The trip
+
+```question id=Q1
+```
+
+```question id=Q2
+```
+"""
+"""Two questions: a research checks a fact for one of them."""
+
+
+def _entry(camp: Camp, item: Item) -> dict[str, Any]:
+    """The item's entry on its project's timeline."""
+    return next(
+        entry
+        for entry in _items(camp.container, camp.project)
+        if entry["id"] == str(item.id)
+    )
+
+
+def _link(item: Item | models.Session, title: str) -> dict[str, Any]:
+    return {"id": str(item.id), "title": title}
+
+
+def _pilots(
+    doing: str,
+    work: dict[str, Any] | None,
+    pulse: bool,
+    asked_in: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {"doing": doing, "work": work, "pulse": pulse, "asked_in": asked_in}
+
+
+class TestPilotsWork:
+    """What Pilot does on an item that is Pilot's, the work its line goes to
+    and whether it pulses, and per block what holds it and whether the
+    hand-back left a claim undone (F13.7, F21.6, F31.7; DB 295, 296), as the
+    reading reads them (`working_on`)."""
+
+    @pytest.fixture
+    def camp(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> Camp:
+        return Camp(container, session)
+
+    def test_a_registered_document_carries_its_read_awaited_then_its_pass(
+        self, camp: Camp
+    ) -> None:
+        run = camp.worker()
+        survey = camp.registered(run, read=False)
+        building = _link(run, "Building the camp")
+
+        assert _entry(camp, survey)["pilots_work"] == _pilots(
+            "awaiting_run", building, False
+        )
+
+        camp.container.document_service().publish_read(
+            camp.session.get_one(Document, survey.id), _SURVEY, run.id
+        )
+        camp.ended(run)
+        job = camp.job_after(run, SessionState.HELD)
+
+        assert _entry(camp, survey)["pilots_work"] == _pilots(
+            "pre_ruling", _link(job, "Pre-ruling"), True
+        )
+
+        camp.ended(job)
+
+        assert _entry(camp, survey)["pilots_work"] is None
+
+    def test_while_its_pass_asks_the_writer_it_links_no_work(self, camp: Camp) -> None:
+        run = camp.worker(conversation="conversation-1")
+        pitch = camp.registered(run, _PITCH)
+        camp.ended(run)
+        job = camp.job_after(run)
+        camp.ask_writer(job, pitch, "Q1")
+        camp.ended(job)
+        camp.clarification(job, run, SessionState.RUNNING)
+
+        assert _entry(camp, pitch)["pilots_work"] == _pilots(
+            "asking_writer", None, True
+        )
+
+    def test_a_held_claim_carries_its_hold_until_its_work_hands_it_back_undone(
+        self, camp: Camp, person: User
+    ) -> None:
+        writer = camp.worker()
+        cut_over = camp.registered(writer, _CUT_OVER)
+        camp.ended(writer)
+        camp.ended(camp.job_after(writer))
+        doing = camp.worker(conversation="conversation-2")
+        camp.claim(cut_over, "A1", doing)
+        building = _link(doing, "Building the camp")
+
+        for read in (_entry(camp, cut_over), _read(camp.container, cut_over)):
+            assert read["pilots_work"] == _pilots("doing", building, True)
+            assert _blocks(read)["A1"]["held"] == {
+                "doing": "doing",
+                "work": building,
+                "pulse": True,
+                "asked_in": None,
+            }
+            assert _blocks(read)["A1"]["claim"] == {"work": building, "undone": False}
+
+        camp.stopped(doing, by=person)
+
+        for read in (_entry(camp, cut_over), _read(camp.container, cut_over)):
+            assert read["pilots_work"] is None
+            assert _blocks(read)["A1"]["held"] is None
+            assert _blocks(read)["A1"]["claim"] == {"work": building, "undone": True}
+
+    def test_while_the_run_waits_on_the_person_it_carries_the_document_they_answer(
+        self, camp: Camp
+    ) -> None:
+        writer = camp.worker()
+        cut_over = camp.registered(writer, _CUT_OVER)
+        camp.ended(writer)
+        camp.ended(camp.job_after(writer))
+        doing = camp.worker(conversation="conversation-2")
+        camp.claim(cut_over, "A1", doing)
+        question = camp.registered(doing, _PITCH)
+        camp.ended(doing)
+        camp.ended(camp.job_after(doing))
+        building = _link(doing, "Building the camp")
+        asked_in = _link(question, "Where do we pitch?")
+
+        entry = _entry(camp, cut_over)
+
+        assert entry["pilots_work"] == _pilots(
+            "waiting_on_answer", building, False, asked_in
+        )
+        assert _blocks(entry)["A1"]["held"] == {
+            "doing": "waiting_on_answer",
+            "work": building,
+            "pulse": False,
+            "asked_in": asked_in,
+        }
+        assert _entry(camp, question)["pilots_work"] is None
+
+    def test_a_researched_block_is_held_in_a_document_that_is_the_persons(
+        self, camp: Camp
+    ) -> None:
+        writer = camp.worker()
+        trip = camp.registered(writer, _TWO_QUESTIONS)
+        camp.ended(writer)
+        camp.ended(camp.job_after(writer))
+        checking = camp.worker(SessionState.IDLE, conversation="conversation-2")
+        camp.research(trip, "Q1", checking)
+
+        entry = _entry(camp, trip)
+
+        assert entry["pilots_work"] is None
+        assert {
+            local_id: block["held"] for local_id, block in _blocks(entry).items()
+        } == {
+            "Q1": {
+                "doing": "researching",
+                "work": _link(checking, "Building the camp"),
+                "pulse": False,
+                "asked_in": None,
+            },
+            "Q2": None,
+        }
 
 
 @pytest.mark.usefixtures("person")
@@ -3418,11 +3605,12 @@ class TestItemDocument:
         environment: Environment,
     ) -> None:
         project = _make(container)
+        work = _work(session, project, environment, SessionState.RUNNING)
         item = (
             container.document_service()
             .register(
                 project,
-                _run(session, project, environment),
+                session.get_one(models.Session, work.id),
                 "/work/Camp/docs/refinement.md",
             )
             .item
@@ -3430,7 +3618,7 @@ class TestItemDocument:
 
         read = _read(container, item)
 
-        assert read == {**_items(container, project)[1], "project_id": str(project.id)}
+        assert read == {**_items(container, project)[2], "project_id": str(project.id)}
         assert (read["body"], read["awaiting_read"]) == (None, True)
 
     def test_an_open_document_reads_as_its_timeline_entry_with_its_project(

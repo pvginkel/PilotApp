@@ -27,7 +27,6 @@ of many items plans and runs it once.
 import uuid
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
-from enum import StrEnum
 from functools import cache
 from typing import Any
 
@@ -60,6 +59,7 @@ from app.models import (
 )
 from app.models import Session as AgentSession
 from app.models.reference import SessionState, WorkTrigger
+from app.schemas.timeline import Doing
 from app.services.start_gate import WORK_KIND
 from app.services.store_update_service import stopped_for_unlifted
 
@@ -81,25 +81,6 @@ _DOWN = (SessionState.FAILED, SessionState.STOPPED)
 flight all the same: owed its nudge, or the store update's retry."""
 
 
-class Doing(StrEnum):
-    """What Pilot does on an item that is Pilot's (DB 296)."""
-
-    AWAITING_RUN = "awaiting_run"
-    """Its read, or another's of the run that registered it, awaited at
-    that run's end."""
-    PRE_RULING = "pre_ruling"
-    """Its pass in flight, or the pass after the writer's reply."""
-    ASKING_WRITER = "asking_writer"
-    """Its pass asked the writer, the clarification run in flight."""
-    DOING = "doing"
-    """Its every open Block held, a claim's run going on."""
-    RESEARCHING = "researching"
-    """Its every open Block held, a research's run going on."""
-    WAITING_ON_ANSWER = "waiting_on_answer"
-    """Its every open Block held, the run holding them waiting on the
-    person's answer to a document it registered."""
-
-
 @dataclass(frozen=True)
 class Hold:
     """A held Block (DB 295, held through the run)."""
@@ -117,6 +98,13 @@ class Hold:
     asked_in: uuid.UUID | None
     """While the run waits on the person: the open document it registered
     that they answer, the first on the timeline; else none."""
+
+    @property
+    def doing(self) -> Doing:
+        """What Pilot does on the Block."""
+        if not self.going_on:
+            return Doing.WAITING_ON_ANSWER
+        return Doing.RESEARCHING if self.research else Doing.DOING
 
 
 @dataclass(frozen=True)
@@ -558,18 +546,10 @@ def pilots_work(
                 for hold in reading.held.values()
                 if hold.document_id == document_id
             ]
-            going = [hold for hold in mine if hold.going_on]
-            first = (going or mine)[0]
-            doing = (
-                Doing.WAITING_ON_ANSWER
-                if not going
-                else Doing.RESEARCHING
-                if first.research
-                else Doing.DOING
-            )
+            first = ([hold for hold in mine if hold.going_on] or mine)[0]
             take(
                 document_id,
-                PilotsWork(doing, first.work_id, first.pulse, first.asked_in),
+                PilotsWork(first.doing, first.work_id, first.pulse, first.asked_in),
             )
     return found
 

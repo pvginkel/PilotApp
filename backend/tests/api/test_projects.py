@@ -537,6 +537,7 @@ class TestGetTimeline:
                     "clarifications": [],
                     "work": None,
                     "wait": None,
+                    "pilots_work": None,
                 },
                 {
                     "id": str(decision.id),
@@ -594,6 +595,7 @@ class TestGetTimeline:
                                 "in_chat": None,
                                 "done": None,
                                 "claim": None,
+                                "held": None,
                                 "deferral": None,
                                 "writer_asked": False,
                                 "section": None,
@@ -611,6 +613,7 @@ class TestGetTimeline:
                     "clarifications": [],
                     "work": None,
                     "wait": None,
+                    "pilots_work": None,
                 },
                 {
                     "id": str(notice.id),
@@ -647,6 +650,7 @@ class TestGetTimeline:
                     "clarifications": [],
                     "work": None,
                     "wait": None,
+                    "pilots_work": None,
                 },
             ],
             "ready_after": None,

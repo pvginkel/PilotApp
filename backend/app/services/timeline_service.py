@@ -70,18 +70,20 @@ from app.schemas.timeline import (
     BodyPartSchema,
     CardTransitionSchema,
     ChatPlaceSchema,
-    ClaimedWorkSchema,
     ClaimSchema,
     ClarificationSchema,
     ConfirmationReasonSchema,
     CurrentLineSchema,
     DeferralSchema,
+    DocumentLinkSchema,
     DoneCauseCode,
     DoneSchema,
+    HoldSchema,
     ItemDocumentSchema,
     ItemForm,
     ItemKindCode,
     OptionSchema,
+    PilotsWorkSchema,
     ProjectDocumentSchema,
     ProsePartSchema,
     RetriedSchema,
@@ -94,6 +96,7 @@ from app.schemas.timeline import (
     WaitFiringSchema,
     WaitRequestSchema,
     WaitSchema,
+    WorkLinkSchema,
     WorkSchema,
     WriterQuestionSchema,
 )
@@ -114,7 +117,7 @@ from app.services.start_gate import (
 from app.services.store_update_service import stopped_for_update, unlifted
 from app.services.usage_halts import UsageHalts
 from app.services.wait_service import REQUESTS, ShownFiring, WaitService
-from app.services.working_on import pilots
+from app.services.working_on import holds, pilots, pilots_work
 
 WORK = "work"
 WAIT = "wait"
@@ -637,6 +640,7 @@ class TimelineService:
             self._chat_places({document.id: parts}),
             {},
             frozenset(),
+            _Pilots({}, {}, frozenset()),
         )
         return ProjectDocumentSchema(
             title=dsl.parse(text).title,
@@ -661,6 +665,7 @@ class TimelineService:
         documents = [item.id for item, document, _ in rows if document is not None]
         asked = writer_asked(self.db, documents)
         clarified = on_documents(self.db, documents)
+        pilots = self._pilots(documents, list(bodies))
         works = work_status(
             self.db,
             [item.id for item, _, form in rows if form == WORK],
@@ -705,6 +710,7 @@ class TimelineService:
                 for document_id, local_ids in asked.items()
                 for local_id in local_ids
             ),
+            pilots,
         )
         held = set(
             self.db.scalars(
@@ -786,6 +792,7 @@ class TimelineService:
                     if form == WAIT
                     else None
                 ),
+                pilots_work=pilots.items.get(item.id),
             )
             for item, document, form in rows
         ]
@@ -818,14 +825,16 @@ class TimelineService:
         project: Project,
         users: dict[uuid.UUID | str, User],
         places: dict[tuple[uuid.UUID, str], ChatPlaceSchema],
-        claims: dict[tuple[uuid.UUID, str], ClaimedWorkSchema],
+        claims: dict[tuple[uuid.UUID, str], WorkLinkSchema],
         asked: frozenset[tuple[uuid.UUID, str]],
+        pilots: "_Pilots",
     ) -> "_Reader":
         return _Reader(
             users=users,
             places=places,
             claims=claims,
             asked=asked,
+            pilots=pilots,
             tasks=dict(
                 self.db.execute(
                     select(PlanTask.task_id, PlanTask.title).where(
@@ -894,7 +903,7 @@ class TimelineService:
 
     def _claims(
         self, bodies: Mapping[uuid.UUID, Iterable[dsl.Prose | dsl.Block]]
-    ) -> dict[tuple[uuid.UUID, str], ClaimedWorkSchema]:
+    ) -> dict[tuple[uuid.UUID, str], WorkLinkSchema]:
         """The work item each action of `bodies` that Pilot claimed and has
         not done is given to, by its standing Claim Assignment (DB 260),
         keyed by its document's id and its local id; a claim no work item is
@@ -918,7 +927,7 @@ class TimelineService:
             )
             .subquery()
         )
-        given: dict[tuple[uuid.UUID, str], ClaimedWorkSchema] = {}
+        given: dict[tuple[uuid.UUID, str], WorkLinkSchema] = {}
         for document_id, local_id, work_id, title in self.db.execute(
             select(
                 Block.document_id, Block.local_id, ClaimAssignment.work_id, Item.title
@@ -936,10 +945,78 @@ class TimelineService:
             # A work item is born titled (DB decision 50).
             assert title is not None
             if (document_id, local_id) in claims:
-                given[(document_id, local_id)] = ClaimedWorkSchema(
-                    id=work_id, title=title
-                )
+                given[(document_id, local_id)] = WorkLinkSchema(id=work_id, title=title)
         return given
+
+    def _pilots(
+        self, document_ids: list[uuid.UUID], body_ids: list[uuid.UUID]
+    ) -> "_Pilots":
+        """What Pilot does on each of the documents `document_ids` that is
+        Pilot's, and on the held blocks of those of `body_ids`, as the
+        reading reads them (`working_on`)."""
+        doing = pilots_work(self.db, document_ids)
+        reading = holds(self.db, body_ids)
+        named = set(reading.held) | reading.undone
+        blocks = {
+            block_id: (document_id, local_id)
+            for block_id, document_id, local_id in self.db.execute(
+                select(Block.id, Block.document_id, Block.local_id).where(
+                    Block.id.in_(named)
+                )
+            )
+        }
+        linked = {each.work_id for each in doing.values() if each.work_id} | {
+            hold.work_id for hold in reading.held.values()
+        }
+        asked_in = {each.asked_in for each in doing.values() if each.asked_in} | {
+            hold.asked_in for hold in reading.held.values() if hold.asked_in
+        }
+        titles = {
+            item_id: (title, source_path)
+            for item_id, title, source_path in self.db.execute(
+                select(Item.id, Item.title, Document.source_path)
+                .outerjoin(Document, Document.id == Item.id)
+                .where(Item.id.in_(linked | asked_in))
+            )
+        }
+
+        def work(work_id: uuid.UUID) -> WorkLinkSchema:
+            title, _ = titles[work_id]
+            # A work item is born titled (DB decision 50).
+            assert title is not None
+            return WorkLinkSchema(id=work_id, title=title)
+
+        def document(item_id: uuid.UUID | None) -> DocumentLinkSchema | None:
+            if item_id is None:
+                return None
+            title, source_path = titles[item_id]
+            # `asked_in` names a registered document alone (`working_on`).
+            assert source_path is not None
+            return DocumentLinkSchema(
+                id=item_id, title=title or PurePosixPath(source_path).name
+            )
+
+        return _Pilots(
+            items={
+                item_id: PilotsWorkSchema(
+                    doing=each.doing,
+                    work=None if each.work_id is None else work(each.work_id),
+                    pulse=each.pulse,
+                    asked_in=document(each.asked_in),
+                )
+                for item_id, each in doing.items()
+            },
+            held={
+                blocks[block_id]: HoldSchema(
+                    doing=hold.doing,
+                    work=work(hold.work_id),
+                    pulse=hold.pulse,
+                    asked_in=document(hold.asked_in),
+                )
+                for block_id, hold in reading.held.items()
+            },
+            undone=frozenset(blocks[block_id] for block_id in reading.undone),
+        )
 
     def _edited(self, document_ids: list[uuid.UUID]) -> dict[uuid.UUID, datetime]:
         """Each document's *Edited <time>* (F28.7, the planning's ruling): the
@@ -1071,13 +1148,25 @@ class TimelineService:
 
 
 @dataclass(frozen=True)
+class _Pilots:
+    """What Pilot does on a timeline's items, as the reading reads it: on
+    each item that is Pilot's by its id, and on each held block and each
+    claim handed back undone by its document's id and its local id."""
+
+    items: dict[uuid.UUID, PilotsWorkSchema]
+    held: dict[tuple[uuid.UUID, str], HoldSchema]
+    undone: frozenset[tuple[uuid.UUID, str]]
+
+
+@dataclass(frozen=True)
 class _Reader:
     """What a timeline's items name, read once for them all."""
 
     users: dict[uuid.UUID | str, User]
     places: dict[tuple[uuid.UUID, str], ChatPlaceSchema]
-    claims: dict[tuple[uuid.UUID, str], ClaimedWorkSchema]
+    claims: dict[tuple[uuid.UUID, str], WorkLinkSchema]
     asked: frozenset[tuple[uuid.UUID, str]]
+    pilots: _Pilots
     tasks: dict[str, str]
     reasons: dict[str, ConfirmationReason]
 
@@ -1131,10 +1220,14 @@ class _Reader:
             in_chat=self.places.get((document_id, block.local_id)),
             done=block.done,
             claim=(
-                ClaimSchema(work=self.claims.get((document_id, block.local_id)))
+                ClaimSchema(
+                    work=self.claims.get((document_id, block.local_id)),
+                    undone=(document_id, block.local_id) in self.pilots.undone,
+                )
                 if block.claimed
                 else None
             ),
+            held=self.pilots.held.get((document_id, block.local_id)),
             deferral=(
                 DeferralSchema(
                     to=block.to,

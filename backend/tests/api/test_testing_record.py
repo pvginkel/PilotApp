@@ -1612,7 +1612,10 @@ class TestCreateWork:
             if part["type"] == "block"
         ]
         assert [block["claim"] for block in blocks] == [
-            {"work": {"id": response.get_json()["id"], "title": WORK["title"]}},
+            {
+                "work": {"id": response.get_json()["id"], "title": WORK["title"]},
+                "undone": False,
+            },
             None,
         ]
 

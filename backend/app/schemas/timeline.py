@@ -56,6 +56,26 @@ class HeldReason(StrEnum):
     CONVERSATION = "conversation"
 
 
+class Doing(StrEnum):
+    """What Pilot does on an item that is Pilot's, or on a held block (F13.7,
+    F31.7; DB 295, 296). Read at display, never stored."""
+
+    AWAITING_RUN = "awaiting_run"
+    """Its read, or another's of the run that registered it, awaited at
+    that run's end."""
+    PRE_RULING = "pre_ruling"
+    """Its pass in flight, or the pass after the writer's reply."""
+    ASKING_WRITER = "asking_writer"
+    """Its pass asked the writer, the clarification run in flight."""
+    DOING = "doing"
+    """A claim's run going on."""
+    RESEARCHING = "researching"
+    """A research's run going on."""
+    WAITING_ON_ANSWER = "waiting_on_answer"
+    """The run holding it waiting on the person's answer to a document it
+    registered."""
+
+
 class StopCause(StrEnum):
     """Why a work item stopped when no person did. A stop made elsewhere, its
     environment stopped under its turn (design 2 §9.6; F71): it settled
@@ -219,9 +239,8 @@ class ChatPlaceSchema(BaseModel):
     )
 
 
-class ClaimedWorkSchema(BaseModel):
-    """The work item a claimed action is given to: the one its latest naming
-    names (DB 260)."""
+class WorkLinkSchema(BaseModel):
+    """A work item a line goes to, a job among them: its id and its title."""
 
     id: uuid.UUID = Field(description="The work item's id, its line's address")
     title: str = Field(
@@ -230,14 +249,109 @@ class ClaimedWorkSchema(BaseModel):
     )
 
 
-class ClaimSchema(BaseModel):
-    """An action Pilot claimed and has not done (F21.6): open, Pilot's, waiting
-    on no person."""
+class DocumentLinkSchema(BaseModel):
+    """A registered document a line links: its id and its title."""
 
-    work: ClaimedWorkSchema | None = Field(
+    id: uuid.UUID = Field(description="The item's id, its document's address")
+    title: str = Field(
+        description=("Its line's title: its text's, else its file's name (F35)"),
+        examples=["refinement.md"],
+    )
+
+
+class ClaimSchema(BaseModel):
+    """An action Pilot claimed and has not done (F21.6): Pilot's while its
+    run holds it (`held`), the person's otherwise."""
+
+    work: WorkLinkSchema | None = Field(
         description=(
             "The work item that does it, the latest named for it on its "
             "`add_item`; null while none is"
+        )
+    )
+    undone: bool = Field(
+        description=(
+            "Whether Pilot's work left it undone, which its head says: the run "
+            "of the work item named for it handed it back, done with it, "
+            "failed or stopped, its `done` unwritten, the action the "
+            "person's again (F21.6; DB 262); false while it is held, and while "
+            "no work item is named for it"
+        )
+    )
+
+
+class HoldSchema(BaseModel):
+    """What holds a block while Pilot's work holds it (F31.7; DB 295, held
+    through the run): read at every read, never stored."""
+
+    doing: Doing = Field(
+        description=(
+            "What Pilot does on it: `doing` a claimed action, `researching` a "
+            "block a research checks a fact for, each while something of the "
+            "run holding it is in flight; `waiting_on_answer` while that run "
+            "waits on the person's answer to a document it registered"
+        )
+    )
+    work: WorkLinkSchema = Field(
+        description=(
+            "The work item its standing claim or research names, which its "
+            "line's button goes to (DB 260, 292)"
+        )
+    )
+    pulse: bool = Field(
+        description=(
+            "Whether the line's dot pulses: a session of the run holding it, a "
+            "work item's or the job's after one of their turns, queued or "
+            "held, starting or running (F13.7)"
+        )
+    )
+    asked_in: DocumentLinkSchema | None = Field(
+        description=(
+            "While its run waits on the person: the run's open document they "
+            "answer, the first on the timeline; null otherwise"
+        )
+    )
+
+
+class PilotsWorkSchema(BaseModel):
+    """What Pilot does on an item that is Pilot's (F13.7; DB 296), which its
+    line shows in its kind's place and its strip says once opened (F28.9):
+    read at every read, never stored."""
+
+    doing: Doing = Field(
+        description=(
+            "What Pilot does on it: `awaiting_run`, it or another document of "
+            "the run that registered it awaiting its read; `pre_ruling`, its "
+            "pass in flight, or the pass after the writer's reply; "
+            "`asking_writer`, its pass asked the writer, the clarification run "
+            "in flight; with every open block held, `doing` or `researching` "
+            "while something of the run holding them is in flight, and "
+            "`waiting_on_answer` while that run waits on the person's answer "
+            "to a document it registered"
+        )
+    )
+    work: WorkLinkSchema | None = Field(
+        description=(
+            "The work its line's button goes to: the work item that registered "
+            "it, while `awaiting_run`; the pass's job, whose session log it "
+            "opens, while `pre_ruling`; the work item the standing claim or "
+            "research of its first held block names, while `doing`, "
+            "`researching` or `waiting_on_answer`; null while `asking_writer`, "
+            "the words standing still"
+        )
+    )
+    pulse: bool = Field(
+        description=(
+            "Whether the line's dot pulses: the session doing Pilot's work on "
+            "it queued or held, starting or running; never while "
+            "`awaiting_run` or `waiting_on_answer` (F13.7)"
+        )
+    )
+    asked_in: DocumentLinkSchema | None = Field(
+        description=(
+            "While `waiting_on_answer`: the run's open document the person "
+            "answers, the first on the timeline, which the strip links; null "
+            "otherwise"
         )
     )
 
@@ -290,6 +404,14 @@ class BlockSchema(BaseModel):
         description=(
             "Pilot does it: the action's claim, `answer: Pilot does it`, `by` "
             "Pilot, until its Done; null for every other block"
+        )
+    )
+    held: HoldSchema | None = Field(
+        description=(
+            "What holds it while Pilot's work holds it, a claimed action or a "
+            "block a research checks a fact for: it takes no answer, Done or "
+            "paste-back from the app's controls (F31.7; DB 295); null while it "
+            "is not held"
         )
     )
     deferral: DeferralSchema | None = Field(
@@ -824,6 +946,15 @@ class TimelineItemSchema(BaseModel):
     )
     wait: WaitSchema | None = Field(
         description="A wait's own; null for every other kind"
+    )
+    pilots_work: PilotsWorkSchema | None = Field(
+        description=(
+            "What Pilot does on it while it is Pilot's (F13.7; DB 296): a "
+            "registered document awaiting its read, under its pass or its "
+            "clarification, or with every open block held; it waits on no "
+            "person. Null while it is the person's or done, and for every "
+            "other item"
+        )
     )
 
 
