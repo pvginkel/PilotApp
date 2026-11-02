@@ -24,6 +24,7 @@ from app.models import (
     Environment,
     Item,
     Project,
+    ResearchAssignment,
     Turn,
     User,
     Wait,
@@ -971,6 +972,7 @@ class TestAddItem:
             {**CARD_WAIT, "states": ["Done", ""]},
             {**TIMED_WAIT, "due_at": "2099-10-25T18:30:00"},
             {**TIMED_WAIT, "due_at": "tomorrow"},
+            {**WORK, "researches": ["D1"]},
         ],
     )
     def test_a_body_that_is_not_an_item_is_400(
@@ -1095,6 +1097,37 @@ class TestAddItem:
             assert str(assignment.work_id) == response.get_json()["id"]
         else:
             assert _error(response).endswith("is a decision, not an action")
+            assert named == []
+
+    @pytest.mark.parametrize(("research", "status"), [("D1", 201), ("A1", 409)])
+    def test_a_work_item_names_the_blocks_it_researches(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        started: SessionStartService,
+        project: Project,
+        environment: Environment,
+        research: str,
+        status: int,
+    ) -> None:
+        _brain(session, project, environment, "job")
+        document = _registered(session, container, project, environment, CUT_OVER)
+        session.commit()
+
+        response = client.post(
+            ITEMS,
+            json={**WORK, "researches": [f"{document.id}/{research}"]},
+            headers=_bearer(),
+        )
+
+        assert response.status_code == status
+        named = session.scalars(select(ResearchAssignment)).all()
+        if status == 201:
+            [assignment] = named
+            assert str(assignment.work_id) == response.get_json()["id"]
+        else:
+            assert _error(response).endswith(" is answered")
             assert named == []
 
     def test_a_text_with_a_fault_is_409_and_a_task_not_in_the_plan_404(

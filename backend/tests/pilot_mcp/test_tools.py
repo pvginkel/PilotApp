@@ -1093,6 +1093,26 @@ class TestAddItem:
         assert added.kind_code == item["kind"]
         assert session.get(models.Wait, added.id) is not None
 
+    async def test_a_work_items_researches_reach_its_route_as_given(
+        self, mcp_app: Starlette, routes: ApiRoutes, brain: models.Session
+    ) -> None:
+        research = f"{uuid.uuid4()}/D1"
+        item = {
+            "kind": "work",
+            "title": "Checking which hosts take the key",
+            "repo": "example/Example",
+            "cwd": "/work/Example",
+            "brief": "Check which hosts take the new key.",
+            "researches": [research],
+        }
+
+        result = await call(mcp_app, "add_item", {"item": item}, path=STORE_PATH)
+
+        [(request, answer)] = routes.calls
+        assert json.loads(request.content) == item
+        assert answer.status_code == 404
+        assert error_text(result) == _refusal(routes, "add_item")
+
     async def test_a_waits_refusal_is_the_routes(
         self, mcp_app: Starlette, routes: ApiRoutes, brain: models.Session
     ) -> None:
@@ -1174,6 +1194,7 @@ class TestAddItem:
             {"kind": "notice", "title": "Camp", "attachments": ["camp.md"]},
             {"kind": "work", "repo": "Example"},
             {"kind": "work", "title": "Rotating", "claims": ["A1"]},
+            {"kind": "work", "title": "Checking", "researches": ["D1"]},
         ],
     )
     async def test_an_item_outside_its_shape_is_refused_without_calling_the_api(

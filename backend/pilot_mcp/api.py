@@ -189,6 +189,15 @@ class NewItem(BaseModel):
             " once when it comes"
         ),
     )
+    researches: list[Annotated[str, Field(pattern=BLOCK_ID)]] = Field(
+        default_factory=list,
+        description=(
+            "The blocks of workers' documents you left unanswered while a work"
+            " item checks a fact their answers rest on, by their ids, `<item"
+            " id>/<local id>`: each block's line names this work item, and the"
+            " job after its turn names them for you to route"
+        ),
+    )
 
 
 class RegisteredDocument(BaseModel):

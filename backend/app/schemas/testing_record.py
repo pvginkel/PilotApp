@@ -326,6 +326,15 @@ class InventedWorkCreateSchema(BaseModel):
         ),
         examples=[["0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15/A1"]],
     )
+    researches: list[BlockId] = Field(
+        default_factory=list,
+        description=(
+            "The blocks it checks a fact for, by their ids: unanswered blocks of "
+            "open registered documents of the project, as a pass's `add_item` "
+            "names them"
+        ),
+        examples=[["0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15/D1"]],
+    )
 
 
 class InventedSaveCreateSchema(BaseModel):

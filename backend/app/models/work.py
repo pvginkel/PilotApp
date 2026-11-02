@@ -1,6 +1,6 @@
 """Work (DB §2.2), the subtype of Item and of Session, Claim Assignment,
-Progress Step, a characteristic of Work, and Clarification Run, a role of a
-Work (DB §2.3).
+Progress Step, a characteristic of Work, Research Assignment, and Clarification
+Run, a role of a Work (DB §2.3).
 
 `work` is the extension table keyed by the id a Work's Item and Session share
 (DB §7.3).
@@ -164,6 +164,30 @@ class ProgressStep(db.Model):  # type: ignore[name-defined]
     state_code: Mapped[ProgressState] = mapped_column(PROGRESS_STATE)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ResearchAssignment(db.Model):  # type: ignore[name-defined]
+    """One naming of a Block by the Work that checks a fact its answer rests
+    on, written when `add_item` adds the Work and never changed (DB decision
+    71). Of a Block's namings, the one whose Work's Item has the highest `seq`
+    stands (DB 292).
+
+    That the Work is a worker's run of the Block's Project, and the Block
+    unanswered in an open registered document of it (DB 293), is the
+    server's check at the `add_item`: no key reaches the Block's Project from
+    this row.
+    """
+
+    __tablename__ = "research_assignments"
+    __table_args__ = (
+        # A researched Block's latest naming (DB 292).
+        Index("ix_research_assignments_block_id", "block_id"),
+    )
+
+    work_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("work.id"), primary_key=True)
+    block_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("blocks.id"), primary_key=True
+    )
 
 
 class ClarificationRun(db.Model):  # type: ignore[name-defined]

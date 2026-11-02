@@ -60,6 +60,7 @@ from app.models import (
     ItemKind,
     PlanTask,
     Project,
+    ResearchAssignment,
     SessionKind,
     User,
     Work,
@@ -580,6 +581,63 @@ class RecordService:
                 registered document, is done, or has not been read yet; a
                 block is no action, or is answered.
         """
+
+        def refusal(block: dsl.Block, path: str) -> str | None:
+            if block.kind is not dsl.BlockKind.ACTION:
+                return (
+                    f"block {block.local_id} of {path} is a {block.kind}, not an action"
+                )
+            if block.answered:
+                return f"action {block.local_id} of {path} is answered"
+            return None
+
+        return self._nameable(
+            project, block_ids, operation, "claims an action", "action", refusal
+        )
+
+    def researchable(
+        self, project: Project, block_ids: Sequence[str], operation: str
+    ) -> list[Block]:
+        """The Blocks `block_ids`, each `<item id>/<local id>`, that a work
+        item added to `project` may be named for as the Blocks it checks a
+        fact for (DB 293): Blocks with neither an answer, a claim included,
+        nor a `done`, of open registered documents of the project, each
+        document's row held until the transaction ends, in the caller's,
+        which holds the project's row.
+
+        Raises:
+            RecordNotFoundException: an item is not of the project, or its
+                document has no such block.
+            InvalidOperationException: a block is named twice; an item is no
+                registered document, is done, or has not been read yet; a
+                block is answered or done.
+        """
+
+        def refusal(block: dsl.Block, path: str) -> str | None:
+            if block.done is not None:
+                return f"block {block.local_id} of {path} is done"
+            if block.answer is not None:
+                return f"block {block.local_id} of {path} is answered"
+            return None
+
+        return self._nameable(
+            project, block_ids, operation, "researches a block", "block", refusal
+        )
+
+    def _nameable(
+        self,
+        project: Project,
+        block_ids: Sequence[str],
+        operation: str,
+        verb: str,
+        noun: str,
+        refusal: Callable[[dsl.Block, str], str | None],
+    ) -> list[Block]:
+        """The Blocks `block_ids` of open registered documents of `project`
+        for none of which `refusal`, given the block and its document's tree
+        path, gives a reason, each document's row held until the transaction
+        ends. A refusal of an item no registered document says what Pilot
+        does, `verb`, and one of a block named twice names it `noun`."""
         named: list[tuple[Item, Document, str]] = []
         for block_id in block_ids:
             item_id, _, local_id = block_id.partition("/")
@@ -590,8 +648,8 @@ class RecordService:
             if document is None or document.source_path is None:
                 raise InvalidOperationException(
                     operation,
-                    f"item {item.id} is no registered document: Pilot claims an"
-                    " action of a worker's document",
+                    f"item {item.id} is no registered document: Pilot {verb} of a"
+                    " worker's document",
                 )
             named.append((item, document, local_id))
         documents = {document.id: document for _, document, _ in named}
@@ -603,16 +661,9 @@ class RecordService:
             _not_awaiting_read(item, document, operation)
             if item.done_at is not None:
                 raise InvalidOperationException(operation, f"{path} is done")
-            block = _block(document, _blocks(item, document), local_id)
-            if block.kind is not dsl.BlockKind.ACTION:
-                raise InvalidOperationException(
-                    operation,
-                    f"block {local_id} of {path} is a {block.kind}, not an action",
-                )
-            if block.answered:
-                raise InvalidOperationException(
-                    operation, f"action {local_id} of {path} is answered"
-                )
+            refused = refusal(_block(document, _blocks(item, document), local_id), path)
+            if refused is not None:
+                raise InvalidOperationException(operation, refused)
             row = self.db.scalars(
                 select(Block).where(
                     Block.document_id == document.id, Block.local_id == local_id
@@ -620,7 +671,7 @@ class RecordService:
             ).one()
             if row in blocks:
                 raise InvalidOperationException(
-                    operation, f"it names action {local_id} of {path} twice"
+                    operation, f"it names {noun} {local_id} of {path} twice"
                 )
             blocks.append(row)
         return blocks
@@ -631,6 +682,18 @@ class RecordService:
         Block's namings the latest stands, the earlier kept (DB 260)."""
         self.db.add_all(
             ClaimAssignment(work_id=work.id, block_id=block.id) for block in blocks
+        )
+        self.db.flush()
+        if blocks:
+            self.view_service.timeline_moved(project)
+
+    def research(self, project: Project, work: Work, blocks: Sequence[Block]) -> None:
+        """The work item `work` named for the Blocks `blocks` whose facts it
+        checks, which `researchable` gave, one Research Assignment each, never
+        changed: of a Block's namings the latest stands, the earlier kept (DB
+        292)."""
+        self.db.add_all(
+            ResearchAssignment(work_id=work.id, block_id=block.id) for block in blocks
         )
         self.db.flush()
         if blocks:

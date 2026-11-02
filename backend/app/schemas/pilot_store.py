@@ -319,6 +319,14 @@ class AddItemRequestSchema(BaseModel):
         description="A timed wait's due time, ahead of now",
         examples=["2026-10-25T18:30:00Z"],
     )
+    researches: list[BlockId] = Field(
+        default_factory=list,
+        description=(
+            "The blocks a work item checks a fact for, by their ids: unanswered"
+            " blocks of open registered documents of the project (DB decision 71)"
+        ),
+        examples=[["0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15/D1"]],
+    )
 
 
 class AttachRequestSchema(BaseModel):

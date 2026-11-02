@@ -35,6 +35,7 @@ from app.models import (
     ItemAttachment,
     ProgressStep,
     Project,
+    ResearchAssignment,
     StoreUpdate,
     Turn,
     User,
@@ -1635,6 +1636,50 @@ class TestCreateWork:
         response = client.post(
             _work_path(project_id),
             json={**WORK, "claims": [f"{document_id}/{claim}"]},
+        )
+
+        assert response.status_code == status
+        assert self._work_items(session) == []
+
+    def test_it_names_the_blocks_the_work_item_researches(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        served: None,
+        session: Session,
+    ) -> None:
+        project_id = _make(client)
+        document_id = self._cut_over(session, container, project_id)
+
+        response = client.post(
+            _work_path(project_id), json={**WORK, "researches": [f"{document_id}/D1"]}
+        )
+
+        assert response.status_code == 201, response.get_json()
+        [research] = session.scalars(select(ResearchAssignment)).all()
+        assert str(research.work_id) == response.get_json()["id"]
+        assert session.get_one(models.Block, research.block_id).local_id == "D1"
+
+    @pytest.mark.parametrize(
+        ("research", "status"),
+        [("A1", 409), ("D9", 404), ("D1 Q1", 400)],
+        ids=["answered", "no-block", "no-block-id"],
+    )
+    def test_a_research_the_record_refuses_places_nothing(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        served: None,
+        session: Session,
+        research: str,
+        status: int,
+    ) -> None:
+        project_id = _make(client)
+        document_id = self._cut_over(session, container, project_id)
+
+        response = client.post(
+            _work_path(project_id),
+            json={**WORK, "researches": [f"{document_id}/{research}"]},
         )
 
         assert response.status_code == status

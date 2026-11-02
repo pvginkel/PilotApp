@@ -38,6 +38,7 @@ from app.models import (
     PlanTask,
     Project,
     ProjectTransition,
+    ResearchAssignment,
     Turn,
     User,
     Wait,
@@ -2393,6 +2394,116 @@ class TestPilotStoreServiceAddWork:
         assert refused.value.message == (
             "Cannot add a notice item because a notice item takes no `claims`"
         )
+
+    def test_a_work_item_is_named_for_the_blocks_it_researches_beside_its_claims(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, project, environment, "job")
+        document = _registered(session, container, project, environment, CUT_OVER)
+
+        added = _starting(container, starts).add_item(
+            _admitted(run),
+            _added(
+                kind="work",
+                title="Checking which hosts take the key",
+                repo=REPO,
+                cwd="/work/Example",
+                brief=BRIEF,
+                claims=[f"{document.id}/A1"],
+                researches=[f"{document.id}/D1", f"{document.id}/A2"],
+            ),
+            TOOL_USE_ID,
+        )
+        clear_after_commit_callbacks()
+
+        assert _researches(session) == sorted(
+            [
+                (added.item.id, _block(session, document, "D1").id),
+                (added.item.id, _block(session, document, "A2").id),
+            ]
+        )
+        assert _claims(session) == [(added.item.id, _block(session, document, "A1").id)]
+        assert _block(session, document, "D1").answer is None
+
+    @pytest.mark.parametrize(
+        ("research", "refusal"),
+        [
+            pytest.param("A1", InvalidOperationException, id="claimed"),
+            pytest.param("D9", RecordNotFoundException, id="no-block"),
+        ],
+    )
+    def test_a_research_the_record_refuses_starts_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        starts: SessionStartService,
+        project: Project,
+        environment: Environment,
+        research: str,
+        refusal: type[Exception],
+    ) -> None:
+        run = _brain(session, project, environment, "job")
+        document = _registered(session, container, project, environment, CUT_OVER)
+
+        with pytest.raises(refusal):
+            _starting(container, starts).add_item(
+                _admitted(run),
+                _added(
+                    kind="work",
+                    title="Checking which hosts take the key",
+                    repo=REPO,
+                    cwd="/work/Example",
+                    brief=BRIEF,
+                    claims=[f"{document.id}/A2"],
+                    researches=[f"{document.id}/{research}"],
+                ),
+                TOOL_USE_ID,
+            )
+
+        assert session.scalars(select(Work)).all() == []
+        assert _claims(session) == []
+        assert _researches(session) == []
+        assert _effects(session) == []
+
+    def test_a_prose_item_takes_no_researches(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, project, environment, "job")
+        document = _registered(session, container, project, environment, CUT_OVER)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _service(container).add_item(
+                _admitted(run),
+                _added(
+                    kind="notice", title="Checking", researches=[f"{document.id}/D1"]
+                ),
+                TOOL_USE_ID,
+            )
+
+        assert refused.value.message == (
+            "Cannot add a notice item because a notice item takes no `researches`"
+        )
+
+
+def _researches(db: DbSession) -> list[tuple[uuid.UUID, int]]:
+    """Every Research Assignment, its Work's and its Block's ids."""
+    return [
+        (research.work_id, research.block_id)
+        for research in db.scalars(
+            select(ResearchAssignment).order_by(
+                ResearchAssignment.work_id, ResearchAssignment.block_id
+            )
+        )
+    ]
 
 
 class TestPilotStoreServiceAddWait:

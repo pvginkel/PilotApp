@@ -248,6 +248,23 @@
             ],
             "title": "Repo"
           },
+          "researches": {
+            "description": "The blocks a work item checks a fact for, by their ids: unanswered blocks of open registered documents of the project (DB decision 71)",
+            "examples": [
+              [
+                "0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15/D1"
+              ]
+            ],
+            "items": {
+              "description": "The block's id, `<item id>/<local id>` (TD §4.9)",
+              "examples": [
+                "0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15/D1"
+              ],
+              "type": "string"
+            },
+            "title": "Researches",
+            "type": "array"
+          },
           "states": {
             "anyOf": [
               {
@@ -2350,6 +2367,23 @@
             "minLength": 1,
             "title": "Repo",
             "type": "string"
+          },
+          "researches": {
+            "description": "The blocks it checks a fact for, by their ids: unanswered blocks of open registered documents of the project, as a pass's `add_item` names them",
+            "examples": [
+              [
+                "0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15/D1"
+              ]
+            ],
+            "items": {
+              "description": "The block's id, `<item id>/<local id>` (TD §4.9)",
+              "examples": [
+                "0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15/D1"
+              ],
+              "type": "string"
+            },
+            "title": "Researches",
+            "type": "array"
           },
           "step": {
             "anyOf": [
@@ -15522,7 +15556,7 @@
     },
     "/api/testing/projects/{project_id}/work": {
       "post": {
-        "description": "Returns:     201: The work item's id, its Work's and its Session's     400: The body is invalid, or the stage is prd     404: No project has the id, its plan has no task of the step, a         claim's item is not of the project, or its document has no such         block     409: A claim that is not an open action of a registered document of         the project, no controller is configured, or the project is         finished or archived: the reason",
+        "description": "Returns:     201: The work item's id, its Work's and its Session's     400: The body is invalid, or the stage is prd     404: No project has the id, its plan has no task of the step, a         claimed or researched block's item is not of the project, or its         document has no such block     409: A claim that is not an open action of a registered document of         the project, a research of a block that is answered or not in an         open registered document of it, no controller is configured, or         the project is finished or archived: the reason",
         "operationId": "post__api_testing_projects_{project_id}_work",
         "parameters": [
           {
@@ -15593,7 +15627,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Place a work item on the project's timeline by repository, and start its session as every work item's starts: once the request commits, its start creates an environment of Pilot's own from the repository on the stage's own controller. It is named for the claimed actions `claims` gives, as a pass's `add_item` names them (F21.6).",
+        "summary": "Place a work item on the project's timeline by repository, and start its session as every work item's starts: once the request commits, its start creates an environment of Pilot's own from the repository on the stage's own controller. It is named for the claimed actions `claims` gives and for the blocks `researches` gives, whose facts it checks, as a pass's `add_item` names them (F21.6, F52.3).",
         "tags": [],
         "x-required-role": "editor"
       }
@@ -16599,7 +16633,7 @@
     },
     "/tools/pilot-store/items": {
       "post": {
-        "description": "Returns:     201: The item, a prose item's file, a work item's state as the gate         left it, and the call's effect line     400: The body is not an item in `timeline.json`'s shape     401: No bearer, or one no session has     403: The bearer's session is not a chat's or a job's, or has no turn         running     404: An attachment, the plan's task, a claim's item or a source's         environment is not the session's project's or the controller's,         or a claim's document has no such block     409: A field the kind does not take or one it needs missing, a text         with faults, a wait's list empty or naming one twice, a card that         is no ticket id, a due time not ahead, material that cannot be         copied, a claim that is not an open action of a registered         document, or a start the project refuses: the reason     502: The controller did not answer, or refused for a reason of its own",
+        "description": "Returns:     201: The item, a prose item's file, a work item's state as the gate         left it, and the call's effect line     400: The body is not an item in `timeline.json`'s shape     401: No bearer, or one no session has     403: The bearer's session is not a chat's or a job's, or has no turn         running     404: An attachment, the plan's task, a claimed or researched block's         item or a source's environment is not the session's project's or         the controller's, or that block's document has no such block     409: A field the kind does not take or one it needs missing, a text         with faults, a wait's list empty or naming one twice, a card that         is no ticket id, a due time not ahead, material that cannot be         copied, a claim that is not an open action of a registered         document, a research of a block that is answered or not in an open         registered document, or a start the project refuses: the reason     502: The controller did not answer, or refused for a reason of its own",
         "operationId": "post__tools_pilot-store_items",
         "parameters": [],
         "requestBody": {
@@ -16684,7 +16718,7 @@
             "description": "Bad Gateway"
           }
         },
-        "summary": "`add_item(item)` (F86.1, F86.6, F36.5): a prose item minted with its file, a work item started on add, named for the claimed actions it does (F21.6), or a wait, fixed from then on (F27.6), with the attachments it carries.",
+        "summary": "`add_item(item)` (F86.1, F86.6, F36.5): a prose item minted with its file, a work item started on add, named for the claimed actions it does (F21.6) and for the blocks it researches (F52.3), or a wait, fixed from then on (F27.6), with the attachments it carries.",
         "tags": []
       }
     },

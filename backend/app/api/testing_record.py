@@ -238,17 +238,19 @@ def create_work(
     its session as every work item's starts: once the request commits, its
     start creates an environment of Pilot's own from the repository on the
     stage's own controller. It is named for the claimed actions `claims`
-    gives, as a pass's `add_item` names them (F21.6).
+    gives and for the blocks `researches` gives, whose facts it checks, as a
+    pass's `add_item` names them (F21.6, F52.3).
 
     Returns:
         201: The work item's id, its Work's and its Session's
         400: The body is invalid, or the stage is prd
         404: No project has the id, its plan has no task of the step, a
-            claim's item is not of the project, or its document has no such
-            block
+            claimed or researched block's item is not of the project, or its
+            document has no such block
         409: A claim that is not an open action of a registered document of
-            the project, no controller is configured, or the project is
-            finished or archived: the reason
+            the project, a research of a block that is answered or not in an
+            open registered document of it, no controller is configured, or
+            the project is finished or archived: the reason
     """
     data = InventedWorkCreateSchema.model_validate(request.get_json())
     work = test_data_service.work(
@@ -259,6 +261,7 @@ def create_work(
         cwd=data.cwd,
         step=data.step,
         claims=data.claims,
+        researches=data.researches,
     )
     return InventedItemSchema(id=work.id).model_dump(mode="json"), 201
 

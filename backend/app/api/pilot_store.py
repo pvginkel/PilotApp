@@ -69,8 +69,8 @@ def add_item(
 ) -> Any:
     """`add_item(item)` (F86.1, F86.6, F36.5): a prose item minted with its
     file, a work item started on add, named for the claimed actions it does
-    (F21.6), or a wait, fixed from then on (F27.6), with the attachments it
-    carries.
+    (F21.6) and for the blocks it researches (F52.3), or a wait, fixed from
+    then on (F27.6), with the attachments it carries.
 
     Returns:
         201: The item, a prose item's file, a work item's state as the gate
@@ -79,14 +79,15 @@ def add_item(
         401: No bearer, or one no session has
         403: The bearer's session is not a chat's or a job's, or has no turn
             running
-        404: An attachment, the plan's task, a claim's item or a source's
-            environment is not the session's project's or the controller's,
-            or a claim's document has no such block
+        404: An attachment, the plan's task, a claimed or researched block's
+            item or a source's environment is not the session's project's or
+            the controller's, or that block's document has no such block
         409: A field the kind does not take or one it needs missing, a text
             with faults, a wait's list empty or naming one twice, a card that
             is no ticket id, a due time not ahead, material that cannot be
             copied, a claim that is not an open action of a registered
-            document, or a start the project refuses: the reason
+            document, a research of a block that is answered or not in an open
+            registered document, or a start the project refuses: the reason
         502: The controller did not answer, or refused for a reason of its own
     """
     body = AddItemRequestSchema.model_validate(request.get_json())

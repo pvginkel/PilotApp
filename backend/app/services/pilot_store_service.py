@@ -100,6 +100,7 @@ WORK_FIELDS = (
     "model",
     "reasoning_effort",
     "claims",
+    "researches",
 )
 WAIT_FIELDS = {CARD_WAIT: ("cards", "states"), TIMED_WAIT: ("due_at",)}
 NEEDED = {
@@ -246,23 +247,25 @@ class PilotStoreService:
         (F66, §5.4), on the brain's placement (F61.1); its Session `held` or
         `starting`, as the gate leaves it (F141.4); named for the claimed
         actions its `claims` give, each an open action of a registered
-        document of the project (F21.6; DB 261). A wait is recorded with its
-        title, a card wait's `cards` and `states`, a timed wait's `due_at`,
-        fixed from then on (F27.6), the server firing it (F86.1).
+        document of the project (F21.6; DB 261), and for the blocks its
+        `researches` give, whose facts it checks, each unanswered in an open
+        registered document of the project (F52.3; DB 293). A wait is recorded
+        with its title, a card wait's `cards` and `states`, a timed wait's
+        `due_at`, fixed from then on (F27.6), the server firing it (F86.1).
 
         Raises:
             RecordNotFoundException: an attachment, the plan's task or a
-                claim's item is not of the brain's project, a claim's
-                document has no such block, or an outside source's
-                environment is not the controller's.
+                claimed or researched block's item is not of the brain's
+                project, its document has no such block, or an outside
+                source's environment is not the controller's.
             InvalidOperationException: a field the item's kind does not take,
                 or one it needs, missing; a prose text that holds faults, each
                 with its line; a wait's list empty or naming one twice, a card
                 no ticket id, or a due time not ahead;
                 material that cannot be copied or over the caps of one call,
-                nothing attached; a claim the record refuses
-                (`RecordService.claimable`); the start a work item takes
-                refused.
+                nothing attached; a claim or a research the record refuses
+                (`RecordService.claimable`, `RecordService.researchable`);
+                the start a work item takes refused.
             ExternalServiceException: the controller did not answer, or
                 refused for a reason of its own.
         """
@@ -279,8 +282,13 @@ class PilotStoreService:
         held: Held | None = None
         if item.kind == WORK:
             claimed = self.record_service.claimable(project, item.claims, operation)
+            researched = self.record_service.researchable(
+                project, item.researches, operation
+            )
             added = self._work(project, item)
-            self.record_service.give(project, self.db.get_one(Work, added.id), claimed)
+            work = self.db.get_one(Work, added.id)
+            self.record_service.give(project, work, claimed)
+            self.record_service.research(project, work, researched)
             started = self.db.get_one(AgentSession, added.id)
             # The gate leaves a work item's start `held` or `starting`.
             state = "held" if started.state_code is SessionState.HELD else "starting"

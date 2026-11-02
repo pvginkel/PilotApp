@@ -4787,6 +4787,177 @@ class TestRecordServiceClaims:
         assert no_block.value.message == f"Block {mine.id}/A9 was not found"
 
 
+class TestRecordServiceResearches:
+    """The blocks a work item is named for at its `add_item` as checking a
+    fact their answers rest on: blocks with neither an answer nor a `done` of
+    open registered documents of its project (DB 293), one Research
+    Assignment each, never changed (DB 292; decision 71)."""
+
+    def test_unanswered_blocks_of_any_kind_are_researched_by_the_work_item(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        asks, _ = _registered(session, container, project, project_session, TWO_ASKS)
+        action, _ = _registered(
+            session, container, project, project_session, ACTION, SURVEY_PATH
+        )
+        records = container.record_service()
+        blocks = records.researchable(
+            project,
+            [f"{asks.id}/Q1", f"{action.id}/A1", f"{asks.id}/D1"],
+            "add a work item",
+        )
+        work = _work_item(session, container, project, "Checking the hosts")
+
+        records.research(project, work, blocks)
+
+        assert [(block.document_id, block.local_id) for block in blocks] == [
+            (asks.id, "Q1"),
+            (action.id, "A1"),
+            (asks.id, "D1"),
+        ]
+        assert sorted(
+            session.scalars(
+                select(models.ResearchAssignment.block_id).where(
+                    models.ResearchAssignment.work_id == work.id
+                )
+            )
+        ) == sorted(block.id for block in blocks)
+        assert session.scalars(select(models.ClaimAssignment)).all() == []
+
+    def test_with_none_named_nothing_is_researched(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+    ) -> None:
+        records = container.record_service()
+        work = _work_item(session, container, project)
+
+        records.research(
+            project, work, records.researchable(project, [], "add a work item")
+        )
+
+        assert session.scalars(select(models.ResearchAssignment)).all() == []
+
+    @pytest.mark.parametrize(
+        ("name", "local_id", "cause"),
+        [
+            pytest.param(
+                "answered", "D1", "block D1 of {path} is answered", id="answered"
+            ),
+            pytest.param(
+                "claimed", "A1", "block A1 of {path} is answered", id="claimed"
+            ),
+            pytest.param(
+                "deferred", "Q1", "block Q1 of {path} is answered", id="deferred"
+            ),
+            pytest.param("done", "A1", "block A1 of {path} is done", id="done"),
+            pytest.param(
+                "twice", "Q1", "it names block Q1 of {path} twice", id="twice"
+            ),
+        ],
+    )
+    def test_a_block_that_is_answered_or_done_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        name: str,
+        local_id: str,
+        cause: str,
+    ) -> None:
+        texts = {
+            "answered": SETTLED_ONE_BLOCK["answered"],
+            "claimed": CLAIMED_ACTION,
+            "deferred": SETTLED_ONE_BLOCK["deferred"],
+            "done": SETTLED_ONE_BLOCK["claimed-and-done"],
+            "twice": TWO_ASKS,
+        }
+        item, document = _registered(
+            session, container, project, project_session, texts[name]
+        )
+        named = [f"{item.id}/{local_id}"]
+        if name == "twice":
+            named.append(f"{str(item.id).upper()}/{local_id}")
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.record_service().researchable(project, named, "add a work item")
+
+        assert refused.value.message == (
+            "Cannot add a work item because "
+            + cause.format(path=tree_path(project, document.path))
+        )
+
+    def test_an_item_no_registered_document_done_or_unread_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        pilots, _ = _bear(
+            session,
+            container,
+            project,
+            project_session,
+            "decision",
+            "Which tent?",
+            DECISION,
+        )
+        done, done_document = _registered(
+            session, container, project, project_session, RECOMMENDED
+        )
+        container.record_service().done(done, person)
+        unread = (
+            container.document_service()
+            .register(project, project_session, SURVEY_PATH)
+            .item
+        )
+        records = container.record_service()
+
+        refusals = []
+        for item in (pilots, done, unread):
+            with pytest.raises(InvalidOperationException) as refused:
+                records.researchable(project, [f"{item.id}/D1"], "add a work item")
+            refusals.append(refused.value.cause)
+
+        assert refusals == [
+            f"item {pilots.id} is no registered document: Pilot researches a block"
+            " of a worker's document",
+            f"{tree_path(project, done_document.path)} is done",
+            "its file has not been read yet: it is read at the end of the turn"
+            " that registered it",
+        ]
+
+    def test_an_item_of_another_project_or_a_block_it_lacks_is_not_found(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        other = Project(created_by_user_id=person.id)
+        session.add(other)
+        session.flush()
+        mine, _ = _registered(session, container, project, project_session, TWO_ASKS)
+        records = container.record_service()
+
+        with pytest.raises(RecordNotFoundException) as not_theirs:
+            records.researchable(other, [f"{mine.id}/D1"], "add a work item")
+        with pytest.raises(RecordNotFoundException) as no_block:
+            records.researchable(project, [f"{mine.id}/Q9"], "add a work item")
+
+        assert not_theirs.value.message == f"Item {mine.id} was not found"
+        assert no_block.value.message == f"Block {mine.id}/Q9 was not found"
+
+
 def _question(
     session: DbSession, container: ServiceContainer, project: Project
 ) -> tuple[Item, Document]:

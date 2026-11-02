@@ -459,6 +459,17 @@ _NEW_ITEM = {
             " when it comes",
             format="date-time",
         ),
+        "researches": {
+            "description": (
+                "The blocks of workers' documents you left unanswered while a work"
+                " item checks a fact their answers rest on, by their ids, `<item"
+                " id>/<local id>`: each block's line names this work item, and the"
+                " job after its turn names them for you to route"
+            ),
+            "items": {"pattern": r"^[0-9A-Fa-f-]{36}/\S+$", "type": "string"},
+            "title": "Researches",
+            "type": "array",
+        },
     },
     "required": ["kind"],
     "title": "NewItem",
@@ -546,7 +557,10 @@ STORE_SURFACE = {
         " or `held` at the gate, and `held` why — say so to the person. A work"
         " item that does actions you claimed names them in `claims`: each stays"
         " open and yours until its `done`, its line naming this work item, the"
-        " latest that names it. A wait is recorded with its `title`, a card wait's"
+        " latest that names it. A work item that checks a fact for blocks you"
+        " left unanswered names them in `researches`: each line names this work"
+        " item, the latest that names it, and the job after its turn gives them"
+        " to you to route. A wait is recorded with its `title`, a card wait's"
         " `cards` and `states` or a timed wait's `due_at`, and is fixed from then"
         " on: Pilot fires it and never closes it; you close it with your own"
         " `mark` `done` and its `note`, and to change it you close it and add"
@@ -554,10 +568,11 @@ STORE_SURFACE = {
         " with no title or with faults, a wait's list empty or naming one twice, a"
         " card that is no ticket id, a due time not ahead, an attachment or a plan"
         " task not of your project, material that cannot be copied, a claim that"
-        " is not an open action of a registered document of your project, or a"
-        " start the project refuses is refused with the reason, each fault with"
-        " its line, and nothing is added. Answers `{id, path, state, held,"
-        " effect}`.",
+        " is not an open action of a registered document of your project, a"
+        " research of a block that is answered or not in an open registered"
+        " document of your project, or a start the project refuses is refused"
+        " with the reason, each fault with its line, and nothing is added."
+        " Answers `{id, path, state, held, effect}`.",
     ),
     "attach_file": (
         {

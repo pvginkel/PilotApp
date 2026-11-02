@@ -28,6 +28,7 @@ from app.models import (
     Project,
     ProjectMember,
     ProjectTransition,
+    ResearchAssignment,
     SaveError,
     Turn,
     User,
@@ -593,6 +594,31 @@ at: 2026-10-26T09:00:00Z
 """
 
 
+HOSTS = """# Plan review for 060
+
+```decision id=D1
+options:
+  - Rotate now
+  - Wait for the window
+```
+
+```question id=Q1
+answer: Two hosts
+by: ada
+at: 2026-10-26T09:10:00Z
+```
+
+```question id=Q2
+```
+
+```action id=A1
+answer: Pilot does it
+by: agent
+at: 2026-10-26T09:00:00Z
+```
+"""
+
+
 def _worker_run(
     db: DbSession, container: ServiceContainer, project: Project, task: str | None
 ) -> models.Session:
@@ -875,6 +901,82 @@ class TestWorkerTurnEnded:
             "Registered nothing this run.\n"
             "The claimed actions given to this work item, as they stand:\n"
             f"- {path} ({cut_over.id}) A1 open, claimed"
+        )
+
+    def test_the_blocks_it_researched_are_named_as_they_stand_on_its_conversation(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        project_session: models.Session,
+    ) -> None:
+        """Each block whose latest research naming is a work item on the
+        run's conversation, open while unanswered, a claim since among them,
+        else as its answer reads; one a later check, on a conversation of its
+        own, named since is that check's (DB 292; F52.3)."""
+        documents = container.document_service()
+        review = documents.register(
+            opened, project_session, "/work/Soup/review.md"
+        ).item
+        documents.publish_read(
+            session.get_one(Document, review.id), HOSTS, project_session.id
+        )
+        run = _worker_run(session, container, opened, None)
+        run.conversation_id = "conversation-1"
+        again = models.Session(
+            project_id=opened.id,
+            kind_code="work",
+            cwd="/work/Soup",
+            conversation_id="conversation-2",
+            token_hash="8" * 64,
+            state_code=SessionState.STARTING,
+        )
+        session.add(again)
+        session.flush()
+        container.record_service().place_work(opened, again, "Trying one host")
+        blocks = dict(
+            session.execute(
+                select(Block.local_id, Block.id).where(Block.document_id == review.id)
+            ).all()
+        )
+        session.add_all(
+            [
+                *(
+                    ResearchAssignment(work_id=run.id, block_id=blocks[local_id])
+                    for local_id in ("D1", "Q1", "Q2", "A1")
+                ),
+                ResearchAssignment(work_id=again.id, block_id=blocks["Q2"]),
+            ]
+        )
+        session.flush()
+        continuation = models.Session(
+            project_id=opened.id,
+            environment_id=WORKER_ENV,
+            kind_code="work",
+            cwd="/work/Soup",
+            controller_session="claude-8",
+            conversation_id="conversation-1",
+            token_hash="9" * 64,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(continuation)
+        session.flush()
+        container.record_service().place_work(
+            opened, continuation, "Checking the hosts", repo="example/Soup"
+        )
+        _turn_ended(session, container, continuation, "")
+
+        path = session.get_one(Document, review.id).path
+        assert briefs.job(opened, _after(continuation), AT, AT).split("\n\n")[3] == (
+            f'The work item: "Checking the hosts" ({continuation.id}), repository'
+            " example/Soup, environment example-soup-3f2a1c, session claude-8;"
+            " its turn ended 2026-10-26T09:29:50Z.\n"
+            "Registered nothing this run.\n"
+            "The blocks this work item researched, as they stand:\n"
+            f"- {path} ({review.id}) D1 open\n"
+            f'- {path} ({review.id}) Q1 "Two hosts" (by ada)\n'
+            f"- {path} ({review.id}) A1 open, claimed"
         )
 
     def test_a_trigger_in_a_pause_carries_it_after_the_switch(

@@ -913,24 +913,29 @@ class TestDataService:
         cwd: str,
         step: str | None,
         claims: Sequence[str],
+        researches: Sequence[str],
     ) -> Work:
         """A work item placed by repository `repo` and its session started,
         as every work item's start is, named for the claimed actions
-        `claims`, by their blocks' ids, as a pass's `add_item` names them
-        (F21.6; DB 261).
+        `claims` and for the blocks `researches` whose facts it checks, by
+        their blocks' ids, as a pass's `add_item` names them (F21.6, F52.3;
+        DB 261, 293).
 
         Raises:
             RecordNotFoundException: no project has the id, its plan has no
-                task `step`, a claim's item is not of the project, or its
-                document has no such block.
-            InvalidOperationException: the record refuses a claim; no
-                controller is configured, or the project is finished or
-                archived.
+                task `step`, a claimed or researched block's item is not of
+                the project, or its document has no such block.
+            InvalidOperationException: the record refuses a claim or a
+                research; no controller is configured, or the project is
+                finished or archived.
         """
         project = self.db.get(Project, project_id)
         if project is None:
             raise RecordNotFoundException("Project", str(project_id))
         claimed = self.record_service.claimable(project, claims, "add a work item")
+        researched = self.record_service.researchable(
+            project, researches, "add a work item"
+        )
         work = self.session_start_service.start_work(
             self.db,
             project_id,
@@ -941,6 +946,7 @@ class TestDataService:
             plan_task_id=step,
         )
         self.record_service.give(project, work, claimed)
+        self.record_service.research(project, work, researched)
         return work
 
     def wait(self, project_id: uuid.UUID, spec: InventedWaitCreateSchema) -> Item:
