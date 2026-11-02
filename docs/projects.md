@@ -188,9 +188,10 @@ field. It is disabled while its post is under way.
   without a title), its ticket, and its status line: "Draft"; "Finished" and the day it finished;
   else the step reading, which is the first step in progress (", …" after it while more are in
   progress), or "Not started", "N of M done" or "All steps done". `stepReading()` in
-  `frontend/src/lib/utils/status-labels.ts` is that reading for the tab and the head's step button
-  alike. While `badge.count` is above 0, the status line ends in it, "N waiting on you" as its
-  tooltip, orange while `badge.urgent`; a finished tab's too.
+  `frontend/src/lib/utils/status-labels.ts` is that reading for the tab, the head's step button and
+  a work item's progress button ([`work.md`](work.md)) alike. While `badge.count` is above 0, the
+  status line ends in it, "N waiting on you" as its tooltip, orange while `badge.urgent`; a finished
+  tab's too.
 - **The status icon** (`status-icon.tsx`) stands before the status line, where the project has a
   `status`, its label in its tooltip: running, a filled dot, green and pulsing; waiting on you, a
   person; waiting on an event, an hourglass; done, a check in a circle; idle, a dashed circle;
@@ -265,10 +266,11 @@ the side panel open.
   start was briefed under the switch's other setting (`work.autopilot`, as the timeline reads it),
   its tooltip "The change applies to work started from now on: a running session keeps the grants
   it was briefed with".
-- **The step button** shows the plan as a donut of its steps, done and in progress, and the step
+- **The step button** (`StepButton`, `plan-popover.tsx`, on the shared `StepsButton`,
+  [`ui.md`](ui.md)) shows the plan as a donut of its steps, done and in progress, and the step
   reading; its tooltip is "N of M steps done", then " · in progress: a; b" while any step is. It
   opens the plan popover: "The plan · N of M done" ("The plan" alone with no steps), the steps in
-  order, a done one ticked and one in progress highlighted. A step with open notes has a
+  order, a done one ticked and every one in progress highlighted. A step with open notes has a
   sticky-note icon; its notes list under the step while the mouse is on the icon, or after a tap
   or a click on it until the next.
 - **The plan's notes button** shows while the plan has open notes of its own, and opens "The plan's
@@ -404,6 +406,11 @@ answers only in testing mode ([`sign-in.md`](sign-in.md)).
   names while its turn is in flight. It answers `201` `{ids}`; an unknown work item or a `to` of no
   item of its project is a `404`, a session with no environment yet or a file that cannot be copied
   a `409`, and the controller's own failure a `502`.
+- `POST /api/testing/items/<id>/progress` `{steps: [{code, label, state?}]}` replaces the work item
+  `<id>`'s list of steps as its worker's `set_progress` does ([`mcp.md`](mcp.md)), its status moved
+  on every browser through `work_moved` where the list changed. It answers `200` `{steps}`, the list
+  as it stands; a session with no turn running is a `403`, an unknown work item a `404`, a session
+  with no environment yet or a repeated code a `409`, and a body outside the limits a `400`.
 - `POST /api/testing/items/<id>/writer-questions` `{questions: [{block, question}]}` asks the writer
   of the registered document `<id>` about its blocks, by their local ids, as the pre-ruling pass's
   `ask_writer` does, in one turn of a job's session of its project placed for it and ended once

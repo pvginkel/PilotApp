@@ -375,8 +375,8 @@ alone, as *In the chat* does, their words left to a screen reader. An item's hea
 below, sets its parts 6px apart, Urgent shows its triangle alone and *Edited* a pencil in place of
 its word, Pilot's mark and the time staying, in the overlay's head too, the words again left to a
 screen reader; a work item's env chip is its icon ([`work.md`](work.md)). At 390px a document's head
-with Urgent, *Edited* and its count, and a work item's with its env chip and running time, each
-hold one line.
+with Urgent, *Edited* and its count, and a work item's with its env chip, its running time and
+Session log's and Stop's icons, each hold one line.
 
 ## Testing it
 

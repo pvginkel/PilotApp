@@ -157,7 +157,17 @@ In `src/components/shared/`:
 - `Menu` and `MenuItem`, and `Popover`: each closes on a press outside it and on Esc
   (`src/hooks/use-dismiss.ts`). A `Popover`, which stands in Esc's order at the plan's rank, closes
   on its button too, and its content may be a function of `close`, for an action in it that closes
-  it.
+  it. It drops from its button and runs to 12px short of the edge of what it is seen in, the nearest
+  pane that scrolls it, else the window, scrolling past that; where, as it opens, it does not fit
+  below and has more room above, it opens above its button.
+- `StepsButton({steps, name, anchorClassName, testId, popoverTestId})` (`steps-button.tsx`): a list
+  of steps behind a button, the plan's step button and a work item's progress button alike
+  ([`projects.md`](projects.md), [`work.md`](work.md)), each step `{id, title, mark, notes?}`, its
+  mark `done`, `now` or `pending` (`planStepMark()` and `progressStepMark()`,
+  `src/lib/utils/status-labels.ts`). The button is the donut of the steps done, in progress and the
+  rest, counts and not places, and the step reading (`stepReading()`), its name giving way down to
+  about three letters in a tight row, ", …" kept; its popover, named `name`, lists the steps in
+  order under `<name> · N of M done`, a step's open notes beside it where it has some.
 - `Dialog`, a modal dialog on Radix's (`@radix-ui/react-dialog`, not the template's wrapper) that a
   click beside it or Esc closes, Esc through `useEscape` (below) and never Radix's own. While it is
   open, Tab and Shift+Tab stay inside it and the page behind it is hidden from a screen reader. It
@@ -205,7 +215,8 @@ In `src/components/shared/`:
 
 `shared.css` has the mockup's buttons (`.btn` with `.btn-sm`, `.btn-icon`, `.btn-primary`,
 `.btn-danger`, `.btn-soft`, `.btn-ghost`), the text field (`.field` in a `.field-row` with its
-button beside it, level with its bottom edge), `.chip`, `.popover`, `.menu-pop`, `.dialog`,
+button beside it, level with its bottom edge), `.chip`, `.popover`, the steps behind a button
+(`.plan-ring`, `.plan-pop`, `.plan-step`), `.menu-pop`, `.dialog`,
 `.empty-state`, `.mention`, `.prose` (its lists with their bullets and numbers, a task list's
 checkboxes), `.fold` and `.link`; `.switch`, a button of role `switch` whose knob moves right while
 it is `aria-checked`, the head's auto pilot switch and the profile's alarms switch; `.icon-cap`, an

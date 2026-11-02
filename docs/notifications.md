@@ -136,8 +136,8 @@ membership last sent, and submits or dismisses when the two differ or a send is 
 
 - once a commit that emits `ProjectChanged` for the project is in ([`engine.md`](engine.md)): its
   items, a work item's state, a join, a leave and its transitions, Archive and Bring back among
-  them. `WorkMoved` alone starts none: no notification shows a work item's line, and a move of its
-  state carries `ProjectChanged`;
+  them. `WorkMoved` alone starts none: no notification shows a work item's line or its steps, so a
+  change of its steps sends nothing, and a move of its state carries `ProjectChanged`;
 - at the timer `notification-retry`, for each project with an owed membership whose last try is
   60 s old or more;
 - at STARTUP, for every project with a membership whose notification stands, is owed, or should

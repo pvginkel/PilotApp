@@ -121,6 +121,15 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
 - `claim_assignments`: a claimed action given to a work item, the `work` and the `block`, both the
   key, one row each time a work item is named for the block; never changed, and of a block's rows
   the one whose work item has the highest `seq` stands ([`engine.md`](engine.md)).
+- `progress_steps`: a step of a work item's list, as its run publishes it ([`work.md`](work.md)),
+  the `work` and the step's `code` the key: `label`; `position`, its place in the list, from 1
+  (`ck_progress_steps_position`), unique in the work item's list (`uq_progress_steps_work_id_position`),
+  which is checked at the commit, so that a replace reorders a whole list in its transaction;
+  `state_code` (`pending`, `active`, `done`); `started_at`, which an `active` or `done` step has
+  (`ck_progress_steps_started`); and `ended_at`, set exactly while it is `done`
+  (`ck_progress_steps_ended`). That the positions run without a gap, the code's, the label's and
+  the list's limits, and that only the work item's own session writes it are the server's checks at
+  the call ([`mcp.md`](mcp.md)).
 - `clarification_runs`: the role of a work item that puts a pre-ruling pass's questions to the
   writer, sharing its id with its `work` row: `pass_id`, the pass's job, one run a pass
   (`uq_clarification_runs_pass_id`), never the run itself (`ck_clarification_runs_pass`); and
@@ -188,7 +197,7 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
 
 ## The reference values
 
-Twenty-two are PostgreSQL enum types, each a `StrEnum` in `backend/app/models/reference.py`, and four
+Twenty-three are PostgreSQL enum types, each a `StrEnum` in `backend/app/models/reference.py`, and four
 are tables with rows, because each value carries a fact. The revisions write the rows; a value is
 added by a revision and nowhere else.
 

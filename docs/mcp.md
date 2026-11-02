@@ -2,13 +2,14 @@
 
 Pilot hands its own MCP server to every headless session it creates, one of two surfaces by the
 session's kind. A work item's session gets `pilot-work`: `register_document`, a decision document
-it wrote, put to a person on the project's timeline, and `attach_file`, the material that backs
-one, copied into the record. The brain's sessions, a project's chat and the server's jobs, get
+it wrote, put to a person on the project's timeline; `attach_file`, the material that backs one,
+copied into the record; and `set_progress` and `set_progress_step`, the steps its run goes through,
+shown on its tile. The brain's sessions, a project's chat and the server's jobs, get
 `pilot-store`, the one door to the record beyond the project's folder: `add_item`, `attach_file`,
 `answer`, `mark`, `stop_work`, `finish` and `ask_writer`. Each tool is one REST call to the backend
 under the session's bearer, which names the session's project, environment and work item, so the
 tools take none of them, and each call that changed the record is its effect, a line in the
-session's records where the call ran. What becomes of a registered document, its read at the run's
+session's records where the call ran, but for the steps, which write none. What becomes of a registered document, its read at the run's
 end, its write-back and the run's continuation, is [`round-trip.md`](round-trip.md)'s; the chat
 the brain's tools serve is [`chats.md`](chats.md)'s.
 
@@ -30,12 +31,14 @@ record refuses changes nothing (`STORE_INSTRUCTIONS`).
   `/health/readyz`, which answer `{"status": "ok"}` without one, the process's own readiness alone.
   The gate checks no token: any bearer is admitted to `initialize` and `tools/list`, and a tool call
   carries it to its route, which decides.
-- **The tools** (`tools.py`) refuse what their routes would refuse, an empty path or a `to` that is
-  not a uuid, before calling. Each then makes one `POST <PILOT_MCP_API_URL>/tools/pilot-work/<route>`
-  or `…/tools/pilot-store/<route>` (`api.py`, `PilotWorkApi` and `PilotStoreApi`) with the call's
-  `Authorization` header as it came, and the call's tool-use id, which Claude Code sends with every
-  `tools/call` as `_meta["claudecode/toolUseId"]`, as the header `Tool-Use-Id` where it gave one,
-  waiting 5 s to connect and 300 s for the answer. An error answer is a `ToolError` of the route's
+- **The tools** (`tools.py`) refuse what their routes would refuse, an empty path, a `to` that is
+  not a uuid, a step whose code or label is empty or too long, or too many steps, before calling.
+  Each then makes one call to `<PILOT_MCP_API_URL>/tools/pilot-work/<route>` or `…/tools/pilot-store/<route>`
+  (`api.py`, `PilotWorkApi` and `PilotStoreApi`), a `POST`, or the steps' `PUT` and `PATCH`, with the
+  call's `Authorization` header as it came, and the call's tool-use id, which Claude Code sends with
+  every `tools/call` as `_meta["claudecode/toolUseId"]`, as the header `Tool-Use-Id` where it gave
+  one, but for the steps' tools, which record no effect to name it, waiting 5 s to connect and 300 s
+  for the answer. An error answer is a `ToolError` of the route's
   `error`, the reason whole, which the session reads as "Error executing tool <name>: <reason>";
   one that is not the API's envelope, as spectree's own validation answer or something other than
   the API at the URL writes, is "Pilot's API answered <status> <reason phrase>, not its error
@@ -66,7 +69,8 @@ session alike, at the endpoint of the surface the create's scope names (`scoped_
 `pilot-store`, a chat's and a job's, at `<MCP_SERVER_URL>/store`, never both:
 
 - it mints a token, `secrets.token_urlsafe(32)`, and appends `PILOT_TOKEN=<token>` to the create's
-  `env`;
+  `env`, then `PILOT_MCP_URL=<the endpoint>`, so that a process the session runs can call a tool
+  with no MCP client (below);
 - it appends one inline entry to the create's `mcpConfig`: `{"mcpServers": {"pilot": {"type":
   "http", "url": <the endpoint>, "headers": {"Authorization": "Bearer ${PILOT_TOKEN}"}}}}`, which
   `claude` expands from the environment the controller spawns it in, so the token is in neither
@@ -74,17 +78,28 @@ session alike, at the endpoint of the surface the create's scope names (`scoped_
 - it leaves `strictMcpConfig` unset, so the session keeps its environment's own servers.
 
 A create whose scope names no surface, a finished project's chat's ([`chats.md`](chats.md)), is
-handed neither the token nor the entry, so no bearer reaches either surface's routes from it; a
-token's hash is minted for it all the same. A worker's tools are `mcp__pilot__register_document`
-and `mcp__pilot__attach_file`, the brain's `mcp__pilot__add_item` and the rest. The token's
+handed neither variable nor the entry, so no bearer reaches either surface's routes from it; a
+token's hash is minted for it all the same. A worker's tools are `mcp__pilot__register_document`,
+`mcp__pilot__attach_file`, `mcp__pilot__set_progress` and `mcp__pilot__set_progress_step`, the
+brain's `mcp__pilot__add_item` and the rest. The token's
 sha256 is the Session's `token_hash`, written in the transaction that records the create's
 controller session, so a bearer resolves to the Session whose controller session carries it; a
 Session placed and not yet created holds the hash of a token no one has ([`record.md`](record.md)).
 Every create mints anew: a session created again, by a Resume or after its pod restarted, carries a
-token of its own, and the old one names nothing once the new one's hash is written.
+token of its own, and the old one names nothing once the new one's hash is written. A Resume that
+sends its Turn to the controller session it has creates nothing, so that session keeps the `env`
+of its last create.
+
+**A tool called with no MCP client.** A process the session runs, a script, calls a tool with one
+JSON-RPC `tools/call` POSTed to `$PILOT_MCP_URL`, no `initialize` before it, since the server is
+stateless, under `Authorization: Bearer $PILOT_TOKEN`, `Accept: application/json,
+text/event-stream` and `Content-Type: application/json`. The answer is an event stream whose
+`data:` line is the JSON-RPC response, `set_progress`'s list in its `result.structuredContent`. The
+transport refuses a POST whose `Accept` does not name both types, `406`, and one whose
+`Content-Type` is not JSON, `400` "Invalid Content-Type header".
 
 `MCP_SERVER_URL` is `pilot-work`'s endpoint as a session reaches it, an `http` or `https` address,
-`pilot-store`'s under it. Empty, a create carries neither the token nor the entry. A backend with
+`pilot-store`'s under it. Empty, a create carries neither variable nor the entry. A backend with
 `FLASK_ENV=production`, as both deployed stages run, refuses to start without it ("MCP_SERVER_URL
 must be set in production"), a check of the server's background start, which the CLI never runs.
 Only the sessions Pilot creates are handed it: an interactive session, or one another client of the
@@ -153,6 +168,31 @@ read) or files over 64 MiB together (`MAX_CALL_SIZE`). Every read is made before
 is locked, and the bytes are held until the call commits. An empty folder attaches nothing and
 answers `[]`. A call that attached is the effect "Attached · <title>" for one file, "Attached ·
 <folder>, <n> files" for more.
+
+### `set_progress(steps)` and `set_progress_step(code, state)`
+
+The session's own work item's list of steps ([`work.md`](work.md)), each `{code, label, state}`:
+`code` the run's name for the step, unique in the list, `label` its words on the tile, `state`
+`pending`, `active` or `done`.
+
+- **`PUT /tools/pilot-work/progress`** `{steps: [{code, label, state?}]}` replaces the list, in the
+  call's order: a code already on it keeps its row, and its state where its step gives none; a new
+  code starts `pending`, or in the state it gives; a code left out goes; and `[]` removes the
+  list.
+- **`PATCH /tools/pilot-work/progress`** `{code, state}` moves one step, every step keeping its
+  place; a code not on the list is a `404` "Progress step <code> was not found".
+
+Both answer `200` `{steps}`, the list as it stands, in order. A body outside the limits, an empty
+code or label, a code over 64 characters, a label over 120, a list over 100 steps
+(`MAX_STEP_CODE`, `MAX_STEP_LABEL` and `MAX_STEPS` in `backend/app/schemas/pilot_work.py`, which
+`pilot_mcp/api.py` mirrors), or a state outside the three, is a `400`, and a repeated code a
+`409`, nothing changed. The server's clock stamps a step's start when it first goes `active` or
+`done`, never changed after, and its end each time it goes `done`, cleared when it leaves `done`; a
+step set to the state it is in is left as it is. Each call holds the Session's row, `FOR NO KEY
+UPDATE`, and refuses with the gate's `403` unless its turn still runs, so two calls on one list,
+a script's and the agent's, are served one after the other, each answering the list its own change
+left. No call writes an effect. One that changed the steps' codes, labels, states or order moves the
+work item's status ([`work.md`](work.md)); one that changed none of them sends nothing.
 
 ## The brain's routes
 
@@ -250,7 +290,7 @@ record unchanged, and a controller that does not answer or refuses for a reason 
 
 ## Effects
 
-Each call that changed the record writes its Effects (`EffectService`,
+Each call that changed the record writes its Effects, but the progress tools' (`EffectService`,
 `backend/app/services/effect_service.py`), one per change, by kind: `added`, `answered`, `marked`,
 `stopped`, `finished`, `attached` and `registered`, each naming the item, the block or the
 attachment it changed. They are of the session's Turn in flight, placed in its records by one
@@ -273,14 +313,15 @@ The server is pinned in `backend/tests/pilot_mcp/`: a real MCP client drives the
 test's session, and `test_main.py` runs `python -m pilot_mcp` as a process. The injection is
 `tests/services/test_pilot_server.py`, with the creates in `test_session_start_service.py` and
 `test_relay_service.py`, whose `_services(..., mcp_url=)` and `_relay_service(..., mcp_url=)` build
-services that inject; the suite's default settings set no URL, so other creates carry neither. The
-routes are `tests/api/test_pilot_work.py`, whose `test_the_surface_is_one_route_outside_the_api`
-holds the blueprint's rules, and `tests/services/test_pilot_work_service.py`, the brain's
+services that inject; the suite's default settings set no URL, so other creates carry neither.
+`TestAScriptsCall` (`tests/pilot_mcp/test_server.py`) pins a script's lone `tools/call` as the
+transport admits it. The routes are `tests/api/test_pilot_work.py`, whose
+`test_the_surface_is_four_routes_outside_the_api` holds the blueprint's rules, and `tests/services/test_pilot_work_service.py`, the brain's
 `tests/api/test_pilot_store.py` and `tests/services/test_pilot_store_service.py`, the scope
 `tests/services/test_session_scope.py`, the effects `tests/services/test_effect_service.py`; the
 copies `tests/engine/test_attachments.py`. The fake controller serves the file routes
 ([`controller.md`](controller.md)), and the record's testing routes `POST
-/api/testing/items/<id>/registrations` and `…/worker-attachments` register a document and attach a
-file as the worker's tools do, and `…/writer-questions` asks a document's writer as the pass does
+/api/testing/items/<id>/registrations`, `…/worker-attachments` and `…/progress` register a
+document, attach a file and replace the list of steps as the worker's tools do, and `…/writer-questions` asks a document's writer as the pass does
 ([`projects.md`](projects.md)). `frontend/tests/infrastructure/nginx.spec.ts` pins that the UI's
 nginx forwards no path under `/tools/`, whatever its extension.

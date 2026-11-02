@@ -14,8 +14,8 @@ to archive ([`docs/projects.md`](docs/projects.md)); under the head, its timelin
 that asks one thing is answered in place and a document inline or from its card, its answers sent at
 once, with Undo, urgent banners, the auto pilot mark, a badge per tab and a URL per item, and which
 every open browser follows live ([`docs/timeline.md`](docs/timeline.md)); its work items, each a
-session Pilot runs, live on the timeline with its one current line, Stop and Resume, and its session
-log, and Pilot's own background jobs among them, one at a time per project, each a fresh session of
+session Pilot runs, live on the timeline with its one current line, the steps its run publishes on
+a donut, Stop and Resume, and its session log, and Pilot's own background jobs among them, one at a time per project, each a fresh session of
 the brain's: the setup, the pre-ruling pass after every worker's turn, which may ask the worker's
 writer or claim an action for a work item of Pilot's, and the plan's next step after every item of
 Pilot's a person closes, with Retry on one that failed ([`docs/work.md`](docs/work.md)); each

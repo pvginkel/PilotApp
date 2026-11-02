@@ -3,7 +3,7 @@
 A work item is a Session Pilot started, standing on its project's timeline: its Item, its Work and
 its Session share one id ([`record.md`](record.md)). This page is the work item as the API gives it
 and as the screens show it: its status, its live event, its line and its actions on the timeline,
-and its session log. What the server does to start it through the gate, stop it and resume it is
+its progress, and its session log. What the server does to start it through the gate, stop it and resume it is
 [`sessions.md`](sessions.md)'s, and the timeline it stands on [`timeline.md`](timeline.md)'s.
 
 The brain places one with `add_item`, started on add by its repository ([`mcp.md`](mcp.md)), and the
@@ -59,7 +59,9 @@ for the live event:
   update's at its lift; null while it is not retried, and always for a worker's run;
 - `nudge_owed`: whether a nudge is owed to it, which carries it on once nothing holds it
   ([`usage.md`](usage.md)): hard-stopped, `stopped`; halted or paused at its turn's end, `idle` and
-  not done; or at the quota wall, `failed`.
+  not done; or at the quota wall, `failed`;
+- `progress`: the steps its run published ([below](#its-progress)), in order, each `{code, label,
+  state}`; empty while it has published none, once it emptied the list, and always for a job.
 
 A work item waits on you while `stopped` or `failed`, a job only until it is retried, and neither
 while its nudge is owed, which its project's badge counts ([`projects.md`](projects.md)). It is
@@ -71,10 +73,11 @@ Finish's close, and a job withdrawn before its brief by an Undo, cause `withdraw
 
 ## Live
 
-A write of a work item's state, its current line, its `started_at` or its `error` emits the bus's
-`WorkMoved(project_id, work_id)` in its transaction, and `ProjectChanged` too when its state moved,
+A write of a work item's state, its current line, its `started_at`, its `error` or its steps emits
+the bus's `WorkMoved(project_id, work_id)` in its transaction, and `ProjectChanged` too when its state moved,
 since that moves the project's tab and head (`work_moved`, `backend/app/services/work_status.py`);
-equal events of one transaction go out once. A Chat's Session has no work item: its state's move
+equal events of one transaction go out once. A call of the progress tools that changed none of the
+steps' codes, labels, states or order emits none. A Chat's Session has no work item: its state's move
 raises `ProjectChanged` alone. A pause and a resume move the reason on the project's held items
 and those whose nudge is owed, each a `WorkMoved`, and the release of the held starts tells every work item it still holds,
 since the outage's turn or the slot's count may have moved its reason. `ProjectEventService` sends a `WorkMoved` to every person's connections as the
@@ -95,7 +98,10 @@ An open work item (`WorkItem`, `frontend/src/components/timeline/work.tsx`) is:
   the name its tooltip and, in a `.chip-label`, its accessible name; and, while `running` with a
   `started_at`, the running time, a pulse and the figure alone, kept on one line: "0m", "12m",
   "1h 5m", past six hours "7h", past two days "2d", counted again every 15 s on the browser's clock.
-  "Running for 1h 5m" is its tooltip and its accessible name (`role="timer"`).
+  "Running for 1h 5m" is its tooltip and its accessible name (`role="timer"`). Then, with Discuss
+  at the head's end, Session log's icon, in every state, and Stop's, its square red, while
+  `running`, `starting` or `held`: icon buttons with no label, "Session log" and "Stop" their
+  tooltips and their accessible names.
 - **Its title.**
 - **Its one line** (`workLine()`, `frontend/src/lib/utils/status-labels.ts`): a held item's reason,
   "Halted at the week's limit", "Halted at the five-hour limit", "Paused", "Waiting for Pilot's
@@ -118,24 +124,59 @@ An open work item (`WorkItem`, `frontend/src/components/timeline/work.tsx`) is:
   store's update stopped, "Stopped for Pilot's update · <time>"; "Failed · <error>";
   and nothing once `idle` or `ended`. A retried job's line has a second under it, "Retried
   as a new job below · <time>".
-- **Its actions**, while `running`, `starting` or `held`: Session log, then Stop. Stop asks first in
-  the actions' place, "Stop the session? Its turn ends where it is; Resume sends it on.", with Stop
-  it and Cancel, which takes the focus; Esc or Cancel puts the focus back on Stop, and the question
-  goes as the item leaves those states. While `stopped` or `failed`: Resume, then Session log;
-  Resume is disabled while the project is archived, as its head's switch is (D012), the API
-  refusing it until Bring back. Pilot's own work has no Stop or Resume: a job `stopped` or `failed`,
-  not retried and owed no nudge offers Retry, then Session log, Retry disabled while the project is archived.
-  Otherwise Session log alone.
+- **The row under the line**: the progress button once its run has published steps
+  ([below](#its-progress)), then Resume while `stopped` or `failed`, disabled while the project is
+  archived, as its head's switch is (D012), the API refusing it until Bring back. Pilot's own work
+  has no Stop or Resume: a job `stopped` or `failed`, not retried and owed no nudge offers Retry
+  there, disabled while the project is archived. A tile with none of them has no row. Stop asks
+  first in the row's place, the progress button going with the row, "Stop the session? Its turn
+  ends where it is; Resume sends it on.", with Stop it and Cancel, which takes the focus; Stop's
+  icon pressed again puts the focus back on Cancel, and Esc or Cancel puts it back on Stop's icon.
+  The question goes as the item leaves `running`, `starting` and `held`, and the row comes back
+  once it goes.
 
 Stop and Resume (`useStop`, `useResume`, `frontend/src/hooks/use-work-acts.ts`) call
 [`sessions.md`](sessions.md)'s routes and write the answer into the cached timeline, only while the
 item there is still in a state the act was made from (`moveWork`). A refusal is the query client's
 toast in the API's words, and Resume, or the question, stays offered. Once this browser's Stop it or
 Resume lands and swaps the two, the keyboard focus that was on the button that went goes to the
-other's resting button, Resume after a Stop and Stop after a Resume (`useHandoff`, `work.tsx`); a
-swap another browser's act made, or one after the focus moved elsewhere meanwhile, moves no focus.
-Retry (`useRetry`) calls its route the same way, and once this browser's Retry lands, the focus that
-was on it goes to Session log.
+other's resting button, Resume after a Stop and Stop's icon after a Resume (`useHandoff`,
+`work.tsx`); a swap another browser's act made, or one after the focus moved elsewhere meanwhile,
+moves no focus. Retry (`useRetry`) calls its route the same way, and once this browser's Retry
+lands, the focus that was on it goes to Session log's icon.
+
+## Its progress
+
+A work item's run says which steps it goes through, so that where it stands shows on its tile
+without its log. Its session publishes them while its turn runs, through `pilot-work`'s
+`set_progress`, the whole list in order, and `set_progress_step`, one step's state
+([`mcp.md`](mcp.md)): each step a code, the run's name for it, a label, its words on the tile, and
+a state, `pending`, `active` or `done`. The server stamps each step's start and end by its own
+clock (`progress_steps`, [`record.md`](record.md)); the API carries neither. Each work item has a
+list of its own: Stop and Resume keep it, and a continuation, a work item of its own, starts with
+none ([`round-trip.md`](round-trip.md)). A job has none: its session is given `pilot-store`.
+
+A change of the list moves the work item's `progress` through `work_moved` ([Live](#live)), and
+nothing else: it writes no effect, so the session log shows no line for it, only the call where the
+session's agent made one; no notification shows it, so a change of it sends nothing
+([`notifications.md`](notifications.md)); and the store's tree does not carry it
+([`projection.md`](projection.md)).
+
+**The progress button** (`Progress`, `work.tsx`) leads the row under the line on every open work
+item whose list is not empty, whatever its state, an `idle` one whose nudge is owed included, its
+line what holds the nudge or "Waiting for its nudge" (D122); never on the done line. It goes once the list is emptied. It is the plan's step button over the run's steps
+(`StepsButton`, [`ui.md`](ui.md); [`projects.md`](projects.md)): the donut of the steps `done`,
+`active` and the rest, drawn as the plan's done, in progress and the rest, and beside it the first
+active step's label, ", …" after it while more are active, or with none active "Not started", "N of
+M done" or "All steps done"; its tooltip is "N of M steps done", then " · in progress: a; b" while
+any step is active. It stands first in the row, so an open popover stays open across a Stop or a
+Resume. On a phone the label stays beside the donut.
+
+**Its popover**, "Progress", lists the steps in order, a done one ticked and every active one
+highlighted, under the heading "Progress · N of M done", with no notes. It follows the list live,
+opens from the button's left edge, within the card's margins on a phone, and opens above the button
+where it does not fit below in the timeline and has more room there. A press outside it or Esc
+closes it.
 
 ## Pilot's own work
 
@@ -337,7 +378,7 @@ The status, its event and the routes are pinned in `backend/tests/services/test_
 `test_timeline_service.py`, `test_project_event_service.py`, and
 `backend/tests/api/test_sessions.py` and `test_testing_record.py`. The browser suites are
 `frontend/tests/work/`: `harness.spec.ts`, `timeline.spec.ts`, `stop-resume.spec.ts`,
-`session-log.spec.ts`, `switch-warning.spec.ts`, `usage-halts.spec.ts`, `hard-stop.spec.ts` and
+`progress.spec.ts`, the progress button and its popover, `session-log.spec.ts`, `switch-warning.spec.ts`, `usage-halts.spec.ts`, `hard-stop.spec.ts` and
 `nudge.spec.ts`, the usage limits ([`usage.md`](usage.md)), and `registered.spec.ts`, the round trip of a
 registered document ([`round-trip.md`](round-trip.md)), with `clarification.spec.ts`, the
 clarification run and its reply, and `claimed.spec.ts`, a claimed action. Pilot's jobs are pinned in
@@ -377,7 +418,8 @@ left free, and answers its id; `projects.environment(project, item)` waits for t
 start took or created and answers its `{id, name}`, the name the project's slug (`slugOf(project)`,
 the testing route's), `-2` for a second at once; `projects.work(project, item)` reads its `work`,
 `projects.records(session, after?)` its records, and `projects.stop(id)` and `projects.resume(id)`
-call the routes as the signed-in person; `projects.register(work, path, toolUseId?)` and
+call the routes as the signed-in person; `projects.setProgress(work, steps)` replaces its list of
+steps as its session's `set_progress` does while its turn runs; `projects.register(work, path, toolUseId?)` and
 `projects.workerAttach(work, path, {to?, toolUseId?})` make its worker's calls, each its effect
 while its turn is in flight, `projects.askWriter(document, [{block, question}])` the pass's
 question, and `projects.clarify(document, reply?)` its clarification run, ended with the reply, or
@@ -385,7 +427,8 @@ with none started in the writer's environment, where `controller.finish(env, <it
 'success', reply)` ends it ([`projects.md`](projects.md)). The `sessionLog` fixture's `steps` reads
 a reply's steps in order and `effects` the effects standing on their own. The `timeline` page
 object's `item(id).work` reads the open item (`environment`, `running`, `line`, whose `data-state`
-is the Session's state, `cue`, `step`, `sessionLog`, `stop`, `resume`, `stopConfirm`, `retry`), and
+is the Session's state, `cue`, `step`, `sessionLog`, `stop`, `row`, `progress`, with
+`progressRing` and `progressName`, `steps`, its popover, `resume`, `stopConfirm`, `retry`), and
 the `sessionLog` fixture the log (`sessionLogAddress()`) and its head's `discuss`. A spec placing an
 item in a project while a work item's start there still writes waits for that item to run first. The
 backends run with `WORK_PARALLELISM_MAX` 10000 and `PROJECT_PARALLELISM_MAX` 3
