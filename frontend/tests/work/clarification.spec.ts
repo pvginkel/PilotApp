@@ -9,6 +9,7 @@
  */
 
 import { test, expect } from '../support/fixtures';
+import type { Chats } from '../support/chats';
 import type { Controller } from '../support/controller';
 import { makeUnique } from '../support/helpers';
 import type { People } from '../support/people';
@@ -48,13 +49,15 @@ interface Fixtures {
   people: People;
   projects: Projects;
   controller: Controller;
+  chats: Chats;
 }
 
 /**
  * A work item's run in a project of the signed-in person's, which wrote and registered the
- * documents at `files` in its environment and ended, each document read; answers their ids.
+ * documents at `files` in its environment and ended, each document read and the pass after it
+ * ended; answers their ids.
  */
-async function written({ people, projects, controller }: Fixtures, files: [string, string][]) {
+async function written({ people, projects, controller, chats }: Fixtures, files: [string, string][]) {
   const me = await people.signIn();
   const project = await projects.make({ name: makeUnique('Clarified'), members: [me.handle!] });
   const work = await projects.startWork(project, { title: 'Packing the camp', brief: 'Pack the camp.', cwd: '/work/Example' });
@@ -65,9 +68,11 @@ async function written({ people, projects, controller }: Fixtures, files: [strin
     await controller.putFile(environment, path, content);
     documents.push(await projects.register(work, path));
   }
+  const passed = await chats.passing(project);
   await controller.play(environment, 'claude-1', [text('wrote', 'The kit and the route are written.')]);
   await controller.finish(environment, 'claude-1');
   for (const document of documents) await expect.poll(async () => (await projects.item(project, document)).awaiting_read).toBe(false);
+  await passed();
   return { project, work, environment, documents };
 }
 
@@ -76,13 +81,14 @@ test.describe('Pilot asking the writer', () => {
     people,
     projects,
     controller,
+    chats,
     timeline,
     overlay,
   }) => {
     const {
       project,
       documents: [kit, route],
-    } = await written({ people, projects, controller }, [
+    } = await written({ people, projects, controller, chats }, [
       [KIT_PATH, KIT],
       [ROUTE_PATH, ROUTE],
     ]);
@@ -130,6 +136,7 @@ test.describe('Pilot asking the writer', () => {
     people,
     projects,
     controller,
+    chats,
     timeline,
     overlay,
     deploymentSse,
@@ -139,7 +146,7 @@ test.describe('Pilot asking the writer', () => {
       work,
       environment,
       documents: [kit],
-    } = await written({ people, projects, controller }, [[KIT_PATH, KIT]]);
+    } = await written({ people, projects, controller, chats }, [[KIT_PATH, KIT]]);
     await projects.askWriter(kit, [{ block: 'D2', question: STOVE }]);
     const clarifying = await projects.clarify(kit);
     await expect.poll(async () => (await projects.work(project, clarifying)).state).toBe('running');

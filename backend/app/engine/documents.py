@@ -620,14 +620,16 @@ def awaits_read(item: Item, document: Document) -> bool:
     )
 
 
-def awaiting_read() -> ColumnElement[bool]:
+def awaiting_read(
+    item: type[Item] = Item, document: type[Document] = Document
+) -> ColumnElement[bool]:
     """`awaits_read` as a query's condition on a Document joined to its
-    Item."""
+    Item, or on aliases of the two."""
     return and_(
-        Document.source_path.is_not(None),
-        Document.published_text.is_(None),
-        Document.read_failed_at.is_(None),
-        Item.done_at.is_(None),
+        document.source_path.is_not(None),
+        document.published_text.is_(None),
+        document.read_failed_at.is_(None),
+        item.done_at.is_(None),
     )
 
 

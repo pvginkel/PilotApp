@@ -10,7 +10,8 @@
  * creates them there; `start()` and `opening()` name it, and the spec plays its turns through
  * `controller` once it is working. While a turn is in flight, `answer()` records a person's answer
  * to a block as the chat's brain records it (POST /api/testing/projects/<id>/chat/answers), the
- * place *In the chat* goes to.
+ * place *In the chat* goes to. The pre-ruling pass a worker's run's end places runs in the store
+ * too: `passing()` ends it.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -22,6 +23,10 @@ import { slugOf } from './projects';
 
 type Sent = components['schemas']['ChatTurnSchema.f9d9b43'];
 type ChatList = components['schemas']['ChatListSchema.f9d9b43'];
+type Timeline = components['schemas']['TimelineSchema.1fdd8ae'];
+
+/** The states of a job's session in which the server goes on with it. */
+const IN_FLIGHT = ['held', 'starting', 'running'];
 
 /** The store repo's root, every chat session's cwd (backend/app/services/session_scope.py). */
 const STORE_REPO = '/work/PilotProjects';
@@ -132,6 +137,30 @@ export class Chats {
         .not.toBe('');
       await this.working(session);
       return session;
+    };
+  }
+
+  /**
+   * The store, ready for the pre-ruling pass the server places after a worker's turn, once the
+   * run's documents are read (design 3 D2), and a wait for that pass: returns once its session in
+   * the store works on its brief, its turn then ended well and the backend reading its job done.
+   * Whether a registered document is Pilot's turns on its pass (DB 296), and the pass starts only
+   * in a store some spec of the worker stocked, so a spec that ends a run which registered a
+   * document ends its pass itself.
+   */
+  async passing(projectId: string): Promise<() => Promise<void>> {
+    const opened = await this.opening(projectId);
+    return async () => {
+      const session = await opened();
+      await this.controller.finish(this.store, session, 'success', 'Pre-ruled.');
+      await expect
+        .poll(async () => {
+          const response = await this.page.request.get(`${this.backendUrl}/api/projects/${projectId}/timeline`);
+          expect(response.status(), await response.text()).toBe(200);
+          const { items } = (await response.json()) as Timeline;
+          return items.filter((item) => item.work?.pilots_own && IN_FLIGHT.includes(item.work.state)).length;
+        })
+        .toBe(0);
     };
   }
 

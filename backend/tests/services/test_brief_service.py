@@ -979,6 +979,98 @@ class TestWorkerTurnEnded:
             f"- {path} ({review.id}) A1 open, claimed"
         )
 
+    def test_a_block_the_reading_handed_back_is_left_to_the_operator(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        project_session: models.Session,
+    ) -> None:
+        """A claimed action and a researched block whose run handed them back,
+        the job after its first turn failed and not retried, are the
+        person's for the rest of the run: the job after a later turn of it
+        is told to leave them (held through the run, slice 036)."""
+        documents = container.document_service()
+        cut_over = documents.register(
+            opened, project_session, "/work/Soup/cut-over.md"
+        ).item
+        review = documents.register(
+            opened, project_session, "/work/Soup/review.md"
+        ).item
+        for item, text in ((cut_over, CUT_OVER), (review, HOSTS)):
+            documents.publish_read(
+                session.get_one(Document, item.id), text, project_session.id
+            )
+        run = _worker_run(session, container, opened, None)
+        run.conversation_id = "conversation-1"
+        session.add_all(
+            [
+                ClaimAssignment(
+                    work_id=run.id,
+                    block_id=session.scalars(
+                        select(Block.id).where(
+                            Block.document_id == cut_over.id, Block.local_id == "A1"
+                        )
+                    ).one(),
+                ),
+                ResearchAssignment(
+                    work_id=run.id,
+                    block_id=session.scalars(
+                        select(Block.id).where(
+                            Block.document_id == review.id, Block.local_id == "D1"
+                        )
+                    ).one(),
+                ),
+            ]
+        )
+        session.flush()
+        _turn_ended(session, container, run, "")
+        failed = models.Session(
+            project_id=opened.id,
+            kind_code="job",
+            cwd="/work/PilotProjects",
+            token_hash="6" * 64,
+            state_code=SessionState.FAILED,
+        )
+        session.add(failed)
+        session.flush()
+        container.record_service().place_work(
+            opened,
+            failed,
+            "Pre-ruling",
+            trigger=WorkTrigger.WORKER_TURN_ENDED,
+            trigger_item_id=run.id,
+        )
+        continuation = models.Session(
+            project_id=opened.id,
+            environment_id=WORKER_ENV,
+            kind_code="work",
+            cwd="/work/Soup",
+            controller_session="claude-8",
+            conversation_id="conversation-1",
+            token_hash="9" * 64,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(continuation)
+        session.flush()
+        container.record_service().place_work(
+            opened, continuation, "Fixing the stock", repo="example/Soup"
+        )
+        _turn_ended(session, container, continuation, "")
+
+        cut_over_path = session.get_one(Document, cut_over.id).path
+        review_path = session.get_one(Document, review.id).path
+        brief = briefs.job(opened, _after(continuation), AT, AT).split("\n\n")[3]
+        assert brief.splitlines()[-4:] == [
+            "The claimed actions given to this work item, as they stand:",
+            f"- {cut_over_path} ({cut_over.id}) A1 open, claimed, handed back to"
+            " the operator: leave it to them",
+            "The blocks this work item researched, as they stand:",
+            f"- {review_path} ({review.id}) D1 open, handed back to the operator:"
+            " leave it to them",
+        ]
+
     def test_a_trigger_in_a_pause_carries_it_after_the_switch(
         self,
         session: DbSession,

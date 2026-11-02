@@ -4002,20 +4002,37 @@ class TestBadges:
 
         assert self._badges(container, person, project) == {}
 
-    def test_a_document_whose_open_blocks_are_all_claimed_waits_on_no_one(
+    def test_a_document_waits_unless_a_run_holds_its_every_open_block(
         self,
         container: ServiceContainer,
         session: DbSession,
         environment: Environment,
         person: User,
     ) -> None:
+        """A claim is the person's but while a run holds it (DB 262, 296):
+        `held` counts no document whose open blocks are all held, and every
+        other, a claim no work item is named for among them (P-106)."""
         project = _make(container)
         run = _run(session, project, environment)
+        held = _registered(container, session, project, run, "held", CLAIMED_ONLY)
         _registered(container, session, project, run, "claimed", CLAIMED_ONLY)
-        _registered(container, session, project, run, "another", CLAIMED_AND_OPEN)
+        another = _registered(
+            container, session, project, run, "another", CLAIMED_AND_OPEN
+        )
         _registered(container, session, project, run, "settled", SETTLED_BY_PILOT)
+        doing = _work(session, project, environment, SessionState.RUNNING)
+        session.add_all(
+            ClaimAssignment(work_id=doing.id, block_id=block.id)
+            for block in session.scalars(
+                select(Block).where(
+                    Block.document_id.in_([held.id, another.id]),
+                    Block.local_id.in_(["A1", "A2"]),
+                )
+            )
+        )
+        session.flush()
 
-        assert self._badges(container, person, project) == {project.id: Badge(2, False)}
+        assert self._badges(container, person, project) == {project.id: Badge(3, False)}
 
     def test_each_project_counts_its_own(
         self,

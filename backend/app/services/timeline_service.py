@@ -15,8 +15,8 @@ from sqlalchemy import ColumnElement, and_, exists, func, or_, select
 from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import Session, aliased
 
-from app.engine.claims import claimed, standing
-from app.engine.documents import OPENING, PROSE, awaiting_read, awaits_read
+from app.engine.claims import standing
+from app.engine.documents import OPENING, PROSE, awaits_read
 from app.engine.paths import tree_path
 from app.engine.record import MARKED, NOTICE, SETTLED, TURN_ENDED, RecordService
 from app.exceptions import RecordNotFoundException
@@ -114,6 +114,7 @@ from app.services.start_gate import (
 from app.services.store_update_service import stopped_for_update, unlifted
 from app.services.usage_halts import UsageHalts
 from app.services.wait_service import REQUESTS, ShownFiring, WaitService
+from app.services.working_on import pilots
 
 WORK = "work"
 WAIT = "wait"
@@ -170,13 +171,13 @@ def waiting_on_a_member() -> ColumnElement[bool]:
 
 def waiting() -> ColumnElement[bool]:
     """F94.5's set, whoever an item is for: open; a prose item but the
-    opening, a notice only when it is urgent (F23.2, F10.3), a registered
-    document only once its turn-end read is made, since none takes a close
-    before it (review 7), and none whose open blocks are all actions Pilot
-    claimed, which are Pilot's until their `done` (DB 262); a work item
-    stopped or failed, a job only until it is retried, and neither while its
-    nudge is owed: one a usage halt's hard stop stopped (DB 225, 269), or one
-    whose turn died at the quota wall; never a wait (F27.5)."""
+    opening, a notice only when it is urgent (F23.2, F10.3), and none that
+    is Pilot's (DB 225, 296; `working_on.pilots`): a registered document
+    awaiting its read, under its pass or its clarification, or with every
+    open block held; a work item stopped or failed, a job only until it is
+    retried, and neither while its nudge is owed: one a usage halt's hard
+    stop stopped (DB 225, 269), or one whose turn died at the quota wall;
+    never a wait (F27.5)."""
     form = (
         select(ItemKind.form)
         .where(ItemKind.code == Item.kind_code)
@@ -188,12 +189,6 @@ def waiting() -> ColumnElement[bool]:
         .where(AgentSession.id == Item.id)
         .correlate(Item)
         .scalar_subquery()
-    )
-    unread = (
-        select(Document.id)
-        .where(Document.id == Item.id, awaiting_read())
-        .correlate(Item)
-        .exists()
     )
     retried = (
         select(Work.id)
@@ -207,22 +202,6 @@ def waiting() -> ColumnElement[bool]:
         .correlate(Item)
         .exists()
     )
-    claims = (
-        select(Block.id)
-        .where(Block.document_id == Item.id, claimed())
-        .correlate(Item)
-        .exists()
-    )
-    unanswered = (
-        select(Block.id)
-        .where(
-            Block.document_id == Item.id,
-            Block.answer.is_(None),
-            Block.done_at.is_(None),
-        )
-        .correlate(Item)
-        .exists()
-    )
     return and_(
         Item.done_at.is_(None),
         or_(
@@ -230,8 +209,7 @@ def waiting() -> ColumnElement[bool]:
                 form == PROSE,
                 Item.kind_code != OPENING,
                 or_(Item.kind_code != NOTICE, Item.urgent),
-                ~unread,
-                or_(~claims, unanswered),
+                ~pilots(),
             ),
             and_(form == WORK, state.in_(_STOPPED), ~retried, ~owed),
         ),

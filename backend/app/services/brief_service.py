@@ -63,6 +63,7 @@ from app.services.session_record_service import read_records
 from app.services.session_scope import project_folder
 from app.services.turn_end_read_service import READ_FAILED
 from app.services.wait_service import CARD_WAIT, REQUESTS
+from app.services.working_on import holds
 
 CHAT_SKILL = "/chat"
 CREATE_SKILL = "/create"
@@ -83,6 +84,10 @@ HOMELESS_HEADING = (
     "Deferrals without a home (a note names none of these blocks — write one,"
     " or answer the block anew in a new item):"
 )
+
+HANDED_BACK = "handed back to the operator: leave it to them"
+"""How a claimed or researched block's line in a job's brief ends once the
+reading handed it back to the person (`working_on`)."""
 
 ASKS_NOTHING = (
     "This pass asks nothing: what is still unclear is the operator's, the"
@@ -503,14 +508,19 @@ class BriefService:
         `run_id` or a work item on its conversation (DB 260), so that a
         continuation's names those of the run it continues (D100), for their
         `done` (design 3 §6.5), in timeline order, each as its block reads
-        now: open while still claimed, else as its close reads, a person's
-        Done meanwhile among them; none where the run was given none."""
+        now: open while still claimed, and handed back to the person once the
+        reading no longer holds it (`working_on`), else as its close reads, a
+        person's Done meanwhile among them; none where the run was given
+        none."""
         named = self._named(run_id, ClaimAssignment, claims.standing())
         if not named:
             return []
+        held = self._held(named)
         lines = ["The claimed actions given to this work item, as they stand:"]
-        for document_id, path, block in named:
-            if block.claimed:
+        for document_id, path, block_id, block in named:
+            if block.claimed and block_id not in held:
+                said = f"{block.local_id} open, claimed, {HANDED_BACK}"
+            elif block.claimed:
                 said = f"{block.local_id} open, claimed"
             elif not block.answered:
                 said = f"{block.local_id} open, its claim gone"
@@ -524,15 +534,19 @@ class BriefService:
         `run_id` or a work item on its conversation (DB 292), as a claim's
         are given (`_given`), for the pass to route on what the run found
         (F52.3), in timeline order, each as its block reads now: open while
-        unanswered, a claim since among them, else as its close reads; none
-        where the run researched none."""
+        unanswered, and handed back to the person once the reading no longer
+        holds it (`working_on`), a claim since among them, else as its close
+        reads; none where the run researched none."""
         named = self._named(run_id, ResearchAssignment, researches.standing())
         if not named:
             return []
+        held = self._held(named)
         lines = ["The blocks this work item researched, as they stand:"]
-        for document_id, path, block in named:
+        for document_id, path, block_id, block in named:
             if block.claimed:
                 said = f"{block.local_id} open, claimed"
+            elif not block.answered and block_id not in held:
+                said = f"{block.local_id} open, {HANDED_BACK}"
             elif not block.answered:
                 said = f"{block.local_id} open"
             else:
@@ -545,11 +559,11 @@ class BriefService:
         run_id: uuid.UUID,
         assignment: type[ClaimAssignment | ResearchAssignment],
         standing: Select[int, uuid.UUID],
-    ) -> list[tuple[uuid.UUID, str, dsl.Block]]:
+    ) -> list[tuple[uuid.UUID, str, int, dsl.Block]]:
         """The Blocks of `assignment` whose standing naming, of `standing`,
         names the run `run_id` or a work item on its conversation, in
-        timeline order, each with its document's id and path, as its
-        published text reads it now."""
+        timeline order, each with its document's id and path and its own
+        id, as its published text reads it now."""
         conversation = self.db.get_one(AgentSession, run_id).conversation_id
         runs = (
             [run_id]
@@ -565,7 +579,13 @@ class BriefService:
         ).subquery()
         document_item = aliased(Item)
         rows = self.db.execute(
-            select(Document.id, Document.path, Document.published_text, Block.local_id)
+            select(
+                Document.id,
+                Document.path,
+                Document.published_text,
+                Block.id,
+                Block.local_id,
+            )
             .join(Block, Block.document_id == Document.id)
             .join(latest, latest.c.block_id == Block.id)
             .join(document_item, document_item.id == Document.id)
@@ -573,14 +593,19 @@ class BriefService:
             .order_by(document_item.seq, Block.position)
         ).all()
         named = []
-        for document_id, path, text, local_id in rows:
+        for document_id, path, text, block_id, local_id in rows:
             # A named block is a block of a registered document read.
             assert text is not None
             block = next(
                 block for block in dsl.parse(text).blocks if block.local_id == local_id
             )
-            named.append((document_id, path, block))
+            named.append((document_id, path, block_id, block))
         return named
+
+    def _held(self, named: Sequence[tuple[uuid.UUID, str, int, dsl.Block]]) -> set[int]:
+        """The ids of the `named` Blocks the reading holds: the others it
+        handed back to the person (`working_on.holds`)."""
+        return set(holds(self.db, {document_id for document_id, *_ in named}).held)
 
     def _run_line(self, run_id: uuid.UUID) -> str:
         """The work item's line: its title and id, the plan's task it serves,

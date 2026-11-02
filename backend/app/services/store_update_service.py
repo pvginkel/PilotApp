@@ -57,20 +57,35 @@ def stopped_for_update() -> ColumnElement[bool]:
     )
 
 
-def _stopped_by_pilot() -> ColumnElement[bool]:
+def stopped_for_unlifted(session: type[AgentSession]) -> ColumnElement[bool]:
+    """Whether the Session `session`, an alias, is a job the Store Update not
+    lifted yet stopped (DB 280): one its lift retries unless a Work retries it
+    first (DB 281)."""
+    update = aliased(StoreUpdate)
+    return and_(
+        _stopped_by_pilot(session),
+        exists().where(
+            update.lifted_at.is_(None), update.made_at <= session.stopped_at
+        ),
+    )
+
+
+def _stopped_by_pilot(
+    session: type[AgentSession] = AgentSession,
+) -> ColumnElement[bool]:
     """A job's Session stopped by Pilot, but at a Finish, which closes its
     Item at the instant it stops it (DB 280)."""
     # An alias of its own, so that a caller's select may join Item too.
     line = aliased(Item)
     return and_(
-        AgentSession.kind_code == JOB_KIND,
-        AgentSession.stopped_by_user_id.in_(
+        session.kind_code == JOB_KIND,
+        session.stopped_by_user_id.in_(
             select(User.id).where(User.kind_code == UserKind.AGENT)
         ),
         ~exists().where(
-            line.id == AgentSession.id,
+            line.id == session.id,
             line.done_cause_code == FINISHED,
-            line.done_at == AgentSession.stopped_at,
+            line.done_at == session.stopped_at,
         ),
     )
 

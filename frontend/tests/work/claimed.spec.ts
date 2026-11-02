@@ -6,6 +6,7 @@
  */
 
 import { test, expect } from '../support/fixtures';
+import type { Chats } from '../support/chats';
 import type { Controller } from '../support/controller';
 import { makeUnique } from '../support/helpers';
 import type { People } from '../support/people';
@@ -36,13 +37,15 @@ interface Fixtures {
   people: People;
   projects: Projects;
   controller: Controller;
+  chats: Chats;
 }
 
 /**
  * The cut-over, registered by a work item's run in a project of the signed-in person's, read at the
- * run's end, its action A1 claimed, and the work item that does it placed; answers their ids.
+ * run's end, the pass after it ended, its action A1 claimed, and the work item that does it placed;
+ * answers their ids.
  */
-async function claimed({ people, projects, controller }: Fixtures) {
+async function claimed({ people, projects, controller, chats }: Fixtures) {
   const me = await people.signIn();
   const project = await projects.make({ name: makeUnique('Claimed'), members: [me.handle!] });
   const work = await projects.startWork(project, { title: 'Planning the cut-over', brief: 'Plan the cut-over.', cwd: '/work/Example' });
@@ -50,8 +53,10 @@ async function claimed({ people, projects, controller }: Fixtures) {
   const { id: environment } = await projects.environment(project, work);
   await controller.putFile(environment, CUT_OVER_PATH, CUT_OVER);
   const document = await projects.register(work, CUT_OVER_PATH);
+  const passed = await chats.passing(project);
   await controller.finish(environment, 'claude-1');
   await expect.poll(async () => (await projects.item(project, document)).awaiting_read).toBe(false);
+  await passed();
   const rotating = await projects.startWork(project, {
     title: ROTATING,
     brief: 'Rotate the CI token.',
@@ -66,11 +71,12 @@ test.describe('A claimed action', () => {
     people,
     projects,
     controller,
+    chats,
     timeline,
     overlay,
     page,
   }) => {
-    const { project, document, rotating } = await claimed({ people, projects, controller });
+    const { project, document, rotating } = await claimed({ people, projects, controller, chats });
     await timeline.open(project);
 
     const item = timeline.item(document);
@@ -106,9 +112,10 @@ test.describe('A claimed action', () => {
     people,
     projects,
     controller,
+    chats,
     timeline,
   }) => {
-    const { project, document } = await claimed({ people, projects, controller });
+    const { project, document } = await claimed({ people, projects, controller, chats });
     await timeline.open(project);
 
     const item = timeline.item(document);

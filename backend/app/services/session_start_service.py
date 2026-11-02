@@ -188,6 +188,7 @@ from app.services.store_update_service import unlifted
 from app.services.supervisor import LoopHandle, Supervisor
 from app.services.usage_halts import UsageHalts
 from app.services.work_status import work_moved
+from app.services.working_on import handed_back_in
 from app.services.write_back_service import WRITE_BACK_REFUSED
 from app.utils.after_commit import after_commit
 
@@ -224,6 +225,10 @@ NOT_PILOTS = "its environment is not Pilot's"
 
 PILOTS_OWN = "it is Pilot's own work"
 """Why a person's Stop and Resume do not take a job (F26.3)."""
+
+HANDED_BACK = "Handed back to the operator, so leave these to them: {blocks}."
+"""The continuation's line naming the blocks of its run's claims and
+researches the reading handed back to the person (`working_on`)."""
 
 FOLDER_WAIT_SECONDS = 60.0
 """How long a boxed create refused `422` is made again from its first refusal:
@@ -572,7 +577,10 @@ class SessionStartService:
         document it registered closed, continued as a new work item (decision
         44, F26.7), in the caller's transaction, which holds the project's row
         exclusively: titled as the run, its trigger the Item `released` whose
-        close released it, as `_resume_conversation` places it.
+        close released it, as `_resume_conversation` places it, its first
+        Turn `message` and a line naming each block of the run's claims and
+        researches the reading handed back to the person, which it leaves to
+        them (`working_on.handed_back_in`).
 
         Returns:
             The continuation's Session
@@ -583,6 +591,13 @@ class SessionStartService:
         title = db.get_one(Item, run_id).title
         # A work item is titled at its placement.
         assert title is not None
+        handed_back = handed_back_in(db, run_id)
+        if handed_back:
+            blocks = ", ".join(
+                f"{local_id} of {path} ({document_id})"
+                for document_id, path, local_id in handed_back
+            )
+            message = f"{message}\n{HANDED_BACK.format(blocks=blocks)}"
         session = self._resume_conversation(
             db,
             project,

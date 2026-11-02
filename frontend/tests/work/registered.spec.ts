@@ -13,6 +13,7 @@
  */
 
 import { test, expect } from '../support/fixtures';
+import type { Chats } from '../support/chats';
 import type { Controller } from '../support/controller';
 import { makeUnique } from '../support/helpers';
 import type { People } from '../support/people';
@@ -71,10 +72,15 @@ async function registered(controller: Controller, projects: Projects, environmen
   return projects.register(work, path);
 }
 
-/** The work item's turn ends, and its run with it. */
-async function endRun(controller: Controller, environment: string) {
+/**
+ * The work item's turn ends, and its run with it; the pass its end places once the run's documents
+ * are read starts in the store and ends, the documents then the person's.
+ */
+async function endRun(controller: Controller, chats: Chats, project: string, environment: string) {
+  const passed = await chats.passing(project);
   await controller.play(environment, 'claude-1', [text('wrote', 'The survey is written and registered.')]);
   await controller.finish(environment, 'claude-1');
+  await passed();
 }
 
 /** A `server` record the server writes of a registered document's file: the document, its path and the reason. */
@@ -113,6 +119,7 @@ test.describe('A registered document', () => {
     people,
     projects,
     controller,
+    chats,
     timeline,
     overlay,
     deploymentSse,
@@ -140,7 +147,7 @@ test.describe('A registered document', () => {
     await expect(item.card.reviewed).toHaveCount(0);
     await expect(item.card.readTime).toHaveCount(0);
 
-    await endRun(controller, environment);
+    await endRun(controller, chats, project, environment);
     await expect(item.title).toHaveText('The survey');
     await expect(item.root).not.toHaveClass(/\bawaiting\b/);
     await expect(item.card.root).not.toHaveAttribute('data-read');
@@ -156,6 +163,7 @@ test.describe('A registered document', () => {
     people,
     projects,
     controller,
+    chats,
     timeline,
     deploymentSse,
   }) => {
@@ -164,7 +172,7 @@ test.describe('A registered document', () => {
     const route = await registered(controller, projects, environment, work, ROUTE_PATH, ROUTE);
     const pitch = await registered(controller, projects, environment, work, PITCH_PATH, PITCH);
     const push = await registered(controller, projects, environment, work, PUSH_PATH, PUSH);
-    await endRun(controller, environment);
+    await endRun(controller, chats, project, environment);
     await expect.poll(async () => (await projects.item(project, route)).awaiting_read).toBe(false);
 
     await timeline.open(project);
@@ -200,6 +208,7 @@ test.describe('A registered document', () => {
     people,
     projects,
     controller,
+    chats,
     timeline,
     overlay,
     sessionLog,
@@ -209,7 +218,7 @@ test.describe('A registered document', () => {
     const survey = await registered(controller, projects, environment, work, SURVEY_PATH, SURVEY);
     // The file is moved after it was registered.
     await controller.removeFile(environment, SURVEY_PATH);
-    await endRun(controller, environment);
+    await endRun(controller, chats, project, environment);
     await expect.poll(async () => (await projects.item(project, survey)).awaiting_read).toBe(false);
     const failure = await fileEvent(projects, work, 'read-failed');
     expect(failure).toMatchObject({ item: survey, path: SURVEY_PATH });
@@ -245,13 +254,14 @@ test.describe('A registered document', () => {
     people,
     projects,
     controller,
+    chats,
     timeline,
     deploymentSse,
   }) => {
     const { project, work, environment } = await running({ people, projects });
     const survey = await registered(controller, projects, environment, work, SURVEY_PATH, SURVEY);
     const pitch = await registered(controller, projects, environment, work, PITCH_PATH, PITCH);
-    await endRun(controller, environment);
+    await endRun(controller, chats, project, environment);
     await expect.poll(async () => (await projects.item(project, survey)).title).toBe('The survey');
     await expect.poll(async () => (await projects.item(project, pitch)).title).toBe('Where do we pitch?');
     await controller.putFile(environment, SURVEY_PATH, SURVEY_EDITED);
@@ -298,12 +308,13 @@ test.describe('A registered document', () => {
     people,
     projects,
     controller,
+    chats,
     timeline,
     sessionLog,
   }) => {
     const { project, work, environment } = await running({ people, projects });
     const survey = await registered(controller, projects, environment, work, SURVEY_PATH, SURVEY);
-    await endRun(controller, environment);
+    await endRun(controller, chats, project, environment);
     await expect.poll(async () => (await projects.item(project, survey)).title).toBe('The survey');
     // Its path is a folder by the time it is closed.
     await controller.removeFile(environment, SURVEY_PATH);

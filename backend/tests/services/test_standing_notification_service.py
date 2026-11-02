@@ -395,13 +395,15 @@ class TestPriority:
             url=f"{_timeline(container, project)}/items/{question.id}",
         )
 
-    def test_a_document_whose_open_blocks_are_all_claimed_waits_on_no_one(
+    def test_a_document_whose_claims_a_running_work_item_holds_waits_on_no_one(
         self,
         container: ServiceContainer,
         session: DbSession,
         environment: Environment,
         person: User,
     ) -> None:
+        """Pilot's while every open block is held (DB 225, 296); once the
+        work item doing them failed, the person's (F94.5)."""
         project = _make(container)
         _token(container, session, person)
         run = _run(session, project, environment)
@@ -410,8 +412,23 @@ class TestPriority:
         documents.publish_read(
             session.get_one(models.Document, item.id), CLAIMED_ONLY, run.id
         )
+        doing = _work(session, project, environment, SessionState.RUNNING)
+        session.add_all(
+            models.ClaimAssignment(work_id=doing.id, block_id=block.id)
+            for block in session.scalars(
+                select(models.Block).where(models.Block.document_id == item.id)
+            )
+        )
+        session.flush()
 
         assert _seen(container, session, project).priority is NotificationPriority.MIN
+
+        session.get_one(models.Session, doing.id).state_code = SessionState.FAILED
+        session.flush()
+
+        assert (
+            _seen(container, session, project).priority is NotificationPriority.DEFAULT
+        )
 
 
 @pytest.mark.usefixtures("person")
