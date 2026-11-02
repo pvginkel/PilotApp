@@ -322,10 +322,13 @@ window regains the focus and on `project_changed` ([`timeline.md`](timeline.md))
 **A draft's chat** stands in the timeline's place instead (`home="feed"`), once the head is read and
 says it is a draft. It is the same chat: the chats before it, *In the chat*'s place, the seen mark
 and Stop. Only where it stands changes: its transcript is in the timeline's column, and its composer
-is in that column too, inside a full-width bordered box. Beside it, the side panel holds the Draft
-and Documents tabs ([`documents.md`](documents.md)). Under an overlay it takes no focus, as the
-timeline does. Once Create project reads the head open, the route draws the timeline in its place,
-and the definition chat stands in the panel's Chat tab, above the line where it closed.
+is in that column too, inside a full-width bordered box. Once the project can be created, Create
+project stands after its last message, scrolling with it ([`projects.md`](projects.md)). Beside it,
+the side panel holds the Draft and Documents tabs ([`documents.md`](documents.md)), on a phone among
+the tabs at the bottom, where the definition chat is the Chat tab. Under an overlay it takes no
+focus, as the timeline does. Once Create project reads the head open, the route draws the timeline
+in its place, and the definition chat stands in the panel's Chat tab, above the line where it
+closed.
 
 - **What it shows.** The project's latest chat: the open one, or with none open the latest closed
   one. Above it, "The chat before · <day>" loads that chat above what is in view, the line at the
@@ -354,7 +357,8 @@ and the definition chat stands in the panel's Chat tab, above the line where it 
 - **It sticks to its end** while it grows (`useStickyBottom`): only the reader's own scrolling up
   lets go, and their message sent from the composer, or a Discuss, takes it back to the end.
 
-On a phone it is the same column, the panel being the whole screen.
+On a phone it is the Chat tab among the tabs at the bottom, the same column between the project's
+head and the tabs ([`projects.md`](projects.md)).
 
 **The composer** (`composer.tsx`) stands under the transcript: the growing text field (`TextField`,
 [`ui.md`](ui.md)) to five lines, Enter breaking the line and Ctrl+Enter, Cmd+Enter on a Mac,
@@ -371,13 +375,14 @@ under "The project is archived: bring it back to message Pilot."
 **Discuss** (`DiscussButton`, `discuss-button.tsx`) quotes what it stands on into the chat. It ends
 an open item's head, every kind's, a document's block's head, where a one-ask item's is its item's,
 and the head of an ask in a draft's Draft tab, quoting it as `project.md/<local id>`; stands before
-a done line's time; and stands in the overlay's head of a document (the item), an attachment, the
-handbook, the project document (by path) and a session log (its work item). Its quote's label is an
-item's title; a block's "<ask> · <item's title>", a draft's ask's "<ask> · <draft's title>", "New
-project" while the draft has none; a file's title as read, else "Handbook" or "Project document"; an
-attachment's title, its path as the timeline gives it. A click puts the quote in the project's
-composer (`hooks/use-discuss.ts`) and opens the panel on the Chat tab, on top; in a draft it goes to
-the definition chat, closing an overlay over it and, below a wide window, the panel. The quote
+a done line's time, off a phone; and stands in the overlay's head of a document (the item), an
+attachment, the handbook, the project document (by path) and a session log (its work item). Its
+quote's label is an item's title; a block's "<ask> · <item's title>", a draft's ask's "<ask> ·
+<draft's title>", "New project" while the draft has none; a file's title as read, else "Handbook" or
+"Project document"; an attachment's title, its path as the timeline gives it. A click puts the quote
+in the project's composer (`hooks/use-discuss.ts`) and opens the panel on the Chat tab, on top; in a
+draft it goes to the definition chat, closing an overlay over it and, below a wide window, the
+panel. On a phone it shows the Chat tab, a draft's Chat, every view taken off first. The quote
 stands over the field as a chip, with its remove, the field takes the focus once nothing covers it,
 and the transcript goes to its end. The message goes as the quote's tag, a space and the words, and
 the chip goes once the server took it. The quote is kept in the page alone, by the project: a reload
@@ -385,23 +390,25 @@ keeps the words and not the quote. The head's Discuss ([`projects.md`](projects.
 tab with nothing quoted, dropping a quote the composer held, and closes the panel where the Chat tab
 shows.
 
-**The unread dot** (`useChatDot`) stands on the head's Discuss and on the Chat tab while the list's
-`unread` says Pilot replied after the person last saw the chat to its end, and this page does not
-show it at its end. At its end means the Chat tab shown, its panel not under the overlay, its
-transcript pinned to its end, and the page visible; there, while the list says a reply is unread,
-`useChatSeen` marks the chat seen (`PUT …/chat/read`) and writes the answer into the list, so a
-reply watched as it arrives leaves no dot. A failed mark is made again once the chat is shown again.
-No other browser hears of the mark: each drops its dot at its next read of the list.
+**The unread dot** (`useChatDot`) stands on the head's Discuss and on the Chat tab, on a phone the
+Chat tab at the bottom, while the list's `unread` says Pilot replied after the person last saw the
+chat to its end, and this page does not show it at its end. At its end means the Chat tab shown, its
+panel not under the overlay, its transcript pinned to its end, and the page visible; there, while
+the list says a reply is unread, `useChatSeen` marks the chat seen (`PUT …/chat/read`) and writes
+the answer into the list, so a reply watched as it arrives leaves no dot. A failed mark is made
+again once the chat is shown again. No other browser hears of the mark: each drops its dot at its
+next read of the list.
 
 ***In the chat*** (`InChatButton`, `in-chat-button.tsx`), the chat icon and "In the chat", stands on
 a block whose answer was given in the chat (`in_chat`, [`timeline.md`](timeline.md)): in its head
 before the time, the icon alone at 600px and below, and in a one-ask item's done line after the
 answer, kept whole. A click (`hooks/use-in-chat.ts`) opens the panel on the Chat tab, on top, with
-nothing quoted; in a draft it goes to the definition chat as Discuss does. The tab loads the chats
-before until the one holding the answer's record, lets go of its end, and once that chat's stream
-has read to the record scrolls the person's message of the turn that holds it, the latest at or
-before it, into the middle of the view, flashes it and holds it there until the reader scrolls. On
-its way there the chat is not at its end, and so not seen.
+nothing quoted; in a draft it goes to the definition chat as Discuss does, and on a phone it shows
+the Chat tab as Discuss does. The tab loads the chats before until the one holding the answer's
+record, lets go of its end, and once that chat's stream has read to the record scrolls the person's
+message of the turn that holds it, the latest at or before it, into the middle of the view, flashes
+it and holds it there until the reader scrolls. On its way there the chat is not at its end, and so
+not seen.
 
 ## Settings and metrics
 
@@ -448,4 +455,6 @@ of the open chat is in flight, through the record's testing route ([`projects.md
 the place *In the chat* goes to, a draft's ask by `project.md/<local id>`. The `chat` page object
 (`tests/support/page-objects/chat-page.ts`) reads the tab, its dot, the transcript and the composer,
 and `acted('send' | 'stop' | 'read')` waits for that write's success; the `definitionChat` fixture
-is the same page object on a draft's chat in the timeline's place.
+is the same page object on a draft's chat in the timeline's place, which reads Create project's box
+too (`createReady`, `createButton`, `createLine`), and whose `create()` presses it and waits for its
+success.

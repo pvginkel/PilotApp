@@ -71,7 +71,8 @@ subject, made when they choose their handle. The endpoints are `backend/app/api/
   without a handle with `409`, "Cannot … because you have not chosen your handle yet".
 
 **The handle step** (`frontend/src/components/people/handle-step.tsx`). Until the person has a
-handle, no screen opens: the step stands under the top bar, whose menu holds the name, the theme and
+handle, no screen opens: the step stands under the top bar, on a phone under the drawer's head, the
+top bar's block of colour ([`ui.md`](ui.md)), whose avatar's menu holds the name, the theme and
 Sign out, so a person can leave before choosing (D013). It reads "Choose your handle", "The short
 name that stands for you in Pilot's files." and "Lower-case letters, digits and hyphens. Once
 chosen, it cannot be changed.", over a one-line field prefilled from `handle_prefill`, where Enter

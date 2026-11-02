@@ -14,8 +14,8 @@ its setup, Pilot's jobs after a worker's turn and an item of its own done, the p
 questions to the writer, the switch's dialog and the archive question, and the phone's
 notifications through the bridge, a project's and the alarms, with the profile's token and switch,
 and the usage limits: the halts, the overrule, the halt file, the hard stop, the nudge and each
-turn's tokens, and the store's update: its command, its hold, its sequence and its retry.
-Every green build of
+turn's tokens, and the store's update: its command, its hold, its sequence and its retry, and the
+phone's layout: its drawer, its tabs at the bottom and its views. Every green build of
 `main` deploys itself to the dev stage at `https://pilot-dev.home`, and production at
 `https://pilot.ginbov.nl` runs what the operator promotes from there
 ([`docs/deployment.md`](docs/deployment.md)). Version 1 is built from the design record in
@@ -205,9 +205,10 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
   signed-in test's session included, and the person on the record, with the handle they choose.
 - [`docs/ui.md`](docs/ui.md), [`docs/projects.md`](docs/projects.md),
   [`docs/timeline.md`](docs/timeline.md), [`docs/documents.md`](docs/documents.md): the UI's shell,
-  tokens, shared pieces and links in text; the projects' API and screens, the plus and Create
-  project; the timeline's API, live event and screens; a document read alone, a draft's asks, the
-  attachments, the overlay and the side panel with a draft's Draft tab.
+  tokens, shared pieces and links in text, the phone's frame and drawer; the projects' API and
+  screens, the plus and Create project, a project on a phone, its tabs and views; the timeline's
+  API, live event and screens; a document read alone, a draft's asks, the attachments, the overlay
+  and the side panel with a draft's Draft tab.
 - [`docs/record.md`](docs/record.md), [`docs/block-dsl.md`](docs/block-dsl.md),
   [`docs/projection.md`](docs/projection.md), [`docs/engine.md`](docs/engine.md): the record's
   schema and the dev seed, the block DSL, the store's tree and its files, and the engine between

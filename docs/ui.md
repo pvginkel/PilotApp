@@ -22,19 +22,25 @@ are the template's (`CLAUDE.md` § Template ownership). The app's own:
 
 ## The shell
 
-`src/routes/_shell.tsx` is a layout route: the top bar, then, in `.app`'s grid, the side column
-(`nav.tabs`, the project list) and the centre (`main.centre`) beside it, where the child route
-shows. It reads the signed-in person through `useSelf()` (`GET /api/people/self`).
-Until they have a handle, the handle step stands under the top bar in place of the side column and
-the centre; a screen under the shell reads the person with `usePerson()`, whose handle, name and
-avatar slot are never null.
+`src/routes/_shell.tsx` is a layout route that draws one of two frames, by `usePhone()`
+(`src/hooks/use-phone.ts`, the media query `(max-width: 900px)`, every phone rule's width). Off a
+phone, `DeskFrame` (`components/shell/desk-frame.tsx`): the top bar, then, in `.app`'s grid, the
+side column (`nav.tabs`, the project list) and the centre (`main.centre`) beside it, where the child
+route shows. On a phone, `PhoneFrame` (`phone-frame.tsx`): no top bar, the gold bar across the
+page's top, and under it the centre, the side column a drawer over it (below). A screen whose phone
+use differs draws a phone component of its own under the same address, as a project's does
+([`projects.md`](projects.md)). The shell reads the signed-in person through `useSelf()` (`GET
+/api/people/self`); the phone's frame draws nothing until it is read. Until they have a handle, the
+handle step stands in place of the side column and the centre, under the top bar, or on a phone
+under the drawer's head, which opens no drawer there; a screen under the shell reads the person with
+`usePerson()`, whose handle, name and avatar slot are never null.
 
-- **The top bar** (`components/shell/top-bar.tsx`): the drawer toggle on a narrow window once the
-  app is open, the logo and the name, the gold bar's badges after them, none at the handle step,
-  and the person's avatar, which opens the profile menu. The
-  menu holds the person's name, Theme (System, Light, Dark), Profile once the handle is chosen, and
-  Sign out. The bar keeps the template's `app-shell.topbar.user*` test ids, so the template's
-  sign-in specs pass against it.
+- **The top bar** (`components/shell/top-bar.tsx`), off a phone: the logo and the name, the gold
+  bar's badges after them, none at the handle step, and the person's avatar, which opens the profile
+  menu (`profile-menu.tsx`). The menu holds the person's name, Theme (System, Light, Dark), Profile
+  once the handle is chosen, and Sign out. It keeps the template's `app-shell.topbar.user*` test
+  ids, on a phone too, where it opens from the drawer's head, so the template's sign-in specs pass
+  against it.
 - **The gold bar** (`components/shell/gold-bar.tsx`) shows each condition that holds all work, and
   nothing while none does; a condition's badge or line stands while it holds and goes when it ends,
   and nothing dismisses it. Off a phone it is `GoldBadges`, a `role="status"` region in the top bar
@@ -43,11 +49,10 @@ avatar slot are never null.
   its `title`. The week's usage halt's badge, which carries its overrule, is a button with a chevron
   and no `title`: it opens a popover (`Popover`, `.gold-pop`) that holds its line and the overrule's
   button, so that a stray click on the top bar spends no quota, and the overrule's click closes it.
-  On a phone, at 900px and below, it is `GoldBar` instead, a `role="status"` region across the
-  window under the top bar, a line per condition, the overrule's button on the week's halt's line;
-  `shell.css` hides the other of the two. A time is the clock alone for today, and dated, "29 Oct,
-  13:16", for an earlier day, `useToday()` (`src/hooks/use-today.ts`) reading the day again each
-  minute so that a page left open past midnight dates it within the minute.
+  On a phone it is `GoldBar` instead, a `role="status"` region across the page's top, a line per
+  condition, the overrule's button on the week's halt's line. A time is the clock alone for today,
+  and dated, "29 Oct, 13:16", for an earlier day, `useToday()` (`src/hooks/use-today.ts`) reading
+  the day again each minute so that a page left open past midnight dates it within the minute.
   The conditions and their words (`conditionLine()`, `src/lib/utils/status-labels.ts`), in the
   server's order:
   - the controller unreachable ([`controller.md`](controller.md)), a server-off icon: "The
@@ -82,18 +87,31 @@ avatar slot are never null.
   and the lines, reads it, writes each event over the read, and reads it again at every rise of the
   stream's `isConnected`. The overrule posts `POST /api/quota-overrules` `{kind: offer}`
   ([`usage.md`](usage.md)).
-- **The narrow window.** Under the mockup's breakpoint, 900px wide, the gold bar's lines span the
-  window under the top bar, and in the row under them the side column is a drawer over the centre,
-  with a scrim. The top bar's toggle opens it; the scrim closes it, and so does any change of
-  address.
+- **The drawer**, on a phone: the side column over the centre, the screen's head included, 300px
+  wide, at most 85% of the window, on the project list's tint (`--side`) with no rule at its right
+  edge. It opens on the drawer's head (`.drawer-head`), the top bar's block of colour: Pilot's logo
+  and name, white on the primary, and the avatar with the profile menu. Its button, "Projects"
+  (`DrawerButton`, `components/shell/drawer.tsx`), is the first part of a screen's head; on a screen
+  with no head, `DrawerProvider` stands it alone at the top-left (`.drawer-bar`), at the same place,
+  8px from the left and from the top under the gold bar, 36px square, where a view's arrow back
+  stands too ([`documents.md`](documents.md)). The open drawer covers its own button: its scrim
+  closes it, and so does any change of address, so that coming back finds it closed. Behind it, the
+  scrim darkens the page, `--scrim`, 30% black in the light theme and 80% in the dark, its opacity
+  the share of its way the drawer has come: the slide and the darkening follow one number,
+  `@property --drawer`, over 160ms. Under reduced motion (`prefers-reduced-motion: reduce`) the
+  drawer comes and goes at once. Closed, the drawer and the scrim are hidden once out of sight, so
+  that they take no focus and no press.
+- **The browser's bar** takes the page's colour on a phone: `useBrowserBarInPageColour()`
+  (`src/lib/theme.ts`) sets `theme-color` to the page's background, again at each change of the
+  theme, and puts the page head's back when the phone's frame goes.
 - **The phone's screen.** The app is as tall as the screen the browser shows: `h-dvh` on
   `__root.tsx`'s root and on the auth gate's screens, never `h-screen`, `100vh`, which a phone's
   Chrome measures with its URL bar hidden. The app scrolls inside itself, so the bar never hides,
   and `100vh` cut off its foot by the bar's height. The keyboard shrinks the app with it: the
   viewport's `interactive-widget=resizes-content` (`index.html`) has a phone's Chrome, from version
-  108, resize the page to the room above the keyboard where it would pan it, so that the top bar,
-  the project's head and the chat's composer stay in view and the messages area between them gets
-  shorter. Whether Firefox on Android honours it is not known.
+  108, resize the page to the room above the keyboard where it would pan it, so that the project's
+  head and the chat's composer stay in view and the messages area between them gets shorter. Whether
+  Firefox on Android honours it is not known.
 - **Empty states** are `EmptyState`: "No projects yet" when there is no project, "None yet" for an
   empty list of archived projects.
 
@@ -125,13 +143,12 @@ is base, its line 1.6. Which text takes which step is the mockup's:
 - **lg**: an item's title, a project's name in the list, the overlay's title, an empty state's and
   a dialog's title, a prose h2.
 - **xl**: the project head's title, the profile's, a prose h1.
-- **2xl**: Pilot's name in the top bar.
+- **2xl**: Pilot's name in the top bar and the drawer's head.
 
 Text sized to its shape keeps a size of its own: an avatar's letters, a count (11.5px in a tab or a
-group, 12px in the project list), Yes and No (18px) and the drawer's toggle (22px); so does mono,
-`code` at 0.86em, `.mono` at 0.92em, `pre` at 13px and `kbd` at 11px. Tailwind's line heights,
-ratios, follow the step; a chat class that replaced a `text-[Npx]`, which set no line, keeps the
-body's with it, as `text-sm/[1.6]`.
+group, 12px in the project list) and Yes and No (18px); so does mono, `code` at 0.86em, `.mono` at
+0.92em, `pre` at 13px and `kbd` at 11px. Tailwind's line heights, ratios, follow the step; a chat
+class that replaced a `text-[Npx]`, which set no line, keeps the body's with it, as `text-sm/[1.6]`.
 
 **The avatars.** The palette is `--avatar-1` to `--avatar-6`, each with its `-text`: the primary
 tint, pink, green, amber, violet and teal. A person's avatar slot counts from 1 and slot *n* takes
@@ -238,10 +255,12 @@ that has one Send (`TextField`).
 
 `src/lib/browser-state.ts`, one localStorage entry, `pilot`: the theme, the current project (which
 the bare address opens), the chevrons of *Other projects* and *Finished*, and each project's side
-panel, `{open, tab}` by the project's id, once the person set it ([`documents.md`](documents.md)).
-Nothing of it is on the server. A component reads it with `useBrowserState()` and changes it with
-`rememberInBrowser(change)`, a panel with `rememberPanel(projectId, panel)`, which keeps what
-another tab of the browser keeps for the other projects.
+panel, `{open, tab}` by the project's id, once the person set it ([`documents.md`](documents.md)),
+which a phone neither reads nor writes: its tab and its views are the history entry's
+([`projects.md`](projects.md)). Nothing of it is on the server. A component reads it with
+`useBrowserState()` and changes it with `rememberInBrowser(change)`, a panel with
+`rememberPanel(projectId, panel)`, which keeps what another tab of the browser keeps for the other
+projects.
 
 The unsent text of every answer's field and of the chat's composer is a second entry,
 `pilot.unsent`, by field: `<item>/<block>/answer`, `/paste`, `/other` and `/no`
@@ -314,20 +333,21 @@ The app takes the renders as they are: `vite-icons.ts`, a plugin of `loadAppPlug
 from the dev server and writes them to the build's root under the names the app asks for, so a new
 render is in the next build with nothing copied: the favicon (`favicon.png`, the 384px blue one)
 and the manifest's icons (`icon-192.png`, `icon-512.png` and the maskable `icon-512-maskable.png`)
-from the blue renders, and the top bar's `logo.png` from the 96px white one, three times the bar's
-32px, the bar being the theme's blue itself (D020). Beside them stand `public/`'s manifest
-(`manifest.json`) and service worker, `sw.js`; the page head links the manifest and sets
-`theme-color` to `#568ed2`, a standing edit of the template's `index.html` (`CLAUDE.md`).
-`registerServiceWorker()` (`src/lib/service-worker.ts`) registers the worker when the shell's
-module loads, on any page, before sign-in too, wherever the browser offers service workers (a
-secure context). The worker caches nothing. It answers only a navigation the network does not,
-with one line, "Pilot is unreachable. Try again when you are back on the network.", and never a
-request under `/api/`, where sign-in, its callback and sign-out are. The UI's nginx caches the
-build's hashed `/assets/` for a year and has the browser revalidate the root's files — the icons,
-the logo, the manifest, the worker — on every load, so a changed icon shows under its name. It hands
-every path under `/api/` to the backend, whatever its extension, so the cache rule never answers
-one from the static root, the sync's `/api/sync/files/*.json` among them. Both are standing edits
-of the template's `nginx.conf` (`CLAUDE.md`), which `tests/infrastructure/nginx.spec.ts` pins.
+from the blue renders, and the top bar's `logo.png`, the drawer's head's too, from the 96px white
+one, three times the bar's 32px, the bar being the theme's blue itself (D020). Beside them stand
+`public/`'s manifest (`manifest.json`) and service worker, `sw.js`; the page head links the manifest
+and sets `theme-color` to `#568ed2`, a standing edit of the template's `index.html` (`CLAUDE.md`),
+which the phone's frame paints in the page's colour (above). `registerServiceWorker()`
+(`src/lib/service-worker.ts`) registers the worker when the shell's module loads, on any page,
+before sign-in too, wherever the browser offers service workers (a secure context). The worker
+caches nothing. It answers only a navigation the network does not, with one line, "Pilot is
+unreachable. Try again when you are back on the network.", and never a request under `/api/`, where
+sign-in, its callback and sign-out are. The UI's nginx caches the build's hashed `/assets/` for a
+year and has the browser revalidate the root's files — the icons, the logo, the manifest, the worker
+— on every load, so a changed icon shows under its name. It hands every path under `/api/` to the
+backend, whatever its extension, so the cache rule never answers one from the static root, the
+sync's `/api/sync/files/*.json` among them. Both are standing edits of the template's `nginx.conf`
+(`CLAUDE.md`), which `tests/infrastructure/nginx.spec.ts` pins.
 
 ## Testing it
 
@@ -340,7 +360,10 @@ The frontend suite's fixtures (`frontend/tests/support/fixtures.ts`):
 - `shell`: `open(path)` opens an address once the signed-in person is read; `goldBadges`,
   `goldBadge(code)` and `goldPopover` read the badges and the week's halt's popover, `goldBar` and
   `goldLine(code)` the phone's lines, `goldText(line)` a line's words without its button, and
-  `goldOverrule(line)` its overrule's button.
+  `goldOverrule(line)` its overrule's button; on a phone `drawerToggle` is the drawer's button,
+  `drawerHead` its head and `scrim` the scrim. Every spec's page reduces motion
+  (`tests/support/fixtures-infrastructure.ts`), so the drawer opens at once; a spec that measures
+  the slide asks for `reducedMotion: 'no-preference'` first.
 - `controller` drives the worker's fake controller, and `conditions` reads what the gold bar reads
   ([`work.md`](work.md)).
 - `bridge` adds registrations to the worker's fake notification bridge and reads what they show
@@ -349,7 +372,7 @@ The frontend suite's fixtures (`frontend/tests/support/fixtures.ts`):
   spec, a setting left out unset, and unsets both after it, through `PUT /api/testing/links`, which
   answers only in testing mode and refuses what the boot refuses; `environment(id, name)` puts an
   environment on the record through `POST /api/testing/environments` ([`projects.md`](projects.md)).
-- The page objects `handleStep`, `profile`, `projectList`, `projectHead`, `timeline`, `overlay`,
-  `sessionLog`, `panel` and `chat`, and `projects` and `chats` ([`projects.md`](projects.md),
-  [`timeline.md`](timeline.md), [`work.md`](work.md), [`documents.md`](documents.md),
-  [`chats.md`](chats.md)).
+- The page objects `handleStep`, `profile`, `projectList`, `projectHead`, `phoneTabs`, `timeline`,
+  `overlay`, `sessionLog`, `panel` and `chat`, and `projects` and `chats`
+  ([`projects.md`](projects.md), [`timeline.md`](timeline.md), [`work.md`](work.md),
+  [`documents.md`](documents.md), [`chats.md`](chats.md)).

@@ -125,6 +125,7 @@ open and they hold a token. Otherwise they see none, and what stands is dismisse
 - **The `url`** is absolute, on the stage's `BASEURL` (D091): `<BASEURL>/projects/<id>/items/<item
   id>`, the item's permalink, when exactly one item waits on the member, and the project's
   timeline, `<BASEURL>/projects/<id>`, otherwise ([`timeline.md`](timeline.md)).
+  On a phone the permalink opens the item alone, over the project's Timeline, which Back shows.
 
 ## The reconcile
 

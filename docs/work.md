@@ -310,14 +310,16 @@ it is retried. A withdrawn job's done line says "Withdrawn by an Undo" under its
 ## The session log
 
 At `/projects/<project>/sessions/<session>`, the item's id, the project's route opens the session
-log in the overlay over the timeline (`SessionLogOverlay`,
+log in the overlay over the timeline, on a phone a view pushed over the tabs (`SessionLogOverlay`,
 `frontend/src/components/overlay/session-log-overlay.tsx`; the overlay is
-[`documents.md`](documents.md)'s). An open item's Session log and a done work line's Open go there.
-An address that names no work item of the project reads "The session log did not load".
+[`documents.md`](documents.md)'s). An open item's Session log and a done work line's Open go there,
+on a phone a tap on the done line ([`timeline.md`](timeline.md)). An address that names no work item
+of the project reads "The session log did not load".
 
 - **Its head**: "Session log", over the item's title, its environment's link once its start has
   one, but for Pilot's own work, and the session's id; and Discuss, quoting the work item into the
-  chat ([`chats.md`](chats.md)).
+  chat ([`chats.md`](chats.md)), the view on a phone keeping it, so that a finished work item is
+  discussed from there (D127).
 - **Its body**: the session's records rendered as the chat renders a reply, one reply per turn
   (`ReplyBody`), bare in the log's column, 6px in from either side (D002): the text as Markdown, the
   runs of tool calls with their summaries, a sub-agent's card with its own steps, the phantom of the

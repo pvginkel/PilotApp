@@ -296,8 +296,9 @@ answers*.
 
 A console (`console.tsx`) is the growing text field with Send and a cross, Cancel, inside its
 border; Ctrl+Enter (Cmd+Enter on a Mac) sends it and Esc closes it, and its Send is disabled while
-it is blank, a No's excepted. Its words, and every field's here, are kept in the browser until sent
-([`ui.md`](ui.md)).
+it is blank, a No's excepted. While its field has the focus, a resize of the window, as a phone's
+keyboard makes as it opens, scrolls the console back into view. Its words, and every field's here,
+are kept in the browser until sent ([`ui.md`](ui.md)).
 
 **An answered block on an open item**, Pilot's answer or a deferral, has a head: its kind, a
 chevron, Answered, the time and the avatar of who answered, Pilot's mark for Pilot, and before the
@@ -338,6 +339,10 @@ project, and an Undo before then withdraws that job ([`work.md`](work.md)).
   consecutive work lines, in muted text, its icon, its time and its buttons smaller. Its Open opens
   its session log ([`work.md`](work.md)), and it never offers Undo. A job an Undo withdrew reads
   "Withdrawn by an Undo" under its title.
+- **On a phone** a done line has Undo alone among its actions: no Open and no Discuss, its
+  attachments' indicator staying. A tap on the line, anywhere but on a link, a button or a menu of
+  its own, goes where Open goes, the document's address or the session log's, which opens it as a
+  view whose head carries Discuss ([`projects.md`](projects.md)).
 
 **Finished.** Finish closes every open item but the opening, so a finished project's timeline is its
 opening and done lines, and ends in "Finished · <stamp>", "22 Oct 2026, 14:05". Under that divider
@@ -358,7 +363,7 @@ offers Undo while the project is archived; Bring back gives every close and Undo
 ## Addresses
 
 An item's address is `/projects/<project>/items/<item>`, a block's
-`/projects/<project>/items/<item>/blocks/<block>`, by their ids; the project's route
+`/projects/<project>/items/<item>/blocks/<block>`, by their ids; off a phone the project's route
 (`routes/_shell/projects/$projectId.tsx`) draws the timeline at them, and the two child routes
 draw nothing of their own. Opened there, the timeline jumps to the middle of the item, the block or
 a confirmation card's row, and flashes it. A block the timeline does not draw, as in a done item's
@@ -368,6 +373,17 @@ timeline following its end. A block in a collapsed section opens its section fir
 address whose document is a card, done or open, also opens the document in the overlay at the
 block; a document's own address, an attachment's, the handbook's and the project document's are
 [`documents.md`](documents.md)'s.
+
+**The item alone.** On a phone an item's address opens the item alone (`ItemOverlay`,
+`components/overlay/item-overlay.tsx`), the whole screen, a view pushed over the tabs
+([`projects.md`](projects.md)); a notification's link is such an address
+([`notifications.md`](notifications.md)). Its head is the view's arrow back and the project's name
+over the item's step; its body the item as the timeline draws it, open or as its done line, answered
+in place as there, its option rows at least 48px high, a thumb's height. A block's address waits for
+the timeline's read: where the block's document is a card it opens the document at the block, as at
+every width, and otherwise the item alone, going to the block. An address naming no item the
+timeline draws, none or a wait, or a read that fails, reads "The item did not load". The Timeline
+tab under it is not gone to the item.
 
 **On a narrow window.** At 900px and below an option's line goes under its label, Recommended
 staying at the label's end. At 600px and below a block's head wraps, and Answered shows its icon
@@ -385,7 +401,8 @@ The engine's side is pinned in `backend/tests/engine/`, the read in
 writes and the event in `tests/api/test_items.py`, `tests/services/test_item_service.py` and
 `tests/services/test_project_event_service.py`. The browser suites are `frontend/tests/timeline/`,
 with `tests/projects/badge.spec.ts`; `document.spec.ts`, `card.spec.ts` and `settled.spec.ts` pin
-the documents, and `frontend/tests/work/timeline.spec.ts` the work items ([`work.md`](work.md)).
+the documents, `phone-items.spec.ts` the item alone and a done line on a phone, and
+`frontend/tests/work/timeline.spec.ts` the work items ([`work.md`](work.md)).
 
 A spec makes its project with `projects.makeWithSession`, places items with `projects.place`, a
 text written in the block DSL, and posts an agent's save with `projects.save`; `projects.answer`,
@@ -395,8 +412,8 @@ has the testing endpoints they call). A text with one block makes its item that 
 spec's document carries two blocks or more. The `timeline` page object
 (`tests/support/page-objects/timeline-page.ts`) opens a project's timeline (`open`), or an
 address (`openAt`), and reads its items, blocks, segments, cards, settled lines, attachments,
-banners and done lines, their Discuss and *In the chat*, an item's line that Pilot asked its
-writer (`item(id).writerAsked`,
+the item alone's as the timeline's (`item(id, overlay.alone)`), banners and done lines, their
+Discuss and *In the chat*, an item's line that Pilot asked its writer (`item(id).writerAsked`,
 pinned in `frontend/tests/work/registered.spec.ts`), a block's head that says so, a claimed action's
 line and its work item's link (`writerAsked`, `claim`, `claimWork`, pinned in
 `tests/work/clarification.spec.ts` and `claimed.spec.ts`), the auto pilot marks and chip

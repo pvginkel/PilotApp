@@ -7,6 +7,8 @@ the tables are [`record.md`](record.md)'s, and the frame the screens sit in is [
 timeline under a project's head, and its items, are [`timeline.md`](timeline.md)'s; the overlay over
 it and the side panel beside it, with the project's handbook and project document, are
 [`documents.md`](documents.md)'s.
+On a phone a project's screen is its own: the head in one line, the tabs at the bottom and the views
+pushed over them (below).
 
 A project starts as a draft, from the plus beside the list's head. It takes shape in its definition
 chat ([`chats.md`](chats.md)) and in its draft, `project.md`, in the side panel's Draft tab
@@ -43,7 +45,7 @@ projects too.
   is open (below). `autopilot_may_take` counts the open confirmations the switch would answer: the
   unanswered confirmation blocks of the project's open items whose reason does not ask under auto
   pilot, whether auto pilot is on or off ([`timeline.md`](timeline.md)). `create_refusal` is why
-  Create project cannot be pressed now (below), null when it can, and the project's standing for one
+  Create project does not show now (below), null when it shows, and the project's standing for one
   that is archived or past its draft. An archived project reads as it was left. An unknown id
   answers `404`.
 
@@ -173,9 +175,10 @@ folder moves from `draft-<number>` to its slug.
 
 ## The project list
 
-The side column (`project-column.tsx`). Its head reads "Projects", with the plus ("New project")
-and the overflow menu ("More"), which holds *Archived*, at its right. The plus starts a new project
-(`POST /api/projects`, above) and opens the draft at its address, the focus in its definition chat's
+The side column (`project-column.tsx`), on a phone the drawer ([`ui.md`](ui.md)). Its head reads
+"Projects", at the base size, with the plus ("New project") and the overflow menu ("More"), which
+holds *Archived*, at its right, their icons 16px. The plus starts a new project (`POST
+/api/projects`, above) and opens the draft at its address, the focus in its definition chat's
 field. It is disabled while its post is under way.
 
 - **The groups.** The person's projects, the unfinished ones they are a member of, stand under the
@@ -213,7 +216,8 @@ address and a block's ([`timeline.md`](timeline.md)), and a document's, an attac
 handbook's and the project document's ([`documents.md`](documents.md)), at which the project's tab
 is current too. The project's route remounts on each project, so whatever it opened (the plan, the
 notes, the menu, a dialog, the overlay) is closed on the next one, while the side panel comes back
-as that project left it; the drawer closes on any change of address ([`ui.md`](ui.md)).
+as that project left it, and a phone shows its Timeline (below); the drawer closes on any change of
+address ([`ui.md`](ui.md)).
 
 The list and the head are read again when the window regains focus, after each of the person's
 own writes, which invalidate every query, on the server's `project_changed` event, and whenever the
@@ -221,10 +225,10 @@ event stream comes up ([`timeline.md`](timeline.md)).
 
 ## The head
 
-`project-head.tsx` draws the head in two rows: the name, its chip and the ticket and the repo, then
-the auto pilot switch; below them the step button, the members, Discuss, the Documents button, the
-handbook's, the plan's notes button and the project's menu. On a wide window the two rows share one
-line. Under the narrow window's breakpoint they are a row each and the repo is hidden.
+`project-head.tsx` draws the head off a phone in two rows: the name, its chip and the ticket and the
+repo, then the auto pilot switch; below them the step button, the members, Discuss, the Documents
+button, the handbook's, the plan's notes button and the project's menu. The two rows share one
+line. A phone's head is its own, in one line (below).
 
 **A tight head** gives way in one order (D073):
 
@@ -234,21 +238,16 @@ line. Under the narrow window's breakpoint they are a row each and the repo is h
 4. Last, the members fold to the first avatars and a "+N" count, whose tooltip names the rest. One
    avatar always stays.
 
-The ticket, the chips, auto pilot or Create project and the icons keep their size. A head whose
-parts, each at its floor, would still run its menu past it in one line stands in its two rows, as
-on a narrow window. It is measured in one line on every change of the head's width or its parts. So
-the switch, the menu and the icons stay inside the head, and nothing overlaps, down to 1200px with
-the side panel open.
+The ticket, the chips, auto pilot and the icons keep their size. A head whose parts, each at its
+floor, would still run its menu past it in one line stands in its two rows. It is measured in one
+line on every change of the head's width or its parts. So the switch, the menu and the icons stay
+inside the head, and nothing overlaps, down to 1200px with the side panel open.
 
-- **The chips.** A draft shows "Draft", its name, Create project in the switch's place, its members,
-  the Draft tab's toggle and its menu, and no step, Discuss, Documents, handbook or notes button.
-  A finished project shows the "Finished" chip in place of the switch. An archived project shows
-  "Archived" after its name and the rest as it was left, the switch disabled.
-- **Create project** (`btn-primary`) is disabled while the head's `create_refusal` gives a reason,
-  its tooltip "Cannot create <name> because <reason>". Otherwise its tooltip is "Hand the project to
-  Pilot: it sets it up and starts the plan". Pressed, it makes the `opened` transition (above) and
-  stays pending until every query is read again. The head then reads the open project's, and the
-  route draws the timeline in the definition chat's place.
+- **The chips.** A draft shows "Draft", its name, its members, the Draft tab's toggle and its menu,
+  and no switch, step, Discuss, Documents, handbook or notes button: its Create project stands at
+  its definition chat's end (below). A finished project shows the "Finished" chip in place of the
+  switch. An archived project shows "Archived" after its name and the rest as it was left, the
+  switch disabled.
 - **The auto pilot switch** flips at once with a transition by the person, `autopilot_off` or
   `autopilot_on`, and stays pending until every query is read again. Turned on while the head's
   `autopilot_may_take` is above 0, it asks first, in a modal dialog (`autopilot-dialog.tsx`):
@@ -285,11 +284,79 @@ the side panel open.
 
 The popovers and the menu close on a press outside them and on Esc.
 
+**A phone's head** (`PhoneHead`, `phone-head.tsx`) is one line, 52px high: the drawer's button
+([`ui.md`](ui.md)); the name, its chip and the ticket, with no repo; the auto pilot switch without
+its label, named "Auto pilot" to a screen reader, and its warning triangle, or the Finished chip in
+its place; the plan's donut alone (`PlanDonut`), with no button's chrome and no step's name, its
+tooltip the step button's, a tap on it showing the Plan tab (below); the members, two circles at
+most, the first member's avatar and then the second's, or a "+N" whose tooltip names the rest; the
+plan's notes button while it shows; and the project's menu. It has no Discuss, Documents or Draft
+button, which the tabs stand for, and no handbook, which the Documents tab lists
+([`documents.md`](documents.md)). The Archived and Finished chips show their icon alone, their word
+the tooltip's and a screen reader's (D128). Only the name gives way, cut to nothing: an archived or
+finished head with its ticket, three members and the notes' button holds its line from about 390px
+wide, and on a narrower phone its menu runs past the head's edge. A draft's has its name, the Draft
+chip, its members and its menu.
+
+## Create project
+
+Create project (`CreateProject`, `create-project.tsx`) stands at the end of a draft's definition
+chat, after its last message, and scrolls with it ([`chats.md`](chats.md)), at every width (D119).
+It shows only once the project can be created: while the head's `create_refusal` gives a reason
+there is nothing, and it is never shown disabled. It is a box with a border, as wide as what it
+holds and centred: the button, "Create project", its tooltip "Hand the project to Pilot: it sets it
+up and starts the plan", and the muted line "The project is ready to be created." at the small size,
+the button left of the line, and above it in a window under 900px wide. Pressed, it makes the
+`opened` transition (above) and stays pending until every query is read again, a press meanwhile
+doing nothing. The head then reads the open project's, and the route draws the timeline in the
+definition chat's place. A refusal the head cannot give, no controller or no store environment,
+comes back as the request's error, the query client's toast.
+
+## A project on a phone
+
+At 900px and below, a project's screen is `PhoneProject` (`components/projects/phone-project.tsx`):
+the head in one line (above), the tab showing, and under it the tabs at the bottom: Timeline, Chat,
+Plan and Documents for a project, and for a draft its Chat, the definition chat in the timeline's
+place with Create project at its end, then Draft and Documents. Each tab is its icon over its name,
+the one showing in the primary's tint, its icon on a pill. Chat carries the unread dot, its name
+then "Chat, a reply unread" ([`chats.md`](chats.md)), and Documents its count on the icon's corner.
+
+- **Chat, Documents and Draft** are the side panel's tabs, drawn without the panel's head
+  (`PhonePanel`, [`documents.md`](documents.md)).
+- **Plan** is the plan popover's content as a page (`PlanPage`): "The plan · N of M done" ("The
+  plan" alone with no steps), the steps in their rows at the base size, a step's notes listed on its
+  icon as in the popover, or "No steps yet." while the plan has none. The head's donut shows it too.
+- **The Timeline**, or a draft's Chat, stays mounted under the other tabs, hidden and inert, so that
+  it keeps its scroll.
+
+**The tab is the history entry's** (`usePhoneTab`, `hooks/use-phone-tab.ts`, the entry's state), and
+nothing of it is in the browser's storage, so that Back and a reload find it. Leaving the Timeline
+is an entry of its own, pushed over the Timeline's; a change between the other tabs replaces it, so
+that Back from any of them shows the Timeline, and on the Timeline Back is the browser's own. An
+address gone to keeps no tab: a project opens on its Timeline, always, a draft on its Chat, and
+switching projects is an entry like any address. A tab the project does not have, a draft's Draft
+past Create, shows the Timeline. The side panel the desktop keeps per project is neither read nor
+written on a phone.
+
+**What opens from a tab is a view** pushed over it: a document, an attachment, the project document,
+the handbook, a session log ([`documents.md`](documents.md), [`work.md`](work.md)) and the item
+alone, which an item's address opens on a phone ([`timeline.md`](timeline.md)). A view is the whole
+screen over the head and the tabs, which take no focus under it. It is an entry of its own, pushed
+over the one it was opened from, whose tab it keeps under it, and a view opened from a view lies on
+top of it; the entry's state lists the views, bottom to top. The view's arrow back, Esc and the
+browser's Back take the one on top off, showing what lay under it. A view's address reached cold — a
+notification's link, a link from another app, a typed address — lies over the project's Timeline, an
+entry of the Timeline put under it, so that Back lands there. Discuss and *In the chat* anywhere on
+the screen show the Chat tab, a draft's its Chat, every view taken off first
+([`chats.md`](chats.md)), and an ask of the draft gone to shows the Draft tab at it, past Create the
+project document.
+
 ## The project's menu
 
-`project-menu.tsx`, last in the head's second row. On an unarchived project, a draft included:
-"Join the project" or "Leave the project"; "Finish the project…" on an open project, "Reopen the
-project" on a finished one; and "Archive the project". On an archived project, "Bring back" alone.
+`project-menu.tsx`, last in the head's second row, on a phone at its line's end. On an unarchived
+project, a draft included: "Join the project" or "Leave the project"; "Finish the project…" on an
+open project, "Reopen the project" on a finished one; and "Archive the project". On an archived
+project, "Bring back" alone.
 
 Join and Leave act at once, each with a toast: "You joined <name>." and "You left <name>. It moves
 to Other projects.", on a finished project "You left <name>." alone, since it stays under Finished.
@@ -451,10 +518,15 @@ wraps them (`make`, `makeWithSession`, `makeDraft`, which answers `{id, folder}`
 `created()` waits for its draft, `projectList.statusIcon(name)` reads a tab's icon, its status and
 its glyphs, and `projectList.written(id, kind)` waits for its pause or resume to be written;
 `projectHead.autopilotWarning` is the triangle, `autopilotDialog` the switch's dialog,
-`discussButton` and `discussDot` are Discuss and its dot, `createButton` is Create project and
-`create()` presses it and waits for its success, and `memberAvatars` and `membersMore` are the
-members and their count. The status and the pause are pinned in
-`tests/projects/project-status.spec.ts`, the switch's dialog in `autopilot.spec.ts`; the plus in
-`new-project.spec.ts`, Create project and its pause in `create-project.spec.ts` and the tight head
-in `project-head.spec.ts`. Each Playwright worker's database is a clone of the dev seed
-([`record.md`](record.md)), so every spec's list holds the seed's projects beside its own.
+`discussButton` and `discussDot` are Discuss and its dot, `memberAvatars` and `membersMore` the
+members and their count, and on a phone `donut` the donut alone; the definition chat's page object
+reads Create project (`definitionChat.createReady`, `createButton` and `createLine`), and its
+`create()` presses it and waits for its success ([`chats.md`](chats.md)); `phoneTabs`
+(`phone-tabs-page.ts`) reads a phone's tabs (`tab(key)`, a draft's Chat keyed `timeline`), the Chat
+tab's dot, the Documents tab's count, the page over them and the Plan tab's page. The status and the
+pause are pinned in `tests/projects/project-status.spec.ts`, the switch's dialog in
+`autopilot.spec.ts`; the plus in `new-project.spec.ts`, Create project and its pause in
+`create-project.spec.ts`, the tight head and a phone's head in `project-head.spec.ts`, a phone's
+tabs in `phone-tabs.spec.ts` and its views and Back in `phone-views.spec.ts`. Each Playwright
+worker's database is a clone of the dev seed ([`record.md`](record.md)), so every spec's list holds
+the seed's projects beside its own.

@@ -23,17 +23,20 @@ project's status as one icon on its tab, which pauses it, and the gold bar, a ba
 or a line on a phone, while the controller does not answer, Pilot updates its store or a usage
 halt holds; and the overlay that opens a document, an attachment or the handbook,
 beside the side panel with the project's chat and its documents
-([`docs/documents.md`](docs/documents.md)). A project starts from the plus beside the list, as a
-draft: its definition chat stands in the timeline's place while Pilot writes the draft,
-`project.md`, in the panel's Draft tab, its asks answered in place, and Create project opens it,
-hands it to Pilot's setup, the brain's first background job, and pauses it, so that its work waits
-for a person's resume ([`docs/projects.md`](docs/projects.md), [`docs/work.md`](docs/work.md)).
-Beneath the screens are the record's schema and the engine behind it: the block DSL, the parse gate
-and the merge by ownership, the record's own writes, and the rendered `timeline.json`,
-`reference.json` and `plan.json` ([`docs/engine.md`](docs/engine.md)); and the sync that keeps the
-store environment's tree in step with the record: the `/api/sync` routes and `pilot-sync`, the Go
-sidecar, in each stage's store environment, with the hooks that hold a project's write lock around
-each of the brain's edits, so that each save is its session's, and tell it what the record made of
+([`docs/documents.md`](docs/documents.md)); and on a phone no top bar, the head in one line, the
+tabs at the bottom and what opens from them a view pushed over them, the item alone from a
+notification's link among them, Back the browser's ([`docs/projects.md`](docs/projects.md)). A
+project starts from the plus beside the list, as a draft: its definition chat stands in the
+timeline's place while Pilot writes the draft, `project.md`, in the panel's Draft tab, its asks
+answered in place, and Create project opens it, hands it to Pilot's setup, the brain's first
+background job, and pauses it, so that its work waits for a person's resume
+([`docs/projects.md`](docs/projects.md), [`docs/work.md`](docs/work.md)). Beneath the screens are
+the record's schema and the engine behind it: the block DSL, the parse gate and the merge by
+ownership, the record's own writes, and the rendered `timeline.json`, `reference.json` and
+`plan.json` ([`docs/engine.md`](docs/engine.md)); and the sync that keeps the store environment's
+tree in step with the record: the `/api/sync` routes and `pilot-sync`, the Go sidecar, in each
+stage's store environment, with the hooks that hold a project's write lock around each of the
+brain's edits, so that each save is its session's, and tell it what the record made of
 them ([`docs/sync.md`](docs/sync.md)); and the server's jobs on the KubeCoder controller: the
 environments of its own Pilot creates from a work item's repository, resets before each fresh start,
 stops and deletes, and the sessions it runs there through the gate every start passes, recorded and
