@@ -38,7 +38,12 @@ test.describe('The plus', () => {
     definitionChat,
   }) => {
     const me = await people.signIn();
+    // The list's first read landed before the plus: one still under way at the draft's
+    // `project_changed` stands in for the read the event asks, without the draft. The list's
+    // `ready` can come at mount, before that read starts.
+    const listed = page.waitForResponse((response) => response.url().includes('/api/projects?archived=false'));
     await page.goto('/');
+    await listed;
     await waitForUiState(page, 'projects.list', 'ready');
     await expect(projectList.newProject).toHaveAttribute('title', 'New project');
 

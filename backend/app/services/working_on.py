@@ -24,6 +24,7 @@ import uuid
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import cache
 from typing import Any
 
 from sqlalchemy import ColumnElement, Select, and_, literal, or_, select
@@ -433,6 +434,7 @@ def _after_reply(document: type[Item], job: _Rows) -> Select[uuid.UUID]:
     )
 
 
+@cache
 def pilots(document: type[Item] = Item) -> ColumnElement[bool]:
     """Whether the Item `document` is Pilot's (DB 296), as a query's
     condition on it: open, and awaiting its read; or a pass over it in
