@@ -4,17 +4,21 @@
  * backdrop close it. Its body keeps its scroll while what it shows is read again, and starts at
  * its top for each thing it shows. A segment in it goes to its block in its body, which flashes
  * (F33), and opened at a block it goes there once its body draws it; either opens the block's
- * collapsed section (F31.5). Its head carries Discuss, quoting what it shows (F39.1). On a phone it is the whole screen, with no maximize (F98.3). It takes
- * the focus as it opens, and again when what it shows replaces what had it, and gives it back as it
- * closes to what had it before, as a dialog does; the timeline under its backdrop takes none
- * meanwhile (the project's route).
+ * collapsed section (F31.5). Its head carries Discuss, quoting what it shows (F39.1). On a phone
+ * it is a view pushed over the tabs (F98.4): the whole screen over the head and the tabs, with no
+ * animation, no backdrop, no maximize and no cross, an arrow back at the left of its head where
+ * the head's drawer button stands; the arrow, Esc and Back take it off (`use-phone-tab.ts`). It
+ * takes the focus as it opens, and again when what it shows replaces what had it, and gives it
+ * back as it closes to what had it before, as a dialog does; the timeline under its backdrop takes
+ * none meanwhile (the project's route).
  */
 
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useContext, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
-import { Maximize2, Minimize2, X } from 'lucide-react';
+import { ArrowLeft, Maximize2, Minimize2, X } from 'lucide-react';
 import { blockKey, FlashContext, GoToContext, useFlashes } from '@/components/timeline/flash';
 import { SectionsContext, useSections } from '@/components/timeline/sections';
+import { PhoneViewContext } from '@/hooks/use-phone-tab';
 import { useEscape } from '@/lib/keys';
 import { cn } from '@/lib/utils';
 
@@ -23,13 +27,14 @@ interface OverlayProps {
   showing: string;
   /** A block of what it shows, to go to once its body draws it. */
   at?: { item: string; block: string } | null;
-  /** Before its titles: an attachment's way back to its document. */
+  /** Before its titles: an attachment's way back to its document, off a phone. */
   back?: ReactNode;
   /** Its head's titles: the title and the line under it. */
   titles: ReactNode;
   /** Its head's Discuss, once what it shows is read. */
   discuss?: ReactNode;
   foot: ReactNode;
+  /** Closes it: `useOverlayClose`'s. */
   onClose: () => void;
   /** Its body, the scroll container, for what it shows. */
   bodyRef?: RefObject<HTMLDivElement | null>;
@@ -37,6 +42,7 @@ interface OverlayProps {
 }
 
 export function Overlay({ showing, at = null, back = null, titles, discuss = null, foot, onClose, bodyRef, children }: OverlayProps) {
+  const view = useContext(PhoneViewContext) !== null;
   const [max, setMax] = useState(false);
   const sheet = useRef<HTMLElement>(null);
   const titlesId = useId();
@@ -89,7 +95,7 @@ export function Overlay({ showing, at = null, back = null, titles, discuss = nul
     <FlashContext.Provider value={{ fresh, flashed }}>
       <GoToContext.Provider value={goToSegment}>
         <SectionsContext.Provider value={sections}>
-          <div className="sheet-backdrop" onClick={onClose} data-testid="overlay.backdrop" />
+          {!view && <div className="sheet-backdrop" onClick={onClose} data-testid="overlay.backdrop" />}
           <section
             ref={sheet}
             className={cn('sheet', max && 'max')}
@@ -99,31 +105,48 @@ export function Overlay({ showing, at = null, back = null, titles, discuss = nul
             data-testid="overlay"
           >
             <div className="sheet-head" data-testid="overlay.head">
-              {back}
+              {view ? (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-icon view-back"
+                  onClick={onClose}
+                  title="Back"
+                  aria-label="Back"
+                  data-testid="overlay.back"
+                >
+                  <ArrowLeft className="icon" aria-hidden="true" />
+                </button>
+              ) : (
+                back
+              )}
               <div id={titlesId} className="titles">
                 {titles}
               </div>
               {discuss}
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm btn-icon maximize"
-                onClick={() => setMax(!max)}
-                title={resize}
-                aria-label={resize}
-                data-testid="overlay.maximize"
-              >
-                {max ? <Minimize2 className="icon" aria-hidden="true" /> : <Maximize2 className="icon" aria-hidden="true" />}
-              </button>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm btn-icon"
-                onClick={onClose}
-                title="Close (Esc)"
-                aria-label="Close"
-                data-testid="overlay.close"
-              >
-                <X className="icon" aria-hidden="true" />
-              </button>
+              {!view && (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm btn-icon maximize"
+                    onClick={() => setMax(!max)}
+                    title={resize}
+                    aria-label={resize}
+                    data-testid="overlay.maximize"
+                  >
+                    {max ? <Minimize2 className="icon" aria-hidden="true" /> : <Maximize2 className="icon" aria-hidden="true" />}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm btn-icon"
+                    onClick={onClose}
+                    title="Close (Esc)"
+                    aria-label="Close"
+                    data-testid="overlay.close"
+                  >
+                    <X className="icon" aria-hidden="true" />
+                  </button>
+                </>
+              )}
             </div>
             <div key={showing} ref={body} className="sheet-body" data-testid="overlay.body">
               <div className="column">{children}</div>

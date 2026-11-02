@@ -8,8 +8,9 @@
  * It stays live and keeps its scroll; a read that fails reads "The document did not load" (F113).
  * A done line's Open shows the document as it was done (F13.3), its answers closed (F31.2), a
  * finished project's included, with neither *Edited* nor Pilot's dots where Done fixed the text.
- * Switching projects closes it (F1.6), and on a phone it is the whole screen, with no maximize,
- * over the head and its drawer's button (F98.3). Esc closes what lies over it first. It takes the focus as it opens, keeps Tab off the
+ * Switching projects closes it (F1.6), and on a phone it is a view, the whole screen over the head
+ * and its drawer's button, with no maximize or cross, its arrow back taking it off (F98.4; the views
+ * whole in tests/projects/phone-views.spec.ts). Esc closes what lies over it first. It takes the focus as it opens, keeps Tab off the
  * timeline under its backdrop, and gives the focus back as it closes.
  */
 
@@ -499,7 +500,7 @@ test.describe('Esc over the overlay', () => {
 test.describe('On a phone', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test('the overlay is the whole screen, with no maximize', async ({ people, projects, shell, overlay }) => {
+  test('a document is a view, the whole screen, with no maximize or cross, its arrow back taking it off', async ({ page, people, projects, shell, overlay }) => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Phone'), members: [me.handle!] });
     const trip = await projects.place(id, { kind: 'document', title: 'The trip', text: TRIP });
@@ -512,11 +513,14 @@ test.describe('On a phone', () => {
     expect(box.width).toBe(390);
     expect(box.y).toBe(app.y);
     expect(box.y + box.height).toBe(app.y + app.height);
-    await expect(overlay.maximize).toBeHidden();
-    await expect(overlay.close).toBeVisible();
+    await expect(overlay.maximize).toHaveCount(0);
+    await expect(overlay.close).toHaveCount(0);
+    await overlay.back.click();
+    await expect(overlay.root).toHaveCount(0);
+    await expect(page).toHaveURL(`/projects/${id}`);
   });
 
-  test('the overlay lies over the head and its drawer’s button, which closed it gives back to switch projects', async ({
+  test('a document’s view lies over the head and its drawer’s button, which its arrow back gives back to switch projects', async ({
     page,
     people,
     projects,
@@ -539,7 +543,7 @@ test.describe('On a phone', () => {
         return button.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
       }),
     ).toBe(false);
-    await overlay.close.click();
+    await overlay.back.click();
     await expect(overlay.root).toHaveCount(0);
 
     await shell.drawerToggle.click();

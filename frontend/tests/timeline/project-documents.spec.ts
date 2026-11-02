@@ -9,8 +9,9 @@
  * none; a draft has none, nor a handbook (F129.2). A save shows live as it lands, Pilot's dots with
  * it until the turn ends, the project document's renaming the project, and once a stream that went
  * down comes back up. On a phone the Documents tab lists the handbook under the project document,
- * by its title, and neither the head nor the project's menu has it; it is the whole screen, over
- * the head and its drawer's button (F98.3), and switching projects closes it (F1.6).
+ * by its title, and neither the head nor the project's menu has it; it opens as a view, the whole
+ * screen over the head and its drawer's button, with no maximize or cross (F98.4), its arrow back
+ * taking it off, and switching projects closes it (F1.6).
  */
 
 import { randomUUID } from 'node:crypto';
@@ -427,7 +428,7 @@ test.describe('A stream that comes back up', () => {
 test.describe('On a phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
 
-  test('the Documents tab lists the handbook by its title right under the project document, opening it as the whole screen with no maximize; neither the head nor the project’s menu has it, nor a draft’s Documents', async ({
+  test('the Documents tab lists the handbook by its title right under the project document, opening it as a view, the whole screen with no maximize or cross; neither the head nor the project’s menu has it, nor a draft’s Documents', async ({
     page,
     people,
     projects,
@@ -468,8 +469,9 @@ test.describe('On a phone', () => {
     expect(box.width).toBe(390);
     expect(box.y).toBe(app.y);
     expect(box.y + box.height).toBe(app.y + app.height);
-    await expect(overlay.maximize).toBeHidden();
-    await expect(overlay.close).toBeVisible();
+    await expect(overlay.maximize).toHaveCount(0);
+    await expect(overlay.close).toHaveCount(0);
+    await expect(overlay.back).toBeVisible();
 
     await projectHead.open(draft);
     await phoneTabs.tab('documents').tap();
@@ -478,7 +480,7 @@ test.describe('On a phone', () => {
     await expect(panel.handbook.root).toHaveCount(0);
   });
 
-  test('lies over the head and its drawer’s button, which closed it gives back to switch projects', async ({
+  test('lies over the head and its drawer’s button, which its arrow back gives back to switch projects', async ({
     page,
     people,
     projects,
@@ -500,7 +502,7 @@ test.describe('On a phone', () => {
         return button.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
       }),
     ).toBe(false);
-    await overlay.close.click();
+    await overlay.back.click();
     await expect(overlay.root).toHaveCount(0);
 
     await shell.drawerToggle.click();

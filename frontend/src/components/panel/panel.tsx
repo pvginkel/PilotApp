@@ -95,7 +95,7 @@ type PhonePanelProps = Pick<PanelProps, 'projectId' | 'draft' | 'members' | 'tab
   documents: PanelDocuments;
 };
 
-/** On a phone the overlay lies over the panel's tab, whichever was opened last. */
+/** On a phone what a row opens is a view pushed over the tab. */
 const overlayOnTop = () => undefined;
 
 /** The panel on a phone: its tab alone, with no head (F98.3). */

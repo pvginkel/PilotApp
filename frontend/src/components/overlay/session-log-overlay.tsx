@@ -15,7 +15,6 @@
  */
 
 import { useMemo, useRef, type RefObject } from 'react';
-import { useNavigate } from '@tanstack/react-router';
 import { Check, CircleAlert, ScrollText, Square } from 'lucide-react';
 import { DiscussButton } from '@/components/chat/discuss-button';
 import { quoteOfItem } from '@/components/chat/discuss-quotes';
@@ -27,6 +26,7 @@ import { EnvironmentLink, LinkedText } from '@/components/shared/linked-text';
 import { Time } from '@/components/shared/time';
 import { useSseContext } from '@/contexts/sse-context';
 import { useChatStream } from '@/hooks/use-chat-stream';
+import { useOverlayClose } from '@/hooks/use-overlay-close';
 import { usePerson } from '@/hooks/use-self';
 import { useSessionTransport } from '@/hooks/use-session-transport';
 import { useStickyBottom } from '@/hooks/use-sticky-bottom';
@@ -48,8 +48,7 @@ interface SessionLogOverlayProps {
 }
 
 export function SessionLogOverlay({ projectId, sessionId }: SessionLogOverlayProps) {
-  const navigate = useNavigate();
-  const close = () => void navigate({ to: '/projects/$projectId', params: { projectId } });
+  const close = useOverlayClose(projectId);
   const { data, error } = useGetProjectsTimelineByProjectId({ path: { project_id: projectId } });
   const item = data?.items.find((each) => each.id === sessionId);
   const work = item?.work ?? undefined;

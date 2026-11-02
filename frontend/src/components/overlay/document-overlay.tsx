@@ -18,7 +18,7 @@
  */
 
 import type { ReactNode } from 'react';
-import { Link, useNavigate, useParams } from '@tanstack/react-router';
+import { Link, useParams } from '@tanstack/react-router';
 import { ArrowLeft, Check } from 'lucide-react';
 import { DiscussButton } from '@/components/chat/discuss-button';
 import { quoteOfAttachment, quoteOfItem } from '@/components/chat/discuss-quotes';
@@ -35,6 +35,7 @@ import { Edited } from '@/components/timeline/item-head';
 import { PilotWriting } from '@/components/timeline/writing';
 import { useItemDocument, type ItemDocument } from '@/hooks/use-document';
 import { useReviewed } from '@/hooks/use-marks';
+import { useOverlayClose } from '@/hooks/use-overlay-close';
 import { useArchived, type ProjectHead } from '@/hooks/use-projects';
 import { usePerson } from '@/hooks/use-self';
 import { attachmentIn, blocksOf, titleOf } from '@/hooks/use-timeline';
@@ -51,9 +52,8 @@ interface DocumentOverlayProps {
 }
 
 export function DocumentOverlay({ projectId, project, documentId, block, attachment }: DocumentOverlayProps) {
-  const navigate = useNavigate();
   const { handle } = usePerson();
-  const close = () => void navigate({ to: '/projects/$projectId', params: { projectId } });
+  const close = useOverlayClose(projectId);
   const { data, error } = useItemDocument(documentId);
   // An address may name an item of another project, or the opening, which has no text.
   const own = data !== undefined && data.project_id === projectId ? data : undefined;
@@ -67,7 +67,7 @@ export function DocumentOverlay({ projectId, project, documentId, block, attachm
       <Overlay
         showing={`attachment ${attachment}`}
         back={<Back projectId={projectId} documentId={documentId} />}
-        titles={headed && shown && <AttachmentTitles item={headed} attachment={shown} />}
+        titles={headed && shown && <AttachmentTitles item={headed} attachment={shown} document={{ projectId, documentId }} />}
         discuss={shown && <DiscussButton quote={quoteOfAttachment(shown)} testId="overlay.discuss" />}
         foot={null}
         onClose={close}
@@ -90,7 +90,7 @@ export function DocumentOverlay({ projectId, project, documentId, block, attachm
   );
 }
 
-/** An attachment's way back to its document: an arrow, no label. */
+/** An attachment's way back to its document, off a phone: an arrow, no label. */
 function Back({ projectId, documentId }: { projectId: string; documentId: string }) {
   return (
     <Link

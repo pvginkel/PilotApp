@@ -8,7 +8,7 @@
  * definition chat in the timeline's place with Create project at its end, Draft and Documents.
  * Every project opens on its Timeline, and a draft on its Chat, whatever panel the browser keeps for
  * it, which the phone neither reads nor changes. Discuss and *In the chat* show the Chat tab, a
- * draft's its Chat, an overlay taken off; an ask of the draft gone to shows the Draft tab at it.
+ * draft's its Chat, a view taken off; an ask of the draft gone to shows the Draft tab at it.
  * Back (F98.5): leaving the Timeline is one entry, a change between the other tabs none, so Back
  * from any of them shows the Timeline and Back there leaves the project; switching projects is an
  * entry; a reload keeps the tab.
@@ -304,7 +304,7 @@ test.describe('The tabs at the bottom on a phone', () => {
     expect(await page.evaluate(() => JSON.parse(localStorage.getItem('pilot')!).panels)).toEqual(kept);
   });
 
-  test('Discuss on an item, and in the overlay, shows the Chat tab with the quote in its composer, the overlay taken off', async ({
+  test('Discuss on an item, and in a view, shows the Chat tab with the quote in its composer, the view taken off', async ({
     people,
     projects,
     timeline,

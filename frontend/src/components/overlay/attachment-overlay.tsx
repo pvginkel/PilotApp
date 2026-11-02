@@ -1,7 +1,9 @@
 /**
  * An attachment in the overlay (F28.5), reader's material and never an item (F36). Its head is its
  * clip and title over "Attachment of “<item>”", with, opened from the item's document, an arrow
- * back to it, with no label, and Discuss, quoting it by its path in the project's folder (F39.1). Its body goes by its type: Markdown as a read-only document, its
+ * back to it, with no label, and Discuss, quoting it by its path in the project's folder (F39.1).
+ * On a phone, where the view's own arrow is Back, the document's title there is the link to it,
+ * Back to it where its view lies under the attachment's (F98.4). Its body goes by its type: Markdown as a read-only document, its
  * front matter left out and its fenced asks plain code, never blocks; a raster image inline from
  * its stream; an SVG inline only as an image, which runs no script, its text read from the stream
  * that serves it as a download; other text in a monospace block; anything else its title, its
@@ -11,7 +13,8 @@
  * "Attachment of the draft", or on an item.
  */
 
-import { useNavigate } from '@tanstack/react-router';
+import { useContext } from 'react';
+import { Link, useRouter } from '@tanstack/react-router';
 import { Download, Paperclip } from 'lucide-react';
 import { DiscussButton } from '@/components/chat/discuss-button';
 import { quoteOfAttachment } from '@/components/chat/discuss-quotes';
@@ -19,13 +22,14 @@ import { DidNotLoad, Overlay } from '@/components/overlay/overlay';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Markdown } from '@/components/shared/markdown';
 import { attachmentUrl, useAttachmentText } from '@/hooks/use-attachment';
+import { useOverlayClose } from '@/hooks/use-overlay-close';
+import { PhoneViewContext, type PhoneView } from '@/hooks/use-phone-tab';
 import { attachmentIn, hungById, titleOf, type Attachment, type TimelineItem } from '@/hooks/use-timeline';
 import { useGetProjectsTimelineByProjectId } from '@/lib/api/generated/hooks';
 
 /** An attachment of an item of the project's timeline, at the attachment's address under the item's. */
 export function ItemAttachmentOverlay({ projectId, itemId, attachmentId }: { projectId: string; itemId: string; attachmentId: string }) {
-  const navigate = useNavigate();
-  const close = () => void navigate({ to: '/projects/$projectId', params: { projectId } });
+  const close = useOverlayClose(projectId);
   // The timeline's read, which the timeline under it reports.
   const { data, error } = useGetProjectsTimelineByProjectId({ path: { project_id: projectId } });
   const item = data?.items.find((each) => each.id === itemId);
@@ -46,8 +50,7 @@ export function ItemAttachmentOverlay({ projectId, itemId, attachmentId }: { pro
 
 /** An attachment of the project, at its address under the project's, wherever it hangs. */
 export function ProjectAttachmentOverlay({ projectId, attachmentId }: { projectId: string; attachmentId: string }) {
-  const navigate = useNavigate();
-  const close = () => void navigate({ to: '/projects/$projectId', params: { projectId } });
+  const close = useOverlayClose(projectId);
   const { data, error } = useGetProjectsTimelineByProjectId({ path: { project_id: projectId } });
   const hung = data && hungById(data, attachmentId);
   const failed = error !== null || (data !== undefined && hung === undefined);
@@ -64,8 +67,16 @@ export function ProjectAttachmentOverlay({ projectId, attachmentId }: { projectI
   );
 }
 
+interface AttachmentTitlesProps {
+  item: TimelineItem | null;
+  attachment: Attachment;
+  /** The document it was opened from, by its address. */
+  document?: { projectId: string; documentId: string };
+}
+
 /** Its title over what it hangs on: its item, or none, a draft's material. */
-export function AttachmentTitles({ item, attachment }: { item: TimelineItem | null; attachment: Attachment }) {
+export function AttachmentTitles({ item, attachment, document }: AttachmentTitlesProps) {
+  const view = useContext(PhoneViewContext);
   return (
     <>
       <h2 title={attachment.title} data-testid="overlay.title">
@@ -74,6 +85,11 @@ export function AttachmentTitles({ item, attachment }: { item: TimelineItem | nu
       <div className="sub" data-testid="overlay.sub">
         {item === null ? (
           <span>Attachment of the draft</span>
+        ) : view !== null && document !== undefined ? (
+          <span>
+            Attachment of{' '}
+            <DocumentLink view={view} {...document} title={titleOf(item)} />
+          </span>
         ) : (
           <span>
             Attachment of “<LinkedText text={titleOf(item)} />”
@@ -81,6 +97,38 @@ export function AttachmentTitles({ item, attachment }: { item: TimelineItem | nu
         )}
       </div>
     </>
+  );
+}
+
+interface DocumentLinkProps {
+  view: PhoneView;
+  projectId: string;
+  documentId: string;
+  /** The document's title. */
+  title: string;
+}
+
+/** On a phone, an attachment's way to its document: Back to it where its view lies under the attachment's, else its view pushed. */
+function DocumentLink({ view, projectId, documentId, title }: DocumentLinkProps) {
+  const router = useRouter();
+  const to = '/projects/$projectId/documents/$documentId';
+  const params = { projectId, documentId };
+  const under = view.under === router.buildLocation({ to, params }).pathname;
+  return (
+    <Link
+      to={to}
+      params={params}
+      className="link"
+      title="Open the document"
+      onClick={(event) => {
+        if (!under) return;
+        event.preventDefault();
+        view.back();
+      }}
+      data-testid="overlay.document-link"
+    >
+      “{title}”
+    </Link>
   );
 }
 

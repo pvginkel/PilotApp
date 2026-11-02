@@ -149,6 +149,8 @@ test.describe('The usage halts', () => {
 
     await page.setViewportSize(PHONE);
     const lines = shell.goldBar.getByTestId('shell.gold-bar.line');
+    // The phone's frame draws its gold bar once the width has crossed.
+    await expect(lines).toHaveCount(3);
     expect(await lines.evaluateAll((each) => each.map((line) => line.getAttribute('data-condition')))).toEqual([
       'outage',
       'week_halt',

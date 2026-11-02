@@ -106,11 +106,15 @@
   .log-tail.failed { color: hsl(var(--destructive-text)); }
   .log-cue { margin-top: 6px; }
 
-  /* A phone: the whole screen, with no maximize (F98.3). */
+  /* A phone: a view pushed over the tabs, the whole screen over the head and the tabs (F98.4; the
+     mockup's 900px block). Its arrow back stands where the head's drawer button stands, 8px from
+     the left and the top, at the top however tall its head. */
   @media (max-width: 900px) {
-    .sheet { width: 100vw; }
+    .sheet { left: 0; right: 0; width: auto; max-width: none; border-left: 0; box-shadow: none; }
     .sheet-body .column { padding: 16px 16px 32px; }
-    .sheet-head { padding: 8px 10px 8px 16px; }
-    .sheet .maximize { display: none; }
+    .sheet-head { padding: 8px 12px 8px 8px; gap: 6px; }
+    .sheet-head .view-back { --h: 36px; flex: none; align-self: flex-start; }
+    .sheet-head .view-back .icon { width: 20px; height: 20px; }
+    .sheet-foot { padding: 10px 16px; }
   }
 }

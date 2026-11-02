@@ -19,7 +19,8 @@
  * document. While an overlay is open, the timeline under its backdrop takes no focus, nor the panel
  * where the overlay lies over it; the head's buttons do, the Documents button being how the panel
  * opens over the overlay below a wide window (F98.2). On a phone the screen is its own
- * (`PhoneProject`), its tabs at the bottom standing for the panel, whose state it leaves alone.
+ * (`PhoneProject`), its tabs at the bottom standing for the panel, whose state it leaves alone, and
+ * what the address opens in the overlay a view pushed over them (F98.4).
  */
 
 import { useEffect, useState, type ReactNode } from 'react';

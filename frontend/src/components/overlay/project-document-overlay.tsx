@@ -8,7 +8,6 @@
  * document did not load" (F113).
  */
 
-import { useNavigate } from '@tanstack/react-router';
 import { FileText, NotebookText, type LucideIcon } from 'lucide-react';
 import { DiscussButton } from '@/components/chat/discuss-button';
 import { quoteOfFile } from '@/components/chat/discuss-quotes';
@@ -18,6 +17,7 @@ import { Markdown } from '@/components/shared/markdown';
 import { DocumentBlock } from '@/components/timeline/block';
 import { PilotWriting } from '@/components/timeline/writing';
 import { useHandbook, useProjectDraft, type ProjectDocument } from '@/hooks/use-document';
+import { useOverlayClose } from '@/hooks/use-overlay-close';
 import type { ProjectHead } from '@/hooks/use-projects';
 
 interface ProjectDocumentOverlayProps {
@@ -67,8 +67,7 @@ interface ReadOnlyOverlayProps extends ProjectDocumentOverlayProps {
 }
 
 function ReadOnlyOverlay({ projectId, project, read: { data, error }, showing, path, role, icon: Icon }: ReadOnlyOverlayProps) {
-  const navigate = useNavigate();
-  const close = () => void navigate({ to: '/projects/$projectId', params: { projectId } });
+  const close = useOverlayClose(projectId);
   const failed = error !== null;
   const title = data?.title ?? role;
   return (

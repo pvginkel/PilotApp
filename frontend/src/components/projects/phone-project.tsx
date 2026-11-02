@@ -7,9 +7,10 @@
  * Draft are the side panel's tabs without its head (F38.1), the phone's Documents listing the
  * handbook under the project document; Plan the plan popover's content as a page (F3.7), which the
  * head's donut shows too. The Timeline, or a draft's Chat, keeps its place under the other tabs.
- * Discuss and *In the chat* anywhere on it show the Chat tab, a draft's its Chat, and an ask of the
- * draft gone to the Draft tab at it; where they stand in the overlay, it is taken off. The tab is
- * the entry's in the browser's history (`use-phone-tab.ts`).
+ * What opens from a tab is a view pushed over the head and the tabs (F98.4), a view opened from a
+ * view on top of it. Discuss and *In the chat* anywhere on it show the Chat tab, a draft's its
+ * Chat, and an ask of the draft gone to the Draft tab at it, every view taken off first. The tab
+ * and the views are the entry's in the browser's history (`use-phone-tab.ts`).
  */
 
 import type { ReactNode } from 'react';
@@ -26,7 +27,7 @@ import { discussIn, DiscussContext } from '@/hooks/use-discuss';
 import { DraftBlockContext, goToDraftBlock } from '@/hooks/use-draft-place';
 import { goToChat, InChatContext, type ChatPlace } from '@/hooks/use-in-chat';
 import { usePanelDocuments } from '@/hooks/use-panel';
-import { DRAFT_TABS, PROJECT_TABS, usePhoneTab, type PhoneTab } from '@/hooks/use-phone-tab';
+import { DRAFT_TABS, PhoneViewContext, PROJECT_TABS, usePhoneTab, type PhoneTab } from '@/hooks/use-phone-tab';
 import type { ProjectHead as Project } from '@/hooks/use-projects';
 import type { QuoteRef } from '@/lib/chat/quotes';
 import { cn } from '@/lib/utils';
@@ -35,17 +36,17 @@ interface PhoneProjectProps {
   projectId: string;
   /** The project's head, once read. */
   project: Project | undefined;
-  /** Whether an overlay the address opens lies over the screen. */
+  /** Whether a view the address opens lies over the screen. */
   overlaid: boolean;
   /** The item, or its block, the address opens the timeline at. */
   goneTo: { item: string; block: string | null } | null;
-  /** The overlays the address opens. */
+  /** The view the address opens. */
   children: ReactNode;
 }
 
 export function PhoneProject({ projectId, project, overlaid, goneTo, children }: PhoneProjectProps) {
   const draft = project?.state === 'draft';
-  const { tab, show } = usePhoneTab(projectId, draft, overlaid);
+  const { tab, show, views, back } = usePhoneTab(projectId, draft, overlaid);
   const documents = usePanelDocuments(projectId);
   const navigate = useNavigate();
   const chatTab = draft ? 'timeline' : 'chat';
@@ -72,7 +73,7 @@ export function PhoneProject({ projectId, project, overlaid, goneTo, children }:
         <DraftBlockContext.Provider value={toDraftBlock}>
           <div className="project">
             {project && (
-              <div className="project-main">
+              <div className="project-main" inert={overlaid}>
                 <PhoneHead project={project} onPlan={() => show('plan')} />
                 <div className="phone-page" data-tab={tab} data-testid="project.phone-page">
                   {draft ? (
@@ -94,7 +95,7 @@ export function PhoneProject({ projectId, project, overlaid, goneTo, children }:
                 <PhoneTabs projectId={projectId} draft={draft} tab={tab} count={documents.count} onTab={show} />
               </div>
             )}
-            {children}
+            <PhoneViewContext.Provider value={{ back, under: views.at(-2) ?? null }}>{children}</PhoneViewContext.Provider>
           </div>
         </DraftBlockContext.Provider>
       </InChatContext.Provider>
