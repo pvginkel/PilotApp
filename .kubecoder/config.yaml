@@ -75,7 +75,12 @@ services:
   # database and applies the migrations. The backend suite and Playwright (a
   # clone of a seed database per worker) create their own databases on the
   # same server (TEST_DATABASE_ADMIN_URL) and never touch the dev one.
-  - postgres
+  # Over the catalog's 512Mi: the frontend suite, run after the backend suite,
+  # OOMKilled it there at slice 036's P4 gate.
+  - use: postgres
+    resources:
+      limits:
+        memory: 1Gi
 
 ports:
   - name: frontend
