@@ -2024,3 +2024,43 @@ class TestWaitFiredRetry:
             'Cannot retry Checking "Slice 058 completes" because the wait it'
             " follows is done"
         )
+
+    @pytest.mark.usefixtures("placing")
+    def test_a_run_is_refused_while_another_run_of_its_wait_is_in_flight(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        person: User,
+    ) -> None:
+        """The batcher's rule: a wait has one run in flight. The wait's close
+        then withdraws the one held before its brief."""
+        wait = _waited(session, container, opened, person)
+        jobs = _jobs(container, starts)
+        failed = _ended(
+            session,
+            container,
+            session.get_one(models.Session, jobs.wait_fired(opened, wait).id),
+        )
+        _item_done(session, container, opened, person)
+        assert container.wait_service().fire_transition(WAIT_TRANSITION) == 1
+        held = session.get_one(models.Session, jobs.wait_fired(opened, wait).id)
+        assert (held.state_code, held.turns) == (SessionState.HELD, 0)
+
+        with pytest.raises(InvalidOperationException) as raised:
+            jobs.retry(failed.id)
+
+        assert raised.value.message == (
+            'Cannot retry Checking "Slice 058 completes" because another run of'
+            " the wait it follows is in flight"
+        )
+        container.wait_service().close(
+            opened,
+            session.get_one(models.Wait, wait.id),
+            session.scalars(select(User).where(User.kind_code == UserKind.AGENT)).one(),
+            failed.id,
+            "ANS-312 read Done at 09:40",
+        )
+        assert held.state_code is SessionState.STOPPED
+        assert session.get_one(Item, held.id).done_cause_code == "withdrawn"

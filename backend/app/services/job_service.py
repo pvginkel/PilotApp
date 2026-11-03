@@ -47,6 +47,7 @@ from app.services.pilot_server import unheld_token_hash
 from app.services.session_scope import STORE_REPO
 from app.services.session_start_service import SessionStartService
 from app.services.start_gate import JOB_KIND
+from app.services.wait_service import run_in_flight
 from app.services.work_status import work_moved
 
 SETUP_TITLE = "Setting up the project"
@@ -235,9 +236,10 @@ class JobService:
                 worker's run, is done (an Undo's withdrawal among it), was
                 retried already, waits for its nudge at the quota wall, is
                 neither failed nor stopped, has its stopped turn still ending,
-                follows an item open again or a wait that is done; its
-                project is finished or archived; or no controller or no store
-                environment is configured
+                follows an item open again, a wait that is done or a wait
+                with another run in flight; its project is finished or
+                archived; or no controller or no store environment is
+                configured
         """
         found = self.db.get(AgentSession, session_id)
         if found is None:
@@ -368,8 +370,10 @@ def retry_refusal(
             return "the item it follows is open again"
     if work.trigger_code is WorkTrigger.WAIT_FIRED:
         # A wait's run names its wait (DB 195), and a wait that is done gets
-        # no run.
+        # no run, nor one with a run in flight.
         assert work.trigger_item_id is not None
         if db.get_one(Item, work.trigger_item_id).done_at is not None:
             return "the wait it follows is done"
+        if db.scalar(select(run_in_flight(work.trigger_item_id))):
+            return "another run of the wait it follows is in flight"
     return None
