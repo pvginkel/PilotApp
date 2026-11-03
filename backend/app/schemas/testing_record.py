@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from pydantic import (
+    AwareDatetime,
     BaseModel,
     BeforeValidator,
     ConfigDict,
@@ -480,14 +481,14 @@ class InventedWaitCreateSchema(BaseModel):
         description="The states a card wait waits for; none for a timed wait",
         examples=[["Done"]],
     )
-    due_at: datetime | None = Field(
+    due_at: AwareDatetime | None = Field(
         default=None,
         description=(
             "A timed wait's due time, after `placed_at`; none for a card wait. "
             "Before now, it is due, and the waits' timer fires it at its next tick"
         ),
     )
-    placed_at: datetime | None = Field(
+    placed_at: AwareDatetime | None = Field(
         default=None,
         description=(
             "When it was added, before now, as a wait added then reads: the add's "

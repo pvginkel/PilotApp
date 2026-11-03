@@ -2811,6 +2811,32 @@ class TestCreateWait:
         assert response.status_code == 400
         assert _count(session, Wait) == 0
 
+    @pytest.mark.parametrize(
+        "spec",
+        [
+            {
+                "kind": "timed_wait",
+                "cards": None,
+                "states": None,
+                "due_at": "2099-10-20T09:05:00",
+            },
+            {"placed_at": "2026-10-20T09:00:00"},
+        ],
+    )
+    def test_a_time_without_its_offset_is_invalid(
+        self,
+        client: FlaskClient,
+        session: Session,
+        environment: Environment,
+        spec: dict[str, Any],
+    ) -> None:
+        project_id = _make(client, environment_id=environment.id)
+
+        response = client.post(_waits_path(project_id), json={**CARD_WAIT, **spec})
+
+        assert response.status_code == 400
+        assert _count(session, Wait) == 0
+
     def test_an_unknown_project_is_not_found(self, client: FlaskClient) -> None:
         response = client.post(_waits_path(NO_ROW), json=CARD_WAIT)
 
