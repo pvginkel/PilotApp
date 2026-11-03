@@ -9,7 +9,8 @@
  * the questions and the writer's reply (F52.2). *Edited* and the dots tell of the text as it
  * stands, so a document read as Done fixed it has neither; its foot "Done · <stamp> · <who>", naming who did it unless it was the person, or
  * Reviewed on an open review, or *Send answers* on an open document, which closes the overlay
- * (F28.4). Opened at a block, it goes to the block once it draws it (F33). Its attachments stand
+ * (F28.4), after the Cancel of a document a run of Pilot's put to the person while the run holds a
+ * block of another document (F28.9). Opened at a block, it goes to the block once it draws it (F33). Its attachments stand
  * between the lead and the text, each opening, at its address under the document's, in place of
  * the document, with an arrow back to it (F28.3, F28.5). A read that fails, or finds no document
  * of the project, reads "The document did not load" (F113), and so does a registered document
@@ -28,6 +29,7 @@ import { AttachmentBody, AttachmentTitles } from '@/components/overlay/attachmen
 import { Clarifications } from '@/components/overlay/clarification';
 import { DidNotLoad, Overlay } from '@/components/overlay/overlay';
 import { PilotStrip } from '@/components/overlay/pilot-strip';
+import { RunCancel } from '@/components/overlay/run-cancel';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Time } from '@/components/shared/time';
 import { ArchiveAnswers } from '@/components/timeline/archive-question';
@@ -183,8 +185,8 @@ function asDone(item: ItemDocument): boolean {
 }
 
 /**
- * What stands in the foot: how it was done, or what marks it done; for a one-ask item, a notice
- * or a document that is Pilot's, nothing.
+ * What stands in the foot: how it was done, or what marks it done, after the Cancel where it is
+ * offered; for a document that is Pilot's, nothing.
  */
 function footOf(item: ItemDocument, myHandle: string, onSent: () => void): ReactNode {
   if (item.done !== null) {
@@ -198,6 +200,18 @@ function footOf(item: ItemDocument, myHandle: string, onSent: () => void): React
     );
   }
   if (item.pilots_work !== null) return null;
+  const own = ownFoot(item, onSent);
+  if (item.cancel === null) return own;
+  return (
+    <>
+      <RunCancel itemId={item.id} cancel={item.cancel} />
+      {own}
+    </>
+  );
+}
+
+/** What marks an open document of the person's done by its kind: Reviewed, *Send answers*, or nothing. */
+function ownFoot(item: ItemDocument, onSent: () => void): ReactNode {
   if (item.kind === 'review') {
     return (
       <>

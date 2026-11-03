@@ -5,8 +5,8 @@
  * every other block answered, the document is Pilot's line, "Doing it" going to that work item
  * (F13.7), and opened it reads only under the gold strip, which links that work item and offers
  * *Stop and take over*, the take-over stopping that work; while the run doing it waits on the
- * person's answer to a document it registered, the strip links that document instead, with no Stop
- * (F28.9). Once the
+ * person's answer to a document it registered, the strip links that document instead, with no Stop,
+ * and that document's Cancel ends the run, the action the person's again at once (F28.9). Once the
  * work doing it is stopped, the action is the person's again, and their Done marks it done as any
  * action's Done, the claim gone; while that work is in flight the server takes no Done on it (DB
  * 295).
@@ -24,8 +24,13 @@ import { addressOf } from '../support/page-objects/timeline-page';
 const ROTATING = 'Rotating the CI token';
 const CLAIM_NOTE = 'Pilot rotates it under the standing grant.';
 const CUT_OVER_PATH = '/work/Example/cut-over.md';
+const CUT_OVER_TITLE = 'The cut-over';
+// A1's own section's heading, which a Cancel's button names it by.
+const TOKEN = 'The CI token';
 // The pass's claim, as it writes it on the action (design 3 §6.4).
-const CUT_OVER = `# The cut-over
+const CUT_OVER = `# ${CUT_OVER_TITLE}
+
+## ${TOKEN}
 
 \`\`\`action id=A1
 answer: Pilot does it
@@ -33,6 +38,8 @@ by: agent
 at: 2026-10-20T09:00:00Z
 note: ${CLAIM_NOTE}
 \`\`\`
+
+## The day
 
 \`\`\`decision id=D1
 options:
@@ -156,11 +163,12 @@ test.describe('A claimed action', () => {
     await expect(overlay.send).toBeEnabled();
   });
 
-  test('while the run doing it waits on the person’s answer to a document it registered, its document opened says so on the strip and links that document, with no Stop', async ({
+  test('while the run doing it waits on the person’s answer to a document it registered, its document opened says so on the strip and links that document, with no Stop; that document’s Cancel, saying it is part of the work on the first and naming the action, closes it, and the action is the person’s, live', async ({
     people,
     projects,
     controller,
     chats,
+    timeline,
     overlay,
     page,
   }) => {
@@ -192,6 +200,27 @@ test.describe('A claimed action', () => {
     await expect(page).toHaveURL(documentAddress(project, asking));
     await expect(overlay.title).toHaveText(ASK_TITLE);
     await expect(overlay.strip.root).toHaveCount(0);
+
+    await expect(overlay.cancel.line).toHaveText(`Pilot asks this as part of its work on ${CUT_OVER_TITLE}.`);
+    await expect(overlay.cancel.links).toHaveAttribute('href', documentAddress(project, document));
+    await expect(overlay.cancel.button).toHaveText(`Cancel and take back “${TOKEN}”`);
+    await overlay.cancel.button.click();
+    await expect(overlay.done).toBeVisible();
+    await expect(overlay.cancel.button).toHaveCount(0);
+    const cancelled = (await projects.item(project, asking)).done;
+    expect([cancelled?.cause, cancelled?.undo]).toEqual(['cancelled', false]);
+
+    await overlay.close.click();
+    await expect(timeline.item(asking).root).toHaveAttribute('data-state', 'done');
+    await expect(timeline.item(asking).undo).toHaveCount(0);
+    const item = timeline.item(document);
+    await expect(item.root).toHaveAttribute('data-state', 'open');
+    const action = item.blockAt('A1');
+    await expect(action.done).toBeEnabled();
+    await action.paste.fill('Rotated by hand.');
+    await action.done.click();
+    await expect(action.answered).toBeVisible();
+    await expect(action.claim).toHaveCount(0);
   });
 
   test('once the work doing it is stopped, a person’s Done marks it done as any action’s, the claim gone, and the document’s answers can be sent', async ({
