@@ -91,6 +91,32 @@ test.describe('A card wait', () => {
     await expect(item.wait.request).toBeEnabled();
     await expect(item.wait.request).toHaveAttribute('title', 'Check now');
   });
+
+  test('ends a firing’s line at its time when the run that took it failed, Pilot having done nothing with it', async ({
+    projects,
+    people,
+    timeline,
+    waits,
+    chats,
+    controller,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('Failed'), members: [me.handle!] });
+    const key = keyOf();
+    const wait = await waits.add(id, { kind: 'card_wait', title: 'The card is done', cards: [`${key}-2`], states: ['Done'] });
+    await timeline.open(id);
+    const item = timeline.item(wait);
+
+    expect(await waits.transition({ card: `${key}-2`, from: 'In Progress', to: 'Done', by: 'pieter' })).toBe(1);
+    await expect(item.wait.firings).toHaveText([new RegExp(`^${key}-2 → Done · ${CLOCK} · Pilot’s turn$`)]);
+
+    const opened = await chats.opening(id);
+    await waits.run(wait);
+    const session = await opened();
+    await controller.finish(chats.store, session, 'error', 'The model is overloaded.');
+    await expect(item.wait.firings).toHaveText([new RegExp(`^${key}-2 → Done · ${CLOCK}$`)]);
+    await expect(item.root.getByTestId('timeline.wait.outcome')).toHaveCount(0);
+  });
 });
 
 test.describe('The request’s button', () => {
