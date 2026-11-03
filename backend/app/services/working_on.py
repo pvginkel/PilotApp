@@ -461,11 +461,13 @@ def pilots(document: type[Item] = Item) -> ColumnElement[bool]:
     )
 
 
-def _documents_of(work_id: ColumnElement[uuid.UUID]) -> Select[uuid.UUID]:
-    """The open registered documents of the run the Work `work_id` begins,
-    in timeline order."""
+def _documents_of(
+    work_id: ColumnElement[uuid.UUID] | QueryableAttribute[uuid.UUID | None],
+    registered: type[Item],
+) -> Select[uuid.UUID]:
+    """The open registered documents `registered` of the run the Work
+    `work_id` begins, in timeline order."""
     document = aliased(Document)
-    registered = aliased(Item)
     return (
         select(registered.id)
         .join(document, document.id == registered.id)
@@ -483,7 +485,7 @@ def _asked_in(work_id: ColumnElement[uuid.UUID]) -> ColumnElement[uuid.UUID]:
     """The first open registered document of the run `work_id` begins on the
     timeline: while the run holds a Block with nothing of it in flight, the
     one the person answers."""
-    return _documents_of(work_id).limit(1).scalar_subquery()
+    return _documents_of(work_id, aliased(Item)).limit(1).scalar_subquery()
 
 
 def holds(db: Session, document_ids: Collection[uuid.UUID]) -> Holds:
@@ -635,8 +637,9 @@ class TakenBack:
 @dataclass(frozen=True)
 class Cancel:
     """What a Cancel on an open registered document of a worker's run that
-    is the person's reads (F28.9; DB 297): what the run holds, and whether
-    something of it is in flight."""
+    is the person's reads (F28.9; DB 297): what the run holds, whether
+    something of it is in flight, and whether Pilot works on one of its
+    documents."""
 
     run_id: uuid.UUID
     """The work item that registered the document, of the run it ends."""
@@ -645,11 +648,16 @@ class Cancel:
     going_on: bool
     """Something of the run in flight, a document of it awaiting its read
     among them."""
+    pilots_in_run: bool
+    """An open document of the run is Pilot's, or has a Block held: every
+    document a Cancel closes is the person's, with no Block held (DB 295,
+    297)."""
 
     @property
     def offered(self) -> bool:
-        """The run holds a Block and nothing of it is in flight."""
-        return bool(self.takes_back) and not self.going_on
+        """The run holds a Block, nothing of it is in flight, and Pilot works
+        on none of its documents."""
+        return bool(self.takes_back) and not self.going_on and not self.pilots_in_run
 
 
 def cancels(db: Session, item_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, Cancel]:
@@ -694,16 +702,42 @@ def cancels(db: Session, item_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, Can
             mine.append(TakenBack(row.block_id, row.document_id, row.research))
         if row.going_on:
             going.add(row.id)
+    pilots_in = _pilots_in_runs(db, set(runs.values()))
     return {
-        item_id: Cancel(run_id, tuple(taken[item_id]), item_id in going)
+        item_id: Cancel(
+            run_id, tuple(taken[item_id]), item_id in going, run_id in pilots_in
+        )
         for item_id, run_id in runs.items()
     }
+
+
+def _pilots_in_runs(db: Session, run_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
+    """Which of the runs the Works `run_ids` begin have an open registered
+    document that is Pilot's, or with a Block held (DB 295, 296): one that a
+    Cancel's close would take from Pilot's work, another run's claim or
+    research."""
+    run = aliased(AgentSession)
+    held_blocks = (
+        select(Block.id)
+        .where(Block.document_id == Item.id, held())
+        .correlate_except(Block)
+    )
+    return set(
+        db.scalars(
+            select(run.id).where(
+                run.id.in_(list(run_ids)),
+                _documents_of(run.id, Item)
+                .where(or_(pilots(), held_blocks.exists()))
+                .exists(),
+            )
+        )
+    )
 
 
 def run_documents(db: Session, run_id: uuid.UUID) -> list[uuid.UUID]:
     """The open registered documents of the run of the work item `run_id`,
     in timeline order: what its Cancel closes (DB 298)."""
-    return list(db.scalars(_documents_of(literal(run_id))))
+    return list(db.scalars(_documents_of(literal(run_id), aliased(Item))))
 
 
 def handed_back_in(db: Session, run_id: uuid.UUID) -> list[tuple[uuid.UUID, str, str]]:

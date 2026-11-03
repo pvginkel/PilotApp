@@ -24,6 +24,7 @@ from app.services.item_service import (
     NOT_PILOTS,
     PILOTS_ITEM,
     RUN_IN_FLIGHT,
+    RUN_PILOTS,
     UNREAD,
     WAITS_ON,
 )
@@ -987,6 +988,29 @@ class TestItemServiceCancel:
         assert refused.value.cause == RUN_IN_FLIGHT
         assert asked.done_at is None
         assert camp.of(cut_over) is not None
+
+    @pytest.mark.parametrize(
+        "text", [CLAIMED_ALONE, CLAIMED], ids=["pilots", "the persons"]
+    )
+    def test_one_whose_run_has_a_document_another_run_holds_is_refused(
+        self, container: ServiceContainer, camp: Camp, text: str
+    ) -> None:
+        # Alone, the run's other document is Pilot's; beside A2, it is the
+        # person's, its A1 held all the same.
+        cut_over, doing = _claimed(camp, CLAIMED_ALONE)
+        asked, actions = camp.registered(doing, QUESTION), camp.registered(doing, text)
+        camp.ended(doing)
+        camp.ended(camp.job_after(doing))
+        third = camp.worker(conversation="conversation-3")
+        camp.claim(actions, "A1", third)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.item_service().cancel(ADA, asked.id)
+
+        assert refused.value.cause == RUN_PILOTS
+        assert (asked.done_at, actions.done_at) == (None, None)
+        assert camp.of(cut_over) is not None
+        assert third.state_code == SessionState.RUNNING
 
     def test_a_document_that_is_pilots_is_refused(
         self, container: ServiceContainer, camp: Camp

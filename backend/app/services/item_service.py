@@ -60,6 +60,11 @@ RUN_IN_FLIGHT = "something of its run is in flight"
 """Why a Cancel is refused while the server goes on with the run by itself
 (DB 294, 297)."""
 
+RUN_PILOTS = "Pilot is working on another document of its run, or a block of one"
+"""Why a Cancel is refused while one of the run's open documents is Pilot's
+or has a held block, which its close would take from Pilot's work (DB 295,
+297)."""
+
 
 class ItemService:
     def __init__(
@@ -254,7 +259,8 @@ class ItemService:
             InvalidOperationException: the caller has not chosen a handle;
                 the item is done, or no document a work item's run
                 registered; it is Pilot's; its run holds no block of another
-                document, or something of it is in flight; or the project is
+                document, something of it is in flight, or another of its
+                documents is Pilot's or has a held block; or the project is
                 archived.
         """
         item = self._item(item_id)
@@ -274,6 +280,8 @@ class ItemService:
             raise InvalidOperationException(operation, HOLDS_NOTHING)
         if reading.going_on:
             raise InvalidOperationException(operation, RUN_IN_FLIGHT)
+        if reading.pilots_in_run:
+            raise InvalidOperationException(operation, RUN_PILOTS)
         self.record_service.cancel(
             project, run_documents(self.db, reading.run_id), person, operation
         )

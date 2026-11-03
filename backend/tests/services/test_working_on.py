@@ -555,8 +555,8 @@ class TestACancel:
 
         # The held document is Pilot's, and a work item no document.
         assert found == {
-            asked.id: Cancel(doing.id, taken, False),
-            report.id: Cancel(doing.id, taken, False),
+            asked.id: Cancel(doing.id, taken, False, False),
+            report.id: Cancel(doing.id, taken, False, False),
         }
         assert found[asked.id].offered
 
@@ -618,6 +618,22 @@ class TestACancel:
         assert reading[asked.id].going_on
         assert not reading[asked.id].offered
 
+    def test_it_is_not_offered_while_another_run_holds_a_block_of_the_runs(
+        self, camp: Camp
+    ) -> None:
+        _, doing, asked = self._asking(camp)
+        actions = camp.registered(doing, CLAIMED)
+        self._waits(camp, doing)
+        third = camp.worker(conversation="conversation-3")
+        camp.claim(actions, "A1", third)
+
+        reading = cancels(camp.session, [asked.id])[asked.id]
+
+        assert (reading.going_on, reading.pilots_in_run) == (False, True)
+        assert not reading.offered
+        self._waits(camp, third)
+        assert cancels(camp.session, [asked.id])[asked.id].offered
+
     def test_it_is_not_offered_on_a_document_of_a_run_that_holds_nothing(
         self, camp: Camp
     ) -> None:
@@ -628,7 +644,7 @@ class TestACancel:
 
         reading = cancels(camp.session, [pitch.id])
 
-        assert reading == {pitch.id: Cancel(writer.id, (), False)}
+        assert reading == {pitch.id: Cancel(writer.id, (), False, False)}
         assert not reading[pitch.id].offered
 
     def test_the_runs_documents_follow_its_conversation(
