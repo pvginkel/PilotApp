@@ -70,6 +70,9 @@
   .sheet-foot:has(> .run-cancel-line) { flex-wrap: wrap; row-gap: 6px; }
   .run-cancel-line { flex-basis: 100%; margin: 0; font-size: var(--text-sm); color: hsl(var(--muted-foreground)); }
   .run-cancel-line .link { font-weight: 600; }
+  /* The button names what it takes back whole, its words wrapping where the foot is narrower; the
+     padding keeps one line at the button's height. */
+  .sheet-foot .run-cancel { height: auto; padding-block: calc((var(--h) - 3px - 1.4em) / 2); line-height: 1.4; text-align: left; white-space: normal; }
 
   /* The strip under a document's head while it is Pilot's (pilot-strip.tsx; the mockup's
      `.pilot-strip`): one line, gold as the gold bar is, *Stop and take over* at its end. */

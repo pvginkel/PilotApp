@@ -28,9 +28,9 @@ const CUT_OVER_TITLE = 'The cut-over';
 // A1's own section's heading, which a Cancel's button names it by.
 const TOKEN = 'The CI token';
 // The pass's claim, as it writes it on the action (design 3 §6.4).
-const CUT_OVER = `# ${CUT_OVER_TITLE}
+const cutOver = (heading: string) => `# ${CUT_OVER_TITLE}
 
-## ${TOKEN}
+## ${heading}
 
 \`\`\`action id=A1
 answer: Pilot does it
@@ -60,17 +60,17 @@ interface Fixtures {
 }
 
 /**
- * The cut-over, registered by a work item's run in a project of the signed-in person's, read at the
- * run's end, the pass after it ended, its action A1 claimed, and the work item that does it placed;
- * answers their ids.
+ * The cut-over, A1 under `heading`, registered by a work item's run in a project of the signed-in
+ * person's, read at the run's end, the pass after it ended, its action A1 claimed, and the work item
+ * that does it placed; answers their ids.
  */
-async function claimed({ people, projects, controller, chats }: Fixtures) {
+async function claimed({ people, projects, controller, chats }: Fixtures, heading = TOKEN) {
   const me = await people.signIn();
   const project = await projects.make({ name: makeUnique('Claimed'), members: [me.handle!] });
   const work = await projects.startWork(project, { title: 'Planning the cut-over', brief: 'Plan the cut-over.', cwd: '/work/Example' });
   await expect.poll(async () => (await projects.work(project, work)).state).toBe('running');
   const { id: environment } = await projects.environment(project, work);
-  await controller.putFile(environment, CUT_OVER_PATH, CUT_OVER);
+  await controller.putFile(environment, CUT_OVER_PATH, cutOver(heading));
   const document = await projects.register(work, CUT_OVER_PATH);
   const passed = await chats.passing(project);
   await controller.finish(environment, 'claude-1');
@@ -83,6 +83,34 @@ async function claimed({ people, projects, controller, chats }: Fixtures) {
     claims: [`${document}/A1`],
   });
   return { project, document, rotating };
+}
+
+/**
+ * The cut-over claimed, D1 answered, and the work doing A1 registering a question to the person at
+ * its turn's end, read, the pass after it ended, so that the run waits on their answer; answers the
+ * ids, the question's `asking`.
+ */
+async function waiting(fixtures: Fixtures, heading = TOKEN) {
+  const { projects, controller, chats } = fixtures;
+  const { project, document, rotating } = await claimed(fixtures, heading);
+  await projects.answer(document, 'D1', 'Friday');
+  await expect.poll(async () => (await projects.work(project, rotating)).state).toBe('running');
+  const { id: environment } = await projects.environment(project, rotating);
+  let session = '';
+  await expect
+    .poll(async () => {
+      session = (await controller.sessionViews(environment)).find((each) => each.working)?.name ?? '';
+      return session;
+    })
+    .not.toBe('');
+  await controller.putFile(environment, ASK_PATH, ASK);
+  const asking = await projects.register(rotating, ASK_PATH);
+  const passed = await chats.passing(project);
+  await controller.finish(environment, session);
+  await expect.poll(async () => (await projects.item(project, asking)).awaiting_read).toBe(false);
+  await passed();
+  await expect.poll(async () => (await projects.item(project, document)).pilots_work?.doing).toBe('waiting_on_answer');
+  return { project, document, asking };
 }
 
 test.describe('A claimed action', () => {
@@ -172,24 +200,7 @@ test.describe('A claimed action', () => {
     overlay,
     page,
   }) => {
-    const { project, document, rotating } = await claimed({ people, projects, controller, chats });
-    await projects.answer(document, 'D1', 'Friday');
-    await expect.poll(async () => (await projects.work(project, rotating)).state).toBe('running');
-    const { id: environment } = await projects.environment(project, rotating);
-    let session = '';
-    await expect
-      .poll(async () => {
-        session = (await controller.sessionViews(environment)).find((each) => each.working)?.name ?? '';
-        return session;
-      })
-      .not.toBe('');
-    await controller.putFile(environment, ASK_PATH, ASK);
-    const asking = await projects.register(rotating, ASK_PATH);
-    const passed = await chats.passing(project);
-    await controller.finish(environment, session);
-    await expect.poll(async () => (await projects.item(project, asking)).awaiting_read).toBe(false);
-    await passed();
-    await expect.poll(async () => (await projects.item(project, document)).pilots_work?.doing).toBe('waiting_on_answer');
+    const { project, document, asking } = await waiting({ people, projects, controller, chats });
 
     await overlay.open(project, document);
     await expect(overlay.strip.root).toHaveAttribute('data-doing', 'waiting_on_answer');
@@ -250,5 +261,27 @@ test.describe('A claimed action', () => {
     await expect(item.send).toBeEnabled();
     await item.send.click();
     await expect(item.root).toHaveAttribute('data-state', 'done');
+  });
+});
+
+test.describe('A claimed action on a phone', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('while the run doing it waits on the person’s answer to a document it registered, that document’s Cancel names the action whole, its words wrapping inside the foot', async ({
+    people,
+    projects,
+    controller,
+    chats,
+    overlay,
+  }) => {
+    const heading = 'Rotate the CI token on Jenkins and in GitHub Actions';
+    const { project, asking } = await waiting({ people, projects, controller, chats }, heading);
+
+    await overlay.open(project, asking);
+    await expect(overlay.cancel.button).toHaveText(`Cancel and take back “${heading}”`);
+    const foot = (await overlay.foot.boundingBox())!;
+    const button = (await overlay.cancel.button.boundingBox())!;
+    expect(button.x + button.width).toBeLessThanOrEqual(foot.x + foot.width);
+    expect(await overlay.cancel.button.evaluate((each) => each.scrollWidth <= each.clientWidth)).toBe(true);
   });
 });

@@ -45,7 +45,7 @@ export function RunCancel({ itemId, cancel }: { itemId: string; cancel: Cancel }
       </p>
       <button
         type="button"
-        className="btn"
+        className="btn run-cancel"
         onClick={run}
         // From the click until the document is read back as done, which takes the button away.
         disabled={mutation.isPending || mutation.isSuccess || archived}
