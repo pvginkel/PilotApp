@@ -4,7 +4,10 @@
  * has read it (review 7). Meanwhile, and while the pass after that turn runs, it is Pilot's line
  * (F13.7): a dashed circle in its kind's place, its title, what Pilot does on it going to the work
  * that does it, the pulse while the pass runs; then published as written, its title its text's,
- * its kind's icon back, live. A read that
+ * its kind's icon back, live. Opened meanwhile, it reads only, under the gold strip saying what
+ * Pilot does on it (F28.9): awaiting its read, that nothing of it has been read yet, with no Stop;
+ * under its pass, *Stop and take over*, which stops the pass, shown stopped with Retry, and hands
+ * every document the pass covers to the person, live. A read that
  * fails keeps its file's name and no text, *Did not load* beside it: it opens to "The document did
  * not load", closes with Reviewed, and its work item's session log says why (ruling D1). Its close
  * is written back to its file, and the close that leaves none of the run's documents open
@@ -16,6 +19,7 @@
 
 import { test, expect } from '../support/fixtures';
 import type { Chats } from '../support/chats';
+import { coloursOf, hue } from '../support/contrast';
 import type { Controller } from '../support/controller';
 import { makeUnique } from '../support/helpers';
 import type { People } from '../support/people';
@@ -131,7 +135,7 @@ async function continued(projects: Projects, project: string, continuation: stri
 }
 
 test.describe('A registered document', () => {
-  test('is Pilot’s line until its run’s end reads it and the pass after it ends: its file’s name, “Awaiting the run” going to the work item, no pulse and no Open, and no close in the overlay; then its text’s title, Open, and “Pre-ruling” pulsing, opening the pass’s session log, the pass’s own line beside it; then its kind’s icon on a published card, live', async ({
+  test('is Pilot’s line until its run’s end reads it and the pass after it ends: its file’s name, “Awaiting the run” going to the work item, no pulse and no Open, and in the overlay the strip saying nothing of it has been read yet, with no Stop and no close; then its text’s title, Open, and “Pre-ruling” pulsing, opening the pass’s session log, the pass’s own line beside it; then its kind’s icon on a published card, live', async ({
     people,
     projects,
     controller,
@@ -147,9 +151,12 @@ test.describe('A registered document', () => {
 
     await overlay.open(project, survey);
     await expect(overlay.title).toHaveText('survey.md');
-    await expect(overlay.failed).toHaveText('The document did not load.');
-    await expect(overlay.reviewed).toHaveCount(0);
-    await expect(overlay.send).toHaveCount(0);
+    await expect(overlay.strip.root).toHaveAttribute('data-doing', 'awaiting_run');
+    await expect(overlay.strip.text).toHaveText('Nothing of this document has been read yet.');
+    await expect(overlay.strip.stop).toHaveCount(0);
+    await expect(overlay.unread).toHaveText('Its text shows here once Pilot has read it.');
+    await expect(overlay.failed).toHaveCount(0);
+    await expect(overlay.foot).toHaveCount(0);
 
     await timeline.open(project);
     await deploymentSse.ensureConnected();
@@ -236,6 +243,66 @@ test.describe('A registered document', () => {
     await expect(timeline.item(push).writerAsked).toHaveText('Pilot asked the writer about C1');
   });
 
+  test('opened while its pass pre-rules it reads only, under the gold strip: what Pilot does and Stop and take over, every control drawn and taking nothing, no foot; Stop and take over stops the pass, shown stopped with Retry, and every document the pass covers is the person’s, live', async ({
+    people,
+    projects,
+    controller,
+    chats,
+    timeline,
+    overlay,
+    deploymentSse,
+    page,
+  }) => {
+    const { project, work, environment } = await running({ people, projects });
+    const kit = await registered(controller, projects, environment, work, KIT_PATH, KIT);
+    const pitch = await registered(controller, projects, environment, work, PITCH_PATH, PITCH);
+    const pass = await chats.pass(project);
+    await endTurn(controller, environment);
+    await pass.running();
+    const job = await passOf(projects, project);
+
+    await overlay.open(project, kit);
+    await deploymentSse.ensureConnected();
+    await expect(overlay.title).toHaveText('The kit');
+    await expect(overlay.strip.root).toHaveAttribute('data-doing', 'pre_ruling');
+    await expect(overlay.strip.text).toHaveText(
+      'Pilot is pre-ruling this document: it settles what it may, and what is left comes to you.',
+    );
+    await expect(overlay.strip.link).toHaveCount(0);
+    await expect(overlay.strip.stop).toHaveText('Stop and take over');
+    await expect(overlay.strip.stop).toBeEnabled();
+    const dome = overlay.blockAt('D1').option('Dome');
+    await expect(overlay.blockAt('D1').options).toHaveCount(2);
+    await expect(dome).toBeDisabled();
+    await expect(overlay.blocks.locator('button.option:enabled')).toHaveCount(0);
+    await expect(overlay.foot).toHaveCount(0);
+    // Under the head, over the body.
+    const head = (await overlay.head.boundingBox())!;
+    const strip = (await overlay.strip.root.boundingBox())!;
+    const body = (await overlay.body.boundingBox())!;
+    expect(strip.y).toBeCloseTo(head.y + head.height, 0);
+    expect(body.y).toBeCloseTo(strip.y + strip.height, 0);
+    // Gold, as the gold bar is: its words at 4.5:1 or better on it, in either theme.
+    for (const scheme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme: scheme });
+      await expect(page.locator('html')).toHaveAttribute('data-theme', scheme);
+      const { ratio, background } = await coloursOf(overlay.strip.root);
+      expect(ratio, `the strip's contrast in ${scheme}`).toBeGreaterThanOrEqual(4.5);
+      expect(Math.abs(hue(background) - 44), `the strip's hue in ${scheme}`).toBeLessThan(5);
+    }
+
+    await overlay.strip.stop.click();
+    await expect(overlay.strip.root).toHaveCount(0);
+    await expect(dome).toBeEnabled();
+    await expect(overlay.send).toBeVisible();
+    const stopped = timeline.item(job).work;
+    await expect(stopped.retry).toBeVisible();
+    expect((await projects.work(project, job)).state).toBe('stopped');
+    expect((await projects.item(project, pitch)).pilots_work).toBeNull();
+    await dome.click();
+    await expect(overlay.blockAt('D1').answered).toBeVisible();
+  });
+
   test('whose read at its run’s end fails keeps its file’s name and no text, “Did not load” beside it, opens to “The document did not load”, closes with Reviewed, and its session log says why', async ({
     people,
     projects,
@@ -271,6 +338,7 @@ test.describe('A registered document', () => {
     await expect(page).toHaveURL(documentAddress(project, survey));
     await expect(overlay.title).toHaveText('survey.md');
     await expect(overlay.failed).toHaveText('The document did not load.');
+    await expect(overlay.strip.root).toHaveCount(0);
     await expect(overlay.reviewed).toBeVisible();
     await overlay.close.click();
 
@@ -382,5 +450,32 @@ test.describe('A registered document on a phone', () => {
     const button = (await item.pilots.root.boundingBox())!;
     expect(button.y).toBeGreaterThanOrEqual(title.y + title.height - 1);
     expect(button.x).toBeLessThan(title.x + 10);
+  });
+
+  test('opened while its pass pre-rules it has the strip under its head across the screen, Stop and take over under its words at the right', async ({
+    people,
+    projects,
+    controller,
+    chats,
+    overlay,
+  }) => {
+    const { project, work, environment } = await running({ people, projects });
+    const kit = await registered(controller, projects, environment, work, KIT_PATH, KIT);
+    const pass = await chats.pass(project);
+    await endTurn(controller, environment);
+    await pass.running();
+
+    await overlay.open(project, kit);
+    await expect(overlay.strip.stop).toBeVisible();
+    const head = (await overlay.head.boundingBox())!;
+    const strip = (await overlay.strip.root.boundingBox())!;
+    const words = (await overlay.strip.text.boundingBox())!;
+    const stop = (await overlay.strip.stop.boundingBox())!;
+    expect(strip.y).toBeCloseTo(head.y + head.height, 0);
+    expect(strip.x).toBe(head.x);
+    expect(strip.width).toBe(head.width);
+    expect(stop.y).toBeGreaterThanOrEqual(words.y + words.height - 1);
+    expect(stop.x + stop.width).toBeCloseTo(strip.x + strip.width - 14, 0);
+    await pass.end();
   });
 });

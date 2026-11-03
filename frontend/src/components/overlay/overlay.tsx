@@ -4,7 +4,8 @@
  * backdrop close it. Its body keeps its scroll while what it shows is read again, and starts at
  * its top for each thing it shows. A segment in it goes to its block in its body, which flashes
  * (F33), and opened at a block it goes there once its body draws it; either opens the block's
- * collapsed section (F31.5). Its head carries Discuss, quoting what it shows (F39.1). On a phone
+ * collapsed section (F31.5). Its head carries Discuss, quoting what it shows (F39.1); a strip under its head, where what
+ * it shows has one, says what Pilot does on it (F28.9). On a phone
  * it is a view pushed over the tabs (F98.4): the whole screen over the head and the tabs, with no
  * animation, no backdrop, no maximize and no cross, an arrow back at the left of its head where
  * the head's drawer button stands; the arrow, Esc and Back take it off (`use-phone-tab.ts`). It
@@ -33,6 +34,8 @@ interface OverlayProps {
   titles: ReactNode;
   /** Its head's Discuss, once what it shows is read. */
   discuss?: ReactNode;
+  /** Under its head: what Pilot does on a document that is Pilot's. */
+  strip?: ReactNode;
   foot: ReactNode;
   /** Closes it: `useOverlayClose`'s. */
   onClose: () => void;
@@ -41,7 +44,7 @@ interface OverlayProps {
   children: ReactNode;
 }
 
-export function Overlay({ showing, at = null, back = null, titles, discuss = null, foot, onClose, bodyRef, children }: OverlayProps) {
+export function Overlay({ showing, at = null, back = null, titles, discuss = null, strip = null, foot, onClose, bodyRef, children }: OverlayProps) {
   const view = useContext(PhoneViewContext) !== null;
   const [max, setMax] = useState(false);
   const sheet = useRef<HTMLElement>(null);
@@ -148,6 +151,7 @@ export function Overlay({ showing, at = null, back = null, titles, discuss = nul
                 </>
               )}
             </div>
+            {strip}
             <div key={showing} ref={body} className="sheet-body" data-testid="overlay.body">
               <div className="column">{children}</div>
             </div>

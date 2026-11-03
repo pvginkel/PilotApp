@@ -4,7 +4,7 @@
  * status icon (F1.3, F141.1), and a step's standing in the plan popover and in a work item's progress (F3.1, F145.3). How a work item's session reads: its one line on the
  * timeline (F26.1, F26.2, F125), why the gate holds its start (F26.1), why it stopped when no one
  * of the app's people stopped it (F71, F135.6), its session log's tail (F69.2), and a job's line withdrawn by an Undo (F14.1). What Pilot
- * does on an item that is Pilot's (F13.7). How a condition that holds all work reads
+ * does on an item that is Pilot's, on its line (F13.7) and on the strip over it opened (F28.9). How a condition that holds all work reads
  * on the gold bar (F125, F135.7), and the week's halt's overrule (F135.2).
  */
 
@@ -215,6 +215,34 @@ export function pilotsDoingLabel(doing: Doing): string {
     default: {
       const unknown: never = doing;
       return String(unknown);
+    }
+  }
+}
+
+/**
+ * What Pilot does on a document that is Pilot's, as the strip over it opened says it (F28.9): the
+ * words before what the strip links, the work item doing it or the document awaiting the person's
+ * answer, and the words after it; `read`, whether the document has a text.
+ */
+export function pilotsStripWords(doing: Doing, read: boolean): { before: string; after: string } {
+  switch (doing) {
+    case 'awaiting_run':
+      return read
+        ? { before: 'Pilot goes over this document once the other documents its run registered are read.', after: '' }
+        : { before: 'Nothing of this document has been read yet.', after: '' };
+    case 'pre_ruling':
+      return { before: 'Pilot is pre-ruling this document: it settles what it may, and what is left comes to you.', after: '' };
+    case 'asking_writer':
+      return { before: 'Pilot asked the writer about this document and waits for the reply, then goes over it again.', after: '' };
+    case 'doing':
+      return { before: 'Pilot does what is open here in ', after: '; its Done comes with the result.' };
+    case 'researching':
+      return { before: 'Pilot has a fact this asks about checked in ', after: ' before it rules.' };
+    case 'waiting_on_answer':
+      return { before: 'Pilot waits on your answer to ', after: ' before it goes on with what is open here.' };
+    default: {
+      const unknown: never = doing;
+      return { before: String(unknown), after: '' };
     }
   }
 }

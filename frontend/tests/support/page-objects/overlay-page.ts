@@ -9,7 +9,9 @@ import { blockParts, settledParts } from './timeline-page';
  * *Done* and *Edited <time>*; its body with the summary, the prose and the blocks, the sections
  * Pilot settled as their lines, its attachments, Pilot's dots, or "The document did not load"; its
  * foot; maximize, the cross and the backdrop; over the text, Pilot's questions to a registered
- * document's writer and the reply (F52.2). Showing an attachment (F28.5), its head is its title
+ * document's writer and the reply (F52.2). A document that is Pilot's has the strip under its head,
+ * what Pilot does on it in `data-doing`, its words, its link and *Stop and take over* (F28.9), and
+ * one awaiting its read says that its text comes once it is read. Showing an attachment (F28.5), its head is its title
  * over "Attachment of “<item>”" and, opened from the document, Back; its body the attachment by
  * its type. On a phone it is a view (F98.4): Back is its arrow, with no maximize, cross or
  * backdrop, and an attachment's document is a link in its head. Showing the handbook or the project document (F129.4, F37.4), its head is the title over
@@ -51,6 +53,10 @@ export class OverlayPage {
   readonly failed: Locator;
   /** The item alone (F99), which `TimelinePage.item` reads within. */
   readonly alone: Locator;
+  /** A registered document's body while it awaits its read. */
+  readonly unread: Locator;
+  /** The strip under the head while the document is Pilot's (F28.9). */
+  readonly strip: { root: Locator; text: Locator; link: Locator; stop: Locator };
   readonly foot: Locator;
   readonly done: Locator;
   readonly doneTime: Locator;
@@ -102,6 +108,14 @@ export class OverlayPage {
     this.empty = this.root.getByTestId('overlay.empty');
     this.failed = this.root.getByTestId('overlay.failed');
     this.alone = this.root.getByTestId('item-alone');
+    this.unread = this.root.getByTestId('overlay.unread');
+    const strip = this.root.getByTestId('overlay.pilot-strip');
+    this.strip = {
+      root: strip,
+      text: strip.getByTestId('overlay.pilot-strip.text'),
+      link: strip.getByTestId('overlay.pilot-strip.link'),
+      stop: strip.getByTestId('overlay.pilot-strip.stop'),
+    };
     this.foot = this.root.getByTestId('overlay.foot');
     this.done = this.root.getByTestId('overlay.done');
     this.doneTime = this.root.getByTestId('overlay.done.time');

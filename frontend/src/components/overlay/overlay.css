@@ -66,6 +66,25 @@
   .sheet-foot .grow { flex: 1; }
   .sheet-foot .state { font-size: var(--text-sm); color: hsl(var(--muted-foreground)); }
 
+  /* The strip under a document's head while it is Pilot's (pilot-strip.tsx; the mockup's
+     `.pilot-strip`): one line, gold as the gold bar is, *Stop and take over* at its end. */
+  .pilot-strip {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 16px 8px 32px;
+    border-bottom: 1px solid hsl(var(--gold-edge));
+    background: hsl(var(--gold));
+    color: hsl(var(--gold-foreground));
+    font-size: var(--text-sm);
+  }
+  .pilot-strip .grow { flex: 1; min-width: 0; }
+  .pilot-strip .link { color: inherit; font-weight: 600; text-decoration: underline; }
+  .pilot-strip .gold-btn { flex: none; gap: 6px; }
+  .pilot-strip .gold-btn .icon { width: 14px; height: 14px; }
+  .pilot-strip :focus-visible { outline-color: hsl(var(--gold-foreground)); }
+
   .sheet .attachments { margin: 0 0 14px; }
   .lead { margin-bottom: 18px; padding: 10px 14px; border-radius: var(--radius); background: hsl(var(--primary-muted) / 0.6); font-size: var(--text-base); }
 
@@ -83,6 +102,9 @@
 
   /* A document's prose and its blocks in the body. */
   .sheet-doc > .prose + .prose { margin-top: 0.7em; }
+  /* A document that is Pilot's, opened: its controls drawn, faded, and taking nothing (F28.9; the
+     mockup's `.sheet.locked`); a disabled button fades as any does. */
+  .sheet-doc.locked .block-controls :is(.option:not(.chosen), .field) { opacity: 0.55; }
   .sheet-doc > .block { margin: 14px 0 26px; }
   .sheet-doc > .settled-lines { margin: 12px -8px 20px; }
 
@@ -119,5 +141,9 @@
     .sheet-head .view-back { --h: 36px; flex: none; align-self: flex-start; }
     .sheet-head .view-back .icon { width: 20px; height: 20px; }
     .sheet-foot { padding: 10px 16px; }
+    /* The strip's button under its words, at the right. */
+    .pilot-strip { flex-wrap: wrap; padding: 8px 14px 8px 16px; }
+    .pilot-strip .grow { flex-basis: calc(100% - 40px); }
+    .pilot-strip .gold-btn { margin-left: auto; }
   }
 }

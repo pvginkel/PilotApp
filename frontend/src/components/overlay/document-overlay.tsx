@@ -13,8 +13,10 @@
  * between the lead and the text, each opening, at its address under the document's, in place of
  * the document, with an arrow back to it (F28.3, F28.5). A read that fails, or finds no document
  * of the project, reads "The document did not load" (F113), and so does a registered document
- * with no text — before its file is read at its run's end, or after that read failed — under its
- * head, its foot Reviewed once that read was made (F85.1, ruling D1).
+ * whose read at its run's end failed, under its head, its foot Reviewed (F85.1, ruling D1). A
+ * document that is Pilot's opens read-only under the strip that says what Pilot does on it (F28.9):
+ * every control drawn and taking nothing, and no foot; one awaiting its read has its head and the
+ * strip over a body that says its text comes once it is read.
  */
 
 import type { ReactNode } from 'react';
@@ -25,6 +27,7 @@ import { quoteOfAttachment, quoteOfItem } from '@/components/chat/discuss-quotes
 import { AttachmentBody, AttachmentTitles } from '@/components/overlay/attachment-overlay';
 import { Clarifications } from '@/components/overlay/clarification';
 import { DidNotLoad, Overlay } from '@/components/overlay/overlay';
+import { PilotStrip } from '@/components/overlay/pilot-strip';
 import { LinkedText } from '@/components/shared/linked-text';
 import { Time } from '@/components/shared/time';
 import { ArchiveAnswers } from '@/components/timeline/archive-question';
@@ -32,6 +35,7 @@ import { Attachments } from '@/components/timeline/attachments';
 import { DocumentParts, SegmentBar, SendAnswers, UnsentChip } from '@/components/timeline/document';
 import { isUnsent } from '@/components/timeline/document-state';
 import { Edited } from '@/components/timeline/item-head';
+import { LockedContext } from '@/components/timeline/locked';
 import { PilotWriting } from '@/components/timeline/writing';
 import { useItemDocument, type ItemDocument } from '@/hooks/use-document';
 import { useReviewed } from '@/hooks/use-marks';
@@ -39,6 +43,7 @@ import { useOverlayClose } from '@/hooks/use-overlay-close';
 import { useArchived, type ProjectHead } from '@/hooks/use-projects';
 import { usePerson } from '@/hooks/use-self';
 import { attachmentIn, blocksOf, titleOf } from '@/hooks/use-timeline';
+import { cn } from '@/lib/utils';
 
 interface DocumentOverlayProps {
   projectId: string;
@@ -82,10 +87,11 @@ export function DocumentOverlay({ projectId, project, documentId, block, attachm
       at={block === null ? null : { item: documentId, block }}
       titles={headed && <Titles item={headed} project={project} />}
       discuss={headed && <DiscussButton quote={quoteOfItem(headed)} testId="overlay.discuss" />}
+      strip={headed?.pilots_work && <PilotStrip itemId={headed.id} pilots={headed.pilots_work} read={item !== undefined} />}
       foot={headed && footOf(headed, handle, close)}
       onClose={close}
     >
-      {failed || textless !== undefined ? <DidNotLoad /> : item && <Body item={item} />}
+      {failed ? <DidNotLoad /> : textless !== undefined ? <Unread item={textless} /> : item && <Body item={item} />}
     </Overlay>
   );
 }
@@ -141,9 +147,20 @@ function Titles({ item, project }: { item: ItemDocument; project: ProjectHead | 
   );
 }
 
-function Body({ item }: { item: ItemDocument }) {
+/** A registered document with no text: awaiting its read, or its read failed. */
+function Unread({ item }: { item: ItemDocument }) {
+  if (!item.awaiting_read) return <DidNotLoad />;
   return (
-    <>
+    <p className="item-sub" data-testid="overlay.unread">
+      Its text shows here once Pilot has read it.
+    </p>
+  );
+}
+
+function Body({ item }: { item: ItemDocument }) {
+  const locked = item.pilots_work !== null;
+  return (
+    <LockedContext.Provider value={locked}>
       {item.summary !== null && (
         <div className="lead" data-testid="overlay.summary">
           <LinkedText text={item.summary} />
@@ -151,12 +168,12 @@ function Body({ item }: { item: ItemDocument }) {
       )}
       <Attachments item={item} inDocument />
       <Clarifications item={item} />
-      <div className="sheet-doc" data-testid="overlay.document">
+      <div className={cn('sheet-doc', locked && 'locked')} data-testid="overlay.document">
         {/* An open archive question is answered Archive or Keep alone, as the timeline draws it (F5.6). */}
         {item.kind === 'archive_question' && item.done === null ? <ArchiveAnswers item={item} /> : <DocumentParts item={item} />}
       </div>
       {item.writing && !asDone(item) && <PilotWriting />}
-    </>
+    </LockedContext.Provider>
   );
 }
 
@@ -167,7 +184,7 @@ function asDone(item: ItemDocument): boolean {
 
 /**
  * What stands in the foot: how it was done, or what marks it done; for a one-ask item, a notice
- * or a registered document awaiting its read, nothing.
+ * or a document that is Pilot's, nothing.
  */
 function footOf(item: ItemDocument, myHandle: string, onSent: () => void): ReactNode {
   if (item.done !== null) {
@@ -180,8 +197,8 @@ function footOf(item: ItemDocument, myHandle: string, onSent: () => void): React
       </span>
     );
   }
+  if (item.pilots_work !== null) return null;
   if (item.kind === 'review') {
-    if (item.awaiting_read) return null;
     return (
       <>
         <span className="grow" />

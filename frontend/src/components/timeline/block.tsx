@@ -13,7 +13,8 @@
  * <task>", or to the project's end, its note under it; opened, its controls, nothing chosen, stand
  * under that line (F31.4). A note sits under its answer with its icon (F17.4). Gone to at its
  * address, it flashes (F97). In an archived project its controls stand disabled, which the API
- * refuses until Bring back (D012). A block of a project's own document, the handbook or
+ * refuses until Bring back (D012), and so do they in a document that is Pilot's, opened (F28.9).
+ * A block of a project's own document, the handbook or
  * `project.md`, has no item, and in the overlay reads only (D1): every answer closed, with no
  * chevron and no Discuss, and an unanswered block open, its controls standing disabled. An action
  * Pilot claimed is open until its Done, its controls a person's (F21.6). A draft's
@@ -21,7 +22,7 @@
  * into the definition chat (F39.1).
  */
 
-import { useState } from 'react';
+import { useContext, useState } from 'react';
 import { useParams } from '@tanstack/react-router';
 import { Check, ChevronDown, ChevronUp } from 'lucide-react';
 import { DiscussButton } from '@/components/chat/discuss-button';
@@ -35,6 +36,7 @@ import { ConfirmControls, Proposal } from '@/components/timeline/confirmation';
 import { DecisionOptions } from '@/components/timeline/decision';
 import { blockKey, useBlockFlash } from '@/components/timeline/flash';
 import { blockKindOf } from '@/components/timeline/kinds';
+import { LockedContext } from '@/components/timeline/locked';
 import { autopilotMayTake } from '@/components/timeline/may-take';
 import { Note } from '@/components/timeline/note';
 import { QuestionAnswer } from '@/components/timeline/question';
@@ -58,6 +60,7 @@ export function Block({ item, block, solo = false }: BlockProps) {
   const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
   const answering = useAnswer(item.id, block.id);
   const archived = useArchived(projectId);
+  const locked = useContext(LockedContext);
   const autopilotOff = useAutopilotOff(projectId);
   const flash = useBlockFlash(item.id, block.id);
   return (
@@ -68,7 +71,7 @@ export function Block({ item, block, solo = false }: BlockProps) {
       mayTake={autopilotMayTake(item, block, autopilotOff)}
       answering={answering}
       settled={item.done !== null}
-      disabled={archived}
+      disabled={archived || locked}
       quote={solo ? null : quoteOfBlock(item, block)}
       flash={flash}
     />

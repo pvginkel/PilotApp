@@ -4,7 +4,8 @@
  * from the asking on and the reply joining them at the clarification run's turn end, live, per block
  * where it kept the headings asked for and whole where it did not; each asked block's head says so,
  * and the document's line on the timeline stays. While the clarification run runs, the document is
- * Pilot's line, "Asking the writer" standing still with the pulse (F13.7). The run's continuation, placed while the
+ * Pilot's line, "Asking the writer" standing still with the pulse (F13.7), and opened it reads only,
+ * under the gold strip saying so, with *Stop and take over* (F28.9). The run's continuation, placed while the
  * clarification run runs on the same conversation, waits for it: "Waiting for the run before it"
  * (DB 183). While Pilot asks the writer the document takes nothing from the app's controls (DB
  * 295), so its answers come through the project's chat, and Pilot's Done closes it.
@@ -134,7 +135,7 @@ test.describe('Pilot asking the writer', () => {
     await expect(overlay.blockAt('D2').writerAsked).toHaveCount(0);
   });
 
-  test('holds the questions alone until the clarification run’s turn ends, the reply joining them live, the document Pilot’s line meanwhile, “Asking the writer” going nowhere; the run’s continuation, placed meanwhile through the chat, reads “Waiting for the run before it” and starts after it', async ({
+  test('holds the questions alone until the clarification run’s turn ends, the reply joining them live, the document Pilot’s line meanwhile, “Asking the writer” going nowhere, and read-only under the strip with Stop and take over; the run’s continuation, placed meanwhile through the chat, reads “Waiting for the run before it” and starts after it', async ({
     people,
     projects,
     controller,
@@ -160,6 +161,13 @@ test.describe('Pilot asking the writer', () => {
     const section = overlay.clarification();
     await expect(section.question('D2').text).toHaveText(STOVE);
     await expect(section.replies).toHaveCount(0);
+    await expect(overlay.strip.root).toHaveAttribute('data-doing', 'asking_writer');
+    await expect(overlay.strip.text).toHaveText(
+      'Pilot asked the writer about this document and waits for the reply, then goes over it again.',
+    );
+    await expect(overlay.strip.stop).toBeEnabled();
+    await expect(overlay.blockAt('D1').option('Dome')).toBeDisabled();
+    await expect(overlay.foot).toHaveCount(0);
     await expect(timeline.item(clarifying).title).toHaveText('Clarify kit.md');
     const line = timeline.item(kit);
     await expect(line.root).toHaveAttribute('data-state', 'pilots');
