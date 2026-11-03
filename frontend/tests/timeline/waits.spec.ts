@@ -65,6 +65,7 @@ test.describe('A card wait', () => {
     await expect(item.root).toHaveAttribute('data-state', 'open');
     await expect(item.root).toHaveAttribute('data-kind', 'card_wait');
     await expect(item.kind).toHaveText('Wait');
+    await expect(item.kind.locator('svg')).toHaveClass(/\blucide-ticket\b/);
     await expect(item.title).toHaveText('The night shift takes the cards');
     await expect(item.wait.on).toHaveText(`${key}-1, ${key}-4 → Done or Won't fix`);
     await expect(item.wait.cards.getByRole('link')).toHaveText([`${key}-1`, `${key}-4`]);
@@ -173,6 +174,7 @@ test.describe('A timed wait', () => {
       const item = timeline.item(wait);
       await expect(item.root).toHaveAttribute('data-kind', 'timed_wait');
       await expect(item.kind).toHaveText('Wait');
+      await expect(item.kind.locator('svg')).toHaveClass(/\blucide-hourglass\b/);
       await expect(item.wait.due).toHaveText(words);
       await expect(item.wait.due.locator('time')).toHaveAttribute('title', fullStamp(due));
       await expect(item.wait.on).toHaveCount(0);
