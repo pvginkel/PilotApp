@@ -35,7 +35,7 @@ export function CreateProject({ project }: { project: Project }) {
   };
   return (
     <div
-      className="flex max-w-full items-center gap-3.5 self-center rounded-lg border py-2.5 pr-[18px] pl-2.5 text-center text-sm/[1.6] text-muted-foreground max-[900px]:flex-col max-[900px]:gap-2 max-[900px]:px-[18px] max-[900px]:pt-3.5 max-[900px]:pb-3"
+      className="flex max-w-full items-center gap-3.5 self-center rounded-lg border py-2.5 pr-[18px] pl-2.5 text-center text-sm/[1.6] text-muted-foreground [@media(max-width:900px)]:flex-col [@media(max-width:900px)]:gap-2 [@media(max-width:900px)]:px-[18px] [@media(max-width:900px)]:pt-3.5 [@media(max-width:900px)]:pb-3"
       data-testid="project.create-ready"
     >
       <button

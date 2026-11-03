@@ -306,7 +306,7 @@ It shows only once the project can be created: while the head's `create_refusal`
 there is nothing, and it is never shown disabled. It is a box with a border, as wide as what it
 holds and centred: the button, "Create project", its tooltip "Hand the project to Pilot: it sets it
 up and starts the plan", and the muted line "The project is ready to be created." at the small size,
-the button left of the line, and above it in a window under 900px wide. Pressed, it makes the
+the button left of the line, and above it at 900px and below, as on a phone. Pressed, it makes the
 `opened` transition (above) and stays pending until every query is read again, a press meanwhile
 doing nothing. The head then reads the open project's, and the route draws the timeline in the
 definition chat's place. A refusal the head cannot give, no controller or no store environment,

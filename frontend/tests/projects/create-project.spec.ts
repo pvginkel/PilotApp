@@ -345,6 +345,24 @@ test.describe('Create project on a phone', () => {
     await expect(definitionChat.root).toHaveCount(0);
     expect((await projects.head(id)).state).toBe('open');
   });
+
+  test('at exactly 900 px wide, where the page is the phone’s, the button stands above its line', async ({
+    page,
+    people,
+    projects,
+    projectHead,
+    controller,
+    chats,
+    definitionChat,
+    phoneTabs,
+  }) => {
+    await page.setViewportSize({ width: 900, height: 844 });
+    const me = await people.signIn();
+    await drafted({ page, projects, projectHead, controller, chats, definitionChat }, me.handle!);
+    await expect(phoneTabs.root).toBeVisible();
+    const { button, line } = await boxes(definitionChat);
+    expect(button.y + button.height).toBeLessThanOrEqual(line.y);
+  });
 });
 
 test.describe('The setup', () => {
