@@ -6,6 +6,7 @@ refusal the tool's error, its reason whole."""
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 from dependency_injector import providers
@@ -22,6 +23,7 @@ from app.models import (
     Environment,
     Item,
     ItemAttachment,
+    PlanTask,
     Turn,
     UsageReading,
     WindowShare,
@@ -32,6 +34,7 @@ from app.models.reference import (
     ChatKind,
     ProjectState,
     SessionState,
+    TaskStatus,
     UsageWindow,
 )
 from app.services.container import ServiceContainer
@@ -792,6 +795,38 @@ class TestMark:
         session.refresh(item)
         assert item.done_by_user_id == person.id
 
+    async def test_a_waits_close_sends_its_note(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        session: DbSession,
+        container: ServiceContainer,
+        brain: models.Session,
+    ) -> None:
+        project = session.get_one(models.Project, brain.project_id)
+        item = container.wait_service().add_card_wait(
+            project, brain, "SR-4 lands", ["SR-4"], ["Done"], None
+        )
+        session.commit()
+        note = "SR-4 read Done at 01:14; the card pass goes on"
+
+        result = await call(
+            mcp_app,
+            "mark",
+            {"item": str(item.id), "mark": "done", "note": note},
+            path=STORE_PATH,
+        )
+
+        assert result.structuredContent == {"effect": "Marked done · SR-4 lands"}
+        [(request, _)] = routes.calls
+        assert json.loads(request.content) == {
+            "item": str(item.id),
+            "mark": "done",
+            "note": note,
+        }
+        session.expire_all()
+        assert session.get_one(models.Wait, item.id).done_note == note
+
     async def test_without_for_none_is_sent_and_read_is_the_routes_refusal(
         self,
         mcp_app: Starlette,
@@ -998,20 +1033,87 @@ class TestAddItem:
         assert answer.status_code == 404
         assert error_text(result) == _refusal(routes, "add_item")
 
-    async def test_a_wait_is_the_routes_refusal(
+    @pytest.mark.parametrize(
+        ("item", "sent"),
+        [
+            (
+                {
+                    "kind": "card_wait",
+                    "title": "SR-4 lands",
+                    "cards": ["SR-4"],
+                    "states": ["Done", "Won't fix"],
+                    "step": "night",
+                },
+                None,
+            ),
+            (
+                {
+                    "kind": "timed_wait",
+                    "title": "ESO refreshes",
+                    "due_at": "2099-10-25T20:30:00+02:00",
+                },
+                {
+                    "kind": "timed_wait",
+                    "title": "ESO refreshes",
+                    "due_at": "2099-10-25T20:30:00+02:00",
+                },
+            ),
+        ],
+        ids=["card-wait", "timed-wait"],
+    )
+    async def test_a_wait_is_added_through_its_route_as_given(
+        self,
+        mcp_app: Starlette,
+        routes: ApiRoutes,
+        session: DbSession,
+        brain: models.Session,
+        item: dict[str, Any],
+        sent: dict[str, Any] | None,
+    ) -> None:
+        if "step" in item:
+            session.add(
+                PlanTask(
+                    project_id=brain.project_id,
+                    task_id="night",
+                    position=1,
+                    title="The night shift",
+                    status_code=TaskStatus.PENDING,
+                )
+            )
+            session.commit()
+
+        result = await call(mcp_app, "add_item", {"item": item}, path=STORE_PATH)
+
+        assert not result.isError
+        [(request, answer)] = routes.calls
+        assert json.loads(request.content) == (item if sent is None else sent)
+        assert answer.status_code == 201
+        assert result.structuredContent == answer.json()
+        [added] = session.scalars(select(Item)).all()
+        assert added.kind_code == item["kind"]
+        assert session.get(models.Wait, added.id) is not None
+
+    async def test_a_waits_refusal_is_the_routes(
         self, mcp_app: Starlette, routes: ApiRoutes, brain: models.Session
     ) -> None:
         result = await call(
             mcp_app,
             "add_item",
-            {"item": {"kind": "timed_wait", "title": "Tomorrow"}},
+            {
+                "item": {
+                    "kind": "card_wait",
+                    "title": "SR-4 lands",
+                    "cards": [],
+                    "states": ["Done"],
+                }
+            },
             path=STORE_PATH,
         )
 
         assert error_text(result) == _refusal(routes, "add_item")
         assert error_text(result) == (
-            "Error executing tool add_item: Cannot add a timed_wait item because"
-            " Pilot takes no waits yet"
+            "Error executing tool add_item: Cannot add a card_wait item because"
+            " its `cards` list is empty"
         )
 
     @pytest.mark.parametrize(
@@ -1067,7 +1169,8 @@ class TestAddItem:
         "item",
         [
             {"kind": "opening", "title": "Camp"},
-            {"kind": "notice", "title": "Camp", "cards": ["MD-8"]},
+            {"kind": "timed_wait", "title": "Soon", "due_at": "2099-10-25T18:30:00"},
+            {"kind": "card_wait", "title": "Soon", "cards": [""], "states": ["Done"]},
             {"kind": "notice", "title": "Camp", "attachments": ["camp.md"]},
             {"kind": "work", "repo": "Example"},
             {"kind": "work", "title": "Rotating", "claims": ["A1"]},

@@ -40,6 +40,7 @@ from app.models import (
     ProjectTransition,
     Turn,
     User,
+    Wait,
     Work,
     WriterQuestion,
 )
@@ -1656,6 +1657,18 @@ REPO = "example/Example"
 
 BRIEF = "Rename the badge."
 
+DUE = "2099-10-25T18:30:00Z"
+
+CARD_WAIT = {
+    "kind": "card_wait",
+    "title": "The night shift takes SR-1 and SR-4",
+    "cards": ["SR-1", "SR-4"],
+    "states": ["Done", "Won't fix"],
+}
+TIMED_WAIT = {"kind": "timed_wait", "title": "ESO refreshes", "due_at": DUE}
+
+NOTE = "SR-4 read Done at 01:14; the card pass goes on"
+
 
 def _added(**fields: Any) -> AddItemRequestSchema:
     return AddItemRequestSchema.model_validate(fields)
@@ -1967,14 +1980,34 @@ class TestPilotStoreServiceAddProse:
                 id="work-fields",
             ),
             pytest.param(
-                {"kind": "card_wait", "title": "MD-8 done"},
-                "Pilot takes no waits yet",
-                id="card-wait",
+                {"kind": "notice", "title": "The lake", "cards": ["SR-4"]},
+                "a notice item takes no `cards`",
+                id="wait-fields",
+            ),
+            pytest.param(
+                {**CARD_WAIT, "markdown": "SR-4 lands.\n", "urgent": True},
+                "a card_wait item takes no `markdown`, `urgent`",
+                id="card-wait-prose-fields",
+            ),
+            pytest.param(
+                {**TIMED_WAIT, "repo": REPO, "cards": ["SR-4"]},
+                "a timed_wait item takes no `repo`, `cards`",
+                id="timed-wait-other-fields",
+            ),
+            pytest.param(
+                {**CARD_WAIT, "due_at": DUE},
+                "a card_wait item takes no `due_at`",
+                id="card-wait-due-at",
+            ),
+            pytest.param(
+                {"kind": "card_wait", "cards": ["SR-4"]},
+                "a card_wait item needs `title`, `states`",
+                id="card-wait-short",
             ),
             pytest.param(
                 {"kind": "timed_wait", "title": "Tomorrow"},
-                "Pilot takes no waits yet",
-                id="timed-wait",
+                "a timed_wait item needs `due_at`",
+                id="timed-wait-short",
             ),
         ],
     )
@@ -2143,9 +2176,20 @@ class TestPilotStoreServiceAddWork:
                 "a work item takes no `markdown`, `urgent`",
                 id="prose-fields",
             ),
+            pytest.param(
+                {
+                    "title": "Renaming the badge",
+                    "repo": REPO,
+                    "cwd": "/work/Example",
+                    "brief": BRIEF,
+                    "due_at": DUE,
+                },
+                "a work item takes no `due_at`",
+                id="wait-fields",
+            ),
         ],
     )
-    def test_a_work_item_short_of_what_it_needs_or_with_prose_is_refused(
+    def test_a_work_item_short_of_what_it_needs_or_with_another_kinds_field_is_refused(
         self,
         session: DbSession,
         container: ServiceContainer,
@@ -2349,6 +2393,241 @@ class TestPilotStoreServiceAddWork:
         assert refused.value.message == (
             "Cannot add a notice item because a notice item takes no `claims`"
         )
+
+
+class TestPilotStoreServiceAddWait:
+    def test_a_card_wait_is_added_with_its_lists_and_its_effect(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        session.add(_plan_task(project, "night"))
+        run = _brain(session, project, environment, "job")
+
+        added = _service(container).add_item(
+            _admitted(run), _added(**CARD_WAIT, step="night"), TOOL_USE_ID
+        )
+        clear_after_commit_callbacks()
+
+        item = added.item
+        assert (added.path, added.state, added.held) == (None, None, None)
+        assert (
+            item.kind_code,
+            item.title,
+            item.plan_task_id,
+            item.created_by_session_id,
+        ) == ("card_wait", "The night shift takes SR-1 and SR-4", "night", run.id)
+        wait = session.get_one(Wait, item.id)
+        assert (wait.cards, wait.states, wait.due_at) == (
+            ["SR-1", "SR-4"],
+            ["Done", "Won't fix"],
+            None,
+        )
+        assert (added.line.verb, added.line.label) == (
+            "Added",
+            "Card wait · The night shift takes SR-1 and SR-4",
+        )
+        assert _effect_record(session, run)["effect"] == {
+            "verb": "Added",
+            "label": "Card wait · The night shift takes SR-1 and SR-4",
+            "itemId": str(item.id),
+        }
+        [effect] = _effects(session)
+        assert (effect.kind_code, effect.item_id) == (EffectKind.ADDED, item.id)
+
+    def test_a_timed_wait_is_added_with_its_due_time(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, project, environment)
+
+        added = _service(container).add_item(
+            _admitted(run), _added(**TIMED_WAIT), TOOL_USE_ID
+        )
+        clear_after_commit_callbacks()
+
+        assert (added.item.kind_code, added.item.plan_task_id) == ("timed_wait", None)
+        assert session.get_one(Wait, added.item.id).due_at == datetime(
+            2099, 10, 25, 18, 30, tzinfo=UTC
+        )
+        assert (added.line.verb, added.line.label) == (
+            "Added",
+            "Timed wait · ESO refreshes",
+        )
+
+    @pytest.mark.parametrize(
+        ("fields", "cause"),
+        [
+            pytest.param(
+                {**CARD_WAIT, "states": []}, "its `states` list is empty", id="empty"
+            ),
+            pytest.param(
+                {**CARD_WAIT, "cards": ["SR-4", "sr-1"]},
+                "`sr-1` is no ticket id, `[A-Z][A-Z0-9_]*-[1-9][0-9]*`",
+                id="no-ticket-id",
+            ),
+            pytest.param(
+                {**TIMED_WAIT, "due_at": "2026-10-25T18:30:00+02:00"},
+                "its due time, 2026-10-25T16:30:00+00:00, is not ahead",
+                id="not-ahead",
+            ),
+        ],
+    )
+    def test_a_wait_the_record_refuses_adds_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        fields: dict[str, Any],
+        cause: str,
+    ) -> None:
+        run = _brain(session, project, environment)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _service(container).add_item(_admitted(run), _added(**fields), TOOL_USE_ID)
+
+        assert refused.value.message == (
+            f"Cannot add a {fields['kind']} item because {cause}"
+        )
+        assert session.scalars(select(Item)).all() == []
+        assert _effects(session) == []
+
+    def test_a_task_not_in_the_plan_is_not_found_and_nothing_added(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, project, environment)
+
+        with pytest.raises(RecordNotFoundException) as not_found:
+            _service(container).add_item(
+                _admitted(run), _added(**TIMED_WAIT, step="nowhere"), TOOL_USE_ID
+            )
+
+        assert not_found.value.message == (
+            f"Plan task {project.id}/nowhere was not found"
+        )
+        assert session.scalars(select(Item)).all() == []
+
+
+def _wait(container: ServiceContainer, project: Project, run: models.Session) -> Item:
+    return container.wait_service().add_card_wait(
+        project, run, "SR-4 lands", ["SR-4"], ["Done"], None
+    )
+
+
+class TestPilotStoreServiceMarkWait:
+    @pytest.mark.usefixtures("placing")
+    def test_done_with_a_note_closes_it_pilots_consumed_by_the_marking_session(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, project, environment, "job")
+        item = _wait(container, project, run)
+
+        line = _service(container).mark(
+            _admitted(run), item.id, "done", None, TOOL_USE_ID, note=NOTE
+        )
+        clear_after_commit_callbacks()
+
+        assert (
+            item.done_cause_code,
+            item.done_by_user_id,
+            item.consumed_session_id,
+        ) == ("marked", _pilot(session).id, run.id)
+        assert item.consumed_at == item.done_at
+        assert session.get_one(Wait, item.id).done_note == NOTE
+        assert (line.verb, line.label) == ("Marked done", "SR-4 lands")
+        [effect] = _effects(session)
+        assert (effect.kind_code, effect.item_id) == (EffectKind.MARKED, item.id)
+        assert _jobs_after(session, item) == []
+
+    @pytest.mark.parametrize(
+        ("mark", "handle", "note", "cause"),
+        [
+            pytest.param(
+                "done",
+                "ada",
+                NOTE,
+                "a wait is closed by Pilot's own `done`, with no `for`",
+                id="for",
+            ),
+            pytest.param(
+                "read",
+                None,
+                NOTE,
+                "a wait is closed by Pilot's own `done`, with no `for`",
+                id="read",
+            ),
+            pytest.param(
+                "done",
+                None,
+                None,
+                "a wait's `done` takes a `note`: what was read and when, and the"
+                " action after it started",
+                id="no-note",
+            ),
+        ],
+    )
+    def test_any_other_mark_of_a_wait_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+        mark: Any,
+        handle: str | None,
+        note: str | None,
+        cause: str,
+    ) -> None:
+        run = _brain(session, project, environment, "job")
+        item = _wait(container, project, run)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _service(container).mark(
+                _admitted(run), item.id, mark, handle, None, note=note
+            )
+
+        assert refused.value.message == (
+            f"Cannot mark item {item.id} {mark} because {cause}"
+        )
+        assert item.done_at is None
+        assert session.get_one(Wait, item.id).done_note is None
+        assert _effects(session) == []
+
+    def test_a_note_on_any_other_item_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, project, environment)
+        item = _bear(container, project, run, "document", "Camp plan", SETTLED_PLAN)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _service(container).mark(
+                _admitted(run), item.id, "done", None, None, note=NOTE
+            )
+
+        assert refused.value.message == (
+            f"Cannot mark item {item.id} done because a `note` is a wait's, at its"
+            " `done`"
+        )
+        assert item.done_at is None
+        assert _effects(session) == []
 
 
 def _claims(db: DbSession) -> list[tuple[uuid.UUID, int]]:

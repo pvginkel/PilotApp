@@ -320,6 +320,18 @@ def _text_field(title: str, description: str) -> dict[str, Any]:
     return _optional(title, description, minLength=1)
 
 
+def _optional_list(title: str, description: str) -> dict[str, Any]:
+    return {
+        "anyOf": [
+            {"items": {"minLength": 1, "type": "string"}, "type": "array"},
+            {"type": "null"},
+        ],
+        "default": None,
+        "description": description,
+        "title": title,
+    }
+
+
 _EFFECT = {
     "description": "Its effect line, `<verb> · <what>`, as it shows where the call ran",
     "title": "Effect",
@@ -333,8 +345,8 @@ _NEW_ITEM = {
         "kind": {
             "description": (
                 "`decision`, `question`, `action`, `notice`, `document` or `review`"
-                " for a prose item, `work` for a work item; a wait, `card_wait` or"
-                " `timed_wait`, is refused: Pilot takes none yet"
+                " for a prose item, `work` for a work item, `card_wait` or"
+                " `timed_wait` for a wait"
             ),
             "enum": [
                 "decision",
@@ -353,8 +365,8 @@ _NEW_ITEM = {
         "title": _text_field(
             "Title",
             "The title it is born with in its file's front matter, where `markdown`"
-            " gives none; a prose item without `markdown` needs it, and a work item,"
-            " whose line shows it",
+            " gives none; a prose item without `markdown` needs it, and a work item"
+            " and a wait, whose line shows it",
         ),
         "markdown": _text_field(
             "Markdown",
@@ -430,6 +442,23 @@ _NEW_ITEM = {
             "title": "Claims",
             "type": "array",
         },
+        "cards": _optional_list(
+            "Cards",
+            "A card wait's cards, one or more ticket ids, each named once: it fires"
+            " whenever one of them enters one of `states`",
+        ),
+        "states": _optional_list(
+            "States",
+            "A card wait's states, one or more of the tracker's names, each named"
+            " once, matched whatever their case: list the states that derail the"
+            " wait beside the one you hope for, since nothing else fires it",
+        ),
+        "due_at": _optional(
+            "Due At",
+            "A timed wait's due time, with its offset, ahead of now: it fires once"
+            " when it comes",
+            format="date-time",
+        ),
     },
     "required": ["kind"],
     "title": "NewItem",
@@ -464,7 +493,7 @@ STORE_SURFACE = {
                     "anyOf": [{"type": "string"}, {"type": "null"}],
                     "description": (
                         "A prose item's file, its absolute path, which you fill; none"
-                        " for a work item"
+                        " for a work item or a wait"
                     ),
                     "title": "Path",
                 },
@@ -475,7 +504,7 @@ STORE_SURFACE = {
                     ],
                     "description": (
                         "A work item's session: `starting`, or `held` at the gate;"
-                        " none for a prose item"
+                        " none for a prose item or a wait"
                     ),
                     "title": "State",
                 },
@@ -517,12 +546,17 @@ STORE_SURFACE = {
         " or `held` at the gate, and `held` why — say so to the person. A work"
         " item that does actions you claimed names them in `claims`: each stays"
         " open and yours until its `done`, its line naming this work item, the"
-        " latest that names it. A wait, a field the kind does not take or one it"
-        " needs missing, a text with no title or with faults, an attachment or a"
-        " plan task not of your project, material that cannot be copied, a claim"
-        " that is not an open action of a registered document of your project,"
-        " or a start the project refuses is refused with the reason, each fault"
-        " with its line, and nothing is added. Answers `{id, path, state, held,"
+        " latest that names it. A wait is recorded with its `title`, a card wait's"
+        " `cards` and `states` or a timed wait's `due_at`, and is fixed from then"
+        " on: Pilot fires it and never closes it; you close it with your own"
+        " `mark` `done` and its `note`, and to change it you close it and add"
+        " another. A field the kind does not take or one it needs missing, a text"
+        " with no title or with faults, a wait's list empty or naming one twice, a"
+        " card that is no ticket id, a due time not ahead, an attachment or a plan"
+        " task not of your project, material that cannot be copied, a claim that"
+        " is not an open action of a registered document of your project, or a"
+        " start the project refuses is refused with the reason, each fault with"
+        " its line, and nothing is added. Answers `{id, path, state, held,"
         " effect}`.",
     ),
     "attach_file": (
@@ -642,8 +676,8 @@ STORE_SURFACE = {
                 "item": {**_ITEM, "description": "The item's id"},
                 "mark": {
                     "description": (
-                        "`done` on a document, `read` on a notice, `reviewed` on"
-                        " a review"
+                        "`done` on a document or a wait, `read` on a notice,"
+                        " `reviewed` on a review"
                     ),
                     "enum": ["done", "read", "reviewed"],
                     "title": "Mark",
@@ -653,6 +687,12 @@ STORE_SURFACE = {
                     "For",
                     "The handle of the person the mark is for; without it, your"
                     " own `done`",
+                    minLength=1,
+                ),
+                "note": _optional(
+                    "Note",
+                    "Your words at a wait's close, shown on its line: what you"
+                    " read and when, and the action after it started",
                     minLength=1,
                 ),
             },
@@ -667,13 +707,15 @@ STORE_SURFACE = {
         " the mark is your own, and only `done`, on a document you settled whole,"
         " every block of it answered, and on a registered document of one block,"
         " whatever its kind, once that block is answered or deferred: a claimed"
-        " action counts once its `done` is written. A registered document's Done"
-        " writes its answers back and resumes its worker once none of its run's"
-        " documents is open. An item not of your project, a `for` that names no"
-        " person, a mark its kind does not take, an item that is done, a document"
-        " with a block neither answered nor recommended, or, without `for`, one"
-        " with a block unanswered or a claimed action not yet done is refused with"
-        " the reason, and nothing is marked. Answers `{effect}`, the call's effect"
+        " action counts once its `done` is written; and on an open wait, with your"
+        " `note`, which closes it for good. A registered document's Done writes its"
+        " answers back and resumes its worker once none of its run's documents is"
+        " open. An item not of your project, a `for` that names no person, a mark"
+        " its kind does not take, an item that is done, a document with a block"
+        " neither answered nor recommended, or, without `for`, one with a block"
+        " unanswered or a claimed action not yet done, a wait's mark with `for` or"
+        " without a `note`, or a `note` on any other item is refused with the"
+        " reason, and nothing is marked. Answers `{effect}`, the call's effect"
         " line.",
     ),
     "stop_work": (

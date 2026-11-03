@@ -80,6 +80,7 @@ from app.services.timeline_service import TimelineService
 from app.services.turn_end_read_service import TurnEndReadService
 from app.services.usage_halts import UsageHalts, UsageWatcher
 from app.services.usage_service import UsageService
+from app.services.wait_service import WaitService
 from app.services.write_back_service import WriteBackService
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
 from app.utils.temp_file_manager import TempFileManager
@@ -682,6 +683,14 @@ class ServiceContainer(containers.DeclarativeContainer):
         record_service=record_service,
         project_service=project_service,
     )
+    # The brain's waits, fixed at add and closed by its `done` (F27)
+    wait_service = providers.Factory(
+        WaitService,
+        db=db_session,
+        document_service=document_service,
+        view_service=view_service,
+        ticket_id_pattern=app_config.provided.ticket_id_pattern,
+    )
     # The brain's tools, under its session's bearer (TD §4.5, F86)
     pilot_store_service = providers.Factory(
         PilotStoreService,
@@ -696,6 +705,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         attach_service=attach_service,
         brief_service=brief_service,
         environment_service=environment_service,
+        wait_service=wait_service,
         controller_client=controller_client.provider,
     )
 

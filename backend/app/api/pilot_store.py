@@ -68,8 +68,9 @@ def add_item(
     ],
 ) -> Any:
     """`add_item(item)` (F86.1, F86.6, F36.5): a prose item minted with its
-    file, or a work item started on add, named for the claimed actions it
-    does (F21.6), with the attachments it carries.
+    file, a work item started on add, named for the claimed actions it does
+    (F21.6), or a wait, fixed from then on (F27.6), with the attachments it
+    carries.
 
     Returns:
         201: The item, a prose item's file, a work item's state as the gate
@@ -81,10 +82,11 @@ def add_item(
         404: An attachment, the plan's task, a claim's item or a source's
             environment is not the session's project's or the controller's,
             or a claim's document has no such block
-        409: A wait, a field the kind does not take or one it needs missing,
-            a text with faults, material that cannot be copied, a claim that
-            is not an open action of a registered document, or a start the
-            project refuses: the reason
+        409: A field the kind does not take or one it needs missing, a text
+            with faults, a wait's list empty or naming one twice, a card that
+            is no ticket id, a due time not ahead, material that cannot be
+            copied, a claim that is not an open action of a registered
+            document, or a start the project refuses: the reason
         502: The controller did not answer, or refused for a reason of its own
     """
     body = AddItemRequestSchema.model_validate(request.get_json())
@@ -217,19 +219,22 @@ def mark(
         ServiceContainer.pilot_store_service
     ],
 ) -> Any:
-    """`mark(item, done | read | reviewed, for?)` (F86.3): Done, Read or
-    Reviewed on an item for the person `for` names, else Pilot's own Done.
+    """`mark(item, done | read | reviewed, for?, note?)` (F86.3): Done, Read
+    or Reviewed on an item for the person `for` names, else Pilot's own Done,
+    a wait's with its `note` (F27.4).
 
     Returns:
         200: The call's effect line
-        400: The body is not an item's id, a mark and an optional handle
+        400: The body is not an item's id, a mark, an optional handle and an
+            optional note
         401: No bearer, or one no session has
         403: The bearer's session is not a chat's or a job's, or has no turn
             running
         404: The item is not of the session's project, or no person has the
             handle
-        409: Read or Reviewed without a person, or the record refuses the
-            mark: the reason
+        409: Read or Reviewed without a person, a wait's mark with a person or
+            without a note, a note on any other item, or the record refuses
+            the mark: the reason
     """
     body = MarkRequestSchema.model_validate(request.get_json())
     line = pilot_store_service.mark(
@@ -238,6 +243,7 @@ def mark(
         body.mark,
         body.for_,
         request.headers.get(TOOL_USE_ID_HEADER),
+        note=body.note,
     )
     return _recorded(line), 200
 

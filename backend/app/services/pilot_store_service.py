@@ -52,6 +52,7 @@ from app.models import (
     Project,
     Turn,
     User,
+    Wait,
     Work,
     WriterQuestion,
 )
@@ -83,13 +84,12 @@ from app.services.session_scope import project_folder
 from app.services.session_start_service import SessionStartService
 from app.services.start_gate import Held
 from app.services.timeline_service import writer_asked
+from app.services.wait_service import CARD_WAIT, TIMED_WAIT, WAITS, WaitService
 
 JOB = "job"
 """The Session Kind of the server's jobs, the pre-ruling pass among them."""
 
 WORK = "work"
-WAITS = ("card_wait", "timed_wait")
-"""The kinds of item `add_item` is given that are not prose (TD §4.5)."""
 
 PROSE_FIELDS = ("markdown", "urgent", "for", "summary")
 WORK_FIELDS = (
@@ -101,9 +101,19 @@ WORK_FIELDS = (
     "reasoning_effort",
     "claims",
 )
-NEEDED_FOR_WORK = ("title", "repo", "cwd", "brief")
-"""The fields of `add_item`'s item that one form takes alone, by their names
-on the wire, and those a work item needs."""
+WAIT_FIELDS = {CARD_WAIT: ("cards", "states"), TIMED_WAIT: ("due_at",)}
+NEEDED = {
+    WORK: ("title", "repo", "cwd", "brief"),
+    CARD_WAIT: ("title", "cards", "states"),
+    TIMED_WAIT: ("title", "due_at"),
+}
+FORMS_FIELDS = (
+    *PROSE_FIELDS,
+    *WORK_FIELDS,
+    *(field for fields in WAIT_FIELDS.values() for field in fields),
+)
+"""The fields of `add_item`'s item that one kind or form takes alone, by their
+names on the wire, and those a work item and a wait need."""
 
 DRAFT_BLOCK = f"{DRAFT}/"
 """How a block of the draft's id starts, `project.md/<local id>`, the name
@@ -183,6 +193,7 @@ class PilotStoreService:
         attach_service: AttachService,
         brief_service: BriefService,
         environment_service: EnvironmentService,
+        wait_service: WaitService,
         controller_client: Callable[[], ControllerClient],
     ) -> None:
         self.db = db
@@ -196,6 +207,7 @@ class PilotStoreService:
         self.attach_service = attach_service
         self.brief_service = brief_service
         self.environment_service = environment_service
+        self.wait_service = wait_service
         self.controller_client = controller_client
 
     def admit(self, authorization: str | None) -> Brain:
@@ -234,16 +246,19 @@ class PilotStoreService:
         (F66, §5.4), on the brain's placement (F61.1); its Session `held` or
         `starting`, as the gate leaves it (F141.4); named for the claimed
         actions its `claims` give, each an open action of a registered
-        document of the project (F21.6; DB 261).
+        document of the project (F21.6; DB 261). A wait is recorded with its
+        title, a card wait's `cards` and `states`, a timed wait's `due_at`,
+        fixed from then on (F27.6), the server firing it (F86.1).
 
         Raises:
             RecordNotFoundException: an attachment, the plan's task or a
                 claim's item is not of the brain's project, a claim's
                 document has no such block, or an outside source's
                 environment is not the controller's.
-            InvalidOperationException: a wait, which Pilot does not take yet;
-                a field the item's kind does not take, or one it needs,
-                missing; a prose text that holds faults, each with its line;
+            InvalidOperationException: a field the item's kind does not take,
+                or one it needs, missing; a prose text that holds faults, each
+                with its line; a wait's list empty or naming one twice, a card
+                no ticket id, or a due time not ahead;
                 material that cannot be copied or over the caps of one call,
                 nothing attached; a claim the record refuses
                 (`RecordService.claimable`); the start a work item takes
@@ -270,6 +285,8 @@ class PilotStoreService:
             # The gate leaves a work item's start `held` or `starting`.
             state = "held" if started.state_code is SessionState.HELD else "starting"
             held = self.session_start_service.held(self.db, project, started)
+        elif item.kind in WAITS:
+            added = self._wait(project, session, item)
         else:
             added = self._prose(project, session, item, operation)
             path = (
@@ -452,39 +469,63 @@ class PilotStoreService:
         mark: Mark,
         person: str | None,
         tool_use_id: str | None,
+        *,
+        note: str | None = None,
     ) -> EffectLine:
         """`mark` on the item for the person whose handle is `person` (F86.3):
         Done on a document, with its recommendations, Read on a notice,
         Reviewed on a review, as the record marks them. Without `person`,
         Pilot's own Done on a document it settled whole (DB decision 42), or
-        on a registered document of one block it settled. The call
-        `tool_use_id`'s effect is "Marked <mark> · <title>".
+        on a registered document of one block it settled, or on an open wait,
+        with its `note` (F27.4, DB 300). The call `tool_use_id`'s effect is
+        "Marked <mark> · <title>".
 
         Raises:
             RecordNotFoundException: the item is not of the brain's project,
                 or no person has the handle.
-            InvalidOperationException: Read or Reviewed without a person, or
-                the record refuses the mark.
+            InvalidOperationException: Read or Reviewed without a person; a
+                wait's mark with a person, or without a note, or a note on
+                any other item; the record refuses the mark.
         """
-        self._project(brain)
+        project = self._project(brain)
         item = self._item(brain, item_id)
-        if person is None:
+        operation = f"mark item {item.id} {mark}"
+        wait = self.db.get(Wait, item.id)
+        if wait is not None:
+            if mark != "done" or person is not None:
+                raise InvalidOperationException(
+                    operation, "a wait is closed by Pilot's own `done`, with no `for`"
+                )
+            if note is None:
+                raise InvalidOperationException(
+                    operation,
+                    "a wait's `done` takes a `note`: what was read and when, and"
+                    " the action after it started",
+                )
+            self.wait_service.close(
+                project, wait, self._pilot(), brain.session_id, note
+            )
+        elif note is not None:
+            raise InvalidOperationException(
+                operation, "a `note` is a wait's, at its `done`"
+            )
+        elif person is None:
             if mark != "done":
                 raise InvalidOperationException(
-                    f"mark item {item.id} {mark}",
+                    operation,
                     "Pilot's own mark is Done, on a document it settled whole:"
                     " Read and Reviewed are a person's, named by `for`",
                 )
-            user = self._pilot()
+            self.record_service.done(item, self._pilot())
         else:
             user = self._person(person)
-        match mark:
-            case "done":
-                self.record_service.done(item, user)
-            case "read":
-                self.record_service.read(item, user)
-            case "reviewed":
-                self.record_service.reviewed(item, user)
+            match mark:
+                case "done":
+                    self.record_service.done(item, user)
+                case "read":
+                    self.record_service.read(item, user)
+                case "reviewed":
+                    self.record_service.reviewed(item, user)
         line = EffectLine(MARKED[mark], self._title(item), item_id=item.id)
         self.effect_service.record(
             brain.session_id,
@@ -692,6 +733,23 @@ class PilotStoreService:
         )
         return self.db.get_one(Item, work.id)
 
+    def _wait(
+        self, project: Project, session: AgentSession, item: AddItemRequestSchema
+    ) -> Item:
+        # The shape check let no wait through without its title and fields.
+        assert item.title is not None
+        task = None if item.step is None else self._task(project, item.step).task_id
+        if item.kind == CARD_WAIT:
+            assert item.cards is not None
+            assert item.states is not None
+            return self.wait_service.add_card_wait(
+                project, session, item.title, item.cards, item.states, task
+            )
+        assert item.due_at is not None
+        return self.wait_service.add_timed_wait(
+            project, session, item.title, item.due_at, task
+        )
+
     def _task(self, project: Project, task_id: str) -> PlanTask:
         """The project's plan task `task_id`, not removed."""
         task = self.db.scalars(
@@ -836,20 +894,15 @@ class PilotStoreService:
 def _shape_refusal(kind: str, given: set[str]) -> str | None:
     """Why `add_item` refuses an item of `kind` given the fields `given`, by
     their names on the wire; None for one it takes."""
-    if kind in WAITS:
-        return "Pilot takes no waits yet"
-    alien: Sequence[str]
-    if kind == WORK:
-        alien, missing = PROSE_FIELDS, [f for f in NEEDED_FOR_WORK if f not in given]
-    else:
-        alien, missing = WORK_FIELDS, []
-        if "title" not in given and "markdown" not in given:
-            return "it has no title: give `title`, or `markdown` that gives one"
-    taken = [field for field in alien if field in given]
+    if kind not in NEEDED and "title" not in given and "markdown" not in given:
+        return "it has no title: give `title`, or `markdown` that gives one"
+    own = WORK_FIELDS if kind == WORK else WAIT_FIELDS.get(kind, PROSE_FIELDS)
+    taken = [field for field in FORMS_FIELDS if field in given and field not in own]
     if taken:
         return f"a {kind} item takes no {_fields(taken)}"
+    missing = [field for field in NEEDED.get(kind, ()) if field not in given]
     if missing:
-        return f"a work item needs {_fields(missing)}"
+        return f"a {kind} item needs {_fields(missing)}"
     return None
 
 

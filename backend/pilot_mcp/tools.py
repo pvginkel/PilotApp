@@ -219,11 +219,16 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
         is `starting` or `held` at the gate, and `held` why — say so to the
         person. A work item that does actions you claimed names them in
         `claims`: each stays open and yours until its `done`, its line naming
-        this work item, the latest that names it. A wait, a field the kind
-        does not take or one it needs missing, a text with no title or with
-        faults, an attachment or a plan task not of your project, material
-        that cannot be copied, a claim that is not an open action of a
-        registered document of your project, or a start the project refuses
+        this work item, the latest that names it. A wait is recorded with its
+        `title`, a card wait's `cards` and `states` or a timed wait's
+        `due_at`, and is fixed from then on: Pilot fires it and never closes
+        it; you close it with your own `mark` `done` and its `note`, and to
+        change it you close it and add another. A field the kind does not
+        take or one it needs missing, a text with no title or with faults, a
+        wait's list empty or naming one twice, a card that is no ticket id, a
+        due time not ahead, an attachment or a plan task not of your project,
+        material that cannot be copied, a claim that is not an open action of
+        a registered document of your project, or a start the project refuses
         is refused with the reason, each fault with its line, and nothing is
         added. Answers `{id, path, state, held, effect}`."""
         return await api.add_item(_authorization(ctx), _tool_use_id(ctx), item)
@@ -348,7 +353,8 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
             Mark,
             Field(
                 description=(
-                    "`done` on a document, `read` on a notice, `reviewed` on a review"
+                    "`done` on a document or a wait, `read` on a notice,"
+                    " `reviewed` on a review"
                 )
             ),
         ],
@@ -364,6 +370,16 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
                 ),
             ),
         ] = None,
+        note: Annotated[
+            str | None,
+            Field(
+                min_length=1,
+                description=(
+                    "Your words at a wait's close, shown on its line: what you"
+                    " read and when, and the action after it started"
+                ),
+            ),
+        ] = None,
     ) -> Recorded:
         """Mark an item on behalf of the person `for` names: `done` on a
         document, its unanswered blocks answered with their recommendations as
@@ -371,16 +387,23 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
         `for`, the mark is your own, and only `done`, on a document you settled
         whole, every block of it answered, and on a registered document of one
         block, whatever its kind, once that block is answered or deferred: a
-        claimed action counts once its `done` is written. A registered
-        document's Done writes its answers back and resumes its worker once
-        none of its run's documents is open. An item not of your project, a
-        `for` that names no person, a mark its kind does not take, an item
-        that is done, a document with a block neither answered nor
-        recommended, or, without `for`, one with a block unanswered or a
-        claimed action not yet done is refused with the reason, and nothing is
-        marked. Answers `{effect}`, the call's effect line."""
+        claimed action counts once its `done` is written; and on an open wait,
+        with your `note`, which closes it for good. A registered document's
+        Done writes its answers back and resumes its worker once none of its
+        run's documents is open. An item not of your project, a `for` that
+        names no person, a mark its kind does not take, an item that is done,
+        a document with a block neither answered nor recommended, or, without
+        `for`, one with a block unanswered or a claimed action not yet done, a
+        wait's mark with `for` or without a `note`, or a `note` on any other
+        item is refused with the reason, and nothing is marked. Answers
+        `{effect}`, the call's effect line."""
         return await api.mark(
-            _authorization(ctx), _tool_use_id(ctx), item=item, mark=mark, person=for_
+            _authorization(ctx),
+            _tool_use_id(ctx),
+            item=item,
+            mark=mark,
+            person=for_,
+            note=note,
         )
 
     @mcp.tool()

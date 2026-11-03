@@ -6,6 +6,7 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
@@ -14,6 +15,7 @@ from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved
 from app.engine.views import READONLY, Rendering, project_chats, utc_time
 from app.models import (
     Attachment,
+    CardTransition,
     Document,
     Environment,
     Item,
@@ -21,14 +23,18 @@ from app.models import (
     PlanTask,
     Project,
     User,
+    Wait,
+    WaitFiring,
 )
 from app.models.reference import (
     AttachmentSource,
     ChatKind,
     CloseCause,
+    FiringCause,
     ProjectState,
     RecordKind,
     TaskStatus,
+    UserKind,
 )
 from app.services.container import ServiceContainer
 from app.utils.after_commit import clear_after_commit_callbacks
@@ -432,6 +438,198 @@ class TestViewService:
             "by": None,
         }
         assert timeline["items"][0]["path"] is None
+
+    def test_a_wait_carries_what_it_waits_on_its_firings_and_its_note(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        pilot = session.scalars(
+            select(User).where(User.kind_code == UserKind.AGENT)
+        ).one()
+        card, marked, finished = (
+            Item(
+                project_id=project.id,
+                seq=seq,
+                kind_code=kind,
+                title=title,
+                created_by_session_id=project_session.id,
+                created_at=_at(9),
+                **done,
+            )
+            for seq, kind, title, done in (
+                (1, "card_wait", "The night shift takes SR-1 and SR-4", {}),
+                (
+                    2,
+                    "timed_wait",
+                    "ESO refreshes",
+                    {
+                        "done_at": _at(10),
+                        "done_cause_code": "marked",
+                        "done_by_user_id": pilot.id,
+                        "consumed_at": _at(10),
+                        "consumed_session_id": project_session.id,
+                    },
+                ),
+                (
+                    3,
+                    "timed_wait",
+                    "A 24-hour soak",
+                    {
+                        "done_at": _at(11),
+                        "done_cause_code": "finished",
+                        "done_by_user_id": person.id,
+                    },
+                ),
+            )
+        )
+        session.add_all([card, marked, finished])
+        session.flush()
+        transition = CardTransition(
+            card="SR-4",
+            from_state="In Progress",
+            to_state="Done",
+            at=_at(9, 30),
+            by="pieter",
+            received_at=_at(9, 31),
+        )
+        session.add_all(
+            [
+                Wait(
+                    id=card.id,
+                    kind_code="card_wait",
+                    cards=["SR-1", "SR-4"],
+                    states=["Done", "Won't fix"],
+                ),
+                Wait(
+                    id=marked.id,
+                    kind_code="timed_wait",
+                    due_at=_at(9, 45),
+                    done_note="Read the ESO sync at 09:46; the importer goes on",
+                ),
+                Wait(id=finished.id, kind_code="timed_wait", due_at=_at(12)),
+                transition,
+            ]
+        )
+        session.flush()
+        session.add_all(
+            [
+                WaitFiring(
+                    wait_id=card.id,
+                    wait_kind_code="card_wait",
+                    seq=2,
+                    cause_code=FiringCause.REQUESTED,
+                    requested_by_user_id=person.id,
+                    fired_at=_at(9, 40),
+                ),
+                WaitFiring(
+                    wait_id=card.id,
+                    wait_kind_code="card_wait",
+                    seq=1,
+                    cause_code=FiringCause.TRANSITION,
+                    transition_id=transition.id,
+                    fired_at=_at(9, 31),
+                ),
+                WaitFiring(
+                    wait_id=marked.id,
+                    wait_kind_code="timed_wait",
+                    seq=1,
+                    cause_code=FiringCause.DUE,
+                    fired_at=_at(9, 45),
+                ),
+            ]
+        )
+        session.flush()
+
+        items = _json(container.view_service().timeline(project))["items"]
+
+        common = {
+            "path": None,
+            "step": None,
+            "urgent": False,
+            "for": None,
+            "summary": None,
+            "created_at": "2026-10-12T09:00:00Z",
+            "attachments": [],
+        }
+        assert items == [
+            {
+                "id": str(card.id),
+                "seq": 1,
+                "kind": "card_wait",
+                "title": "The night shift takes SR-1 and SR-4",
+                **common,
+                "done": None,
+                "cards": ["SR-1", "SR-4"],
+                "states": ["Done", "Won't fix"],
+                "firings": [
+                    {
+                        "seq": 1,
+                        "cause": "transition",
+                        "fired_at": "2026-10-12T09:31:00Z",
+                        "transition": {
+                            "card": "SR-4",
+                            "from": "In Progress",
+                            "to": "Done",
+                            "at": "2026-10-12T09:30:00Z",
+                            "by": "pieter",
+                        },
+                        "requested_by": None,
+                        "job": None,
+                    },
+                    {
+                        "seq": 2,
+                        "cause": "requested",
+                        "fired_at": "2026-10-12T09:40:00Z",
+                        "transition": None,
+                        "requested_by": "ada",
+                        "job": None,
+                    },
+                ],
+            },
+            {
+                "id": str(marked.id),
+                "seq": 2,
+                "kind": "timed_wait",
+                "title": "ESO refreshes",
+                **common,
+                "done": {
+                    "at": "2026-10-12T10:00:00Z",
+                    "cause": "marked",
+                    "by": "agent",
+                    "note": "Read the ESO sync at 09:46; the importer goes on",
+                },
+                "due_at": "2026-10-12T09:45:00Z",
+                "firings": [
+                    {
+                        "seq": 1,
+                        "cause": "due",
+                        "fired_at": "2026-10-12T09:45:00Z",
+                        "transition": None,
+                        "requested_by": None,
+                        "job": None,
+                    }
+                ],
+            },
+            {
+                "id": str(finished.id),
+                "seq": 3,
+                "kind": "timed_wait",
+                "title": "A 24-hour soak",
+                **common,
+                "done": {
+                    "at": "2026-10-12T11:00:00Z",
+                    "cause": "finished",
+                    "by": "ada",
+                    "note": None,
+                },
+                "due_at": "2026-10-12T12:00:00Z",
+                "firings": [],
+            },
+        ]
 
     def test_timeline_moved_tells_the_bus_after_the_commit(
         self,

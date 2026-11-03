@@ -27,7 +27,7 @@
       },
       "AddItemRequestSchema.4ff8b5e": {
         "additionalProperties": false,
-        "description": "An item to add, in `timeline.json`'s shape (TD §4.5, F86.1): a prose\nitem, with its text or to fill, or a work item to start. Which of the\nfields a kind takes the service says.",
+        "description": "An item to add, in `timeline.json`'s shape (TD §4.5, F86.1): a prose\nitem, with its text or to fill, a work item to start, or a wait. Which of\nthe fields a kind takes the service says.",
         "properties": {
           "agent": {
             "anyOf": [
@@ -73,6 +73,29 @@
             ],
             "title": "Brief"
           },
+          "cards": {
+            "anyOf": [
+              {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A card wait's cards, by their ticket ids (F91)",
+            "examples": [
+              [
+                "SR-1",
+                "SR-4"
+              ]
+            ],
+            "title": "Cards"
+          },
           "claims": {
             "description": "The claimed actions a work item does, by their blocks' ids: open actions of registered documents of the project (DB decision 64)",
             "examples": [
@@ -106,6 +129,23 @@
               "/work/Example"
             ],
             "title": "Cwd"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A timed wait's due time, ahead of now",
+            "examples": [
+              "2026-10-25T18:30:00Z"
+            ],
+            "title": "Due At"
           },
           "for": {
             "anyOf": [
@@ -208,6 +248,29 @@
             ],
             "title": "Repo"
           },
+          "states": {
+            "anyOf": [
+              {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A card wait's states, the tracker's names, any of which a card entering fires it",
+            "examples": [
+              [
+                "Done",
+                "Won't fix"
+              ]
+            ],
+            "title": "States"
+          },
           "step": {
             "anyOf": [
               {
@@ -253,7 +316,7 @@
               }
             ],
             "default": null,
-            "description": "The title it is born with in its file's front matter, where its Markdown gives none; a work item's line",
+            "description": "The title it is born with in its file's front matter, where its Markdown gives none; a work item's or a wait's line",
             "examples": [
               "Put the v4 key into OpenBao"
             ],
@@ -309,7 +372,7 @@
                 "type": "null"
               }
             ],
-            "description": "A prose item's file, its absolute path in the store; none for work",
+            "description": "A prose item's file, its absolute path in the store; none for work and a wait",
             "examples": [
               "/work/Projects/camp/items/4-put-the-v4-key-into-openbao.md"
             ],
@@ -328,7 +391,7 @@
                 "type": "null"
               }
             ],
-            "description": "A work item's session as the gate left it; none for prose",
+            "description": "A work item's session as the gate left it; none otherwise",
             "title": "State"
           }
         },
@@ -4096,7 +4159,7 @@
             "type": "string"
           },
           "mark": {
-            "description": "Done on a document, Read on a notice, Reviewed on a review",
+            "description": "Done on a document or a wait, Read on a notice, Reviewed on a review",
             "enum": [
               "done",
               "read",
@@ -4104,6 +4167,23 @@
             ],
             "title": "Mark",
             "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A wait's close, Pilot's own Done: what was read and when, and the action after it started",
+            "examples": [
+              "SR-4 read Done at 01:14; the card pass goes on"
+            ],
+            "title": "Note"
           }
         },
         "required": [
@@ -15317,7 +15397,7 @@
     },
     "/tools/pilot-store/items": {
       "post": {
-        "description": "Returns:     201: The item, a prose item's file, a work item's state as the gate         left it, and the call's effect line     400: The body is not an item in `timeline.json`'s shape     401: No bearer, or one no session has     403: The bearer's session is not a chat's or a job's, or has no turn         running     404: An attachment, the plan's task, a claim's item or a source's         environment is not the session's project's or the controller's,         or a claim's document has no such block     409: A wait, a field the kind does not take or one it needs missing,         a text with faults, material that cannot be copied, a claim that         is not an open action of a registered document, or a start the         project refuses: the reason     502: The controller did not answer, or refused for a reason of its own",
+        "description": "Returns:     201: The item, a prose item's file, a work item's state as the gate         left it, and the call's effect line     400: The body is not an item in `timeline.json`'s shape     401: No bearer, or one no session has     403: The bearer's session is not a chat's or a job's, or has no turn         running     404: An attachment, the plan's task, a claim's item or a source's         environment is not the session's project's or the controller's,         or a claim's document has no such block     409: A field the kind does not take or one it needs missing, a text         with faults, a wait's list empty or naming one twice, a card that         is no ticket id, a due time not ahead, material that cannot be         copied, a claim that is not an open action of a registered         document, or a start the project refuses: the reason     502: The controller did not answer, or refused for a reason of its own",
         "operationId": "post__tools_pilot-store_items",
         "parameters": [],
         "requestBody": {
@@ -15402,13 +15482,13 @@
             "description": "Bad Gateway"
           }
         },
-        "summary": "`add_item(item)` (F86.1, F86.6, F36.5): a prose item minted with its file, or a work item started on add, named for the claimed actions it does (F21.6), with the attachments it carries.",
+        "summary": "`add_item(item)` (F86.1, F86.6, F36.5): a prose item minted with its file, a work item started on add, named for the claimed actions it does (F21.6), or a wait, fixed from then on (F27.6), with the attachments it carries.",
         "tags": []
       }
     },
     "/tools/pilot-store/marks": {
       "post": {
-        "description": "Returns:     200: The call's effect line     400: The body is not an item's id, a mark and an optional handle     401: No bearer, or one no session has     403: The bearer's session is not a chat's or a job's, or has no turn         running     404: The item is not of the session's project, or no person has the         handle     409: Read or Reviewed without a person, or the record refuses the         mark: the reason",
+        "description": "Returns:     200: The call's effect line     400: The body is not an item's id, a mark, an optional handle and an         optional note     401: No bearer, or one no session has     403: The bearer's session is not a chat's or a job's, or has no turn         running     404: The item is not of the session's project, or no person has the         handle     409: Read or Reviewed without a person, a wait's mark with a person or         without a note, a note on any other item, or the record refuses         the mark: the reason",
         "operationId": "post__tools_pilot-store_marks",
         "parameters": [],
         "requestBody": {
@@ -15483,7 +15563,7 @@
             "description": "Conflict"
           }
         },
-        "summary": "`mark(item, done | read | reviewed, for?)` (F86.3): Done, Read or Reviewed on an item for the person `for` names, else Pilot's own Done.",
+        "summary": "`mark(item, done | read | reviewed, for?, note?)` (F86.3): Done, Read or Reviewed on an item for the person `for` names, else Pilot's own Done, a wait's with its `note` (F27.4).",
         "tags": []
       }
     },

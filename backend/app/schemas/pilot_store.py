@@ -4,7 +4,7 @@ for the brain's tools (TD §4.5, F86)."""
 import uuid
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, AwareDatetime, BaseModel, ConfigDict, Field
 
 from app.engine.paths import DRAFT
 from app.schemas.timeline import HeldReason
@@ -162,7 +162,9 @@ class MarkRequestSchema(BaseModel):
         description="The item's id", examples=["0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15"]
     )
     mark: Mark = Field(
-        description="Done on a document, Read on a notice, Reviewed on a review"
+        description=(
+            "Done on a document or a wait, Read on a notice, Reviewed on a review"
+        )
     )
     for_: str | None = Field(
         default=None,
@@ -170,6 +172,15 @@ class MarkRequestSchema(BaseModel):
         min_length=1,
         description="The handle of the person the mark is for; without it, Pilot's",
         examples=["ada"],
+    )
+    note: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "A wait's close, Pilot's own Done: what was read and when, and the"
+            " action after it started"
+        ),
+        examples=["SR-4 read Done at 01:14; the card pass goes on"],
     )
 
 
@@ -200,8 +211,8 @@ class WriterQuestionRequestSchema(BaseModel):
 
 class AddItemRequestSchema(BaseModel):
     """An item to add, in `timeline.json`'s shape (TD §4.5, F86.1): a prose
-    item, with its text or to fill, or a work item to start. Which of the
-    fields a kind takes the service says."""
+    item, with its text or to fill, a work item to start, or a wait. Which of
+    the fields a kind takes the service says."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -211,7 +222,7 @@ class AddItemRequestSchema(BaseModel):
         min_length=1,
         description=(
             "The title it is born with in its file's front matter, where its"
-            " Markdown gives none; a work item's line"
+            " Markdown gives none; a work item's or a wait's line"
         ),
         examples=["Put the v4 key into OpenBao"],
     )
@@ -290,6 +301,24 @@ class AddItemRequestSchema(BaseModel):
         ),
         examples=[["0f8a1c2e-5b7d-4e3a-9c61-2d4f8b0e7a15/A1"]],
     )
+    cards: list[Annotated[str, Field(min_length=1)]] | None = Field(
+        default=None,
+        description="A card wait's cards, by their ticket ids (F91)",
+        examples=[["SR-1", "SR-4"]],
+    )
+    states: list[Annotated[str, Field(min_length=1)]] | None = Field(
+        default=None,
+        description=(
+            "A card wait's states, the tracker's names, any of which a card"
+            " entering fires it"
+        ),
+        examples=[["Done", "Won't fix"]],
+    )
+    due_at: AwareDatetime | None = Field(
+        default=None,
+        description="A timed wait's due time, ahead of now",
+        examples=["2026-10-25T18:30:00Z"],
+    )
 
 
 class AttachRequestSchema(BaseModel):
@@ -310,11 +339,14 @@ class AddedSchema(BaseModel):
 
     id: uuid.UUID = Field(description="Its id")
     path: str | None = Field(
-        description="A prose item's file, its absolute path in the store; none for work",
+        description=(
+            "A prose item's file, its absolute path in the store; none for work"
+            " and a wait"
+        ),
         examples=["/work/Projects/camp/items/4-put-the-v4-key-into-openbao.md"],
     )
     state: Literal["starting", "held"] | None = Field(
-        description="A work item's session as the gate left it; none for prose"
+        description="A work item's session as the gate left it; none otherwise"
     )
     held: HeldReason | None = Field(
         description="Why the gate holds a held work item's start; none otherwise"

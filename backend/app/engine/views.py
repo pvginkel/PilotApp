@@ -23,6 +23,7 @@ from app.engine.paths import (
 )
 from app.models import (
     Attachment,
+    CardTransition,
     Chat,
     ConfirmationReason,
     Document,
@@ -31,6 +32,8 @@ from app.models import (
     ItemKind,
     Project,
     User,
+    Wait,
+    WaitFiring,
 )
 from app.models import Session as AgentSession
 from app.models.reference import ChatKind, RecordKind, SessionState, TaskStatus
@@ -119,7 +122,9 @@ class ViewService:
 
     def timeline(self, project: Project) -> Rendering:
         """The project's timeline: the project's state, its items in order,
-        and its attachments, in the files' vocabulary."""
+        and its attachments, in the files' vocabulary; a wait in `add_item`'s
+        shape, with its firings in order and, once marked, its note (TD
+        §7.1)."""
         rows = self.db.execute(
             select(Item, Document.path, Document.summary, Document.published_hash)
             .outerjoin(Document, Document.id == Item.id)
@@ -141,12 +146,35 @@ class ViewService:
             .order_by(ItemAttachment.position)
         ):
             hung.setdefault(item_id, []).append(_attachment_ref(attachment))
+        waits = {
+            wait.id: wait
+            for wait in self.db.scalars(
+                select(Wait)
+                .join(Item, Item.id == Wait.id)
+                .where(Item.project_id == project.id)
+            )
+        }
+        firings: dict[uuid.UUID, list[tuple[WaitFiring, CardTransition | None]]] = {}
+        for firing, transition in self.db.execute(
+            select(WaitFiring, CardTransition)
+            .outerjoin(CardTransition, CardTransition.id == WaitFiring.transition_id)
+            .join(Item, Item.id == WaitFiring.wait_id)
+            .where(Item.project_id == project.id)
+            .order_by(WaitFiring.wait_id, WaitFiring.seq)
+        ):
+            firings.setdefault(firing.wait_id, []).append((firing, transition))
         handles = self._handles(
             {
                 user_id
                 for item, _, _, _ in rows
                 for user_id in (item.for_user_id, item.done_by_user_id)
                 if user_id is not None
+            }
+            | {
+                firing.requested_by_user_id
+                for taken in firings.values()
+                for firing, _ in taken
+                if firing.requested_by_user_id is not None
             }
         )
         return render_json(
@@ -168,6 +196,8 @@ class ViewService:
                         summary,
                         handles,
                         hung.get(item.id, []),
+                        waits.get(item.id),
+                        firings.get(item.id, []),
                     )
                     for item, path, summary, published_hash in rows
                 ],
@@ -395,8 +425,10 @@ def _item(
     summary: str | None,
     handles: dict[uuid.UUID, str],
     attachments: list[dict[str, str]],
+    wait: Wait | None,
+    firings: list[tuple[WaitFiring, CardTransition | None]],
 ) -> dict[str, Any]:
-    done = None
+    done: dict[str, Any] | None = None
     if item.done_at is not None:
         done = {
             "at": utc_time(item.done_at),
@@ -405,7 +437,9 @@ def _item(
             if item.done_by_user_id is None
             else handles[item.done_by_user_id],
         }
-    return {
+        if wait is not None:
+            done["note"] = wait.done_note
+    entry = {
         "id": str(item.id),
         "seq": item.seq,
         "kind": item.kind_code,
@@ -419,6 +453,45 @@ def _item(
         "done": done,
         "attachments": attachments,
     }
+    if wait is not None:
+        entry |= _wait(wait, firings, handles)
+    return entry
+
+
+def _wait(
+    wait: Wait,
+    firings: list[tuple[WaitFiring, CardTransition | None]],
+    handles: dict[uuid.UUID, str],
+) -> dict[str, Any]:
+    """A wait's own fields, as `add_item` takes them, and its firings in
+    order."""
+    fields: dict[str, Any] = (
+        {"due_at": utc_time(wait.due_at)}
+        if wait.due_at is not None
+        else {"cards": wait.cards, "states": wait.states}
+    )
+    fields["firings"] = [
+        {
+            "seq": firing.seq,
+            "cause": firing.cause_code.value,
+            "fired_at": utc_time(firing.fired_at),
+            "transition": None
+            if transition is None
+            else {
+                "card": transition.card,
+                "from": transition.from_state,
+                "to": transition.to_state,
+                "at": utc_time(transition.at),
+                "by": transition.by,
+            },
+            "requested_by": None
+            if firing.requested_by_user_id is None
+            else handles[firing.requested_by_user_id],
+            "job": None if firing.job_id is None else str(firing.job_id),
+        }
+        for firing, transition in firings
+    ]
+    return fields
 
 
 def _attachment_ref(attachment: Attachment) -> dict[str, str]:

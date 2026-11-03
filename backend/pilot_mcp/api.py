@@ -13,7 +13,7 @@ from typing import Annotated, Any, Literal
 
 import httpx
 from mcp.server.fastmcp.exceptions import ToolError
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 TOOL_USE_ID_HEADER = "Tool-Use-Id"
 """The header the routes read a call's tool-use id from
@@ -62,8 +62,8 @@ class NewItem(BaseModel):
     ] = Field(
         description=(
             "`decision`, `question`, `action`, `notice`, `document` or `review`"
-            " for a prose item, `work` for a work item; a wait, `card_wait` or"
-            " `timed_wait`, is refused: Pilot takes none yet"
+            " for a prose item, `work` for a work item, `card_wait` or"
+            " `timed_wait` for a wait"
         )
     )
     title: str | None = Field(
@@ -72,7 +72,7 @@ class NewItem(BaseModel):
         description=(
             "The title it is born with in its file's front matter, where"
             " `markdown` gives none; a prose item without `markdown` needs it, and"
-            " a work item, whose line shows it"
+            " a work item and a wait, whose line shows it"
         ),
     )
     markdown: str | None = Field(
@@ -167,6 +167,28 @@ class NewItem(BaseModel):
             " names them for their `done`"
         ),
     )
+    cards: list[Annotated[str, Field(min_length=1)]] | None = Field(
+        default=None,
+        description=(
+            "A card wait's cards, one or more ticket ids, each named once: it"
+            " fires whenever one of them enters one of `states`"
+        ),
+    )
+    states: list[Annotated[str, Field(min_length=1)]] | None = Field(
+        default=None,
+        description=(
+            "A card wait's states, one or more of the tracker's names, each named"
+            " once, matched whatever their case: list the states that derail the"
+            " wait beside the one you hope for, since nothing else fires it"
+        ),
+    )
+    due_at: AwareDatetime | None = Field(
+        default=None,
+        description=(
+            "A timed wait's due time, with its offset, ahead of now: it fires"
+            " once when it comes"
+        ),
+    )
 
 
 class RegisteredDocument(BaseModel):
@@ -202,13 +224,13 @@ class Added(BaseModel):
     path: str | None = Field(
         description=(
             "A prose item's file, its absolute path, which you fill; none for a"
-            " work item"
+            " work item or a wait"
         )
     )
     state: Literal["starting", "held"] | None = Field(
         description=(
             "A work item's session: `starting`, or `held` at the gate; none for"
-            " a prose item"
+            " a prose item or a wait"
         )
     )
     held: (
@@ -438,8 +460,10 @@ class PilotStoreApi(_Routes):
         item: uuid.UUID,
         mark: Mark,
         person: str | None,
+        note: str | None,
     ) -> Recorded:
-        body = {"item": str(item), "mark": mark} | _given(**{"for": person})
+        body = {"item": str(item), "mark": mark}
+        body |= _given(**{"for": person}, note=note)
         answer = await self._post("marks", authorization, tool_use_id, body)
         return Recorded.model_validate(answer)
 

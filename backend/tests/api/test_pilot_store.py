@@ -26,6 +26,7 @@ from app.models import (
     Project,
     Turn,
     User,
+    Wait,
     WriterQuestion,
 )
 from app.models.reference import AnswerChannel, ChatKind, ProjectState, SessionState
@@ -95,6 +96,19 @@ options:
   - Tunnel
 ```
 """
+
+
+DUE = "2099-10-25T18:30:00Z"
+
+CARD_WAIT = {
+    "kind": "card_wait",
+    "title": "SR-4 lands",
+    "cards": ["SR-4"],
+    "states": ["Done", "Won't fix"],
+}
+TIMED_WAIT = {"kind": "timed_wait", "title": "ESO refreshes", "due_at": DUE}
+
+NOTE = "SR-4 read Done at 01:14; the card pass goes on"
 
 
 def _bearer(token: str = TOKEN) -> dict[str, str]:
@@ -455,7 +469,8 @@ class TestAnswer:
 
 
 class TestMark:
-    """`POST /tools/pilot-store/marks`: `mark(item, done | read | reviewed, for?)`."""
+    """`POST /tools/pilot-store/marks`: `mark(item, done | read | reviewed, for?,
+    note?)`."""
 
     def test_a_mark_is_200_with_its_effect_line(
         self,
@@ -513,8 +528,9 @@ class TestMark:
             {"item": "{item}", "mark": "answered"},
             {"item": "{item}"},
             {"item": "{item}", "mark": "done", "for": ""},
+            {"item": "{item}", "mark": "done", "note": ""},
         ],
-        ids=["no-item-id", "another-mark", "no-mark", "an-empty-for"],
+        ids=["no-item-id", "another-mark", "no-mark", "an-empty-for", "an-empty-note"],
     )
     def test_a_body_that_is_not_an_item_and_a_mark_is_400(
         self,
@@ -565,6 +581,83 @@ class TestMark:
 
         assert response.status_code == 404
         assert _error(response) == f"Item {theirs.id} was not found"
+
+    def test_pilots_done_with_a_note_closes_a_wait(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+    ) -> None:
+        run = _brain(session, project, environment, "job")
+        item = container.wait_service().add_card_wait(
+            project, run, "SR-4 lands", ["SR-4"], ["Done"], None
+        )
+
+        response = client.post(
+            MARKS,
+            json={"item": str(item.id), "mark": "done", "note": NOTE},
+            headers=_bearer(),
+        )
+
+        assert response.status_code == 200
+        assert response.get_json() == {"effect": "Marked done · SR-4 lands"}
+        session.refresh(item)
+        assert (item.done_cause_code, item.consumed_session_id) == ("marked", run.id)
+        assert session.get_one(Wait, item.id).done_note == NOTE
+
+    @pytest.mark.parametrize(
+        ("wait", "body", "cause"),
+        [
+            (
+                True,
+                {"mark": "done"},
+                "a wait's `done` takes a `note`: what was read and when, and the"
+                " action after it started",
+            ),
+            (
+                True,
+                {"mark": "done", "for": "ada", "note": NOTE},
+                "a wait is closed by Pilot's own `done`, with no `for`",
+            ),
+            (
+                False,
+                {"mark": "done", "for": "ada", "note": NOTE},
+                "a `note` is a wait's, at its `done`",
+            ),
+        ],
+        ids=["wait-without-note", "wait-for-a-person", "note-on-a-decision"],
+    )
+    def test_a_waits_mark_without_its_note_and_a_note_elsewhere_are_409(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        environment: Environment,
+        person: User,
+        wait: bool,
+        body: dict[str, str],
+        cause: str,
+    ) -> None:
+        run = _brain(session, project, environment, "job")
+        item = (
+            container.wait_service().add_card_wait(
+                project, run, "SR-4 lands", ["SR-4"], ["Done"], None
+            )
+            if wait
+            else _decision(container, project, run)
+        )
+
+        response = client.post(
+            MARKS, json={"item": str(item.id), **body}, headers=_bearer()
+        )
+
+        assert response.status_code == 409
+        assert _error(response) == (
+            f"Cannot mark item {item.id} {body['mark']} because {cause}"
+        )
 
     def test_read_without_for_is_409(
         self,
@@ -874,8 +967,10 @@ class TestAddItem:
             {"kind": "notice", "title": "Camp", "attachments": ["camp.md"]},
             {"kind": "notice", "title": "Camp", "attachments": ["e:/a", "e:/a"]},
             {"kind": "work", "repo": "Example"},
-            {"kind": "notice", "title": "Camp", "cards": ["MD-8"]},
             {**WORK, "claims": ["A1"]},
+            {**CARD_WAIT, "states": ["Done", ""]},
+            {**TIMED_WAIT, "due_at": "2099-10-25T18:30:00"},
+            {**TIMED_WAIT, "due_at": "tomorrow"},
         ],
     )
     def test_a_body_that_is_not_an_item_is_400(
@@ -893,23 +988,83 @@ class TestAddItem:
         assert response.status_code == 400
         assert session.scalars(select(Item)).all() == []
 
-    def test_a_wait_is_409(
+    @pytest.mark.parametrize(
+        ("body", "effect"),
+        [
+            (CARD_WAIT, "Added · Card wait · SR-4 lands"),
+            (TIMED_WAIT, "Added · Timed wait · ESO refreshes"),
+        ],
+    )
+    def test_a_wait_is_201_with_its_effect_line(
         self,
         client: FlaskClient,
         session: DbSession,
         project: Project,
         environment: Environment,
+        body: dict[str, Any],
+        effect: str,
+    ) -> None:
+        _brain(session, project, environment, "job")
+
+        response = client.post(ITEMS, json=body, headers=_bearer())
+
+        assert response.status_code == 201
+        [item] = session.scalars(select(Item)).all()
+        assert response.get_json() == {
+            "id": str(item.id),
+            "path": None,
+            "state": None,
+            "held": None,
+            "effect": effect,
+        }
+        wait = session.get_one(Wait, item.id)
+        assert (wait.cards, wait.states, wait.due_at) == (
+            body.get("cards"),
+            body.get("states"),
+            None
+            if "due_at" not in body
+            else datetime(2099, 10, 25, 18, 30, tzinfo=UTC),
+        )
+
+    @pytest.mark.parametrize(
+        ("body", "cause"),
+        [
+            (
+                {"kind": "notice", "title": "Camp", "cards": ["MD-8"]},
+                "a notice item takes no `cards`",
+            ),
+            ({**CARD_WAIT, "due_at": DUE}, "a card_wait item takes no `due_at`"),
+            ({**CARD_WAIT, "cards": []}, "its `cards` list is empty"),
+            (
+                {**CARD_WAIT, "cards": ["SR-4", "SR-4"]},
+                "its `cards` list names `SR-4` twice",
+            ),
+            (
+                {**CARD_WAIT, "cards": ["md-8"]},
+                "`md-8` is no ticket id, `[A-Z][A-Z0-9_]*-[1-9][0-9]*`",
+            ),
+            (
+                {**TIMED_WAIT, "due_at": "2026-10-25T18:30:00Z"},
+                "its due time, 2026-10-25T18:30:00+00:00, is not ahead",
+            ),
+        ],
+    )
+    def test_a_wait_refused_or_a_field_of_another_kind_is_409(
+        self,
+        client: FlaskClient,
+        session: DbSession,
+        project: Project,
+        environment: Environment,
+        body: dict[str, Any],
+        cause: str,
     ) -> None:
         _brain(session, project, environment)
 
-        response = client.post(
-            ITEMS, json={"kind": "card_wait", "title": "MD-8 done"}, headers=_bearer()
-        )
+        response = client.post(ITEMS, json=body, headers=_bearer())
 
         assert response.status_code == 409
-        assert _error(response) == (
-            "Cannot add a card_wait item because Pilot takes no waits yet"
-        )
+        assert _error(response) == f"Cannot add a {body['kind']} item because {cause}"
+        assert session.scalars(select(Item)).all() == []
 
     @pytest.mark.parametrize(("claim", "status"), [("A1", 201), ("D1", 409)])
     def test_a_work_item_names_the_claimed_actions_it_does(

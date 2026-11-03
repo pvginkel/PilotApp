@@ -40,6 +40,8 @@ class Item(db.Model):  # type: ignore[name-defined]
         UniqueConstraint("project_id", "seq"),
         # What a Work's keys reference, so its Item is of its Project.
         UniqueConstraint("project_id", "id"),
+        # What a Wait's key references, so its Item is of its kind.
+        UniqueConstraint("id", "kind_code"),
         # The task is of the Item's Project, the key carrying `project_id`
         # once (DB assertion 176).
         ForeignKeyConstraint(
