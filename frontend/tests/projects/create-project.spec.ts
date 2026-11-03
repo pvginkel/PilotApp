@@ -221,6 +221,10 @@ test.describe('Create project', () => {
     const me = await people.signIn({ subject });
     await drafted({ page, projects, projectHead, controller, chats, definitionChat }, me.handle!);
     await expect(definitionChat.createReady).toBeVisible();
+    // The reply shown at the chat's end is marked seen, and the mark's answer has the page read every
+    // query again: after the swap, that round's read of the person is refused, and the app says
+    // "No Access".
+    await definitionChat.acted('read');
 
     // The browser's session now lacks the editor role, and the API refuses the list's next read.
     await expectConsoleError(page, /403/);

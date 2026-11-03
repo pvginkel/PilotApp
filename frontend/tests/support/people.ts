@@ -44,12 +44,13 @@ export class People {
 
   /**
    * The browser's session swapped for one without the editor role, the same subject's or a fresh
-   * one's, once every fetch the page sent before the swap has landed. Such a fetch went under the
-   * old session, which the API does not refuse, and a read the window's focus asks for while one
-   * of the same query is under way is that read: TanStack Query refetches on focus with
+   * one's: every fetch the page sent before the call lands first, under the old session, and every
+   * one it sent during the swap before the call returns. A read the window's focus asks for while
+   * one of the same query is under way is that read: TanStack Query refetches on focus with
    * `cancelRefetch: false`.
    */
   async withoutRole({ name = 'Test Person', subject }: FirstSignIn = {}): Promise<void> {
+    await this.fetches.landed();
     await this.auth.createSession({ subject, name, roles: [] });
     await this.fetches.landed();
   }
