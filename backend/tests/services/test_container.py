@@ -29,12 +29,15 @@ from app.models import (
     StoreUpdate,
     Turn,
     User,
+    Wait,
+    WaitFiring,
 )
 from app.models import Session as AgentSession
 from app.models.reference import (
     ChatKind,
     CloseCause,
     Condition,
+    FiringCause,
     ProjectState,
     SessionState,
     UserKind,
@@ -63,6 +66,7 @@ from app.services.store_updater import StoreUpdater
 from app.services.supervisor import TIMER_RUNS_TOTAL, Supervisor
 from app.services.usage_halts import TIMER as USAGE_TIMER
 from app.services.usage_halts import UsageWatcher
+from app.services.wait_timer import WaitTimer
 from tests.conftest_infrastructure import (
     _clear_prometheus_registry,
     _create_test_app,
@@ -782,6 +786,71 @@ class TestChatCloseWiring:
             )
         finally:
             coordinator.shutdown()
+
+
+class TestWaitTimerWiring:
+    def test_the_timer_runs_from_startup_with_no_controller_and_fires_what_is_due(
+        self, committed_app: Flask
+    ) -> None:
+        container = committed_app.container
+        container.app_config.override(AppSettings(scheduler_tick_seconds=0.05))
+        with scoped_session(container) as db:
+            person = User(
+                kind_code=UserKind.PERSON,
+                subject="subject-ada",
+                handle="ada",
+                name="Ada Example",
+                avatar_slot=1,
+            )
+            db.add(person)
+            db.flush()
+            project = Project(
+                created_by_user_id=person.id,
+                state_code=ProjectState.OPEN,
+                slug="soup-club",
+            )
+            db.add(project)
+            db.flush()
+            run = AgentSession(
+                project_id=project.id,
+                kind_code="work",
+                cwd="/work/Example",
+                token_hash="a" * 64,
+                state_code=SessionState.RUNNING,
+            )
+            db.add(run)
+            db.flush()
+            added = container.wait_service().add_timed_wait(
+                project,
+                run,
+                "ESO refreshes",
+                datetime.now(UTC) + timedelta(hours=1),
+                None,
+            )
+            db.get_one(Wait, added.id).due_at = datetime.now(UTC) - timedelta(hours=1)
+            wait_id = added.id
+        timer = container.wait_timer()
+        assert isinstance(timer, WaitTimer)
+        assert timer is container.wait_timer()
+        coordinator = container.lifecycle_coordinator()
+
+        coordinator.fire_startup()
+        try:
+            wait_until(
+                lambda: _firing_causes(container, wait_id) == [FiringCause.DUE],
+                "the wait fired due by its timer",
+            )
+        finally:
+            coordinator.shutdown()
+
+
+def _firing_causes(container: ServiceContainer, wait_id: uuid.UUID) -> list[str]:
+    with scoped_session(container) as db:
+        return list(
+            db.scalars(
+                select(WaitFiring.cause_code).where(WaitFiring.wait_id == wait_id)
+            )
+        )
 
 
 class TestStoreUpdaterWiring:

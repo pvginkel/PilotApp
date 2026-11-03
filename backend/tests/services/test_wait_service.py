@@ -1,22 +1,46 @@
 """The waits (F27, DB decision 46): a card wait or a timed wait born with what
-it waits on and fixed from then on, refused as F86.1 has it, and closed by
-Pilot's own `done` with a note (DB 199, 300) or by Finish, with none."""
+it waits on and fixed from then on, refused as F86.1 has it, fired by a card's
+transition or its due time (F136.2, F27.2), and closed by Pilot's own `done`
+with a note (DB 199, 300) or by Finish, with none."""
 
+import json
 import re
+import threading
+import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import select
+from flask import Flask
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.database import scoped_session
-from app.engine.bus import EngineEvent, ProjectChanged
+from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved
+from app.engine.paths import TIMELINE, tree_path
 from app.exceptions import InvalidOperationException
-from app.models import Item, PlanTask, Project, User, Wait
-from app.models.reference import ProjectState, TaskStatus, TransitionKind, UserKind
+from app.models import (
+    CardTransition,
+    Environment,
+    Item,
+    PlanTask,
+    Project,
+    User,
+    Wait,
+    WaitFiring,
+)
+from app.models.reference import (
+    FiringCause,
+    ProjectState,
+    SessionState,
+    TaskStatus,
+    TransitionKind,
+    UserKind,
+)
+from app.services import wait_service
 from app.services.container import ServiceContainer
-from app.services.wait_service import WaitService
+from app.services.wait_service import ReportedTransition, WaitService
 from app.utils.after_commit import clear_after_commit_callbacks
 
 NOTE = "ANS-312 read Done at 09:40; the rollout goes on"
@@ -322,3 +346,449 @@ class TestWaitServiceClose:
             )
             assert not container.record_service().offers_undo(each)
             assert session.get_one(Wait, each.id).done_note is None
+
+
+AT = datetime(2026, 10, 12, 9, 30, tzinfo=UTC)
+
+
+def _transition(card: str = "ANS-312", to_state: str = "Done") -> ReportedTransition:
+    return ReportedTransition(
+        card=card, from_state="In Progress", to_state=to_state, at=AT, by="pieter"
+    )
+
+
+def _other_project(session: DbSession, person: User) -> tuple[Project, models.Session]:
+    """A second open project, with a work Session of its own."""
+    other = Project(
+        created_by_user_id=person.id,
+        state_code=ProjectState.OPEN,
+        slug="soup-club",
+        name="Soup club",
+    )
+    session.add(other)
+    session.flush()
+    run = models.Session(
+        project_id=other.id,
+        kind_code="work",
+        cwd="/work/Example",
+        token_hash="2" * 64,
+        state_code=SessionState.RUNNING,
+    )
+    session.add(run)
+    session.flush()
+    return other, run
+
+
+def _overdue(
+    session: DbSession,
+    container: ServiceContainer,
+    project: Project,
+    creator: models.Session,
+) -> Item:
+    """A timed wait whose due time passed five minutes ago, as a restart
+    finds one that came due while no process ran."""
+    added = _service(container).add_timed_wait(
+        project, creator, "ESO refreshes", _ahead(), None
+    )
+    session.get_one(Wait, added.id).due_at = datetime.now(UTC) - timedelta(minutes=5)
+    session.flush()
+    return added
+
+
+def _firings(db: DbSession, wait_id: uuid.UUID) -> list[WaitFiring]:
+    return list(
+        db.scalars(
+            select(WaitFiring)
+            .where(WaitFiring.wait_id == wait_id)
+            .order_by(WaitFiring.seq)
+        )
+    )
+
+
+def _transitions(db: DbSession) -> list[CardTransition]:
+    return list(db.scalars(select(CardTransition).order_by(CardTransition.id)))
+
+
+def _shown_firings(
+    container: ServiceContainer, project: Project, wait_id: uuid.UUID
+) -> list[dict[str, object]]:
+    """The wait's firings as the project's `timeline.json` carries them."""
+    text = container.view_service().timeline(project).text
+    item = next(
+        each for each in json.loads(text)["items"] if each["id"] == str(wait_id)
+    )
+    firings: list[dict[str, object]] = item["firings"]
+    return firings
+
+
+def _not_firable(
+    session: DbSession,
+    container: ServiceContainer,
+    project: Project,
+    wait: Item,
+    creator: models.Session,
+    how: str,
+) -> None:
+    """`wait` left where the server fires it not: done, or its project
+    finished, archived or a draft."""
+    match how:
+        case "done":
+            _service(container).close(
+                project,
+                session.get_one(Wait, wait.id),
+                _pilot(session),
+                creator.id,
+                NOTE,
+            )
+        case "finished":
+            project.state_code = ProjectState.FINISHED
+        case "archived":
+            project.archived = True
+        case "draft":
+            project.state_code = ProjectState.DRAFT
+            project.slug = None
+    session.flush()
+    clear_after_commit_callbacks()
+
+
+NOT_FIRABLE = ["done", "finished", "archived", "draft"]
+
+
+class TestWaitServiceFireTransition:
+    def test_it_fires_each_open_card_wait_watching_the_card_and_the_state_once(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        _opened(session, project)
+        other, other_run = _other_project(session, person)
+        service = _service(container)
+        watching = service.add_card_wait(
+            project, project_session, "Slice 058 completes", ["ANS-312"], ["Done"], None
+        )
+        elsewhere = service.add_card_wait(
+            other,
+            other_run,
+            "The night shift takes ANS-312 and SR-4",
+            ["SR-4", "ANS-312"],
+            ["won't fix", "DONE"],
+            None,
+        )
+        unwatched = service.add_card_wait(
+            project, project_session, "SR-1 is done", ["SR-1"], ["Done"], None
+        )
+        clear_after_commit_callbacks()
+        ids = (watching.id, elsewhere.id, unwatched.id)
+
+        with scoped_session(container):
+            assert service.fire_transition(_transition(to_state="done")) == 2
+
+        [recorded] = _transitions(session)
+        assert (
+            recorded.card,
+            recorded.from_state,
+            recorded.to_state,
+            recorded.at,
+            recorded.by,
+        ) == ("ANS-312", "In Progress", "done", AT, "pieter")
+        for wait_id in ids[:2]:
+            [firing] = _firings(session, wait_id)
+            assert (
+                firing.seq,
+                firing.wait_kind_code,
+                firing.cause_code,
+                firing.transition_id,
+                firing.requested_by_user_id,
+                firing.fired_at,
+                firing.job_id,
+            ) == (
+                1,
+                "card_wait",
+                FiringCause.TRANSITION,
+                recorded.id,
+                None,
+                recorded.received_at,
+                None,
+            )
+        assert _firings(session, ids[2]) == []
+        for each in (project, other):
+            assert ProjectChanged(each.id) in engine_events
+            assert (
+                TreeHashMoved(
+                    tree_path(each, TIMELINE),
+                    container.view_service().timeline(each).hash,
+                )
+                in engine_events
+            )
+        assert [
+            (firing["cause"], firing["transition"])
+            for firing in _shown_firings(container, other, ids[1])
+        ] == [
+            (
+                "transition",
+                {
+                    "card": "ANS-312",
+                    "from": "In Progress",
+                    "to": "done",
+                    "at": "2026-10-12T09:30:00Z",
+                    "by": "pieter",
+                },
+            )
+        ]
+
+    @pytest.mark.parametrize(
+        ("card", "to_state"),
+        [("ANS-313", "Done"), ("ANS-312", "In Review"), ("ans-312", "Done")],
+    )
+    def test_a_transition_no_card_wait_watches_is_not_recorded(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        project_session: models.Session,
+        card: str,
+        to_state: str,
+    ) -> None:
+        _opened(session, project)
+        added = _card_wait(container, project, project_session)
+        clear_after_commit_callbacks()
+
+        with scoped_session(container):
+            assert _service(container).fire_transition(_transition(card, to_state)) == 0
+
+        assert _transitions(session) == []
+        assert _firings(session, added.id) == []
+        assert engine_events == []
+
+    @pytest.mark.parametrize("how", NOT_FIRABLE)
+    def test_a_done_wait_or_one_of_a_project_not_open_or_archived_fires_not(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        how: str,
+    ) -> None:
+        _opened(session, project)
+        added = _card_wait(container, project, project_session)
+        _not_firable(session, container, project, added, project_session, how)
+
+        assert _service(container).fire_transition(_transition()) == 0
+
+        assert _transitions(session) == []
+        assert _firings(session, added.id) == []
+
+    def test_a_transition_posted_again_fires_again(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        # No dedupe of a redelivered transition (F136.3).
+        _opened(session, project)
+        added = _card_wait(container, project, project_session)
+        service = _service(container)
+
+        assert service.fire_transition(_transition()) == 1
+        assert service.fire_transition(_transition()) == 1
+        clear_after_commit_callbacks()
+
+        first, second = _transitions(session)
+        assert [
+            (firing.seq, firing.transition_id) for firing in _firings(session, added.id)
+        ] == [(1, first.id), (2, second.id)]
+
+
+class TestWaitServiceFireDue:
+    def test_an_overdue_timed_wait_fires_due_once_after_its_earlier_firings(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        _opened(session, project)
+        overdue = _overdue(session, container, project, project_session)
+        ahead = _service(container).add_timed_wait(
+            project, project_session, "A 24-hour soak", _ahead(24), None
+        )
+        session.add(
+            WaitFiring(
+                wait_id=overdue.id,
+                wait_kind_code="timed_wait",
+                seq=1,
+                cause_code=FiringCause.REQUESTED,
+                requested_by_user_id=person.id,
+                fired_at=datetime.now(UTC) - timedelta(minutes=1),
+            )
+        )
+        session.flush()
+        clear_after_commit_callbacks()
+        project_id = project.id
+        service = _service(container)
+
+        with scoped_session(container):
+            assert service.fire_due() == 1
+
+        due = _firings(session, overdue.id)[1]
+        assert (
+            due.seq,
+            due.wait_kind_code,
+            due.cause_code,
+            due.transition_id,
+            due.requested_by_user_id,
+            due.job_id,
+        ) == (2, "timed_wait", FiringCause.DUE, None, None, None)
+        assert _firings(session, ahead.id) == []
+        assert ProjectChanged(project_id) in engine_events
+        assert [
+            firing["cause"] for firing in _shown_firings(container, project, overdue.id)
+        ] == [
+            "requested",
+            "due",
+        ]
+        engine_events.clear()
+
+        with scoped_session(container):
+            assert service.fire_due() == 0
+
+        assert len(_firings(session, overdue.id)) == 2
+        assert engine_events == []
+
+    @pytest.mark.parametrize("how", NOT_FIRABLE)
+    def test_a_done_wait_or_one_of_a_project_not_open_or_archived_fires_not(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        how: str,
+    ) -> None:
+        _opened(session, project)
+        overdue = _overdue(session, container, project, project_session)
+        _not_firable(session, container, project, overdue, project_session, how)
+
+        assert _service(container).fire_due() == 0
+
+        assert _firings(session, overdue.id) == []
+
+
+class TestWaitServiceFireDueInTwoProcesses:
+    """During a roll two processes run the timer at once (design 2 §8.1)."""
+
+    def test_a_wait_another_process_is_firing_is_skipped(
+        self, committed_app: Flask
+    ) -> None:
+        container = committed_app.container
+        wait_id = _committed_overdue(container)
+
+        with scoped_session(container):
+            assert container.wait_service().fire_due() == 1
+            # The other process, while this one's firing is not committed.
+            assert _in_thread(lambda: _fire_due(container)) == 0
+
+        assert _fire_due(container) == 0
+        assert _due_count(container, wait_id) == 1
+
+    def test_a_firing_committed_after_the_read_is_seen_under_the_lock(
+        self, committed_app: Flask, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        container = committed_app.container
+        wait_id = _committed_overdue(container)
+        hold = WaitService._hold
+        pending = [True]
+        earlier: list[int] = []
+
+        def hooked(
+            service: WaitService,
+            project_id: uuid.UUID,
+            wait: uuid.UUID,
+            *,
+            skip_locked: bool,
+        ) -> Project | None:
+            # The other process fires and commits after this one read the
+            # wait as due, before it takes the Wait's row.
+            if pending:
+                pending.pop()
+                earlier.append(_in_thread(lambda: _fire_due(container)))
+            return hold(service, project_id, wait, skip_locked=skip_locked)
+
+        monkeypatch.setattr(wait_service.WaitService, "_hold", hooked)
+
+        assert _fire_due(container) == 0
+        assert earlier == [1]
+        assert _due_count(container, wait_id) == 1
+
+
+def _committed_overdue(container: ServiceContainer) -> uuid.UUID:
+    """An open project's timed wait whose due time has passed, committed."""
+    with scoped_session(container) as db:
+        person = User(
+            kind_code=UserKind.PERSON,
+            subject="subject-ada",
+            handle="ada",
+            name="Ada Example",
+            avatar_slot=1,
+        )
+        db.add_all([person, Environment(id="env-1", name="Example-1", exempt=False)])
+        db.flush()
+        project = Project(
+            created_by_user_id=person.id,
+            state_code=ProjectState.OPEN,
+            slug="camp",
+            name="Camp",
+        )
+        db.add(project)
+        db.flush()
+        run = models.Session(
+            project_id=project.id,
+            environment_id="env-1",
+            kind_code="work",
+            cwd="/work/Example",
+            token_hash="1" * 64,
+            state_code=SessionState.RUNNING,
+        )
+        db.add(run)
+        db.flush()
+        return _overdue(db, container, project, run).id
+
+
+def _fire_due(container: ServiceContainer) -> int:
+    with scoped_session(container):
+        fired: int = container.wait_service().fire_due()
+        return fired
+
+
+def _due_count(container: ServiceContainer, wait_id: uuid.UUID) -> int:
+    with scoped_session(container) as db:
+        count: int = (
+            db.scalar(
+                select(func.count())
+                .select_from(WaitFiring)
+                .where(
+                    WaitFiring.wait_id == wait_id,
+                    WaitFiring.cause_code == FiringCause.DUE,
+                )
+            )
+            or 0
+        )
+        return count
+
+
+def _in_thread[T](run: Callable[[], T]) -> T:
+    """`run`'s result, run on a thread of its own: another process's
+    transaction, on a database session of its own."""
+    results: list[T] = []
+    thread = threading.Thread(target=lambda: results.append(run()))
+    thread.start()
+    thread.join(timeout=30)
+    assert results, "the other process did not finish"
+    return results[0]

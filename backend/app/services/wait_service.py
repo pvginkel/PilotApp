@@ -1,31 +1,49 @@
 """The waits (DB decision 46, F27): a card wait or a timed wait added by the
-brain, fixed at add (F27.6), and closed by its own `done` with a note (F27.4,
-DB 300) or by Finish's close of the open items, which writes none.
+brain, fixed at add (F27.6), fired by the server (F136.2, F27.2), and closed by
+its own `done` with a note (F27.4, DB 300) or by Finish's close of the open
+items, which writes none.
 
 Each write is of the caller's transaction, under its Project's row: a wait's
-birth takes its `seq` under it (`DocumentService.next_seq`), and its close
-holds the Wait's row after it.
+birth takes its `seq` under it (`DocumentService.next_seq`), its close holds
+the Wait's row after it, and a firing holds the Project's row shared, then the
+Wait's, and reads the wait open there.
 """
 
 import re
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, SQLColumnExpression, and_, exists, func, select
 from sqlalchemy.orm import Session
 
 from app.engine.documents import DocumentService
 from app.engine.record import ARCHIVED, MARKED
 from app.engine.views import ViewService
 from app.exceptions import InvalidOperationException
-from app.models import Item, Project, User, Wait
+from app.models import CardTransition, Item, Project, User, Wait, WaitFiring
 from app.models import Session as AgentSession
+from app.models.reference import FiringCause, ProjectState
 
 CARD_WAIT = "card_wait"
 TIMED_WAIT = "timed_wait"
 WAITS = (CARD_WAIT, TIMED_WAIT)
 """The Item Kinds of form `wait` (DB assertion 185)."""
+
+
+@dataclass(frozen=True)
+class ReportedTransition:
+    """A card's change of state as its tracker posted it (F136): the card, as
+    the tracker writes it; the state it left, none when the tracker gives
+    none; the state it entered; when, by the tracker's clock; and by whom,
+    none when the tracker names no one."""
+
+    card: str
+    from_state: str | None
+    to_state: str
+    at: datetime
+    by: str | None
 
 
 class WaitService:
@@ -139,6 +157,140 @@ class WaitService:
         self.db.flush()
         self.view_service.timeline_moved(project)
 
+    def fire_transition(self, transition: ReportedTransition) -> int:
+        """Fire, once each, the open card waits of open, unarchived projects
+        that watch `transition`'s card and, case-insensitively, the state it
+        entered (F136.2, DB 197). The transition is recorded only when a wait
+        fired; nothing is read from the tracker (F136.3).
+
+        Returns:
+            How many waits fired.
+        """
+        entered = transition.to_state.casefold()
+        watching = self.db.execute(
+            select(Item.project_id, Wait.id, Wait.states)
+            .join(Item, Item.id == Wait.id)
+            .join(Project, Project.id == Item.project_id)
+            .where(Wait.cards.contains([transition.card]), _firable())
+            .order_by(Item.project_id, Wait.id)
+        ).all()
+        held: list[tuple[Project, uuid.UUID]] = []
+        for project_id, wait_id, states in watching:
+            # A wait with cards has states (`ck_waits_halves`).
+            assert states is not None
+            if entered not in {state.casefold() for state in states}:
+                continue
+            project = self._hold(project_id, wait_id, skip_locked=False)
+            if project is not None:
+                held.append((project, wait_id))
+        if not held:
+            return 0
+        at = datetime.now(UTC)
+        recorded = CardTransition(
+            card=transition.card,
+            from_state=transition.from_state,
+            to_state=transition.to_state,
+            at=transition.at,
+            by=transition.by,
+            received_at=at,
+        )
+        self.db.add(recorded)
+        self.db.flush()
+        for _, wait_id in held:
+            self._fire(
+                wait_id,
+                CARD_WAIT,
+                FiringCause.TRANSITION,
+                at,
+                transition_id=recorded.id,
+            )
+        self._moved(project for project, _ in held)
+        return len(held)
+
+    def fire_due(self) -> int:
+        """Fire `due` the open timed waits of open, unarchived projects whose
+        due time has passed and that have not fired it (F27.2, DB 198), those
+        that came due while no process ran included. A Wait's row another
+        transaction holds is skipped, for the next call to read again: two
+        processes at once fire a wait once.
+
+        Returns:
+            How many waits fired.
+        """
+        at = datetime.now(UTC)
+        due = self.db.execute(
+            select(Item.project_id, Wait.id)
+            .join(Item, Item.id == Wait.id)
+            .join(Project, Project.id == Item.project_id)
+            .where(Wait.due_at <= at, _firable(), ~_due_fired(Wait.id))
+            .order_by(Item.project_id, Wait.id)
+        ).all()
+        fired: list[Project] = []
+        for project_id, wait_id in due:
+            project = self._hold(project_id, wait_id, skip_locked=True)
+            if project is None or self.db.scalar(select(_due_fired(wait_id))):
+                continue
+            self._fire(wait_id, TIMED_WAIT, FiringCause.DUE, at)
+            fired.append(project)
+        self._moved(fired)
+        return len(fired)
+
+    def _hold(
+        self, project_id: uuid.UUID, wait_id: uuid.UUID, *, skip_locked: bool
+    ) -> Project | None:
+        """The wait's Project, its row held shared and the Wait's after it,
+        when both are taken and read there, the project open and unarchived
+        and the wait open; else none. With `skip_locked`, a Wait's row
+        another transaction holds is not taken."""
+        project = self.db.scalars(
+            select(Project)
+            .where(Project.id == project_id)
+            .with_for_update(read=True)
+            .execution_options(populate_existing=True)
+        ).one()
+        if project.state_code is not ProjectState.OPEN or project.archived:
+            return None
+        taken = self.db.scalar(
+            select(Wait.id)
+            .where(Wait.id == wait_id)
+            .with_for_update(skip_locked=skip_locked)
+        )
+        if taken is None:
+            return None
+        item = self.db.get_one(Item, wait_id, populate_existing=True)
+        return project if item.done_at is None else None
+
+    def _fire(
+        self,
+        wait_id: uuid.UUID,
+        kind: str,
+        cause: FiringCause,
+        at: datetime,
+        *,
+        transition_id: int | None = None,
+    ) -> None:
+        """A pending Firing of the Wait, whose row the caller holds, next in
+        its order."""
+        last = self.db.scalar(
+            select(func.max(WaitFiring.seq)).where(WaitFiring.wait_id == wait_id)
+        )
+        self.db.add(
+            WaitFiring(
+                wait_id=wait_id,
+                wait_kind_code=kind,
+                seq=(last or 0) + 1,
+                cause_code=cause,
+                transition_id=transition_id,
+                fired_at=at,
+            )
+        )
+        self.db.flush()
+
+    def _moved(self, projects: Iterable[Project]) -> None:
+        """Each project's timeline moved, once."""
+        for project in {project.id: project for project in projects}.values():
+            self.view_service.timeline_moved(project)
+
     def _item(
         self,
         project: Project,
@@ -178,6 +330,24 @@ def _listed(
         raise InvalidOperationException(
             operation, f"its `{field}` list names {_names(twice)} twice"
         )
+
+
+def _firable() -> ColumnElement[bool]:
+    """A wait the server fires: open, of an open, unarchived project."""
+    return and_(
+        Item.done_at.is_(None),
+        Project.state_code == ProjectState.OPEN,
+        Project.archived.is_(False),
+    )
+
+
+def _due_fired(
+    wait_id: SQLColumnExpression[uuid.UUID] | uuid.UUID,
+) -> ColumnElement[bool]:
+    """Whether the wait has fired `due` (DB 198)."""
+    return exists().where(
+        WaitFiring.wait_id == wait_id, WaitFiring.cause_code == FiringCause.DUE
+    )
 
 
 def _names(names: Sequence[str]) -> str:

@@ -8663,6 +8663,22 @@
         "title": "WriterQuestionSchema",
         "type": "object"
       },
+      "TrackerEventReplySchema.ec422c2": {
+        "description": "What a delivery the endpoint took did: how many card waits it fired,\nnone for one it dropped.",
+        "properties": {
+          "fired": {
+            "description": "How many card waits the delivery fired",
+            "minimum": 0,
+            "title": "Fired",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "fired"
+        ],
+        "title": "TrackerEventReplySchema",
+        "type": "object"
+      },
       "TransitionRequestSchema.e86ccd6": {
         "description": "A change of a project's standing the signed-in person makes.",
         "properties": {
@@ -15000,6 +15016,67 @@
         "summary": "Start a demo or failing task for integration testing.",
         "tags": [],
         "x-required-role": "editor"
+      }
+    },
+    "/api/tracker-events/{tracker}": {
+      "post": {
+        "description": "`youtrack`'s credential is the header `X-YouTrack-Token`, the instance's webhook token; its body the Webhook Triggers app's `issueUpdated`. Answers 200 with how many waits fired, none for a delivery that reports no change of State or matches no open card wait; 401 for a delivery without the token, and every delivery while none is configured; 400 for a body the tracker's adapter cannot read; 404 for no such tracker.",
+        "operationId": "post__api_tracker-events_{tracker}",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "tracker",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackerEventReplySchema.ec422c2"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "A delivery of `tracker`'s, `youtrack` the one there is: the card waits the change of state it reports matches fire inside the request (F136.2).",
+        "tags": []
       }
     },
     "/api/ui-setup": {

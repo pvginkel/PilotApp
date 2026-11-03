@@ -58,6 +58,14 @@ class AppEnvironment(BaseSettings):
         default="",
         description="The store environment's KubeCoder id, which every sync call names",
     )
+    YOUTRACK_WEBHOOK_TOKEN: str = Field(
+        default="",
+        description=(
+            "YouTrack's webhook token, which each delivery to "
+            "/api/tracker-events/youtrack carries in X-YouTrack-Token; empty "
+            "refuses every delivery"
+        ),
+    )
     SYNC_PUT_MAX_BYTES: int = Field(
         default=2 * 1024 * 1024,
         gt=0,
@@ -250,6 +258,11 @@ class AppSettings(BaseModel):
     """The store environment's KubeCoder id, which every sync call names in
     `X-Pilot-Environment`: empty refuses every sync call."""
 
+    youtrack_webhook_token: Annotated[str, Sensitive] = ""
+    """YouTrack's webhook token, the instance's one, which each of its
+    deliveries carries in `X-YouTrack-Token` (F136.1): empty refuses every
+    delivery."""
+
     sync_put_max_bytes: int = 2 * 1024 * 1024
     """The largest body a sync PUT takes."""
 
@@ -396,6 +409,7 @@ class AppSettings(BaseModel):
             ticket_id_pattern=re.compile(env.TICKET_ID_PATTERN),
             sync_token=env.SYNC_TOKEN,
             store_environment_id=env.STORE_ENVIRONMENT_ID,
+            youtrack_webhook_token=env.YOUTRACK_WEBHOOK_TOKEN,
             sync_put_max_bytes=env.SYNC_PUT_MAX_BYTES,
             sync_heartbeat_seconds=env.SYNC_HEARTBEAT_SECONDS,
             ticket_url_template=env.TICKET_URL_TEMPLATE or None,

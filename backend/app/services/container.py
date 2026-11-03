@@ -77,10 +77,12 @@ from app.services.test_data_service import TestDataService
 from app.services.testing_service import TestingService
 from app.services.testing_sync_service import TestingSyncService
 from app.services.timeline_service import TimelineService
+from app.services.tracker_event_service import TrackerEventService
 from app.services.turn_end_read_service import TurnEndReadService
 from app.services.usage_halts import UsageHalts, UsageWatcher
 from app.services.usage_service import UsageService
 from app.services.wait_service import WaitService
+from app.services.wait_timer import WaitTimer
 from app.services.write_back_service import WriteBackService
 from app.utils.lifecycle_coordinator import LifecycleCoordinator
 from app.utils.temp_file_manager import TempFileManager
@@ -690,6 +692,16 @@ class ServiceContainer(containers.DeclarativeContainer):
         document_service=document_service,
         view_service=view_service,
         ticket_id_pattern=app_config.provided.ticket_id_pattern,
+    )
+    # The waits' timer (design 2 §8.2); it registers on the supervisor when
+    # built, before STARTUP.
+    wait_timer = providers.Singleton(
+        WaitTimer, container=__self__, supervisor=supervisor
+    )
+    register_for_background_startup(lambda c: c.wait_timer())
+    # A tracker's posts of a card's change of state (F136)
+    tracker_event_service = providers.Factory(
+        TrackerEventService, wait_service=wait_service, app_settings=app_config
     )
     # The brain's tools, under its session's bearer (TD §4.5, F86)
     pilot_store_service = providers.Factory(

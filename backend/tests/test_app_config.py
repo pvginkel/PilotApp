@@ -53,6 +53,16 @@ class TestAppSettings:
             settings.sync_heartbeat_seconds,
         ) == ("example-token", "example-env-1", 1024, 2.5)
 
+    def test_the_tracker_events_refuse_every_delivery_by_default(self) -> None:
+        assert AppSettings().youtrack_webhook_token == ""
+
+    def test_load_reads_youtracks_webhook_token_from_the_environment(self) -> None:
+        settings = AppSettings.load(
+            AppEnvironment(YOUTRACK_WEBHOOK_TOKEN="an-invented-webhook-token")
+        )
+
+        assert settings.youtrack_webhook_token == "an-invented-webhook-token"
+
     def test_load_refuses_a_put_limit_below_one_byte(self) -> None:
         with pytest.raises(ValueError):
             AppEnvironment(SYNC_PUT_MAX_BYTES=0)
@@ -354,13 +364,16 @@ class TestAppSettings:
 
     def test_the_settings_are_logged_with_the_token_masked(self) -> None:
         settings = AppSettings(
-            sync_token="example-token", store_environment_id="example-env-1"
+            sync_token="example-token",
+            store_environment_id="example-env-1",
+            youtrack_webhook_token="an-invented-webhook-token",
         )
 
         assert settings.dump_for_logging() == {
             "ticket_id_pattern": repr(re.compile(r"[A-Z][A-Z0-9_]*-[1-9][0-9]*")),
             "sync_token": "***",
             "store_environment_id": "'example-env-1'",
+            "youtrack_webhook_token": "***",
             "sync_put_max_bytes": "2097152",
             "sync_heartbeat_seconds": "15.0",
             "ticket_url_template": "None",
@@ -461,6 +474,7 @@ class TestAppSettings:
             "ticket_id_pattern": repr(re.compile(r"[A-Z][A-Z0-9_]*-[1-9][0-9]*")),
             "sync_token": "***",
             "store_environment_id": repr(""),
+            "youtrack_webhook_token": "***",
             "sync_put_max_bytes": "2097152",
             "sync_heartbeat_seconds": "15.0",
             "ticket_url_template": repr("https://tracker.example.com/{id}"),
