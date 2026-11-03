@@ -24,7 +24,8 @@ import type { Page } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import type { Chats } from '../support/chats';
 import { rawTurn, type Controller } from '../support/controller';
-import { makeUnique, makeUniqueToken } from '../support/helpers';
+import { expectConsoleError, makeUnique, makeUniqueToken } from '../support/helpers';
+import { slowNetwork } from '../support/network';
 import type { ChatPage } from '../support/page-objects/chat-page';
 import type { ProjectHeadPage } from '../support/page-objects/project-head-page';
 import type { Projects } from '../support/projects';
@@ -184,6 +185,49 @@ test.describe('Create project', () => {
     const { button, line } = await boxes(definitionChat);
     expect(button.x + button.width).toBeLessThanOrEqual(line.x);
     expect(Math.abs(button.y + button.height / 2 - (line.y + line.height / 2))).toBeLessThan(2);
+  });
+
+  test('stands nowhere while the definition chat’s read is on its way, and shows once it lands', async ({
+    page,
+    people,
+    projects,
+    projectHead,
+    projectList,
+    timeline,
+    controller,
+    chats,
+    definitionChat,
+  }) => {
+    const me = await people.signIn();
+    const { title } = await drafted({ page, projects, projectHead, controller, chats, definitionChat }, me.handle!);
+    const other = await projects.make({ name: makeUnique('Elsewhere'), members: [me.handle!] });
+    await timeline.open(other);
+
+    const restore = await slowNetwork(page, 1_000);
+    const read = definitionChat.read();
+    await projectList.tab(title).click();
+    await expect(projectHead.name).toHaveText(title);
+    await expect(definitionChat.root).toBeVisible();
+    await expect(definitionChat.createReady).toHaveCount(0);
+
+    await read;
+    await restore();
+    await expect(definitionChat.texts).toHaveText([REPLY]);
+    await expect(definitionChat.createReady).toBeVisible();
+  });
+
+  test('stands nowhere while the definition chat did not load', async ({ page, auth, people, projects, projectHead, timeline, controller, chats, definitionChat }) => {
+    const subject = makeUnique('subject');
+    const me = await people.signIn({ subject });
+    await drafted({ page, projects, projectHead, controller, chats, definitionChat }, me.handle!);
+    await expect(definitionChat.createReady).toBeVisible();
+
+    // The browser's session now lacks the editor role, and the API refuses the list's next read.
+    await expectConsoleError(page, /403/);
+    await auth.createSession({ subject, name: 'Test Person', roles: [] });
+    await timeline.refocus();
+    await expect(definitionChat.failed).toHaveText('The chat did not load.');
+    await expect(definitionChat.createReady).toHaveCount(0);
   });
 
   test('opens the timeline at once with the opening first: the person’s words, the draft’s copy and the material attached on it; the head is the open project’s, the panel’s tabs Chat and Documents, the project document first', async ({

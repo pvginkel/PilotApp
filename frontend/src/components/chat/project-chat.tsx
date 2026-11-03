@@ -183,9 +183,9 @@ export function ProjectChat({ projectId, members, home, covered, end }: ProjectC
                   onFlashed={flashed}
                 />
               ))}
+              {chats !== null && end}
             </>
           )}
-          {end}
         </div>
       </div>
       <Composer
