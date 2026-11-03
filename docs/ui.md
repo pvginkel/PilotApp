@@ -356,7 +356,9 @@ The frontend suite's fixtures (`frontend/tests/support/fixtures.ts`):
 - `people`: `signIn({name?, handle?, subject?})` signs in a person with a handle, chosen through
   the API, the same `subject` signing the same person in again; `firstSignIn({name?, subject?})`
   one at their first sign-in, `null` for a token with no name;
-  `other(handle, name?)` puts another person on the record; `self()` reads the signed-in person.
+  `other(handle, name?)` puts another person on the record; `self()` reads the signed-in person;
+  `withoutRole({name?, subject?})` swaps the page's session for one without the `editor` role once
+  the page's fetches have landed ([`sign-in.md`](sign-in.md)).
 - `shell`: `open(path)` opens an address once the signed-in person is read; `goldBadges`,
   `goldBadge(code)` and `goldPopover` read the badges and the week's halt's popover, `goldBar` and
   `goldLine(code)` the phone's lines, `goldText(line)` a line's words without its button, and
@@ -373,6 +375,6 @@ The frontend suite's fixtures (`frontend/tests/support/fixtures.ts`):
   answers only in testing mode and refuses what the boot refuses; `environment(id, name)` puts an
   environment on the record through `POST /api/testing/environments` ([`projects.md`](projects.md)).
 - The page objects `handleStep`, `profile`, `projectList`, `projectHead`, `phoneTabs`, `timeline`,
-  `overlay`, `sessionLog`, `panel` and `chat`, and `projects` and `chats`
+  `overlay`, `sessionLog`, `panel` and `chat`, and `projects`, `chats` and `waits`
   ([`projects.md`](projects.md), [`timeline.md`](timeline.md), [`work.md`](work.md),
-  [`documents.md`](documents.md), [`chats.md`](chats.md)).
+  [`documents.md`](documents.md), [`chats.md`](chats.md), [`waits.md`](waits.md)).

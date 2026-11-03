@@ -15,10 +15,11 @@ that asks one thing is answered in place and a document inline or from its card,
 once, with Undo, urgent banners, the auto pilot mark, a badge per tab and a URL per item, and which
 every open browser follows live ([`docs/timeline.md`](docs/timeline.md)); its work items, each a
 session Pilot runs, live on the timeline with its one current line, the steps its run publishes on
-a donut, Stop and Resume, and its session log, and Pilot's own background jobs among them, one at a time per project, each a fresh session of
-the brain's: the setup, the pre-ruling pass after every worker's turn, which may ask the worker's
-writer or claim an action for a work item of Pilot's, and the plan's next step after every item of
-Pilot's a person closes, with Retry on one that failed ([`docs/work.md`](docs/work.md)); each
+a donut, Stop and Resume, and its session log, and Pilot's own background jobs among them, one at a time per project, each a session of
+the brain's, fresh but for a wait's run: the setup, the pre-ruling pass after every worker's turn,
+which may ask the worker's writer or claim an action for a work item of Pilot's, the plan's next
+step after every item of Pilot's a person closes, and a wait's run, with Retry on one that failed
+([`docs/work.md`](docs/work.md)); each
 project's status as one icon on its tab, which pauses it, and the gold bar, a badge in the top bar
 or a line on a phone, while the controller does not answer, Pilot updates its store or a usage
 halt holds; and the overlay that opens a document, an attachment or the handbook,
@@ -62,7 +63,12 @@ stopping it, the week's halt's overrule from the gold bar, and the nudge that ca
 paused or walled run on once nothing holds it, with each turn's tokens and cost kept in the
 database ([`docs/usage.md`](docs/usage.md)); and the store's update, one command that holds the
 store's chats and jobs while the server stops them, resets the store onto PilotProjects' `main`,
-retries the jobs it stopped and lifts the hold ([`docs/store-update.md`](docs/store-update.md)).
+retries the jobs it stopped and lifts the hold ([`docs/store-update.md`](docs/store-update.md));
+and the brain's waits on the timeline, a card wait fired when YouTrack posts that one of its cards
+entered one of its states, a timed wait at its due time, either by a person's Check now or Skip
+wait, their firings batched into one run of the brain, which resumes its previous run's
+conversation while the prompt cache holds and closes the wait through `mark` with a note
+([`docs/waits.md`](docs/waits.md)).
 The brain's own repository holds its map, its
 rules, its four skills, and `pilot.py`, the script it edits a project's folder with, on the block
 DSL's own package ([`docs/block-dsl.md`](docs/block-dsl.md)); its four skills' bodies are written:

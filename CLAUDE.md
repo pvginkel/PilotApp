@@ -15,7 +15,8 @@ questions to the writer, the switch's dialog and the archive question, and the p
 notifications through the bridge, a project's and the alarms, with the profile's token and switch,
 and the usage limits: the halts, the overrule, the halt file, the hard stop, the nudge and each
 turn's tokens, and the store's update: its command, its hold, its sequence and its retry, and the
-phone's layout: its drawer, its tabs at the bottom and its views. Every green build of
+phone's layout: its drawer, its tabs at the bottom and its views, and the waits: their firings by
+YouTrack's posts, the due time and a request, and the run per batch. Every green build of
 `main` deploys itself to the dev stage at `https://pilot-dev.home`, and production at
 `https://pilot.ginbov.nl` runs what the operator promotes from there
 ([`docs/deployment.md`](docs/deployment.md)). Version 1 is built from the design record in
@@ -118,7 +119,8 @@ the template gives an app no place for a plugin; the Playwright backends' own se
 in the app-owned `frontend/tests/support/backend-env-extensions.ts`, given the backend's URL, where
 the template gives an app no place for a backend setting under Playwright: this app's points each
 backend's controller at the fake it serves itself, and its chats at a store environment in that
-fake, and its notification bridge at the bridge's fake it serves too; `run-suite`'s Playwright worker count,
+fake, and its notification bridge at the bridge's fake it serves too, and holds its waits' batcher
+off for a day; `run-suite`'s Playwright worker count,
 which `tools/suite_runner/local.py` reads from `PLAYWRIGHT_WORKERS` when no `--workers` is given,
 where the library's `modernApp.test` fixes run-suite's flags and so left CI on the Playwright
 config's count; the completion of `useSSETask` in `frontend/src/hooks/use-sse-task.ts`, which
@@ -236,3 +238,6 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
 - [`docs/store-update.md`](docs/store-update.md): the store's update: `update-store`, the hold at the
   gate and on a chat's message, the stop, the reset, the reconcile, the retry and the lift, and its
   testing route.
+- [`docs/waits.md`](docs/waits.md): the brain's card and timed waits: the tracker-events endpoint
+  and YouTrack's token, the due timer, a person's request, the batcher, the wait's run and its
+  resume, the close and the testing routes.

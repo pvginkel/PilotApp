@@ -77,8 +77,14 @@ The values the agent writes from a closed list:
     document and for a registered document with no text;
   - `step` (a task id, or null), `urgent`, `for` (a handle, or null) and `summary` (or null);
   - `created_at`;
-  - `done`: null while open, else `at`, `cause` (a done cause's code) and `by` (a handle, or null);
-  - `attachments`: the `id` and `path` of each attachment hung on the item, in their order.
+  - `done`: null while open, else `at`, `cause` (a done cause's code) and `by` (a handle, or null),
+    and on a wait `note`, the brain's words at its close through `mark`, null after Finish's;
+  - `attachments`: the `id` and `path` of each attachment hung on the item, in their order;
+  - on a wait alone, its fields in `add_item`'s shape, a card wait's `cards` and `states` or a timed
+    wait's `due_at`, and `firings`, in order, each `seq`, `cause` (`transition`, `due` or
+    `requested`), `fired_at`, `transition` (`card`, `from`, `to`, `at`, `by`, null but for a
+    transition's), `requested_by` (a handle, or null) and `job`, the run that took it, null while it
+    is pending ([`waits.md`](waits.md)).
 - `attachments`, every attachment of the project by batch and file name, a draft's hung on no item
   among them: `id`, `path` (`attachments/<batch>/<filename>`), `title`, and `source` (`<environment
   id>:<path>`, null for the draft's copy).

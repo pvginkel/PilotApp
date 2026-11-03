@@ -50,7 +50,8 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   `ck_items_created_by`). Its done is `done_at` with `done_cause_code`, and
   `done_by_user_id` when a user did it; `consumed_at` with `consumed_session_id` is a session
   taking its answers: a registered document's, the continuation of the run that registered it, from
-  its placement ([`round-trip.md`](round-trip.md)).
+  its placement ([`round-trip.md`](round-trip.md)), and a wait's, the session whose `mark` closed
+  it, at the close ([`waits.md`](waits.md)).
 - `documents`: a Markdown file of a project's folder, `path` relative to the folder. A prose item's
   document shares its item's `id`, and its own columns are `summary` and, for a registered
   document, the source environment and path, both or neither, `read_failed_at` (its read at its
@@ -170,6 +171,29 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   payload, its words and author being its turn's (`words`, `author_user_id`), and a turn has one at
   most; every other kind has a payload.
 
+**The waits** ([`waits.md`](waits.md))
+
+- `waits`: a wait, the extension table its Item shares its id with, both kinds in one table, its
+  `kind_code` its Item's, carried so that its key reaches an item of the same kind and its checks
+  read it (`ck_waits_kind`): a timed wait's `due_at`, a card wait's `cards` and `states`, text
+  arrays of one name or more, exactly one kind's (`ck_waits_halves`); and `done_note`, the brain's
+  words at a close through `mark`, null while the wait is open and after Finish's close, a rule
+  across `items` and `waits` the server keeps. That neither list names one twice, `states`
+  case-insensitively, is the server's check at the add. `ix_waits_due_at` indexes every timed wait
+  for the timer and `ix_waits_cards`, GIN, every card wait for the match; whether the wait is open
+  is the query's, since a partial index reads no other table.
+- `wait_firings`: one occasion a wait fired, `wait_id` with its kind, `wait_kind_code`, numbered
+  by `seq` from 1 within the wait: `cause_code` (`transition`, `due`, `requested`), with
+  `transition_id` exactly for a transition's and `requested_by_user_id` exactly for a request's
+  (`ck_wait_firings_cause`); a transition firing a card wait alone and the due time a timed wait
+  alone (`ck_wait_firings_kind`); `fired_at`, the server's time at its record; and `job_id`, the
+  run that took it, null while it is pending (`ix_wait_firings_pending`). A timed wait fires `due`
+  once (`uq_wait_firings_due`), and a transition fires a wait once
+  (`uq_wait_firings_transition_id_wait_id`).
+- `card_transitions`: a card's change of state the tracker reported, recorded only when it fired a
+  wait: `card`, `from_state` (null where the tracker gave none), `to_state`, `at`, the tracker's
+  time of the change, `by`, its login, or null, and `received_at`, the server's.
+
 **The subscription's usage** ([`usage.md`](usage.md))
 
 - `usage_readings`: a reading of the subscription's usage the controller served with figures and
@@ -204,7 +228,7 @@ added by a revision and nowhere else.
 | Table | Rows |
 |---|---|
 | `item_kinds` (`name`, `form`, `icon`) | prose: `opening`, `decision`, `confirmation`, `question`, `action`, `notice`, `document`, `review`, `archive_question`; work: `work`; wait: `card_wait`, `timed_wait` |
-| `done_causes` (`name`, `undo_offered`) | undo offered: `answered`, `marked`, `settled`; not: `turn_ended`, `finished`, `withdrawn` (a job an Undo of its trigger item withdrew before its brief, which never ran) |
+| `done_causes` (`name`, `undo_offered`) | undo offered: `answered`, `marked`, `settled`; not: `turn_ended`, `finished`, `withdrawn` (a job an Undo of its trigger item, or its wait's close, withdrew before its brief, which never ran) |
 | `confirmation_reasons` (`name`, `asks_under_autopilot`, `description`) | asked only while auto pilot is off: `auto-pilot-off`, `rider`; asked under auto pilot too: `irreversible`, `product-hold`, `self-approval`, `standing-grant` |
 | `session_kinds` (`name`, `surface`, `on_timeline`) | `chat` (`pilot-store`, not on the timeline), `work` (`pilot-work`), `job` (`pilot-store`) |
 

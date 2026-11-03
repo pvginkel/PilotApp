@@ -70,7 +70,16 @@ each with:
   questions too, and `replied_at`, both null until it comes; `split`, whether every question has
   its part, so the reply is shown per block, else whole;
 - `work`, a work item's status, its Session as its line shows it, null for every other kind
-  ([`work.md`](work.md)).
+  ([`work.md`](work.md));
+- `wait`, a wait's own, null for every other kind ([`waits.md`](waits.md)): `cards` and `states`, a
+  card wait's, as the brain gave them, and `due_at`, a timed wait's, each null on the other kind;
+  `firings`, in order, each `{seq, cause, fired_at, transition, requested_by, outcome}`,
+  `transition` `{card, from_state, to_state, at, by}` for a card's change of state and
+  `requested_by` a person for a request, each null otherwise, and `outcome` what the brain did with
+  it, `pilots_turn`, `left_open` or `closed`, null where it did nothing; `request`, `{label, open,
+  refusal}`, the head's button, `label` *Check now* or *Skip wait*, `open` whether the wait takes a
+  request now, and `refusal` why not, null while it does; and `note`, the brain's words at its close
+  through `mark`, null while open and after Finish's close. A wait waits since its `created_at`.
 
 A block is `{id, kind, confirmation, because, proposal, default, check, options, answer, by, at,
 note, via, done, claim, deferral, writer_asked, section}`. `id` is its local id; `because` is a
@@ -91,7 +100,7 @@ with no slot.
 
 ## Answering it
 
-Six routes under `/api/items/<item_id>`, each the record's own write, as the caller, now, through
+Seven routes under `/api/items/<item_id>`, each the record's own write, as the caller, now, through
 the app, answering `204` with no body:
 
 | Route | Body | Does |
@@ -102,6 +111,7 @@ the app, answering `204` with no body:
 | `POST read` | | Read on a notice |
 | `POST reviewed` | | Reviewed on a review |
 | `POST undo` | | Undo of a done item's answer or mark, whoever gave it |
+| `POST request` | | a wait's firing requested by the caller, *Check now* on a card wait, *Skip wait* on a timed wait, which the wait's next run is briefed with ([`waits.md`](waits.md)) |
 
 An answer or a Done on a one-ask item is the item's done. Neither body takes `to` or `via`, and
 neither takes another key (`400`): the page never defers. The archive question takes `Archive` or
@@ -111,7 +121,8 @@ was not found", and a block the item lacks, any block of a work item or of the o
 "Block <item>/<block> was not found". A caller who has not chosen a handle, and every refusal of the
 record, an archived project's close or Undo among them, "its project is archived" (D012), answer
 `409` with the record's reason ([`engine.md`](engine.md)); Undo takes no person, so
-it needs no handle. The routes are behind the API's sign-in and `editor` role
+it needs no handle. A request on an item that is no wait, or on a wait that takes none now, is a
+`409` with the reason, "Pilot is checking" among them ([`waits.md`](waits.md)). The routes are behind the API's sign-in and `editor` role
 ([`sign-in.md`](sign-in.md)).
 
 ## Live
@@ -135,8 +146,7 @@ as well. Each `work_moved`'s status it writes into the timeline as read, with no
 ## The timeline
 
 `Timeline` (`timeline.tsx`) draws under the project's head, from `useTimeline`
-(`hooks/use-timeline.ts`). It draws every item in its order, the opening first, but waits, which
-draw no line. Every project it draws has its opening: a draft draws its definition chat in the
+(`hooks/use-timeline.ts`). It draws every item in its order, the opening first. Every project it draws has its opening: a draft draws its definition chat in the
 timeline's place ([`chats.md`](chats.md)).
 
 - **Dividers** (`rows.ts`). A day divider falls at each new date in the browser's time zone,
@@ -167,6 +177,24 @@ timeline's place ([`chats.md`](chats.md)).
   dashed border. An open work item is its session's: its env chip once its start has an
   environment, its one line and its Stop or Resume, a job of Pilot's own its Retry once it failed or
   stopped ([`work.md`](work.md)).
+- **An open wait** (`wait.tsx`) is its head, its title and what it waits on
+  ([`waits.md`](waits.md)). Its head's kind is "Wait", with the ticket for a card wait and the
+  hourglass for a timed wait, and just before Discuss, touching it, stands the request's one button:
+  an icon alone, the operator's hourglass, two chevrons in place of its lower bulb's right half
+  (`hourglass-skip.tsx`), its label its tooltip, *Check now* on a card wait and *Skip wait* on a
+  timed wait. A press records
+  the request. While the wait takes none the button is disabled, its tooltip the reason, "Pilot is
+  checking", "The wait is done", "Its project is finished" or "Its project is archived", and it
+  stays disabled from a press until the read holds the firing the press made. A card wait shows its
+  cards, each a ticket link, and its states, "SR-1, SR-4 → Done or Won't fix", then "Waiting since
+  <time>" and its firings, a line each: "SR-4 → Done", the card a ticket link, or "Check requested
+  by <handle>", then its time and, where the brain did anything with it, what: "Pilot’s turn", "left
+  open" or "closed", " · " between them. A timed wait shows its due time from now in one coarse
+  unit, minutes to weeks, rounded, a count that reaches the next unit's size moving up to it: "Due
+  in 7 minutes", "Due now" within a minute either side, "Due 5 minutes ago", counted again every
+  15 s, and once its due time fired it what the brain did, "Due 5 minutes ago · Pilot’s turn". Its
+  requests, "Skip requested by <handle>", are its firings' lines. Every time has its full stamp as
+  its tooltip, and one off today shows its date.
 - **Attachments** (`attachments.tsx`) are chips, the clip and the title, a long one cut short:
   after a one-ask item's or a notice's text, at a confirmation card's end, in the opening's bubble,
   after an inline document's text and on a card. A chip opens the attachment in the overlay
@@ -327,8 +355,8 @@ places the continuation that takes their answers ([`round-trip.md`](round-trip.m
 Pilot's own loses it once the brief of the job its close placed goes out, at once in an idle
 project, and an Undo before then withdraws that job ([`work.md`](work.md)).
 
-- **Open**, on every done line, opens the item's document in the overlay at its address, as Done
-  fixed it ([`documents.md`](documents.md)).
+- **Open**, on every done line but a wait's, opens the item's document in the overlay at its
+  address, as Done fixed it ([`documents.md`](documents.md)).
 - **The attachments' indicator**, where attachments hang on the item, whatever its kind: the clip
   opening the one attachment, as the chips carry it, set apart from Open's document icon beside it
   (D039), or a documents icon opening a menu of them, which drops under its button at the line's
@@ -339,10 +367,15 @@ project, and an Undo before then withdraws that job ([`work.md`](work.md)).
   consecutive work lines, in muted text, its icon, its time and its buttons smaller. Its Open opens
   its session log ([`work.md`](work.md)), and it never offers Undo. A job an Undo withdrew reads
   "Withdrawn by an Undo" under its title.
+- **A wait's line** has nothing behind it: no Open, and never Undo, Pilot's close being consumed on
+  the spot ([`waits.md`](waits.md)). Under its title stands the note Pilot closed it with, as linked
+  text; a wait Finish closed has none.
 - **On a phone** a done line has Undo alone among its actions: no Open and no Discuss, its
   attachments' indicator staying. A tap on the line, anywhere but on a link, a button or a menu of
   its own, goes where Open goes, the document's address or the session log's, which opens it as a
-  view whose head carries Discuss ([`projects.md`](projects.md)).
+  view whose head carries Discuss ([`projects.md`](projects.md)). A wait's line, with nothing behind
+  it, opens instead the menu of its actions in a row under it, Discuss alone, which a tap elsewhere,
+  Esc or a tap on the line again closes.
 
 **Finished.** Finish closes every open item but the opening, so a finished project's timeline is its
 opening and done lines, and ends in "Finished · <stamp>", "22 Oct 2026, 14:05". Under that divider
@@ -381,8 +414,8 @@ block; a document's own address, an attachment's, the handbook's and the project
 over the item's step; its body the item as the timeline draws it, open or as its done line, answered
 in place as there, its option rows at least 48px high, a thumb's height. A block's address waits for
 the timeline's read: where the block's document is a card it opens the document at the block, as at
-every width, and otherwise the item alone, going to the block. An address naming no item the
-timeline draws, none or a wait, or a read that fails, reads "The item did not load". The Timeline
+every width, and otherwise the item alone, going to the block. An address naming no item, or a
+read that fails, reads "The item did not load". The Timeline
 tab under it is not gone to the item.
 
 **On a narrow window.** At 900px and below an option's line goes under its label, Recommended
@@ -402,7 +435,9 @@ writes and the event in `tests/api/test_items.py`, `tests/services/test_item_ser
 `tests/services/test_project_event_service.py`. The browser suites are `frontend/tests/timeline/`,
 with `tests/projects/badge.spec.ts`; `document.spec.ts`, `card.spec.ts` and `settled.spec.ts` pin
 the documents, `phone-items.spec.ts` the item alone and a done line on a phone, and
-`frontend/tests/work/timeline.spec.ts` the work items ([`work.md`](work.md)).
+`frontend/tests/work/timeline.spec.ts` the work items ([`work.md`](work.md)), and `waits.spec.ts` the
+waits, open and done, and a wait's menu on a phone, through the `waits` fixture
+([`waits.md`](waits.md)).
 
 A spec makes its project with `projects.makeWithSession`, places items with `projects.place`, a
 text written in the block DSL, and posts an agent's save with `projects.save`; `projects.answer`,
@@ -418,6 +453,7 @@ pinned in `frontend/tests/work/registered.spec.ts`), a block's head that says so
 line and its work item's link (`writerAsked`, `claim`, `claimWork`, pinned in
 `tests/work/clarification.spec.ts` and `claimed.spec.ts`), the auto pilot marks and chip
 (`autopilotMark`, `autopilotChip`, `tests/timeline/autopilot-mark.spec.ts`), the archive question's
-buttons (`archiveQuestion`, `archive-question.spec.ts`) and the ready line (`ready`); `slowNetwork`
+buttons (`archiveQuestion`, `archive-question.spec.ts`), the ready line (`ready`) and a wait's
+button, what it waits on, its firings, its note and its phone menu (`item(id).wait`); `slowNetwork`
 (`tests/support/network.ts`) holds a write on its way, to see what shows while it saves. A spec
 asserting a live update waits for the stream first (`deploymentSse.ensureConnected()`).

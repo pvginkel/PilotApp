@@ -13,8 +13,9 @@ the close that leaves none of the documents a work item's run registered open pl
 that continues its conversation, titled as the run, on its plan task while the plan still has it,
 after the answered items, and the end of a pre-ruling pass that asked the writer places the
 clarification run that puts its questions to the run's writer, on that run's conversation
-([`round-trip.md`](round-trip.md)). Create project, a worker's turn end and a person's close of an
-item of Pilot's own place the jobs of Pilot's own ([below](#pilots-own-work)).
+([`round-trip.md`](round-trip.md)). Create project, a worker's turn end, a person's close of an
+item of Pilot's own and a wait's firings place the jobs of Pilot's own
+([below](#pilots-own-work)).
 
 ## Its status
 
@@ -68,8 +69,8 @@ while its nudge is owed, which its project's badge counts ([`projects.md`](proje
 done at the end of a turn neither interrupted nor in error ([`sessions.md`](sessions.md)), unless a
 cooperative usage halt or its project's pause holds then ([`usage.md`](usage.md)), cause
 `turn_ended`, by no one, or by
-Finish's close, and a job withdrawn before its brief by an Undo, cause `withdrawn`
-([below](#pilots-own-work)); it then draws as its done line ([`timeline.md`](timeline.md)).
+Finish's close, and a job withdrawn before its brief by an Undo or its wait's close, cause
+`withdrawn` ([below](#pilots-own-work)); it then draws as its done line ([`timeline.md`](timeline.md)).
 
 ## Live
 
@@ -181,8 +182,9 @@ closes it.
 ## Pilot's own work
 
 A background job of Pilot's own is a work item too (`JobService`,
-`backend/app/services/job_service.py`): a fresh brain session in the store for each trigger, ending
-with its turn. It is placed in its caller's transaction, under the project's row held exclusively,
+`backend/app/services/job_service.py`): a brain session in the store for each trigger, ending
+with its turn, fresh but for a wait's run that resumes its previous run's conversation
+(below). It is placed in its caller's transaction, under the project's row held exclusively,
 at its trigger's instant:
 
 - its Session is kind `job`, in the store repo's root, on the brain's model and effort
@@ -201,9 +203,10 @@ while that folder is not on disk. Its brief is composed as it leaves the gate, f
 then stands (below). Its item is done at its last turn's end, the follow-up's where it gets one
 ([`chats.md`](chats.md)), and its project's next job goes on then. Neither a person's Stop or Resume
 nor the brain's `stop_work` takes it ([`sessions.md`](sessions.md)); Finish and Archive stop it as
-they stop every session, and the store's update while it runs or starts. One job is placed per trigger, never one for several.
+they stop every session, and the store's update while it runs or starts. One job is placed per
+trigger, never one for several; a wait's run is one trigger, however many firings it takes.
 
-**The triggers.** Three place a job:
+**The triggers.** Four place a job:
 
 - **The setup**: Create project places it after the opening, titled "Setting up the project",
   trigger `setup`, and the setup runs under the pause Create writes, so the work items it places
@@ -223,6 +226,10 @@ they stop every session, and the store's update while it runs or starts. One job
   job's, in the close's transaction ([`engine.md`](engine.md)): answered, Done, an action's Done,
   Reviewed. A notice's Read, Pilot's own Done, Finish's close, a registered document's close, an
   item a worker's session added and the archive question, which no session added, place none.
+- **A wait's firings**, trigger `wait_fired`, its trigger item the wait, titled `Checking "<wait
+  title>"`: placed by the batcher once the wait's oldest pending firing is the quiet window old and
+  no run of the wait is in flight, taking at its brief every firing still pending
+  ([`waits.md`](waits.md)).
 
 **The briefs** (`BriefService.job`), each Markdown, its blocks a blank line apart, a line that does
 not hold left out, open with the skill line and the frame, `Pilot's brief · <kind> · project
@@ -274,6 +281,10 @@ pause holds no setup. Then by trigger:
   `(Other)`); a document's `Done by <handle> at <stamp>; its blocks:` and a line per block; a
   review's `Reviewed by <handle> at <stamp>`; then the open notes of the item's plan task and the
   plan's own, and the deferrals without a home.
+- **A wait's firings**: `/plan`, kind `a wait fired`; the wait's line, what it waits on, since when
+  and its task, then `Firings pending, oldest first:` and a line per firing it took
+  (their words in [`waits.md`](waits.md)); then the open notes of the wait's task and the plan's own,
+  and the deferrals without a home.
 
 The brief is the job's first Turn, written as it moves to `starting` ([`sessions.md`](sessions.md)):
 at its placement, at its trigger's instant, when the gate lets it through then; else by the release
@@ -285,6 +296,14 @@ brief, behind the project's other jobs or held by the pause, withdraws the job (
 `stopped` by no one, with no Turn, and its work item done, cause `withdrawn`, by no one, offering no
 Undo; the next close of the item places a new job. With the project idle the job is briefed in the
 close's own transaction, so the item's Undo shows only while the job waits.
+
+**A wait's run.** A wait's close by the brain's `mark` withdraws its run held before its brief, as
+an Undo withdraws a job, its firings left untaken. A run within `CACHE_EXPIRATION_TTL` of its
+wait's previous run's turn's end, that run's turn ended neither failed nor stopped, resumes its
+conversation: its first Turn is the follow-up alone, `Another firing of "<title>" since your last
+run:` and the firing lines, under the switch that run's brief stated, which the conversation keeps.
+Past it, after a run that failed or was stopped, and for a Retry, the run is fresh, with the full
+brief. A resume the controller refuses fails the run at its create ([`waits.md`](waits.md)).
 
 **Retry.** A job `failed` or `stopped`, whoever stopped it, its work item open, offers Retry (D078,
 `POST /api/sessions/<id>/retry`, [`sessions.md`](sessions.md)): a fresh job for the same trigger,
@@ -299,7 +318,9 @@ more, and leaves the badge. A person has to press it, but at the store's update'
 retries each job the update stopped once ([`store-update.md`](store-update.md)). A job
 withdrawn by an Undo, done, never ran, and takes no Retry; nor does a job whose turn died at the
 quota wall while its nudge is owed, which is not at its end until the run its nudge continues ends
-(D099, [`usage.md`](usage.md)).
+(D099, [`usage.md`](usage.md)); nor a wait's run whose wait is done or has another run in flight. A
+wait's run retried is briefed fresh with the firings the runs it retries took, and with any still
+pending.
 
 On the timeline, a job's `pilots_own` is true. Its line has its session log, and neither the env
 chip, the store's once its start takes it, nor Stop or Resume. Its session log's head names no

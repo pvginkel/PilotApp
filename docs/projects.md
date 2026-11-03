@@ -504,9 +504,15 @@ answers only in testing mode ([`sign-in.md`](sign-in.md)).
   true}` asks the unlifted one's lift, `200`, as `update-store` does; each answers the update's row,
   and a second make or a lift with none under way is a `409`
   ([`store-update.md`](store-update.md)).
+- `POST /api/testing/projects/<id>/waits`, `/api/testing/tracker-events/<tracker>`,
+  `/api/testing/waits/due`, `/api/testing/waits/<id>/run` and `/api/testing/waits/<id>/close` add a
+  wait by the project's session, deliver a card's change of state past the endpoint's token, run the
+  waits' timer's tick, place a wait's run past its quiet window and close a wait as Pilot's `mark`
+  does ([`waits.md`](waits.md)).
 
 A project past the draft, born with its opening, an item placed, a work item placed, an item's save
-posted, Pilot's Done and attachments hung each raise `project_changed` through the engine, so an
+posted, Pilot's Done, a wait's firing and attachments hung each raise `project_changed` through the
+engine, so an
 open screen follows them ([`timeline.md`](timeline.md)), and so do a save of the handbook or the
 project document that changes its text or takes it for the session, and a turn's end, for each
 document it lets go. The frontend suite's `projects` fixture (`frontend/tests/support/projects.ts`)

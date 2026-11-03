@@ -37,8 +37,9 @@ Three things follow:
   driver writes beside the lease. Nothing in this doc takes or frees it.
 
 What the checks cannot show from here is reported as *not verified*: production after a promotion,
-its store included, and anything that needs a part of the fleet no slice has wired into the
-deployment yet (YouTrack). The dev stage's store is wired, and a check that needs it works it
+its store included, and YouTrack's deliveries, which reach production alone. On the dev stage a
+check delivers a card's change of state through the record's testing route
+`POST /api/testing/tracker-events/youtrack` ([`waits.md`](waits.md)). The dev stage's store is wired, and a check that needs it works it
 (step 4.7). The KubeCoder controller is wired: what Pilot does with it is proven on two
 real turns against `kubecoder-dev` (§2, the fleet's live check), and `pilot-dev` shows that its
 backend reaches that controller (step 4.3). A check that needs a work item on the dev stage places

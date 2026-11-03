@@ -38,9 +38,11 @@ the job, never its work.
 | `alarm-clear:<n>` | a loop of the job `alarm-clear` | dismisses, once each, a person's alarms through the token they just cleared ([`notifications.md`](notifications.md)) |
 | `notification-retry` | a timer | asks for the reconcile of each project with a notification owed past its retry ([`notifications.md`](notifications.md)) |
 | `alarm-retry` | a timer | asks for the alarms' reconcile when the alarms due have turned, or while one is owed past its retry ([`notifications.md`](notifications.md)) |
+| `wait-due` | a timer | fires each open timed wait whose due time has passed, once ([`waits.md`](waits.md)) |
+| `wait-batch` | a timer | places the run of each wait whose oldest pending firing is the quiet window old ([`waits.md`](waits.md)) |
 
-Each but the notifications', the alarms' and the timers `usage-halts`, `nudges` and `store-update`
-needs the controller. With `CONTROLLER_URL` unset (the
+Each but the notifications', the alarms' and the timers `usage-halts`, `nudges`, `store-update` and
+`wait-due` needs the controller. With `CONTROLLER_URL` unset (the
 backend suite, a dev stack without the credential), none of them starts, and the log says so once at
 STARTUP: `No controller configured (CONTROLLER_URL unset): the jobs and timers that need one do not
 start (<names>)`. Production refuses to start without `CONTROLLER_URL` and `CONTROLLER_TOKEN`; the
@@ -79,8 +81,8 @@ a registration after STARTUP raises `InvalidOperationException`.
 - **A timer**: `register_timer(timer, run, *, needs_controller)`. The scheduler runs the timers in
   registration order (`usage-halts`, `halt-file`, `environment-shutdown`, `environment-delete`,
   `chat-close`, `relay-watchdog`, `controller-probe`, `nudges`, `store-update`,
-  `notification-retry`, then `alarm-retry`), the first round at STARTUP, then
-  each round `SCHEDULER_TICK_SECONDS` after the last ended. Each run has a database session of its
+  `notification-retry`, `alarm-retry`, `wait-due`, then `wait-batch`), the first round at STARTUP,
+  then each round `SCHEDULER_TICK_SECONDS` after the last ended. Each run has a database session of its
   own; one that raises is logged and counted, and the rest of the round runs.
 
 The suite and the CLI never fire STARTUP, so there a requested loop never runs. A test that needs

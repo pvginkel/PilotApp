@@ -211,12 +211,16 @@ record unchanged, and a controller that does not answer or refuses for a reason 
 
 - **`add_item(item)`**, `POST …/items`, answers `201` `{id, path, state, held, effect}`. `item` is
   one object in `timeline.json`'s shape ([`projection.md`](projection.md)): `kind` (`decision`,
-  `question`, `action`, `notice`, `document`, `review` or `work`; `card_wait` and `timed_wait` are
-  refused, "Pilot takes no waits yet"), `title`, `step` and `attachments`, then a prose item's
-  `markdown`, `urgent`, `for` and `summary`, or a work item's `repo` (`owner/Name`), `cwd`, `brief`,
-  `agent`, `model`, `reasoning_effort` and `claims`, the blocks' ids, `<item id>/<local id>`, of
-  the claimed actions it does. A field the kind does not take, and a work item without
-  its `title`, `repo`, `cwd` or `brief`, are refused. A prose item is born in the record with its
+  `question`, `action`, `notice`, `document`, `review`, `work`, `card_wait` or `timed_wait`),
+  `title`, `step` and `attachments`, then a prose item's `markdown`, `urgent`, `for` and `summary`,
+  a work item's `repo` (`owner/Name`), `cwd`, `brief`, `agent`, `model`, `reasoning_effort` and
+  `claims`, the blocks' ids, `<item id>/<local id>`, of the claimed actions it does, a card wait's
+  `cards` and `states`, or a timed wait's `due_at`, a time with its offset. A field the kind does not
+  take, and a work item without its `title`, `repo`, `cwd` or `brief`, or a wait without its
+  `title` and its own fields, are refused. A wait is recorded as given and fixed from then on: an
+  empty list ("its `cards` list is empty"), a card that is no ticket id ("`sr-1` is no ticket id,
+  `<pattern>`"), a list naming a card twice or a state twice, case-insensitively, and a due time
+  not ahead ("its due time, <UTC>, is not ahead") are refused ([`waits.md`](waits.md)). A prose item is born in the record with its
   file, empty without `markdown` (`bear_item`, [`engine.md`](engine.md)): the call's `title` written
   into its front matter where that gives none, and `step`, `urgent`, `for` and `summary` where it
   gives none of its own (`with_facts`, [`block-dsl.md`](block-dsl.md)); its text is read first as a
@@ -258,13 +262,18 @@ record unchanged, and a controller that does not answer or refuses for a reason 
   is `project.md/<local id>`, which only that draft's definition chat answers, its title the
   draft's, else `project.md`; anywhere else it is a `409`. Its answer takes no Undo, the draft
   having no item.
-- **`mark(item, mark, for?)`**, `POST …/marks`, answers `200` `{effect}`: `done` on a document,
-  with its recommendations, `read` on a notice, `reviewed` on a review, for the person `for` names;
-  without `for`, Pilot's own Done on a document it settled whole, and on a registered document of
-  one block, whatever its kind, once that block is answered or deferred, a claimed action counting
-  once its `done` is written; `read` and `reviewed` refused. A registered document's Done writes its
-  answers back and continues its run once none of the run's documents is open
-  ([`round-trip.md`](round-trip.md)).
+- **`mark(item, mark, for?, note?)`**, `POST …/marks`, answers `200` `{effect}`: `done` on a
+  document, with its recommendations, `read` on a notice, `reviewed` on a review, for the person
+  `for` names; without `for`, Pilot's own Done on a document it settled whole, and on a registered
+  document of one block, whatever its kind, once that block is answered or deferred, a claimed
+  action counting once its `done` is written; `read` and `reviewed` refused. A registered
+  document's Done writes its answers back and continues its run once none of the run's documents is
+  open ([`round-trip.md`](round-trip.md)). An open wait is closed by Pilot's own `done` alone, with
+  no `for` and with its `note`, what was read and when and the action started after it: cause
+  `marked`, consumed on the spot by the calling session, so it offers no Undo, the note kept as the
+  wait's ([`waits.md`](waits.md)). A wait's `done` without a `note` ("a wait's `done` takes a
+  `note`: …"), with `for`, or as `read` or `reviewed`, and a `note` on any other item, are
+  refused.
   "Marked done · <title>", "Marked read · …", "Marked reviewed · …".
 - **`stop_work(item)`**, `POST …/stops`, answers `200` `{effect}`: the work item's Session stopped
   by Pilot as a Stop stops one ([`sessions.md`](sessions.md)), refused for an item that is no work

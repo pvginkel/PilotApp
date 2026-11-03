@@ -28,8 +28,9 @@ All are in `backend/app/services/`. The brain's `add_item` places a work item ([
 and so does the record's testing route (below); the close that leaves none of a run's registered
 documents open places the run's continuation, and a pre-ruling pass's end its clarification run
 ([`round-trip.md`](round-trip.md)); Create project
-places the setup, a job of Pilot's own, and a worker's turn end and a person's close of an item of
-Pilot's own place the jobs after them ([`work.md`](work.md)). A person's Resume carries a stopped
+places the setup, a job of Pilot's own, a worker's turn end and a person's close of an item of
+Pilot's own place the jobs after them, and the waits' batcher a wait's run ([`work.md`](work.md),
+[`waits.md`](waits.md)). A person's Resume carries a stopped
 or failed worker's run on, a person's Retry places a fresh job for a failed or stopped one, a nudge
 carries on a run the usage limits or the pause halted ([`usage.md`](usage.md)), and Stop, the
 brain's `stop_work`, a usage halt's hard stop, Finish and Archive stop a worker's run. The store's
@@ -453,8 +454,9 @@ which Resume carries on"), a job done ("it is done") or withdrawn by an Undo ("a
 before its brief went out"), one retried already ("it was retried already"), one neither failed nor
 stopped (as Resume's refusals word it), one whose nudge is owed at the quota wall ("it waits for its
 nudge at the quota wall", D099), one whose stopped turn is still ending, a job after an item's
-close whose item is open again ("the item it follows is open again"), and in a finished or an
-archived project. The server retries a job on its own only at the store's update's lift: each job
+close whose item is open again ("the item it follows is open again"), a wait's run whose wait is
+done ("the wait it follows is done") or has another run in flight ("another run of the wait it
+follows is in flight"), and in a finished or an archived project. The server retries a job on its own only at the store's update's lift: each job
 the update stopped, once, through this Retry and its refusals ([`store-update.md`](store-update.md)).
 
 **Finish, Archive and Reopen** stop every Session of the project running, starting or held, a

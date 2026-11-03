@@ -32,10 +32,12 @@ chooses theirs at their first sign-in, before the app opens, and is on Pilot's r
   event, status `401` with no valid token and `403` to a token without `editor`, and the stream
   ends, never registered. The check runs only when a stream opens, so a stream already open stays
   open after its token expires.
-- **Two surfaces are not a person's, and sit outside the API blueprint**, where the OIDC gate never
-  sees them: the store's sync routes, behind the store's bearer ([`sync.md`](sync.md)), and the
+- **Three surfaces are not a person's, and sit outside the API blueprint**, where the OIDC gate
+  never sees them: the store's sync routes, behind the store's bearer ([`sync.md`](sync.md)); the
   tools' routes, the worker's `/tools/pilot-work/` and the brain's `/tools/pilot-store/`, behind the
-  bearer Pilot minted for the session that calls ([`mcp.md`](mcp.md)), which no site reaches.
+  bearer Pilot minted for the session that calls ([`mcp.md`](mcp.md)), which no site reaches; and
+  the tracker-events endpoint, `/api/tracker-events/<tracker>`, behind the tracker's own token,
+  YouTrack's `X-YouTrack-Token` ([`waits.md`](waits.md)).
 
 On a `rejected` event the UI stops reconnecting and asks `/api/auth/self`, which refreshes an
 expired token: on `200` it opens a new stream, on `401` it goes to the login page, and on anything
@@ -95,7 +97,11 @@ the dev seed does not hold it, so recreating the database takes its handle with 
 In testing mode a test session (`POST /api/testing/auth/session`) is checked like a token, by the
 API and the event stream alike: it passes only if its roles include `editor`. The frontend suite's
 `auth.createSession()` gives a session no roles unless told, so a test that signs in passes
-`roles: ['editor']`. `POST /api/testing/sse/force-callback-error?status=401` (or `403`) makes the
+`roles: ['editor']`. A spec that swaps a signed-in page's session for one without the role, to see
+a read refused, does it through `people.withoutRole()`, which waits for the page's fetches under the
+old session to land, swaps the session, then waits for every fetch sent during the swap
+(`PageFetches`, `frontend/tests/support/network.ts`); a page that marks a chat seen is first left
+to make its mark (`chat.acted('read')`), whose answer refetches every query the page holds. `POST /api/testing/sse/force-callback-error?status=401` (or `403`) makes the
 next stream's connect callback refuse it, once.
 
 A test session writes no person row: a spec gets a person with a handle the way production does,

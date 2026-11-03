@@ -18,7 +18,7 @@ tables are [`record.md`](record.md)'s. The skill the brief opens with is PilotPr
 | Service | Does |
 |---|---|
 | `ChatService` (`chat_service.py`) | a person's message: sent to the project's open chat, or the chat started with it; and the Stop of Pilot's answer |
-| `BriefService` (`brief_service.py`) | the chat's brief, the definition chat's and each job's ([`work.md`](work.md)), the follow-up turn, and the server's lines after a worker's brief ([`mcp.md`](mcp.md)) |
+| `BriefService` (`brief_service.py`) | the chat's brief, the definition chat's and each job's ([`work.md`](work.md)), the follow-up turn, a resumed wait's run's first turn ([`waits.md`](waits.md)), and the server's lines after a worker's brief ([`mcp.md`](mcp.md)) |
 | `ChatCloseService` (`chat_close_service.py`) | a chat's close: at Create project, Finish, Reopen and Archive, and on the timer `chat-close` |
 | `ChatReadService` (`chat_read_service.py`) | a project's chats in their order, and a person's place in them |
 | `session_scope.py` | what a brain session's create is handed: its box, its surface, its `PILOT_PROJECT` and its `PILOT_SESSION` ([`sessions.md`](sessions.md)) |
@@ -416,7 +416,7 @@ not seen.
 |---|---|---|
 | `BRAIN_MODEL` | `opus` | the model of every brain session, the chat's and every job's |
 | `BRAIN_REASONING_EFFORT` | `xhigh` | their reasoning effort |
-| `CHAT_CLOSE_TIMEOUT` | 3300 | the seconds after its last turn ended at which an open project chat with no turn in flight closes, `cache_expiration_ttl`'s 55 minutes; above 0 |
+| `CHAT_CLOSE_TIMEOUT` | `CACHE_EXPIRATION_TTL`'s, 3300 | the seconds after its last turn ended at which an open project chat with no turn in flight closes, by default the prompt cache's 55 minutes, the TTL within which a wait's run resumes its previous run's conversation ([`waits.md`](waits.md)); above 0 |
 
 The brain runs on one model and one effort, for the chat and every job alike, each a setting of the
 deployment (D066): no chat and no task has its own, and the brain has no tool to change its own; it

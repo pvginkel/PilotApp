@@ -131,6 +131,14 @@ objects into each stage's namespace:
   That reference is optional: a backend started while the Secret is absent runs with `SYNC_TOKEN`
   unset, which refuses every sync call, until its next start, and never fails to start for it.
   `migrate` sets neither.
+  Production's backend takes YouTrack's webhook token, which its tracker-events endpoint compares
+  with each delivery's `X-YouTrack-Token` ([`waits.md`](waits.md)), as `YOUTRACK_WEBHOOK_TOKEN`
+  from the Secret `pilot-youtrack-webhook-token`, key `token` ([below](#secrets)). That reference
+  is optional too: a backend started while the Secret is absent
+  refuses every delivery until its next start. The chart sets it only where a stage's values carry
+  the Secret, so the dev stage, which gets no tracker events, refuses every delivery; `migrate`
+  sets it on neither stage. The waits' quiet window and `CACHE_EXPIRATION_TTL` are the backend's
+  defaults on both stages.
   The backend's link settings ([`ui.md`](ui.md)) come from `links` in the values:
   `ticketUrlTemplate` as `TICKET_URL_TEMPLATE` and `environmentLinkBaseUrl` as
   `ENVIRONMENT_LINK_BASE_URL`, each left unset where the values say nothing. Both stages' ticket
@@ -261,6 +269,11 @@ reads its own OpenBao leaves, under `eso/prd/pilot/<stage>/`, through the `openb
   profile ([`notifications.md`](notifications.md)), and a new key opens none of them: recreating
   `pilot-secret-key` stops every person's notifications and alarms until they paste their token
   again, and their Clear is refused until then.
+- **YouTrack's webhook token** is production's alone, since the dev stage gets no tracker events.
+  It is not the operator's to write: production's `youtrack-webhook-token` leaf (`token`) is a copy
+  of the YouTrack instance's one shared webhook token that SecretRotator keeps, and the
+  ExternalSecret `pilot-youtrack-webhook-token` brings it into the namespace for the backend's
+  `YOUTRACK_WEBHOOK_TOKEN` (D129, [`waits.md`](waits.md)).
 - **The database password** is Terraform's (above).
 
 A secret a later feature needs comes the same way: a value from outside the cluster is an OpenBao
