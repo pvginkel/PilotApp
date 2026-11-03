@@ -196,11 +196,10 @@ class ProjectHeadSchema(BaseModel):
     )
     create_refusal: str | None = Field(
         description=(
-            "Why Create project cannot be pressed now, the reason its disabled "
-            "button gives (F48.1): Pilot writing in the definition chat, nothing "
-            "drafted, or a draft with no valid slug; for an archived project or "
-            "one past its draft, its standing. Null when it can be pressed; an "
-            "ask the draft leaves open is no reason"
+            "Why Create project cannot be pressed now (F48.1): Pilot writing in "
+            "the definition chat, nothing drafted, or a draft with no valid slug; "
+            "for an archived project or one past its draft, its standing. Null "
+            "when it can be pressed; an ask the draft leaves open is no reason"
         ),
         examples=["Pilot is writing"],
     )
