@@ -37,6 +37,7 @@ from app.models.reference import (
     TaskStatus,
     TransitionKind,
     UserKind,
+    WorkTrigger,
 )
 from app.services import wait_service
 from app.services.container import ServiceContainer
@@ -792,3 +793,435 @@ def _in_thread[T](run: Callable[[], T]) -> T:
     thread.join(timeout=30)
     assert results, "the other process did not finish"
     return results[0]
+
+
+def _fired(
+    session: DbSession,
+    container: ServiceContainer,
+    project: Project,
+    creator: models.Session,
+    ago: timedelta = timedelta(minutes=1),
+) -> Item:
+    """An open card wait of `project`'s, fired once by a transition `ago`."""
+    _opened(session, project)
+    added = _card_wait(container, project, creator)
+    assert _service(container).fire_transition(_transition()) == 1
+    for firing in _firings(session, added.id):
+        firing.fired_at = datetime.now(UTC) - ago
+    session.flush()
+    clear_after_commit_callbacks()
+    return added
+
+
+def _run(
+    session: DbSession,
+    container: ServiceContainer,
+    project: Project,
+    wait: Item,
+    state: SessionState,
+    *,
+    turns: int = 1,
+    conversation: str | None = None,
+    turn_ended_at: datetime | None = None,
+) -> models.Work:
+    """A run of `wait`, a `wait_fired` job in `state`, as the batcher places
+    it and the gate and the relay leave it."""
+    job = models.Session(
+        project_id=project.id,
+        kind_code="job",
+        cwd="/work/PilotProjects",
+        token_hash=uuid.uuid4().hex,
+        state_code=state,
+        turns=turns,
+        conversation_id=conversation,
+        turn_ended_at=turn_ended_at,
+    )
+    session.add(job)
+    session.flush()
+    work = container.record_service().place_work(
+        project,
+        job,
+        "Checking the wait",
+        trigger=WorkTrigger.WAIT_FIRED,
+        trigger_item_id=wait.id,
+    )
+    clear_after_commit_callbacks()
+    return work
+
+
+IN_FLIGHT = [SessionState.HELD, SessionState.STARTING, SessionState.RUNNING]
+ENDED = [SessionState.IDLE, SessionState.FAILED, SessionState.STOPPED]
+
+
+class TestWaitServiceBatchesDue:
+    """The batcher's read (design 2 §8.2; F136.4)."""
+
+    def test_a_wait_whose_oldest_pending_firing_is_past_the_cutoff_is_due(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        added = _fired(session, container, project, project_session)
+        other, other_run = _other_project(session, person)
+        recent = _card_wait(container, other, other_run)
+        assert _service(container).fire_transition(_transition()) == 2
+        clear_after_commit_callbacks()
+        fired_at = _firings(session, added.id)[0].fired_at
+
+        # The firing of `added` a minute old; the second, of both waits, now.
+        assert _service(container).batches_due(fired_at) == [(project.id, added.id)]
+        assert _service(container).batches_due(fired_at - timedelta(seconds=1)) == []
+        assert _firings(session, recent.id)[0].job_id is None
+
+    def test_a_wait_whose_firings_a_run_took_is_not(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        added = _fired(session, container, project, project_session)
+        work = _run(session, container, project, added, SessionState.IDLE)
+        _firings(session, added.id)[0].job_id = work.id
+        session.flush()
+
+        assert _service(container).batches_due(datetime.now(UTC)) == []
+
+    @pytest.mark.parametrize("state", IN_FLIGHT)
+    def test_a_wait_with_a_run_held_starting_or_running_is_not(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        state: SessionState,
+    ) -> None:
+        """A run held at the gate or queued, not yet briefed, counts too: its
+        brief takes the firings still pending."""
+        added = _fired(session, container, project, project_session)
+        _run(session, container, project, added, state, turns=0)
+
+        assert _service(container).batches_due(datetime.now(UTC)) == []
+
+    def test_a_wait_whose_run_waits_for_its_nudge_at_the_quota_wall_is_not(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        added = _fired(session, container, project, project_session)
+        work = _run(session, container, project, added, SessionState.FAILED)
+        session.get_one(models.Session, work.id).nudge_owed_at = datetime.now(UTC)
+        session.flush()
+
+        assert _service(container).batches_due(datetime.now(UTC)) == []
+
+    @pytest.mark.parametrize("state", ENDED)
+    def test_a_wait_whose_runs_ended_is_due_for_its_firing_since(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        state: SessionState,
+    ) -> None:
+        added = _fired(session, container, project, project_session)
+        _run(session, container, project, added, state)
+
+        assert _service(container).batches_due(datetime.now(UTC)) == [
+            (project.id, added.id)
+        ]
+
+    @pytest.mark.parametrize("how", NOT_FIRABLE)
+    def test_a_done_wait_or_one_of_a_project_not_open_or_archived_is_not(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        how: str,
+    ) -> None:
+        added = _fired(session, container, project, project_session)
+        _not_firable(session, container, project, added, project_session, how)
+
+        assert _service(container).batches_due(datetime.now(UTC)) == []
+
+
+class TestWaitServiceHoldBatch:
+    """The batcher's read again under the rows: one run per batch."""
+
+    def test_a_due_batch_is_held_its_project_and_wait_given(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        added = _fired(session, container, project, project_session)
+
+        held = _service(container).hold_batch(project.id, added.id, datetime.now(UTC))
+
+        assert held == (project, added)
+
+    def test_a_batch_whose_run_was_placed_since_the_read_is_not(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        added = _fired(session, container, project, project_session)
+        service = _service(container)
+        assert service.batches_due(datetime.now(UTC)) == [(project.id, added.id)]
+        _run(session, container, project, added, SessionState.HELD, turns=0)
+
+        assert service.hold_batch(project.id, added.id, datetime.now(UTC)) is None
+
+    def test_a_batch_whose_firing_is_younger_than_the_cutoff_is_not(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        added = _fired(session, container, project, project_session)
+
+        held = _service(container).hold_batch(
+            project.id, added.id, datetime.now(UTC) - timedelta(minutes=2)
+        )
+
+        assert held is None
+
+    @pytest.mark.parametrize("how", ["done", "finished", "archived"])
+    def test_a_wait_done_since_the_read_or_its_project_closed_is_not(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        how: str,
+    ) -> None:
+        added = _fired(session, container, project, project_session)
+        _not_firable(session, container, project, added, project_session, how)
+
+        assert (
+            _service(container).hold_batch(project.id, added.id, datetime.now(UTC))
+            is None
+        )
+
+
+class TestWaitServiceTake:
+    """A run takes every firing of its wait pending at its brief (DB 191,
+    196)."""
+
+    def test_it_takes_every_pending_firing_and_moves_the_timeline(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        added = _fired(session, container, project, project_session)
+        earlier = _run(session, container, project, added, SessionState.IDLE)
+        _firings(session, added.id)[0].job_id = earlier.id
+        assert _service(container).fire_transition(_transition()) == 1
+        assert _service(container).fire_transition(_transition()) == 1
+        work = _run(session, container, project, added, SessionState.STARTING)
+        project_id = project.id
+        clear_after_commit_callbacks()
+
+        with scoped_session(container):
+            _service(container).take(project, work)
+
+        assert [
+            (firing.seq, firing.job_id) for firing in _firings(session, added.id)
+        ] == [(1, earlier.id), (2, work.id), (3, work.id)]
+        assert engine_events == [
+            TreeHashMoved(
+                tree_path(project, TIMELINE),
+                container.view_service().timeline(project).hash,
+            ),
+            ProjectChanged(project_id),
+        ]
+        assert [
+            firing["job"] for firing in _shown_firings(container, project, added.id)
+        ] == [
+            str(earlier.id),
+            str(work.id),
+            str(work.id),
+        ]
+
+    def test_with_nothing_pending_it_takes_none_and_moves_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        _opened(session, project)
+        added = _card_wait(container, project, project_session)
+        work = _run(session, container, project, added, SessionState.STARTING)
+
+        with scoped_session(container):
+            _service(container).take(project, work)
+
+        assert engine_events == []
+
+
+class TestWaitServiceResumed:
+    """A wait's run resumes its previous run's conversation while that run's
+    turn ended within `cache_expiration_ttl` (F136.5, DB 200)."""
+
+    def _previous(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        wait: Item,
+        ended: timedelta,
+        state: SessionState = SessionState.IDLE,
+        conversation: str | None = "conversation-1",
+    ) -> models.Work:
+        return _run(
+            session,
+            container,
+            project,
+            wait,
+            state,
+            conversation=conversation,
+            turn_ended_at=datetime.now(UTC) - ended,
+        )
+
+    def test_within_the_ttl_the_previous_run_is_resumed(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        added = _fired(session, container, project, project_session)
+        previous = self._previous(
+            session, container, project, added, timedelta(minutes=54)
+        )
+        work = _run(session, container, project, added, SessionState.STARTING)
+
+        resumed = _service(container).resumed(work, datetime.now(UTC))
+
+        assert resumed is not None and resumed.id == previous.id
+
+    def test_past_the_ttl_none_is(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        added = _fired(session, container, project, project_session)
+        self._previous(session, container, project, added, timedelta(minutes=56))
+        work = _run(session, container, project, added, SessionState.STARTING)
+
+        assert _service(container).resumed(work, datetime.now(UTC)) is None
+
+    def test_the_ttl_is_the_deployments(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        added = _fired(session, container, project, project_session)
+        self._previous(session, container, project, added, timedelta(minutes=11))
+        work = _run(session, container, project, added, SessionState.STARTING)
+        service = container.wait_service(cache_expiration_ttl_seconds=600)
+
+        assert service.resumed(work, datetime.now(UTC)) is None
+
+    @pytest.mark.parametrize("state", [SessionState.FAILED, SessionState.STOPPED])
+    def test_after_a_run_that_failed_or_was_stopped_none_is(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        state: SessionState,
+    ) -> None:
+        """A resume the controller refused fails its run on the conversation
+        it was given: the next run starts fresh."""
+        added = _fired(session, container, project, project_session)
+        self._previous(session, container, project, added, timedelta(minutes=1), state)
+        work = _run(session, container, project, added, SessionState.STARTING)
+
+        assert _service(container).resumed(work, datetime.now(UTC)) is None
+
+    def test_after_a_run_with_no_conversation_none_is(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        added = _fired(session, container, project, project_session)
+        self._previous(
+            session, container, project, added, timedelta(minutes=1), conversation=None
+        )
+        work = _run(session, container, project, added, SessionState.STARTING)
+
+        assert _service(container).resumed(work, datetime.now(UTC)) is None
+
+    def test_the_previous_run_is_the_latest_briefed_of_its_wait(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        """A run never briefed, such as one Finish stopped held, is no run
+        that ended; another wait's run is not this wait's."""
+        added = _fired(session, container, project, project_session)
+        self._previous(session, container, project, added, timedelta(minutes=50))
+        latest = self._previous(
+            session,
+            container,
+            project,
+            added,
+            timedelta(minutes=2),
+            conversation="conversation-2",
+        )
+        _run(session, container, project, added, SessionState.STOPPED, turns=0)
+        other = _card_wait(container, project, project_session)
+        self._previous(
+            session,
+            container,
+            project,
+            other,
+            timedelta(minutes=1),
+            conversation="conversation-3",
+        )
+        work = _run(session, container, project, added, SessionState.STARTING)
+
+        resumed = _service(container).resumed(work, datetime.now(UTC))
+
+        assert resumed is not None and resumed.id == latest.id
+
+    def test_a_retry_is_fresh(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        added = _fired(session, container, project, project_session)
+        self._previous(session, container, project, added, timedelta(minutes=1))
+        failed = _run(session, container, project, added, SessionState.FAILED)
+        retry = _run(session, container, project, added, SessionState.STARTING)
+        failed.retried_by_id = retry.id
+        session.flush()
+
+        assert _service(container).resumed(retry, datetime.now(UTC)) is None

@@ -5,10 +5,11 @@ V03, V08, V12, V13, V21)."""
 
 import hashlib
 import json
-from datetime import UTC, datetime
+import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
@@ -30,6 +31,8 @@ from app.models import (
     SaveError,
     Turn,
     User,
+    Wait,
+    WaitFiring,
     Work,
     WriterQuestion,
 )
@@ -39,6 +42,7 @@ from app.models.reference import (
     ChatKind,
     CloseCause,
     ErrorKind,
+    FiringCause,
     ProjectState,
     RecordKind,
     SessionState,
@@ -51,6 +55,7 @@ from app.services.brief_service import FOLLOW_UP_END, BriefService, is_follow_up
 from app.services.container import ServiceContainer
 from app.services.session_record_service import SessionRecordService
 from app.services.turn_end_read_service import READ_FAILED
+from app.services.wait_service import ReportedTransition
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
 
 AT = datetime(2026, 10, 26, 9, 30, 15, tzinfo=UTC)
@@ -1881,4 +1886,302 @@ class TestWorkItem:
         assert briefs.work_item(opened, "Rename the badge.", None).endswith(
             "- Auto pilot is off: the grants above ask the operator first for this"
             " session."
+        )
+
+
+TRANSITION = ReportedTransition(
+    card="ANS-312", from_state="In Progress", to_state="Done", at=AT, by="pieter"
+)
+
+
+def _wait_run(
+    db: DbSession, container: ServiceContainer, project: Project, wait: Item
+) -> Work:
+    """A run of `wait`, as the batcher places it, having taken its wait's
+    pending firings at its brief."""
+    job = models.Session(
+        project_id=project.id,
+        kind_code="job",
+        cwd="/work/PilotProjects",
+        token_hash=uuid.uuid4().hex,
+        state_code=SessionState.STARTING,
+    )
+    db.add(job)
+    db.flush()
+    work = container.record_service().place_work(
+        project,
+        job,
+        "Checking the wait",
+        trigger=WorkTrigger.WAIT_FIRED,
+        trigger_item_id=wait.id,
+    )
+    container.wait_service().take(project, work)
+    return work
+
+
+def _requested(db: DbSession, wait: Item, person: User) -> None:
+    """A person's request on the wait, its next firing."""
+    last = db.scalar(
+        select(func.max(WaitFiring.seq)).where(WaitFiring.wait_id == wait.id)
+    )
+    db.add(
+        WaitFiring(
+            wait_id=wait.id,
+            wait_kind_code=wait.kind_code,
+            seq=(last or 0) + 1,
+            cause_code=FiringCause.REQUESTED,
+            requested_by_user_id=person.id,
+            fired_at=datetime.now(UTC),
+        )
+    )
+    db.flush()
+
+
+def _fired_at(db: DbSession, wait: Item) -> list[str]:
+    return [
+        _z(fired)
+        for fired in db.scalars(
+            select(WaitFiring.fired_at)
+            .where(WaitFiring.wait_id == wait.id)
+            .order_by(WaitFiring.seq)
+        )
+    ]
+
+
+class TestWaitFired:
+    """A wait's run: the wait, the firings it took, oldest first, and the
+    notes of its task and the plan's own; resumed, the follow-up alone
+    (design 3 §5.3, *A wait's firings*; F136.5; DB 191, 196; V10)."""
+
+    @pytest.fixture
+    def planned(self, container: ServiceContainer, opened: Project) -> Project:
+        assert container.plan_service().save(opened, json.dumps(PLAN).encode()) == []
+        return opened
+
+    def test_a_card_waits_brief_names_each_firing_and_every_line_in_the_frames_order(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        planned: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        waits = container.wait_service()
+        wait = waits.add_card_wait(
+            planned,
+            project_session,
+            "Slice 058 completes",
+            ["ANS-312", "ANS-313"],
+            ["Done", "Won't fix"],
+            "fix",
+        )
+        assert waits.fire_transition(TRANSITION) == 1
+        _requested(session, wait, person)
+        work = _wait_run(session, container, planned, wait)
+
+        brief = briefs.job(planned, work, AT, LATER)
+
+        assert brief.startswith("/plan\n\n")
+        head, switch, payload, notes = brief.split("\n\n")[1:]
+        assert head == (
+            'Pilot\'s brief · a wait fired · project "Soup club" ·'
+            " /work/Projects/soup-club · 2026-10-26T11:05:40Z"
+        )
+        assert switch == (
+            "Auto pilot: off — the granted column asks for this session"
+            " (rules/grants.md)."
+        )
+        transition, request = _fired_at(session, wait)
+        assert payload == (
+            f'The wait: "Slice 058 completes" ({wait.id}), a card wait on ANS-312,'
+            f" ANS-313 for Done, Won't fix; waiting since {_z(wait.created_at)};"
+            " task fix.\n"
+            "Firings pending, oldest first:\n"
+            f"- {transition} · ANS-312: In Progress → Done, by pieter\n"
+            f"- {request} · the operator's request (Check now), by ada"
+        )
+        assert notes == (
+            f"{NOTES}\n"
+            '- fix "Fix the stock" · n1: Ask about salt\n'
+            "- the plan · n2: Add a sweep task"
+        )
+
+    def test_a_timed_waits_brief_names_its_due_time_and_a_request_to_skip_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        wait = container.wait_service().add_timed_wait(
+            opened,
+            project_session,
+            "ESO refreshes",
+            datetime.now(UTC) + timedelta(hours=1),
+            None,
+        )
+        due = datetime.now(UTC).replace(microsecond=0) - timedelta(minutes=1)
+        session.get_one(Wait, wait.id).due_at = due
+        session.flush()
+        assert container.wait_service().fire_due() == 1
+        _requested(session, wait, person)
+        work = _wait_run(session, container, opened, wait)
+
+        payload = briefs.job(opened, work, AT, LATER).split("\n\n")[3]
+
+        fired, request = _fired_at(session, wait)
+        assert payload == (
+            f'The wait: "ESO refreshes" ({wait.id}), a timed wait due {_z(due)};'
+            f" waiting since {_z(wait.created_at)}.\n"
+            "Firings pending, oldest first:\n"
+            f"- {fired} · due {_z(due)} — fired at its due time\n"
+            f"- {request} · the operator's request (Skip wait), by ada"
+        )
+
+    def test_a_transition_with_no_state_left_and_no_one_named_reads_so(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        project_session: models.Session,
+    ) -> None:
+        waits = container.wait_service()
+        wait = waits.add_card_wait(
+            opened, project_session, "Slice 058 completes", ["ANS-312"], ["Done"], None
+        )
+        assert (
+            waits.fire_transition(
+                ReportedTransition(
+                    card="ANS-312", from_state=None, to_state="done", at=AT, by=None
+                )
+            )
+            == 1
+        )
+        work = _wait_run(session, container, opened, wait)
+
+        (fired,) = _fired_at(session, wait)
+        assert (
+            briefs.job(opened, work, AT, LATER)
+            .split("\n\n")[3]
+            .endswith(f"- {fired} · ANS-312 → done")
+        )
+
+    def test_a_trigger_in_a_pause_carries_it_after_the_switch(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        waits = container.wait_service()
+        wait = waits.add_card_wait(
+            opened, project_session, "Slice 058 completes", ["ANS-312"], ["Done"], None
+        )
+        assert waits.fire_transition(TRANSITION) == 1
+        work = _wait_run(session, container, opened, wait)
+        _transition(session, opened, person, TransitionKind.PAUSED, PAUSED_AT)
+        _transition(session, opened, person, TransitionKind.RESUMED, RESUMED_AT)
+
+        assert briefs.job(opened, work, AT, LATER).split("\n\n")[2] == (
+            "Auto pilot: off — the granted column asks for this session"
+            f" (rules/grants.md).\n{PAUSE_LINE}"
+        )
+
+    def test_a_retrys_brief_carries_the_firings_the_runs_it_retries_took(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        project_session: models.Session,
+    ) -> None:
+        """They stay theirs (DB 191); the Retry takes those pending at its
+        brief."""
+        waits = container.wait_service()
+        wait = waits.add_card_wait(
+            opened, project_session, "Slice 058 completes", ["ANS-312"], ["Done"], None
+        )
+        assert waits.fire_transition(TRANSITION) == 1
+        first = _wait_run(session, container, opened, wait)
+        assert waits.fire_transition(TRANSITION) == 1
+        second = _wait_run(session, container, opened, wait)
+        assert waits.fire_transition(TRANSITION) == 1
+        retry = _wait_run(session, container, opened, wait)
+        first.retried_by_id = second.id
+        second.retried_by_id = retry.id
+        session.flush()
+
+        payload = briefs.job(opened, retry, AT, LATER).split("\n\n")[3]
+
+        assert payload.split("\n")[2:] == [
+            f"- {fired} · ANS-312: In Progress → Done, by pieter"
+            for fired in _fired_at(session, wait)
+        ]
+        assert [
+            firing.job_id
+            for firing in session.scalars(
+                select(WaitFiring)
+                .where(WaitFiring.wait_id == wait.id)
+                .order_by(WaitFiring.seq)
+            )
+        ] == [first.id, second.id, retry.id]
+
+    def test_another_waits_firings_and_another_runs_are_not_its(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        project_session: models.Session,
+    ) -> None:
+        waits = container.wait_service()
+        wait = waits.add_card_wait(
+            opened, project_session, "Slice 058 completes", ["ANS-312"], ["Done"], None
+        )
+        waits.add_card_wait(
+            opened, project_session, "Slice 059 completes", ["ANS-312"], ["Done"], None
+        )
+        assert waits.fire_transition(TRANSITION) == 2
+        _wait_run(session, container, opened, wait)
+        assert waits.fire_transition(TRANSITION) == 2
+        work = _wait_run(session, container, opened, wait)
+
+        (_, fired) = _fired_at(session, wait)
+        assert briefs.job(opened, work, AT, LATER).split("\n\n")[3].split("\n")[1:] == [
+            "Firings pending, oldest first:",
+            f"- {fired} · ANS-312: In Progress → Done, by pieter",
+        ]
+
+    def test_resumed_its_turn_is_the_follow_up_alone(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        opened: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        waits = container.wait_service()
+        wait = waits.add_card_wait(
+            opened, project_session, "Slice 058 completes", ["ANS-312"], ["Done"], None
+        )
+        assert waits.fire_transition(TRANSITION) == 1
+        _wait_run(session, container, opened, wait)
+        assert waits.fire_transition(TRANSITION) == 1
+        _requested(session, wait, person)
+        work = _wait_run(session, container, opened, wait)
+
+        follow_up = briefs.wait_follow_up(work)
+
+        _, transition, request = _fired_at(session, wait)
+        assert follow_up == (
+            'Another firing of "Slice 058 completes" since your last run:\n'
+            f"- {transition} · ANS-312: In Progress → Done, by pieter\n"
+            f"- {request} · the operator's request (Check now), by ada"
         )

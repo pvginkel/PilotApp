@@ -331,10 +331,47 @@ class TestAppSettings:
 
         assert settings.chat_close_timeout_seconds == 600
 
+    def test_the_chats_close_timeout_unset_is_the_cache_expiration_ttl(
+        self,
+    ) -> None:
+        settings = AppSettings.load(
+            AppEnvironment(_env_file=None, CACHE_EXPIRATION_TTL=1800)
+        )
+
+        assert settings.chat_close_timeout_seconds == 1800
+
+    def test_a_waits_run_resumes_within_55_minutes_by_default(self) -> None:
+        settings = AppSettings.load(AppEnvironment(_env_file=None))
+
+        assert settings.cache_expiration_ttl_seconds == 55 * 60
+
+    def test_load_reads_the_cache_expiration_ttl_from_the_environment(self) -> None:
+        settings = AppSettings.load(
+            AppEnvironment(_env_file=None, CACHE_EXPIRATION_TTL=1800)
+        )
+
+        assert settings.cache_expiration_ttl_seconds == 1800
+
+    def test_a_waits_quiet_window_is_5_seconds_by_default(self) -> None:
+        settings = AppSettings.load(AppEnvironment(_env_file=None))
+
+        assert settings.wait_quiet_window_seconds == 5
+
+    def test_load_reads_the_waits_quiet_window_from_the_environment(self) -> None:
+        settings = AppSettings.load(
+            AppEnvironment(_env_file=None, WAIT_QUIET_WINDOW_SECONDS=12)
+        )
+
+        assert settings.wait_quiet_window_seconds == 12
+
+    @pytest.mark.parametrize(
+        "name",
+        ["CHAT_CLOSE_TIMEOUT", "CACHE_EXPIRATION_TTL", "WAIT_QUIET_WINDOW_SECONDS"],
+    )
     @pytest.mark.parametrize("seconds", [0, -1])
-    def test_load_refuses_a_close_timeout_not_above_zero(self, seconds: int) -> None:
-        with pytest.raises(ValidationError, match="CHAT_CLOSE_TIMEOUT"):
-            AppEnvironment.model_validate({"CHAT_CLOSE_TIMEOUT": seconds})
+    def test_load_refuses_a_time_not_above_zero(self, name: str, seconds: int) -> None:
+        with pytest.raises(ValidationError, match=name):
+            AppEnvironment.model_validate({name: seconds})
 
     def test_the_outages_alarm_waits_five_minutes_by_default(self) -> None:
         settings = AppSettings.load(AppEnvironment(_env_file=None))
@@ -398,6 +435,8 @@ class TestAppSettings:
             "brain_model": repr("opus"),
             "brain_reasoning_effort": repr("xhigh"),
             "chat_close_timeout_seconds": repr(3300.0),
+            "cache_expiration_ttl_seconds": repr(3300.0),
+            "wait_quiet_window_seconds": repr(5.0),
         }
 
     def test_the_link_settings_are_unset_by_default(self) -> None:
@@ -499,4 +538,6 @@ class TestAppSettings:
             "brain_model": repr("opus"),
             "brain_reasoning_effort": repr("xhigh"),
             "chat_close_timeout_seconds": repr(3300.0),
+            "cache_expiration_ttl_seconds": repr(3300.0),
+            "wait_quiet_window_seconds": repr(5.0),
         }

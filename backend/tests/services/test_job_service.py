@@ -21,7 +21,7 @@ from app import models
 from app.database import scoped_session
 from app.engine.views import ViewService, utc_time
 from app.exceptions import InvalidOperationException, RecordNotFoundException
-from app.models import Item, Project, ProjectTransition, Turn, User, Work
+from app.models import Item, Project, ProjectTransition, Turn, User, WaitFiring, Work
 from app.models.reference import (
     AnswerChannel,
     ProjectState,
@@ -42,6 +42,7 @@ from app.services.session_start_service import SessionStartService
 from app.services.start_gate import Held
 from app.services.supervisor import LoopHandle
 from app.services.timeline_service import work_status
+from app.services.wait_service import ReportedTransition
 from tests.support.fake_controller import ServedFakeController, client_of
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
 from tests.support.starts import configured_starts
@@ -1818,3 +1819,171 @@ class TestRetryAcrossTransactions:
         with scoped_session(container) as db:
             assert db.get_one(Work, job.id).retried_by_id == retry
             assert db.scalar(select(func.count()).select_from(Work)) == 2
+
+
+WAIT_TRANSITION = ReportedTransition(
+    card="ANS-312", from_state="In Progress", to_state="Done", at=AT, by="pieter"
+)
+
+
+def _waited(
+    db: DbSession, container: ServiceContainer, project: Project, person: User
+) -> Item:
+    """An open card wait of Pilot's own, fired once by ANS-312's
+    transition."""
+    chat = models.Session(
+        project_id=project.id,
+        kind_code="chat",
+        cwd=STORE_REPO,
+        token_hash=uuid.uuid4().hex,
+        state_code=SessionState.RUNNING,
+    )
+    db.add(chat)
+    db.flush()
+    waits = container.wait_service()
+    wait = waits.add_card_wait(
+        project, chat, "Slice 058 completes", ["ANS-312"], ["Done"], None
+    )
+    assert waits.fire_transition(WAIT_TRANSITION) == 1
+    return wait
+
+
+def _taken_by(db: DbSession, wait: Item) -> list[uuid.UUID | None]:
+    return list(
+        db.scalars(
+            select(WaitFiring.job_id)
+            .where(WaitFiring.wait_id == wait.id)
+            .order_by(WaitFiring.seq)
+            .execution_options(populate_existing=True)
+        )
+    )
+
+
+@pytest.mark.usefixtures("placing")
+class TestWaitFired:
+    """A wait's run, placed by the batcher for its pending firings, its
+    trigger item the wait, through the gate and the queue (F136.4; DB 195,
+    196; V06)."""
+
+    def test_it_places_a_job_its_trigger_item_the_wait_titled_by_it(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        person: User,
+    ) -> None:
+        wait = _waited(session, container, opened, person)
+
+        work = _jobs(container, starts).wait_fired(opened, wait)
+
+        line = session.get_one(Item, work.id)
+        assert (line.seq, line.kind_code, line.title) == (
+            wait.seq + 1,
+            "work",
+            'Checking "Slice 058 completes"',
+        )
+        assert (work.trigger_code, work.trigger_item_id) == (
+            WorkTrigger.WAIT_FIRED,
+            wait.id,
+        )
+        job = session.get_one(models.Session, work.id)
+        assert (job.kind_code, job.cwd, job.state_code) == (
+            "job",
+            STORE_REPO,
+            SessionState.STARTING,
+        )
+        assert _taken_by(session, wait) == [work.id]
+        assert _brief(container, job).message == container.brief_service().job(
+            opened, work, job.created_at, job.created_at
+        )
+
+    def test_held_by_the_pause_it_takes_its_firings_at_the_release(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        person: User,
+    ) -> None:
+        paused_at = datetime.now(UTC)
+        _transition(session, opened, person, TransitionKind.PAUSED, paused_at)
+        wait = _waited(session, container, opened, person)
+        job = session.get_one(
+            models.Session, _jobs(container, starts).wait_fired(opened, wait).id
+        )
+        assert (job.state_code, job.turns) == (SessionState.HELD, 0)
+        assert _taken_by(session, wait) == [None]
+        assert container.wait_service().fire_transition(WAIT_TRANSITION) == 1
+        resumed_at = datetime.now(UTC)
+        _transition(session, opened, person, TransitionKind.RESUMED, resumed_at)
+
+        _release(starts)
+
+        job = _read(session, job)
+        assert job.state_code is SessionState.STARTING
+        assert _taken_by(session, wait) == [job.id, job.id]
+        assert f"Paused {utc_time(paused_at)} to {utc_time(resumed_at)}" in (
+            _brief(container, job).message
+        )
+
+
+class TestWaitFiredRetry:
+    """A Retry of a wait's failed or stopped run: fresh, briefed with the
+    firings that run took, which stay its own, and those pending at its brief
+    (D078; DB 191; V10)."""
+
+    @pytest.mark.usefixtures("placing")
+    def test_it_is_fresh_and_briefed_with_the_firings_the_run_took(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        person: User,
+    ) -> None:
+        wait = _waited(session, container, opened, person)
+        work = _jobs(container, starts).wait_fired(opened, wait)
+        failed = _ended(session, container, session.get_one(models.Session, work.id))
+        failed.conversation_id = "conversation-1"
+        assert container.wait_service().fire_transition(WAIT_TRANSITION) == 1
+        session.flush()
+
+        retry = _retry(container, starts, failed)
+
+        assert (retry.state_code, retry.conversation_id) == (
+            SessionState.STARTING,
+            None,
+        )
+        assert _taken_by(session, wait) == [failed.id, retry.id]
+        message = _brief(container, retry).message
+        assert message.startswith("/plan\n\n")
+        assert message.count("ANS-312: In Progress → Done, by pieter") == 2
+
+    @pytest.mark.usefixtures("placing")
+    def test_a_run_of_a_wait_that_is_done_is_refused(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        person: User,
+    ) -> None:
+        wait = _waited(session, container, opened, person)
+        work = _jobs(container, starts).wait_fired(opened, wait)
+        failed = _ended(session, container, session.get_one(models.Session, work.id))
+        container.wait_service().close(
+            opened,
+            session.get_one(models.Wait, wait.id),
+            session.scalars(select(User).where(User.kind_code == UserKind.AGENT)).one(),
+            failed.id,
+            "ANS-312 read Done at 09:40",
+        )
+
+        with pytest.raises(InvalidOperationException) as raised:
+            _jobs(container, starts).retry(failed.id)
+
+        assert raised.value.message == (
+            'Cannot retry Checking "Slice 058 completes" because the wait it'
+            " follows is done"
+        )

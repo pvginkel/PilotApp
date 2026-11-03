@@ -81,6 +81,7 @@ from app.services.tracker_event_service import TrackerEventService
 from app.services.turn_end_read_service import TurnEndReadService
 from app.services.usage_halts import UsageHalts, UsageWatcher
 from app.services.usage_service import UsageService
+from app.services.wait_batcher import WaitBatcher
 from app.services.wait_service import WaitService
 from app.services.wait_timer import WaitTimer
 from app.services.write_back_service import WriteBackService
@@ -692,13 +693,21 @@ class ServiceContainer(containers.DeclarativeContainer):
         document_service=document_service,
         view_service=view_service,
         ticket_id_pattern=app_config.provided.ticket_id_pattern,
+        cache_expiration_ttl_seconds=app_config.provided.cache_expiration_ttl_seconds,
     )
-    # The waits' timer (design 2 §8.2); it registers on the supervisor when
-    # built, before STARTUP.
+    # The waits' timer and the batcher (design 2 §8.2); each registers on the
+    # supervisor when built, before STARTUP.
     wait_timer = providers.Singleton(
         WaitTimer, container=__self__, supervisor=supervisor
     )
     register_for_background_startup(lambda c: c.wait_timer())
+    wait_batcher = providers.Singleton(
+        WaitBatcher,
+        container=__self__,
+        supervisor=supervisor,
+        quiet_window_seconds=app_config.provided.wait_quiet_window_seconds,
+    )
+    register_for_background_startup(lambda c: c.wait_batcher())
     # A tracker's posts of a card's change of state (F136)
     tracker_event_service = providers.Factory(
         TrackerEventService, wait_service=wait_service, app_settings=app_config

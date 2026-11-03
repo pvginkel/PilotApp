@@ -3,33 +3,61 @@ brain, fixed at add (F27.6), fired by the server (F136.2, F27.2), and closed by
 its own `done` with a note (F27.4, DB 300) or by Finish's close of the open
 items, which writes none.
 
+A wait's pending firings become one run of the brain per batch (F136.4): the
+batcher's tick (`WaitBatcher`) places a `wait_fired` job once its oldest
+pending firing is a quiet window old and no run of the wait is in flight, and
+the job takes every firing still pending at its brief (DB 196). That run
+resumes the conversation of the wait's previous run when that run's turn ended
+`idle` within `cache_expiration_ttl` (F136.5, DB 200).
+
 Each write is of the caller's transaction, under its Project's row: a wait's
 birth takes its `seq` under it (`DocumentService.next_seq`), its close holds
-the Wait's row after it, and a firing holds the Project's row shared, then the
-Wait's, and reads the wait open there.
+the Wait's row after it, a firing holds the Project's row shared, then the
+Wait's, and reads the wait open there, and the batcher's placement and a
+run's take hold the Wait's row after the Project's.
 """
 
 import re
 import uuid
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import ColumnElement, SQLColumnExpression, and_, exists, func, select
+from sqlalchemy import (
+    ColumnElement,
+    SQLColumnExpression,
+    and_,
+    exists,
+    func,
+    or_,
+    select,
+    update,
+)
 from sqlalchemy.orm import Session
 
 from app.engine.documents import DocumentService
 from app.engine.record import ARCHIVED, MARKED
 from app.engine.views import ViewService
 from app.exceptions import InvalidOperationException
-from app.models import CardTransition, Item, Project, User, Wait, WaitFiring
+from app.models import CardTransition, Item, Project, User, Wait, WaitFiring, Work
 from app.models import Session as AgentSession
-from app.models.reference import FiringCause, ProjectState
+from app.models.reference import FiringCause, ProjectState, SessionState, WorkTrigger
 
 CARD_WAIT = "card_wait"
 TIMED_WAIT = "timed_wait"
 WAITS = (CARD_WAIT, TIMED_WAIT)
 """The Item Kinds of form `wait` (DB assertion 185)."""
+
+REQUESTS = {CARD_WAIT: "Check now", TIMED_WAIT: "Skip wait"}
+"""What a person's request is called on each kind of wait (F27.3)."""
+
+_IN_FLIGHT = (SessionState.HELD, SessionState.STARTING, SessionState.RUNNING)
+"""The states of a wait's run that keep a second from being placed: held at
+the gate or queued behind its project's jobs, briefed or not, starting, or
+running, a follow-up turn included."""
+
+_RESUMABLE = (SessionState.IDLE, SessionState.ENDED)
+"""The states of a run whose turn ended neither failed nor stopped."""
 
 
 @dataclass(frozen=True)
@@ -53,11 +81,13 @@ class WaitService:
         document_service: DocumentService,
         view_service: ViewService,
         ticket_id_pattern: re.Pattern[str],
+        cache_expiration_ttl_seconds: float,
     ) -> None:
         self.db = db
         self.document_service = document_service
         self.view_service = view_service
         self.ticket_id_pattern = ticket_id_pattern
+        self.cache_expiration_ttl = timedelta(seconds=cache_expiration_ttl_seconds)
 
     def add_card_wait(
         self,
@@ -235,6 +265,107 @@ class WaitService:
         self._moved(fired)
         return len(fired)
 
+    def batches_due(self, cutoff: datetime) -> list[tuple[uuid.UUID, uuid.UUID]]:
+        """The waits whose run is due (design 2 §8.2's batcher; F136.4), as
+        their project's id and their own, read with no lock: open, of an open,
+        unarchived project, with a firing pending since `cutoff` or before,
+        and no run in flight (`run_in_flight`). `hold_batch` reads each again
+        under its rows."""
+        return [
+            (project_id, wait_id)
+            for project_id, wait_id in self.db.execute(
+                select(Item.project_id, Wait.id)
+                .join(Item, Item.id == Wait.id)
+                .join(Project, Project.id == Item.project_id)
+                .where(
+                    _firable(),
+                    _pending_since(Wait.id, cutoff),
+                    ~run_in_flight(Wait.id),
+                )
+                .order_by(Item.project_id, Wait.id)
+            )
+        ]
+
+    def hold_batch(
+        self, project_id: uuid.UUID, wait_id: uuid.UUID, cutoff: datetime
+    ) -> tuple[Project, Item] | None:
+        """The wait's Project and Item while its run is due under their rows:
+        the Project's held exclusively, as the run's placement takes it
+        (`DocumentService.next_seq`), then the Wait's, and read there as
+        `batches_due` reads them; else none. A second process reading the
+        same batch waits for the first's commit, then finds its run in
+        flight: one run per batch."""
+        project = self.db.scalars(
+            select(Project)
+            .where(Project.id == project_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).one()
+        if project.state_code is not ProjectState.OPEN or project.archived:
+            return None
+        self.db.execute(select(Wait.id).where(Wait.id == wait_id).with_for_update())
+        item = self.db.get_one(Item, wait_id, populate_existing=True)
+        if item.done_at is not None:
+            return None
+        if not self.db.scalar(select(_pending_since(wait_id, cutoff))):
+            return None
+        if self.db.scalar(select(run_in_flight(wait_id))):
+            return None
+        return project, item
+
+    def take(self, project: Project, work: Work) -> None:
+        """Every firing of the wait the run `work` follows still pending, taken
+        by it at its brief (DB 191, 196), under the Wait's row after the
+        Project's, which the caller holds, so that a firing recorded before
+        is taken and one after stays pending for the next run."""
+        # A wait's run names its wait (DB 195).
+        assert work.trigger_item_id is not None
+        self.db.execute(
+            select(Wait.id).where(Wait.id == work.trigger_item_id).with_for_update()
+        )
+        taken = self.db.scalars(
+            update(WaitFiring)
+            .where(
+                WaitFiring.wait_id == work.trigger_item_id,
+                WaitFiring.job_id.is_(None),
+            )
+            .values(job_id=work.id)
+            .returning(WaitFiring.id)
+        ).all()
+        if taken:
+            self.view_service.timeline_moved(project)
+
+    def resumed(self, work: Work, at: datetime) -> AgentSession | None:
+        """The run whose conversation the wait's run `work`, briefed at `at`,
+        resumes (F136.5, DB 200): the wait's previous run, the latest other
+        one briefed, while its turn ended `idle` on a conversation within
+        `cache_expiration_ttl` before `at`. None past it, after a run that
+        failed or was stopped, and for a Retry, a fresh job (D078)."""
+        if self.db.scalar(select(exists().where(Work.retried_by_id == work.id))):
+            return None
+        previous = self.db.scalars(
+            select(AgentSession)
+            .join(Work, Work.id == AgentSession.id)
+            .join(Item, Item.id == Work.id)
+            .where(
+                Work.trigger_code == WorkTrigger.WAIT_FIRED,
+                Work.trigger_item_id == work.trigger_item_id,
+                Work.id != work.id,
+                AgentSession.turns > 0,
+            )
+            .order_by(Item.seq.desc())
+            .limit(1)
+        ).one_or_none()
+        if (
+            previous is None
+            or previous.state_code not in _RESUMABLE
+            or previous.conversation_id is None
+            or previous.turn_ended_at is None
+            or previous.turn_ended_at < at - self.cache_expiration_ttl
+        ):
+            return None
+        return previous
+
     def _hold(
         self, project_id: uuid.UUID, wait_id: uuid.UUID, *, skip_locked: bool
     ) -> Project | None:
@@ -338,6 +469,35 @@ def _firable() -> ColumnElement[bool]:
         Item.done_at.is_(None),
         Project.state_code == ProjectState.OPEN,
         Project.archived.is_(False),
+    )
+
+
+def run_in_flight(
+    wait_id: SQLColumnExpression[uuid.UUID] | uuid.UUID,
+) -> ColumnElement[bool]:
+    """Whether a run of the wait is placed and not ended (F136.4): held at the
+    gate or queued, starting or running, or failed at the quota wall with its
+    nudge owed, which continues it (D078)."""
+    return exists().where(
+        Work.trigger_code == WorkTrigger.WAIT_FIRED,
+        Work.trigger_item_id == wait_id,
+        AgentSession.id == Work.id,
+        or_(
+            AgentSession.state_code.in_(_IN_FLIGHT),
+            AgentSession.nudge_owed_at.is_not(None),
+        ),
+    )
+
+
+def _pending_since(
+    wait_id: SQLColumnExpression[uuid.UUID] | uuid.UUID, cutoff: datetime
+) -> ColumnElement[bool]:
+    """Whether a firing of the wait recorded at `cutoff` or before is
+    pending: its oldest pending firing is that old."""
+    return exists().where(
+        WaitFiring.wait_id == wait_id,
+        WaitFiring.job_id.is_(None),
+        WaitFiring.fired_at <= cutoff,
     )
 
 

@@ -31,6 +31,7 @@ from app.models import (
     User,
     Wait,
     WaitFiring,
+    Work,
 )
 from app.models import Session as AgentSession
 from app.models.reference import (
@@ -41,6 +42,7 @@ from app.models.reference import (
     ProjectState,
     SessionState,
     UserKind,
+    WorkTrigger,
 )
 from app.services.alarm_service import ALARM_RETRY_TIMER, AlarmService
 from app.services.chat_close_service import ChatCloseService
@@ -66,6 +68,8 @@ from app.services.store_updater import StoreUpdater
 from app.services.supervisor import TIMER_RUNS_TOTAL, Supervisor
 from app.services.usage_halts import TIMER as USAGE_TIMER
 from app.services.usage_halts import UsageWatcher
+from app.services.wait_batcher import WaitBatcher
+from app.services.wait_service import ReportedTransition
 from app.services.wait_timer import WaitTimer
 from tests.conftest_infrastructure import (
     _clear_prometheus_registry,
@@ -850,6 +854,100 @@ def _firing_causes(container: ServiceContainer, wait_id: uuid.UUID) -> list[str]
             db.scalars(
                 select(WaitFiring.cause_code).where(WaitFiring.wait_id == wait_id)
             )
+        )
+
+
+class TestWaitBatcherWiring:
+    def test_the_batcher_runs_from_startup_and_places_a_fired_waits_run(
+        self,
+        committed_app: Flask,
+        fake_controller: ServedFakeController,
+        test_app_settings: AppSettings,
+    ) -> None:
+        container = committed_app.container
+        container.app_config.override(
+            test_app_settings.model_copy(
+                update={
+                    "controller_url": fake_controller.url,
+                    "scheduler_tick_seconds": 0.05,
+                    "wait_quiet_window_seconds": 0.05,
+                }
+            )
+        )
+        client_of(container, fake_controller)
+        fake_controller.add_environment(
+            STORE_ENVIRONMENT_ID, name="PilotProjects", status="running", exempt=True
+        )
+        with scoped_session(container) as db:
+            person = User(
+                kind_code=UserKind.PERSON,
+                subject="subject-ada",
+                handle="ada",
+                name="Ada Example",
+                avatar_slot=1,
+            )
+            db.add(person)
+            db.flush()
+            project = Project(
+                created_by_user_id=person.id,
+                state_code=ProjectState.OPEN,
+                slug="soup-club",
+            )
+            db.add(project)
+            db.flush()
+            run = AgentSession(
+                project_id=project.id,
+                kind_code="work",
+                cwd="/work/Example",
+                token_hash="a" * 64,
+                state_code=SessionState.RUNNING,
+            )
+            db.add(run)
+            db.flush()
+            waits = container.wait_service()
+            added = waits.add_card_wait(
+                project, run, "Slice 058 completes", ["ANS-312"], ["Done"], None
+            )
+            assert (
+                waits.fire_transition(
+                    ReportedTransition(
+                        card="ANS-312",
+                        from_state=None,
+                        to_state="Done",
+                        at=datetime.now(UTC),
+                        by=None,
+                    )
+                )
+                == 1
+            )
+            wait_id = added.id
+        batcher = container.wait_batcher()
+        assert isinstance(batcher, WaitBatcher)
+        assert batcher is container.wait_batcher()
+        # Built before STARTUP, as the app's background start builds it: its
+        # jobs and timers register then.
+        container.session_start_service()
+        coordinator = container.lifecycle_coordinator()
+
+        coordinator.fire_startup()
+        try:
+            wait_until(
+                lambda: _runs_of(container, wait_id) == 1,
+                "the wait's run placed by the batcher",
+            )
+        finally:
+            coordinator.shutdown()
+
+
+def _runs_of(container: ServiceContainer, wait_id: uuid.UUID) -> int:
+    with scoped_session(container) as db:
+        return len(
+            db.scalars(
+                select(Work.id).where(
+                    Work.trigger_code == WorkTrigger.WAIT_FIRED,
+                    Work.trigger_item_id == wait_id,
+                )
+            ).all()
         )
 
 

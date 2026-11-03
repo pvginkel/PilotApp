@@ -228,12 +228,29 @@ class AppEnvironment(BaseSettings):
             "job's (F139)"
         ),
     )
-    CHAT_CLOSE_TIMEOUT: float = Field(
+    CACHE_EXPIRATION_TTL: float = Field(
         default=3300.0,
         gt=0,
         description=(
+            "Seconds after its previous run's turn ended within which a wait's "
+            "run resumes that run's conversation, the subscription's prompt-cache "
+            "TTL (F136.5)"
+        ),
+    )
+    CHAT_CLOSE_TIMEOUT: float | None = Field(
+        default=None,
+        gt=0,
+        description=(
             "Seconds after its last turn ended at which an open project chat with "
-            "no turn in flight closes; cache_expiration_ttl's 55 minutes (F130)"
+            "no turn in flight closes; unset, CACHE_EXPIRATION_TTL (F130)"
+        ),
+    )
+    WAIT_QUIET_WINDOW_SECONDS: float = Field(
+        default=5.0,
+        gt=0,
+        description=(
+            "Seconds after a wait's first pending firing at which its run is "
+            "placed, later firings joining it (F136.4)"
         ),
     )
 
@@ -394,6 +411,14 @@ class AppSettings(BaseModel):
     flight stands before the scheduler's tick closes it (F130; design 2
     §13)."""
 
+    cache_expiration_ttl_seconds: float = 3300.0
+    """How long after its previous run's turn ended a wait's run resumes that
+    run's conversation; past it, the run is fresh (F136.5, DB 200)."""
+
+    wait_quiet_window_seconds: float = 5.0
+    """How long after a wait's first pending firing the batcher places its run,
+    counted on the scheduler's tick (F136.4)."""
+
     def dump_for_logging(self) -> dict[str, str]:
         """Every setting, for the boot log, with the Sensitive ones as ``***``."""
         return dump_config_for_logging(self)
@@ -439,5 +464,11 @@ class AppSettings(BaseModel):
             five_hour_halt=env.FIVE_HOUR_HALT,
             brain_model=env.BRAIN_MODEL,
             brain_reasoning_effort=env.BRAIN_REASONING_EFFORT,
-            chat_close_timeout_seconds=env.CHAT_CLOSE_TIMEOUT,
+            chat_close_timeout_seconds=(
+                env.CACHE_EXPIRATION_TTL
+                if env.CHAT_CLOSE_TIMEOUT is None
+                else env.CHAT_CLOSE_TIMEOUT
+            ),
+            cache_expiration_ttl_seconds=env.CACHE_EXPIRATION_TTL,
+            wait_quiet_window_seconds=env.WAIT_QUIET_WINDOW_SECONDS,
         )

@@ -28,6 +28,7 @@ from app.engine.views import utc_time
 from app.models import (
     Attachment,
     Block,
+    CardTransition,
     Chat,
     ClaimAssignment,
     ClarificationRun,
@@ -42,12 +43,15 @@ from app.models import (
     SaveError,
     Turn,
     User,
+    Wait,
+    WaitFiring,
     Work,
 )
 from app.models import Session as AgentSession
 from app.models.reference import (
     DocumentRole,
     ErrorKind,
+    FiringCause,
     ProjectState,
     RecordKind,
     TransitionKind,
@@ -57,6 +61,7 @@ from app.services.clarification_service import Clarification, of_pass
 from app.services.session_record_service import read_records
 from app.services.session_scope import project_folder
 from app.services.turn_end_read_service import READ_FAILED
+from app.services.wait_service import CARD_WAIT, REQUESTS
 
 CHAT_SKILL = "/chat"
 CREATE_SKILL = "/create"
@@ -185,9 +190,71 @@ class BriefService:
             # The job after an item's close names the item.
             assert work.trigger_item_id is not None
             return self._item_done(project, work.trigger_item_id, triggered, at)
-        # `JobService` places no job of a wait's firings.
+        if work.trigger_code is WorkTrigger.WAIT_FIRED:
+            return self._wait_fired(project, work, triggered, at)
         assert work.trigger_code is WorkTrigger.SETUP
         return self._setup(project, triggered, at)
+
+    def wait_follow_up(self, work: Work) -> str:
+        """The first Turn of the wait's run `work` that resumes its previous
+        run's conversation (§5.3; F136.5): no frame, the follow-up alone,
+        naming the wait and the firings the run took, oldest first."""
+        item, wait = self._wait(work)
+        return "\n".join(
+            [
+                f'Another firing of "{item.title}" since your last run:',
+                *self._firings(wait, [work.id]),
+            ]
+        )
+
+    def _wait_fired(
+        self, project: Project, work: Work, triggered: datetime, at: datetime
+    ) -> str:
+        """A wait's run, fresh (§5.3, *A wait's firings*): `/plan`, then the
+        wait's line and the firings the run took at its brief, oldest first,
+        a Retry's with those the runs it retries took, which stay theirs (DB
+        191); then the open notes of the wait's task and the plan's own."""
+        item, wait = self._wait(work)
+        lines = [_wait_line(item, wait)]
+        firings = self._firings(wait, _retried(self.db, work))
+        if firings:
+            lines.extend(["Firings pending, oldest first:", *firings])
+        return _frame(
+            PLAN_SKILL,
+            "a wait fired",
+            project,
+            at,
+            [_switch(project), self._trigger_paused(project, triggered)],
+            lines,
+            self._notes(
+                project, [] if item.plan_task_id is None else [item.plan_task_id]
+            ),
+        )
+
+    def _wait(self, work: Work) -> tuple[Item, Wait]:
+        # A wait's run names its wait (DB 195).
+        assert work.trigger_item_id is not None
+        return (
+            self.db.get_one(Item, work.trigger_item_id),
+            self.db.get_one(Wait, work.trigger_item_id),
+        )
+
+    def _firings(self, wait: Wait, jobs: Sequence[uuid.UUID]) -> list[str]:
+        """The wait's firings the runs `jobs` took, oldest first, each its
+        time and its cause: the transition, the due time, or a person's
+        request by its button's name."""
+        return [
+            f"- {utc_time(firing.fired_at)} · {_fired(wait, firing, transition, by)}"
+            for firing, transition, by in self.db.execute(
+                select(WaitFiring, CardTransition, User.handle)
+                .outerjoin(
+                    CardTransition, CardTransition.id == WaitFiring.transition_id
+                )
+                .outerjoin(User, User.id == WaitFiring.requested_by_user_id)
+                .where(WaitFiring.wait_id == wait.id, WaitFiring.job_id.in_(jobs))
+                .order_by(WaitFiring.seq)
+            )
+        ]
 
     def _setup(self, project: Project, triggered: datetime, at: datetime) -> str:
         """The setup's (F49), triggered at Create project's instant, which
@@ -831,6 +898,61 @@ def _noted(block: dsl.Block) -> str:
     if block.confirmation:
         return f', its reason: "{block.note}"'
     return f', note: "{block.note}"'
+
+
+def _wait_line(item: Item, wait: Wait) -> str:
+    """The wait's line: its title and id, what it waits on, since when, and
+    the plan's task it serves."""
+    if wait.kind_code == CARD_WAIT:
+        # A card wait has its two lists (DB 186, 187).
+        assert wait.cards is not None and wait.states is not None
+        on = f"a card wait on {', '.join(wait.cards)} for {', '.join(wait.states)}"
+    else:
+        # A timed wait has its due time (`ck_waits_halves`).
+        assert wait.due_at is not None
+        on = f"a timed wait due {utc_time(wait.due_at)}"
+    line = (
+        f'The wait: "{item.title}" ({item.id}), {on};'
+        f" waiting since {utc_time(item.created_at)}"
+    )
+    if item.plan_task_id is not None:
+        line += f"; task {item.plan_task_id}"
+    return f"{line}."
+
+
+def _fired(
+    wait: Wait,
+    firing: WaitFiring,
+    transition: CardTransition | None,
+    by: str | None,
+) -> str:
+    """What fired the wait: the card's transition, by whom where the tracker
+    names someone; its due time; or a person's request, by its button's name
+    (DB 193)."""
+    # A firing's cause has its own (`ck_wait_firings_cause`, DB 193).
+    if firing.cause_code is FiringCause.TRANSITION:
+        assert transition is not None
+        moved = (
+            f"{transition.card} → {transition.to_state}"
+            if transition.from_state is None
+            else f"{transition.card}: {transition.from_state} → {transition.to_state}"
+        )
+        return moved if transition.by is None else f"{moved}, by {transition.by}"
+    if firing.cause_code is FiringCause.DUE:
+        assert wait.due_at is not None
+        return f"due {utc_time(wait.due_at)} — fired at its due time"
+    assert by is not None
+    return f"the operator's request ({REQUESTS[wait.kind_code]}), by {by}"
+
+
+def _retried(db: Session, work: Work) -> list[uuid.UUID]:
+    """The job and every job its Retries retry, in their chain."""
+    chain = [work.id]
+    while (
+        earlier := db.scalar(select(Work.id).where(Work.retried_by_id == chain[-1]))
+    ) is not None:
+        chain.append(earlier)
+    return chain
 
 
 def _files(count: int) -> str:

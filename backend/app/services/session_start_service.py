@@ -1838,19 +1838,17 @@ class SessionStartService:
         The job after an item's close consumes the item it is briefed with,
         which takes Undo from it (F14.1): under the Session's lock, which the
         item's Undo takes before it reads the item. A Retry's finds it
-        consumed by the job it retries, and consumed is final (DB 56)."""
+        consumed by the job it retries, and consumed is final (DB 56). A
+        wait's run takes its wait's pending firings first (`_wait_run`)."""
         work = db.get_one(Work, session.id)
-        work.autopilot = project.autopilot
-        db.add(
-            Turn(
-                session_id=session.id,
-                seq=1,
-                message=self._container.brief_service().job(
-                    project, work, _triggered(db, session), at
-                ),
-                started_at=at,
+        if work.trigger_code is WorkTrigger.WAIT_FIRED:
+            message = self._wait_run(db, project, session, work, at)
+        else:
+            work.autopilot = project.autopilot
+            message = self._container.brief_service().job(
+                project, work, _triggered(db, session), at
             )
-        )
+        db.add(Turn(session_id=session.id, seq=1, message=message, started_at=at))
         if work.trigger_code is WorkTrigger.ITEM_DONE:
             # The job after an item's close names the item.
             assert work.trigger_item_id is not None
@@ -1861,6 +1859,35 @@ class SessionStartService:
         db.flush()
         session.turns = 1
         session.turn_started_at = at
+
+    def _wait_run(
+        self,
+        db: Session,
+        project: Project,
+        session: AgentSession,
+        work: Work,
+        at: datetime,
+    ) -> str:
+        """The first Turn of the wait's run `work`, briefed at `at`, once it
+        took its wait's pending firings (`WaitService.take`): within
+        `cache_expiration_ttl` of its previous run's turn's end, the
+        follow-up alone, on that run's conversation and under the switch
+        that run's brief stated, which the conversation keeps (F136.5,
+        F54.7); else the full brief, fresh. A resume the controller refuses
+        fails the run at its create, as any refused create does (F125)."""
+        waits = self._container.wait_service()
+        briefs = self._container.brief_service()
+        waits.take(project, work)
+        resumed = waits.resumed(work, at)
+        if resumed is None:
+            work.autopilot = project.autopilot
+            return briefs.job(project, work, _triggered(db, session), at)
+        session.conversation_id = resumed.conversation_id
+        work.autopilot = db.get_one(Work, resumed.id).autopilot
+        logger.info(
+            "Session %s resumes session %s's conversation", session.id, resumed.id
+        )
+        return briefs.wait_follow_up(work)
 
     def withdraw(self, db: Session, session: AgentSession, at: datetime) -> None:
         """A job held before its brief, its Session locked by the caller,

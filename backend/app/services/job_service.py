@@ -1,7 +1,9 @@
 """Pilot's own background jobs (design 3 §5.1; F59, F59.1, F59.2, F49; DB
-Work, assertion 167, decision 45): a fresh brain session per trigger, ending
+Work, assertion 167, decisions 45 and 46): a brain session per trigger, ending
 with its turn, each a quiet work item of Pilot's with its session log behind
-it.
+it; fresh, but for a wait's run that resumes the conversation of the wait's
+previous run while that run's turn ended within `cache_expiration_ttl`
+(F136.5, DB 200; `WaitService.resumed`).
 
 A job is placed in its caller's transaction, which holds its project's row,
 at its trigger's instant: its Session, a `job` one in the store repo's root on
@@ -17,13 +19,15 @@ queue or the pause, from the record as it then stands (F59, F141.4). Its work it
 turn ends, a follow-up turn included (`RelayService`), and its project's next
 job goes on then; a person's Stop and Resume do not take it (F26.3).
 
-Three triggers are placed here: the setup, Create project's; a worker's turn
+Four triggers are placed here: the setup, Create project's; a worker's turn
 ended, once the turn-end read settled every document the run registered (D2);
-and a person's close of an item of Pilot's own (DB decision 45), whose Undo
-withdraws the job while it is held before its brief. A job that failed or
-stopped takes a person's Retry, a fresh job for the same trigger; the server
-retries none on its own, but each job the store's update stopped, once, at its
-lift, through the same Retry (D078; DB 281).
+a person's close of an item of Pilot's own (DB decision 45), whose Undo
+withdraws the job while it is held before its brief; and a wait's pending
+firings, the batcher's (`WaitBatcher`; F136.4), which the job takes at its
+brief (DB 196). A job that failed or stopped takes a person's Retry, a fresh
+job for the same trigger; the server retries none on its own, but each job the
+store's update stopped, once, at its lift, through the same Retry (D078; DB
+281).
 """
 
 import uuid
@@ -55,6 +59,9 @@ each named by its place, `<folder>/<seq>` (DB Item sample)."""
 NEXT_TITLE = "Deciding what is next"
 """The title of the job after a worker's turn whose run registered nothing,
 and of the job after an item of Pilot's own is closed (DB Item sample)."""
+
+WAIT_TITLE = 'Checking "{wait}"'
+"""The title of a wait's run, the wait named by its title."""
 
 _RETRIABLE = (SessionState.FAILED, SessionState.STOPPED)
 
@@ -155,6 +162,27 @@ class JobService:
             trigger_item_id=item.id,
         )
 
+    def wait_fired(self, project: Project, wait: Item) -> Work:
+        """A run of the open wait `wait` for its pending firings (F136.4; DB
+        195), in the batcher's transaction, which holds the project's row
+        exclusively and the Wait's, and in which no other run of the wait is
+        in flight (`WaitService.hold_batch`): placed now, its trigger item
+        the wait. It takes the firings pending at its brief, composed as it
+        leaves the queue or the pause (`WaitService.take`).
+
+        Raises:
+            InvalidOperationException: No controller or no store environment
+                is configured
+        """
+        return self._place(
+            project,
+            WorkTrigger.WAIT_FIRED,
+            WAIT_TITLE.format(wait=wait.title),
+            datetime.now(UTC),
+            f"place the run of wait {wait.id}",
+            trigger_item_id=wait.id,
+        )
+
     def unbriefed(self, item: Item) -> AgentSession | None:
         """The job a close of `item` placed that is still held before its
         brief, its Session locked and read afresh until the transaction ends;
@@ -206,9 +234,9 @@ class JobService:
                 worker's run, is done (an Undo's withdrawal among it), was
                 retried already, waits for its nudge at the quota wall, is
                 neither failed nor stopped, has its stopped turn still ending,
-                or follows an item open again; its project is finished or
-                archived; or no controller or no store environment is
-                configured
+                follows an item open again or a wait that is done; its
+                project is finished or archived; or no controller or no store
+                environment is configured
         """
         found = self.db.get(AgentSession, session_id)
         if found is None:
@@ -337,4 +365,10 @@ def retry_refusal(
         assert work.trigger_item_id is not None
         if db.get_one(Item, work.trigger_item_id).done_at is None:
             return "the item it follows is open again"
+    if work.trigger_code is WorkTrigger.WAIT_FIRED:
+        # A wait's run names its wait (DB 195), and a wait that is done gets
+        # no run.
+        assert work.trigger_item_id is not None
+        if db.get_one(Item, work.trigger_item_id).done_at is not None:
+            return "the wait it follows is done"
     return None
