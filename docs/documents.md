@@ -145,7 +145,7 @@ At an attachment's address, the head is its clip and title over "Attachment of â
 "Attachment of the draft" for one hung on nothing, and there is no foot. Opened from the document's
 overlay, an arrow with no label leads back to the document; on a phone, where the view's own arrow
 is Back, the document's title in its head is the link to it, Back to it where the document's view
-lies under the attachment's. The body goes by the type it was stored with
+lies under the attachment's, opened at its address or at one of its blocks'. The body goes by the type it was stored with
 (`attachment-overlay.tsx`):
 
 - Markdown (`text/markdown`), rendered read only, its front matter left out and a fenced ask shown

@@ -17,6 +17,7 @@ import { test, expect } from '../support/fixtures';
 import { makeUnique } from '../support/helpers';
 import { documentAddress, documentAttachmentAddress, handbookAddress, projectDocumentAddress } from '../support/page-objects/overlay-page';
 import { sessionLogAddress } from '../support/page-objects/session-log-page';
+import { addressOf } from '../support/page-objects/timeline-page';
 import type { AttachedFile } from '../support/projects';
 
 const SUMMARY = 'Where we go, what we take and who drives.';
@@ -198,6 +199,35 @@ test.describe('Views on a phone', () => {
     await expect(timeline.root).toBeVisible();
     await page.goBack();
     await expect(page).toHaveURL(`/projects/${before}`);
+  });
+
+  test('a card’s document opened at one of its blocks lies under its attachment too: the attachment’s document link is Back to it, adding no entry', async ({
+    page,
+    people,
+    projects,
+    timeline,
+    overlay,
+    phoneTabs,
+  }) => {
+    const me = await people.signIn();
+    const id = await projects.makeWithSession({ name: makeUnique('At a block'), members: [me.handle!] });
+    const trip = await projects.place(id, { kind: 'document', title: 'The trip', text: TRIP });
+    const [notes] = await projects.attach(trip, [NOTES]);
+    await timeline.open(id);
+
+    await page.goto(addressOf(id, trip, 'A2'));
+    await expect(overlay.summary).toHaveText(SUMMARY);
+    await overlay.attachmentChip(notes).tap();
+    await expect(page).toHaveURL(documentAttachmentAddress(id, trip, notes));
+    const entries = await page.evaluate(() => history.length);
+    await overlay.documentLink.tap();
+    await expect(page).toHaveURL(addressOf(id, trip, 'A2'));
+    await expect(overlay.summary).toHaveText(SUMMARY);
+    expect(await page.evaluate(() => history.length)).toBe(entries);
+    await overlay.back.tap();
+    await expect(overlay.root).toHaveCount(0);
+    await expect(page).toHaveURL(`/projects/${id}`);
+    await expect(phoneTabs.tab('timeline')).toHaveAttribute('aria-selected', 'true');
   });
 
   test('a reload keeps the tab and the views, Back taking them off one by one down to the tab they were opened from', async ({

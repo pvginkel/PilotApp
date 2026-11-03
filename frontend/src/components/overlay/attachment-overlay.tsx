@@ -108,12 +108,17 @@ interface DocumentLinkProps {
   title: string;
 }
 
-/** On a phone, an attachment's way to its document: Back to it where its view lies under the attachment's, else its view pushed. */
+/**
+ * On a phone, an attachment's way to its document: Back to it where its view lies under the
+ * attachment's, at the document's address or at one of its blocks', where a card's document opens
+ * too, else its view pushed.
+ */
 function DocumentLink({ view, projectId, documentId, title }: DocumentLinkProps) {
   const router = useRouter();
   const to = '/projects/$projectId/documents/$documentId';
   const params = { projectId, documentId };
-  const under = view.under === router.buildLocation({ to, params }).pathname;
+  const blocks = `${router.buildLocation({ to: '/projects/$projectId/items/$itemId', params: { projectId, itemId: documentId } }).pathname}/blocks/`;
+  const under = view.under !== null && (view.under === router.buildLocation({ to, params }).pathname || view.under.startsWith(blocks));
   return (
     <Link
       to={to}
