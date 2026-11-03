@@ -36,7 +36,7 @@ const ROUTE = [
 ].join('\n');
 const ROTATING = 'Rotating the CI token';
 const CUT_OVER_PATH = '/work/Example/cut-over.md';
-const CUT_OVER = '# The cut-over\n\n```action id=A1\nanswer: Pilot does it\nby: agent\nat: 2026-10-20T09:00:00Z\n```\n';
+const CUT_OVER = '# The cut-over\n\n```action id=A1\nanswer: Pilot does it\nby: agent\nat: 2026-10-20T09:00:00Z\n```\n\n```decision id=D1\noptions:\n  - Friday\n  - Monday\n```\n';
 const PHONE = { width: 390, height: 844 };
 
 test.describe('The item alone on a phone', () => {
@@ -190,6 +190,7 @@ test.describe('The item alone on a phone', () => {
     people,
     projects,
     controller,
+    chats,
     timeline,
     overlay,
     phoneTabs,
@@ -201,12 +202,14 @@ test.describe('The item alone on a phone', () => {
     const { id: environment } = await projects.environment(id, work);
     await controller.putFile(environment, CUT_OVER_PATH, CUT_OVER);
     const document = await projects.register(work, CUT_OVER_PATH);
+    const passed = await chats.passing(id);
     await controller.finish(environment, 'claude-1');
     await expect.poll(async () => (await projects.item(id, document)).awaiting_read).toBe(false);
+    await passed();
     const rotating = await projects.startWork(id, { title: ROTATING, brief: 'Rotate the CI token.', cwd: '/work/Example', claims: [`${document}/A1`] });
     await timeline.open(id);
 
-    await timeline.item(document).blockAt('A1').claimWork.tap();
+    await timeline.item(document).blockAt('A1').held.pilots.tap();
     await expect(page).toHaveURL(addressOf(id, rotating));
     await expect(timeline.item(rotating, overlay.alone).root).toBeVisible();
     await overlay.back.tap();
