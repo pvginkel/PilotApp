@@ -112,6 +112,9 @@
   .item-head .work-log { margin-left: auto; }
   .item-head .work-log ~ .item-discuss { margin-left: 0; }
   .item-head .work-stop .icon { color: hsl(var(--destructive-text)); }
+  /* A wait's request button stands at the head's end touching Discuss, the head's gap taken back. */
+  .item-head .wait-request { margin-left: auto; }
+  .item-head .wait-request + .item-discuss { margin-left: -8px; }
   .chip.for { background: hsl(330 60% 50% / 0.12); color: hsl(330 55% 38%); }
   :root[data-theme="dark"] .chip.for { color: hsl(330 70% 78%); }
   .chip.urgent { background: hsl(var(--urgent) / 0.15); color: hsl(var(--urgent-text)); font-weight: 600; }
@@ -432,6 +435,11 @@
   .dots { display: inline-flex; align-items: center; gap: 2px; }
   .dots span { display: inline-block; width: 6px; height: 6px; border-radius: 999px; background: hsl(218 11% 65%); opacity: 0.5; transform-origin: bottom; }
 
+  /* ---- A wait open: what it waits on, then its firings, a line each (wait.tsx) ----------- */
+
+  .wait-on { color: hsl(var(--foreground)); }
+  .wait-firings { margin: 6px 0 0; padding: 0; list-style: none; font-size: var(--text-sm); line-height: 22px; color: hsl(var(--muted-foreground)); }
+
   /* ---- The done line -------------------------------------------------------------------- */
 
   /* The same shape for every kind, so history reads as a log. Its text, icons and time share a
@@ -554,8 +562,11 @@
     .option .label { flex: 1; max-width: none; }
     .option .desc { order: 1; flex-basis: 100%; }
     .option .note { order: 2; }
-    /* A tap on a done line opens its view (F13.9). */
+    /* A tap on a done line opens its view, or the menu of a line with nothing behind it, its
+       actions in a row under the line (F13.9). */
     .item.collapsed .line { cursor: pointer; }
+    .line-menu { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 12px 6px 34px; }
+    .line-menu .btn { font-weight: 400; }
   }
   /* A narrow block head wraps what does not fit, and Answered and In the chat keep their icons
      alone, their words left to a screen reader (F98.3); so do an item head's Urgent and its env

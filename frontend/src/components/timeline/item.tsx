@@ -12,13 +12,15 @@
  * Open (F13.3), its attachments' indicator (F13.6), Undo while the record offers it (F14.1) and
  * Discuss (F13.4), and *In the chat* after a one-ask item's answer given in the chat (F42.3); a
  * work item's is quieter, its Open the session log (F13.5, F26.6), and a job's an Undo withdrew
- * says so (F14.1). On a phone the line has Undo alone among its actions, and a tap on it opens what
- * Open opens, as a view whose head carries Discuss (F13.9).
+ * says so (F14.1). A wait open is its own (wait.tsx, F27); done, its line has nothing behind it, no
+ * Open and no Undo, and the note Pilot closed it with under its title (F27.4). On a phone the line
+ * has Undo alone among its actions, and a tap on it opens what Open opens, as a view whose head
+ * carries Discuss, or, on a line with nothing behind it, a menu of its actions under it (F13.9).
  */
 
-import type { AnimationEvent, MouseEvent, ReactNode } from 'react';
+import { useCallback, useState, type AnimationEvent, type MouseEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
-import { Check, FileText, ScrollText, StickyNote, Undo2, X } from 'lucide-react';
+import { Check, FileText, MessagesSquare, ScrollText, StickyNote, Undo2, X } from 'lucide-react';
 import { DiscussButton } from '@/components/chat/discuss-button';
 import { quoteOfItem } from '@/components/chat/discuss-quotes';
 import { InChatButton } from '@/components/chat/in-chat-button';
@@ -35,9 +37,12 @@ import { isCard } from '@/components/timeline/document-state';
 import { ItemHead } from '@/components/timeline/item-head';
 import { kindOf } from '@/components/timeline/kinds';
 import { UserAvatar } from '@/components/timeline/user-avatar';
+import { WaitItem } from '@/components/timeline/wait';
 import { WorkItem } from '@/components/timeline/work';
 import { WriterAsked } from '@/components/timeline/writer-asked';
 import { PilotWriting } from '@/components/timeline/writing';
+import { useDiscuss } from '@/hooks/use-discuss';
+import { useDismiss } from '@/hooks/use-dismiss';
 import { useRead, useUndo } from '@/hooks/use-marks';
 import { usePhone } from '@/hooks/use-phone';
 import { useArchived } from '@/hooks/use-projects';
@@ -82,6 +87,7 @@ export function Item({ item, fresh, onFlashed }: ItemProps) {
 
 function OpenItem({ item }: { item: TimelineItem }) {
   if (item.kind === 'work') return <WorkItem item={item} />;
+  if (item.form === 'wait') return <WaitItem item={item} />;
   if (item.kind === 'confirmation') return <Confirmation item={item} />;
   if (item.kind === 'archive_question') return <ArchiveQuestion item={item} />;
   if (isCard(item)) return <DocumentCard item={item} />;
@@ -193,30 +199,76 @@ function inChatOf(item: TimelineItem) {
 }
 
 /**
- * The same line for every kind: its icon, its title, Open, its attachments' indicator, Undo while
- * the record offers it, Discuss, and when it was done; under the title the person's answer to a one-ask item with its note, the other
- * person's after their avatar, and *In the chat* after it, kept whole, where it was given in the
- * chat; under a job's title that an Undo withdrew it (F14.1). A confirmation's Yes leads it with a
- * green check, its No with a red cross (F22.5). It does not expand. On a phone Open and Discuss
- * leave it, and a tap on it anywhere but on a control of its own opens what Open opens (F13.9).
+ * The same line for every kind: its icon, its title, Open where something is behind it, its
+ * attachments' indicator, Undo while the record offers it, Discuss, and when it was done; under the
+ * title the person's answer to a one-ask item with its note, the other person's after their
+ * avatar, and *In the chat* after it, kept whole, where it was given in the chat; under a job's
+ * title that an Undo withdrew it (F14.1); under a wait's the note Pilot closed it with (F27.4). A
+ * confirmation's Yes leads it with a green check, its No with a red cross (F22.5). It does not
+ * expand. On a phone Open and Discuss leave it, and a tap on it anywhere but on a control of its
+ * own opens what Open opens, or a wait's menu (F13.9).
  */
 function DoneLine({ item }: { item: TimelineItem }) {
-  const me = usePerson();
   const phone = usePhone();
   const openView = useOpenLine(item);
+  if (!phone) return <Line item={item} />;
+  return item.form === 'wait' ? <MenuLine item={item} /> : <Line item={item} onTap={openView} />;
+}
+
+/** Whether a tap on a line fell on a control of its own, which acts alone. */
+const onControl = (event: MouseEvent) => (event.target as Element).closest('a, button, [role="menu"]') !== null;
+
+/**
+ * A phone's line with nothing behind it, a wait's: a tap on it opens the menu of its actions under
+ * it, as the mockup's `lineMenu()` offers them, Discuss, never Undo, and a tap on it again or
+ * anywhere else closes the menu (F13.9).
+ */
+function MenuLine({ item }: { item: TimelineItem }) {
+  const [open, setOpen] = useState(false);
+  const close = useCallback(() => setOpen(false), []);
+  const anchor = useDismiss('menu', open, close);
+  const discuss = useDiscuss();
+  return (
+    <div ref={anchor}>
+      <Line item={item} onTap={(event) => !onControl(event) && setOpen(!open)} />
+      {open && (
+        <div className="line-menu" role="menu" aria-label="The line’s actions" data-testid="timeline.line.menu">
+          <button
+            type="button"
+            role="menuitem"
+            className="btn btn-ghost btn-sm"
+            onClick={() => {
+              close();
+              discuss(quoteOfItem(item));
+            }}
+            data-testid="timeline.line.menu.discuss"
+          >
+            <MessagesSquare className="icon" aria-hidden="true" />
+            Discuss
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Line({ item, onTap }: { item: TimelineItem; onTap?: (event: MouseEvent) => void }) {
+  const me = usePerson();
+  const phone = usePhone();
   const title = titleOf(item);
   const said = saidIn(item);
   const place = inChatOf(item);
   // An item's done line is drawn only once it is done.
   const done = item.done!;
   const closed = item.kind === 'work' ? workClosedLabel(done.cause) : null;
+  const note = item.wait?.note ?? null;
   return (
-    <div className="line" onClick={phone ? openView : undefined} data-testid="timeline.line">
+    <div className="line" onClick={onTap} data-testid="timeline.line">
       <LineLead item={item} />
       <span className="title" title={title} data-testid="timeline.line.title">
         <LinkedText text={title} />
       </span>
-      {!phone && <Open item={item} />}
+      {!phone && item.form !== 'wait' && <Open item={item} />}
       <LineAttachments item={item} />
       {done.undo && <Undo item={item} />}
       {!phone && <DiscussButton quote={quoteOfItem(item)} testId="timeline.line.discuss" />}
@@ -242,6 +294,13 @@ function DoneLine({ item }: { item: TimelineItem }) {
       {closed !== null && (
         <span className="said" data-testid="timeline.line.closed">
           <span className="said-text">{closed}</span>
+        </span>
+      )}
+      {note !== null && (
+        <span className="said" data-testid="timeline.line.wait-note">
+          <span className="said-text" title={note}>
+            <LinkedText text={note} />
+          </span>
         </span>
       )}
     </div>
@@ -306,7 +365,7 @@ function useOpenLine(item: TimelineItem) {
   const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
   const navigate = useNavigate();
   return (event: MouseEvent) => {
-    if ((event.target as Element).closest('a, button, [role="menu"]') !== null) return;
+    if (onControl(event)) return;
     if (item.kind === 'work') {
       void navigate({ to: '/projects/$projectId/sessions/$sessionId', params: { projectId, sessionId: item.id } });
     } else {

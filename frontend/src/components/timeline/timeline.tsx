@@ -2,7 +2,7 @@
  * A project's timeline (F8): its prose and work items in their order under their date and step
  * dividers (F9, F9.1), the opening first. It is anchored to the bottom: it opens at its end, a
  * project's own on each project (F1.6), and when items arrive it scrolls to the end unless the
- * reader has scrolled away from it; a new item flashes (F8.2). Waits draw no line here.
+ * reader has scrolled away from it; a new item flashes (F8.2).
  *
  * An open urgent item has a banner pinned to the top, whose Show scrolls to the item and flashes
  * it; a finished project's has none (F10.2). While open items are scrolled out above, a chip under
@@ -51,7 +51,7 @@ interface TimelineProps {
 
 export function Timeline({ projectId, address, inert }: TimelineProps) {
   const { data } = useTimeline(projectId);
-  const items = data?.items.filter((item) => item.form !== 'wait');
+  const items = data?.items;
   const finishedAt = data?.finished_at ?? null;
   const readyAfter = data?.ready_after ?? null;
   // Every finish puts one, so a finished project's latest archive question is its latest finish's.

@@ -15,6 +15,10 @@ export const STORE_ENVIRONMENT = 'playwright-store';
 // More work items than a worker's specs start.
 const UNBOUNDED_WORK = 10_000;
 
+// Longer than a worker's specs run: the batcher places no wait's run, and a spec places it
+// (tests/support/waits.ts).
+const NO_BATCH_SECONDS = 86_400;
+
 /** The settings of the backend serving at `backendUrl`. */
 export function loadAppBackendEnv(backendUrl: string): NodeJS.ProcessEnv {
   return {
@@ -27,6 +31,7 @@ export function loadAppBackendEnv(backendUrl: string): NodeJS.ProcessEnv {
     WORK_PARALLELISM_MAX: String(UNBOUNDED_WORK),
     PROJECT_PARALLELISM_MAX: '3',
     STORE_ENVIRONMENT_ID: STORE_ENVIRONMENT,
+    WAIT_QUIET_WINDOW_SECONDS: String(NO_BATCH_SECONDS),
     // The backend's notification bridge is its own fake, mounted under
     // /api/testing/notification-bridge in testing mode
     // (backend/app/api/testing_notification_bridge.py); tests/support/notification-bridge.ts drives it.

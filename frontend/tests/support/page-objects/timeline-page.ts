@@ -17,7 +17,10 @@ import { waitTestEvent } from '../helpers';
  * project's address or at an item's or a block's under it (F97). A work item open shows its env
  * chip, its running time, Session log's and Stop's icons in its head, its one line — the working
  * cue and the latest step — and the row under it, with Stop's question, or the progress button and
- * its popover and Resume or Retry (F26, F26.8, F67, F145.2, F145.3).
+ * its popover and Resume or Retry (F26, F26.8, F67, F145.2, F145.3). A wait open shows its request's
+ * button, what it waits on — a card wait's cards and states and since when, a timed wait's due
+ * time — and its firings; done, the note Pilot closed it with, and on a phone the menu its line
+ * opens (F27, F13.9).
  */
 export class TimelinePage {
   readonly root: Locator;
@@ -181,6 +184,24 @@ export class TimelinePage {
           yes: root.getByTestId('timeline.work.stop-confirm.yes'),
           cancel: root.getByTestId('timeline.work.stop-confirm.cancel'),
         },
+      },
+      wait: {
+        /** The head's one button, *Check now* or *Skip wait* (F27.3). */
+        request: root.getByTestId('timeline.wait.request'),
+        /** A card wait's cards and states, each card on its own, and the states. */
+        on: root.getByTestId('timeline.wait.on'),
+        cards: root.getByTestId('timeline.wait.card'),
+        states: root.getByTestId('timeline.wait.states'),
+        since: root.getByTestId('timeline.wait.since'),
+        /** A timed wait's due time from now, and what Pilot did once it fired. */
+        due: root.getByTestId('timeline.wait.due'),
+        /** Its firings' lines, a timed wait's due time's not among them. */
+        firings: root.getByTestId('timeline.wait.firing'),
+        /** The note Pilot closed it with, under its done line's title. */
+        note: root.getByTestId('timeline.line.wait-note'),
+        /** The menu a tap on its done line opens on a phone, and its Discuss. */
+        menu: root.getByTestId('timeline.line.menu'),
+        menuDiscuss: root.getByTestId('timeline.line.menu.discuss'),
       },
       card: {
         root: root.getByTestId('timeline.item.card'),

@@ -9,8 +9,9 @@
  * `sessionLog` a work item's session log in it, `panel` the side panel beside it, `chat` its Chat tab,
  * `phoneTabs` a phone's tabs at the bottom and the page over them,
  * `chats` puts a project's chats in the store's fake environment and sends their messages,
- * `bridge` adds registrations to the worker's fake notification bridge and reads what they show, and
- * `storeUpdate` makes the store's update and asks its lift, lifting one a spec left standing.
+ * `bridge` adds registrations to the worker's fake notification bridge and reads what they show,
+ * `storeUpdate` makes the store's update and asks its lift, lifting one a spec left standing, and
+ * `waits` adds the brain's waits, fires them, places their runs and closes them.
  * `conditions`, the worker's, reads what the gold bar reads.
  */
 
@@ -34,6 +35,7 @@ import { TimelinePage } from './page-objects/timeline-page';
 import { People } from './people';
 import { Projects } from './projects';
 import { StoreUpdate } from './store-update';
+import { Waits } from './waits';
 
 interface DomainFixtures {
   people: People;
@@ -55,6 +57,7 @@ interface DomainFixtures {
   chats: Chats;
   bridge: NotificationBridge;
   storeUpdate: StoreUpdate;
+  waits: Waits;
 }
 
 interface DomainWorkerFixtures {
@@ -139,6 +142,9 @@ export const test = infrastructureFixtures.extend<DomainFixtures, DomainWorkerFi
     const storeUpdate = new StoreUpdate(page, backendUrl, conditions, chats);
     await use(storeUpdate);
     await storeUpdate.restore();
+  },
+  waits: async ({ page, backendUrl }, use) => {
+    await use(new Waits(page, backendUrl));
   },
 });
 
