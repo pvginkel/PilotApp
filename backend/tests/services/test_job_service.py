@@ -1961,6 +1961,43 @@ class TestWaitFiredRetry:
         assert message.count("ANS-312: In Progress → Done, by pieter") == 2
 
     @pytest.mark.usefixtures("placing")
+    def test_after_a_later_run_ended_idle_it_is_fresh_with_the_firings_it_took(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        starts: SessionStartService,
+        opened: Project,
+        person: User,
+    ) -> None:
+        """The later run's conversation is not the Retry's: its follow-up
+        would carry none of the firings the retried run took."""
+        wait = _waited(session, container, opened, person)
+        jobs = _jobs(container, starts)
+        failed = _ended(
+            session,
+            container,
+            session.get_one(models.Session, jobs.wait_fired(opened, wait).id),
+        )
+        assert container.wait_service().fire_transition(WAIT_TRANSITION) == 1
+        later = session.get_one(models.Session, jobs.wait_fired(opened, wait).id)
+        later.state_code = SessionState.IDLE
+        later.conversation_id = "conversation-2"
+        later.turn_ended_at = datetime.now(UTC)
+        container.record_service().work_done(later.id, datetime.now(UTC))
+        session.flush()
+
+        retry = _retry(container, starts, failed)
+
+        assert (retry.state_code, retry.conversation_id) == (
+            SessionState.STARTING,
+            None,
+        )
+        assert _taken_by(session, wait) == [failed.id, later.id]
+        message = _brief(container, retry).message
+        assert message.startswith("/plan\n\n")
+        assert message.count("ANS-312: In Progress → Done, by pieter") == 1
+
+    @pytest.mark.usefixtures("placing")
     def test_a_run_of_a_wait_that_is_done_is_refused(
         self,
         container: ServiceContainer,

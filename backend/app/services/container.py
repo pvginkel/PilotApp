@@ -686,7 +686,9 @@ class ServiceContainer(containers.DeclarativeContainer):
         record_service=record_service,
         project_service=project_service,
     )
-    # The brain's waits, fixed at add and closed by its `done` (F27)
+    # The brain's waits, fixed at add and closed by its `done` (F27); the job
+    # service, built at the call, withdraws a closed wait's run held before
+    # its brief.
     wait_service = providers.Factory(
         WaitService,
         db=db_session,
@@ -694,6 +696,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         view_service=view_service,
         ticket_id_pattern=app_config.provided.ticket_id_pattern,
         cache_expiration_ttl_seconds=app_config.provided.cache_expiration_ttl_seconds,
+        jobs=providers.Callable(lambda container: container.job_service, __self__),
     )
     # The waits' timer and the batcher (design 2 §8.2); each registers on the
     # supervisor when built, before STARTUP.

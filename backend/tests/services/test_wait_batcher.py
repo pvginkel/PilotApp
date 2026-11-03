@@ -309,6 +309,48 @@ class TestBatch:
         assert _taken(session, wait) == [job.id, job.id]
         assert _brief(session, job).count("ANS-312: In Progress → Done") == 2
 
+    def test_a_wait_closed_while_its_run_is_queued_withdraws_the_run(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        batcher: WaitBatcher,
+        starts: SessionStartService,
+        opened: Project,
+        person: User,
+        project_session: models.Session,
+        wait: Item,
+    ) -> None:
+        """A wait that is done gets no run: its run never briefed is withdrawn,
+        and its firings stay untaken."""
+        container.document_service().bear_opening(
+            opened, "Ada Example started this project", person, "Soup?"
+        )
+        setup = container.job_service().setup(opened, AT, "create Soup club")
+        _fire(session, container, wait, QUIET * 2)
+        _tick(session, batcher)
+        (job,) = _runs(session, wait)
+        assert (job.state_code, job.turns) == (SessionState.HELD, 0)
+
+        container.wait_service().close(
+            opened,
+            session.get_one(models.Wait, wait.id),
+            session.scalars(select(User).where(User.kind_code == UserKind.AGENT)).one(),
+            project_session.id,
+            "ANS-312 read Done at 09:40",
+        )
+        session.get_one(models.Session, setup.id).state_code = SessionState.IDLE
+        session.flush()
+        starts.release(LoopHandle("start:held"))
+
+        (job,) = _runs(session, wait)
+        assert (job.state_code, job.turns, job.stopped_by_user_id) == (
+            SessionState.STOPPED,
+            0,
+            None,
+        )
+        assert session.get_one(Item, job.id).done_cause_code == "withdrawn"
+        assert _taken(session, wait) == [None]
+
     def test_a_firing_during_its_run_goes_to_the_next_run_once_its_turn_ends(
         self,
         container: ServiceContainer,

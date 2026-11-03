@@ -1891,10 +1891,11 @@ class SessionStartService:
 
     def withdraw(self, db: Session, session: AgentSession, at: datetime) -> None:
         """A job held before its brief, its Session locked by the caller,
-        withdrawn at `at` by its trigger item's Undo: `stopped` by no one,
-        with no Turn, as a Stop leaves a job held before its brief, so the
-        gate never starts it. It held no slot and no environment; the
-        project's next job goes on once what held this one moves."""
+        withdrawn at `at` by its trigger item's Undo or its wait's close:
+        `stopped` by no one, with no Turn, as a Stop leaves a job held before
+        its brief, so the gate never starts it. It held no slot and no
+        environment; the project's next job goes on once what held this one
+        moves."""
         session.state_code = SessionState.STOPPED
         session.stopped_at = at
         session.current_line = None

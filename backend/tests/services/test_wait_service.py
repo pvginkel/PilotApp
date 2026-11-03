@@ -1217,9 +1217,11 @@ class TestWaitServiceResumed:
         project: Project,
         project_session: models.Session,
     ) -> None:
+        """Also while another run of the wait ended `idle` after the run it
+        retries, within the TTL."""
         added = _fired(session, container, project, project_session)
-        self._previous(session, container, project, added, timedelta(minutes=1))
         failed = _run(session, container, project, added, SessionState.FAILED)
+        self._previous(session, container, project, added, timedelta(minutes=1))
         retry = _run(session, container, project, added, SessionState.STARTING)
         failed.retried_by_id = retry.id
         session.flush()

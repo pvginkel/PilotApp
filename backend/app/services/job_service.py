@@ -24,7 +24,7 @@ ended, once the turn-end read settled every document the run registered (D2);
 a person's close of an item of Pilot's own (DB decision 45), whose Undo
 withdraws the job while it is held before its brief; and a wait's pending
 firings, the batcher's (`WaitBatcher`; F136.4), which the job takes at its
-brief (DB 196). A job that failed or stopped takes a person's Retry, a fresh
+brief (DB 196), and whose close withdraws it until then. A job that failed or stopped takes a person's Retry, a fresh
 job for the same trigger; the server retries none on its own, but each job the
 store's update stopped, once, at its lift, through the same Retry (D078; DB
 281).
@@ -184,15 +184,16 @@ class JobService:
         )
 
     def unbriefed(self, item: Item) -> AgentSession | None:
-        """The job a close of `item` placed that is still held before its
-        brief, its Session locked and read afresh until the transaction ends;
-        None when there is none. A job that left `held` under the lock is
-        none: its brief consumed the item."""
+        """The job a close of `item` placed, or the run of the wait `item`,
+        that is still held before its brief, its Session locked and read
+        afresh until the transaction ends; None when there is none. A job
+        that left `held` under the lock is none: its brief consumed the item
+        or took the wait's firings."""
         return self.db.scalars(
             select(AgentSession)
             .join(Work, Work.id == AgentSession.id)
             .where(
-                Work.trigger_code == WorkTrigger.ITEM_DONE,
+                Work.trigger_code.in_((WorkTrigger.ITEM_DONE, WorkTrigger.WAIT_FIRED)),
                 Work.trigger_item_id == item.id,
                 AgentSession.state_code == SessionState.HELD,
                 AgentSession.turns == 0,
@@ -203,9 +204,9 @@ class JobService:
 
     def withdraw(self, job: AgentSession, at: datetime) -> None:
         """The job `job`, its Session locked and held before its brief,
-        withdrawn at `at` by its trigger item's Undo: its Session stopped by
-        no one, so it never starts, and its work item done `withdrawn`, which
-        offers nothing and leaves the badge (F8, F94.5)."""
+        withdrawn at `at` by its trigger item's Undo or its wait's close: its
+        Session stopped by no one, so it never starts, and its work item done
+        `withdrawn`, which offers nothing and leaves the badge (F8, F94.5)."""
         self.session_start_service.withdraw(self.db, job, at)
         line = self.db.get_one(Item, job.id)
         line.done_at = at

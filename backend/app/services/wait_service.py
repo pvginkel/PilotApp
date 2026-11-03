@@ -11,8 +11,9 @@ resumes the conversation of the wait's previous run when that run's turn ended
 `idle` within `cache_expiration_ttl` (F136.5, DB 200).
 
 Each write is of the caller's transaction, under its Project's row: a wait's
-birth takes its `seq` under it (`DocumentService.next_seq`), its close holds
-the Wait's row after it, a firing holds the Project's row shared, then the
+birth takes its `seq` under it (`DocumentService.next_seq`), its close locks
+its run held before its brief, as a run's brief does before its take, then
+holds the Wait's row, a firing holds the Project's row shared, then the
 Wait's, and reads the wait open there, and the batcher's placement and a
 run's take hold the Wait's row after the Project's.
 """
@@ -22,6 +23,7 @@ import uuid
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     ColumnElement,
@@ -42,6 +44,9 @@ from app.exceptions import InvalidOperationException
 from app.models import CardTransition, Item, Project, User, Wait, WaitFiring, Work
 from app.models import Session as AgentSession
 from app.models.reference import FiringCause, ProjectState, SessionState, WorkTrigger
+
+if TYPE_CHECKING:
+    from app.services.job_service import JobService
 
 CARD_WAIT = "card_wait"
 TIMED_WAIT = "timed_wait"
@@ -82,12 +87,14 @@ class WaitService:
         view_service: ViewService,
         ticket_id_pattern: re.Pattern[str],
         cache_expiration_ttl_seconds: float,
+        jobs: Callable[[], "JobService"],
     ) -> None:
         self.db = db
         self.document_service = document_service
         self.view_service = view_service
         self.ticket_id_pattern = ticket_id_pattern
         self.cache_expiration_ttl = timedelta(seconds=cache_expiration_ttl_seconds)
+        self.jobs = jobs
 
     def add_card_wait(
         self,
@@ -163,7 +170,8 @@ class WaitService:
         """The open wait done by Pilot's own `done` in the Session
         `session_id`, with `note` (F27.4): Done Cause `marked`, consumed on
         the spot by that Session, so it offers no Undo (DB 199), and its
-        note set with its `done_at` (DB 300). `project`'s row is the
+        note set with its `done_at` (DB 300). Its run held before its brief
+        is withdrawn: a wait that is done gets no run. `project`'s row is the
         caller's to hold.
 
         Raises:
@@ -173,6 +181,8 @@ class WaitService:
         operation = f"mark item {wait.id} done"
         if project.archived:
             raise InvalidOperationException(operation, ARCHIVED)
+        jobs = self.jobs()
+        run = jobs.unbriefed(self.db.get_one(Item, wait.id))
         self.db.execute(select(Wait.id).where(Wait.id == wait.id).with_for_update())
         item = self.db.get_one(Item, wait.id, populate_existing=True)
         if item.done_at is not None:
@@ -184,6 +194,8 @@ class WaitService:
         item.consumed_at = at
         item.consumed_session_id = session_id
         wait.done_note = note
+        if run is not None:
+            jobs.withdraw(run, at)
         self.db.flush()
         self.view_service.timeline_moved(project)
 
