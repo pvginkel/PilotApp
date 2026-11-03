@@ -119,6 +119,11 @@ export class TimelinePage {
       undo: root.getByTestId('timeline.line.undo'),
       open: root.getByTestId('timeline.line.open'),
       lineDiscuss: root.getByTestId('timeline.line.discuss'),
+      /** What Pilot does on an item that is Pilot's, its line's button, and its pulsing dot (F13.7). */
+      pilots: {
+        root: root.getByTestId('timeline.line.pilots'),
+        pulse: root.getByTestId('timeline.line.pilots.pulse'),
+      },
       /** *In the chat* after a one-ask item's answer given in the chat. */
       lineInChat: root.getByTestId('timeline.line.in-chat'),
       /** The attachments' chips, and each by its attachment's id. */
@@ -210,8 +215,7 @@ export class TimelinePage {
         /** The auto pilot chip beside the counts (F4.4). */
         autopilotChip: root.getByTestId('timeline.item.autopilot-chip'),
         readTime: root.getByTestId('timeline.item.read-time'),
-        /** A registered document's "Loads when the turn ends" awaiting its read, and *Did not load* after it failed. */
-        loads: root.getByTestId('timeline.item.loads'),
+        /** A registered document's *Did not load* after its read failed. */
         didNotLoad: root.getByTestId('timeline.item.did-not-load'),
         open: root.getByTestId('timeline.item.open'),
         reviewed: root.getByTestId('timeline.item.reviewed'),

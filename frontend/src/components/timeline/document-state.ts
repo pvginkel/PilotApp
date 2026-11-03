@@ -1,7 +1,7 @@
 /**
  * What a document's screens read from its item: whether it leaves a card (F24.1, F24.2, F25.1),
- * what its card counts (F24.2), whether it reads *Unsent* (D026), where a registered document's read
- * stands (F85.1), what a block asks and the answer Done records for it unanswered (F32.5).
+ * what its card counts (F24.2), whether it reads *Unsent* (D026), whether a registered document's
+ * read failed (F85.1), what a block asks and the answer Done records for it unanswered (F32.5).
  */
 
 import { blockKindOf } from '@/components/timeline/kinds';
@@ -49,13 +49,12 @@ export function isUnsent(item: TimelineItem): boolean {
 }
 
 /**
- * Where a registered document's read at its run's end stands while it has no text: `awaiting` it,
- * or `failed`, a document with no text whose read was made; null once its text is published, and on
- * every other item.
+ * Whether a registered document's read at its run's end failed: `failed`, a document with no text
+ * whose read was made; null while its read is awaited, once its text is published, and on every
+ * other item.
  */
-export function readOf(item: TimelineItem): 'awaiting' | 'failed' | null {
-  if (item.awaiting_read) return 'awaiting';
-  return item.body === null && item.file_name !== null ? 'failed' : null;
+export function readOf(item: TimelineItem): 'failed' | null {
+  return !item.awaiting_read && item.body === null && item.file_name !== null ? 'failed' : null;
 }
 
 /**

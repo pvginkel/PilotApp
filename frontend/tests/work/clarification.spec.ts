@@ -3,7 +3,8 @@
  * the overlay's section over the document's text, "Pilot asked the writer · <stamp>", the questions
  * from the asking on and the reply joining them at the clarification run's turn end, live, per block
  * where it kept the headings asked for and whole where it did not; each asked block's head says so,
- * and the document's line on the timeline stays. The run's continuation, placed while the
+ * and the document's line on the timeline stays. While the clarification run runs, the document is
+ * Pilot's line, "Asking the writer" standing still with the pulse (F13.7). The run's continuation, placed while the
  * clarification run runs on the same conversation, waits for it: "Waiting for the run before it"
  * (DB 183). While Pilot asks the writer the document takes nothing from the app's controls (DB
  * 295), so its answers come through the project's chat, and Pilot's Done closes it.
@@ -133,7 +134,7 @@ test.describe('Pilot asking the writer', () => {
     await expect(overlay.blockAt('D2').writerAsked).toHaveCount(0);
   });
 
-  test('holds the questions alone until the clarification run’s turn ends, the reply joining them live; the run’s continuation, placed meanwhile through the chat, reads “Waiting for the run before it” and starts after it', async ({
+  test('holds the questions alone until the clarification run’s turn ends, the reply joining them live, the document Pilot’s line meanwhile, “Asking the writer” going nowhere; the run’s continuation, placed meanwhile through the chat, reads “Waiting for the run before it” and starts after it', async ({
     people,
     projects,
     controller,
@@ -160,6 +161,11 @@ test.describe('Pilot asking the writer', () => {
     await expect(section.question('D2').text).toHaveText(STOVE);
     await expect(section.replies).toHaveCount(0);
     await expect(timeline.item(clarifying).title).toHaveText('Clarify kit.md');
+    const line = timeline.item(kit);
+    await expect(line.root).toHaveAttribute('data-state', 'pilots');
+    await expect(line.pilots.root).toHaveText('Asking the writer');
+    await expect(line.pilots.root).not.toHaveAttribute('href');
+    await expect(line.pilots.pulse).toHaveCount(1);
 
     await chats.start(project, 'Answer the kit for me.');
     for (const [block, answer] of [

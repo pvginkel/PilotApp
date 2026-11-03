@@ -1,7 +1,9 @@
 /**
  * An action of a registered document Pilot claimed (F21.6): open until its Done, Pilot's, its block
  * reading "Pilot does it" with the claim's note and a link to the work item the claim names, inline
- * and in the overlay, over a person's controls; the document's *Send answers* waits on it. Once the
+ * and in the overlay, over a person's controls; the document's *Send answers* waits on it, and with
+ * every other block answered, the document is Pilot's line, "Doing it" going to that work item
+ * (F13.7). Once the
  * work doing it is stopped, the action is the person's again, and their Done marks it done as any
  * action's Done, the claim gone; while that work is in flight the server takes no Done on it (DB
  * 295).
@@ -69,7 +71,7 @@ async function claimed({ people, projects, controller, chats }: Fixtures) {
 }
 
 test.describe('A claimed action', () => {
-  test('reads “Pilot does it” with its note and links the work item that does it, inline and in the overlay, open with a person’s controls; Send answers waits on it', async ({
+  test('reads “Pilot does it” with its note and links the work item that does it, inline and in the overlay, open with a person’s controls; Send answers waits on it, and with the other block answered the document is Pilot’s line, “Doing it” going to that work item', async ({
     people,
     projects,
     controller,
@@ -93,11 +95,16 @@ test.describe('A claimed action', () => {
     await expect(action.done).toBeEnabled();
     await expect(item.segment('A1')).not.toHaveClass(/\bdone\b/);
     await expect(item.unsent).toHaveCount(0);
-    await item.blockAt('D1').option('Friday').click();
-    await expect(item.blockAt('D1').answered).toBeVisible();
-    await expect(item.send).toBeDisabled();
+    await expect(action.claimWork).toHaveAttribute('href', addressOf(project, rotating));
 
-    await action.claimWork.click();
+    // The one block it leaves open held by the work doing it, the document is Pilot's.
+    await item.blockAt('D1').option('Friday').click();
+    await expect(item.root).toHaveAttribute('data-state', 'pilots');
+    await expect(item.pilots.root).toHaveText('Doing it');
+    await expect(item.pilots.root).toHaveAttribute('title', `Go to the work item: ${ROTATING}`);
+    await expect(item.pilots.pulse).toBeVisible();
+    await expect(item.open).toBeVisible();
+    await item.pilots.root.click();
     await expect(page).toHaveURL(addressOf(project, rotating));
 
     await overlay.open(project, document);

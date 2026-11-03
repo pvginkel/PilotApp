@@ -3,7 +3,8 @@
  * (F1.2), derived from the record, never written by the brain (database.md decision 15), a tab's
  * status icon (F1.3, F141.1), and a step's standing in the plan popover and in a work item's progress (F3.1, F145.3). How a work item's session reads: its one line on the
  * timeline (F26.1, F26.2, F125), why the gate holds its start (F26.1), why it stopped when no one
- * of the app's people stopped it (F71, F135.6), its session log's tail (F69.2), and a job's line withdrawn by an Undo (F14.1). How a condition that holds all work reads
+ * of the app's people stopped it (F71, F135.6), its session log's tail (F69.2), and a job's line withdrawn by an Undo (F14.1). What Pilot
+ * does on an item that is Pilot's (F13.7). How a condition that holds all work reads
  * on the gold bar (F125, F135.7), and the week's halt's overrule (F135.2).
  */
 
@@ -25,6 +26,7 @@ type LineStep = NonNullable<CurrentLine['step']>;
 type Condition = components['schemas']['ConditionsSchema.6c014b4.ConditionSchema'];
 type OverruleKind = components['schemas']['ConditionsSchema.6c014b4.OverruleKind'];
 type DoneCause = components['schemas']['TimelineSchema.1fdd8ae.DoneSchema']['cause'];
+type Doing = components['schemas']['TimelineSchema.1fdd8ae.Doing'];
 
 interface StepReading {
   text: string;
@@ -190,6 +192,28 @@ export function workClosedLabel(cause: DoneCause): string | null {
       return null;
     default: {
       const unknown: never = cause;
+      return String(unknown);
+    }
+  }
+}
+
+/** What Pilot does on an item that is Pilot's, as its line's button says it (F13.7). */
+export function pilotsDoingLabel(doing: Doing): string {
+  switch (doing) {
+    case 'awaiting_run':
+      return 'Awaiting the run';
+    case 'pre_ruling':
+      return 'Pre-ruling';
+    case 'asking_writer':
+      return 'Asking the writer';
+    case 'doing':
+      return 'Doing it';
+    case 'researching':
+      return 'Researching';
+    case 'waiting_on_answer':
+      return 'Waiting on your answer';
+    default: {
+      const unknown: never = doing;
       return String(unknown);
     }
   }

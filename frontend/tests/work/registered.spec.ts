@@ -1,8 +1,10 @@
 /**
  * A document a work item's session registers (F85.1, F65): on the timeline from its registration,
  * a review titled by its file's name, with no text and no close until the turn that ends its run
- * has read it (review 7), its card muted meanwhile, "Loads when the turn ends" under its name and
- * Pilot's dots ending it, then published as written, its title its text's, live. A read that
+ * has read it (review 7). Meanwhile, and while the pass after that turn runs, it is Pilot's line
+ * (F13.7): a dashed circle in its kind's place, its title, what Pilot does on it going to the work
+ * that does it, the pulse while the pass runs; then published as written, its title its text's,
+ * its kind's icon back, live. A read that
  * fails keeps its file's name and no text, *Did not load* beside it: it opens to "The document did
  * not load", closes with Reviewed, and its work item's session log says why (ruling D1). Its close
  * is written back to its file, and the close that leaves none of the run's documents open
@@ -19,6 +21,8 @@ import { makeUnique } from '../support/helpers';
 import type { People } from '../support/people';
 import type { Projects } from '../support/projects';
 import { documentAddress } from '../support/page-objects/overlay-page';
+import { sessionLogAddress } from '../support/page-objects/session-log-page';
+import { addressOf } from '../support/page-objects/timeline-page';
 
 const TITLE = 'Surveying the camp';
 
@@ -78,9 +82,21 @@ async function registered(controller: Controller, projects: Projects, environmen
  */
 async function endRun(controller: Controller, chats: Chats, project: string, environment: string) {
   const passed = await chats.passing(project);
+  await endTurn(controller, environment);
+  await passed();
+}
+
+/** The work item's turn ends, and its run with it. */
+async function endTurn(controller: Controller, environment: string) {
   await controller.play(environment, 'claude-1', [text('wrote', 'The survey is written and registered.')]);
   await controller.finish(environment, 'claude-1');
-  await passed();
+}
+
+/** Pilot's own job on the project's timeline: the pass after the run's turn. */
+async function passOf(projects: Projects, project: string): Promise<string> {
+  const job = async () => (await projects.timeline(project)).items.find((item) => item.work?.pilots_own)?.id;
+  await expect.poll(job).toBeDefined();
+  return (await job())!;
 }
 
 /** A `server` record the server writes of a registered document's file: the document, its path and the reason. */
@@ -115,7 +131,7 @@ async function continued(projects: Projects, project: string, continuation: stri
 }
 
 test.describe('A registered document', () => {
-  test('shows its file’s name on a muted card with Pilot’s dots and “Loads when the turn ends”, and takes no close, on its line or in the overlay, until its run’s end reads it, then its text’s title on a published card, live', async ({
+  test('is Pilot’s line until its run’s end reads it and the pass after it ends: its file’s name, “Awaiting the run” going to the work item, no pulse and no Open, and no close in the overlay; then its text’s title, Open, and “Pre-ruling” pulsing, opening the pass’s session log, the pass’s own line beside it; then its kind’s icon on a published card, live', async ({
     people,
     projects,
     controller,
@@ -123,6 +139,7 @@ test.describe('A registered document', () => {
     timeline,
     overlay,
     deploymentSse,
+    page,
   }) => {
     const { project, work, environment } = await running({ people, projects });
     const survey = await registered(controller, projects, environment, work, SURVEY_PATH, SURVEY);
@@ -136,27 +153,42 @@ test.describe('A registered document', () => {
 
     await timeline.open(project);
     await deploymentSse.ensureConnected();
-    await expect(item.root).toHaveAttribute('data-state', 'open');
-    await expect(item.title).toHaveText('survey.md');
-    await expect(item.root).toHaveClass(/\bawaiting\b/);
-    await expect(item.card.root).toHaveAttribute('data-read', 'awaiting');
-    await expect(item.card.loads).toHaveText('Loads when the turn ends');
-    await expect(item.writing).toBeVisible();
-    await expect(item.card.didNotLoad).toHaveCount(0);
-    await expect(item.card.open).toBeVisible();
-    await expect(item.card.reviewed).toHaveCount(0);
-    await expect(item.card.readTime).toHaveCount(0);
+    await expect(item.root).toHaveAttribute('data-state', 'pilots');
+    await expect(item.lineKind.locator('svg')).toHaveClass(/\blucide-circle-dashed\b/);
+    await expect(item.lineTitle).toHaveText('survey.md');
+    await expect(item.pilots.root).toHaveText('Awaiting the run');
+    await expect(item.pilots.root).toHaveAttribute('title', `Go to the work item: ${TITLE}`);
+    await expect(item.pilots.pulse).toHaveCount(0);
+    await expect(item.open).toHaveCount(0);
+    await expect(item.lineDiscuss).toBeVisible();
+    await expect(item.lineTime).toBeVisible();
+    await expect(item.card.root).toHaveCount(0);
+    await expect(item.writing).toHaveCount(0);
+    await item.pilots.root.click();
+    await expect(page).toHaveURL(addressOf(project, work));
 
-    await endRun(controller, chats, project, environment);
+    const pass = await chats.pass(project);
+    await endTurn(controller, environment);
+    await pass.running();
+    const job = await passOf(projects, project);
+    await expect(item.lineTitle).toHaveText('The survey');
+    await expect(item.root).toHaveAttribute('data-state', 'pilots');
+    await expect(item.pilots.root).toHaveText('Pre-ruling');
+    await expect(item.pilots.root).toHaveAttribute('href', sessionLogAddress(project, job));
+    await expect(item.pilots.pulse).toBeVisible();
+    await expect(item.open).toBeVisible();
+    await expect(timeline.item(job).root).toHaveAttribute('data-kind', 'work');
+
+    await pass.end();
+    await expect(item.root).toHaveAttribute('data-state', 'open');
+    await expect(item.line).toHaveCount(0);
     await expect(item.title).toHaveText('The survey');
-    await expect(item.root).not.toHaveClass(/\bawaiting\b/);
+    await expect(item.kind.locator('svg')).toHaveClass(/\blucide-book-open\b/);
     await expect(item.card.root).not.toHaveAttribute('data-read');
-    await expect(item.card.loads).toHaveCount(0);
     await expect(item.writing).toHaveCount(0);
     await expect(item.card.didNotLoad).toHaveCount(0);
     await expect(item.card.readTime).toHaveText('1 min read');
     await expect(item.card.reviewed).toBeVisible();
-    await expect(item.root).toHaveAttribute('data-state', 'open');
   });
 
   test('whose writer Pilot asked about its blocks says so, live: “Pilot asked the writer about D2 and D4” under an inline document’s title, under a card’s summary, under a one-ask item’s title and under a confirmation’s row', async ({
@@ -231,8 +263,7 @@ test.describe('A registered document', () => {
     await expect(item.title).toHaveText('survey.md');
     await expect(item.card.root).toHaveAttribute('data-read', 'failed');
     await expect(item.card.didNotLoad).toHaveText('Did not load');
-    await expect(item.root).not.toHaveClass(/\bawaiting\b/);
-    await expect(item.card.loads).toHaveCount(0);
+    await expect(item.root).toHaveAttribute('data-state', 'open');
     await expect(item.writing).toHaveCount(0);
     await expect(item.card.readTime).toHaveCount(0);
     await expect(item.card.summary).toHaveCount(0);
@@ -334,5 +365,22 @@ test.describe('A registered document', () => {
     await expect(timeline.item(continuation).work.line).toHaveText(
       `Failed · Cannot write ${SURVEY_PATH} back because ${refusal.reason}`,
     );
+  });
+});
+
+test.describe('A registered document on a phone', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('is Pilot’s line with what Pilot does on a row of its own under the title', async ({ people, projects, controller, timeline }) => {
+    const { project, work, environment } = await running({ people, projects });
+    const survey = await registered(controller, projects, environment, work, SURVEY_PATH, SURVEY);
+    await timeline.open(project);
+    const item = timeline.item(survey);
+    await expect(item.pilots.root).toHaveText('Awaiting the run');
+
+    const title = (await item.lineTitle.boundingBox())!;
+    const button = (await item.pilots.root.boundingBox())!;
+    expect(button.y).toBeGreaterThanOrEqual(title.y + title.height - 1);
+    expect(button.x).toBeLessThan(title.x + 10);
   });
 });

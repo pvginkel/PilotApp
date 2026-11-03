@@ -11,7 +11,7 @@
  * `controller` once it is working. While a turn is in flight, `answer()` records a person's answer
  * to a block as the chat's brain records it (POST /api/testing/projects/<id>/chat/answers), the
  * place *In the chat* goes to. The pre-ruling pass a worker's run's end places runs in the store
- * too: `passing()` ends it.
+ * too: `passing()` ends it, and `pass()` holds it running until the spec ends it.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -34,6 +34,14 @@ const STORE_REPO = '/work/PilotProjects';
 const STORE_ROOT = `${STORE_REPO}/CLAUDE.md`;
 /** The store's tree, a folder per project under it. */
 const PROJECTS = '/work/Projects';
+
+/** The pre-ruling pass after a worker's turn (`Chats.pass()`). */
+interface Pass {
+  /** Returns once the pass's session in the store works on its brief: its session's name. */
+  running(): Promise<string>;
+  /** Ends the pass's turn well; returns once the backend reads its job done. */
+  end(): Promise<void>;
+}
 
 /** A chat a message opened, and its session's name in the store. */
 interface Started {
@@ -149,18 +157,28 @@ export class Chats {
    * document ends its pass itself.
    */
   async passing(projectId: string): Promise<() => Promise<void>> {
+    const pass = await this.pass(projectId);
+    return () => pass.end();
+  }
+
+  /** The store, ready for the pre-ruling pass after a worker's turn, as `passing()` readies it, and the pass. */
+  async pass(projectId: string): Promise<Pass> {
     const opened = await this.opening(projectId);
-    return async () => {
-      const session = await opened();
-      await this.controller.finish(this.store, session, 'success', 'Pre-ruled.');
-      await expect
-        .poll(async () => {
-          const response = await this.page.request.get(`${this.backendUrl}/api/projects/${projectId}/timeline`);
-          expect(response.status(), await response.text()).toBe(200);
-          const { items } = (await response.json()) as Timeline;
-          return items.filter((item) => item.work?.pilots_own && IN_FLIGHT.includes(item.work.state)).length;
-        })
-        .toBe(0);
+    let session: Promise<string> | undefined;
+    const running = () => (session ??= opened());
+    return {
+      running,
+      end: async () => {
+        await this.controller.finish(this.store, await running(), 'success', 'Pre-ruled.');
+        await expect
+          .poll(async () => {
+            const response = await this.page.request.get(`${this.backendUrl}/api/projects/${projectId}/timeline`);
+            expect(response.status(), await response.text()).toBe(200);
+            const { items } = (await response.json()) as Timeline;
+            return items.filter((item) => item.work?.pilots_own && IN_FLIGHT.includes(item.work.state)).length;
+          })
+          .toBe(0);
+      },
     };
   }
 

@@ -14,11 +14,10 @@
  * answer (F4.4), its segment bar, or for a text with no block "N min read", its attachments, Open, which reads Continue while the document reads *Unsent*, and on a review
  * Reviewed (F25.2); Pilot's dots end it while Pilot writes. Open opens the overlay at the document's address, and a segment opens
  * it at its block's (F33, F97). A registered document has no text until its file is read at its
- * run's end, nor after a read that failed: a review whose card titles it by its file's name, and
- * which takes no Reviewed until that read is made (F85.1, ruling D1). Awaiting its read, its card is
- * muted, its name in muted text, "Loads when the turn ends" under it and Pilot's dots ending it; its
- * read failed, a warning chip beside its name, *Did not load*, since only then does it wait on the
- * person's Reviewed; published, it is any review's card. Where Pilot asked a registered
+ * run's end, nor after a read that failed: awaiting its read, it is Pilot's line (item.tsx, F13.7);
+ * its read failed, its card titles it by its file's name, a warning chip beside it, *Did not load*,
+ * since only then does it wait on the person's Reviewed (F85.1, ruling D1); published, it is any
+ * review's card. Where Pilot asked a registered
  * document's writer about its blocks, its line under the title, or on a card under the summary,
  * says so: "Pilot asked the writer about D2 and D4" (F86.8).
  */
@@ -95,11 +94,6 @@ export function DocumentCard({ item }: { item: TimelineItem }) {
           </div>
           {read === 'failed' && <DidNotLoadChip />}
         </div>
-        {read === 'awaiting' && (
-          <p className="item-sub" data-testid="timeline.item.loads">
-            Loads when the turn ends
-          </p>
-        )}
         {item.summary !== null && (
           <p className="item-sub" data-testid="timeline.item.summary">
             <LinkedText text={item.summary} />
@@ -130,10 +124,10 @@ export function DocumentCard({ item }: { item: TimelineItem }) {
             <FileText className="icon" aria-hidden="true" />
             {isUnsent(item) ? 'Continue' : 'Open'}
           </Link>
-          {item.kind === 'review' && !item.awaiting_read && <Reviewed item={item} />}
+          {item.kind === 'review' && <Reviewed item={item} />}
         </div>
       </div>
-      {(item.writing || read === 'awaiting') && <PilotWriting />}
+      {item.writing && <PilotWriting />}
     </div>
   );
 }

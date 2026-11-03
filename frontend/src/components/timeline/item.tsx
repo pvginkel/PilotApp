@@ -6,9 +6,9 @@
  * (F22), a short document stands inline (F24.1), and a larger one and a review leave a card
  * (F24.2, F25.1); the archive question is its two buttons (F5.6). A registered document whose writer Pilot asked says so under its title (F86.8).
  * Its attachments follow its text (F17.5). An urgent one is tinted (F10.1), and one
- * whose latest save is held shows its last published text with a dashed border, a concept (F78), and
- * a registered document awaiting its read is muted (F85.1). A
- * work item open is its session's (work.tsx, F26). Done, an item is its line (F13.1, F13.2), with
+ * whose latest save is held shows its last published text with a dashed border, a concept (F78). A
+ * work item open is its session's (work.tsx, F26). An item Pilot is working on is one line in its
+ * place, its kind's icon a dashed circle, what Pilot does on it its button (F13.7, F12.1, F24.1). Done, an item is its line (F13.1, F13.2), with
  * Open (F13.3), its attachments' indicator (F13.6), Undo while the record offers it (F14.1) and
  * Discuss (F13.4), and *In the chat* after a one-ask item's answer given in the chat (F42.3); a
  * work item's is quieter, its Open the session log (F13.5, F26.6), and a job's an Undo withdrew
@@ -20,7 +20,7 @@
 
 import { useCallback, useState, type AnimationEvent, type MouseEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
-import { Check, FileText, MessagesSquare, ScrollText, StickyNote, Undo2, X } from 'lucide-react';
+import { Check, CircleDashed, FileText, MessagesSquare, ScrollText, StickyNote, Undo2, X } from 'lucide-react';
 import { DiscussButton } from '@/components/chat/discuss-button';
 import { quoteOfItem } from '@/components/chat/discuss-quotes';
 import { InChatButton } from '@/components/chat/in-chat-button';
@@ -36,6 +36,7 @@ import { DocumentCard, InlineDocument } from '@/components/timeline/document';
 import { isCard } from '@/components/timeline/document-state';
 import { ItemHead } from '@/components/timeline/item-head';
 import { kindOf } from '@/components/timeline/kinds';
+import { PilotsButton } from '@/components/timeline/pilots';
 import { UserAvatar } from '@/components/timeline/user-avatar';
 import { WaitItem } from '@/components/timeline/wait';
 import { WorkItem } from '@/components/timeline/work';
@@ -46,7 +47,7 @@ import { useDismiss } from '@/hooks/use-dismiss';
 import { useRead, useUndo } from '@/hooks/use-marks';
 import { usePhone } from '@/hooks/use-phone';
 import { useArchived } from '@/hooks/use-projects';
-import { blocksOf, isProse, titleOf, type BodyPart, type TimelineItem, type TimelineUser } from '@/hooks/use-timeline';
+import { blocksOf, isProse, titleOf, type BodyPart, type PilotsWork, type TimelineItem, type TimelineUser } from '@/hooks/use-timeline';
 import { usePerson } from '@/hooks/use-self';
 import { cn } from '@/lib/utils';
 import { workClosedLabel } from '@/lib/utils/status-labels';
@@ -60,27 +61,30 @@ interface ItemProps {
 
 export function Item({ item, fresh, onFlashed }: ItemProps) {
   const done = item.done !== null;
+  // The API gives what Pilot does only on an open item.
+  const pilots = item.pilots_work;
+  const open = !done && pilots === null;
   const flashed = (event: AnimationEvent) => event.target === event.currentTarget && onFlashed();
   return (
     <article
       className={cn(
         'item',
-        done ? 'collapsed' : 'open',
+        open ? 'open' : 'collapsed',
+        pilots !== null && 'pilots',
         item.kind === 'confirmation' && 'confirm',
         done && item.kind === 'work' && 'quiet',
-        !done && item.concept && 'concept',
-        !done && item.awaiting_read && 'awaiting',
-        !done && item.urgent && 'urgent',
+        open && item.concept && 'concept',
+        open && item.urgent && 'urgent',
         fresh && 'fresh',
       )}
       onAnimationEnd={flashed}
       data-testid="timeline.item"
       data-item-id={item.id}
       data-kind={item.kind}
-      data-state={done ? 'done' : 'open'}
+      data-state={done ? 'done' : pilots !== null ? 'pilots' : 'open'}
       data-concept={item.concept}
     >
-      {done ? <DoneLine item={item} /> : <OpenItem item={item} />}
+      {done ? <DoneLine item={item} /> : pilots !== null ? <PilotsLine item={item} pilots={pilots} /> : <OpenItem item={item} />}
     </article>
   );
 }
@@ -303,6 +307,31 @@ function Line({ item, onTap }: { item: TimelineItem; onTap?: (event: MouseEvent)
           </span>
         </span>
       )}
+    </div>
+  );
+}
+
+/**
+ * The line of an item Pilot is working on (F13.7), as a done line is: a dashed circle in the time's
+ * grey in its kind's place, the title, the file's name before the read, Open once its text is read,
+ * Discuss, what Pilot does on it, and when it was placed. It takes no answer.
+ */
+function PilotsLine({ item, pilots }: { item: TimelineItem; pilots: PilotsWork }) {
+  const title = titleOf(item);
+  return (
+    <div className="line" data-testid="timeline.line">
+      <span className="kind-icon" title="Pilot is working on it" data-testid="timeline.line.kind">
+        <CircleDashed className="icon" aria-hidden="true" />
+      </span>
+      <span className="title" title={title} data-testid="timeline.line.title">
+        <LinkedText text={title} />
+      </span>
+      {item.body !== null && <Open item={item} />}
+      <DiscussButton quote={quoteOfItem(item)} testId="timeline.line.discuss" />
+      <span className="pilots-slot">
+        <PilotsButton pilots={pilots} testId="timeline.line.pilots" />
+      </span>
+      <Time at={item.created_at} format="clock" testId="timeline.line.time" />
     </div>
   );
 }

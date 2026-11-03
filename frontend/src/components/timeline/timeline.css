@@ -76,10 +76,6 @@
     background: linear-gradient(hsl(var(--urgent) / 0.06), hsl(var(--urgent) / 0.06)), hsl(var(--background));
   }
   .item.concept { border-style: dashed; }
-  /* A registered document awaiting its read (F85.1): a muted card, its file's name muted; no dashed
-     border, which marks a concept. */
-  .item.open.awaiting { border-color: hsl(var(--border)); background: hsl(var(--muted) / 0.4); box-shadow: none; }
-  .item.awaiting .item-title { color: hsl(var(--muted-foreground)); }
   .item.fresh { animation: fresh 1.6s ease-out; }
   @keyframes fresh { from { box-shadow: 0 0 0 4px hsl(var(--primary) / 0.35); } }
 
@@ -488,6 +484,19 @@
   .line .said .note .icon { margin-right: 4px; }
   .line time { flex: none; font-size: var(--text-sm); color: hsl(var(--muted-foreground)); font-variant-numeric: tabular-nums; }
 
+  /* An item Pilot is working on (F13.7): its line's dashed circle in the time's grey, where a done
+     line has the kind's icon in blue. What Pilot does is a ghost button beside Open and Discuss: the
+     pulsing dot, Pilot's mark and the words in the line's own weight; it stands still where it goes
+     nowhere. The title gives way before anything wraps. */
+  .pilots .line .kind-icon { color: hsl(var(--muted-foreground)); }
+  .pilots .line .title { min-width: 6ch; }
+  .pilots-slot { display: contents; }
+  .pilots-btn { flex: none; align-self: center; align-items: center; gap: 6px; padding: 0 10px 0 7px; font-weight: 400; text-decoration: none; }
+  .pilots-btn .pulse { top: 0; margin-right: 1px; }
+  .pilots-btn .avatar { width: 16px; height: 16px; }
+  .pilots-btn.still { cursor: default; }
+  .pilots-btn.still:hover { background: none; color: hsl(var(--muted-foreground)); }
+
   /* A work item's line is quiet: a session that ran reads as a footnote between the items,
      indented behind a 2px rule in the dividers' colour, one stroke down a run, stopping 1px short
      of the text at either end. The rule is the border of a box of its own, so a run's ends trim it
@@ -556,6 +565,9 @@
 
   @media (max-width: 900px) {
     .feed-inner { padding: 12px 12px 64px; }
+    /* On the phone what Pilot does takes a row of its own under the title, its dot 4px in from the
+       title's left edge. */
+    .line .pilots-slot { display: flex; order: 9; flex-basis: 100%; margin: 0 0 2px 22px; }
     .pinned { padding: 8px 12px 0; }
     /* On the phone an option's line goes under its label, Recommended staying at the label's end
        (F98.3). */

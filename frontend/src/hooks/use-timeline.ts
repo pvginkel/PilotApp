@@ -14,6 +14,8 @@ export type TimelineUser = Schemas['TimelineSchema.1fdd8ae.UserSchema'];
 export type Block = Schemas['TimelineSchema.1fdd8ae.BlockSchema'];
 export type BodyPart = NonNullable<TimelineItem['body']>[number];
 export type Attachment = Schemas['TimelineSchema.1fdd8ae.AttachmentSchema'];
+/** What Pilot does on an item that is Pilot's (F13.7). */
+export type PilotsWork = Schemas['TimelineSchema.1fdd8ae.PilotsWorkSchema'];
 type ProsePart = Schemas['TimelineSchema.1fdd8ae.ProsePartSchema'];
 type Timeline = Schemas['TimelineSchema.1fdd8ae'];
 
