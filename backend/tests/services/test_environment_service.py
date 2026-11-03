@@ -724,6 +724,24 @@ class TestTake:
 
         assert _taken(environments, session) == ENV
 
+    def test_a_cancel_of_the_runs_documents_frees_it(
+        self,
+        environments: EnvironmentService,
+        session: Session,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+    ) -> None:
+        # DB 299: a cancelled run continues nothing, as after Finish's close.
+        _own(session)
+        run = _agent_session(session, project, SessionState.IDLE)
+        item = _registered(session, container, project, run, "published")
+        assert _taken(environments, session) is None
+
+        container.record_service().cancel(project, [item.id], person, "cancel the run")
+
+        assert _taken(environments, session) == ENV
+
     def test_a_document_registered_elsewhere_binds_it_not(
         self,
         environments: EnvironmentService,
