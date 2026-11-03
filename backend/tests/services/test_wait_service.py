@@ -207,16 +207,20 @@ class TestWaitServiceAddTimedWait:
         self,
         session: DbSession,
         container: ServiceContainer,
+        engine_events: list[EngineEvent],
         project: Project,
         project_session: models.Session,
     ) -> None:
         due = _ahead(24)
+        project_id = project.id
 
-        added = _service(container).add_timed_wait(
-            project, project_session, "A 24-hour soak after the rollout", due, None
-        )
-        clear_after_commit_callbacks()
+        with scoped_session(container):
+            added = _service(container).add_timed_wait(
+                project, project_session, "A 24-hour soak after the rollout", due, None
+            )
+            added_id = added.id
 
+        added = session.get_one(Item, added_id)
         assert (added.seq, added.kind_code, added.plan_task_id) == (
             1,
             "timed_wait",
@@ -229,6 +233,14 @@ class TestWaitServiceAddTimedWait:
             None,
             None,
         )
+        assert (
+            TreeHashMoved(
+                tree_path(project, TIMELINE),
+                container.view_service().timeline(project).hash,
+            )
+            in engine_events
+        )
+        assert ProjectChanged(project_id) in engine_events
 
     @pytest.mark.parametrize("hours", [0, -1])
     def test_a_due_time_not_ahead_is_refused(
