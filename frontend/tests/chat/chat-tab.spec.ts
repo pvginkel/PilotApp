@@ -353,7 +353,6 @@ test.describe('The Chat tab’s read', () => {
 
   test('says “The chat did not load.” where it fails, and draws the chat once a later read lands', async ({
     page,
-    auth,
     people,
     projects,
     projectHead,
@@ -375,7 +374,7 @@ test.describe('The Chat tab’s read', () => {
 
     // The browser's session now lacks the editor role, and the API refuses the list's next read.
     await expectConsoleError(page, /403/);
-    await auth.createSession({ subject, name: 'Test Person', roles: [] });
+    await people.withoutRole({ subject });
     await timeline.refocus();
     await chat.tab.click();
     await expect(chat.failed).toHaveText('The chat did not load.');

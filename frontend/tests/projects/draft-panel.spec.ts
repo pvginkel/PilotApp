@@ -128,7 +128,6 @@ test.describe('The Draft tab', () => {
 
   test('says “The draft did not load” in the draft’s place where its read fails, and draws the draft once a later read lands', async ({
     page,
-    auth,
     people,
     projects,
     projectHead,
@@ -146,7 +145,7 @@ test.describe('The Draft tab', () => {
 
     // The browser's session now lacks the editor role, and the API refuses the tab's read again.
     await expectConsoleError(page, /403/);
-    await auth.createSession({ name: 'Test Person', roles: [] });
+    await people.withoutRole();
     await timeline.refocus();
     await expect(panel.draft.failed).toHaveText('The draft did not load.');
     await expect(panel.draft.root).toHaveCount(0);

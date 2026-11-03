@@ -216,7 +216,7 @@ test.describe('Create project', () => {
     await expect(definitionChat.createReady).toBeVisible();
   });
 
-  test('stands nowhere while the definition chat did not load', async ({ page, auth, people, projects, projectHead, timeline, controller, chats, definitionChat }) => {
+  test('stands nowhere while the definition chat did not load', async ({ page, people, projects, projectHead, timeline, controller, chats, definitionChat }) => {
     const subject = makeUnique('subject');
     const me = await people.signIn({ subject });
     await drafted({ page, projects, projectHead, controller, chats, definitionChat }, me.handle!);
@@ -224,7 +224,7 @@ test.describe('Create project', () => {
 
     // The browser's session now lacks the editor role, and the API refuses the list's next read.
     await expectConsoleError(page, /403/);
-    await auth.createSession({ subject, name: 'Test Person', roles: [] });
+    await people.withoutRole({ subject });
     await timeline.refocus();
     await expect(definitionChat.failed).toHaveText('The chat did not load.');
     await expect(definitionChat.createReady).toHaveCount(0);

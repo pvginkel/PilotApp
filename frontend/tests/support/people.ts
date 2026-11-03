@@ -1,13 +1,15 @@
 /**
  * Signing a spec in as a fresh person: at their first sign-in, or with a handle chosen through
  * POST /api/people/self/handle, the path the handle step takes. A test session writes no person;
- * the handle puts them on the record, in the lowest free avatar slot.
+ * the handle puts them on the record, in the lowest free avatar slot. A session without the editor
+ * role, for the API's refusals.
  */
 
 import { expect, type Page } from '@playwright/test';
 import type { components } from '@/lib/api/generated/types';
 import type { AuthFactory } from './helpers/auth-factory';
 import { makeUnique } from './helpers';
+import { PageFetches } from './network';
 
 type Self = components['schemas']['SelfResponseSchema.d1d9f70'];
 
@@ -25,15 +27,31 @@ interface SignIn {
 }
 
 export class People {
+  private readonly fetches: PageFetches;
+
   constructor(
     private readonly page: Page,
     private readonly auth: AuthFactory,
     private readonly backendUrl: string,
-  ) {}
+  ) {
+    this.fetches = new PageFetches(page);
+  }
 
   /** A fresh person signed in for the first time: no handle chosen, no slot taken. */
   async firstSignIn({ name = 'Test Person', subject }: FirstSignIn = {}): Promise<void> {
     await this.auth.createSession({ subject, name, roles: ['editor'] });
+  }
+
+  /**
+   * The browser's session swapped for one without the editor role, the same subject's or a fresh
+   * one's, once every fetch the page sent before the swap has landed. Such a fetch went under the
+   * old session, which the API does not refuse, and a read the window's focus asks for while one
+   * of the same query is under way is that read: TanStack Query refetches on focus with
+   * `cancelRefetch: false`.
+   */
+  async withoutRole({ name = 'Test Person', subject }: FirstSignIn = {}): Promise<void> {
+    await this.auth.createSession({ subject, name, roles: [] });
+    await this.fetches.landed();
   }
 
   /** A fresh person who has chosen their handle, as the record holds them. */
