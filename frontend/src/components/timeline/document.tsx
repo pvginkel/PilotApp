@@ -2,12 +2,13 @@
  * A document item (F24): many blocks under one title, its head carrying *Edited <time>* (F28.7) and
  * *Unsent* while it has an answer and no Done (D026). One under about 150 words of its own (F24.1)
  * stands inline: its head; its title; its prose with every block answered in place, each in a panel
- * of its own, and each section Pilot settled collapsed to its line (F31.5); its attachments
- * (F17.5); Pilot's dots while it writes (F35); then its segment bar beside *Send answers* (F33), the bar
- * empty and *Send answers* enabled where it has no block. A segment goes to its block.
- * *Send answers* is the document's Done (F24.3): it enables once every block is answered or has a
- * recommendation, and clicked with unanswered recommended blocks it lists them in a dialog whose
- * Confirm sends, the record answering them with their recommendation (F32.5).
+ * of its own, each section Pilot settled collapsed to its line (F31.5), and each block Pilot's work
+ * holds its section's line (F31.7); its attachments (F17.5); Pilot's dots while it writes (F35);
+ * then its segment bar beside *Send answers* (F33), the bar empty and *Send answers* enabled where it
+ * has no block. A segment goes to its block, and a held block's is in the plan donut's in-progress
+ * colour. *Send answers* is the document's Done (F24.3): it enables once every block is answered or
+ * has a recommendation, and none is held, and clicked with unanswered recommended blocks it lists
+ * them in a dialog whose Confirm sends, the record answering them with their recommendation (F32.5).
  *
  * A larger one, and every review (F25.1), leaves a card: its head, its title, its summary (F34),
  * its count chips (F24.2) and the auto pilot chip, counting the confirmations the switch would
@@ -34,6 +35,7 @@ import { Block } from '@/components/timeline/block';
 import { askOf, countsOf, isUnsent, readOf, recommendationOf, type Counts } from '@/components/timeline/document-state';
 import { blockKey, GoToContext } from '@/components/timeline/flash';
 import { Edited, ItemHead } from '@/components/timeline/item-head';
+import { LockedContext } from '@/components/timeline/locked';
 import { autopilotMayTake } from '@/components/timeline/may-take';
 import { isSettled, piecesOf, SectionsContext } from '@/components/timeline/sections';
 import { SettledLines } from '@/components/timeline/settled';
@@ -187,15 +189,17 @@ export function UnsentChip() {
 }
 
 /**
- * A document's prose and its blocks in their order, every block answered in place, and each
- * section Pilot settled, while not opened, its line in its block's place, consecutive lines one
- * list.
+ * A document's prose and its blocks in their order, every block answered in place, each section
+ * Pilot settled, while not opened, its line in its block's place, consecutive lines one list, and
+ * each block Pilot's work holds its section's line, unless the document is Pilot's (F28.9).
  */
 export function DocumentParts({ item }: { item: TimelineItem }) {
   const { opened, open } = useContext(SectionsContext);
+  const locked = useContext(LockedContext);
   const collapsed = (block: BlockData) => isSettled(block) && !opened.has(blockKey(item.id, block.id));
+  const held = (block: BlockData) => !locked && block.held !== null;
   // The API gives every prose item but the opening its text.
-  return piecesOf(item.body!, collapsed).map((piece) => {
+  return piecesOf(item.body!, collapsed, held).map((piece) => {
     if (piece.type === 'settled') {
       return (
         <SettledLines
@@ -204,6 +208,9 @@ export function DocumentParts({ item }: { item: TimelineItem }) {
           onOpen={(block) => open(blockKey(item.id, block.id))}
         />
       );
+    }
+    if (piece.type === 'held') {
+      return <Block key={`block ${piece.block.id}`} item={item} block={piece.block} section={piece.section} />;
     }
     const { part, index } = piece;
     return part.type === 'block' ? (
@@ -214,19 +221,20 @@ export function DocumentParts({ item }: { item: TimelineItem }) {
   });
 }
 
-/** A segment per block, filled once the block is answered; each goes to its block. */
+/** A segment per block, filled once the block is answered, half filled while Pilot's work holds it; each goes to its block. */
 export function SegmentBar({ item }: { item: TimelineItem }) {
   const goTo = useContext(GoToContext);
   return (
     <div className="segbar" data-testid="timeline.segments">
       {blocksOf(item).map((block) => {
         const answered = isAnswered(block);
-        const label = `${askOf(block)} · ${answered ? 'answered' : 'open'}`;
+        const held = block.held !== null;
+        const label = `${askOf(block)} · ${answered ? 'answered' : held ? 'Pilot is working on it' : 'open'}`;
         return (
           <button
             key={block.id}
             type="button"
-            className={cn('seg', answered && 'done')}
+            className={cn('seg', answered && 'done', held && 'held')}
             onClick={() => goTo(item.id, block.id)}
             title={label}
             aria-label={label}
@@ -244,6 +252,12 @@ function recommendedWords(block: BlockData, answer: string): string {
   return block.proposal === null ? answer : `${answer}: ${block.proposal}`;
 }
 
+/** Why *Send answers* is disabled, or what it does. */
+function sendTitle(held: boolean, ready: boolean): string {
+  if (held) return 'Pilot is working on a block of it: send once Pilot is done';
+  return ready ? 'Send the answers to Pilot' : 'Answer every block that has no recommendation first';
+}
+
 /** `onSent` runs once the record holds the answers; disabled while the project is archived (D012). */
 export function SendAnswers({ item, onSent }: { item: TimelineItem; onSent?: () => void }) {
   const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
@@ -252,7 +266,8 @@ export function SendAnswers({ item, onSent }: { item: TimelineItem; onSent?: () 
   const [asking, setAsking] = useState(false);
   const blocks = blocksOf(item);
   const unanswered = blocks.filter((block) => !isAnswered(block));
-  const ready = unanswered.every((block) => recommendationOf(block) !== null);
+  const held = blocks.some((block) => block.held !== null);
+  const ready = !held && unanswered.every((block) => recommendationOf(block) !== null);
   const send = () => (unanswered.length > 0 ? setAsking(true) : mark());
   return (
     <>
@@ -261,7 +276,7 @@ export function SendAnswers({ item, onSent }: { item: TimelineItem; onSent?: () 
         className="btn btn-primary"
         onClick={send}
         disabled={!ready || pending || archived}
-        title={ready ? 'Send the answers to Pilot' : 'Answer every block that has no recommendation first'}
+        title={sendTitle(held, ready)}
         data-testid="timeline.item.send"
       >
         <Check className="icon" aria-hidden="true" />

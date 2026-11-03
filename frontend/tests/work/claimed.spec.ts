@@ -1,17 +1,20 @@
 /**
- * An action of a registered document Pilot claimed (F21.6): open until its Done, Pilot's, its block
- * reading "Pilot does it" with the claim's note and a link to the work item the claim names, inline
- * and in the overlay, over a person's controls; the document's *Send answers* waits on it, and with
- * every other block answered, the document is Pilot's line, "Doing it" going to that work item
- * (F13.7), and opened it reads only under the gold strip, which links that work item and offers
+ * An action of a registered document Pilot claimed (F21.6), Pilot's while the work doing it is in
+ * flight, running or queued at the gate: inline, its section is its held line (F31.7), "Doing it"
+ * going to that work item, the claim's note under it and its segment in the plan donut's in-progress
+ * colour, and opened its controls take nothing, *Send answers* waiting on it; with every other block
+ * answered, the document is Pilot's line, "Doing it" going to that work item (F13.7), and opened it
+ * reads only under the gold strip, its blocks drawn whole, which links that work item and offers
  * *Stop and take over*, the take-over stopping that work; while the run doing it waits on the
  * person's answer to a document it registered, the strip links that document instead, with no Stop,
  * and that document's Cancel ends the run, the action the person's again at once (F28.9). Once the
- * work doing it is stopped, the action is the person's again, and their Done marks it done as any
+ * work doing it fails or is stopped, the action is the person's again, live, unfolded with its
+ * controls, its head saying Pilot's work left it undone, and their Done marks it done as any
  * action's Done, the claim gone; while that work is in flight the server takes no Done on it (DB
- * 295).
+ * 295). A block a work item researches is its held line too, "Researching" (F52.3).
  */
 
+import type { Locator } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import type { Chats } from '../support/chats';
 import type { Controller } from '../support/controller';
@@ -61,10 +64,10 @@ interface Fixtures {
 
 /**
  * The cut-over, A1 under `heading`, registered by a work item's run in a project of the signed-in
- * person's, read at the run's end, the pass after it ended, its action A1 claimed, and the work item
- * that does it placed; answers their ids.
+ * person's, read at the run's end, and the pass after it ended, its action A1 claimed; answers their
+ * ids.
  */
-async function claimed({ people, projects, controller, chats }: Fixtures, heading = TOKEN) {
+async function registered({ people, projects, controller, chats }: Fixtures, heading: string) {
   const me = await people.signIn();
   const project = await projects.make({ name: makeUnique('Claimed'), members: [me.handle!] });
   const work = await projects.startWork(project, { title: 'Planning the cut-over', brief: 'Plan the cut-over.', cwd: '/work/Example' });
@@ -76,6 +79,17 @@ async function claimed({ people, projects, controller, chats }: Fixtures, headin
   await controller.finish(environment, 'claude-1');
   await expect.poll(async () => (await projects.item(project, document)).awaiting_read).toBe(false);
   await passed();
+  return { project, document };
+}
+
+/**
+ * The cut-over registered, and the work item that does A1 placed, the project paused first where
+ * `paused` says so, which holds that work at the gate; answers their ids.
+ */
+async function claimed(fixtures: Fixtures, { heading = TOKEN, paused = false } = {}) {
+  const { projects } = fixtures;
+  const { project, document } = await registered(fixtures, heading);
+  if (paused) await projects.transition(project, 'paused');
   const rotating = await projects.startWork(project, {
     title: ROTATING,
     brief: 'Rotate the CI token.',
@@ -85,17 +99,10 @@ async function claimed({ people, projects, controller, chats }: Fixtures, headin
   return { project, document, rotating };
 }
 
-/**
- * The cut-over claimed, D1 answered, and the work doing A1 registering a question to the person at
- * its turn's end, read, the pass after it ended, so that the run waits on their answer; answers the
- * ids, the question's `asking`.
- */
-async function waiting(fixtures: Fixtures, heading = TOKEN) {
-  const { projects, controller, chats } = fixtures;
-  const { project, document, rotating } = await claimed(fixtures, heading);
-  await projects.answer(document, 'D1', 'Friday');
-  await expect.poll(async () => (await projects.work(project, rotating)).state).toBe('running');
-  const { id: environment } = await projects.environment(project, rotating);
+/** The environment of a work item's running session, and that session's name. */
+async function turnOf({ projects, controller }: Fixtures, project: string, work: string) {
+  await expect.poll(async () => (await projects.work(project, work)).state).toBe('running');
+  const { id: environment } = await projects.environment(project, work);
   let session = '';
   await expect
     .poll(async () => {
@@ -103,6 +110,22 @@ async function waiting(fixtures: Fixtures, heading = TOKEN) {
       return session;
     })
     .not.toBe('');
+  return { environment, session };
+}
+
+/** A segment's colour as the page draws it. */
+const colourOf = (segment: Locator) => segment.evaluate((each) => getComputedStyle(each).backgroundColor);
+
+/**
+ * The cut-over claimed, D1 answered, and the work doing A1 registering a question to the person at
+ * its turn's end, read, the pass after it ended, so that the run waits on their answer; answers the
+ * ids, the question's `asking`.
+ */
+async function waiting(fixtures: Fixtures, heading = TOKEN) {
+  const { projects, controller, chats } = fixtures;
+  const { project, document, rotating } = await claimed(fixtures, { heading });
+  await projects.answer(document, 'D1', 'Friday');
+  const { environment, session } = await turnOf(fixtures, project, rotating);
   await controller.putFile(environment, ASK_PATH, ASK);
   const asking = await projects.register(rotating, ASK_PATH);
   const passed = await chats.passing(project);
@@ -114,7 +137,7 @@ async function waiting(fixtures: Fixtures, heading = TOKEN) {
 }
 
 test.describe('A claimed action', () => {
-  test('reads “Pilot does it” with its note and links the work item that does it, inline, open with a person’s controls; Send answers waits on it, and with the other block answered the document is Pilot’s line, “Doing it” going to that work item, and opened it reads only under the strip, which links that work item, with Stop and take over', async ({
+  test('is its section’s held line inline, “Doing it” going to the work item that does it, the claim’s note under it and its segment in progress, its controls taking nothing once opened and Send answers waiting on it; with the other block answered the document is Pilot’s line, “Doing it” going to that work item, and opened it reads only under the strip, its blocks drawn whole, which links that work item, with Stop and take over', async ({
     people,
     projects,
     controller,
@@ -128,17 +151,33 @@ test.describe('A claimed action', () => {
 
     const item = timeline.item(document);
     const action = item.blockAt('A1');
-    await expect(action.root).toHaveClass(/\bopen\b/);
-    await expect(action.claim).toContainText('Pilot does it');
-    await expect(action.claimWork).toHaveText(ROTATING);
+    await expect(action.root).toHaveClass(/\bheld\b/);
+    await expect(action.held.heading).toHaveText(TOKEN);
+    await expect(action.held.pilots).toHaveText('Doing it');
+    await expect(action.held.pilots).toHaveAttribute('data-doing', 'doing');
+    await expect(action.held.pilots).toHaveAttribute('title', `Go to the work item: ${ROTATING}`);
+    await expect(action.held.pilots.locator('.avatar')).toHaveCount(0);
+    await expect(action.held.pulse).toBeVisible();
     await expect(action.note).toHaveText(CLAIM_NOTE);
-    await expect(action.answered).toHaveCount(0);
-    await expect(action.said).toHaveCount(0);
-    await expect(action.paste).toBeVisible();
-    await expect(action.done).toBeEnabled();
-    await expect(item.segment('A1')).not.toHaveClass(/\bdone\b/);
+    await expect(action.head).toHaveCount(0);
+    await expect(action.claim).toHaveCount(0);
+    await expect(action.paste).toHaveCount(0);
+    await expect(item.segment('A1')).toHaveClass(/\bheld\b/);
+    await expect(item.segment('A1')).toHaveAttribute('title', `${TOKEN} · Pilot is working on it`);
+    expect(await colourOf(item.segment('A1'))).not.toBe(await colourOf(item.segment('D1')));
     await expect(item.unsent).toHaveCount(0);
-    await expect(action.claimWork).toHaveAttribute('href', addressOf(project, rotating));
+    await expect(item.send).toBeDisabled();
+
+    await action.held.heading.click();
+    await expect(action.held.toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(action.held.body).toBeVisible();
+    await expect(action.paste).toBeDisabled();
+    await expect(action.done).toBeDisabled();
+    await action.held.toggle.click();
+    await expect(action.held.body).toHaveCount(0);
+    await action.held.pilots.click();
+    await expect(page).toHaveURL(addressOf(project, rotating));
+    await expect(action.held.body).toHaveCount(0);
 
     // The one block it leaves open held by the work doing it, the document is Pilot's.
     await item.blockAt('D1').option('Friday').click();
@@ -147,8 +186,6 @@ test.describe('A claimed action', () => {
     await expect(item.pilots.root).toHaveAttribute('title', `Go to the work item: ${ROTATING}`);
     await expect(item.pilots.pulse).toBeVisible();
     await expect(item.open).toBeVisible();
-    await item.pilots.root.click();
-    await expect(page).toHaveURL(addressOf(project, rotating));
 
     await overlay.open(project, document);
     await expect(overlay.strip.root).toHaveAttribute('data-doing', 'doing');
@@ -156,7 +193,9 @@ test.describe('A claimed action', () => {
     await expect(overlay.strip.link).toHaveAttribute('href', addressOf(project, rotating));
     await expect(overlay.strip.stop).toBeEnabled();
     const inOverlay = overlay.blockAt('A1');
+    await expect(inOverlay.held.line).toHaveCount(0);
     await expect(inOverlay.claimWork).toHaveText(ROTATING);
+    await expect(inOverlay.note).toHaveText(CLAIM_NOTE);
     await expect(inOverlay.paste).toBeDisabled();
     await expect(inOverlay.done).toBeDisabled();
     await expect(overlay.foot).toHaveCount(0);
@@ -165,7 +204,69 @@ test.describe('A claimed action', () => {
     await expect(page).toHaveURL(addressOf(project, rotating));
   });
 
-  test('opened while the work doing it runs, Stop and take over on its strip stops that work, and the action is the person’s, live, its Done marking it done', async ({
+  test('queued at the gate, the work doing it held by the pause, it is its held line, the dot pulsing, its controls taking nothing and its segment in progress; once that work is stopped it unfolds, live, with its controls, its head saying Pilot’s work left it undone', async ({
+    people,
+    projects,
+    controller,
+    chats,
+    timeline,
+    deploymentSse,
+  }) => {
+    const { project, document, rotating } = await claimed({ people, projects, controller, chats }, { paused: true });
+    await expect.poll(async () => (await projects.work(project, rotating)).state).toBe('held');
+    await timeline.open(project);
+    await deploymentSse.ensureConnected();
+
+    const item = timeline.item(document);
+    const action = item.blockAt('A1');
+    await expect(action.held.pilots).toHaveAttribute('data-doing', 'doing');
+    await expect(action.held.pulse).toBeVisible();
+    await expect(item.segment('A1')).toHaveClass(/\bheld\b/);
+    await action.held.toggle.click();
+    await expect(action.paste).toBeDisabled();
+    await expect(action.done).toBeDisabled();
+
+    await projects.stop(rotating);
+    await expect(action.held.line).toHaveCount(0);
+    await expect(action.root).toHaveClass(/\bopen\b/);
+    await expect(action.undone).toHaveText('Pilot’s work left it undone');
+    await expect(action.undone).toHaveAttribute('title', `${ROTATING} ended without doing it: it is yours again`);
+    await expect(action.claim).toHaveCount(0);
+    await expect(action.paste).toBeEnabled();
+    await expect(action.done).toBeEnabled();
+    await expect(item.segment('A1')).not.toHaveClass(/\bheld\b/);
+    expect(await colourOf(item.segment('A1'))).toBe(await colourOf(item.segment('D1')));
+  });
+
+  test('once the turn of the work doing it fails, it unfolds, live, with its controls, its head saying Pilot’s work left it undone, and the person’s Done closes it', async ({
+    people,
+    projects,
+    controller,
+    chats,
+    timeline,
+    deploymentSse,
+  }) => {
+    const fixtures = { people, projects, controller, chats };
+    const { project, document, rotating } = await claimed(fixtures);
+    const { environment, session } = await turnOf(fixtures, project, rotating);
+    await timeline.open(project);
+    await deploymentSse.ensureConnected();
+    const item = timeline.item(document);
+    const action = item.blockAt('A1');
+    await expect(action.held.line).toBeVisible();
+
+    await controller.finish(environment, session, 'error', 'The model is overloaded.');
+    await expect(action.undone).toBeVisible();
+    await expect(action.held.line).toHaveCount(0);
+    expect((await projects.work(project, rotating)).state).toBe('failed');
+    await action.paste.fill('Rotated by hand.');
+    await action.done.click();
+    await expect(action.answered).toBeVisible();
+    await expect(action.undone).toHaveCount(0);
+    await expect(action.claim).toHaveCount(0);
+  });
+
+  test('opened while the work doing it runs, Stop and take over on its strip stops that work, and the action is the person’s, live, its head saying Pilot’s work left it undone, its Done marking it done', async ({
     people,
     projects,
     controller,
@@ -184,6 +285,7 @@ test.describe('A claimed action', () => {
     await overlay.strip.stop.click();
     await expect(overlay.strip.root).toHaveCount(0);
     await expect(action.done).toBeEnabled();
+    await expect(action.undone).toBeVisible();
     expect((await projects.work(project, rotating)).state).toBe('stopped');
     await action.paste.fill('Rotated by hand.');
     await action.done.click();
@@ -191,7 +293,7 @@ test.describe('A claimed action', () => {
     await expect(overlay.send).toBeEnabled();
   });
 
-  test('while the run doing it waits on the person’s answer to a document it registered, its document opened says so on the strip and links that document, with no Stop; that document’s Cancel, saying it is part of the work on the first and naming the action, closes it, and the action is the person’s, live', async ({
+  test('while the run doing it waits on the person’s answer to a document it registered, its document opened says so on the strip and links that document, with no Stop; that document’s Cancel, saying it is part of the work on the first and naming the action, closes it, and the action is the person’s, live, its head saying Pilot’s work left it undone', async ({
     people,
     projects,
     controller,
@@ -227,6 +329,8 @@ test.describe('A claimed action', () => {
     const item = timeline.item(document);
     await expect(item.root).toHaveAttribute('data-state', 'open');
     const action = item.blockAt('A1');
+    await expect(action.held.line).toHaveCount(0);
+    await expect(action.undone).toBeVisible();
     await expect(action.done).toBeEnabled();
     await action.paste.fill('Rotated by hand.');
     await action.done.click();
@@ -234,7 +338,7 @@ test.describe('A claimed action', () => {
     await expect(action.claim).toHaveCount(0);
   });
 
-  test('once the work doing it is stopped, a person’s Done marks it done as any action’s, the claim gone, and the document’s answers can be sent', async ({
+  test('once the work doing it is stopped, it unfolds with its controls, its head saying Pilot’s work left it undone, and a person’s Done marks it done as any action’s, the claim gone, and the document’s answers can be sent', async ({
     people,
     projects,
     controller,
@@ -247,9 +351,15 @@ test.describe('A claimed action', () => {
 
     const item = timeline.item(document);
     const action = item.blockAt('A1');
+    await expect(action.root).toHaveClass(/\bopen\b/);
+    await expect(action.undone).toHaveText('Pilot’s work left it undone');
+    await expect(action.claim).toHaveCount(0);
+    await expect(action.said).toHaveCount(0);
+    await expect(item.segment('A1')).not.toHaveClass(/\bheld\b/);
     await action.paste.fill('Rotated by hand.');
     await action.done.click();
     await expect(action.answered).toBeVisible();
+    await expect(action.undone).toHaveCount(0);
     await expect(action.claim).toHaveCount(0);
     await expect(action.said.locator('.said')).toHaveText('Done');
     await expect(action.note).toHaveText('Rotated by hand.');
@@ -261,6 +371,42 @@ test.describe('A claimed action', () => {
     await expect(item.send).toBeEnabled();
     await item.send.click();
     await expect(item.root).toHaveAttribute('data-state', 'done');
+  });
+});
+
+test.describe('A researched block', () => {
+  test('is its section’s held line, “Researching” going to the work item that checks its fact, its segment in progress and its controls taking nothing once opened, beside an action claimed for no work item, the person’s', async ({
+    people,
+    projects,
+    controller,
+    chats,
+    timeline,
+  }) => {
+    const { project, document } = await registered({ people, projects, controller, chats }, TOKEN);
+    const checking = await projects.startWork(project, {
+      title: 'Checking the release calendar',
+      brief: 'Check which day the release calendar leaves free.',
+      cwd: '/work/Example',
+      researches: [`${document}/D1`],
+    });
+    await timeline.open(project);
+
+    const item = timeline.item(document);
+    await expect(item.root).toHaveAttribute('data-state', 'open');
+    const day = item.blockAt('D1');
+    await expect(day.held.heading).toHaveText('The day');
+    await expect(day.held.pilots).toHaveText('Researching');
+    await expect(day.held.pilots).toHaveAttribute('href', addressOf(project, checking));
+    await expect(item.segment('D1')).toHaveClass(/\bheld\b/);
+    await day.held.toggle.click();
+    await expect(day.option('Friday')).toBeDisabled();
+    await expect(day.option('Monday')).toBeDisabled();
+
+    const action = item.blockAt('A1');
+    await expect(action.held.line).toHaveCount(0);
+    await expect(action.undone).toHaveCount(0);
+    await expect(action.claim).toContainText('Pilot does it');
+    await expect(action.done).toBeEnabled();
   });
 });
 

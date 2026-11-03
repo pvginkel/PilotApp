@@ -14,10 +14,14 @@
  * under that line (F31.4). A note sits under its answer with its icon (F17.4). Gone to at its
  * address, it flashes (F97). In an archived project its controls stand disabled, which the API
  * refuses until Bring back (D012), and so do they in a document that is Pilot's, opened (F28.9).
+ * A block Pilot's work holds, inside a document that is the person's, is its section's line (F31.7;
+ * held.tsx), its controls under it, once opened, taking nothing, as the API refuses them (DB 295).
  * A block of a project's own document, the handbook or
  * `project.md`, has no item, and in the overlay reads only (D1): every answer closed, with no
  * chevron and no Discuss, and an unanswered block open, its controls standing disabled. An action
- * Pilot claimed is open until its Done, its controls a person's (F21.6). A draft's
+ * Pilot claimed is open until its Done, its controls a person's while no work holds it; one Pilot's
+ * work handed back reads no claim, its head, drawn in a one-ask item too, saying Pilot's work left it
+ * undone (F21.6). A draft's
  * block in the Draft tab is answered in place, as a document's is (F47.4), its Discuss quoting it
  * into the definition chat (F39.1).
  */
@@ -35,16 +39,18 @@ import { AutopilotMark } from '@/components/timeline/autopilot-mark';
 import { ConfirmControls, Proposal } from '@/components/timeline/confirmation';
 import { DecisionOptions } from '@/components/timeline/decision';
 import { blockKey, useBlockFlash } from '@/components/timeline/flash';
+import { HeldBody, HeldLine, type Hold } from '@/components/timeline/held';
 import { blockKindOf } from '@/components/timeline/kinds';
 import { LockedContext } from '@/components/timeline/locked';
 import { autopilotMayTake } from '@/components/timeline/may-take';
 import { Note } from '@/components/timeline/note';
 import { QuestionAnswer } from '@/components/timeline/question';
 import { Deferral, DEFERRED } from '@/components/timeline/said';
+import { SectionsContext } from '@/components/timeline/sections';
 import { UserAvatar } from '@/components/timeline/user-avatar';
 import { useAnswer, useDraftAnswer, type Answering } from '@/hooks/use-answer';
 import { useArchived, useAutopilotOff } from '@/hooks/use-projects';
-import { isAnswered, type Block as BlockData, type TimelineItem } from '@/hooks/use-timeline';
+import { isAnswered, type Block as BlockData, type BodyPart, type TimelineItem } from '@/hooks/use-timeline';
 import type { QuoteRef } from '@/lib/chat/quotes';
 import { cn } from '@/lib/utils';
 
@@ -53,27 +59,45 @@ interface BlockProps {
   block: BlockData;
   /** A one-ask item's one block, whose kind the item's head names. */
   solo?: boolean;
+  /** Its own section's parts in their order, itself among them, which its line folds while it is held. */
+  section?: BodyPart[];
 }
 
 /** An item's block, answered through its item. */
-export function Block({ item, block, solo = false }: BlockProps) {
+export function Block({ item, block, solo = false, section = [{ type: 'block', block }] }: BlockProps) {
   const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
   const answering = useAnswer(item.id, block.id);
   const archived = useArchived(projectId);
   const locked = useContext(LockedContext);
   const autopilotOff = useAutopilotOff(projectId);
   const flash = useBlockFlash(item.id, block.id);
+  const sections = useContext(SectionsContext);
+  // Closed by its chevron after it was opened, by a click, a segment or its address.
+  const [shut, setShut] = useState(false);
+  const key = blockKey(item.id, block.id);
+  const shown = sections.opened.has(key) && !shut;
+  const toggle = () => {
+    if (shown) {
+      setShut(true);
+      return;
+    }
+    sections.open(key);
+    setShut(false);
+  };
+  // A document that is Pilot's draws every block whole (F28.9).
+  const held = block.held === null || locked ? null : { hold: block.held, section, shown, onToggle: toggle };
   return (
     <BlockPanel
-      field={blockKey(item.id, block.id)}
+      field={key}
       block={block}
       solo={solo}
       mayTake={autopilotMayTake(item, block, autopilotOff)}
       answering={answering}
       settled={item.done !== null}
-      disabled={archived || locked}
+      disabled={archived || locked || block.held !== null}
       quote={solo ? null : quoteOfBlock(item, block)}
       flash={flash}
+      held={held}
     />
   );
 }
@@ -94,6 +118,7 @@ export function DocumentBlock({ document, block }: { document: string; block: Bl
       disabled
       quote={null}
       flash={null}
+      held={null}
     />
   );
 }
@@ -121,11 +146,20 @@ export function DraftBlock({ projectId, block, title, flash }: DraftBlockProps) 
       disabled={archived}
       quote={quoteOfDraftBlock(block, title)}
       flash={flash}
+      held={null}
     />
   );
 }
 
 type Flash = ReturnType<typeof useBlockFlash>;
+
+/** A held block's line: what holds it, its section, and whether the section stands open under it. */
+interface Held {
+  hold: Hold;
+  section: BodyPart[];
+  shown: boolean;
+  onToggle: () => void;
+}
 
 /** What a read-only block's controls take, which stand disabled. */
 const unanswerable = (): never => {
@@ -148,9 +182,11 @@ interface BlockPanelProps {
   /** What its head's Discuss quotes; none where its head has no Discuss. */
   quote: QuoteRef | null;
   flash: Flash | null;
+  /** Its line, where Pilot's work holds it inside a document that is the person's; none otherwise. */
+  held: Held | null;
 }
 
-function BlockPanel({ field, block, solo, mayTake, answering, settled, disabled, quote, flash }: BlockPanelProps) {
+function BlockPanel({ field, block, solo, mayTake, answering, settled, disabled, quote, flash, held }: BlockPanelProps) {
   const [opened, setOpened] = useState(false);
   const saving = answering?.saving ?? null;
   const answer = answering?.answer ?? unanswerable;
@@ -161,6 +197,7 @@ function BlockPanel({ field, block, solo, mayTake, answering, settled, disabled,
   const live = !settled && saving === null;
   const off = disabled || answering === null;
   const own = deferred ? null : block.answer;
+  const undone = block.claim?.undone ?? false;
 
   const controls = () => {
     if (block.confirmation) {
@@ -199,6 +236,7 @@ function BlockPanel({ field, block, solo, mayTake, answering, settled, disabled,
           <ActionAnswer
             field={field}
             block={block}
+            claimed={!undone && held === null}
             saving={saving}
             closed={closed}
             live={live}
@@ -214,6 +252,20 @@ function BlockPanel({ field, block, solo, mayTake, answering, settled, disabled,
     }
   };
 
+  if (held !== null) {
+    return (
+      <section
+        className={cn('block held', flash?.flashing && 'flash')}
+        onAnimationEnd={flash?.onAnimationEnd}
+        data-testid="timeline.block"
+        data-block-id={block.id}
+      >
+        <HeldLine block={block} hold={held.hold} shown={held.shown} onToggle={held.onToggle} />
+        {held.shown && <HeldBody section={held.section} controls={controls()} />}
+      </section>
+    );
+  }
+
   return (
     <section
       className={cn('block', solo && 'solo', answered ? 'answered' : 'open', flash?.flashing && 'flash')}
@@ -222,11 +274,12 @@ function BlockPanel({ field, block, solo, mayTake, answering, settled, disabled,
       data-block-id={block.id}
       data-closed={closed}
     >
-      {(answered || !solo) && (
+      {(answered || !solo || undone) && (
         <BlockHead
           block={block}
           mayTake={mayTake}
           writerAsked={block.writer_asked && !solo}
+          undone={undone}
           answered={answered}
           closed={closed}
           onToggle={closable && answering !== null ? () => setOpened(!opened) : null}
@@ -246,6 +299,8 @@ interface BlockHeadProps {
   mayTake: boolean;
   /** Pilot asked the writer about it; a one-ask item's line says so instead (writer-asked.tsx). */
   writerAsked: boolean;
+  /** Pilot's work on its claim left it undone (F21.6). */
+  undone: boolean;
   answered: boolean;
   closed: boolean;
   /** Toggles a closed answer open and closed again; none where it stays as it is. */
@@ -253,7 +308,7 @@ interface BlockHeadProps {
   quote: QuoteRef | null;
 }
 
-function BlockHead({ block, mayTake, writerAsked, answered, closed, onToggle, quote }: BlockHeadProps) {
+function BlockHead({ block, mayTake, writerAsked, undone, answered, closed, onToggle, quote }: BlockHeadProps) {
   const { icon: Icon, label } = blockKindOf(block);
   const toggle = closed ? 'Show every option' : 'Show only the answer';
   return (
@@ -267,6 +322,17 @@ function BlockHead({ block, mayTake, writerAsked, answered, closed, onToggle, qu
         <span className="asked" data-testid="timeline.block.writer-asked">
           <Avatar who="pilot" size="xs" />
           Pilot asked the writer
+        </span>
+      )}
+      {/* The API names the work item of every claim it hands back. */}
+      {undone && (
+        <span
+          className="pilot-mark undone"
+          title={`${block.claim!.work!.title} ended without doing it: it is yours again`}
+          data-testid="timeline.block.undone"
+        >
+          <Avatar who="pilot" size="xs" />
+          Pilot’s work left it undone
         </span>
       )}
       {onToggle !== null && (

@@ -228,6 +228,8 @@
   .block-head .who .in-chat { margin-right: 4px; }
   /* That Pilot asked the writer about the block (F52.2), Pilot's mark before the words. */
   .block-head .asked { display: inline-flex; align-self: center; align-items: center; gap: 6px; line-height: 20px; }
+  /* That Pilot's work left a claimed action undone (F21.6), Pilot's mark before the words. */
+  .block-head .undone { display: inline-flex; align-self: center; align-items: center; gap: 6px; line-height: 20px; color: hsl(var(--warning-text)); white-space: nowrap; }
   .block-controls { padding: 6px 14px 12px; }
   .block.solo .block-controls { padding-top: 12px; }
   .block.solo .block-head + .block-controls { padding-top: 6px; }
@@ -402,6 +404,34 @@
   }
   .settled-note .icon { margin-right: 6px; }
 
+  /* A block Pilot's work holds (F31.7): its section one line in a block's box, Pilot's mark leading
+     it, the heading giving way first, what Pilot does and the chevron kept whole; the claim's note
+     under it; opened, the section's prose and the block's controls, faded and taking nothing. */
+  .held-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 8px 8px 8px 14px;
+    font-size: var(--text-base);
+    line-height: 22px;
+    cursor: pointer;
+  }
+  .held-line > .avatar { flex: none; }
+  .held-line .heading { flex: 0 1 auto; min-width: 6ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+  .held-line .sep { flex: none; opacity: 0.5; }
+  .held-line .doing { display: flex; flex: none; color: hsl(var(--muted-foreground)); }
+  .held-line .grow { flex: 1; }
+  .held-line .pilots-btn { margin: -6px 0; }
+  .held-line .toggle { flex: none; --h: 24px; margin: -1px 0; color: hsl(var(--muted-foreground)); }
+  .held-line .toggle .icon { width: 14px; height: 14px; }
+  /* Under the heading, past the mark's 24px and the gap. */
+  .held-note { padding: 0 14px 8px 46px; font-size: var(--text-sm); }
+  .held-body { padding: 10px 14px 0; border-top: 1px solid hsl(var(--border)); }
+  .held-body > .prose + .prose, .held-body > .prose + .block-controls { margin-top: 10px; }
+  .held-body > .block-controls { padding-left: 0; padding-right: 0; }
+  .held-body .block-controls :is(.option:not(.chosen), .field) { opacity: 0.55; }
+
   /* The card a larger document or a review leaves: what is in it, how far the answers are. */
   .doc-card .counts { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
   .doc-card .title-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
@@ -423,6 +453,8 @@
     cursor: pointer;
   }
   .seg.done { background: hsl(var(--primary)); }
+  /* Held by Pilot's work: the plan donut's in-progress colour (project-head.css, `.plan-ring .now`). */
+  .seg.held { background: hsl(var(--primary) / 0.45); }
   .seg:hover { outline: 2px solid hsl(var(--primary) / 0.4); outline-offset: 1px; }
 
   /* Pilot writing: its avatar and the dancing dots at the end of the text, 6px, 2px apart, grey at

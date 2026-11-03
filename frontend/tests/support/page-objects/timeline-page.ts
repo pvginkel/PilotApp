@@ -300,8 +300,9 @@ export function settledParts(within: Locator, blockId: string) {
 
 /**
  * An open item's block, its head, its answer; a decision's options, a question's field and Send,
- * an action's paste-back, Done and its options as buttons, and Pilot's claim on it; Other and its
- * console; a confirmation block's check and cross, and No's console.
+ * an action's paste-back, Done and its options as buttons, and Pilot's claim on it, or the mark of
+ * Pilot's work that left it undone; Other and its console; a confirmation block's check and cross,
+ * and No's console; a block Pilot's work holds as its section's line (F31.7).
  */
 export function blockParts(page: Page, root: Locator) {
   return {
@@ -316,6 +317,20 @@ export function blockParts(page: Page, root: Locator) {
     /** An action Pilot claimed: "Pilot does it", its note, and the work item that does it (F21.6). */
     claim: root.getByTestId('timeline.block.claim'),
     claimWork: root.getByTestId('timeline.block.claim.work'),
+    /** "Pilot's work left it undone", in the head of a claimed action Pilot's work handed back (F21.6). */
+    undone: root.getByTestId('timeline.block.undone'),
+    /**
+     * A held block's line: the heading, what Pilot does going to the work item, its pulse, the
+     * chevron, and the section opened under it.
+     */
+    held: {
+      line: root.getByTestId('timeline.block.held'),
+      heading: root.getByTestId('timeline.block.held.heading'),
+      pilots: root.getByTestId('timeline.block.held.pilots'),
+      pulse: root.getByTestId('timeline.block.held.pilots.pulse'),
+      toggle: root.getByTestId('timeline.block.held.toggle'),
+      body: root.getByTestId('timeline.block.held.body'),
+    },
     toggle: root.getByTestId('timeline.block.toggle'),
     answered: root.getByTestId('timeline.block.answered'),
     /** *In the chat*, on an answer given in the chat. */

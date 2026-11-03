@@ -1,7 +1,8 @@
 /**
  * What Pilot does on an item that is Pilot's (F13.7), as a ghost button like Open and Discuss beside
  * it: a running work item's pulsing dot while the session doing Pilot's work on it is queued, held,
- * starting or running, Pilot's mark, then the words. Where a work item does the work, it goes to it
+ * starting or running, Pilot's mark, unless the line it stands in leads with it (F31.7), then the
+ * words. Where a work item does the work, it goes to it
  * in the timeline, its title the tooltip; while the pass pre-rules, it opens the pass's session log;
  * while the pass asks the writer, the words stand still and go nowhere.
  */
@@ -13,16 +14,18 @@ import { pilotsDoingLabel } from '@/lib/utils/status-labels';
 
 interface PilotsButtonProps {
   pilots: Pick<PilotsWork, 'doing' | 'work' | 'pulse'>;
+  /** Whether it draws Pilot's mark. */
+  mark?: boolean;
   testId: string;
 }
 
-export function PilotsButton({ pilots, testId }: PilotsButtonProps) {
+export function PilotsButton({ pilots, mark = true, testId }: PilotsButtonProps) {
   const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
   const { doing, work, pulse } = pilots;
   const words = (
     <>
       {pulse && <span className="pulse" title="Pilot’s session on this is running" data-testid={`${testId}.pulse`} />}
-      <Avatar who="pilot" size="xs" />
+      {mark && <Avatar who="pilot" size="xs" />}
       <span>{pilotsDoingLabel(doing)}</span>
     </>
   );

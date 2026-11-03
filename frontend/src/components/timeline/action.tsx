@@ -3,8 +3,9 @@
  * the first the primary, and Other, whose console sends the words as the answer (F21.2). What was
  * pasted back is the note under the Done, the option or the words. Answered, it reads Done or the
  * option, the words boxed, the note under it (F21.5). Claimed by Pilot and not yet done, it reads
- * "Pilot does it", linking the work item that does it, the claim's note under it, over a person's
- * controls (F21.6).
+ * "Pilot does it", linking the work item that does it, the claim's note under it, over its controls
+ * (F21.6), unless its held line says so (held.tsx) or Pilot's work handed it back, when it reads
+ * nothing of the claim.
  */
 
 import { useState } from 'react';
@@ -24,6 +25,8 @@ interface ActionAnswerProps {
   /** The block's key, which its fields keep their unsent words under. */
   field: string;
   block: Block;
+  /** Whether a claim on it reads "Pilot does it". */
+  claimed: boolean;
   saving: Saving | null;
   closed: boolean;
   /** Whether it takes an answer now. */
@@ -34,11 +37,13 @@ interface ActionAnswerProps {
   onDone: (sent: Sent) => void;
 }
 
-export function ActionAnswer({ field, block, saving, closed, live, disabled = false, onAnswer, onDone }: ActionAnswerProps) {
+export function ActionAnswer({ field, block, claimed, saving, closed, live, disabled = false, onAnswer, onDone }: ActionAnswerProps) {
   const said = saidOf(block, saving);
   return (
     <>
-      {saving === null && block.claim !== null ? <Claimed block={block} work={block.claim.work} /> : said !== null && <Said {...said} />}
+      {saving === null && block.claim !== null
+        ? claimed && <Claimed block={block} work={block.claim.work} />
+        : said !== null && <Said {...said} />}
       {live && !closed && <ActionControls field={field} block={block} disabled={disabled} onAnswer={onAnswer} onDone={onDone} />}
     </>
   );
