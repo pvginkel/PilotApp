@@ -186,6 +186,7 @@ export function workClosedLabel(cause: DoneCause): string | null {
     case 'settled':
     case 'turn_ended':
     case 'finished':
+    case 'cancelled':
       return null;
     default: {
       const unknown: never = cause;

@@ -4,7 +4,9 @@ the block found by their ids and the writer by the caller; the archive
 question's Archive archives the project with it (DB 265); and a person's
 request of a wait, which fires it (F27.3). A document that is Pilot's, and a
 held block, take no answer, Done or paste-back from here (DB 295); Stop and
-take over hands such a document to the person (F28.9)."""
+take over hands such a document to the person (F28.9), and a Cancel on a
+document of the run holding a block, while that run waits on the person, ends
+the run and hands the block back (DB 297 to 299)."""
 
 import uuid
 
@@ -22,7 +24,14 @@ from app.services.people_service import PeopleService
 from app.services.project_service import ProjectService
 from app.services.wait_service import WaitService
 from app.services.session_start_service import SessionStartService
-from app.services.working_on import held, holding_work, pilots, pilots_work
+from app.services.working_on import (
+    cancels,
+    held,
+    holding_work,
+    pilots,
+    pilots_work,
+    run_documents,
+)
 
 PILOTS_ITEM = "Pilot is working on the item"
 """Why a document that is Pilot's takes no answer, Done or paste-back from
@@ -34,11 +43,22 @@ UNREAD = "it, or another document its run registered, has not been read yet"
 """Why Stop and take over is refused before the pass over a run's documents
 is placed: nothing of it is in flight to stop."""
 
-WAITS_ON = "Pilot waits on an answer to {document}"
+WAITS_ON = "Pilot waits on an answer to {document}, whose Cancel hands the blocks back"
 """Why Stop and take over is refused while the run holding the blocks waits
-on the person: nothing of it is in flight to stop (R20)."""
+on the person: nothing of it is in flight to stop, and a Cancel on that
+document ends the run (R20)."""
 
 HOLDING_UNREAD = "a document of the run holding its blocks has not been read yet"
+
+NOT_A_RUNS = "it is no document a work item's run registered"
+"""Why a Cancel is refused on an item that is not a registered document of a
+worker's run (DB 297)."""
+
+HOLDS_NOTHING = "its run holds no block of another document"
+
+RUN_IN_FLIGHT = "something of its run is in flight"
+"""Why a Cancel is refused while the server goes on with the run by itself
+(DB 294, 297)."""
 
 
 class ItemService:
@@ -218,6 +238,45 @@ class ItemService:
         if not work:
             raise InvalidOperationException(operation, HOLDING_UNREAD)
         self.session_start_service.take_over(self.db, work, person)
+
+    def cancel(self, auth: AuthContext, item_id: uuid.UUID) -> None:
+        """The caller's Cancel on an open registered document of a worker's
+        run that is theirs, while nothing of the run is in flight and it
+        holds a block of another document (F28.9; DB 297 to 299), under its
+        project's row: every open document of the run closed at once by
+        them, done `cancelled`, which offers no undo, owes no write-back and
+        continues nothing, so that the run is ended and the blocks it held
+        are theirs again.
+
+        Raises:
+            RecordNotFoundException: no item has the id, or it has no
+                document.
+            InvalidOperationException: the caller has not chosen a handle;
+                the item is done, or no document a work item's run
+                registered; it is Pilot's; its run holds no block of another
+                document, or something of it is in flight; or the project is
+                archived.
+        """
+        item = self._item(item_id)
+        operation = f"cancel item {item_id}"
+        person = self.people_service.require_person(auth, operation)
+        if self.db.get(Document, item.id) is None:
+            raise RecordNotFoundException("Document", str(item_id))
+        project = self._lock_project(item)
+        if item.done_at is not None:
+            raise InvalidOperationException(operation, "the item is done")
+        if self.db.scalar(select(Item.id).where(Item.id == item.id, pilots())):
+            raise InvalidOperationException(operation, PILOTS_ITEM)
+        reading = cancels(self.db, [item.id]).get(item.id)
+        if reading is None:
+            raise InvalidOperationException(operation, NOT_A_RUNS)
+        if not reading.takes_back:
+            raise InvalidOperationException(operation, HOLDS_NOTHING)
+        if reading.going_on:
+            raise InvalidOperationException(operation, RUN_IN_FLIGHT)
+        self.record_service.cancel(
+            project, run_documents(self.db, reading.run_id), person, operation
+        )
 
     def _lock_project(self, item: Item) -> Project:
         """The item's project, its row locked as an item's close locks it,

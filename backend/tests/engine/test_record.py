@@ -2366,6 +2366,146 @@ class TestRecordServiceWriteBackOwed:
         ]
 
 
+class TestRecordServiceCancel:
+    """A person's Cancel on a run's documents (F28.9; DB 297 to 299): each
+    open one done at once, `cancelled`, by them, which offers no undo, owes
+    no write-back and continues nothing."""
+
+    def test_each_open_document_is_done_cancelled_by_the_person_at_once(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        run = _ended_run(container, project, project_session)
+        asked, document = _registered(session, container, project, run, TWO_ASKS)
+        survey, _ = _registered(session, container, project, run, NOTICE, SURVEY_PATH)
+        records = container.record_service()
+        records.answer(document, "D1", person, "Dome")
+        text = document.published_text
+        versions = session.scalars(
+            select(DocumentVersion.id).where(DocumentVersion.document_id == asked.id)
+        ).all()
+        clear_after_commit_callbacks()
+
+        with scoped_session(container):
+            records.cancel(project, [asked.id, survey.id], person, "cancel the run")
+
+        for each in (asked, survey):
+            assert (each.done_cause_code, each.done_by_user_id) == (
+                "cancelled",
+                person.id,
+            )
+        assert asked.done_at is not None and asked.done_at == survey.done_at
+        assert document.published_text == text
+        assert (
+            session.scalars(
+                select(DocumentVersion.id).where(
+                    DocumentVersion.document_id == asked.id
+                )
+            ).all()
+            == versions
+        )
+        assert not owes_write_back(asked, document)
+        assert (
+            session.scalars(
+                select(Document.id)
+                .join(Item, Item.id == Document.id)
+                .where(write_back_owed())
+            ).all()
+            == []
+        )
+        assert _owed_events(engine_events) == []
+        assert ProjectChanged(project.id) in engine_events
+        assert _continuations(session, project) == []
+        assert not records.offers_undo(asked)
+        with pytest.raises(InvalidOperationException) as refused:
+            records.undo(asked)
+        assert refused.value.cause == "an item done as cancelled offers no undo"
+
+    def test_a_later_close_of_another_document_of_the_run_continues_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        # DB 299: no Work continues a cancelled run's conversation.
+        run = _ended_run(container, project, project_session)
+        decision, document = _registered(session, container, project, run, DECISION)
+        survey, _ = _registered(session, container, project, run, NOTICE, SURVEY_PATH)
+        records = container.record_service()
+
+        records.cancel(project, [survey.id], person, "cancel the run")
+        records.answer(document, "D1", person, "Tunnel")
+
+        assert decision.done_cause_code == "answered"
+        assert _continuations(session, project) == []
+        assert (decision.consumed_at, survey.consumed_at) == (None, None)
+
+    def test_a_document_done_already_stays_as_it_was_closed(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        run = _ended_run(container, project, project_session)
+        survey, _ = _registered(session, container, project, run, NOTICE)
+        records = container.record_service()
+        records.reviewed(survey, person)
+
+        records.cancel(project, [survey.id], person, "cancel the run")
+
+        assert survey.done_cause_code == "marked"
+
+    def test_pilot_cancels_nothing(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        run = _ended_run(container, project, project_session)
+        survey, _ = _registered(session, container, project, run, NOTICE)
+        with pytest.raises(InvalidOperationException) as refused:
+            container.record_service().cancel(
+                project, [survey.id], _agent(session), "cancel the run"
+            )
+
+        assert (refused.value.operation, refused.value.cause) == (
+            "cancel the run",
+            "a Cancel is a person's",
+        )
+        assert survey.done_at is None
+
+    def test_an_archived_projects_run_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        run = _ended_run(container, project, project_session)
+        survey, _ = _registered(session, container, project, run, NOTICE)
+        project.archived = True
+        session.flush()
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.record_service().cancel(
+                project, [survey.id], person, "cancel the run"
+            )
+
+        assert refused.value.cause == "its project is archived"
+        assert survey.done_at is None
+
+
 SURVEY_PATH = "/work/Example/survey.md"
 CONTINUED = (
     "Your documents were answered and written back in place: {paths}."

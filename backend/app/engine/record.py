@@ -83,7 +83,12 @@ MARKED = "marked"
 SETTLED = "settled"
 TURN_ENDED = "turn_ended"
 FINISHED = "finished"
+CANCELLED = "cancelled"
 WITHDRAWN = "withdrawn"
+
+ENDS_RUN = (FINISHED, CANCELLED)
+"""The Done Causes of a registered document's close that ends its run: no
+continuation follows it and it owes no write-back (D049; DB 299)."""
 
 YES = "Yes"
 
@@ -434,6 +439,47 @@ class RecordService:
         for item in items:
             item.done_at = at
             item.done_cause_code = FINISHED
+            item.done_by_user_id = user.id
+        if items:
+            self.view_service.timeline_moved(project)
+
+    def cancel(
+        self,
+        project: Project,
+        document_ids: Sequence[uuid.UUID],
+        user: User,
+        operation: str,
+    ) -> None:
+        """A person's Cancel on a document of a run (F28.9; DB 297 to 299):
+        the run's open registered documents `document_ids` done at once by
+        `user`, their Done Cause `cancelled`, which offers no undo, in the
+        caller's transaction, which holds the project's row exclusively. The
+        texts are untouched: no Version is cut, no write-back is owed and no
+        continuation is placed, so the run is ended.
+
+        Raises:
+            InvalidOperationException: `user` is Pilot, or the project is
+                archived.
+        """
+        _a_person(user, operation, "a Cancel is a person's")
+        _not_archived(project, operation)
+        self.db.scalars(
+            select(Document.id)
+            .where(Document.id.in_(document_ids))
+            .order_by(Document.id)
+            .with_for_update()
+        ).all()
+        items = self.db.scalars(
+            select(Item)
+            .where(Item.id.in_(document_ids), Item.done_at.is_(None))
+            .order_by(Item.seq)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).all()
+        at = _now()
+        for item in items:
+            item.done_at = at
+            item.done_cause_code = CANCELLED
             item.done_by_user_id = user.id
         if items:
             self.view_service.timeline_moved(project)
@@ -843,10 +889,10 @@ class RecordService:
         """The close of the registered document `item`, under the project's
         row (`_closing`): once its run has ended, its work item done at its
         turn's end, and none of the documents it registered is open, nor any
-        closed by Finish, which continues nothing (review 4), the run's
-        conversation continues as a new work item, released by `item`
-        (`Continuations`), and every document of the run is consumed by it:
-        no Undo from now (review 1)."""
+        closed by Finish or a Cancel, which continue nothing (review 4; DB
+        299), the run's conversation continues as a new work item, released
+        by `item` (`Continuations`), and every document of the run is
+        consumed by it: no Undo from now (review 1)."""
         run_id = item.created_by_session_id
         # A registered document is its Session's.
         assert run_id is not None
@@ -864,7 +910,7 @@ class RecordService:
             .execution_options(populate_existing=True)
         ).all()
         if any(
-            each.done_at is None or each.done_cause_code == FINISHED
+            each.done_at is None or each.done_cause_code in ENDS_RUN
             for each, _ in registered
         ):
             return
@@ -905,14 +951,14 @@ def resume_message(written: list[str], unread: list[str]) -> str:
 def owes_write_back(item: Item, document: Document) -> bool:
     """Whether the document is a registered one whose text, the answers in it,
     is owed to the file it was registered from (F65.1): closed by a person or
-    by Pilot, Finish's close owing none (review 4); with a text, which one
-    whose read failed has not (ruling D1); and neither written back nor
-    refused since that close."""
+    by Pilot, Finish's close and a Cancel owing none (review 4; DB 299); with
+    a text, which one whose read failed has not (ruling D1); and neither
+    written back nor refused since that close."""
     return (
         document.source_path is not None
         and document.published_text is not None
         and item.done_at is not None
-        and item.done_cause_code != FINISHED
+        and item.done_cause_code not in ENDS_RUN
         and document.written_back_at is None
         and document.write_back_refused_at is None
     )
@@ -925,7 +971,7 @@ def write_back_owed() -> ColumnElement[bool]:
         Document.source_path.is_not(None),
         Document.published_text.is_not(None),
         Item.done_at.is_not(None),
-        Item.done_cause_code != FINISHED,
+        Item.done_cause_code.not_in(ENDS_RUN),
         Document.written_back_at.is_(None),
         Document.write_back_refused_at.is_(None),
     )

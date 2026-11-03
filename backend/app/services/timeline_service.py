@@ -68,6 +68,7 @@ from app.schemas.timeline import (
     BlockPartSchema,
     BlockSchema,
     BodyPartSchema,
+    CancelSchema,
     CardTransitionSchema,
     ChatPlaceSchema,
     ClaimSchema,
@@ -90,6 +91,7 @@ from app.schemas.timeline import (
     SectionSchema,
     StepSchema,
     StopCause,
+    TakenBackSchema,
     TimelineItemSchema,
     TimelineSchema,
     UserSchema,
@@ -117,7 +119,7 @@ from app.services.start_gate import (
 from app.services.store_update_service import stopped_for_update, unlifted
 from app.services.usage_halts import UsageHalts
 from app.services.wait_service import REQUESTS, ShownFiring, WaitService
-from app.services.working_on import holds, pilots, pilots_work
+from app.services.working_on import TakenBack, cancels, holds, pilots, pilots_work
 
 WORK = "work"
 WAIT = "wait"
@@ -640,7 +642,7 @@ class TimelineService:
             self._chat_places({document.id: parts}),
             {},
             frozenset(),
-            _Pilots({}, {}, frozenset()),
+            _Pilots({}, {}, frozenset(), {}),
         )
         return ProjectDocumentSchema(
             title=dsl.parse(text).title,
@@ -793,6 +795,7 @@ class TimelineService:
                     else None
                 ),
                 pilots_work=pilots.items.get(item.id),
+                cancel=pilots.cancels.get(item.id),
             )
             for item, document, form in rows
         ]
@@ -952,11 +955,18 @@ class TimelineService:
         self, document_ids: list[uuid.UUID], body_ids: list[uuid.UUID]
     ) -> "_Pilots":
         """What Pilot does on each of the documents `document_ids` that is
-        Pilot's, and on the held blocks of those of `body_ids`, as the
-        reading reads them (`working_on`)."""
+        Pilot's, and on the held blocks of those of `body_ids`, and the
+        Cancel each of `document_ids` offers, as the reading reads them
+        (`working_on`)."""
         doing = pilots_work(self.db, document_ids)
         reading = holds(self.db, body_ids)
-        named = set(reading.held) | reading.undone
+        offered = {
+            item_id: cancel
+            for item_id, cancel in cancels(self.db, document_ids).items()
+            if cancel.offered
+        }
+        taken = [each for cancel in offered.values() for each in cancel.takes_back]
+        named = set(reading.held) | reading.undone | {each.block_id for each in taken}
         blocks = {
             block_id: (document_id, local_id)
             for block_id, document_id, local_id in self.db.execute(
@@ -968,17 +978,29 @@ class TimelineService:
         linked = {each.work_id for each in doing.values() if each.work_id} | {
             hold.work_id for hold in reading.held.values()
         }
-        asked_in = {each.asked_in for each in doing.values() if each.asked_in} | {
-            hold.asked_in for hold in reading.held.values() if hold.asked_in
-        }
+        linked_documents = (
+            {each.asked_in for each in doing.values() if each.asked_in}
+            | {hold.asked_in for hold in reading.held.values() if hold.asked_in}
+            | {each.document_id for each in taken}
+        )
         titles = {
             item_id: (title, source_path)
             for item_id, title, source_path in self.db.execute(
                 select(Item.id, Item.title, Document.source_path)
                 .outerjoin(Document, Document.id == Item.id)
-                .where(Item.id.in_(linked | asked_in))
+                .where(Item.id.in_(linked | linked_documents))
             )
         }
+        sections: dict[tuple[uuid.UUID, str], dsl.Block] = {}
+        for document_id, text in self.db.execute(
+            select(Document.id, Document.published_text).where(
+                Document.id.in_({each.document_id for each in taken})
+            )
+        ):
+            # A held block is of a document read (DB 261, 293).
+            assert text is not None
+            for block in dsl.parse(text).blocks:
+                sections[(document_id, block.local_id)] = block
 
         def work(work_id: uuid.UUID) -> WorkLinkSchema:
             title, _ = titles[work_id]
@@ -986,14 +1008,26 @@ class TimelineService:
             assert title is not None
             return WorkLinkSchema(id=work_id, title=title)
 
-        def document(item_id: uuid.UUID | None) -> DocumentLinkSchema | None:
-            if item_id is None:
-                return None
+        def link(item_id: uuid.UUID) -> DocumentLinkSchema:
             title, source_path = titles[item_id]
-            # `asked_in` names a registered document alone (`working_on`).
+            # `asked_in` names a registered document alone (`working_on`), and
+            # a claim or a research is of one (DB 261, 293).
             assert source_path is not None
             return DocumentLinkSchema(
                 id=item_id, title=title or PurePosixPath(source_path).name
+            )
+
+        def document(item_id: uuid.UUID | None) -> DocumentLinkSchema | None:
+            return None if item_id is None else link(item_id)
+
+        def taken_back(each: TakenBack) -> TakenBackSchema:
+            block = sections[blocks[each.block_id]]
+            return TakenBackSchema(
+                document=link(each.document_id),
+                block=block.local_id,
+                heading=None if block.section is None else block.section.heading,
+                kind=BlockKind(block.kind.value),
+                research=each.research,
             )
 
         return _Pilots(
@@ -1016,6 +1050,12 @@ class TimelineService:
                 for block_id, hold in reading.held.items()
             },
             undone=frozenset(blocks[block_id] for block_id in reading.undone),
+            cancels={
+                item_id: CancelSchema(
+                    takes_back=[taken_back(each) for each in cancel.takes_back]
+                )
+                for item_id, cancel in offered.items()
+            },
         )
 
     def _edited(self, document_ids: list[uuid.UUID]) -> dict[uuid.UUID, datetime]:
@@ -1151,11 +1191,15 @@ class TimelineService:
 class _Pilots:
     """What Pilot does on a timeline's items, as the reading reads it: on
     each item that is Pilot's by its id, and on each held block and each
-    claim handed back undone by its document's id and its local id."""
+    claim handed back undone by its document's id and its local id; and the
+    Cancels offered."""
 
     items: dict[uuid.UUID, PilotsWorkSchema]
     held: dict[tuple[uuid.UUID, str], HoldSchema]
     undone: frozenset[tuple[uuid.UUID, str]]
+    cancels: dict[uuid.UUID, CancelSchema]
+    """The Cancel each open registered document of a run offers, by its
+    id."""
 
 
 @dataclass(frozen=True)

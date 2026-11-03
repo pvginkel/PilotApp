@@ -117,7 +117,7 @@ ItemForm = Literal["prose", "work", "wait"]
 """Item Kind's forms: which subtype an item is."""
 
 DoneCauseCode = Literal[
-    "answered", "marked", "settled", "turn_ended", "finished", "withdrawn"
+    "answered", "marked", "settled", "turn_ended", "finished", "cancelled", "withdrawn"
 ]
 """Done Cause's codes (DB §2.4)."""
 
@@ -273,9 +273,9 @@ class ClaimSchema(BaseModel):
         description=(
             "Whether Pilot's work left it undone, which its head says: the run "
             "of the work item named for it handed it back, done with it, "
-            "failed or stopped, its `done` unwritten, the action the "
-            "person's again (F21.6; DB 262); false while it is held, and while "
-            "no work item is named for it"
+            "failed, stopped or cancelled, its `done` unwritten, the action "
+            "the person's again (F21.6; DB 262, 299); false while it is held, "
+            "and while no work item is named for it"
         )
     )
 
@@ -353,6 +353,40 @@ class PilotsWorkSchema(BaseModel):
             "answers, the first on the timeline, which the strip links; null "
             "otherwise"
         )
+    )
+
+
+class TakenBackSchema(BaseModel):
+    """A block a Cancel gives back, which its button names (F28.9; DB 297)."""
+
+    document: DocumentLinkSchema = Field(
+        description="The document the block is on, which the label names"
+    )
+    block: str = Field(description="The block's local id", examples=["A1"])
+    heading: str | None = Field(
+        description=(
+            "The heading of the block's own section, as its line names it "
+            "(F30.9); null where it has none"
+        ),
+        examples=["Push the tag"],
+    )
+    kind: BlockKind = Field(description="The block's kind")
+    research: bool = Field(
+        description=(
+            "Whether the run holds it as a research, checking a fact its answer "
+            "rests on; else as a claimed action it does"
+        )
+    )
+
+
+class CancelSchema(BaseModel):
+    """The Cancel a registered document of a run offers (F28.9; DB 297 to
+    299): the document is the person's, nothing of the run is in flight, and
+    the run holds a block of another document. It closes every open document
+    of the run at once, with no Undo, and gives the blocks back."""
+
+    takes_back: list[TakenBackSchema] = Field(
+        description="The blocks the run holds, which it gives back, in timeline order"
     )
 
 
@@ -954,6 +988,13 @@ class TimelineItemSchema(BaseModel):
             "clarification, or with every open block held; it waits on no "
             "person. Null while it is the person's or done, and for every "
             "other item"
+        )
+    )
+    cancel: CancelSchema | None = Field(
+        description=(
+            "The Cancel it offers while it is an open registered document of a "
+            "run that holds a block of another document, it is the person's, "
+            "and nothing of the run is in flight (DB 297); null otherwise"
         )
     )
 

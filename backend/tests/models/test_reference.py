@@ -102,6 +102,7 @@ class TestDoneCause:
             ("settled", "Settled", True),
             ("turn_ended", "Turn ended", False),
             ("finished", "Finished", False),
+            ("cancelled", "Cancelled", False),
             ("withdrawn", "Withdrawn", False),
         }
 

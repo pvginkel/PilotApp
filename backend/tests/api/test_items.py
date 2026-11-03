@@ -1267,6 +1267,99 @@ class TestTakeOver:
         assert response.status_code == 401
 
 
+CUT_OVER = """# The cut-over
+
+```action id=A1
+answer: Pilot does it
+by: agent
+at: 2026-11-02T09:00:00Z
+```
+"""
+
+
+def _run_waits(working: Camp) -> tuple[Item, Item]:
+    """A claimed action whose work item asked the person a question, its
+    turn and the job after it ended: the held document and the question."""
+    writer = working.worker()
+    cut_over = working.registered(writer, CUT_OVER)
+    working.ended(writer)
+    working.ended(working.job_after(writer))
+    doing = working.worker(conversation="conversation-2")
+    working.claim(cut_over, "A1", doing)
+    question = working.registered(doing, PITCH)
+    working.ended(doing)
+    working.ended(working.job_after(doing))
+    return cut_over, question
+
+
+class TestCancel:
+    def test_it_ends_the_run_and_the_action_is_the_callers(
+        self,
+        client: FlaskClient,
+        working: Camp,
+        person: User,
+        second_browser: SSEConnection,
+    ) -> None:
+        cut_over, question = _run_waits(working)
+        _sign_in(client)
+        assert _entry(client, working.project, question)["cancel"] is not None
+        clear_after_commit_callbacks()
+        _heard(second_browser)
+
+        response = client.post(f"{ITEMS}/{question.id}/cancel")
+
+        assert response.status_code == 204
+        assert response.data == b""
+        working.session.refresh(question)
+        assert _done(question) == ("cancelled", person.id)
+        entry = _entry(client, working.project, cut_over)
+        assert entry["pilots_work"] is None
+        (block,) = [part["block"] for part in entry["body"] if part["type"] == "block"]
+        assert block["claim"]["undone"] is True
+        assert {
+            "type": "project_changed",
+            "payload": {"project_id": str(working.project.id)},
+        } in _heard(second_browser)
+
+    def test_a_document_whose_run_holds_nothing_is_refused_with_why(
+        self, client: FlaskClient, working: Camp
+    ) -> None:
+        pitch, job = _under_its_pass(working)
+        working.ended(job)
+        _sign_in(client)
+
+        response = client.post(f"{ITEMS}/{pitch.id}/cancel")
+
+        assert response.status_code == 409
+        assert _error(response) == (
+            f"Cannot cancel item {pitch.id} because its run holds no block of"
+            " another document"
+        )
+
+    def test_an_unknown_item_is_not_found(self, client: FlaskClient) -> None:
+        _sign_in(client)
+
+        response = client.post(f"{ITEMS}/{uuid.uuid4()}/cancel")
+
+        assert response.status_code == 404
+
+    def test_without_the_editor_role_it_is_forbidden(
+        self, client: FlaskClient, working: Camp
+    ) -> None:
+        _, question = _run_waits(working)
+        _sign_in(client, roles=())
+
+        assert client.post(f"{ITEMS}/{question.id}/cancel").status_code == 403
+        assert question.done_at is None
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        response = oidc_client.post(f"{ITEMS}/{uuid.uuid4()}/cancel")
+
+        assert response.status_code == 401
+
+
 class TestWhilePilotWorks:
     def test_an_answer_on_a_document_under_its_pass_is_refused_with_why(
         self, client: FlaskClient, working: Camp

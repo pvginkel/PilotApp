@@ -3209,6 +3209,25 @@ _TWO_QUESTIONS = """# The trip
 """Two questions: a research checks a fact for one of them."""
 
 
+_CHECKLIST = """# Release checklist
+
+## Push the tag
+
+```action id=A1
+answer: Pilot does it
+by: agent
+at: 2026-11-02T09:00:00Z
+```
+
+## Announce it
+
+```action id=A2
+```
+"""
+"""An action the pass claimed in its own section, beside one that waits on the
+person."""
+
+
 def _entry(camp: Camp, item: Item) -> dict[str, Any]:
     """The item's entry on its project's timeline."""
     return next(
@@ -3361,6 +3380,82 @@ class TestPilotsWork:
             },
             "Q2": None,
         }
+
+    def test_a_document_of_a_run_that_waits_on_the_person_offers_its_cancel(
+        self, camp: Camp
+    ) -> None:
+        writer = camp.worker()
+        checklist = camp.registered(writer, _CHECKLIST)
+        trip = camp.registered(writer, _TWO_QUESTIONS)
+        camp.ended(writer)
+        camp.ended(camp.job_after(writer))
+        doing = camp.worker(conversation="conversation-2")
+        camp.claim(checklist, "A1", doing)
+        camp.research(trip, "Q2", doing)
+        question = camp.registered(doing, _PITCH)
+        survey = camp.registered(doing, _SURVEY)
+        camp.ended(doing)
+        camp.ended(camp.job_after(doing))
+        cancel = {
+            "takes_back": [
+                {
+                    "document": _link(checklist, "Release checklist"),
+                    "block": "A1",
+                    "heading": "Push the tag",
+                    "kind": "action",
+                    "research": False,
+                },
+                {
+                    "document": _link(trip, "The trip"),
+                    "block": "Q2",
+                    "heading": None,
+                    "kind": "question",
+                    "research": True,
+                },
+            ]
+        }
+
+        for read in (_entry(camp, question), _read(camp.container, question)):
+            assert read["cancel"] == cancel
+        assert _entry(camp, survey)["cancel"] == cancel
+        assert _entry(camp, checklist)["cancel"] is None
+
+        camp.container.item_service().cancel(ADA, survey.id)
+
+        for each in (question, survey):
+            entry = _entry(camp, each)
+            assert entry["cancel"] is None
+            assert entry["done"] == {
+                "at": entry["done"]["at"],
+                "cause": "cancelled",
+                "by": ADA_USER,
+                "undo": False,
+            }
+        blocks = _blocks(_entry(camp, checklist))
+        assert blocks["A1"]["held"] is None
+        assert blocks["A1"]["claim"] == {
+            "work": _link(doing, "Building the camp"),
+            "undone": True,
+        }
+        assert _blocks(_entry(camp, trip))["Q2"]["held"] is None
+
+    def test_no_cancel_is_offered_while_the_run_goes_on(self, camp: Camp) -> None:
+        writer = camp.worker()
+        cut_over = camp.registered(writer, _CUT_OVER)
+        camp.ended(writer)
+        camp.ended(camp.job_after(writer))
+        doing = camp.worker(conversation="conversation-2")
+        camp.claim(cut_over, "A1", doing)
+        question = camp.registered(doing, _PITCH)
+        survey = camp.registered(doing, _SURVEY)
+        camp.ended(doing)
+        pass_ = camp.job_after(doing)
+        camp.ask_writer(pass_, question, "Q1")
+        camp.ended(pass_)
+        camp.clarification(pass_, doing)
+
+        assert _entry(camp, survey)["pilots_work"] is None
+        assert _entry(camp, survey)["cancel"] is None
 
 
 @pytest.mark.usefixtures("person")

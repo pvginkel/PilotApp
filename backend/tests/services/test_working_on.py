@@ -29,12 +29,16 @@ from app.services.auth_service import AuthContext
 from app.services.container import ServiceContainer
 from app.services.timeline_service import Badge
 from app.services.working_on import (
+    Cancel,
     Doing,
     PilotsWork,
+    TakenBack,
+    cancels,
     flying,
     handed_back_in,
     holding_work,
     holds,
+    run_documents,
 )
 from app.utils.after_commit import clear_after_commit_callbacks
 from tests.support.working_on import AT, Camp
@@ -500,6 +504,147 @@ class TestAResearch:
         )
 
         assert holds(camp.session, [pitch.id]) == holds(camp.session, [])
+
+
+class TestACancel:
+    """A Cancel on an open registered document of a run that is the
+    person's (DB 297 to 299): offered while nothing of the run is in flight
+    and it holds a Block of another document; once one of its documents is
+    closed `cancelled`, the run holds nothing."""
+
+    def _asking(
+        self, camp: Camp, *, research: bool = False
+    ) -> tuple[Item, models.Session, Item]:
+        """A document whose one block a work item's run holds, a claimed
+        action or a researched question, and the open question that run put
+        to the person, its pass over."""
+        writer = camp.worker()
+        held = camp.registered(writer, QUESTION if research else CLAIMED)
+        camp.ended(writer)
+        camp.ended(camp.job_after(writer))
+        doing = camp.worker(conversation="conversation-2")
+        if research:
+            camp.research(held, "Q1", doing)
+        else:
+            camp.claim(held, "A1", doing)
+        asked = camp.registered(doing, QUESTION)
+        return held, doing, asked
+
+    def _waits(self, camp: Camp, doing: models.Session) -> None:
+        camp.ended(doing)
+        camp.ended(camp.job_after(doing))
+
+    def _cancel(self, camp: Camp, document: Item, person: User) -> None:
+        reading = cancels(camp.session, [document.id])[document.id]
+        camp.container.record_service().cancel(
+            camp.project,
+            run_documents(camp.session, reading.run_id),
+            person,
+            "cancel the run",
+        )
+
+    def test_it_is_offered_on_each_document_of_a_run_that_waits_on_the_person(
+        self, camp: Camp
+    ) -> None:
+        cut_over, doing, asked = self._asking(camp)
+        report = camp.registered(doing, REPORT)
+        self._waits(camp, doing)
+        taken = (TakenBack(camp.block(cut_over, "A1").id, cut_over.id, False),)
+
+        found = cancels(camp.session, [cut_over.id, asked.id, report.id, doing.id])
+
+        # The held document is Pilot's, and a work item no document.
+        assert found == {
+            asked.id: Cancel(doing.id, taken, False),
+            report.id: Cancel(doing.id, taken, False),
+        }
+        assert found[asked.id].offered
+
+    def test_a_cancel_ends_the_run_and_hands_the_claim_back(
+        self, camp: Camp, person: User
+    ) -> None:
+        cut_over, doing, asked = self._asking(camp)
+        report = camp.registered(doing, REPORT)
+        self._waits(camp, doing)
+
+        self._cancel(camp, asked, person)
+
+        assert (asked.done_cause_code, report.done_cause_code) == (
+            "cancelled",
+            "cancelled",
+        )
+        assert camp.of(cut_over) is None
+        assert holds(camp.session, [cut_over.id]).undone == {
+            camp.block(cut_over, "A1").id
+        }
+        assert cancels(camp.session, [asked.id, report.id]) == {}
+        assert handed_back_in(camp.session, doing.id) == [
+            (
+                cut_over.id,
+                camp.session.get_one(Document, cut_over.id).path,
+                "A1",
+            )
+        ]
+
+    def test_a_researched_block_whose_work_asked_first_is_open_again(
+        self, camp: Camp, person: User
+    ) -> None:
+        pitch, doing, asked = self._asking(camp, research=True)
+        self._waits(camp, doing)
+        assert cancels(camp.session, [asked.id])[asked.id].takes_back == (
+            TakenBack(camp.block(pitch, "Q1").id, pitch.id, True),
+        )
+
+        self._cancel(camp, asked, person)
+
+        assert camp.of(pitch) is None
+        assert holds(camp.session, [pitch.id]) == holds(camp.session, [])
+
+    def test_it_is_not_offered_while_something_of_the_run_is_in_flight(
+        self, camp: Camp
+    ) -> None:
+        _, doing, asked = self._asking(camp)
+        other = camp.registered(doing, QUESTION)
+        camp.ended(doing)
+        pass_ = camp.job_after(doing)
+        camp.ask_writer(pass_, other, "Q1")
+        camp.ended(pass_)
+        camp.clarification(pass_, doing)
+
+        reading = cancels(camp.session, [asked.id, other.id])
+
+        # The other is Pilot's while its writer is asked.
+        assert reading.keys() == {asked.id}
+        assert reading[asked.id].going_on
+        assert not reading[asked.id].offered
+
+    def test_it_is_not_offered_on_a_document_of_a_run_that_holds_nothing(
+        self, camp: Camp
+    ) -> None:
+        writer = camp.worker()
+        pitch = camp.registered(writer, QUESTION)
+        camp.ended(writer)
+        camp.ended(camp.job_after(writer))
+
+        reading = cancels(camp.session, [pitch.id])
+
+        assert reading == {pitch.id: Cancel(writer.id, (), False)}
+        assert not reading[pitch.id].offered
+
+    def test_the_runs_documents_follow_its_conversation(
+        self, camp: Camp, person: User
+    ) -> None:
+        _, doing, first = self._asking(camp)
+        self._waits(camp, doing)
+        camp.answered(first, "Q1", "The lake")
+        continuation = camp.continuation(doing)
+        second = camp.registered(continuation, QUESTION)
+        third = camp.registered(continuation, REPORT)
+        self._waits(camp, continuation)
+
+        assert run_documents(camp.session, doing.id) == [second.id, third.id]
+        assert run_documents(camp.session, continuation.id) == [second.id, third.id]
+        assert cancels(camp.session, [second.id])[second.id].run_id == continuation.id
 
 
 class TestWhatWaits:

@@ -15,9 +15,11 @@ clarification run's never, has ended and that turn registered no document
 with a Block in it: it asked the person nothing. It hands the Block back at
 once while one of its Works, or the latest job after one of their turns,
 stands failed or stopped otherwise than by the server's own resumable stops;
-a Resume or a Retry holds it again. Until then the Block is held, whether
-something of the run is in flight or the run waits on the person's answer to
-a document it registered.
+a Resume or a Retry holds it again. A person's Cancel on a document of the
+run ends it (DB 297 to 299): once one of its documents is closed `cancelled`
+it holds nothing. Until then the Block is held, whether something of the run
+is in flight or the run waits on the person's answer to a document it
+registered.
 
 Every hold is read by one grouped query over the standing namings and the
 Works of their runs (`_holding`), which no Block or Item correlates: a query
@@ -47,7 +49,7 @@ from sqlalchemy.orm import QueryableAttribute, Session, aliased
 from app.engine import claims, researches
 from app.engine.claims import claimed
 from app.engine.documents import awaiting_read
-from app.engine.record import TURN_ENDED
+from app.engine.record import CANCELLED, TURN_ENDED
 from app.models import (
     Block,
     ClarificationRun,
@@ -189,7 +191,9 @@ class _Rows:
         return and_(self.session.state_code.in_(_DOWN), ~self.in_flight())
 
 
-def run_of(work_id: ColumnElement[uuid.UUID]) -> Select[uuid.UUID]:
+def run_of(
+    work_id: ColumnElement[uuid.UUID] | QueryableAttribute[uuid.UUID | None],
+) -> Select[uuid.UUID]:
     """The Works of the run the Work `work_id` begins: it and every worker's
     Work on its conversation (DB 183), its continuations and its
     clarification runs."""
@@ -242,11 +246,12 @@ def _any(condition: ColumnElement[bool]) -> ColumnElement[bool]:
 
 def _holding() -> Subquery:
     """Each standing naming that still applies, with what its run makes of
-    its Block, one row per Block: `holding`, the run neither handing it back
-    nor done with it; `going_on`, something of the run in flight, a document
-    of it awaiting its read among them, the job after its turn placed once
-    it is read; `pulse`, a Session of the run, a Work's or the latest job's
-    after one of their turns, queued or held, starting or running."""
+    its Block, one row per Block: `holding`, the run neither handing it back,
+    nor done with it, nor ended by a Cancel (DB 299); `going_on`, something
+    of the run in flight, a document of it awaiting its read among them, the
+    job after its turn placed once it is read; `pulse`, a Session of the run,
+    a Work's or the latest job's after one of their turns, queued or held,
+    starting or running."""
     standing = _standing()
     named = aliased(AgentSession)
     member = _Rows.new()
@@ -256,6 +261,7 @@ def _holding() -> Subquery:
     registered = aliased(Item)
     document = aliased(Document)
     unread = aliased(Item)
+    closed = aliased(Item)
     asked_nothing = ~(
         select(asked.id)
         .join(registered, registered.id == asked.document_id)
@@ -279,14 +285,26 @@ def _holding() -> Subquery:
         job.item.done_at.is_not(None),
         asked_nothing,
     )
+    cancelled = (
+        select(closed.id)
+        .where(
+            closed.created_by_session_id == member.work.id,
+            closed.done_cause_code == CANCELLED,
+        )
+        .correlate_except(closed)
+        .exists()
+    )
     return (
         select(
             standing.c.block_id,
             standing.c.work_id,
             standing.c.research,
-            and_(~_any(member.down()), ~_any(job.down()), ~_any(done_with)).label(
-                "holding"
-            ),
+            and_(
+                ~_any(member.down()),
+                ~_any(job.down()),
+                ~_any(done_with),
+                ~_any(cancelled),
+            ).label("holding"),
             or_(_any(member.in_flight()), _any(job.in_flight()), _any(awaiting)).label(
                 "going_on"
             ),
@@ -443,10 +461,9 @@ def pilots(document: type[Item] = Item) -> ColumnElement[bool]:
     )
 
 
-def _asked_in(work_id: ColumnElement[uuid.UUID]) -> ColumnElement[uuid.UUID]:
-    """The first open registered document of the run `work_id` begins on the
-    timeline: while the run holds a Block with nothing of it in flight, the
-    one the person answers."""
+def _documents_of(work_id: ColumnElement[uuid.UUID]) -> Select[uuid.UUID]:
+    """The open registered documents of the run the Work `work_id` begins,
+    in timeline order."""
     document = aliased(Document)
     registered = aliased(Item)
     return (
@@ -458,10 +475,15 @@ def _asked_in(work_id: ColumnElement[uuid.UUID]) -> ColumnElement[uuid.UUID]:
             document.source_path.is_not(None),
         )
         .order_by(registered.seq)
-        .limit(1)
         .correlate_except(registered, document)
-        .scalar_subquery()
     )
+
+
+def _asked_in(work_id: ColumnElement[uuid.UUID]) -> ColumnElement[uuid.UUID]:
+    """The first open registered document of the run `work_id` begins on the
+    timeline: while the run holds a Block with nothing of it in flight, the
+    one the person answers."""
+    return _documents_of(work_id).limit(1).scalar_subquery()
 
 
 def holds(db: Session, document_ids: Collection[uuid.UUID]) -> Holds:
@@ -597,6 +619,91 @@ def holding_work(db: Session, document_id: uuid.UUID) -> list[uuid.UUID]:
                 )
             )
     return sorted(found)
+
+
+@dataclass(frozen=True)
+class TakenBack:
+    """A Block a Cancel gives back to the person: one the run of the
+    document it is pressed on holds (DB 297)."""
+
+    block_id: int
+    document_id: uuid.UUID
+    research: bool
+    """A research's naming, else a claim's."""
+
+
+@dataclass(frozen=True)
+class Cancel:
+    """What a Cancel on an open registered document of a worker's run that
+    is the person's reads (F28.9; DB 297): what the run holds, and whether
+    something of it is in flight."""
+
+    run_id: uuid.UUID
+    """The work item that registered the document, of the run it ends."""
+    takes_back: tuple[TakenBack, ...]
+    """The Blocks the run holds, in timeline order."""
+    going_on: bool
+    """Something of the run in flight, a document of it awaiting its read
+    among them."""
+
+    @property
+    def offered(self) -> bool:
+        """The run holds a Block and nothing of it is in flight."""
+        return bool(self.takes_back) and not self.going_on
+
+
+def cancels(db: Session, item_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, Cancel]:
+    """What a Cancel reads on each of the Items `item_ids` that is an open
+    registered document of a worker's run and the person's (DB 296, 297), by
+    its id, whether it is offered or not; every other Item is left out."""
+    holding = _holding()
+    creator = aliased(AgentSession)
+    named = aliased(Block)
+    owner = aliased(Item)
+    rows = db.execute(
+        select(
+            Item.id,
+            Item.created_by_session_id,
+            holding.c.block_id,
+            named.document_id,
+            holding.c.research,
+            holding.c.holding,
+            holding.c.going_on,
+        )
+        .join(Document, Document.id == Item.id)
+        .join(creator, creator.id == Item.created_by_session_id)
+        .outerjoin(holding, holding.c.work_id.in_(run_of(Item.created_by_session_id)))
+        .outerjoin(named, named.id == holding.c.block_id)
+        .outerjoin(owner, owner.id == named.document_id)
+        .where(
+            Item.id.in_(list(item_ids)),
+            Item.done_at.is_(None),
+            Document.source_path.is_not(None),
+            creator.kind_code == WORK_KIND,
+            ~pilots(),
+        )
+        .order_by(Item.id, owner.seq, named.position)
+    ).all()
+    runs: dict[uuid.UUID, uuid.UUID] = {}
+    taken: dict[uuid.UUID, list[TakenBack]] = {}
+    going: set[uuid.UUID] = set()
+    for row in rows:
+        runs[row.id] = row.created_by_session_id
+        mine = taken.setdefault(row.id, [])
+        if row.holding:
+            mine.append(TakenBack(row.block_id, row.document_id, row.research))
+        if row.going_on:
+            going.add(row.id)
+    return {
+        item_id: Cancel(run_id, tuple(taken[item_id]), item_id in going)
+        for item_id, run_id in runs.items()
+    }
+
+
+def run_documents(db: Session, run_id: uuid.UUID) -> list[uuid.UUID]:
+    """The open registered documents of the run of the work item `run_id`,
+    in timeline order: what its Cancel closes (DB 298)."""
+    return list(db.scalars(_documents_of(literal(run_id))))
 
 
 def handed_back_in(db: Session, run_id: uuid.UUID) -> list[tuple[uuid.UUID, str, str]]:

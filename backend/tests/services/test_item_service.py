@@ -19,8 +19,11 @@ from app.services.auth_service import AuthContext
 from app.services.container import ServiceContainer
 from app.services.item_service import (
     HOLDING_UNREAD,
+    HOLDS_NOTHING,
+    NOT_A_RUNS,
     NOT_PILOTS,
     PILOTS_ITEM,
+    RUN_IN_FLIGHT,
     UNREAD,
     WAITS_ON,
 )
@@ -882,6 +885,180 @@ class TestItemServiceTakeOver:
             container.item_service().take_over(NEWCOMER, pitch.id)
 
         assert refused.value.cause == NO_HANDLE
+
+
+REPORT = "# What tagging needs\n\nA signed tag.\n"
+"""A document with no block, a report a run registers beside its question."""
+
+
+def _asked(camp: Camp, *, research: bool = False) -> tuple[Item, Item, Item]:
+    """A document whose one block a work item's run holds, a claimed action
+    or a researched question, and the question and the report that run
+    registered, its turn and the job after it ended: the run waits on the
+    person."""
+    held = _passed(camp, QUESTION if research else CLAIMED_ALONE)
+    doing = camp.worker(conversation="conversation-2")
+    if research:
+        camp.research(held, "Q1", doing)
+    else:
+        camp.claim(held, "A1", doing)
+    asked, report = camp.registered(doing, QUESTION), camp.registered(doing, REPORT)
+    camp.ended(doing)
+    camp.ended(camp.job_after(doing))
+    return held, asked, report
+
+
+class TestItemServiceCancel:
+    """A Cancel on a document of a run that holds a block of another
+    document, while the run waits on the person (F28.9; DB 297 to 299): the
+    run ended, every open document of it done `cancelled` by them, the block
+    theirs again."""
+
+    def test_it_closes_every_open_document_of_the_run_and_hands_the_claim_back(
+        self, container: ServiceContainer, camp: Camp, person: User
+    ) -> None:
+        cut_over, asked, report = _asked(camp)
+        items = container.item_service()
+        assert not _waits(camp, cut_over)
+
+        items.cancel(ADA, report.id)
+
+        for each in (asked, report):
+            assert (each.done_cause_code, each.done_by_user_id) == (
+                "cancelled",
+                person.id,
+            )
+        assert camp.of(cut_over) is None
+        assert holds(camp.session, [cut_over.id]).undone == {
+            camp.block(cut_over, "A1").id
+        }
+        assert _waits(camp, cut_over)
+        # No work item continues the run.
+        assert camp.session.scalars(
+            select(models.Session.id).where(
+                models.Session.conversation_id == "conversation-2"
+            )
+        ).all() == [camp.session.get_one(Item, asked.id).created_by_session_id]
+        items.done_action(ADA, cut_over.id, "A1", "Pushed by hand.")
+        assert _block(camp.session, cut_over, "A1").done is not None
+        with pytest.raises(InvalidOperationException) as refused:
+            items.undo(asked.id)
+        assert refused.value.cause == "an item done as cancelled offers no undo"
+
+    def test_a_researched_block_whose_work_asked_first_is_the_persons_again(
+        self, container: ServiceContainer, camp: Camp
+    ) -> None:
+        lake, asked, _ = _asked(camp, research=True)
+        items = container.item_service()
+
+        items.cancel(ADA, asked.id)
+
+        assert camp.of(lake) is None
+        items.answer(ADA, lake.id, "Q1", "The north shore", None)
+        assert _block(camp.session, lake, "Q1").answer == "The north shore"
+
+    def test_one_whose_run_holds_nothing_is_refused(
+        self, container: ServiceContainer, camp: Camp
+    ) -> None:
+        pitch = _passed(camp, PITCH)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.item_service().cancel(ADA, pitch.id)
+
+        assert str(refused.value) == (
+            f"Cannot cancel item {pitch.id} because {HOLDS_NOTHING}"
+        )
+        assert pitch.done_at is None
+
+    def test_one_whose_run_has_something_in_flight_is_refused(
+        self, container: ServiceContainer, camp: Camp
+    ) -> None:
+        cut_over, doing = _claimed(camp, CLAIMED_ALONE)
+        asked, other = camp.registered(doing, QUESTION), camp.registered(doing, PITCH)
+        camp.ended(doing)
+        pass_ = camp.job_after(doing)
+        camp.ask_writer(pass_, other, "Q1")
+        camp.ended(pass_)
+        camp.clarification(pass_, doing)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.item_service().cancel(ADA, asked.id)
+
+        assert refused.value.cause == RUN_IN_FLIGHT
+        assert asked.done_at is None
+        assert camp.of(cut_over) is not None
+
+    def test_a_document_that_is_pilots_is_refused(
+        self, container: ServiceContainer, camp: Camp
+    ) -> None:
+        cut_over, doing = _claimed(camp, CLAIMED_ALONE)
+        asked = camp.registered(doing, QUESTION)
+        camp.ended(doing)
+        camp.job_after(doing)
+
+        for each in (asked, cut_over):
+            with pytest.raises(InvalidOperationException) as refused:
+                container.item_service().cancel(ADA, each.id)
+            assert refused.value.cause == PILOTS_ITEM
+
+    def test_a_document_done_is_refused(
+        self, container: ServiceContainer, camp: Camp
+    ) -> None:
+        _, asked, report = _asked(camp)
+        items = container.item_service()
+        items.reviewed(ADA, report.id)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            items.cancel(ADA, report.id)
+
+        assert refused.value.cause == "the item is done"
+        assert asked.done_at is None
+
+    def test_a_document_no_work_items_run_registered_is_refused(
+        self, container: ServiceContainer, camp: Camp
+    ) -> None:
+        notice = container.test_data_service().item(
+            camp.project.id, "notice", "Pitched", "By the lake.\n", by_pilot=True
+        )
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.item_service().cancel(ADA, notice.id)
+
+        assert refused.value.cause == NOT_A_RUNS
+
+    def test_an_archived_projects_document_is_refused(
+        self, container: ServiceContainer, camp: Camp
+    ) -> None:
+        _, asked, _ = _asked(camp)
+        camp.project.archived = True
+        camp.session.flush()
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.item_service().cancel(ADA, asked.id)
+
+        assert refused.value.cause == "its project is archived"
+        assert asked.done_at is None
+
+    def test_an_item_with_no_document_is_not_found(
+        self, container: ServiceContainer, camp: Camp
+    ) -> None:
+        with pytest.raises(RecordNotFoundException):
+            container.item_service().cancel(ADA, camp.worker().id)
+
+    def test_an_unknown_item_is_not_found(self, container: ServiceContainer) -> None:
+        with pytest.raises(RecordNotFoundException):
+            container.item_service().cancel(ADA, uuid.uuid4())
+
+    def test_a_caller_with_no_handle_is_refused(
+        self, container: ServiceContainer, camp: Camp
+    ) -> None:
+        _, asked, _ = _asked(camp)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.item_service().cancel(NEWCOMER, asked.id)
+
+        assert refused.value.cause == NO_HANDLE
+        assert asked.done_at is None
 
 
 class TestItemServiceWhilePilotWorks:

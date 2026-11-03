@@ -4,8 +4,10 @@ review Reviewed, and undo; and request a wait's firing (F27.3). Each is the
 record's own write; its refusals answer as the API's errors, a document Pilot
 is working on and a block it holds refusing an answer, Done or paste-back (DB
 295). A block is addressed under its item, by its local id (F30.7). Stop and
-take over hands a document Pilot is working on to the person (F28.9). And an
-item's document, read on its own as the overlay draws it (F28, F13.3)."""
+take over hands a document Pilot is working on to the person (F28.9), and a
+Cancel on a document of a run that holds a block ends the run (DB 297 to
+299). And an item's document, read on its own as the overlay draws it (F28,
+F13.3)."""
 
 import uuid
 from typing import Any
@@ -231,6 +233,33 @@ def take_over(
             awaiting its read
     """
     item_service.take_over(caller(), item_id)
+    return "", 204
+
+
+@items_bp.route("/<uuid:item_id>/cancel", methods=["POST"])
+@api.validate(resp=_MARK_RESPONSES)
+@inject
+def cancel(
+    item_id: uuid.UUID,
+    item_service: ItemService = Provide[ServiceContainer.item_service],
+) -> tuple[str, int]:
+    """Cancel a document of a run that holds a block of another document, as
+    the signed-in person, while the document is theirs and nothing of the
+    run is in flight: every open document of the run is done at once,
+    `cancelled`, by them, with no Undo, no write-back and no continuation,
+    so that the run is ended and the blocks it held are theirs again.
+
+    Returns:
+        204: The run's documents are done
+        401: No one is signed in
+        403: The caller lacks the editor role
+        404: No item has the id, or it has no document
+        409: The caller has not chosen a handle; the item is done, or no
+            document a work item's run registered; Pilot is working on it;
+            its run holds no block of another document, or something of it
+            is in flight; or the project is archived
+    """
+    item_service.cancel(caller(), item_id)
     return "", 204
 
 
