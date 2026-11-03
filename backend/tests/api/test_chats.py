@@ -33,6 +33,7 @@ from app.services.turn_end_read_service import TurnEndReadService
 from app.utils.after_commit import clear_after_commit_callbacks
 from tests.support.chats import ChatWriter, close_chat, open_chat
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
+from tests.support.starts import configured_starts
 from tests.support.store_updates import hold
 from tests.support.supervisor import Supervise
 
@@ -118,6 +119,19 @@ def starts(container: ServiceContainer, supervise: Supervise) -> Iterator[None]:
         store_environment_id=STORE_ENVIRONMENT_ID,
     )
     container.session_start_service.override(providers.Object(starting))
+    try:
+        yield
+    finally:
+        container.session_start_service.reset_last_overriding()
+
+
+@pytest.fixture
+def no_controller(container: ServiceContainer, supervise: Supervise) -> Iterator[None]:
+    """The routes' session start with no controller configured, of its own: the
+    container's is a singleton that keeps the `controller_url` it was first
+    built under, an earlier test's override included."""
+    unconfigured = configured_starts(container, supervise, controller_configured=False)
+    container.session_start_service.override(providers.Object(unconfigured))
     try:
         yield
     finally:
@@ -328,6 +342,7 @@ class TestSendChatMessage:
         assert response.status_code == 409
         assert "its chat is starting" in response.get_json()["error"]
 
+    @pytest.mark.usefixtures("no_controller")
     def test_with_no_controller_configured_it_is_409(
         self, client: FlaskClient, opened: Project, person: User
     ) -> None:

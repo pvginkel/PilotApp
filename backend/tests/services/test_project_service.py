@@ -1117,6 +1117,19 @@ def starts(
         container.session_start_service.reset_last_overriding()
 
 
+@pytest.fixture
+def no_controller(container: ServiceContainer, supervise: Supervise) -> Iterator[None]:
+    """The container's session start with no controller configured, of its
+    own: the container's is a singleton that keeps the `controller_url` it was
+    first built under, an earlier test's override included."""
+    unconfigured = configured_starts(container, supervise, controller_configured=False)
+    container.session_start_service.override(providers.Object(unconfigured))
+    try:
+        yield
+    finally:
+        container.session_start_service.reset_last_overriding()
+
+
 def _opening(db: DbSession, project: Project) -> Item:
     return db.scalars(
         select(Item).where(Item.project_id == project.id, Item.kind_code == "opening")
@@ -1426,6 +1439,7 @@ class TestCreateProjectSetup:
         assert job.state_code is SessionState.HELD
         assert draft.state_code is ProjectState.OPEN
 
+    @pytest.mark.usefixtures("no_controller")
     def test_with_no_controller_configured_create_is_refused(
         self, container: ServiceContainer, session: DbSession, person: User
     ) -> None:
