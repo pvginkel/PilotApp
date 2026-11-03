@@ -223,6 +223,11 @@ merge carries the write to the file.
   by its kind. Then a `done` version is cut and the item marked done.
 - `read(item, user)` on a notice and `reviewed(item, user)` on a review: the item's mark, cause
   `marked`, the text untouched.
+- `cancel(project, document_ids, user, operation)`: a person's Cancel on a run's documents
+  ([`round-trip.md`](round-trip.md)). Each open one of `document_ids`, locked in id order, is marked
+  done by `user`, cause `cancelled`, which offers no undo; the texts are untouched, no Version is
+  cut, and like Finish's close it owes no write-back and continues nothing (`ENDS_RUN`). It refuses
+  Pilot as the user and an archived project.
 - `close_unanswered(project, user, at)`: Finish's close ([`projects.md`](projects.md)). Every open
   item of the project but the opening, which is never done, is marked done at `at` by `user`, cause
   `finished`, which offers no undo; the texts are untouched, and a registered document so closed
@@ -255,13 +260,24 @@ answered, a claim not yet done excepted, and a block named twice are refused. `g
 blocks)` writes one row each once the work item is placed. A block named again later keeps its
 earlier rows, and the one whose work item has the highest `seq` stands (`claims.standing()`); a
 claimed action whose rows are none has no work item named. `claims.claimed()` is the claim as a
-query's condition on a block. A claimed action stays out of the badge while its document has no
-other open block ([`projects.md`](projects.md)), and keeps a person's controls: a person who closes
-it meanwhile is answered as any person's answer is. A run that fails leaves the claim
-standing and the block open.
+query's condition on a block. A claimed action is held, Pilot's, through the run of its work item,
+and the person's again once that run hands it back, its claim standing
+([`round-trip.md`](round-trip.md)). The record takes a person's Done on it at any time: the item
+routes refuse the app's controls on a held block before the record is reached
+([`timeline.md`](timeline.md)).
+
+**A researched block** is a block of a registered document the pass left open for a work item that
+checks a fact its answer rests on, named in the `researches` of that work item's `add_item`, each
+naming a Research Assignment ([`record.md`](record.md)). `researchable(project, block_ids,
+operation)` checks the named blocks as `claimable` does, under the same locks: a block with an
+answer, a claim's included, or a `done` is refused, "block <id> of <path> is answered" or "… is
+done", of any kind; `research(project, work, blocks)` writes one row each once the work item is
+placed. The latest naming stands (`researches.standing()`, `backend/app/engine/researches.py`), and
+the block is held through that work item's run as a claimed action is.
 
 Each refuses with `InvalidOperationException`, its message saying why: Pilot as the actor of an
-answer, an action's Done, Read or Reviewed, since Pilot answers in the file with `by: agent`; any
+answer, an action's Done, Read, Reviewed or a Cancel, since Pilot answers in the file with `by:
+agent`; any
 write on a done item; a blank answer; `deferred` without `to`, `to` without `deferred`, or a `to`
 naming neither `plan` nor a task in the plan; an answer to an action without options other than a
 deferral; Done on an action with options or on a block that is no action; Done on an item that is
@@ -274,11 +290,12 @@ none, or is of a finished or an archived project. A block the text does not have
 `RecordNotFoundException`, and the opening has none, nor a registered document whose read failed:
 an answer or a Done on either is refused so.
 
-The close of a registered document by anything but Finish, a one-ask answer, an action's Done that
-closes it, Done or Reviewed, emits `WriteBackOwed` for the Session that registered it while its text
-is owed to its file (`owes_write_back`, and `write_back_owed()` as a query's condition). Once that
-Session's work item is done `turn_ended` and none of the documents it registered is open or closed
-by Finish, the close also releases its continuation (`_release`): the work item that continues
+The close of a registered document by anything but Finish or a Cancel (`ENDS_RUN`), a one-ask
+answer, an action's Done that closes it, Done or Reviewed, emits `WriteBackOwed` for the Session that
+registered it while its text is owed to its file (`owes_write_back`, and `write_back_owed()` as a
+query's condition). Once that Session's work item is done `turn_ended` and none of the documents it
+registered is open or closed by Finish or a Cancel, the close also releases its continuation
+(`_release`): the work item that continues
 the run's conversation, placed through the port `Continuations` (the session start's
 `continue_run`, [`sessions.md`](sessions.md)) with the message naming the files, and every
 document of the run consumed by it, `consumed_at` and `consumed_session_id`, with

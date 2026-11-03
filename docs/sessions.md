@@ -15,7 +15,7 @@ on in [`jobs.md`](jobs.md).
 
 | Service | Does |
 |---|---|
-| `SessionStartService` (`session_start_service.py`) | a work item placed by repository, a run's continuation or a clarification run, its Session written `held` or `starting` through the gate and brought up by its start loop in an environment of Pilot's own; a brain session's start, a chat's or a job's, brought up in the store, a job briefed as it leaves the gate; Stop and Resume; the usage halts' hard stop and the nudges ([`usage.md`](usage.md)) |
+| `SessionStartService` (`session_start_service.py`) | a work item placed by repository, a run's continuation or a clarification run, its Session written `held` or `starting` through the gate and brought up by its start loop in an environment of Pilot's own; a brain session's start, a chat's or a job's, brought up in the store, a job briefed as it leaves the gate; Stop and Resume, and a document's Stop and take over ([`round-trip.md`](round-trip.md)); the usage halts' hard stop and the nudges ([`usage.md`](usage.md)) |
 | `start_gate.py` | `held_reason`, the gate every start passes, and `WorkSlots`, its slot; `setups` and `carried`, the setup the pause lets through and the conversation another run holds |
 | `session_scope.py` | `scoped_create`, what each create of a Session is handed |
 | `RelayService` (`relay_service.py`) | the send of a Turn, the relay of each turn into the records, and the interrupt of a turn stopped under it |
@@ -230,7 +230,9 @@ item that continues the conversation of the work item `run_id`, in the caller's 
 close's, which holds the project's row: its Item titled as the run, at the project's next `seq`,
 its trigger the Item `released` whose close released it; its Work with the run's repository; its
 Session in the run's environment from its placement on, with the run's conversation, `cwd`,
-`agent`, `model` and effort; its Turn 1 `message`, with no author. It passes the gate as
+`agent`, `model` and effort; its Turn 1 `message`, with no author, ending in a line naming each
+block of the run's claims and researches the run handed back to the person, which it leaves to them
+([`round-trip.md`](round-trip.md)). It passes the gate as
 `start_work`'s does, and refuses as it does in a finished or an archived project, which refuses
 the close. Its environment is never reset: the
 conversation goes on in the tree as the run left it ([`round-trip.md`](round-trip.md)).
@@ -406,7 +408,8 @@ no `result` (a `session-gone` record where its controller session is gone), as i
 controller never got. A held or starting Session's Turn ends at the stop, unsent, and its start
 sends nothing more, unless its send was already going out: that Turn is put back in flight and
 interrupted (`send_turn`, above). It is a `409` for a Session that is no work item's, for a job's,
-Pilot's own work ("it is Pilot's own work"), for one neither running, starting nor held ("its turn
+Pilot's own work ("it is Pilot's own work"), which a person stops only through a document's Stop and
+take over ([`round-trip.md`](round-trip.md)), for one neither running, starting nor held ("its turn
 has ended", "it is stopped already", "it has failed", "its session has ended"), and for a caller
 with no handle.
 

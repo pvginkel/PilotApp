@@ -219,7 +219,10 @@ The nudges are asked for at a halt's turn and at an overrule made, at a resume's
 STARTUP, by the start job's reconcile, and by the timer `nudges` on every tick while a nudge owed is
 held by nothing or a wall decided missed still owes one. A person's Resume of a hard-stopped work
 item clears its nudge owed, its own continuation standing in for it: one continuation, never two.
-Finish closes an item whose nudge is owed with its other open items, and its nudge never goes;
+A document's Stop and take over clears the nudge owed to every Work it takes over: one halted is
+stopped by the person, and a pass at the wall stays `failed` and puts no question to the writer
+([`round-trip.md`](round-trip.md)). Finish closes an item whose nudge is owed with its other open
+items, and its nudge never goes;
 Archive keeps it owed, and Bring back lets it go.
 
 ## The quota wall

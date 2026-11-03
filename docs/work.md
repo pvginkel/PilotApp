@@ -255,9 +255,15 @@ pause holds no setup. Then by trigger:
   standing naming theirs, so that a continuation's names those of the run it continues and a retry,
   on a conversation of its own, takes them from it (D100), `The claimed actions given to this work
   item, as they stand:` and a line per action in timeline order, `- <path> (<item id>) <local id>
-  open, claimed`, `… open, its claim gone`, or its close as the record
-  holds it, a person's Done meanwhile included; then every open plan note by summary and the
-  deferrals without a home, as the chat's brief has them ([`chats.md`](chats.md)).
+  open, claimed`, `… open, claimed, handed back to the operator: leave it to them` once the run no
+  longer holds it ([`round-trip.md`](round-trip.md)), `… open, its claim gone`, or its close as the
+  record holds it, a person's Done meanwhile included; then, where the run was given blocks to
+  research, its standing naming theirs as a claim's is, `The blocks this work item researched, as
+  they stand:` and a line per block in timeline order, `- <path> (<item id>) <local id> open`, `…
+  open, handed back to the operator: leave it to them`, `… open, claimed` where it was claimed
+  since, or its answer as the record holds it, `Q1 "Two hosts" (by ada)`; then every open plan note
+  by summary and the deferrals without a home, as the chat's brief has them
+  ([`chats.md`](chats.md)).
 - **The writer answered**, the job after a clarification run's turn, trigger `worker_turn_ended`,
   its trigger item the run ([`round-trip.md`](round-trip.md)): `/pre-rule`, kind `the writer
   answered`; `The clarification run: "<title>" (<id>), of the work item "<title>" (<id>)[, task
@@ -323,7 +329,9 @@ wait's run retried is briefed fresh with the firings the runs it retries took, a
 pending.
 
 On the timeline, a job's `pilots_own` is true. Its line has its session log, and neither the env
-chip, the store's once its start takes it, nor Stop or Resume. Its session log's head names no
+chip, the store's once its start takes it, nor Stop or Resume. A pass's job, and the job after the
+writer's reply, stops through Stop and take over on a document it goes over, by the person, and the
+lift never retries it ([`round-trip.md`](round-trip.md)). Its session log's head names no
 environment. A failed or stopped job shows so, offers Retry, and its project's badge counts it until
 it is retried. A withdrawn job's done line says "Withdrawn by an Undo" under its title
 (`workClosedLabel`).
@@ -435,7 +443,7 @@ sets a timeout of its own.
 
 Every project Create opens is paused, so a spec that creates one and starts work in it resumes it
 first (`projects.transition(id, 'resumed')`). `projects.startWork(project, {title, brief, cwd,
-step?, claims?})` places a work item by `projects.repo`, a repository of the spec's own
+step?, claims?, researches?})` places a work item by `projects.repo`, a repository of the spec's own
 (`example/Example-<unique>`), so that its start takes no environment an earlier spec of the worker
 left free, and answers its id; `projects.environment(project, item)` waits for the environment its
 start took or created and answers its `{id, name}`, the name the project's slug (`slugOf(project)`,

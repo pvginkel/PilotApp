@@ -134,7 +134,10 @@ nothing runs the sequence, the lift included.
 
 **The jobs it stopped** are derived from their stop, never linked: a job's Session stopped by Pilot
 at or after the update's `made_at` and, once lifted, before its `lifted_at`. A job whose item a
-Finish closed at that stop's instant does not count, since Finish stops what it closes. A chat is
+Finish closed at that stop's instant does not count, since Finish stops what it closes, and
+neither does one a person took over meanwhile, its stop then the person's
+([`round-trip.md`](round-trip.md)). Until the lift, a job it stopped is still in flight for what
+Pilot works on: the documents its pass goes over stay Pilot's. A chat is
 not retried: it stays the open one, and the next message after the lift goes to it
 ([`chats.md`](chats.md)).
 A stopped job's line reads "Stopped for Pilot's update · <time>", and its session log ends "Stopped

@@ -16,7 +16,9 @@ notifications through the bridge, a project's and the alarms, with the profile's
 and the usage limits: the halts, the overrule, the halt file, the hard stop, the nudge and each
 turn's tokens, and the store's update: its command, its hold, its sequence and its retry, and the
 phone's layout: its drawer, its tabs at the bottom and its views, and the waits: their firings by
-YouTrack's posts, the due time and a request, and the run per batch. Every green build of
+YouTrack's posts, the due time and a request, and the run per batch, and an ask Pilot is working
+on: its line, the read-only strip with Stop and take over, a held block's line, the hand-back and
+the Cancel. Every green build of
 `main` deploys itself to the dev stage at `https://pilot-dev.home`, and production at
 `https://pilot.ginbov.nl` runs what the operator promotes from there
 ([`docs/deployment.md`](docs/deployment.md)). Version 1 is built from the design record in
@@ -225,7 +227,8 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
   its line, its progress and its session log, and Pilot's own work: its jobs, their briefs, Retry.
 - [`docs/mcp.md`](docs/mcp.md), [`docs/round-trip.md`](docs/round-trip.md),
   [`docs/chats.md`](docs/chats.md): Pilot's MCP server, handed to every session it creates, the
-  worker's tools and the brain's; a registered document's read at the run's end, a claimed action,
+  worker's tools and the brain's; a registered document's read at the run's end, what of it is
+  Pilot's, a claimed or researched block held through its run, Stop and take over and the Cancel,
   the clarification run, its write-back and the run's continuation; a project's chat and a draft's
   definition chat, its start in the store, its brief, its Stop, its close, `chat.md`, and its Chat
   tab, composer, Discuss and *In the chat*.

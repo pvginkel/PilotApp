@@ -213,8 +213,9 @@ record unchanged, and a controller that does not answer or refuses for a reason 
   one object in `timeline.json`'s shape ([`projection.md`](projection.md)): `kind` (`decision`,
   `question`, `action`, `notice`, `document`, `review`, `work`, `card_wait` or `timed_wait`),
   `title`, `step` and `attachments`, then a prose item's `markdown`, `urgent`, `for` and `summary`,
-  a work item's `repo` (`owner/Name`), `cwd`, `brief`, `agent`, `model`, `reasoning_effort` and
-  `claims`, the blocks' ids, `<item id>/<local id>`, of the claimed actions it does, a card wait's
+  a work item's `repo` (`owner/Name`), `cwd`, `brief`, `agent`, `model`, `reasoning_effort`,
+  `claims`, the blocks' ids, `<item id>/<local id>`, of the claimed actions it does, and
+  `researches`, the ids of the blocks it checks a fact for, which the pass left open, a card wait's
   `cards` and `states`, or a timed wait's `due_at`, a time with its offset. A field the kind does not
   take, and a work item without its `title`, `repo`, `cwd` or `brief`, or a wait without its
   `title` and its own fields, are refused. A wait is recorded as given and fixed from then on: an
@@ -238,11 +239,16 @@ record unchanged, and a controller that does not answer or refuses for a reason 
   `controller_unreachable` or `slot`, for the brain to say so. Each of
   `claims` names the work item for a claimed action, an open action of a registered document of the
   project, checked before the start and written after it, so a refused claim starts nothing: each
-  stays open and Pilot's until its `done`, its line naming the work item named for it last, and the
-  job after that work item's turn names it for its `done` ([`engine.md`](engine.md)). A claim's item
-  not of the project, or a block its document lacks, is a `404`; an item that is no registered
-  document, is done or not yet read, a block that is no action or is answered, and one named twice,
-  a `409`. Each of
+  stays open, held through that work item's run ([`round-trip.md`](round-trip.md)), its line naming
+  the work item named for it last, and the job after that work item's turn names it for its `done`
+  ([`engine.md`](engine.md)). A claim's item not of the project, or a block its document lacks, is a
+  `404`; an item that is no registered document, is done or not yet read, a block that is no action
+  or is answered, and one named twice, a `409`. Each of `researches` names the work item for a block
+  of an open registered document of the project with neither an answer, a claim's included, nor a
+  `done`, checked and written as a claim is: each is held through that work item's run, its line
+  naming the work item named for it last, and the job after its turn names it for the pass to route
+  on what the work found. Its refusals are a claim's, but for the block's kind, which is any: "block
+  <id> of <path> is answered" and "… is done" among them. Each of
   `attachments` is an attachment of the project by its id, hung on the new item, or outside
   material, `<environment>:<path>`, copied in as `attach_file` copies it, a batch per source, every
   source's files under the caps of one call, hung in their order. The effect is "Added · <kind's
@@ -293,7 +299,7 @@ record unchanged, and a controller that does not answer or refuses for a reason 
   writer has answered the questions of the pass before it: this pass asks nothing" and "another pass
   of the same run asked its writer already: one round per worker turn". When the pass's job ends,
   its questions go to the writer in one clarification run ([`round-trip.md`](round-trip.md)). It
-  changes no ask, so it writes no effect: the document's line says that Pilot asked its writer
+  changes no ask, so it writes no effect: the asked block's head says that Pilot asked its writer
   ([`timeline.md`](timeline.md)), `blocks` the local ids it is asked about in the document's order,
   and each question is counted, `pilot_pass_questions_total{project}`.
 

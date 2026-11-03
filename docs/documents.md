@@ -110,28 +110,69 @@ At a document's address (`DocumentOverlay`, read by `useItemDocument`):
   *Unsent*, and *Edited <time>*, a pencil in place of its word at 600px and below
   ([`timeline.md`](timeline.md)).
 - **The body**: the summary as its lead, the attachments, then Pilot's questions to the writer
-  (below), then the text as an inline document draws it, every block answered in place and every
-  settled section collapsed, a claimed action reading "Pilot does it" and its work item
-  ([`timeline.md`](timeline.md)), an open archive question its Archive and Keep alone, as the
-  timeline draws them, and Pilot's dots while a turn saves it. A segment scrolls the body
+  (below), then the text as an inline document draws it, every block answered in place, every
+  settled section collapsed and every held block its line, a claimed action reading "Pilot does it"
+  and its work item ([`timeline.md`](timeline.md)), an open archive question its Archive and Keep
+  alone, as the timeline draws them, and Pilot's dots while a turn saves it. A segment scrolls the body
   to its block, which flashes, its section opened first.
 - **The foot**: on a done item, "Done · <stamp>", then " · Pilot", or the other person's name, where
   the signed-in person did not do it; on an open review, Reviewed; on an open document, *Send
   answers*, which closes the overlay once the record holds the answers, each disabled while the
-  project is archived (D012); on an open one-ask item or notice, nothing.
+  project is archived (D012); on an open one-ask item or notice, nothing; and on a document that is
+  Pilot's, no foot. Before them stands the Cancel where the document offers it (below).
 
-**Pilot asked the writer** (`clarification.tsx`). Over a registered document's text stands a
-section per pre-ruling pass that asked its writer about its blocks, the item's `clarifications`
-([`timeline.md`](timeline.md)): Pilot's avatar and "Pilot asked the writer · <stamp>", the stamp
-when the pass first asked, then each question after its block's local id. Once the reply comes, each
-question's part stands under it where the reply kept every heading asked for (`split`), else the
-reply whole under the questions, as Markdown. Until then, and where the run's turn ended with no
-text, the questions stand alone.
+**A document Pilot is working on** (`pilots_work` set, [`round-trip.md`](round-trip.md)) opens
+read-only under the strip (`PilotStrip`, `overlay/pilot-strip.tsx`), which `Overlay` draws between
+its head and its body: every block drawn whole and its controls disabled (`LockedContext`,
+`timeline/locked.ts`), the options not chosen and the fields faded, and no foot. The strip, gold as
+the gold bar
+is ([`ui.md`](ui.md)), holds Pilot's mark and a sentence (`pilotsStripWords()`, `status-labels.ts`):
 
-A registered document with no text, awaiting its read at the end of the run that registered it or
-after one that failed ([`round-trip.md`](round-trip.md)), draws its head, titled by its file's
-name, and "The document did not load." as its body; its foot holds Reviewed once the read was made,
-and nothing while it awaits it. Its attachments open at their addresses.
+- `awaiting_run`: "Nothing of this document has been read yet.", or, read while another of its
+  run awaits its read, "Pilot goes over this document once the other documents its run registered
+  are read.";
+- `pre_ruling`: "Pilot is pre-ruling this document: it settles what it may, and what is left comes
+  to you.";
+- `asking_writer`: "Pilot asked the writer about this document and waits for the reply, then goes
+  over it again.";
+- `doing`: "Pilot does what is open here in <work>; its Done comes with the result.";
+- `researching`: "Pilot has a fact this asks about checked in <work> before it rules.";
+- `waiting_on_answer`: "Pilot waits on your answer to <document> before it goes on with what is
+  open here.";
+
+<work> linking the work item and <document> the run's document. While `pre_ruling`,
+`asking_writer`, `doing` or `researching` it ends in *Stop and take over*, the gold bar's button
+with a square, which asks nothing first: it calls the take-over (`POST take-over`,
+[`round-trip.md`](round-trip.md)), stays disabled from the click until the document reads back as
+the person's, and a refusal is a toast in the API's words. On a phone it wraps under the words, at
+the right. A document awaiting its read draws its head, titled by its file's name, the strip with
+no Stop, and "Its text shows here once Pilot has read it." as its body.
+
+**The Cancel** (`RunCancel`, `overlay/run-cancel.tsx`), on a document whose `cancel` is set
+([`timeline.md`](timeline.md)), opens the foot, before *Send answers* or Reviewed: a first row, "Pilot
+asks this as part of its work on <document>.", each document of `takes_back` a link to its
+address, joined with "and", then the button "Cancel and take back “<name>”", each block named by
+its section's `heading`, else by its document's title, the names joined with "and" and none twice;
+"End that work: this document and every other it put to you close, and what it holds is yours
+again" its tooltip. It asks nothing first, and offers no Undo after: it calls `POST cancel`
+([`round-trip.md`](round-trip.md)), disabled while the project is archived and from the click until
+the document reads back as done. Its words wrap at their spaces.
+
+**Pilot asked the writer** (`clarification.tsx`). Over a registered document's text stands the box
+of Pilot's questions to its writer, a section per pre-ruling pass that asked about its blocks, the
+item's `clarifications` ([`timeline.md`](timeline.md)): Pilot's avatar and "Pilot asked the writer
+· <stamp>", the stamp when the pass first asked, and " · replied <stamp>" once the reply came, then
+each question, muted, after its block's local id. Once the reply comes, each question's part stands
+under it where the reply kept every heading asked for (`split`), else the reply whole under the
+questions, as Markdown. While the clarification run is in flight (`asking_writer`), each question of
+the last section reads "Awaiting the writer’s reply" under it; where the run's turn ended with no
+text, the questions stand alone. The document's clarification address opens the overlay at the box,
+and an asked block's mark in the overlay goes to it there, the address unchanged; either way it
+flashes (`useClarificationBox`, `overlay/clarification-box.ts`).
+
+A registered document whose read failed ([`round-trip.md`](round-trip.md)) draws its head, titled
+by its file's name, "The document did not load." as its body, and Reviewed in its foot. Its
+attachments open at their addresses.
 
 Opened at a card's block address, it goes to the block once its body draws it, and flashes it. Open
 on a done line shows the document as Done fixed it (above), with no *Edited <time>* and no dots: those
@@ -265,6 +306,7 @@ here what you point it at in the chat: a card, a handover, a design."
 | Address | Opens |
 |---|---|
 | `/projects/<project>/documents/<item>` | the item's document in the overlay |
+| `/projects/<project>/documents/<item>/clarification` | the item's document in the overlay, at the box of Pilot's questions to its writer |
 | `/projects/<project>/documents/<item>/attachments/<attachment>` | the attachment in the document's overlay, in the document's place, with the arrow back |
 | `/projects/<project>/items/<item>/attachments/<attachment>` | the attachment in the overlay, over the timeline where it stands |
 | `/projects/<project>/attachments/<attachment>` | the attachment in the overlay, wherever it hangs: a draft's, on nothing, and the same one once Create hangs it on the opening |
@@ -282,7 +324,7 @@ project left it.
 
 ## Testing it
 
-The reads are pinned in `TestItemDocument` and `TestProjectDocument`
+The reads are pinned in `TestItemDocument`, `TestProjectDocument` and `TestPilotsWork`
 (`backend/tests/services/test_timeline_service.py`), `TestGetItemDocument`
 (`tests/api/test_items.py`) and `TestGetProjectDocuments` (`tests/api/test_projects.py`); the store
 and the stream in `tests/engine/test_attachments.py`, `tests/services/test_attachment_service.py`
@@ -299,8 +341,11 @@ endpoints ([`projects.md`](projects.md)), on a project made with a session. The 
 (`tests/support/page-objects/overlay-page.ts`) opens a document's address (`open`), the handbook or
 the project document (`openProjectDocument`), and reads the overlay's head, body, foot and
 attachment view, its head's Discuss among them, on a phone the view's arrow back (`back`) and an
-attachment's link to its document (`documentLink`), and its clarification sections
-(`clarification(n)`, pinned in `tests/work/clarification.spec.ts`); the `panel` fixture
+attachment's link to its document (`documentLink`), its clarification box and sections
+(`clarificationBox`, `clarification(n)`, pinned in `tests/work/clarification.spec.ts`), the strip
+(`strip`: `root`, `text`, `link`, `stop`), the unread body (`unread`) and the Cancel (`cancel`:
+`line`, `links`, `button`), pinned in `tests/work/registered.spec.ts` and `claimed.spec.ts`; the
+`panel` fixture
 (`panel-page.ts`) reads the panel, its Documents tab, on a phone with the handbook's row
 (`handbook`), and a draft's Draft tab (`draft`, `draftBlock(id)`), and the `chat` fixture
 its Chat tab ([`chats.md`](chats.md)). On the default 1280px viewport the panel stands open, on the

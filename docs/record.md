@@ -122,6 +122,10 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
 - `claim_assignments`: a claimed action given to a work item, the `work` and the `block`, both the
   key, one row each time a work item is named for the block; never changed, and of a block's rows
   the one whose work item has the highest `seq` stands ([`engine.md`](engine.md)).
+- `research_assignments`: a block a work item checks a fact for, the `work` and the `block`, both
+  the key, indexed by `block`, one row each time a work item is named for the block in its
+  `researches`; never changed, and of a block's rows the one whose work item has the highest `seq`
+  stands ([`engine.md`](engine.md)).
 - `progress_steps`: a step of a work item's list, as its run publishes it ([`work.md`](work.md)),
   the `work` and the step's `code` the key: `label`; `position`, its place in the list, from 1
   (`ck_progress_steps_position`), unique in the work item's list (`uq_progress_steps_work_id_position`),
@@ -228,7 +232,7 @@ added by a revision and nowhere else.
 | Table | Rows |
 |---|---|
 | `item_kinds` (`name`, `form`, `icon`) | prose: `opening`, `decision`, `confirmation`, `question`, `action`, `notice`, `document`, `review`, `archive_question`; work: `work`; wait: `card_wait`, `timed_wait` |
-| `done_causes` (`name`, `undo_offered`) | undo offered: `answered`, `marked`, `settled`; not: `turn_ended`, `finished`, `withdrawn` (a job an Undo of its trigger item, or its wait's close, withdrew before its brief, which never ran) |
+| `done_causes` (`name`, `undo_offered`) | undo offered: `answered`, `marked`, `settled`; not: `turn_ended`, `finished`, `cancelled` (a run's documents a person's Cancel closed), `withdrawn` (a job an Undo of its trigger item, or its wait's close, withdrew before its brief, which never ran) |
 | `confirmation_reasons` (`name`, `asks_under_autopilot`, `description`) | asked only while auto pilot is off: `auto-pilot-off`, `rider`; asked under auto pilot too: `irreversible`, `product-hold`, `self-approval`, `standing-grant` |
 | `session_kinds` (`name`, `surface`, `on_timeline`) | `chat` (`pilot-store`, not on the timeline), `work` (`pilot-work`), `job` (`pilot-store`) |
 

@@ -160,9 +160,11 @@ initials 14.5, 12 and 10.2px, and Pilot's mark 13/20 of the circle.
 
 **The gold bar's** are `--gold`, `--gold-foreground` and `--gold-edge`, its surface, its text and
 the rule under each line, light and dark; a badge redeclares the light theme's three on
-`.gold-badge`, so that it is the one gold in both themes on the top bar's blue.
-`tests/shell/gold-bar.spec.ts` measures its text at 4.5:1 or better and its hue gold in each
-theme.
+`.gold-badge`, so that it is the one gold in both themes on the top bar's blue. The overlay's
+strip over a document Pilot is working on takes the theme's three as the phone's gold line does,
+its button the gold bar's ([`documents.md`](documents.md)). `tests/shell/gold-bar.spec.ts`
+measures the bar's text at 4.5:1 or better and its hue gold in each theme, and
+`tests/work/registered.spec.ts` the strip's.
 
 ## The shared pieces
 

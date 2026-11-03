@@ -12,12 +12,15 @@ plan, its members, the auto pilot switch, which offers to answer the confirmatio
 it turns on, and Finish, Reopen, Archive and Bring back, a finish followed by the question whether
 to archive ([`docs/projects.md`](docs/projects.md)); under the head, its timeline, where every item
 that asks one thing is answered in place and a document inline or from its card, its answers sent at
-once, with Undo, urgent banners, the auto pilot mark, a badge per tab and a URL per item, and which
-every open browser follows live ([`docs/timeline.md`](docs/timeline.md)); its work items, each a
+once, with Undo, urgent banners, the auto pilot mark, a badge per tab and a URL per item, an item
+Pilot is still working on one line until it is done, read-only under a gold strip with Stop and
+take over, and which every open browser follows live ([`docs/timeline.md`](docs/timeline.md)); its
+work items, each a
 session Pilot runs, live on the timeline with its one current line, the steps its run publishes on
 a donut, Stop and Resume, and its session log, and Pilot's own background jobs among them, one at a time per project, each a session of
 the brain's, fresh but for a wait's run: the setup, the pre-ruling pass after every worker's turn,
-which may ask the worker's writer or claim an action for a work item of Pilot's, the plan's next
+which may ask the worker's writer, or claim an action or research a fact for a work item of
+Pilot's, the blocks held through its run, the plan's next
 step after every item of Pilot's a person closes, and a wait's run, with Retry on one that failed
 ([`docs/work.md`](docs/work.md)); each
 project's status as one icon on its tab, which pauses it, and the gold bar, a badge in the top bar

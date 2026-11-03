@@ -57,8 +57,6 @@ each with:
   from 1, and `source` where it was copied from, `<environment>:<path>`, null for the draft's copy
   that Create project hangs on the opening. Its bytes are streamed apart
   ([`documents.md`](documents.md));
-- `asked_writer_about`: the local ids of the blocks Pilot asked a registered document's writer
-  about, in the document's order (`ask_writer`, [`mcp.md`](mcp.md)); empty on every other item;
 - `clarifications`: Pilot's questions to a registered document's writer and the writer's reply, one
   per pre-ruling pass that asked about its blocks, in the order first asked, which is one in
   practice ([`round-trip.md`](round-trip.md)); empty on every other item. Each is `{asked_at,
@@ -79,10 +77,28 @@ each with:
   it, `pilots_turn`, `left_open` or `closed`, null where it did nothing; `request`, `{label, open,
   refusal}`, the head's button, `label` *Check now* or *Skip wait*, `open` whether the wait takes a
   request now, and `refusal` why not, null while it does; and `note`, the brain's words at its close
-  through `mark`, null while open and after Finish's close. A wait waits since its `created_at`.
+  through `mark`, null while open and after Finish's close. A wait waits since its `created_at`;
+- `pilots_work`, what Pilot does on the item while it is Pilot's ([`round-trip.md`](round-trip.md)),
+  null while it is the person's or done, and on every other item: `{doing, work, pulse, asked_in}`.
+  `doing` is `awaiting_run`, it or another document its run registered awaiting its read;
+  `pre_ruling`, its pass in flight, or the pass after the writer's reply; `asking_writer`, the
+  clarification run its pass asked for in flight; and, with every open block held, `doing` or
+  `researching` while something of the run holding them is in flight and `waiting_on_answer` while
+  that run waits on the person. `work`, `{id, title}`, is what its line goes to: the work item that
+  registered it while `awaiting_run`, the pass's job while `pre_ruling`, the work item the standing
+  claim or research of its first held block names otherwise, and null while `asking_writer`.
+  `pulse` is whether the session doing that work is queued or held, starting or running, never
+  while `awaiting_run` or `waiting_on_answer`. `asked_in`, `{id, title}`, the title the line's, the
+  file's name where the text gives none, is the run's first open document on the timeline while
+  `waiting_on_answer`, else null. `awaiting_read` tells a document with no text from one already
+  read while another of its run awaits its read, both `awaiting_run`;
+- `cancel`, the Cancel the item offers ([`round-trip.md`](round-trip.md)), null while it offers none:
+  `{takes_back}`, the blocks the run holds, in timeline order, each `{document, block, heading,
+  kind, research}`, its document `{id, title}`, its local id, its own section's heading or null,
+  its kind, and whether the run holds it as a research rather than a claimed action.
 
 A block is `{id, kind, confirmation, because, proposal, default, check, options, answer, by, at,
-note, via, done, claim, deferral, writer_asked, section}`. `id` is its local id; `because` is a
+note, via, done, claim, held, deferral, writer_asked, section}`. `id` is its local id; `because` is a
 confirmation's reason, `{code, name, description, asks_under_autopilot}`, the grants table's name
 and the line the agent reads, not the card's words, and whether it asks under auto pilot too;
 `options` are `{label, text, recommended}` in order; `via` is `app` for a person's answer whose text
@@ -90,9 +106,15 @@ names no channel; `in_chat` is where in a chat the answer was recorded, `{chat, 
 and the number in its records of the `server` record placing the latest `answered` effect on the
 block, read through the session's records route ([`sessions.md`](sessions.md)), and null unless
 `via` is `chat` and that effect's call ran in a chat; `claim` is an action Pilot claimed and has not
-done, `{work}`, the work item that does it, `{id, title}`, the one named for it last, or null while
-none is ([`engine.md`](engine.md)), and null on every other block; `writer_asked` is whether Pilot
-asked the registered document's writer about the block; `deferral` is `{to, title}` while `answer`
+done, `{work, undone}`, `work` the work item that does it, `{id, title}`, the one named for it last,
+or null while none is ([`engine.md`](engine.md)), and `undone` whether Pilot's work left it undone,
+the run of that work item having handed it back, done with it, failed, stopped or cancelled, false
+while it is held and while no work item is named for it; null on every other block; `held` is what
+holds a block while Pilot's work holds it, a claimed action or a block a research checks a fact for
+([`round-trip.md`](round-trip.md)), `{doing, work, pulse, asked_in}` as `pilots_work` has them,
+`doing` one of `doing`, `researching` or `waiting_on_answer` and `work` the work item its standing
+claim or research names, and null while it is not held; `writer_asked` is whether Pilot asked the
+registered document's writer about the block; `deferral` is `{to, title}` while `answer`
 is `deferred`, `title` the task's title live from the plan and null for `to: plan`, the project's
 end; `section` is the block's own section, `{heading}`, the heading's text, or null. A person or
 Pilot, wherever one is named, is `{kind, handle, name, initials, avatar_slot}`, Pilot `kind: agent`
@@ -112,6 +134,10 @@ the app, answering `204` with no body:
 | `POST reviewed` | | Reviewed on a review |
 | `POST undo` | | Undo of a done item's answer or mark, whoever gave it |
 | `POST request` | | a wait's firing requested by the caller, *Check now* on a card wait, *Skip wait* on a timed wait, which the wait's next run is briefed with ([`waits.md`](waits.md)) |
+
+Stop and take over, `POST take-over`, and the Cancel, `POST cancel`, are
+[`round-trip.md`](round-trip.md)'s. An answer, an action's Done and a document's Done are refused
+while the item is Pilot's or the block is held, with "Pilot is working on …" (there).
 
 An answer or a Done on a one-ask item is the item's done. Neither body takes `to` or `via`, and
 neither takes another key (`400`): the page never defers. The archive question takes `Archive` or
@@ -138,7 +164,8 @@ and moves nothing else ([`work.md`](work.md)).
 `useProjectEvents` (`frontend/src/hooks/use-project-events.ts`), called by the shell, reads again,
 on the event, the project lists and the named project's head, timeline, handbook, project document
 and chats ([`chats.md`](chats.md)), and every document read of an item of it
-([`documents.md`](documents.md)), events that arrive together once after them; and on every rise of
+([`documents.md`](documents.md)), events that arrive together once after them, a first read still
+under way cancelled and made again, since it may predate the event; and on every rise of
 the stream's `isConnected`, the first included, every one of those reads, which covers an event sent
 from a process that does not hold the browser's stream. A person's own write reads every query again
 as well. Each `work_moved`'s status it writes into the timeline as read, with no read.
@@ -177,6 +204,19 @@ timeline's place ([`chats.md`](chats.md)).
   dashed border. An open work item is its session's: its env chip once its start has an
   environment, its one line and its Stop or Resume, a job of Pilot's own its Retry once it failed or
   stopped ([`work.md`](work.md)).
+- **An item Pilot is working on** (`PilotsLine`, `item.tsx`), its `pilots_work` set, is one line,
+  as a done line is: a dashed circle in the time's grey in its kind's place, "Pilot is working on
+  it" its tooltip; the title (`title`, else `file_name`); Open once its text is read; Discuss; what
+  Pilot does; and the time it was placed. What Pilot does (`PilotsButton`, `pilots.tsx`) is a ghost
+  button: a pulsing dot while `pulse`, Pilot's mark, and the words `pilotsDoingLabel()` gives
+  `doing` (`status-labels.ts`), "Awaiting the run", "Pre-ruling", "Asking the writer", "Doing it",
+  "Researching" or "Waiting on your answer". It goes to `work`'s address, "Go to the work item:
+  <title>" its tooltip, or while `pre_ruling` to the pass's session log, "Open the session log of
+  Pilot’s job: <title>"; while `work` is null its words stand still, "Pilot is working on this: it
+  comes to you once Pilot is done". At 900px and below it takes a row of its own under the title.
+  The line takes no answer and is not open: it is neither tinted urgent nor a concept and "N open
+  above" leaves it out, while its urgent banner stands. The pass's job keeps its own line beside it
+  ([`work.md`](work.md)).
 - **An open wait** (`wait.tsx`) is its head, its title and what it waits on
   ([`waits.md`](waits.md)). Its head's kind is "Wait", with the ticket for a card wait and the
   hourglass for a timed wait, and just before Discuss, touching it, stands the request's one button:
@@ -199,12 +239,14 @@ timeline's place ([`chats.md`](chats.md)).
   after a one-ask item's or a notice's text, at a confirmation card's end, in the opening's bubble,
   after an inline document's text and on a card. A chip opens the attachment in the overlay
   ([`documents.md`](documents.md)).
-- **Pilot asked the writer.** An open registered document whose writer Pilot asked about its blocks
-  says so with Pilot's avatar, "Pilot asked the writer about D2 and D4", the blocks by their local
-  ids (`writer-asked.tsx`): inline under its title, on a card under its summary, on a one-ask item
-  under its title, and on a confirmation under its controls; a document's asked block says "Pilot
-  asked the writer" in its own head, with Pilot's avatar. A done line shows nothing of it. The
-  writer's reply is the overlay's ([`documents.md`](documents.md)).
+- **Pilot asked the writer.** A block whose writer Pilot asked about it (`writer_asked`) carries
+  Pilot's mark and "Pilot asked the writer" in its head (`WriterAsked`, `writer-asked.tsx`), a link
+  to the document's clarification address, `/projects/<project>/documents/<item>/clarification`,
+  which opens the overlay at the box of Pilot's questions and the writer's reply
+  ([`documents.md`](documents.md)); in the overlay it is a button that goes to the box there. A
+  one-ask item's block and a confirmation's, whose head is the item's, carry it in the item's head.
+  A held block's line carries none, opened or not, and a settled section's line none, though its
+  block's head does once opened; a card and a done line show nothing of it.
 - **The auto pilot mark** (`autopilot-mark.tsx`) stands on an open confirmation the switch would
   answer while the project's auto pilot is off: its reason does not ask under auto pilot
   (`because.asks_under_autopilot` false), it is unanswered and its item open (`may-take.ts`). It is
@@ -247,17 +289,15 @@ answer moves the count, so a document stays as it stands while it is answered.
   Open goes to the document's address, which opens it in the overlay
   ([`documents.md`](documents.md)); none of the text shows on the card. Reviewed (`POST reviewed`)
   makes the review a done line.
-- **A registered document with no text**, awaiting its read or after one that failed, is a review's
-  card titled by its file's name, with no "N min read", and its Reviewed only once `awaiting_read` is
-  false: a failed read closes so ([`round-trip.md`](round-trip.md)). Each state has a look of its
-  own. Awaiting its read, the card is muted, its file's name in muted text, "Loads when the turn
-  ends" under it and Pilot's dots ending it; muted, not dashed, which marks a concept. Its read
-  failed, a warning chip beside the name reads *Did not load*, since only that state waits on the
-  person's Reviewed. Its text, once read, gives it its title and its blocks live, on a review's
-  card as any other.
+- **A registered document with no text** after a failed read is a review's card titled by its
+  file's name, with no "N min read", a warning chip beside the name, *Did not load*, and its
+  Reviewed, which closes it ([`round-trip.md`](round-trip.md)). Awaiting its read, it is Pilot's
+  line (above). Its text, once read, gives it its title and its blocks live, on a review's card as
+  any other.
 - **The segment bar**: a segment per block, filled once the block is answered, a claim only once
-  its action is done, its tooltip what the
-  block asks, its section's heading, else its kind, and whether it is answered. Inline, a segment
+  its action is done, and a held block's in the plan donut's in-progress colour (`.seg.held`), its
+  tooltip what the block asks, its section's heading, else its kind, and whether it is answered,
+  open or one Pilot is working on. Inline, a segment
   scrolls to its block, which flashes; on a card it opens the overlay at the block's address.
 
 **Unsent and Send answers** (D026, D033). A document reads *Unsent* while it has an answer and no
@@ -265,7 +305,9 @@ Done: a person's answer or Pilot's, an action's Done among them. A deferral alon
 since it asks nothing of the person, and neither is a recommendation or a claim not yet done; a held
 save, `concept`, has nothing to do with it (`isUnsent`). The document's Done is *Send answers*,
 which fixes the answers and sends them back while the work goes on (`POST done`). It enables once
-every unanswered block has a recommendation; with any block unanswered it asks first, in a dialog,
+every unanswered block has a recommendation and no block is held, its tooltip while one is "Pilot
+is working on a block of it: send once Pilot is done"; with any block unanswered it asks first, in
+a dialog,
 "Send with the recommendations?", a line per unanswered block, "<ask> · <answer>", a proposal's
 answer "Agree: <proposal>" and a confirmation's "Yes: <proposal>", whose Confirm sends, the record
 answering each block with its recommendation. An action's Done keeps its name, and a one-ask item,
@@ -285,6 +327,15 @@ address opens it, and it stays open on that page, the timeline or the overlay, e
 the page is shown. A person's answer is not Pilot's, so it opens the section for good, and Undo,
 which never gives Pilot its answer back, leaves it open. A block with no section never collapses.
 The count, the bar and *Send answers* are the same whether it collapses or not.
+
+**A held block** (`held.tsx`). In a document that is the person's, a held block's own section
+stands as one line in its block's place, inline and in the overlay alike, as a settled section's
+does: Pilot's mark, the heading's words (the kind's label where the block has no section), "·",
+what Pilot does as the line's button, without Pilot's mark, and a chevron; the claim's note as a
+second muted line. A click on the line or its chevron, a segment of its document's bar or the
+block's address opens the section under it, its prose and the block's controls, disabled; a click
+closes it again. In a document that is Pilot's every block is drawn whole, under the overlay's strip
+([`documents.md`](documents.md)).
 
 ## Answering inline
 
@@ -306,10 +357,13 @@ answers*.
 - **An action** (`action.tsx`): without options, a paste-back field, "What to paste back, if
   anything", over Done; with options, a button each, the first primary, and Other…, whose console
   sends its words as the answer. The paste-back goes as the note of the Done, the option or the
-  words. An action Pilot claimed is open until its `done`: while nothing saves it reads Pilot's
-  avatar, "Pilot does it" and " · " the work item that does it, linked to its address, with the
-  claim's note under it, over the controls, which stay a person's; a person's Done is answered as
-  any person's is.
+  words. An action Pilot claimed is open until its `done`. Unless its held line says so, it reads,
+  while nothing saves, Pilot's avatar, "Pilot does it" and " · " the work item that does it, linked
+  to its address, with the claim's note under it, over the controls: disabled in a document that is
+  Pilot's, and a person's where no work item is named for it. One Pilot's work handed back
+  (`claim.undone`) reads nothing of the claim: its head, drawn in a one-ask item too, says "Pilot’s
+  work left it undone", "<work item> ended without doing it: it is yours again" its tooltip, and its
+  controls are a person's, whose Done is answered as any person's is.
 - **A confirmation** (`confirmation.tsx`) is a card: its head with the reason line, plain words by
   the reason's code with the ground as its tooltip (`item-head.tsx`'s `WHY`: "Auto pilot off",
   "Always asks: cannot be undone", and so on; a code without words of its own shows `because.name`);
@@ -448,10 +502,13 @@ spec's document carries two blocks or more. The `timeline` page object
 (`tests/support/page-objects/timeline-page.ts`) opens a project's timeline (`open`), or an
 address (`openAt`), and reads its items, blocks, segments, cards, settled lines, attachments,
 the item alone's as the timeline's (`item(id, overlay.alone)`), banners and done lines, their
-Discuss and *In the chat*, an item's line that Pilot asked its writer (`item(id).writerAsked`,
-pinned in `frontend/tests/work/registered.spec.ts`), a block's head that says so, a claimed action's
-line and its work item's link (`writerAsked`, `claim`, `claimWork`, pinned in
-`tests/work/clarification.spec.ts` and `claimed.spec.ts`), the auto pilot marks and chip
+Discuss and *In the chat*, an item's head that says Pilot asked its writer
+(`item(id).writerAsked`, pinned in `frontend/tests/work/registered.spec.ts`), a block's head that
+says so, a claimed action's line and its work item's link, and the mark of Pilot's work that left
+it undone (`writerAsked`, `claim`, `claimWork`, `undone`, pinned in
+`tests/work/clarification.spec.ts` and `claimed.spec.ts`), Pilot's line and its button
+(`item(id).pilots`, `data-doing` the API's `doing`), a held block's line (`held`), the auto pilot
+marks and chip
 (`autopilotMark`, `autopilotChip`, `tests/timeline/autopilot-mark.spec.ts`), the archive question's
 buttons (`archiveQuestion`, `archive-question.spec.ts`), the ready line (`ready`) and a wait's
 button, what it waits on, its firings, its note and its phone menu (`item(id).wait`); `slowNetwork`

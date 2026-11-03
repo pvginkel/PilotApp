@@ -27,9 +27,10 @@ projects too.
   false before they have a handle. `progress` is `{done, total, in_progress}` over the plan's steps,
   removed steps not counted, `in_progress` the titles of the steps in progress in the plan's order.
   `badge` is `{count, urgent}`: `count` the project's open items waiting on the caller, which are
-  its prose items but the opening, a notice only while it is urgent and a registered document only
-  once its turn-end read is made, and none whose open blocks are all actions Pilot claimed, which
-  are Pilot's until their `done` ([`engine.md`](engine.md)); a work item whose session stopped or
+  its prose items but the opening, a notice only while it is urgent, and none that is Pilot's while
+  its work on it is in flight, a registered document awaiting its read, under its pass or its
+  clarification, or with every open block held ([`round-trip.md`](round-trip.md)); a work item
+  whose session stopped or
   failed, a job of Pilot's own only until it is retried, and neither while its nudge is owed
   ([`usage.md`](usage.md)); never a wait and never an item for another
   person (before the caller has a handle, every item for someone is another's); `urgent` whether one
@@ -408,14 +409,16 @@ answers only in testing mode ([`sign-in.md`](sign-in.md)).
   open notices. A finished project with auto pilot on, a paused project that is not open, a member
   named twice, open items without an environment and a plan with a fault are each a `400`; a handle
   that is no person's, `agent` included, and an unknown environment a `404`.
-- `POST /api/testing/projects/<id>/work` `{repo, title, brief, cwd, step?, claims?}` places a work
+- `POST /api/testing/projects/<id>/work` `{repo, title, brief, cwd, step?, claims?, researches?}`
+  places a work
   item by the repository `repo`, `owner/Name`, its session to run in `cwd`, and starts its session
   through the gate, as every work item's starts ([`sessions.md`](sessions.md)): once the request
   commits, its start takes or creates an environment of Pilot's own from the repository on the
   stage's own controller. It answers `201` `{id}`, the item's, its Work's and its Session's. `step`
-  is the id of a plan task it serves. `claims` names it for claimed actions by their blocks' ids, as
-  a pass's `add_item` does ([`mcp.md`](mcp.md)). An unknown project, a step not in the plan, a
-  claim's item not of the project or a block its document lacks is a `404`; a claim the record
+  is the id of a plan task it serves. `claims` names it for claimed actions by their blocks' ids,
+  and `researches` for the blocks it checks a fact for, as a pass's `add_item` does
+  ([`mcp.md`](mcp.md)). An unknown project, a step not in the plan, a claim's or a research's item
+  not of the project or a block its document lacks is a `404`; a claim or a research the record
   refuses, no controller configured, or a finished or an archived project, a `409`. A work item is
   created by its own Session, so once one has started, the routes below that act by the project's
   session started last act by it.
