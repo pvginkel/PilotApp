@@ -1,7 +1,8 @@
 """/api/items: what the signed-in person does to a timeline's items — answer
 a block, mark an action Done, mark a document Done, a notice Read, a review
 Reviewed, and undo (F14, F17, F32.4); and the live event each sends (F80.2).
-And an item's document read on its own (F28, F13.3)."""
+And an item's document read on its own (F28, F13.3), and a person's request
+of a wait (F27.3)."""
 
 import json
 import uuid
@@ -12,12 +13,13 @@ from typing import Any
 import pilot_dsl as dsl
 import pytest
 from flask.testing import FlaskClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import models
 from app.engine.paths import tree_path
-from app.models import Document, Environment, Item, Project, User
-from app.models.reference import SessionState
+from app.models import Document, Environment, Item, Project, User, WaitFiring
+from app.models.reference import FiringCause, ProjectState, SessionState
 from app.schemas.testing_record import InventedProjectCreateSchema
 from app.services.container import ServiceContainer
 from app.services.project_event_service import ProjectEventService
@@ -1046,3 +1048,128 @@ class TestTheLiveEvent:
         assert _heard(second_browser) == [
             {"type": "project_changed", "payload": {"project_id": str(camp.id)}}
         ]
+
+
+def _wait(
+    container: ServiceContainer, session: Session, camp: Project, run: models.Session
+) -> Item:
+    """An open card wait of `camp`'s, opened."""
+    camp.state_code = ProjectState.OPEN
+    camp.slug = "camp"
+    session.flush()
+    return container.wait_service().add_card_wait(
+        camp, run, "SR-4 is done", ["SR-4"], ["Done"], None
+    )
+
+
+def _requests(
+    session: Session, wait: Item
+) -> list[tuple[FiringCause, uuid.UUID | None]]:
+    return [
+        (firing.cause_code, firing.requested_by_user_id)
+        for firing in session.scalars(
+            select(WaitFiring).where(WaitFiring.wait_id == wait.id)
+        )
+    ]
+
+
+@pytest.mark.usefixtures("person")
+class TestRequest:
+    """A person's request of a wait, its head's button (F27.3)."""
+
+    def test_the_request_fires_the_wait(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        camp: Project,
+        run: models.Session,
+        person: User,
+    ) -> None:
+        wait = _wait(container, session, camp, run)
+        _sign_in(client)
+
+        response = client.post(f"{ITEMS}/{wait.id}/request")
+
+        assert response.status_code == 204
+        assert response.data == b""
+        assert _requests(session, wait) == [(FiringCause.REQUESTED, person.id)]
+
+    def test_a_wait_that_takes_no_request_now_conflicts(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        camp: Project,
+        run: models.Session,
+    ) -> None:
+        wait = _wait(container, session, camp, run)
+        _sign_in(client)
+        client.post(f"{ITEMS}/{wait.id}/request")
+
+        response = client.post(f"{ITEMS}/{wait.id}/request")
+
+        assert response.status_code == 409
+        assert _error(response) == (
+            f"Cannot request a firing of item {wait.id} because Pilot is checking"
+        )
+        assert len(_requests(session, wait)) == 1
+
+    def test_an_item_that_is_no_wait_conflicts(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        camp: Project,
+        run: models.Session,
+    ) -> None:
+        item = _bear(container, camp, run, "notice", NOTICE)
+        _sign_in(client)
+
+        response = client.post(f"{ITEMS}/{item.id}/request")
+
+        assert response.status_code == 409
+        assert _error(response).endswith("a notice item takes no request")
+
+    def test_an_unknown_item_is_not_found(self, client: FlaskClient) -> None:
+        unknown = uuid.uuid4()
+        _sign_in(client)
+
+        response = client.post(f"{ITEMS}/{unknown}/request")
+
+        assert response.status_code == 404
+        assert _error(response) == f"Item {unknown} was not found"
+
+    def test_a_caller_without_a_handle_conflicts(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        camp: Project,
+        run: models.Session,
+    ) -> None:
+        wait = _wait(container, session, camp, run)
+        _sign_in(client, subject="subject-newcomer")
+
+        response = client.post(f"{ITEMS}/{wait.id}/request")
+
+        assert response.status_code == 409
+        assert _error(response).endswith("you have not chosen your handle yet")
+        assert _requests(session, wait) == []
+
+    def test_without_editor_it_is_refused(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: Session,
+        camp: Project,
+        run: models.Session,
+    ) -> None:
+        wait = _wait(container, session, camp, run)
+        _sign_in(client, roles=())
+
+        assert client.post(f"{ITEMS}/{wait.id}/request").status_code == 403
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        assert oidc_client.post(f"{ITEMS}/{uuid.uuid4()}/request").status_code == 401

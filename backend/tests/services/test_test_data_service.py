@@ -21,6 +21,7 @@ from app.app import App
 from app.database import scoped_session
 from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved, WorkMoved
 from app.engine.tree import TreeDocument, TreeFile, TreePlan
+from app.engine.views import utc_time
 from app.exceptions import (
     AuthorizationException,
     InvalidOperationException,
@@ -46,6 +47,7 @@ from app.models import (
     ProjectTransition,
     Turn,
     User,
+    Wait,
     Work,
     WriterQuestion,
 )
@@ -67,12 +69,14 @@ from app.schemas.testing_record import (
     OPENING_WORDS,
     InventedFileSchema,
     InventedProjectCreateSchema,
+    InventedWaitCreateSchema,
     InventedWriterQuestionSchema,
 )
 from app.services import test_data_service
 from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerClient
 from app.services.session_record_service import read_records
+from app.services.wait_service import ReportedTransition
 from app.startup import load_test_data_hook
 from app.utils.after_commit import clear_after_commit_callbacks
 from tests.support.chats import ChatWriter, open_chat
@@ -2293,3 +2297,289 @@ class TestAnswerInChat:
             )
 
         assert raised.value.cause == "its chat has no turn in flight"
+
+
+def _wait_spec(**spec: Any) -> InventedWaitCreateSchema:
+    return InventedWaitCreateSchema.model_validate(
+        {
+            "kind": "card_wait",
+            "title": "SR-4 is done",
+            "cards": ["SR-4"],
+            "states": ["Done"],
+            **spec,
+        }
+    )
+
+
+def _timed_spec(due_at: datetime, **spec: Any) -> InventedWaitCreateSchema:
+    return InventedWaitCreateSchema.model_validate(
+        {"kind": "timed_wait", "title": "ESO refreshes", "due_at": due_at, **spec}
+    )
+
+
+SR_4_DONE = ReportedTransition(
+    card="SR-4",
+    from_state="In Progress",
+    to_state="Done",
+    at=datetime(2026, 10, 12, 1, 12, tzinfo=UTC),
+    by="pieter",
+)
+
+
+def _wait_run_of(
+    container: ServiceContainer,
+    session: DbSession,
+    camp: Project,
+    wait: Item,
+    turns: int,
+) -> Work:
+    """A run of `wait`, briefed once `turns` is past none."""
+    job = models.Session(
+        project_id=camp.id,
+        kind_code="job",
+        cwd="/work/PilotProjects",
+        token_hash=uuid.uuid4().hex * 2,
+        state_code=SessionState.RUNNING if turns else SessionState.HELD,
+        turns=turns,
+    )
+    session.add(job)
+    session.flush()
+    return container.record_service().place_work(
+        camp,
+        job,
+        "Checking the wait",
+        trigger=WorkTrigger.WAIT_FIRED,
+        trigger_item_id=wait.id,
+    )
+
+
+class TestWait:
+    """A wait the project's session adds, as `add_item` adds one."""
+
+    def test_a_card_wait_is_added_by_the_project_s_session_now(
+        self, container: ServiceContainer, session: DbSession, camp: Project
+    ) -> None:
+        before = datetime.now(UTC)
+
+        item = container.test_data_service().wait(camp.id, _wait_spec())
+
+        wait = session.get_one(Wait, item.id)
+        assert (
+            item.kind_code,
+            item.title,
+            item.seq,
+            item.created_by_session_id,
+        ) == ("card_wait", "SR-4 is done", 2, _session_of(session, camp).id)
+        assert (wait.cards, wait.states, wait.due_at) == (["SR-4"], ["Done"], None)
+        session.refresh(item)
+        assert item.created_at >= before - timedelta(seconds=5)
+
+    def test_a_timed_wait_placed_before_now_is_due_as_one_added_then(
+        self, container: ServiceContainer, session: DbSession, camp: Project
+    ) -> None:
+        now = datetime.now(UTC).replace(microsecond=0)
+        placed, due = now - timedelta(minutes=10), now - timedelta(minutes=5)
+
+        item = container.test_data_service().wait(
+            camp.id, _timed_spec(due, placed_at=placed)
+        )
+
+        assert (item.created_at, session.get_one(Wait, item.id).due_at) == (
+            placed,
+            due,
+        )
+        [shown] = [
+            entry
+            for entry in json.loads(container.view_service().timeline(camp).text)[
+                "items"
+            ]
+            if entry["id"] == str(item.id)
+        ]
+        assert shown["due_at"] == utc_time(due)
+        assert container.wait_service().fire_due() == 1
+
+    def test_a_card_wait_placed_before_now_waits_since_then(
+        self, container: ServiceContainer, camp: Project
+    ) -> None:
+        placed = datetime.now(UTC).replace(microsecond=0) - timedelta(hours=2)
+
+        item = container.test_data_service().wait(camp.id, _wait_spec(placed_at=placed))
+
+        assert item.created_at == placed
+
+    def test_a_placed_at_ahead_or_not_before_the_due_time_is_refused(
+        self, container: ServiceContainer, session: DbSession, camp: Project
+    ) -> None:
+        now = datetime.now(UTC).replace(microsecond=0)
+        service = container.test_data_service()
+
+        with pytest.raises(InvalidOperationException) as ahead:
+            service.wait(camp.id, _wait_spec(placed_at=now + timedelta(minutes=1)))
+        with pytest.raises(InvalidOperationException) as after_due:
+            service.wait(
+                camp.id,
+                _timed_spec(
+                    now - timedelta(minutes=5), placed_at=now - timedelta(minutes=5)
+                ),
+            )
+
+        assert ahead.value.cause == "its `placed_at` is ahead"
+        assert after_due.value.cause == (
+            f"its due time, {utc_time(now - timedelta(minutes=5))}, is not after its"
+            f" `placed_at`, {utc_time(now - timedelta(minutes=5))}"
+        )
+        assert session.scalars(select(Wait)).all() == []
+
+    def test_the_add_s_refusal_reaches_the_caller(
+        self, container: ServiceContainer, camp: Project
+    ) -> None:
+        with pytest.raises(InvalidOperationException) as raised:
+            container.test_data_service().wait(camp.id, _wait_spec(cards=["sr-4"]))
+
+        assert raised.value.cause.startswith("`sr-4` is no ticket id")
+
+    def test_an_unknown_project_is_not_found(self, container: ServiceContainer) -> None:
+        project_id = uuid.uuid4()
+
+        with pytest.raises(RecordNotFoundException) as raised:
+            container.test_data_service().wait(project_id, _wait_spec())
+
+        assert raised.value.message == f"Project {project_id} was not found"
+
+    def test_a_project_without_a_session_is_refused(
+        self, container: ServiceContainer, person: User
+    ) -> None:
+        project = container.test_data_service().project(_spec())
+
+        with pytest.raises(InvalidOperationException) as raised:
+            container.test_data_service().wait(project.id, _wait_spec())
+
+        assert raised.value.cause == (
+            "the project has no session: make it with an environment_id"
+        )
+
+
+class TestWaitRun:
+    """A wait's run placed as the batcher places it, past its quiet window."""
+
+    @pytest.fixture(autouse=True)
+    def _no_callbacks(self) -> Iterator[None]:
+        clear_after_commit_callbacks()
+        yield
+        clear_after_commit_callbacks()
+
+    @pytest.fixture(autouse=True)
+    def starts(
+        self, container: ServiceContainer, supervise: Supervise
+    ) -> Iterator[None]:
+        """The start the run is placed through, its loops never run."""
+        container.session_start_service.override(
+            providers.Object(configured_starts(container, supervise))
+        )
+        try:
+            yield
+        finally:
+            container.session_start_service.reset_override()
+
+    def test_a_fired_wait_s_run_is_placed_now(
+        self, container: ServiceContainer, session: DbSession, camp: Project
+    ) -> None:
+        service = container.test_data_service()
+        item = service.wait(camp.id, _wait_spec())
+        assert container.wait_service().fire_transition(SR_4_DONE) == 1
+
+        work = service.wait_run(item.id)
+
+        assert (work.trigger_code, work.trigger_item_id) == (
+            WorkTrigger.WAIT_FIRED,
+            item.id,
+        )
+        # Through the gate, which nothing holds.
+        assert session.get_one(models.Session, work.id).state_code is (
+            SessionState.STARTING
+        )
+        assert session.get_one(Item, work.id).title == 'Checking "SR-4 is done"'
+
+    def test_a_wait_with_no_run_due_is_refused(
+        self, container: ServiceContainer, camp: Project
+    ) -> None:
+        service = container.test_data_service()
+        item = service.wait(camp.id, _wait_spec())
+        assert container.wait_service().fire_transition(SR_4_DONE) == 1
+        service.wait_run(item.id)
+
+        with pytest.raises(InvalidOperationException) as raised:
+            service.wait_run(item.id)
+
+        assert raised.value.message == (
+            f"Cannot place the run of wait {item.id} because no run of it is due:"
+            " it is done, its project is not open, no firing of it is pending, or"
+            " a run of it is in flight"
+        )
+
+    def test_an_item_that_is_no_wait_is_not_found(
+        self, container: ServiceContainer, session: DbSession, camp: Project
+    ) -> None:
+        [opening] = _items(session, camp)
+
+        with pytest.raises(RecordNotFoundException) as raised:
+            container.test_data_service().wait_run(opening.id)
+
+        assert raised.value.message == f"Wait {opening.id} was not found"
+
+
+class TestCloseWait:
+    """Pilot's `done` on an open wait, as its `mark` closes one."""
+
+    NOTE = "SR-4 read Done at 09:40; the rollout goes on"
+
+    def test_the_wait_s_latest_run_briefed_closes_it_with_its_note(
+        self, container: ServiceContainer, session: DbSession, camp: Project
+    ) -> None:
+        service = container.test_data_service()
+        item = service.wait(camp.id, _wait_spec())
+        assert container.wait_service().fire_transition(SR_4_DONE) == 1
+        _wait_run_of(container, session, camp, item, 1)
+        latest = _wait_run_of(container, session, camp, item, 2)
+        _wait_run_of(container, session, camp, item, 0)
+
+        service.close_wait(item.id, self.NOTE)
+
+        assert (
+            item.done_cause_code,
+            item.done_by_user_id,
+            item.consumed_session_id,
+            session.get_one(Wait, item.id).done_note,
+        ) == ("marked", _user(session, "agent").id, latest.id, self.NOTE)
+
+    def test_with_no_run_briefed_the_project_s_session_closes_it(
+        self, container: ServiceContainer, session: DbSession, camp: Project
+    ) -> None:
+        service = container.test_data_service()
+        item = service.wait(camp.id, _wait_spec())
+
+        service.close_wait(item.id, self.NOTE)
+
+        assert item.consumed_session_id == _session_of(session, camp).id
+
+    def test_a_done_wait_is_refused(
+        self, container: ServiceContainer, camp: Project
+    ) -> None:
+        service = container.test_data_service()
+        item = service.wait(camp.id, _wait_spec())
+        service.close_wait(item.id, self.NOTE)
+
+        with pytest.raises(InvalidOperationException) as raised:
+            service.close_wait(item.id, "Again")
+
+        assert raised.value.cause == "the item is done"
+
+    def test_an_item_that_is_no_wait_is_not_found(
+        self, container: ServiceContainer, session: DbSession, camp: Project
+    ) -> None:
+        [opening] = _items(session, camp)
+
+        with pytest.raises(RecordNotFoundException) as raised:
+            container.test_data_service().close_wait(opening.id, self.NOTE)
+
+        assert raised.value.message == f"Wait {opening.id} was not found"

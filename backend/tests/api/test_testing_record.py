@@ -5,8 +5,9 @@ saves of the project's draft and handbook, Pilot's Done, a work item placed by
 repository, started in an environment of Pilot's own the stage's own
 controller creates, its worker's registrations and attachments with their
 effects and the list of steps it publishes, a pre-ruling pass's questions to a registered document's
-writer, and the store's update and its lift, as `update-store` makes and asks
-them."""
+writer, the store's update and its lift, as `update-store` makes and asks
+them, and the brain's waits, a card's transition past the endpoint's token,
+the waits' timer's tick, a wait's run and its close."""
 
 import base64
 import uuid
@@ -37,6 +38,8 @@ from app.models import (
     StoreUpdate,
     Turn,
     User,
+    Wait,
+    WaitFiring,
     Work,
     WriterQuestion,
 )
@@ -65,8 +68,10 @@ from app.utils.after_commit import clear_after_commit_callbacks
 from tests.support.chats import ChatWriter, open_chat
 from tests.support.fake_controller import ServedFakeController
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
+from tests.support.starts import configured_starts
 from tests.support.store_updates import hold, lift
 from tests.support.supervisor import Supervise
+from tests.support.youtrack import youtrack_delivery
 
 PEOPLE = "/api/testing/people"
 ENVIRONMENTS = "/api/testing/environments"
@@ -136,6 +141,22 @@ def _clarification_path(item_id: uuid.UUID | str) -> str:
 
 def _chat_answers_path(project_id: uuid.UUID | str) -> str:
     return f"/api/testing/projects/{project_id}/chat/answers"
+
+
+def _waits_path(project_id: uuid.UUID | str) -> str:
+    return f"{PROJECTS}/{project_id}/waits"
+
+
+def _wait_run_path(item_id: uuid.UUID | str) -> str:
+    return f"/api/testing/waits/{item_id}/run"
+
+
+def _wait_close_path(item_id: uuid.UUID | str) -> str:
+    return f"/api/testing/waits/{item_id}/close"
+
+
+TRACKER_EVENTS = "/api/testing/tracker-events"
+DUE = "/api/testing/waits/due"
 
 
 WORK_REPO = "example/Camp"
@@ -1724,6 +1745,11 @@ ENDPOINTS = [
         {"block": f"{NO_ROW}/D1", "value": "Yes", "for": "ada"},
     ),
     (STORE_UPDATE, {}),
+    (_waits_path(NO_ROW), {"kind": "card_wait", "title": "SR-4", "cards": ["SR-4"]}),
+    (f"{TRACKER_EVENTS}/youtrack", youtrack_delivery()),
+    (DUE, {}),
+    (_wait_run_path(NO_ROW), {}),
+    (_wait_close_path(NO_ROW), {"note": "Read"}),
 ]
 
 
@@ -2690,6 +2716,307 @@ class TestCreateStoreUpdate:
 
         assert response.status_code == 400
         assert _count(session, StoreUpdate) == 0
+
+
+CARD_WAIT = {
+    "kind": "card_wait",
+    "title": "ANS-312 is done",
+    "cards": ["ANS-312"],
+    "states": ["Done"],
+}
+
+
+def _wait(client: FlaskClient, project_id: str, **spec: Any) -> str:
+    response = client.post(_waits_path(project_id), json={**CARD_WAIT, **spec})
+    assert response.status_code == 201, response.get_json()
+    wait_id: str = response.get_json()["id"]
+    return wait_id
+
+
+def _deliver(client: FlaskClient, **changes: Any) -> Any:
+    return client.post(f"{TRACKER_EVENTS}/youtrack", json=youtrack_delivery(**changes))
+
+
+@pytest.mark.usefixtures("person")
+class TestCreateWait:
+    def test_a_card_wait_is_added_by_the_project_s_session(
+        self, client: FlaskClient, environment: Environment
+    ) -> None:
+        project_id = _make(client, environment_id=environment.id)
+
+        response = client.post(_waits_path(project_id), json=CARD_WAIT)
+
+        assert response.status_code == 201
+        item = _timeline_item(client, project_id, response.get_json()["id"])
+        assert _within(
+            item,
+            {
+                "kind": "card_wait",
+                "form": "wait",
+                "title": "ANS-312 is done",
+                "done": None,
+                "wait": {
+                    "cards": ["ANS-312"],
+                    "states": ["Done"],
+                    "due_at": None,
+                    "firings": [],
+                    "request": {"label": "Check now", "open": True, "refusal": None},
+                    "note": None,
+                },
+            },
+        ), item
+
+    def test_a_timed_wait_placed_before_now_is_past_due(
+        self, client: FlaskClient, environment: Environment
+    ) -> None:
+        project_id = _make(client, environment_id=environment.id)
+
+        wait_id = _wait(
+            client,
+            project_id,
+            kind="timed_wait",
+            cards=None,
+            states=None,
+            due_at="2026-10-20T09:05:00Z",
+            placed_at=AT,
+        )
+
+        item = _timeline_item(client, project_id, wait_id)
+        assert (item["created_at"], item["wait"]["due_at"]) == (
+            AT,
+            "2026-10-20T09:05:00Z",
+        )
+
+    @pytest.mark.parametrize(
+        "spec",
+        [
+            {"cards": None},
+            {"due_at": AT},
+            {"kind": "timed_wait"},
+            {"kind": "timed_wait", "cards": None, "states": None},
+            {"title": ""},
+        ],
+    )
+    def test_a_body_with_a_field_of_the_other_kind_or_missing_is_invalid(
+        self,
+        client: FlaskClient,
+        session: Session,
+        environment: Environment,
+        spec: dict[str, Any],
+    ) -> None:
+        project_id = _make(client, environment_id=environment.id)
+
+        response = client.post(_waits_path(project_id), json={**CARD_WAIT, **spec})
+
+        assert response.status_code == 400
+        assert _count(session, Wait) == 0
+
+    def test_an_unknown_project_is_not_found(self, client: FlaskClient) -> None:
+        response = client.post(_waits_path(NO_ROW), json=CARD_WAIT)
+
+        assert response.status_code == 404
+
+    def test_a_wait_the_add_refuses_conflicts(
+        self, client: FlaskClient, environment: Environment
+    ) -> None:
+        project_id = _make(client, environment_id=environment.id)
+
+        response = client.post(
+            _waits_path(project_id), json={**CARD_WAIT, "states": []}
+        )
+
+        assert response.status_code == 409
+        assert response.get_json()["error"].endswith("its `states` list is empty")
+
+
+@pytest.mark.usefixtures("person")
+class TestCreateTrackerEvent:
+    """A card's transition delivered past the endpoint's token (R8)."""
+
+    def test_the_card_waits_it_matches_fire_with_no_token(
+        self, client: FlaskClient, session: Session, environment: Environment
+    ) -> None:
+        project_id = _make(client, environment_id=environment.id)
+        wait_id = _wait(client, project_id)
+
+        response = _deliver(client)
+
+        assert response.status_code == 200
+        assert response.get_json() == {"fired": 1}
+        [firing] = _timeline_item(client, project_id, wait_id)["wait"]["firings"]
+        assert _within(
+            firing,
+            {
+                "cause": "transition",
+                "transition": {
+                    "card": "ANS-312",
+                    "from_state": "In Progress",
+                    "to_state": "Done",
+                    "by": "pieter",
+                },
+                "outcome": "pilots_turn",
+            },
+        ), firing
+
+    def test_a_delivery_that_matches_no_wait_fires_none(
+        self, client: FlaskClient, session: Session, environment: Environment
+    ) -> None:
+        _wait(client, _make(client, environment_id=environment.id))
+
+        response = _deliver(client, card="ANS-313")
+
+        assert (response.status_code, response.get_json()) == (200, {"fired": 0})
+        assert _count(session, WaitFiring) == 0
+
+    def test_a_body_the_adapter_cannot_read_is_invalid(
+        self, client: FlaskClient
+    ) -> None:
+        response = client.post(f"{TRACKER_EVENTS}/youtrack", data=b"not json")
+
+        assert response.status_code == 400
+
+    def test_an_unknown_tracker_is_not_found(self, client: FlaskClient) -> None:
+        response = client.post(f"{TRACKER_EVENTS}/jira", json=youtrack_delivery())
+
+        assert response.status_code == 404
+
+
+@pytest.mark.usefixtures("person")
+class TestCreateDueFirings:
+    def test_every_open_timed_wait_past_its_due_time_fires_once(
+        self, client: FlaskClient, session: Session, environment: Environment
+    ) -> None:
+        project_id = _make(client, environment_id=environment.id)
+        wait_id = _wait(
+            client,
+            project_id,
+            kind="timed_wait",
+            cards=None,
+            states=None,
+            due_at="2026-10-20T09:05:00Z",
+            placed_at=AT,
+        )
+
+        first = client.post(DUE)
+        again = client.post(DUE)
+
+        assert (first.status_code, first.get_json()) == (200, {"fired": 1})
+        assert again.get_json() == {"fired": 0}
+        [firing] = _timeline_item(client, project_id, wait_id)["wait"]["firings"]
+        assert (firing["cause"], firing["outcome"]) == ("due", "pilots_turn")
+
+
+@pytest.mark.usefixtures("person")
+class TestCreateWaitRun:
+    @pytest.fixture(autouse=True)
+    def _no_callbacks(self) -> Iterator[None]:
+        clear_after_commit_callbacks()
+        yield
+        clear_after_commit_callbacks()
+
+    @pytest.fixture
+    def starts(
+        self, container: ServiceContainer, supervise: Supervise
+    ) -> Iterator[None]:
+        """The start the run is placed through, its loops never run."""
+        container.session_start_service.override(
+            providers.Object(configured_starts(container, supervise))
+        )
+        try:
+            yield
+        finally:
+            container.session_start_service.reset_override()
+
+    @pytest.mark.usefixtures("starts")
+    def test_a_fired_wait_s_run_is_placed(
+        self, client: FlaskClient, environment: Environment
+    ) -> None:
+        project_id = _make(client, environment_id=environment.id)
+        wait_id = _wait(client, project_id)
+        _deliver(client)
+
+        response = client.post(_wait_run_path(wait_id))
+
+        assert response.status_code == 201
+        run = _timeline_item(client, project_id, response.get_json()["id"])
+        assert (run["kind"], run["title"], run["work"]["pilots_own"]) == (
+            "work",
+            'Checking "ANS-312 is done"',
+            True,
+        )
+        assert _timeline_item(client, project_id, wait_id)["wait"]["request"] == {
+            "label": "Check now",
+            "open": False,
+            "refusal": "Pilot is checking",
+        }
+
+    @pytest.mark.usefixtures("starts")
+    def test_a_wait_with_no_run_due_conflicts(
+        self, client: FlaskClient, environment: Environment
+    ) -> None:
+        wait_id = _wait(client, _make(client, environment_id=environment.id))
+
+        response = client.post(_wait_run_path(wait_id))
+
+        assert response.status_code == 409
+        assert "no run of it is due" in response.get_json()["error"]
+
+    def test_with_no_controller_it_conflicts(
+        self, client: FlaskClient, environment: Environment
+    ) -> None:
+        wait_id = _wait(client, _make(client, environment_id=environment.id))
+        _deliver(client)
+
+        response = client.post(_wait_run_path(wait_id))
+
+        assert response.status_code == 409
+
+    def test_an_unknown_wait_is_not_found(self, client: FlaskClient) -> None:
+        assert client.post(_wait_run_path(NO_ROW)).status_code == 404
+
+
+@pytest.mark.usefixtures("person")
+class TestCreateWaitClose:
+    NOTE = "ANS-312 read Done at 09:40; the rollout goes on"
+
+    def test_the_wait_is_done_with_its_note(
+        self, client: FlaskClient, environment: Environment
+    ) -> None:
+        project_id = _make(client, environment_id=environment.id)
+        wait_id = _wait(client, project_id)
+
+        response = client.post(_wait_close_path(wait_id), json={"note": self.NOTE})
+
+        assert (response.status_code, response.data) == (204, b"")
+        item = _timeline_item(client, project_id, wait_id)
+        assert (item["done"]["cause"], item["done"]["by"], item["wait"]["note"]) == (
+            "marked",
+            PILOT,
+            self.NOTE,
+        )
+
+    def test_a_missing_note_is_invalid(
+        self, client: FlaskClient, environment: Environment
+    ) -> None:
+        wait_id = _wait(client, _make(client, environment_id=environment.id))
+
+        assert client.post(_wait_close_path(wait_id), json={}).status_code == 400
+
+    def test_a_done_wait_conflicts(
+        self, client: FlaskClient, environment: Environment
+    ) -> None:
+        wait_id = _wait(client, _make(client, environment_id=environment.id))
+        client.post(_wait_close_path(wait_id), json={"note": self.NOTE})
+
+        response = client.post(_wait_close_path(wait_id), json={"note": "Again"})
+
+        assert response.status_code == 409
+        assert response.get_json()["error"].endswith("the item is done")
+
+    def test_an_unknown_wait_is_not_found(self, client: FlaskClient) -> None:
+        response = client.post(_wait_close_path(NO_ROW), json={"note": self.NOTE})
+
+        assert response.status_code == 404
 
 
 @pytest.mark.usefixtures("person")

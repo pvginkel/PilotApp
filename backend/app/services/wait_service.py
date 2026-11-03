@@ -3,6 +3,12 @@ brain, fixed at add (F27.6), fired by the server (F136.2, F27.2), and closed by
 its own `done` with a note (F27.4, DB 300) or by Finish's close of the open
 items, which writes none.
 
+A person's request fires an open wait too (F27.3), refused while a firing of
+it is pending or a run of it is in flight, on a wait that is done, and in a
+project finished or archived: one rule, which the timeline's read gives as
+the wait's button (`refusals`). What the brain did with each firing is read
+from the run that took it and the wait's close, never stored (`firings`).
+
 A wait's pending firings become one run of the brain per batch (F136.4): the
 batcher's tick (`WaitBatcher`) places a `wait_fired` job once its oldest
 pending firing is a quiet window old and no run of the wait is in flight, and
@@ -13,9 +19,9 @@ resumes the conversation of the wait's previous run when that run's turn ended
 Each write is of the caller's transaction, under its Project's row: a wait's
 birth takes its `seq` under it (`DocumentService.next_seq`), its close locks
 its run held before its brief, as a run's brief does before its take, then
-holds the Wait's row, a firing holds the Project's row shared, then the
-Wait's, and reads the wait open there, and the batcher's placement and a
-run's take hold the Wait's row after the Project's.
+holds the Wait's row, a firing, a person's request among them, holds the
+Project's row shared, then the Wait's, and reads the wait open there, and the
+batcher's placement and a run's take hold the Wait's row after the Project's.
 """
 
 import re
@@ -44,6 +50,7 @@ from app.exceptions import InvalidOperationException
 from app.models import CardTransition, Item, Project, User, Wait, WaitFiring, Work
 from app.models import Session as AgentSession
 from app.models.reference import FiringCause, ProjectState, SessionState, WorkTrigger
+from app.schemas.timeline import FiringOutcome, RequestLabel
 
 if TYPE_CHECKING:
     from app.services.job_service import JobService
@@ -53,8 +60,12 @@ TIMED_WAIT = "timed_wait"
 WAITS = (CARD_WAIT, TIMED_WAIT)
 """The Item Kinds of form `wait` (DB assertion 185)."""
 
-REQUESTS = {CARD_WAIT: "Check now", TIMED_WAIT: "Skip wait"}
+REQUESTS: dict[str, RequestLabel] = {CARD_WAIT: "Check now", TIMED_WAIT: "Skip wait"}
 """What a person's request is called on each kind of wait (F27.3)."""
+
+CHECKING = "Pilot is checking"
+"""Why a wait takes no request while a firing of it is pending or a run of it
+is in flight (F27.3; UC's tooltip)."""
 
 _IN_FLIGHT = (SessionState.HELD, SessionState.STARTING, SessionState.RUNNING)
 """The states of a wait's run that keep a second from being placed: held at
@@ -77,6 +88,16 @@ class ReportedTransition:
     to_state: str
     at: datetime
     by: str | None
+
+
+@dataclass(frozen=True)
+class ShownFiring:
+    """A firing of a wait, with the transition that caused it, if one did,
+    and what the brain did with it, none where it did nothing."""
+
+    firing: WaitFiring
+    transition: CardTransition | None
+    outcome: FiringOutcome | None
 
 
 class WaitService:
@@ -277,6 +298,115 @@ class WaitService:
         self._moved(fired)
         return len(fired)
 
+    def request(self, item: Item, person: User) -> None:
+        """`person`'s request of the wait `item` (F27.3; DB 190): a
+        `requested` firing by them, pending for the wait's next run as any
+        firing is (F136.4), read under the wait's Project's row, held shared,
+        and the Wait's, by `refusals`' rule.
+
+        Raises:
+            InvalidOperationException: the item is no wait, or the wait takes
+                no request now: why (`refusals`).
+        """
+        operation = f"request a firing of item {item.id}"
+        if item.kind_code not in WAITS:
+            raise InvalidOperationException(
+                operation, f"a {item.kind_code} item takes no request"
+            )
+        locked = self._lock(item.project_id, item.id, skip_locked=False)
+        # A Wait's row another transaction holds is waited for.
+        assert locked is not None
+        project, held = locked
+        refusal = self.refusals(project, [held])[held.id]
+        if refusal is not None:
+            raise InvalidOperationException(operation, refusal)
+        self._fire(
+            held.id,
+            held.kind_code,
+            FiringCause.REQUESTED,
+            datetime.now(UTC),
+            requested_by_user_id=person.id,
+        )
+        self.view_service.timeline_moved(project)
+
+    def refusals(
+        self, project: Project, waits: Sequence[Item]
+    ) -> dict[uuid.UUID, str | None]:
+        """Why each of `project`'s `waits` takes no person's request now
+        (F27.3), by its id, none for one that takes it: its project archived
+        or finished, the wait done, or Pilot checking, a firing of it pending
+        or a run of it in flight (`run_in_flight`)."""
+        checking = set(
+            self.db.scalars(
+                select(Wait.id).where(
+                    Wait.id.in_([wait.id for wait in waits]),
+                    or_(_pending(Wait.id), run_in_flight(Wait.id)),
+                )
+            )
+        )
+        return {wait.id: _refusal(project, wait, wait.id in checking) for wait in waits}
+
+    def firings(self, waits: Sequence[Item]) -> dict[uuid.UUID, list[ShownFiring]]:
+        """Each wait's firings in order, by its id, a wait with none left out,
+        each with what the brain did with it (`FiringOutcome`), read from the
+        run that took it, followed through its Retries, and the wait's close
+        (DB Wait Firing): closed where a run of that chain is the Session
+        that marked the wait done (DB 199); else Pilot's turn while the
+        chain's latest run is in flight (`run_in_flight`), left open once its
+        turn ended neither failed nor stopped, and none once it failed or was
+        stopped. A firing no run took is Pilot's turn on an open wait, none on
+        a done one."""
+        by_id = {wait.id: wait for wait in waits}
+        runs = {
+            row.id: row
+            for row in self.db.execute(
+                select(
+                    Work.id,
+                    Work.retried_by_id,
+                    AgentSession.state_code,
+                    AgentSession.nudge_owed_at,
+                )
+                .join(AgentSession, AgentSession.id == Work.id)
+                .where(
+                    Work.trigger_code == WorkTrigger.WAIT_FIRED,
+                    Work.trigger_item_id.in_(list(by_id)),
+                )
+            )
+        }
+        shown: dict[uuid.UUID, list[ShownFiring]] = {}
+        for firing, transition in self.db.execute(
+            select(WaitFiring, CardTransition)
+            .outerjoin(CardTransition, CardTransition.id == WaitFiring.transition_id)
+            .where(WaitFiring.wait_id.in_(list(by_id)))
+            .order_by(WaitFiring.wait_id, WaitFiring.seq)
+        ):
+            wait = by_id[firing.wait_id]
+            outcome: FiringOutcome | None
+            if firing.job_id is None:
+                outcome = FiringOutcome.PILOTS_TURN if wait.done_at is None else None
+            else:
+                # A Retry of a wait's run is a run of the wait (`JobService`).
+                chain = [runs[firing.job_id]]
+                while chain[-1].retried_by_id is not None:
+                    chain.append(runs[chain[-1].retried_by_id])
+                latest = chain[-1]
+                if wait.done_cause_code == MARKED and wait.consumed_session_id in {
+                    run.id for run in chain
+                }:
+                    outcome = FiringOutcome.CLOSED
+                elif (
+                    latest.state_code in _IN_FLIGHT or latest.nudge_owed_at is not None
+                ):
+                    outcome = FiringOutcome.PILOTS_TURN
+                elif latest.state_code in _RESUMABLE:
+                    outcome = FiringOutcome.LEFT_OPEN
+                else:
+                    outcome = None
+            shown.setdefault(firing.wait_id, []).append(
+                ShownFiring(firing, transition, outcome)
+            )
+        return shown
+
     def batches_due(self, cutoff: datetime) -> list[tuple[uuid.UUID, uuid.UUID]]:
         """The waits whose run is due (design 2 §8.2's batcher; F136.4), as
         their project's id and their own, read with no lock: open, of an open,
@@ -381,18 +511,32 @@ class WaitService:
     def _hold(
         self, project_id: uuid.UUID, wait_id: uuid.UUID, *, skip_locked: bool
     ) -> Project | None:
-        """The wait's Project, its row held shared and the Wait's after it,
-        when both are taken and read there, the project open and unarchived
-        and the wait open; else none. With `skip_locked`, a Wait's row
-        another transaction holds is not taken."""
+        """The wait's Project, under its rows (`_lock`), the project open and
+        unarchived and the wait open there; else none."""
+        locked = self._lock(project_id, wait_id, skip_locked=skip_locked)
+        if locked is None:
+            return None
+        project, item = locked
+        if (
+            project.state_code is not ProjectState.OPEN
+            or project.archived
+            or item.done_at is not None
+        ):
+            return None
+        return project
+
+    def _lock(
+        self, project_id: uuid.UUID, wait_id: uuid.UUID, *, skip_locked: bool
+    ) -> tuple[Project, Item] | None:
+        """The wait's Project, its row held shared, and its Item, read under
+        the Wait's row after it. With `skip_locked`, a Wait's row another
+        transaction holds is not taken, and none is returned."""
         project = self.db.scalars(
             select(Project)
             .where(Project.id == project_id)
             .with_for_update(read=True)
             .execution_options(populate_existing=True)
         ).one()
-        if project.state_code is not ProjectState.OPEN or project.archived:
-            return None
         taken = self.db.scalar(
             select(Wait.id)
             .where(Wait.id == wait_id)
@@ -400,8 +544,7 @@ class WaitService:
         )
         if taken is None:
             return None
-        item = self.db.get_one(Item, wait_id, populate_existing=True)
-        return project if item.done_at is None else None
+        return project, self.db.get_one(Item, wait_id, populate_existing=True)
 
     def _fire(
         self,
@@ -411,6 +554,7 @@ class WaitService:
         at: datetime,
         *,
         transition_id: int | None = None,
+        requested_by_user_id: uuid.UUID | None = None,
     ) -> None:
         """A pending Firing of the Wait, whose row the caller holds, next in
         its order."""
@@ -424,6 +568,7 @@ class WaitService:
                 seq=(last or 0) + 1,
                 cause_code=cause,
                 transition_id=transition_id,
+                requested_by_user_id=requested_by_user_id,
                 fired_at=at,
             )
         )
@@ -499,6 +644,25 @@ def run_in_flight(
             AgentSession.nudge_owed_at.is_not(None),
         ),
     )
+
+
+def _refusal(project: Project, wait: Item, checking: bool) -> str | None:
+    if project.archived:
+        return ARCHIVED
+    # A wait is born in an open project (`add_item`), which Finish alone
+    # leaves.
+    if project.state_code is not ProjectState.OPEN:
+        return "its project is finished"
+    if wait.done_at is not None:
+        return "the wait is done"
+    return CHECKING if checking else None
+
+
+def _pending(
+    wait_id: SQLColumnExpression[uuid.UUID] | uuid.UUID,
+) -> ColumnElement[bool]:
+    """Whether a firing of the wait is pending: no run has taken it."""
+    return exists().where(WaitFiring.wait_id == wait_id, WaitFiring.job_id.is_(None))
 
 
 def _pending_since(

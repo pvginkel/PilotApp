@@ -1,6 +1,6 @@
 """What a person does to an item on the timeline, by the item's id and a
 block's local id (F30.7): each the record's own write (F32.4), its refusals
-the caller's."""
+the caller's; and a person's request of a wait (F27.3)."""
 
 import uuid
 
@@ -11,8 +11,8 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.exceptions import InvalidOperationException, RecordNotFoundException
-from app.models import Document, Item, Project, ProjectTransition, User
-from app.models.reference import ProjectState, TransitionKind
+from app.models import Document, Item, Project, ProjectTransition, User, WaitFiring
+from app.models.reference import FiringCause, ProjectState, TransitionKind
 from app.schemas.testing_record import InventedProjectCreateSchema
 from app.services.auth_service import AuthContext
 from app.services.container import ServiceContainer
@@ -572,3 +572,81 @@ class TestItemServiceArchiveQuestion:
             "Done with it.",
             "app",
         )
+
+
+def _card_wait(
+    session: DbSession,
+    container: ServiceContainer,
+    project: Project,
+    project_session: models.Session,
+) -> Item:
+    """An open card wait of `project`'s, opened."""
+    project.state_code = ProjectState.OPEN
+    project.slug = "camp"
+    project.name = "Camp"
+    session.flush()
+    return container.wait_service().add_card_wait(
+        project, project_session, "SR-4 is done", ["SR-4"], ["Done"], None
+    )
+
+
+@pytest.mark.usefixtures("person")
+class TestItemServiceRequest:
+    """A person's request of a wait, its head's button (F27.3)."""
+
+    def test_the_request_fires_the_wait_by_the_caller(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        person: User,
+    ) -> None:
+        wait = _card_wait(session, container, project, project_session)
+
+        container.item_service().request(ADA, wait.id)
+
+        assert [
+            (firing.cause_code, firing.requested_by_user_id)
+            for firing in session.scalars(
+                select(WaitFiring).where(WaitFiring.wait_id == wait.id)
+            )
+        ] == [(FiringCause.REQUESTED, person.id)]
+
+    def test_an_unknown_item_is_not_found(self, container: ServiceContainer) -> None:
+        unknown = uuid.uuid4()
+
+        with pytest.raises(RecordNotFoundException) as missing:
+            container.item_service().request(ADA, unknown)
+
+        assert missing.value.message == f"Item {unknown} was not found"
+
+    def test_a_caller_without_a_handle_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        wait = _card_wait(session, container, project, project_session)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.item_service().request(NEWCOMER, wait.id)
+
+        assert refused.value.cause == NO_HANDLE
+        assert session.scalars(select(WaitFiring)).all() == []
+
+    def test_the_wait_s_refusal_reaches_the_caller(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        wait = _card_wait(session, container, project, project_session)
+        container.item_service().request(ADA, wait.id)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            container.item_service().request(ADA, wait.id)
+
+        assert refused.value.cause == "Pilot is checking"

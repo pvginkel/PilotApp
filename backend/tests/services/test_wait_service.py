@@ -1,7 +1,9 @@
 """The waits (F27, DB decision 46): a card wait or a timed wait born with what
 it waits on and fixed from then on, refused as F86.1 has it, fired by a card's
-transition or its due time (F136.2, F27.2), and closed by Pilot's own `done`
-with a note (DB 199, 300) or by Finish, with none."""
+transition, its due time or a person's request (F136.2, F27.2, F27.3), and
+closed by Pilot's own `done` with a note (DB 199, 300) or by Finish, with
+none; what the brain did with each firing, read from its run and the wait's
+close."""
 
 import json
 import re
@@ -19,6 +21,7 @@ from app import models
 from app.database import scoped_session
 from app.engine.bus import EngineEvent, ProjectChanged, TreeHashMoved
 from app.engine.paths import TIMELINE, tree_path
+from app.engine.record import ARCHIVED
 from app.exceptions import InvalidOperationException
 from app.models import (
     CardTransition,
@@ -39,9 +42,15 @@ from app.models.reference import (
     UserKind,
     WorkTrigger,
 )
+from app.schemas.timeline import FiringOutcome
 from app.services import wait_service
 from app.services.container import ServiceContainer
-from app.services.wait_service import ReportedTransition, WaitService
+from app.services.wait_service import (
+    CHECKING,
+    ReportedTransition,
+    ShownFiring,
+    WaitService,
+)
 from app.utils.after_commit import clear_after_commit_callbacks
 
 NOTE = "ANS-312 read Done at 09:40; the rollout goes on"
@@ -1227,3 +1236,447 @@ class TestWaitServiceResumed:
         session.flush()
 
         assert _service(container).resumed(retry, datetime.now(UTC)) is None
+
+
+def _taken(session: DbSession, wait: Item, work: models.Work) -> None:
+    """Every pending firing of `wait` taken by the run `work`."""
+    for firing in _firings(session, wait.id):
+        if firing.job_id is None:
+            firing.job_id = work.id
+    session.flush()
+
+
+def _waiting(
+    session: DbSession,
+    container: ServiceContainer,
+    project: Project,
+    creator: models.Session,
+    kind: str,
+) -> Item:
+    """An open wait of `kind` of `project`'s, opened, that has not fired."""
+    _opened(session, project)
+    if kind == "card_wait":
+        added = _card_wait(container, project, creator)
+    else:
+        added = _service(container).add_timed_wait(
+            project, creator, "ESO refreshes", _ahead(), None
+        )
+    clear_after_commit_callbacks()
+    return added
+
+
+REFUSED = [
+    ("pending", CHECKING),
+    ("held", CHECKING),
+    ("starting", CHECKING),
+    ("running", CHECKING),
+    ("nudge owed", CHECKING),
+    ("done", "the wait is done"),
+    ("finished", "its project is finished"),
+    ("archived", ARCHIVED),
+]
+"""Where a wait takes no request (F27.3), and why: Pilot checking, a firing
+pending or a run in flight, the quota wall's nudge owed among them; the wait
+done; its project finished or archived."""
+
+
+def _refused(
+    session: DbSession,
+    container: ServiceContainer,
+    project: Project,
+    creator: models.Session,
+    how: str,
+) -> Item:
+    """A fired card wait left where it takes no request, as `how` says."""
+    added = _fired(session, container, project, creator)
+    match how:
+        case "pending":
+            pass
+        case "held" | "starting" | "running":
+            work = _run(session, container, project, added, SessionState(how))
+            _taken(session, added, work)
+        case "nudge owed":
+            work = _run(session, container, project, added, SessionState.FAILED)
+            _taken(session, added, work)
+            session.get_one(models.Session, work.id).nudge_owed_at = datetime.now(UTC)
+            session.flush()
+        case _:
+            _taken(
+                session,
+                added,
+                _run(session, container, project, added, SessionState.IDLE),
+            )
+            _not_firable(session, container, project, added, creator, how)
+    return added
+
+
+class TestWaitServiceRequest:
+    """A person's request of a wait, its head's button (F27.3; DB 190)."""
+
+    @pytest.mark.parametrize("kind", ["card_wait", "timed_wait"])
+    def test_it_fires_the_open_wait_pending_by_the_person(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        engine_events: list[EngineEvent],
+        project: Project,
+        person: User,
+        project_session: models.Session,
+        kind: str,
+    ) -> None:
+        added = _waiting(session, container, project, project_session, kind)
+        project_id = project.id
+        before = datetime.now(UTC)
+
+        with scoped_session(container):
+            _service(container).request(added, person)
+
+        [firing] = _firings(session, added.id)
+        assert (
+            firing.seq,
+            firing.wait_kind_code,
+            firing.cause_code,
+            firing.transition_id,
+            firing.requested_by_user_id,
+            firing.job_id,
+        ) == (1, kind, FiringCause.REQUESTED, None, person.id, None)
+        assert before <= firing.fired_at <= datetime.now(UTC)
+        assert engine_events == [
+            TreeHashMoved(
+                tree_path(project, TIMELINE),
+                container.view_service().timeline(project).hash,
+            ),
+            ProjectChanged(project_id),
+        ]
+        assert [
+            (each["cause"], each["requested_by"])
+            for each in _shown_firings(container, project, added.id)
+        ] == [("requested", "ada")]
+
+    def test_its_firing_is_the_batchers_as_any_other(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        added = _waiting(session, container, project, project_session, "card_wait")
+
+        _service(container).request(added, person)
+
+        assert _service(container).batches_due(datetime.now(UTC)) == [
+            (project.id, added.id)
+        ]
+
+    @pytest.mark.parametrize("state", [SessionState.IDLE, SessionState.ENDED])
+    def test_once_the_wait_s_run_ended_it_is_taken_after_its_firings(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+        project_session: models.Session,
+        state: SessionState,
+    ) -> None:
+        added = _fired(session, container, project, project_session)
+        _taken(session, added, _run(session, container, project, added, state))
+
+        _service(container).request(added, person)
+
+        assert [
+            (firing.seq, firing.cause_code) for firing in _firings(session, added.id)
+        ] == [(1, FiringCause.TRANSITION), (2, FiringCause.REQUESTED)]
+
+    @pytest.mark.parametrize(("how", "cause"), REFUSED)
+    def test_it_is_refused_as_the_read_says(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+        project_session: models.Session,
+        how: str,
+        cause: str,
+    ) -> None:
+        """The read's rule and the request's are one (F27.3)."""
+        added = _refused(session, container, project, project_session, how)
+        service = _service(container)
+        fired = len(_firings(session, added.id))
+
+        assert service.refusals(project, [added]) == {added.id: cause}
+        with pytest.raises(InvalidOperationException) as refused:
+            service.request(added, person)
+
+        assert str(refused.value) == (
+            f"Cannot request a firing of item {added.id} because {cause}"
+        )
+        assert len(_firings(session, added.id)) == fired
+
+    def test_an_item_that_is_no_wait_is_refused(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        person: User,
+        item: Item,
+    ) -> None:
+        with pytest.raises(InvalidOperationException) as refused:
+            _service(container).request(item, person)
+
+        assert refused.value.cause == "a decision item takes no request"
+
+
+class TestWaitServiceRefusals:
+    """The rule the timeline's read gives as a wait's button (F27.3)."""
+
+    @pytest.mark.parametrize("kind", ["card_wait", "timed_wait"])
+    def test_an_open_wait_with_nothing_pending_or_in_flight_takes_one(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        kind: str,
+    ) -> None:
+        added = _waiting(session, container, project, project_session, kind)
+
+        assert _service(container).refusals(project, [added]) == {added.id: None}
+
+    def test_each_wait_is_read_on_its_own(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        fired = _fired(session, container, project, project_session)
+        quiet = _service(container).add_timed_wait(
+            project, project_session, "ESO refreshes", _ahead(), None
+        )
+
+        assert _service(container).refusals(project, [fired, quiet]) == {
+            fired.id: CHECKING,
+            quiet.id: None,
+        }
+
+
+class TestWaitServiceRequestInTwoProcesses:
+    """Two people's requests at once (F27.3)."""
+
+    def test_a_request_committed_before_the_rows_are_held_is_seen_under_them(
+        self, committed_app: Flask, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        container = committed_app.container
+        wait_id = _committed_overdue(container)
+        lock = WaitService._lock
+        pending = [True]
+
+        def hooked(
+            service: WaitService,
+            project_id: uuid.UUID,
+            wait: uuid.UUID,
+            *,
+            skip_locked: bool,
+        ) -> tuple[Project, Item] | None:
+            # The other person's request commits after this one read the
+            # wait, before it holds the rows.
+            if pending:
+                pending.pop()
+                _in_thread(lambda: _request(container, wait_id))
+            return lock(service, project_id, wait, skip_locked=skip_locked)
+
+        monkeypatch.setattr(wait_service.WaitService, "_lock", hooked)
+
+        with pytest.raises(InvalidOperationException) as refused:
+            _request(container, wait_id)
+
+        assert refused.value.cause == CHECKING
+        with scoped_session(container) as db:
+            assert [firing.cause_code for firing in _firings(db, wait_id)] == [
+                FiringCause.REQUESTED
+            ]
+
+
+def _request(container: ServiceContainer, wait_id: uuid.UUID) -> None:
+    with scoped_session(container) as db:
+        ada = db.scalars(select(User).where(User.handle == "ada")).one()
+        container.wait_service().request(db.get_one(Item, wait_id), ada)
+
+
+def _outcomes(
+    container: ServiceContainer, wait: Item
+) -> list[tuple[int, FiringOutcome | None]]:
+    return [
+        (shown.firing.seq, shown.outcome)
+        for shown in _service(container).firings([wait]).get(wait.id, [])
+    ]
+
+
+class TestWaitServiceFirings:
+    """What the brain did with each firing, read from its run and the wait's
+    close, never stored (DB Wait Firing)."""
+
+    def test_each_firing_in_order_with_its_transition_or_its_requester(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        person: User,
+        project_session: models.Session,
+    ) -> None:
+        added = _fired(session, container, project, project_session)
+        quiet = _service(container).add_timed_wait(
+            project, project_session, "ESO refreshes", _ahead(), None
+        )
+        work = _run(session, container, project, added, SessionState.IDLE)
+        _taken(session, added, work)
+        _service(container).request(added, person)
+        [transition] = _transitions(session)
+
+        shown = _service(container).firings([added, quiet])
+
+        first, second = _firings(session, added.id)
+        assert shown == {
+            added.id: [
+                ShownFiring(first, transition, FiringOutcome.LEFT_OPEN),
+                ShownFiring(second, None, FiringOutcome.PILOTS_TURN),
+            ]
+        }
+        assert second.requested_by_user_id == person.id
+
+    @pytest.mark.parametrize(
+        ("state", "outcome"),
+        [
+            (SessionState.HELD, FiringOutcome.PILOTS_TURN),
+            (SessionState.STARTING, FiringOutcome.PILOTS_TURN),
+            (SessionState.RUNNING, FiringOutcome.PILOTS_TURN),
+            (SessionState.IDLE, FiringOutcome.LEFT_OPEN),
+            (SessionState.ENDED, FiringOutcome.LEFT_OPEN),
+            (SessionState.FAILED, None),
+            (SessionState.STOPPED, None),
+        ],
+    )
+    def test_a_taken_firing_is_what_its_run_did(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        state: SessionState,
+        outcome: FiringOutcome | None,
+    ) -> None:
+        added = _fired(session, container, project, project_session)
+        _taken(session, added, _run(session, container, project, added, state))
+
+        assert _outcomes(container, added) == [(1, outcome)]
+
+    def test_a_run_that_waits_for_its_nudge_at_the_quota_wall_is_pilots_turn(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        added = _fired(session, container, project, project_session)
+        work = _run(session, container, project, added, SessionState.FAILED)
+        _taken(session, added, work)
+        session.get_one(models.Session, work.id).nudge_owed_at = datetime.now(UTC)
+        session.flush()
+
+        assert _outcomes(container, added) == [(1, FiringOutcome.PILOTS_TURN)]
+
+    @pytest.mark.parametrize(
+        ("state", "outcome"),
+        [
+            (SessionState.RUNNING, FiringOutcome.PILOTS_TURN),
+            (SessionState.IDLE, FiringOutcome.LEFT_OPEN),
+            (SessionState.FAILED, None),
+        ],
+    )
+    def test_a_retried_run_s_firing_is_what_its_latest_retry_did(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        state: SessionState,
+        outcome: FiringOutcome | None,
+    ) -> None:
+        added = _fired(session, container, project, project_session)
+        failed = _run(session, container, project, added, SessionState.FAILED)
+        _taken(session, added, failed)
+        stopped = _run(session, container, project, added, SessionState.STOPPED)
+        failed.retried_by_id = stopped.id
+        stopped.retried_by_id = _run(session, container, project, added, state).id
+        session.flush()
+
+        assert _outcomes(container, added) == [(1, outcome)]
+
+    @pytest.mark.parametrize("closer", ["run", "retry"])
+    def test_the_firings_of_the_run_that_marked_the_wait_done_closed_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+        closer: str,
+    ) -> None:
+        """Whatever its run's state since; an earlier run's firings were left
+        open, and one pending at the close no run took."""
+        added = _fired(session, container, project, project_session)
+        _taken(
+            session, added, _run(session, container, project, added, SessionState.IDLE)
+        )
+        assert _service(container).fire_transition(_transition()) == 1
+        work = _run(session, container, project, added, SessionState.FAILED)
+        _taken(session, added, work)
+        retry = _run(session, container, project, added, SessionState.RUNNING)
+        work.retried_by_id = retry.id
+        session.flush()
+        assert _service(container).fire_transition(_transition()) == 1
+
+        _service(container).close(
+            project,
+            session.get_one(Wait, added.id),
+            _pilot(session),
+            work.id if closer == "run" else retry.id,
+            NOTE,
+        )
+
+        assert _outcomes(container, added) == [
+            (1, FiringOutcome.LEFT_OPEN),
+            (2, FiringOutcome.CLOSED),
+            (3, None),
+        ]
+
+    def test_a_wait_marked_done_by_another_session_was_left_open_by_its_runs(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        added = _fired(session, container, project, project_session)
+        _taken(
+            session, added, _run(session, container, project, added, SessionState.IDLE)
+        )
+
+        _not_firable(session, container, project, added, project_session, "done")
+
+        assert _outcomes(container, added) == [(1, FiringOutcome.LEFT_OPEN)]
+
+    def test_a_firing_no_run_took_is_pilots_turn_until_the_wait_is_done(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        project_session: models.Session,
+    ) -> None:
+        added = _fired(session, container, project, project_session)
+        assert _outcomes(container, added) == [(1, FiringOutcome.PILOTS_TURN)]
+
+        container.record_service().close_unanswered(
+            project, _pilot(session), datetime.now(UTC)
+        )
+
+        assert _outcomes(container, added) == [(1, None)]

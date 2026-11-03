@@ -10,8 +10,11 @@ documents and the material its session registers and attaches there, each with
 its effect, and the list of steps it publishes; a pre-ruling pass's questions to a registered document's writer,
 and its clarification run, with the writer's reply or to run; a person's
 answer the brain records through the project's open chat, with
-its effect; and the store's update, made or its lift asked, as `update-store`
-does (F144.5).
+its effect; the store's update, made or its lift asked, as `update-store`
+does (F144.5); and the brain's waits, a card's transition delivered as the
+tracker-events endpoint takes it, past its token, which the dev stage has
+none of (R8), the waits' timer's tick, a wait's run placed as the batcher
+places it, and its close by Pilot's `mark`.
 Nothing in the UI places a work item, which the brain adds (F66).
 
 They answer on every STAGE but prd, whatever FLASK_ENV says, so that the dev
@@ -46,6 +49,7 @@ from app.schemas.testing_record import (
     InventedClarificationSchema,
     InventedEnvironmentSchema,
     InventedFaultSchema,
+    InventedFiredSchema,
     InventedItemCreateSchema,
     InventedItemSchema,
     InventedPersonCreateSchema,
@@ -57,15 +61,20 @@ from app.schemas.testing_record import (
     InventedSaveSchema,
     InventedStoreUpdateCreateSchema,
     InventedStoreUpdateSchema,
+    InventedWaitCloseSchema,
+    InventedWaitCreateSchema,
     InventedWorkCreateSchema,
     InventedWorkerAttachmentCreateSchema,
     InventedWorkerAttachmentsSchema,
     InventedWriterQuestionsCreateSchema,
     InventedWriterQuestionsSchema,
 )
+from app.schemas.tracker_events import TrackerEventReplySchema
 from app.services.container import ServiceContainer
 from app.services.store_update_service import StoreUpdateService
 from app.services.test_data_service import TestDataService
+from app.services.tracker_event_service import TrackerEventService
+from app.services.wait_service import WaitService
 from app.utils.flask_error_handlers import build_error_response
 from app.utils.spectree_config import api
 
@@ -741,6 +750,149 @@ def create_store_update(
         ), 200
     update = store_update_service.make()
     return InventedStoreUpdateSchema.model_validate(update).model_dump(mode="json"), 201
+
+
+@testing_record_bp.route("/projects/<uuid:project_id>/waits", methods=["POST"])
+@api.validate(
+    json=InventedWaitCreateSchema,
+    resp=SpectreeResponse(
+        HTTP_201=InventedItemSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def create_wait(
+    project_id: uuid.UUID,
+    test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
+) -> Any:
+    """Add a wait to the project's timeline, by the project's session, as the
+    brain's `add_item` adds one (F86.1): a card wait on its cards and states,
+    a timed wait due at its time; placed at `placed_at`, as a wait added then
+    reads, so that a timed wait is due, or past due, at once.
+
+    Returns:
+        201: The wait's id
+        400: The body is invalid, a field of the other kind given, or the
+            stage is prd
+        404: No project has the id
+        409: The project has no session, `placed_at` is ahead, or the add
+            refuses the wait: the reason
+    """
+    data = InventedWaitCreateSchema.model_validate(request.get_json())
+    item = test_data_service.wait(project_id, data)
+    return InventedItemSchema(id=item.id).model_dump(mode="json"), 201
+
+
+@testing_record_bp.route("/tracker-events/<tracker>", methods=["POST"])
+@api.validate(
+    resp=SpectreeResponse(
+        HTTP_200=TrackerEventReplySchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def create_tracker_event(
+    tracker: str,
+    tracker_event_service: TrackerEventService = Provide[
+        ServiceContainer.tracker_event_service
+    ],
+) -> Any:
+    """Deliver a card's change of state as `POST /api/tracker-events/<tracker>`
+    takes it, past its token and its count of deliveries received: its body
+    the tracker's own, `youtrack`'s the Webhook Triggers app's
+    `issueUpdated`; the card waits it matches fire (F136.2).
+
+    Returns:
+        200: How many waits fired, none for a delivery the endpoint drops
+        400: The tracker's adapter cannot read the body, or the stage is prd
+        404: No tracker has the name
+    """
+    fired = tracker_event_service.take(tracker, request.get_data())
+    return TrackerEventReplySchema(fired=fired).model_dump()
+
+
+@testing_record_bp.route("/waits/due", methods=["POST"])
+@api.validate(
+    resp=SpectreeResponse(
+        HTTP_200=InventedFiredSchema, HTTP_400=ApiErrorResponseSchema
+    ),
+)
+@inject
+def create_due_firings(
+    wait_service: WaitService = Provide[ServiceContainer.wait_service],
+) -> Any:
+    """Run the waits' timer's tick now: every open timed wait whose due time
+    has passed fires `due`, once (F27.2).
+
+    Returns:
+        200: How many waits fired
+        400: The stage is prd
+    """
+    return InventedFiredSchema(fired=wait_service.fire_due()).model_dump()
+
+
+@testing_record_bp.route("/waits/<uuid:item_id>/run", methods=["POST"])
+@api.validate(
+    resp=SpectreeResponse(
+        HTTP_201=InventedItemSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def create_wait_run(
+    item_id: uuid.UUID,
+    test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
+) -> Any:
+    """Place the wait's run now, as the batcher places it once the quiet
+    window from its oldest pending firing has passed (F136.4): it starts
+    through the gate once the request commits and takes the firings pending
+    at its brief.
+
+    Returns:
+        201: The run's work item's id
+        400: The stage is prd
+        404: No wait has the id
+        409: No run of it is due, or no controller or no store environment is
+            configured: the reason
+    """
+    work = test_data_service.wait_run(item_id)
+    return InventedItemSchema(id=work.id).model_dump(mode="json"), 201
+
+
+@testing_record_bp.route("/waits/<uuid:item_id>/close", methods=["POST"])
+@api.validate(
+    json=InventedWaitCloseSchema,
+    resp=SpectreeResponse(
+        HTTP_204=None,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def create_wait_close(
+    item_id: uuid.UUID,
+    test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
+) -> tuple[str, int]:
+    """Close the open wait with its note as Pilot's `mark` does (F27.4), by
+    the wait's latest run briefed, else by the project's session: done
+    `marked`, consumed on the spot, the note its done line's.
+
+    Returns:
+        204: The wait is done
+        400: The note is missing, or the stage is prd
+        404: No wait has the id
+        409: The wait has no run briefed and its project no session, the
+            project is archived, or the wait is done
+    """
+    data = InventedWaitCloseSchema.model_validate(request.get_json())
+    test_data_service.close_wait(item_id, data.note)
+    return "", 204
 
 
 def _saved(ingested: Ingested) -> dict[str, Any]:

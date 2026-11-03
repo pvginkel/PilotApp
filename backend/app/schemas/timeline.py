@@ -10,7 +10,13 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
-from app.models.reference import AnswerChannel, BlockKind, SessionState, UserKind
+from app.models.reference import (
+    AnswerChannel,
+    BlockKind,
+    FiringCause,
+    SessionState,
+    UserKind,
+)
 from app.schemas.links import EnvironmentNameSchema
 from app.schemas.pilot_work import ProgressStepSchema
 
@@ -68,6 +74,23 @@ class StopCause(StrEnum):
     FIVE_HOUR_HALT = "five_hour_halt"
     USAGE_LIMIT = "usage_limit"
     STORE_UPDATE = "store_update"
+
+
+class FiringOutcome(StrEnum):
+    """What the brain did with a wait's firing (F27.1; UC's wait), read at
+    display from the run that took it and the wait's close, never stored
+    (DB Wait Firing): Pilot's turn while it is pending on an open wait or
+    its run, or that run's Retry, is in flight; closed once that run marked
+    the wait done; left open once that run's turn ended with the wait open."""
+
+    PILOTS_TURN = "pilots_turn"
+    LEFT_OPEN = "left_open"
+    CLOSED = "closed"
+
+
+RequestLabel = Literal["Check now", "Skip wait"]
+"""What a person's request of a wait is called (F27.3): *Check now* on a card
+wait, *Skip wait* on a timed wait."""
 
 
 ItemForm = Literal["prose", "work", "wait"]
@@ -582,6 +605,104 @@ class ClarificationSchema(BaseModel):
     )
 
 
+class CardTransitionSchema(BaseModel):
+    """A card's change of state its tracker reported, which fired a card wait
+    (F136)."""
+
+    card: str = Field(
+        description="The card, as the tracker writes it", examples=["SR-4"]
+    )
+    from_state: str | None = Field(
+        description="The state it left; null where the tracker gave none",
+        examples=["In Progress"],
+    )
+    to_state: str = Field(description="The state it entered", examples=["Done"])
+    at: datetime = Field(description="When it changed, by the tracker's clock")
+    by: str | None = Field(
+        description=(
+            "Who changed it, the tracker's login, not a person of Pilot's; null "
+            "where the tracker named no one"
+        ),
+        examples=["pieter"],
+    )
+
+
+class WaitFiringSchema(BaseModel):
+    """One occasion a wait fired, one line under its card (F27.1, F27.2)."""
+
+    seq: int = Field(description="Its place among the wait's firings, from 1")
+    cause: FiringCause = Field(
+        description=(
+            "What fired it: a card's transition, the due time, or a person's request"
+        )
+    )
+    fired_at: datetime = Field(description="When the server recorded it")
+    transition: CardTransitionSchema | None = Field(
+        description="The transition that fired it; null unless `cause` is `transition`"
+    )
+    requested_by: UserSchema | None = Field(
+        description="The person who requested it; null unless `cause` is `requested`"
+    )
+    outcome: FiringOutcome | None = Field(
+        description=(
+            "What the brain did with it; null where it did nothing: its run "
+            "failed or was stopped and is not retried, or the wait was closed "
+            "before a run took it"
+        )
+    )
+
+
+class WaitRequestSchema(BaseModel):
+    """A person's request of the wait, its head's one button (F27.3), which
+    fires the wait with the request in its run's brief."""
+
+    label: RequestLabel = Field(description="The button's label, its tooltip")
+    open: bool = Field(description="Whether the wait takes a request now")
+    refusal: str | None = Field(
+        description=(
+            "Why it takes none, the server's refusal of one, the disabled "
+            "button's tooltip: Pilot is checking, while a firing of it is "
+            "pending or a run of it is in flight; it is done; or its project is "
+            "finished or archived. Null while `open`"
+        ),
+        examples=["Pilot is checking"],
+    )
+
+
+class WaitSchema(BaseModel):
+    """A wait's own, as its card, its line and its button draw it (F27). It
+    waits since the item's `created_at`, when it was added."""
+
+    cards: list[str] | None = Field(
+        description=(
+            "A card wait's cards, in their order, its ticket links; null for a "
+            "timed wait"
+        ),
+        examples=[["SR-1", "SR-4"]],
+    )
+    states: list[str] | None = Field(
+        description=(
+            "The states a card wait waits for its cards to enter, as the brain "
+            "gave them; null for a timed wait"
+        ),
+        examples=[["Done", "Won't fix"]],
+    )
+    due_at: datetime | None = Field(
+        description="A timed wait's due time; null for a card wait"
+    )
+    firings: list[WaitFiringSchema] = Field(
+        description="Its firings, in order; empty while it has fired none"
+    )
+    request: WaitRequestSchema = Field(description="A person's request of it")
+    note: str | None = Field(
+        description=(
+            "What the brain wrote at its close through `mark`, the done line's "
+            "after the dot (F27.4); null while open and after a close by Finish"
+        ),
+        examples=["SR-4 read Done at 09:40; the rollout goes on"],
+    )
+
+
 class TimelineItemSchema(BaseModel):
     """An entry on the timeline, with what its line and its open form show."""
 
@@ -700,6 +821,9 @@ class TimelineItemSchema(BaseModel):
             "A work item's Session, which the SSE event `work_moved` carries as it "
             "moves; null for every other kind"
         )
+    )
+    wait: WaitSchema | None = Field(
+        description="A wait's own; null for every other kind"
     )
 
 

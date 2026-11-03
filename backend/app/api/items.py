@@ -1,6 +1,6 @@
 """What the signed-in person does to a timeline's items (F14, F17, F32.4):
 answer a block, mark an action Done, mark a document Done, a notice Read, a
-review Reviewed, and undo. Each is the record's own write; its refusals
+review Reviewed, and undo; and request a wait's firing (F27.3). Each is the record's own write; its refusals
 answer as the API's errors. A block is addressed under its item, by its
 local id (F30.7). And an item's document, read on its own as the overlay
 draws it (F28, F13.3)."""
@@ -217,4 +217,29 @@ def undo(
             done in a way that offers no undo, or it is no prose item
     """
     item_service.undo(item_id)
+    return "", 204
+
+
+@items_bp.route("/<uuid:item_id>/request", methods=["POST"])
+@api.validate(resp=_MARK_RESPONSES)
+@inject
+def request_firing(
+    item_id: uuid.UUID,
+    item_service: ItemService = Provide[ServiceContainer.item_service],
+) -> tuple[str, int]:
+    """Request a wait's firing as the signed-in person, now (F27.3): *Check
+    now* on a card wait, *Skip wait* on a timed wait. It fires the wait, and
+    the wait's next run is briefed with the request.
+
+    Returns:
+        204: The firing is recorded
+        401: No one is signed in
+        403: The caller lacks the editor role
+        404: No item has the id
+        409: The caller has not chosen a handle, the item is no wait, or the
+            wait takes no request now: Pilot is checking, a firing of it
+            pending or a run of it in flight; it is done; or its project is
+            finished or archived
+    """
+    item_service.request(caller(), item_id)
     return "", 204

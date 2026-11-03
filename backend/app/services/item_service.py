@@ -1,7 +1,8 @@
 """What a person does to an item on the timeline, by the item's id and a
 block's local id (F30.7): each the record's own write (F32.4), the item and
 the block found by their ids and the writer by the caller; the archive
-question's Archive archives the project with it (DB 265)."""
+question's Archive archives the project with it (DB 265); and a person's
+request of a wait, which fires it (F27.3)."""
 
 import uuid
 
@@ -14,6 +15,7 @@ from app.models import Document, Item
 from app.services.auth_service import AuthContext
 from app.services.people_service import PeopleService
 from app.services.project_service import ProjectService
+from app.services.wait_service import WaitService
 
 
 class ItemService:
@@ -23,11 +25,13 @@ class ItemService:
         people_service: PeopleService,
         record_service: RecordService,
         project_service: ProjectService,
+        wait_service: WaitService,
     ) -> None:
         self.db = db
         self.people_service = people_service
         self.record_service = record_service
         self.project_service = project_service
+        self.wait_service = wait_service
 
     def answer(
         self,
@@ -130,6 +134,21 @@ class ItemService:
             InvalidOperationException: the record refuses the undo.
         """
         self.record_service.undo(self._item(item_id))
+
+    def request(self, auth: AuthContext, item_id: uuid.UUID) -> None:
+        """The caller's request of the wait (F27.3): *Check now* on a card
+        wait, *Skip wait* on a timed wait, a firing by them.
+
+        Raises:
+            RecordNotFoundException: no item has the id.
+            InvalidOperationException: the caller has not chosen a handle,
+                the item is no wait, or the wait takes no request now.
+        """
+        item = self._item(item_id)
+        person = self.people_service.require_person(
+            auth, f"request a firing of item {item_id}"
+        )
+        self.wait_service.request(item, person)
 
     def _item(self, item_id: uuid.UUID) -> Item:
         item = self.db.get(Item, item_id)

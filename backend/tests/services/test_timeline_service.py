@@ -34,6 +34,8 @@ from app.models import (
     Turn,
     UsageReading,
     User,
+    Wait,
+    WaitFiring,
     WindowShare,
     Work,
     WriterQuestion,
@@ -73,6 +75,7 @@ from app.services.session_record_service import SessionRecordService
 from app.services.start_gate import WorkSlots
 from app.services.timeline_service import Badge, work_status
 from app.services.usage_halts import UsageHalts
+from app.services.wait_service import ReportedTransition
 from tests.support.chats import ChatWriter, open_chat
 from tests.support.store_updates import hold, lift, stopped_job
 from tests.support.turns import end_turns, turn_in_flight
@@ -517,6 +520,14 @@ def _wait(session: DbSession, project: Project, run: models.Session) -> Item:
         created_by_session_id=run.id,
     )
     session.add(wait)
+    session.flush()
+    session.add(
+        Wait(
+            id=wait.id,
+            kind_code="timed_wait",
+            due_at=datetime.now(UTC) + timedelta(hours=1),
+        )
+    )
     session.flush()
     return wait
 
@@ -2173,6 +2184,200 @@ class TestTimeline:
         assert project.autopilot is False
         assert briefed_on.work is not None and briefed_off.work is not None
         assert (briefed_on.work.autopilot, briefed_off.work.autopilot) == (True, False)
+
+
+def _wait_run(
+    container: ServiceContainer,
+    session: DbSession,
+    project: Project,
+    wait: Item,
+    state: SessionState,
+) -> Work:
+    """A run of `wait` in `state`, which took its pending firings."""
+    job = models.Session(
+        project_id=project.id,
+        kind_code="job",
+        cwd="/work/PilotProjects",
+        token_hash=uuid.uuid4().hex * 2,
+        state_code=state,
+        turns=1,
+    )
+    session.add(job)
+    session.flush()
+    work = container.record_service().place_work(
+        project,
+        job,
+        "Checking the wait",
+        trigger=WorkTrigger.WAIT_FIRED,
+        trigger_item_id=wait.id,
+    )
+    session.execute(
+        update(WaitFiring)
+        .where(WaitFiring.wait_id == wait.id, WaitFiring.job_id.is_(None))
+        .values(job_id=work.id)
+    )
+    session.flush()
+    return work
+
+
+_NIGHT_SHIFT = ReportedTransition(
+    card="SR-4",
+    from_state="In Progress",
+    to_state="Done",
+    at=datetime(2026, 10, 12, 1, 12, tzinfo=UTC),
+    by="pieter",
+)
+
+
+@pytest.mark.usefixtures("person")
+class TestWaits:
+    """A wait as its card, its line and its button draw it (F27)."""
+
+    def test_a_card_wait_with_its_lists_its_firings_and_its_button(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+        person: User,
+    ) -> None:
+        project = _make(container)
+        run = _run(session, project, environment)
+        waits = container.wait_service()
+        wait = waits.add_card_wait(
+            project,
+            run,
+            "The night shift takes SR-1 and SR-4",
+            ["SR-1", "SR-4"],
+            ["Done", "Won't fix"],
+            None,
+        )
+        assert waits.fire_transition(_NIGHT_SHIFT) == 1
+        _wait_run(container, session, project, wait, SessionState.IDLE)
+        waits.request(wait, person)
+
+        _opening, entry, _run_line = _items(container, project)
+
+        [first, second] = session.scalars(
+            select(WaitFiring)
+            .where(WaitFiring.wait_id == wait.id)
+            .order_by(WaitFiring.seq)
+        )
+        assert (entry["created_at"], entry["done"]) == (
+            wait.created_at.isoformat().replace("+00:00", "Z"),
+            None,
+        )
+        assert entry["wait"] == {
+            "cards": ["SR-1", "SR-4"],
+            "states": ["Done", "Won't fix"],
+            "due_at": None,
+            "firings": [
+                {
+                    "seq": 1,
+                    "cause": "transition",
+                    "fired_at": _stamp(first.fired_at),
+                    "transition": {
+                        "card": "SR-4",
+                        "from_state": "In Progress",
+                        "to_state": "Done",
+                        "at": "2026-10-12T01:12:00Z",
+                        "by": "pieter",
+                    },
+                    "requested_by": None,
+                    "outcome": "left_open",
+                },
+                {
+                    "seq": 2,
+                    "cause": "requested",
+                    "fired_at": _stamp(second.fired_at),
+                    "transition": None,
+                    "requested_by": ADA_USER,
+                    "outcome": "pilots_turn",
+                },
+            ],
+            "request": {
+                "label": "Check now",
+                "open": False,
+                "refusal": "Pilot is checking",
+            },
+            "note": None,
+        }
+
+    def test_a_timed_wait_with_its_due_time_and_its_button(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        run = _run(session, project, environment)
+        due = datetime.now(UTC).replace(microsecond=0) + timedelta(minutes=7)
+        container.wait_service().add_timed_wait(
+            project, run, "ESO refreshes", due, None
+        )
+
+        _opening, entry = _items(container, project)
+
+        assert entry["wait"] == {
+            "cards": None,
+            "states": None,
+            "due_at": _stamp(due),
+            "firings": [],
+            "request": {"label": "Skip wait", "open": True, "refusal": None},
+            "note": None,
+        }
+
+    def test_a_done_wait_has_the_note_its_close_wrote_and_takes_no_request(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        run = _run(session, project, environment)
+        waits = container.wait_service()
+        wait = waits.add_card_wait(
+            project, run, "SR-4 is done", ["SR-4"], ["Done"], None
+        )
+        assert waits.fire_transition(_NIGHT_SHIFT) == 1
+        work = _wait_run(container, session, project, wait, SessionState.RUNNING)
+        note = "SR-4 read Done at 09:40; the rollout goes on"
+
+        waits.close(
+            project, session.get_one(Wait, wait.id), _pilot(session), work.id, note
+        )
+
+        _opening, entry, _run_line = _items(container, project)
+        assert (entry["done"]["cause"], entry["done"]["by"], entry["done"]["undo"]) == (
+            "marked",
+            PILOT,
+            False,
+        )
+        assert (
+            entry["wait"]["note"],
+            entry["wait"]["request"],
+            [firing["outcome"] for firing in entry["wait"]["firings"]],
+        ) == (
+            note,
+            {"label": "Check now", "open": False, "refusal": "the wait is done"},
+            ["closed"],
+        )
+
+    def test_every_other_item_has_no_wait(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        environment: Environment,
+    ) -> None:
+        project = _make(container)
+        run = _run(session, project, environment)
+        _bear(container, project, run, "notice", "Bring boots", NOTICE)
+        _work(session, project, environment, SessionState.RUNNING)
+
+        assert [entry["wait"] for entry in _items(container, project)] == [None] * 3
+
+
+def _stamp(at: datetime) -> str:
+    return at.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 @pytest.mark.usefixtures("person")

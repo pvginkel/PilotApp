@@ -2,7 +2,8 @@
 cannot make: people, environments, projects, their items, their work items,
 an agent's saves of them, the files hung on them, a worker's registrations and
 attachments, the pre-ruling pass's questions to a writer, an answer the brain
-records in the chat, and the store's update and its lift."""
+records in the chat, the store's update and its lift, and the brain's waits,
+their firings, their runs and their close."""
 
 import base64
 import binascii
@@ -17,6 +18,7 @@ from pydantic import (
     Field,
     WithJsonSchema,
     field_validator,
+    model_validator,
 )
 
 from app.models.reference import ProjectState, TaskStatus
@@ -457,3 +459,64 @@ class InventedStoreUpdateSchema(BaseModel):
     error: str | None = Field(
         description="The sequence's last failure, cleared at the next attempt"
     )
+
+
+class InventedWaitCreateSchema(BaseModel):
+    """A wait the project's session adds, as the brain's `add_item` adds one
+    (F86.1): a card wait with its cards and states, a timed wait with its due
+    time, placed now or at a time before now."""
+
+    kind: Literal["card_wait", "timed_wait"] = Field(description="Its kind")
+    title: str = Field(
+        min_length=1, description="Its title", examples=["The night shift takes SR-4"]
+    )
+    cards: list[str] | None = Field(
+        default=None,
+        description="A card wait's cards, ticket ids; none for a timed wait",
+        examples=[["SR-4"]],
+    )
+    states: list[str] | None = Field(
+        default=None,
+        description="The states a card wait waits for; none for a timed wait",
+        examples=[["Done"]],
+    )
+    due_at: datetime | None = Field(
+        default=None,
+        description=(
+            "A timed wait's due time, after `placed_at`; none for a card wait. "
+            "Before now, it is due, and the waits' timer fires it at its next tick"
+        ),
+    )
+    placed_at: datetime | None = Field(
+        default=None,
+        description=(
+            "When it was added, before now, as a wait added then reads: the add's "
+            "refusals hold as of then; now when none"
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _fields_of_its_kind(self) -> "InventedWaitCreateSchema":
+        lists = (self.cards is not None, self.states is not None)
+        if self.kind == "card_wait":
+            if lists != (True, True) or self.due_at is not None:
+                raise ValueError("a card wait takes `cards` and `states`, no `due_at`")
+        elif lists != (False, False) or self.due_at is None:
+            raise ValueError("a timed wait takes `due_at`, no `cards` or `states`")
+        return self
+
+
+class InventedWaitCloseSchema(BaseModel):
+    """Pilot's `done` on an open wait, as its `mark` closes one (F27.4)."""
+
+    note: str = Field(
+        min_length=1,
+        description="What was read and when, and the action after it started",
+        examples=["SR-4 read Done at 09:40; the rollout goes on"],
+    )
+
+
+class InventedFiredSchema(BaseModel):
+    """How many waits a testing route fired."""
+
+    fired: int = Field(ge=0, description="How many waits fired", examples=[1])

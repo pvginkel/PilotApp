@@ -553,6 +553,18 @@ class ServiceContainer(containers.DeclarativeContainer):
         NotificationTokenCipher, secret_key=config.provided.secret_key
     )
 
+    # The brain's waits, fixed at add and closed by its `done` (F27), and a
+    # person's request of one (F27.3); the job service, built at the call,
+    # withdraws a closed wait's run held before its brief.
+    wait_service = providers.Factory(
+        WaitService,
+        db=db_session,
+        document_service=document_service,
+        view_service=view_service,
+        ticket_id_pattern=app_config.provided.ticket_id_pattern,
+        cache_expiration_ttl_seconds=app_config.provided.cache_expiration_ttl_seconds,
+        jobs=providers.Callable(lambda container: container.job_service, __self__),
+    )
     # The projects as the signed-in person reads them (F1, F2, F3), and their
     # transitions and membership (F4.1, F5, F6, F127, F128)
     # A project's timeline as a screen draws it, and the badge (F8, F1.4)
@@ -563,6 +575,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         controller_outage=controller_outage,
         work_slots=work_slots,
         usage_halts=usage_halts,
+        wait_service=wait_service,
     )
     # The standing notification each member of a project should see (F94.1,
     # F94.2), its link on the stage's public address
@@ -685,18 +698,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         people_service=people_service,
         record_service=record_service,
         project_service=project_service,
-    )
-    # The brain's waits, fixed at add and closed by its `done` (F27); the job
-    # service, built at the call, withdraws a closed wait's run held before
-    # its brief.
-    wait_service = providers.Factory(
-        WaitService,
-        db=db_session,
-        document_service=document_service,
-        view_service=view_service,
-        ticket_id_pattern=app_config.provided.ticket_id_pattern,
-        cache_expiration_ttl_seconds=app_config.provided.cache_expiration_ttl_seconds,
-        jobs=providers.Callable(lambda container: container.job_service, __self__),
+        wait_service=wait_service,
     )
     # The waits' timer and the batcher (design 2 §8.2); each registers on the
     # supervisor when built, before STARTUP.
@@ -765,6 +767,9 @@ class ServiceContainer(containers.DeclarativeContainer):
         pilot_work_service=pilot_work_service,
         pilot_store_service=pilot_store_service,
         session_start_service=session_start_service,
+        view_service=view_service,
+        wait_service=wait_service,
+        job_service=job_service,
     )
 
 

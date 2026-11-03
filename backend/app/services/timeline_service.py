@@ -41,6 +41,7 @@ from app.models import (
     SaveError,
     Turn,
     User,
+    Wait,
     Work,
     WriterQuestion,
 )
@@ -67,6 +68,7 @@ from app.schemas.timeline import (
     BlockPartSchema,
     BlockSchema,
     BodyPartSchema,
+    CardTransitionSchema,
     ChatPlaceSchema,
     ClaimedWorkSchema,
     ClaimSchema,
@@ -89,6 +91,9 @@ from app.schemas.timeline import (
     TimelineItemSchema,
     TimelineSchema,
     UserSchema,
+    WaitFiringSchema,
+    WaitRequestSchema,
+    WaitSchema,
     WorkSchema,
     WriterQuestionSchema,
 )
@@ -108,6 +113,7 @@ from app.services.start_gate import (
 )
 from app.services.store_update_service import stopped_for_update, unlifted
 from app.services.usage_halts import UsageHalts
+from app.services.wait_service import REQUESTS, ShownFiring, WaitService
 
 WORK = "work"
 WAIT = "wait"
@@ -509,12 +515,14 @@ class TimelineService:
         controller_outage: ControllerOutage,
         work_slots: WorkSlots,
         usage_halts: UsageHalts,
+        wait_service: WaitService,
     ) -> None:
         self.db = db
         self.record_service = record_service
         self.controller_outage = controller_outage
         self.work_slots = work_slots
         self.usage_halts = usage_halts
+        self.wait_service = wait_service
 
     def badges(
         self, person: User | None, project_ids: Iterable[uuid.UUID]
@@ -682,6 +690,15 @@ class TimelineService:
             halts=self.usage_halts,
             slots=self.work_slots,
         )
+        waits = [item for item, _, form in rows if form == WAIT]
+        fields = {
+            wait.id: wait
+            for wait in self.db.scalars(
+                select(Wait).where(Wait.id.in_([wait.id for wait in waits]))
+            )
+        }
+        firings = self.wait_service.firings(waits)
+        refusals = self.wait_service.refusals(project, waits)
         reader = self._reader(
             project,
             self._users(
@@ -694,6 +711,12 @@ class TimelineService:
                         item.created_by_user_id,
                     )
                     if user_id is not None
+                }
+                | {
+                    shown.firing.requested_by_user_id
+                    for each in firings.values()
+                    for shown in each
+                    if shown.firing.requested_by_user_id is not None
                 },
                 _answerers(bodies.values()),
             ),
@@ -774,6 +797,17 @@ class TimelineService:
                     for clarification in clarified.get(item.id, [])
                 ],
                 work=works[item.id] if form == WORK else None,
+                wait=(
+                    _wait(
+                        item,
+                        fields[item.id],
+                        firings.get(item.id, []),
+                        refusals[item.id],
+                        reader,
+                    )
+                    if form == WAIT
+                    else None
+                ),
             )
             for item, document, form in rows
         ]
@@ -1138,6 +1172,45 @@ class _Reader:
                 else SectionSchema(heading=block.section.heading)
             ),
         )
+
+
+def _wait(
+    item: Item,
+    wait: Wait,
+    firings: list[ShownFiring],
+    refusal: str | None,
+    reader: _Reader,
+) -> WaitSchema:
+    return WaitSchema(
+        cards=wait.cards,
+        states=wait.states,
+        due_at=wait.due_at,
+        firings=[
+            WaitFiringSchema(
+                seq=shown.firing.seq,
+                cause=shown.firing.cause_code,
+                fired_at=shown.firing.fired_at,
+                transition=(
+                    None
+                    if shown.transition is None
+                    else CardTransitionSchema(
+                        card=shown.transition.card,
+                        from_state=shown.transition.from_state,
+                        to_state=shown.transition.to_state,
+                        at=shown.transition.at,
+                        by=shown.transition.by,
+                    )
+                ),
+                requested_by=reader.user(shown.firing.requested_by_user_id),
+                outcome=shown.outcome,
+            )
+            for shown in firings
+        ],
+        request=WaitRequestSchema(
+            label=REQUESTS[item.kind_code], open=refusal is None, refusal=refusal
+        ),
+        note=wait.done_note,
+    )
 
 
 def _clarification(clarification: Clarification) -> ClarificationSchema:

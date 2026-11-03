@@ -1558,6 +1558,25 @@
         "title": "InventedEnvironmentSchema",
         "type": "object"
       },
+      "InventedFiredSchema.6d6b324": {
+        "description": "How many waits a testing route fired.",
+        "properties": {
+          "fired": {
+            "description": "How many waits fired",
+            "examples": [
+              1
+            ],
+            "minimum": 0,
+            "title": "Fired",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "fired"
+        ],
+        "title": "InventedFiredSchema",
+        "type": "object"
+      },
       "InventedItemCreateSchema.6d6b324": {
         "description": "A prose item the project's session, or a job of Pilot's own, adds, as\nPilot adds one.",
         "properties": {
@@ -2167,6 +2186,124 @@
         "title": "InventedStoreUpdateSchema",
         "type": "object"
       },
+      "InventedWaitCloseSchema.6d6b324": {
+        "description": "Pilot's `done` on an open wait, as its `mark` closes one (F27.4).",
+        "properties": {
+          "note": {
+            "description": "What was read and when, and the action after it started",
+            "examples": [
+              "SR-4 read Done at 09:40; the rollout goes on"
+            ],
+            "minLength": 1,
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "note"
+        ],
+        "title": "InventedWaitCloseSchema",
+        "type": "object"
+      },
+      "InventedWaitCreateSchema.6d6b324": {
+        "description": "A wait the project's session adds, as the brain's `add_item` adds one\n(F86.1): a card wait with its cards and states, a timed wait with its due\ntime, placed now or at a time before now.",
+        "properties": {
+          "cards": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A card wait's cards, ticket ids; none for a timed wait",
+            "examples": [
+              [
+                "SR-4"
+              ]
+            ],
+            "title": "Cards"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "A timed wait's due time, after `placed_at`; none for a card wait. Before now, it is due, and the waits' timer fires it at its next tick",
+            "title": "Due At"
+          },
+          "kind": {
+            "description": "Its kind",
+            "enum": [
+              "card_wait",
+              "timed_wait"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "placed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "When it was added, before now, as a wait added then reads: the add's refusals hold as of then; now when none",
+            "title": "Placed At"
+          },
+          "states": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The states a card wait waits for; none for a timed wait",
+            "examples": [
+              [
+                "Done"
+              ]
+            ],
+            "title": "States"
+          },
+          "title": {
+            "description": "Its title",
+            "examples": [
+              "The night shift takes SR-4"
+            ],
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "title"
+        ],
+        "title": "InventedWaitCreateSchema",
+        "type": "object"
+      },
       "InventedWorkCreateSchema.6d6b324": {
         "description": "A work item placed by repository and started, as Pilot starts one, in\nan environment of Pilot's own the stage's controller creates from it.",
         "properties": {
@@ -2635,6 +2772,17 @@
             "title": "Urgent",
             "type": "boolean"
           },
+          "wait": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.WaitSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A wait's own; null for every other kind"
+          },
           "word_count": {
             "anyOf": [
               {
@@ -2705,6 +2853,7 @@
           "asked_writer_about",
           "clarifications",
           "work",
+          "wait",
           "project_id"
         ],
         "title": "ItemDocumentSchema",
@@ -3055,6 +3204,72 @@
         "title": "BlockSchema",
         "type": "object"
       },
+      "ItemDocumentSchema.1fdd8ae.CardTransitionSchema": {
+        "description": "A card's change of state its tracker reported, which fired a card wait\n(F136).",
+        "properties": {
+          "at": {
+            "description": "When it changed, by the tracker's clock",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who changed it, the tracker's login, not a person of Pilot's; null where the tracker named no one",
+            "examples": [
+              "pieter"
+            ],
+            "title": "By"
+          },
+          "card": {
+            "description": "The card, as the tracker writes it",
+            "examples": [
+              "SR-4"
+            ],
+            "title": "Card",
+            "type": "string"
+          },
+          "from_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The state it left; null where the tracker gave none",
+            "examples": [
+              "In Progress"
+            ],
+            "title": "From State"
+          },
+          "to_state": {
+            "description": "The state it entered",
+            "examples": [
+              "Done"
+            ],
+            "title": "To State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "card",
+          "from_state",
+          "to_state",
+          "at",
+          "by"
+        ],
+        "title": "CardTransitionSchema",
+        "type": "object"
+      },
       "ItemDocumentSchema.1fdd8ae.ChatPlaceSchema": {
         "description": "Where in a chat a block's answer was recorded, which *In the chat* goes\nto (F42.3).",
         "properties": {
@@ -3397,6 +3612,25 @@
         ],
         "title": "EnvironmentNameSchema",
         "type": "object"
+      },
+      "ItemDocumentSchema.1fdd8ae.FiringCause": {
+        "enum": [
+          "transition",
+          "due",
+          "requested"
+        ],
+        "title": "FiringCause",
+        "type": "string"
+      },
+      "ItemDocumentSchema.1fdd8ae.FiringOutcome": {
+        "description": "What the brain did with a wait's firing (F27.1; UC's wait), read at\ndisplay from the run that took it and the wait's close, never stored\n(DB Wait Firing): Pilot's turn while it is pending on an open wait or\nits run, or that run's Retry, is in flight; closed once that run marked\nthe wait done; left open once that run's turn ended with the wait open.",
+        "enum": [
+          "pilots_turn",
+          "left_open",
+          "closed"
+        ],
+        "title": "FiringOutcome",
+        "type": "string"
       },
       "ItemDocumentSchema.1fdd8ae.HeldReason": {
         "description": "Why the gate holds a start (design 2 §13.4, §13.5; F26.1, F143.4,\nF59.2, F135.1, F135.4, F144.2; DB 183, 266, 282): a work item's the\nweek's or the five-hour usage halt, its project paused, a job's or a\nChat's the store's update, the controller unreachable, a work item's no\nslot free, a job's another job of its project before it, or a work item's\nanother run on its conversation until that run's turn ends. Read at\ndisplay, never stored (decision 53).",
@@ -3771,6 +4005,207 @@
           "avatar_slot"
         ],
         "title": "UserSchema",
+        "type": "object"
+      },
+      "ItemDocumentSchema.1fdd8ae.WaitFiringSchema": {
+        "description": "One occasion a wait fired, one line under its card (F27.1, F27.2).",
+        "properties": {
+          "cause": {
+            "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.FiringCause",
+            "description": "What fired it: a card's transition, the due time, or a person's request"
+          },
+          "fired_at": {
+            "description": "When the server recorded it",
+            "format": "date-time",
+            "title": "Fired At",
+            "type": "string"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.FiringOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the brain did with it; null where it did nothing: its run failed or was stopped and is not retried, or the wait was closed before a run took it"
+          },
+          "requested_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.UserSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The person who requested it; null unless `cause` is `requested`"
+          },
+          "seq": {
+            "description": "Its place among the wait's firings, from 1",
+            "title": "Seq",
+            "type": "integer"
+          },
+          "transition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.CardTransitionSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The transition that fired it; null unless `cause` is `transition`"
+          }
+        },
+        "required": [
+          "seq",
+          "cause",
+          "fired_at",
+          "transition",
+          "requested_by",
+          "outcome"
+        ],
+        "title": "WaitFiringSchema",
+        "type": "object"
+      },
+      "ItemDocumentSchema.1fdd8ae.WaitRequestSchema": {
+        "description": "A person's request of the wait, its head's one button (F27.3), which\nfires the wait with the request in its run's brief.",
+        "properties": {
+          "label": {
+            "description": "The button's label, its tooltip",
+            "enum": [
+              "Check now",
+              "Skip wait"
+            ],
+            "title": "Label",
+            "type": "string"
+          },
+          "open": {
+            "description": "Whether the wait takes a request now",
+            "title": "Open",
+            "type": "boolean"
+          },
+          "refusal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why it takes none, the server's refusal of one, the disabled button's tooltip: Pilot is checking, while a firing of it is pending or a run of it is in flight; it is done; or its project is finished or archived. Null while `open`",
+            "examples": [
+              "Pilot is checking"
+            ],
+            "title": "Refusal"
+          }
+        },
+        "required": [
+          "label",
+          "open",
+          "refusal"
+        ],
+        "title": "WaitRequestSchema",
+        "type": "object"
+      },
+      "ItemDocumentSchema.1fdd8ae.WaitSchema": {
+        "description": "A wait's own, as its card, its line and its button draw it (F27). It\nwaits since the item's `created_at`, when it was added.",
+        "properties": {
+          "cards": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A card wait's cards, in their order, its ticket links; null for a timed wait",
+            "examples": [
+              [
+                "SR-1",
+                "SR-4"
+              ]
+            ],
+            "title": "Cards"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A timed wait's due time; null for a card wait",
+            "title": "Due At"
+          },
+          "firings": {
+            "description": "Its firings, in order; empty while it has fired none",
+            "items": {
+              "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.WaitFiringSchema"
+            },
+            "title": "Firings",
+            "type": "array"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the brain wrote at its close through `mark`, the done line's after the dot (F27.4); null while open and after a close by Finish",
+            "examples": [
+              "SR-4 read Done at 09:40; the rollout goes on"
+            ],
+            "title": "Note"
+          },
+          "request": {
+            "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.WaitRequestSchema",
+            "description": "A person's request of it"
+          },
+          "states": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The states a card wait waits for its cards to enter, as the brain gave them; null for a timed wait",
+            "examples": [
+              [
+                "Done",
+                "Won't fix"
+              ]
+            ],
+            "title": "States"
+          }
+        },
+        "required": [
+          "cards",
+          "states",
+          "due_at",
+          "firings",
+          "request",
+          "note"
+        ],
+        "title": "WaitSchema",
         "type": "object"
       },
       "ItemDocumentSchema.1fdd8ae.WorkSchema": {
@@ -7402,6 +7837,72 @@
         "title": "BlockSchema",
         "type": "object"
       },
+      "TimelineSchema.1fdd8ae.CardTransitionSchema": {
+        "description": "A card's change of state its tracker reported, which fired a card wait\n(F136).",
+        "properties": {
+          "at": {
+            "description": "When it changed, by the tracker's clock",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who changed it, the tracker's login, not a person of Pilot's; null where the tracker named no one",
+            "examples": [
+              "pieter"
+            ],
+            "title": "By"
+          },
+          "card": {
+            "description": "The card, as the tracker writes it",
+            "examples": [
+              "SR-4"
+            ],
+            "title": "Card",
+            "type": "string"
+          },
+          "from_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The state it left; null where the tracker gave none",
+            "examples": [
+              "In Progress"
+            ],
+            "title": "From State"
+          },
+          "to_state": {
+            "description": "The state it entered",
+            "examples": [
+              "Done"
+            ],
+            "title": "To State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "card",
+          "from_state",
+          "to_state",
+          "at",
+          "by"
+        ],
+        "title": "CardTransitionSchema",
+        "type": "object"
+      },
       "TimelineSchema.1fdd8ae.ChatPlaceSchema": {
         "description": "Where in a chat a block's answer was recorded, which *In the chat* goes\nto (F42.3).",
         "properties": {
@@ -7744,6 +8245,25 @@
         ],
         "title": "EnvironmentNameSchema",
         "type": "object"
+      },
+      "TimelineSchema.1fdd8ae.FiringCause": {
+        "enum": [
+          "transition",
+          "due",
+          "requested"
+        ],
+        "title": "FiringCause",
+        "type": "string"
+      },
+      "TimelineSchema.1fdd8ae.FiringOutcome": {
+        "description": "What the brain did with a wait's firing (F27.1; UC's wait), read at\ndisplay from the run that took it and the wait's close, never stored\n(DB Wait Firing): Pilot's turn while it is pending on an open wait or\nits run, or that run's Retry, is in flight; closed once that run marked\nthe wait done; left open once that run's turn ended with the wait open.",
+        "enum": [
+          "pilots_turn",
+          "left_open",
+          "closed"
+        ],
+        "title": "FiringOutcome",
+        "type": "string"
       },
       "TimelineSchema.1fdd8ae.HeldReason": {
         "description": "Why the gate holds a start (design 2 §13.4, §13.5; F26.1, F143.4,\nF59.2, F135.1, F135.4, F144.2; DB 183, 266, 282): a work item's the\nweek's or the five-hour usage halt, its project paused, a job's or a\nChat's the store's update, the controller unreachable, a work item's no\nslot free, a job's another job of its project before it, or a work item's\nanother run on its conversation until that run's turn ends. Read at\ndisplay, never stored (decision 53).",
@@ -8298,6 +8818,17 @@
             "title": "Urgent",
             "type": "boolean"
           },
+          "wait": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.WaitSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A wait's own; null for every other kind"
+          },
           "word_count": {
             "anyOf": [
               {
@@ -8367,7 +8898,8 @@
           "attachments",
           "asked_writer_about",
           "clarifications",
-          "work"
+          "work",
+          "wait"
         ],
         "title": "TimelineItemSchema",
         "type": "object"
@@ -8435,6 +8967,207 @@
           "avatar_slot"
         ],
         "title": "UserSchema",
+        "type": "object"
+      },
+      "TimelineSchema.1fdd8ae.WaitFiringSchema": {
+        "description": "One occasion a wait fired, one line under its card (F27.1, F27.2).",
+        "properties": {
+          "cause": {
+            "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.FiringCause",
+            "description": "What fired it: a card's transition, the due time, or a person's request"
+          },
+          "fired_at": {
+            "description": "When the server recorded it",
+            "format": "date-time",
+            "title": "Fired At",
+            "type": "string"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.FiringOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the brain did with it; null where it did nothing: its run failed or was stopped and is not retried, or the wait was closed before a run took it"
+          },
+          "requested_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.UserSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The person who requested it; null unless `cause` is `requested`"
+          },
+          "seq": {
+            "description": "Its place among the wait's firings, from 1",
+            "title": "Seq",
+            "type": "integer"
+          },
+          "transition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.CardTransitionSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The transition that fired it; null unless `cause` is `transition`"
+          }
+        },
+        "required": [
+          "seq",
+          "cause",
+          "fired_at",
+          "transition",
+          "requested_by",
+          "outcome"
+        ],
+        "title": "WaitFiringSchema",
+        "type": "object"
+      },
+      "TimelineSchema.1fdd8ae.WaitRequestSchema": {
+        "description": "A person's request of the wait, its head's one button (F27.3), which\nfires the wait with the request in its run's brief.",
+        "properties": {
+          "label": {
+            "description": "The button's label, its tooltip",
+            "enum": [
+              "Check now",
+              "Skip wait"
+            ],
+            "title": "Label",
+            "type": "string"
+          },
+          "open": {
+            "description": "Whether the wait takes a request now",
+            "title": "Open",
+            "type": "boolean"
+          },
+          "refusal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why it takes none, the server's refusal of one, the disabled button's tooltip: Pilot is checking, while a firing of it is pending or a run of it is in flight; it is done; or its project is finished or archived. Null while `open`",
+            "examples": [
+              "Pilot is checking"
+            ],
+            "title": "Refusal"
+          }
+        },
+        "required": [
+          "label",
+          "open",
+          "refusal"
+        ],
+        "title": "WaitRequestSchema",
+        "type": "object"
+      },
+      "TimelineSchema.1fdd8ae.WaitSchema": {
+        "description": "A wait's own, as its card, its line and its button draw it (F27). It\nwaits since the item's `created_at`, when it was added.",
+        "properties": {
+          "cards": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A card wait's cards, in their order, its ticket links; null for a timed wait",
+            "examples": [
+              [
+                "SR-1",
+                "SR-4"
+              ]
+            ],
+            "title": "Cards"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A timed wait's due time; null for a card wait",
+            "title": "Due At"
+          },
+          "firings": {
+            "description": "Its firings, in order; empty while it has fired none",
+            "items": {
+              "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.WaitFiringSchema"
+            },
+            "title": "Firings",
+            "type": "array"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the brain wrote at its close through `mark`, the done line's after the dot (F27.4); null while open and after a close by Finish",
+            "examples": [
+              "SR-4 read Done at 09:40; the rollout goes on"
+            ],
+            "title": "Note"
+          },
+          "request": {
+            "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.WaitRequestSchema",
+            "description": "A person's request of it"
+          },
+          "states": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The states a card wait waits for its cards to enter, as the brain gave them; null for a timed wait",
+            "examples": [
+              [
+                "Done",
+                "Won't fix"
+              ]
+            ],
+            "title": "States"
+          }
+        },
+        "required": [
+          "cards",
+          "states",
+          "due_at",
+          "firings",
+          "request",
+          "note"
+        ],
+        "title": "WaitSchema",
         "type": "object"
       },
       "TimelineSchema.1fdd8ae.WorkSchema": {
@@ -10055,6 +10788,87 @@
           }
         ],
         "summary": "Mark a notice Read as the signed-in person, now.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/items/{item_id}/request": {
+      "post": {
+        "description": "Returns:     204: The firing is recorded     401: No one is signed in     403: The caller lacks the editor role     404: No item has the id     409: The caller has not chosen a handle, the item is no wait, or the         wait takes no request now: Pilot is checking, a firing of it         pending or a run of it in flight; it is done; or its project is         finished or archived",
+        "operationId": "post__api_items_{item_id}_request",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Request a wait's firing as the signed-in person, now (F27.3): *Check now* on a card wait, *Skip wait* on a timed wait. It fires the wait, and the wait's next run is briefed with the request.",
         "tags": [],
         "x-required-role": "editor"
       }
@@ -14628,6 +15442,84 @@
         "x-required-role": "editor"
       }
     },
+    "/api/testing/projects/{project_id}/waits": {
+      "post": {
+        "description": "Returns:     201: The wait's id     400: The body is invalid, a field of the other kind given, or the         stage is prd     404: No project has the id     409: The project has no session, `placed_at` is ahead, or the add         refuses the wait: the reason",
+        "operationId": "post__api_testing_projects_{project_id}_waits",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventedWaitCreateSchema.6d6b324"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventedItemSchema.6d6b324"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Add a wait to the project's timeline, by the project's session, as the brain's `add_item` adds one (F86.1): a card wait on its cards and states, a timed wait due at its time; placed at `placed_at`, as a wait added then reads, so that a timed wait is due, or past due, at once.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
     "/api/testing/projects/{project_id}/work": {
       "post": {
         "description": "Returns:     201: The work item's id, its Work's and its Session's     400: The body is invalid, or the stage is prd     404: No project has the id, its plan has no task of the step, a         claim's item is not of the project, or its document has no such         block     409: A claim that is not an open action of a registered document of         the project, no controller is configured, or the project is         finished or archived: the reason",
@@ -15014,6 +15906,239 @@
           }
         ],
         "summary": "Start a demo or failing task for integration testing.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/tracker-events/{tracker}": {
+      "post": {
+        "description": "Returns:     200: How many waits fired, none for a delivery the endpoint drops     400: The tracker's adapter cannot read the body, or the stage is prd     404: No tracker has the name",
+        "operationId": "post__api_testing_tracker-events_{tracker}",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "tracker",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackerEventReplySchema.ec422c2"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Deliver a card's change of state as `POST /api/tracker-events/<tracker>` takes it, past its token and its count of deliveries received: its body the tracker's own, `youtrack`'s the Webhook Triggers app's `issueUpdated`; the card waits it matches fire (F136.2).",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/waits/due": {
+      "post": {
+        "description": "Returns:     200: How many waits fired     400: The stage is prd",
+        "operationId": "post__api_testing_waits_due",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventedFiredSchema.6d6b324"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Run the waits' timer's tick now: every open timed wait whose due time has passed fires `due`, once (F27.2).",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/waits/{item_id}/close": {
+      "post": {
+        "description": "Returns:     204: The wait is done     400: The note is missing, or the stage is prd     404: No wait has the id     409: The wait has no run briefed and its project no session, the         project is archived, or the wait is done",
+        "operationId": "post__api_testing_waits_{item_id}_close",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventedWaitCloseSchema.6d6b324"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Close the open wait with its note as Pilot's `mark` does (F27.4), by the wait's latest run briefed, else by the project's session: done `marked`, consumed on the spot, the note its done line's.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/waits/{item_id}/run": {
+      "post": {
+        "description": "Returns:     201: The run's work item's id     400: The stage is prd     404: No wait has the id     409: No run of it is due, or no controller or no store environment is         configured: the reason",
+        "operationId": "post__api_testing_waits_{item_id}_run",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventedItemSchema.6d6b324"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Place the wait's run now, as the batcher places it once the quiet window from its oldest pending firing has passed (F136.4): it starts through the gate once the request commits and takes the firings pending at its brief.",
         "tags": [],
         "x-required-role": "editor"
       }

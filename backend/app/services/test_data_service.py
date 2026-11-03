@@ -1,8 +1,8 @@
 """The invented record: the dev stack's seed, which `cli load-test-data`
 loads into the dev database and into the seed every Playwright worker clones,
-and the people, environments, projects, items, agent saves and Pilot's marks
-a spec or the dev stage's deployed check makes through `/api/testing/`
-(TEST-6, D027).
+and the people, environments, projects, items, agent saves and Pilot's marks,
+and the brain's waits, their runs and their close, a spec or the dev stage's
+deployed check makes through `/api/testing/` (TEST-6, D027).
 
 Documents, attachments, the record's writes and the plan go through the
 engine's own operations, so the seed is a record the engine could have
@@ -16,7 +16,7 @@ import hashlib
 import json
 import uuid
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import exists, func, select
@@ -29,7 +29,7 @@ from app.engine.paths import tree_path
 from app.engine.plan import PlanService
 from app.engine.record import WORK, RecordService
 from app.engine.tree import TreeService
-from app.engine.views import utc_time
+from app.engine.views import ViewService, utc_time
 from app.exceptions import (
     InvalidOperationException,
     RecordNotFoundException,
@@ -52,6 +52,7 @@ from app.models import (
     ProjectTransition,
     Turn,
     User,
+    Wait,
     Work,
     WriterQuestion,
 )
@@ -69,17 +70,20 @@ from app.schemas.pilot_work import ProgressStepRequestSchema
 from app.schemas.testing_record import (
     InventedFileSchema,
     InventedProjectCreateSchema,
+    InventedWaitCreateSchema,
     InventedWriterQuestionSchema,
 )
 from app.services.auth_service import AuthContext
 from app.services.clarification_service import asked, message, title
 from app.services.effect_service import EffectLine
+from app.services.job_service import JobService
 from app.services.people_service import PeopleService
 from app.services.pilot_store_service import JOB, Brain, PilotStoreService
 from app.services.pilot_work_service import PilotWorkService, Worker
 from app.services.session_scope import STORE_REPO
 from app.services.session_start_service import SessionStartService
 from app.services.start_gate import WORK_KIND
+from app.services.wait_service import CARD_WAIT, WAITS, WaitService
 
 SLUG = "recipe-box"
 """The open project's slug; the draft beside it has none."""
@@ -386,6 +390,9 @@ class TestDataService:
         pilot_work_service: PilotWorkService,
         pilot_store_service: PilotStoreService,
         session_start_service: SessionStartService,
+        view_service: ViewService,
+        wait_service: WaitService,
+        job_service: JobService,
     ) -> None:
         self.db = db
         self.document_service = document_service
@@ -398,6 +405,9 @@ class TestDataService:
         self.pilot_work_service = pilot_work_service
         self.pilot_store_service = pilot_store_service
         self.session_start_service = session_start_service
+        self.view_service = view_service
+        self.wait_service = wait_service
+        self.job_service = job_service
 
     def load_all(self) -> dict[str, int]:
         """Seed the record into an empty database, in the caller's
@@ -933,6 +943,117 @@ class TestDataService:
         self.record_service.give(project, work, claimed)
         return work
 
+    def wait(self, project_id: uuid.UUID, spec: InventedWaitCreateSchema) -> Item:
+        """A wait the project's session adds as `add_item` adds one (F86.1),
+        through `WaitService`, with its refusals, placed at `spec.placed_at`:
+        its times moved back to then, as a wait added then reads, so that a
+        timed wait's due time is passed with no wait for it.
+
+        Raises:
+            RecordNotFoundException: no project has the id.
+            InvalidOperationException: the project has no session,
+                `placed_at` is ahead or not before the due time, or the add
+                refuses the wait.
+        """
+        project = self.db.get(Project, project_id)
+        if project is None:
+            raise RecordNotFoundException("Project", str(project_id))
+        operation = f"add a {spec.kind} item to project {project.id}"
+        session = self._session_of(project, operation)
+        now = datetime.now(UTC)
+        placed_at = spec.placed_at or now
+        if placed_at > now:
+            raise InvalidOperationException(operation, "its `placed_at` is ahead")
+        if spec.due_at is not None and spec.due_at <= placed_at:
+            raise InvalidOperationException(
+                operation,
+                f"its due time, {utc_time(spec.due_at)}, is not after its"
+                f" `placed_at`, {utc_time(placed_at)}",
+            )
+        if spec.kind == CARD_WAIT:
+            # The schema gives a card wait its two lists.
+            assert spec.cards is not None and spec.states is not None
+            item = self.wait_service.add_card_wait(
+                project, session, spec.title, spec.cards, spec.states, None
+            )
+        else:
+            assert spec.due_at is not None
+            item = self.wait_service.add_timed_wait(
+                project, session, spec.title, spec.due_at + (now - placed_at), None
+            )
+        if spec.placed_at is not None:
+            item.created_at = placed_at
+            wait = self.db.get_one(Wait, item.id)
+            wait.due_at = spec.due_at
+            self.db.flush()
+            self.view_service.timeline_moved(project)
+        return item
+
+    def wait_run(self, item_id: uuid.UUID) -> Work:
+        """The wait's run placed now, as the batcher places it once its oldest
+        pending firing is a quiet window old (F136.4), the window passed:
+        read under its Project's row and its Wait's (`WaitService.hold_batch`).
+
+        Raises:
+            RecordNotFoundException: no wait has the id.
+            InvalidOperationException: no run of it is due, it being done, its
+                project not open, no firing of it pending, or a run of it in
+                flight; or no controller or no store environment is
+                configured.
+        """
+        item = self._wait(item_id)
+        held = self.wait_service.hold_batch(item.project_id, item.id, datetime.now(UTC))
+        if held is None:
+            raise InvalidOperationException(
+                f"place the run of wait {item.id}",
+                "no run of it is due: it is done, its project is not open, no"
+                " firing of it is pending, or a run of it is in flight",
+            )
+        return self.job_service.wait_fired(*held)
+
+    def close_wait(self, item_id: uuid.UUID, note: str) -> None:
+        """Pilot's `done` on the open wait with `note`, as its `mark` closes
+        one (F27.4), under its project's row, as `mark` holds it: by the
+        wait's latest run briefed, else by the project's session started
+        last.
+
+        Raises:
+            RecordNotFoundException: no wait has the id.
+            InvalidOperationException: it has no run briefed and the project
+                no session, or the close refuses it: the project is archived
+                or the wait done.
+        """
+        item = self._wait(item_id)
+        project = self.db.scalars(
+            select(Project)
+            .where(Project.id == item.project_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).one()
+        run = self.db.scalar(
+            select(Work.id)
+            .join(Item, Item.id == Work.id)
+            .join(AgentSession, AgentSession.id == Work.id)
+            .where(
+                Work.trigger_code == WorkTrigger.WAIT_FIRED,
+                Work.trigger_item_id == item.id,
+                AgentSession.turns > 0,
+            )
+            .order_by(Item.seq.desc())
+            .limit(1)
+        )
+        by = (
+            run
+            if run is not None
+            else self._session_of(project, f"mark item {item.id} done").id
+        )
+        pilot = self.db.scalars(
+            select(User).where(User.kind_code == UserKind.AGENT)
+        ).one()
+        self.wait_service.close(
+            project, self.db.get_one(Wait, item.id), pilot, by, note
+        )
+
     def ask_writer(
         self, item_id: uuid.UUID, questions: Sequence[InventedWriterQuestionSchema]
     ) -> list[str]:
@@ -1242,6 +1363,12 @@ class TestDataService:
                 operation, f"work item {item.id} has no environment yet"
             )
         return Worker(session.id, session.project_id, session.environment_id, item.id)
+
+    def _wait(self, item_id: uuid.UUID) -> Item:
+        item = self.db.get(Item, item_id)
+        if item is None or item.kind_code not in WAITS:
+            raise RecordNotFoundException("Wait", str(item_id))
+        return item
 
     def _session_of(self, project: Project, operation: str) -> AgentSession:
         """The project's session started last."""

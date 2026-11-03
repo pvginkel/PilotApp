@@ -536,6 +536,7 @@ class TestGetTimeline:
                     "asked_writer_about": [],
                     "clarifications": [],
                     "work": None,
+                    "wait": None,
                 },
                 {
                     "id": str(decision.id),
@@ -609,6 +610,7 @@ class TestGetTimeline:
                     "asked_writer_about": [],
                     "clarifications": [],
                     "work": None,
+                    "wait": None,
                 },
                 {
                     "id": str(notice.id),
@@ -644,6 +646,7 @@ class TestGetTimeline:
                     "asked_writer_about": [],
                     "clarifications": [],
                     "work": None,
+                    "wait": None,
                 },
             ],
             "ready_after": None,
