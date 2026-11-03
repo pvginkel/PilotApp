@@ -2613,6 +2613,17 @@
             "description": "A prose item's text but the opening's, as drawn: its prose parts and blocks in order, split at each block's own section's edges, without the front matter and a first heading that is its title; null for the opening, work and waits",
             "title": "Body"
           },
+          "cancel": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.CancelSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The Cancel it offers while it is an open registered document of a run that holds a block of another document, it is the person's, and nothing of the run is in flight (DB 297); null otherwise"
+          },
           "clarifications": {
             "description": "Pilot's questions to a registered document's writer and the writer's reply (F52.2): one per pre-ruling pass that asked about its blocks, in the order first asked; empty for every other item",
             "items": {
@@ -2716,6 +2727,17 @@
             ],
             "title": "Kind",
             "type": "string"
+          },
+          "pilots_work": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.PilotsWorkSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What Pilot does on it while it is Pilot's (F13.7; DB 296): a registered document awaiting its read, under its pass or its clarification, or with every open block held; it waits on no person. Null while it is the person's or done, and for every other item"
           },
           "project_id": {
             "description": "The project whose timeline holds it",
@@ -2873,6 +2895,8 @@
           "clarifications",
           "work",
           "wait",
+          "pilots_work",
+          "cancel",
           "project_id"
         ],
         "title": "ItemDocumentSchema",
@@ -3116,6 +3140,17 @@
             "description": "When the action was marked Done",
             "title": "Done"
           },
+          "held": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.HoldSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What holds it while Pilot's work holds it, a claimed action or a block a research checks a fact for: it takes no answer, Done or paste-back from the app's controls (F31.7; DB 295); null while it is not held"
+          },
           "id": {
             "description": "The block's local id, unique within its item",
             "examples": [
@@ -3216,11 +3251,30 @@
           "in_chat",
           "done",
           "claim",
+          "held",
           "deferral",
           "writer_asked",
           "section"
         ],
         "title": "BlockSchema",
+        "type": "object"
+      },
+      "ItemDocumentSchema.1fdd8ae.CancelSchema": {
+        "description": "The Cancel a registered document of a run offers (F28.9; DB 297 to\n299): the document is the person's, nothing of the run is in flight, and\nthe run holds a block of another document. It closes every open document\nof the run at once, with no Undo, and gives the blocks back.",
+        "properties": {
+          "takes_back": {
+            "description": "The blocks the run holds, which it gives back, in timeline order",
+            "items": {
+              "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.TakenBackSchema"
+            },
+            "title": "Takes Back",
+            "type": "array"
+          }
+        },
+        "required": [
+          "takes_back"
+        ],
+        "title": "CancelSchema",
         "type": "object"
       },
       "ItemDocumentSchema.1fdd8ae.CardTransitionSchema": {
@@ -3312,12 +3366,17 @@
         "type": "object"
       },
       "ItemDocumentSchema.1fdd8ae.ClaimSchema": {
-        "description": "An action Pilot claimed and has not done (F21.6): open, Pilot's, waiting\non no person.",
+        "description": "An action Pilot claimed and has not done (F21.6): Pilot's while its\nrun holds it (`held`), the person's otherwise.",
         "properties": {
+          "undone": {
+            "description": "Whether Pilot's work left it undone, which its head says: the run of the work item named for it handed it back, done with it, failed, stopped or cancelled, its `done` unwritten, the action the person's again (F21.6; DB 262, 299); false while it is held, and while no work item is named for it",
+            "title": "Undone",
+            "type": "boolean"
+          },
           "work": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.ClaimedWorkSchema"
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.WorkLinkSchema"
               },
               {
                 "type": "null"
@@ -3327,34 +3386,10 @@
           }
         },
         "required": [
-          "work"
+          "work",
+          "undone"
         ],
         "title": "ClaimSchema",
-        "type": "object"
-      },
-      "ItemDocumentSchema.1fdd8ae.ClaimedWorkSchema": {
-        "description": "The work item a claimed action is given to: the one its latest naming\nnames (DB 260).",
-        "properties": {
-          "id": {
-            "description": "The work item's id, its line's address",
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "title": {
-            "description": "The work item's title, as its line shows it",
-            "examples": [
-              "Rotating the CI token"
-            ],
-            "title": "Title",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "title"
-        ],
-        "title": "ClaimedWorkSchema",
         "type": "object"
       },
       "ItemDocumentSchema.1fdd8ae.ClarificationSchema": {
@@ -3557,6 +3592,44 @@
         "title": "DeferralSchema",
         "type": "object"
       },
+      "ItemDocumentSchema.1fdd8ae.DocumentLinkSchema": {
+        "description": "A registered document a line links: its id and its title.",
+        "properties": {
+          "id": {
+            "description": "The item's id, its document's address",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "description": "Its line's title: its text's, else its file's name (F35)",
+            "examples": [
+              "refinement.md"
+            ],
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title"
+        ],
+        "title": "DocumentLinkSchema",
+        "type": "object"
+      },
+      "ItemDocumentSchema.1fdd8ae.Doing": {
+        "description": "What Pilot does on an item that is Pilot's, or on a held block (F13.7,\nF31.7; DB 295, 296). Read at display, never stored.",
+        "enum": [
+          "awaiting_run",
+          "pre_ruling",
+          "asking_writer",
+          "doing",
+          "researching",
+          "waiting_on_answer"
+        ],
+        "title": "Doing",
+        "type": "string"
+      },
       "ItemDocumentSchema.1fdd8ae.DoneSchema": {
         "description": "How a done item came to be done: its done line (F13).",
         "properties": {
@@ -3585,6 +3658,7 @@
               "settled",
               "turn_ended",
               "finished",
+              "cancelled",
               "withdrawn"
             ],
             "title": "Cause",
@@ -3665,6 +3739,43 @@
         ],
         "title": "HeldReason",
         "type": "string"
+      },
+      "ItemDocumentSchema.1fdd8ae.HoldSchema": {
+        "description": "What holds a block while Pilot's work holds it (F31.7; DB 295, held\nthrough the run): read at every read, never stored.",
+        "properties": {
+          "asked_in": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.DocumentLinkSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "While its run waits on the person: the run's open document they answer, the first on the timeline; null otherwise"
+          },
+          "doing": {
+            "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.Doing",
+            "description": "What Pilot does on it: `doing` a claimed action, `researching` a block a research checks a fact for, each while something of the run holding it is in flight; `waiting_on_answer` while that run waits on the person's answer to a document it registered"
+          },
+          "pulse": {
+            "description": "Whether the line's dot pulses: a session of the run holding it, a work item's or the job's after one of their turns, queued or held, starting or running (F13.7)",
+            "title": "Pulse",
+            "type": "boolean"
+          },
+          "work": {
+            "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.WorkLinkSchema",
+            "description": "The work item its standing claim or research names, which its line's button goes to (DB 260, 292)"
+          }
+        },
+        "required": [
+          "doing",
+          "work",
+          "pulse",
+          "asked_in"
+        ],
+        "title": "HoldSchema",
+        "type": "object"
       },
       "ItemDocumentSchema.1fdd8ae.LineAgentSchema": {
         "description": "The sub-agent a current line waits on, from its `Task` call.",
@@ -3779,6 +3890,50 @@
           "recommended"
         ],
         "title": "OptionSchema",
+        "type": "object"
+      },
+      "ItemDocumentSchema.1fdd8ae.PilotsWorkSchema": {
+        "description": "What Pilot does on an item that is Pilot's (F13.7; DB 296), which its\nline shows in its kind's place and its strip says once opened (F28.9):\nread at every read, never stored.",
+        "properties": {
+          "asked_in": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.DocumentLinkSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "While `waiting_on_answer`: the run's open document the person answers, the first on the timeline, which the strip links; null otherwise"
+          },
+          "doing": {
+            "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.Doing",
+            "description": "What Pilot does on it: `awaiting_run`, it or another document of the run that registered it awaiting its read; `pre_ruling`, its pass in flight, or the pass after the writer's reply; `asking_writer`, its pass asked the writer, the clarification run in flight; with every open block held, `doing` or `researching` while something of the run holding them is in flight, and `waiting_on_answer` while that run waits on the person's answer to a document it registered"
+          },
+          "pulse": {
+            "description": "Whether the line's dot pulses: the session doing Pilot's work on it queued or held, starting or running; never while `awaiting_run` or `waiting_on_answer` (F13.7)",
+            "title": "Pulse",
+            "type": "boolean"
+          },
+          "work": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.WorkLinkSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The work its line's button goes to: the work item that registered it, while `awaiting_run`; the pass's job, whose session log it opens, while `pre_ruling`; the work item the standing claim or research of its first held block names, while `doing`, `researching` or `waiting_on_answer`; null while `asking_writer`, the words standing still"
+          }
+        },
+        "required": [
+          "doing",
+          "work",
+          "pulse",
+          "asked_in"
+        ],
+        "title": "PilotsWorkSchema",
         "type": "object"
       },
       "ItemDocumentSchema.1fdd8ae.ProgressState": {
@@ -3960,6 +4115,56 @@
         ],
         "title": "StopCause",
         "type": "string"
+      },
+      "ItemDocumentSchema.1fdd8ae.TakenBackSchema": {
+        "description": "A block a Cancel gives back, which its button names (F28.9; DB 297).",
+        "properties": {
+          "block": {
+            "description": "The block's local id",
+            "examples": [
+              "A1"
+            ],
+            "title": "Block",
+            "type": "string"
+          },
+          "document": {
+            "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.DocumentLinkSchema",
+            "description": "The document the block is on, which the label names"
+          },
+          "heading": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The heading of the block's own section, as its line names it (F30.9); null where it has none",
+            "examples": [
+              "Push the tag"
+            ],
+            "title": "Heading"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.BlockKind",
+            "description": "The block's kind"
+          },
+          "research": {
+            "description": "Whether the run holds it as a research, checking a fact its answer rests on; else as a claimed action it does",
+            "title": "Research",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "document",
+          "block",
+          "heading",
+          "kind",
+          "research"
+        ],
+        "title": "TakenBackSchema",
+        "type": "object"
       },
       "ItemDocumentSchema.1fdd8ae.UserKind": {
         "enum": [
@@ -4225,6 +4430,31 @@
           "note"
         ],
         "title": "WaitSchema",
+        "type": "object"
+      },
+      "ItemDocumentSchema.1fdd8ae.WorkLinkSchema": {
+        "description": "A work item a line goes to, a job among them: its id and its title.",
+        "properties": {
+          "id": {
+            "description": "The work item's id, its line's address",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "description": "The work item's title, as its line shows it",
+            "examples": [
+              "Rotating the CI token"
+            ],
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title"
+        ],
+        "title": "WorkLinkSchema",
         "type": "object"
       },
       "ItemDocumentSchema.1fdd8ae.WorkSchema": {
@@ -4937,6 +5167,17 @@
             "description": "When the action was marked Done",
             "title": "Done"
           },
+          "held": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectDocumentSchema.1fdd8ae.HoldSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What holds it while Pilot's work holds it, a claimed action or a block a research checks a fact for: it takes no answer, Done or paste-back from the app's controls (F31.7; DB 295); null while it is not held"
+          },
           "id": {
             "description": "The block's local id, unique within its item",
             "examples": [
@@ -5037,6 +5278,7 @@
           "in_chat",
           "done",
           "claim",
+          "held",
           "deferral",
           "writer_asked",
           "section"
@@ -5067,12 +5309,17 @@
         "type": "object"
       },
       "ProjectDocumentSchema.1fdd8ae.ClaimSchema": {
-        "description": "An action Pilot claimed and has not done (F21.6): open, Pilot's, waiting\non no person.",
+        "description": "An action Pilot claimed and has not done (F21.6): Pilot's while its\nrun holds it (`held`), the person's otherwise.",
         "properties": {
+          "undone": {
+            "description": "Whether Pilot's work left it undone, which its head says: the run of the work item named for it handed it back, done with it, failed, stopped or cancelled, its `done` unwritten, the action the person's again (F21.6; DB 262, 299); false while it is held, and while no work item is named for it",
+            "title": "Undone",
+            "type": "boolean"
+          },
           "work": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/ProjectDocumentSchema.1fdd8ae.ClaimedWorkSchema"
+                "$ref": "#/components/schemas/ProjectDocumentSchema.1fdd8ae.WorkLinkSchema"
               },
               {
                 "type": "null"
@@ -5082,34 +5329,10 @@
           }
         },
         "required": [
-          "work"
+          "work",
+          "undone"
         ],
         "title": "ClaimSchema",
-        "type": "object"
-      },
-      "ProjectDocumentSchema.1fdd8ae.ClaimedWorkSchema": {
-        "description": "The work item a claimed action is given to: the one its latest naming\nnames (DB 260).",
-        "properties": {
-          "id": {
-            "description": "The work item's id, its line's address",
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "title": {
-            "description": "The work item's title, as its line shows it",
-            "examples": [
-              "Rotating the CI token"
-            ],
-            "title": "Title",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "title"
-        ],
-        "title": "ClaimedWorkSchema",
         "type": "object"
       },
       "ProjectDocumentSchema.1fdd8ae.ConfirmationReasonSchema": {
@@ -5182,6 +5405,81 @@
           "title"
         ],
         "title": "DeferralSchema",
+        "type": "object"
+      },
+      "ProjectDocumentSchema.1fdd8ae.DocumentLinkSchema": {
+        "description": "A registered document a line links: its id and its title.",
+        "properties": {
+          "id": {
+            "description": "The item's id, its document's address",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "description": "Its line's title: its text's, else its file's name (F35)",
+            "examples": [
+              "refinement.md"
+            ],
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title"
+        ],
+        "title": "DocumentLinkSchema",
+        "type": "object"
+      },
+      "ProjectDocumentSchema.1fdd8ae.Doing": {
+        "description": "What Pilot does on an item that is Pilot's, or on a held block (F13.7,\nF31.7; DB 295, 296). Read at display, never stored.",
+        "enum": [
+          "awaiting_run",
+          "pre_ruling",
+          "asking_writer",
+          "doing",
+          "researching",
+          "waiting_on_answer"
+        ],
+        "title": "Doing",
+        "type": "string"
+      },
+      "ProjectDocumentSchema.1fdd8ae.HoldSchema": {
+        "description": "What holds a block while Pilot's work holds it (F31.7; DB 295, held\nthrough the run): read at every read, never stored.",
+        "properties": {
+          "asked_in": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectDocumentSchema.1fdd8ae.DocumentLinkSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "While its run waits on the person: the run's open document they answer, the first on the timeline; null otherwise"
+          },
+          "doing": {
+            "$ref": "#/components/schemas/ProjectDocumentSchema.1fdd8ae.Doing",
+            "description": "What Pilot does on it: `doing` a claimed action, `researching` a block a research checks a fact for, each while something of the run holding it is in flight; `waiting_on_answer` while that run waits on the person's answer to a document it registered"
+          },
+          "pulse": {
+            "description": "Whether the line's dot pulses: a session of the run holding it, a work item's or the job's after one of their turns, queued or held, starting or running (F13.7)",
+            "title": "Pulse",
+            "type": "boolean"
+          },
+          "work": {
+            "$ref": "#/components/schemas/ProjectDocumentSchema.1fdd8ae.WorkLinkSchema",
+            "description": "The work item its standing claim or research names, which its line's button goes to (DB 260, 292)"
+          }
+        },
+        "required": [
+          "doing",
+          "work",
+          "pulse",
+          "asked_in"
+        ],
+        "title": "HoldSchema",
         "type": "object"
       },
       "ProjectDocumentSchema.1fdd8ae.OptionSchema": {
@@ -5343,6 +5641,31 @@
           "avatar_slot"
         ],
         "title": "UserSchema",
+        "type": "object"
+      },
+      "ProjectDocumentSchema.1fdd8ae.WorkLinkSchema": {
+        "description": "A work item a line goes to, a job among them: its id and its title.",
+        "properties": {
+          "id": {
+            "description": "The work item's id, its line's address",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "description": "The work item's title, as its line shows it",
+            "examples": [
+              "Rotating the CI token"
+            ],
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title"
+        ],
+        "title": "WorkLinkSchema",
         "type": "object"
       },
       "ProjectHeadSchema.e86ccd6": {
@@ -7749,6 +8072,17 @@
             "description": "When the action was marked Done",
             "title": "Done"
           },
+          "held": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.HoldSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What holds it while Pilot's work holds it, a claimed action or a block a research checks a fact for: it takes no answer, Done or paste-back from the app's controls (F31.7; DB 295); null while it is not held"
+          },
           "id": {
             "description": "The block's local id, unique within its item",
             "examples": [
@@ -7849,11 +8183,30 @@
           "in_chat",
           "done",
           "claim",
+          "held",
           "deferral",
           "writer_asked",
           "section"
         ],
         "title": "BlockSchema",
+        "type": "object"
+      },
+      "TimelineSchema.1fdd8ae.CancelSchema": {
+        "description": "The Cancel a registered document of a run offers (F28.9; DB 297 to\n299): the document is the person's, nothing of the run is in flight, and\nthe run holds a block of another document. It closes every open document\nof the run at once, with no Undo, and gives the blocks back.",
+        "properties": {
+          "takes_back": {
+            "description": "The blocks the run holds, which it gives back, in timeline order",
+            "items": {
+              "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.TakenBackSchema"
+            },
+            "title": "Takes Back",
+            "type": "array"
+          }
+        },
+        "required": [
+          "takes_back"
+        ],
+        "title": "CancelSchema",
         "type": "object"
       },
       "TimelineSchema.1fdd8ae.CardTransitionSchema": {
@@ -7945,12 +8298,17 @@
         "type": "object"
       },
       "TimelineSchema.1fdd8ae.ClaimSchema": {
-        "description": "An action Pilot claimed and has not done (F21.6): open, Pilot's, waiting\non no person.",
+        "description": "An action Pilot claimed and has not done (F21.6): Pilot's while its\nrun holds it (`held`), the person's otherwise.",
         "properties": {
+          "undone": {
+            "description": "Whether Pilot's work left it undone, which its head says: the run of the work item named for it handed it back, done with it, failed, stopped or cancelled, its `done` unwritten, the action the person's again (F21.6; DB 262, 299); false while it is held, and while no work item is named for it",
+            "title": "Undone",
+            "type": "boolean"
+          },
           "work": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.ClaimedWorkSchema"
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.WorkLinkSchema"
               },
               {
                 "type": "null"
@@ -7960,34 +8318,10 @@
           }
         },
         "required": [
-          "work"
+          "work",
+          "undone"
         ],
         "title": "ClaimSchema",
-        "type": "object"
-      },
-      "TimelineSchema.1fdd8ae.ClaimedWorkSchema": {
-        "description": "The work item a claimed action is given to: the one its latest naming\nnames (DB 260).",
-        "properties": {
-          "id": {
-            "description": "The work item's id, its line's address",
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "title": {
-            "description": "The work item's title, as its line shows it",
-            "examples": [
-              "Rotating the CI token"
-            ],
-            "title": "Title",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "title"
-        ],
-        "title": "ClaimedWorkSchema",
         "type": "object"
       },
       "TimelineSchema.1fdd8ae.ClarificationSchema": {
@@ -8190,6 +8524,44 @@
         "title": "DeferralSchema",
         "type": "object"
       },
+      "TimelineSchema.1fdd8ae.DocumentLinkSchema": {
+        "description": "A registered document a line links: its id and its title.",
+        "properties": {
+          "id": {
+            "description": "The item's id, its document's address",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "description": "Its line's title: its text's, else its file's name (F35)",
+            "examples": [
+              "refinement.md"
+            ],
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title"
+        ],
+        "title": "DocumentLinkSchema",
+        "type": "object"
+      },
+      "TimelineSchema.1fdd8ae.Doing": {
+        "description": "What Pilot does on an item that is Pilot's, or on a held block (F13.7,\nF31.7; DB 295, 296). Read at display, never stored.",
+        "enum": [
+          "awaiting_run",
+          "pre_ruling",
+          "asking_writer",
+          "doing",
+          "researching",
+          "waiting_on_answer"
+        ],
+        "title": "Doing",
+        "type": "string"
+      },
       "TimelineSchema.1fdd8ae.DoneSchema": {
         "description": "How a done item came to be done: its done line (F13).",
         "properties": {
@@ -8218,6 +8590,7 @@
               "settled",
               "turn_ended",
               "finished",
+              "cancelled",
               "withdrawn"
             ],
             "title": "Cause",
@@ -8298,6 +8671,43 @@
         ],
         "title": "HeldReason",
         "type": "string"
+      },
+      "TimelineSchema.1fdd8ae.HoldSchema": {
+        "description": "What holds a block while Pilot's work holds it (F31.7; DB 295, held\nthrough the run): read at every read, never stored.",
+        "properties": {
+          "asked_in": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.DocumentLinkSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "While its run waits on the person: the run's open document they answer, the first on the timeline; null otherwise"
+          },
+          "doing": {
+            "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.Doing",
+            "description": "What Pilot does on it: `doing` a claimed action, `researching` a block a research checks a fact for, each while something of the run holding it is in flight; `waiting_on_answer` while that run waits on the person's answer to a document it registered"
+          },
+          "pulse": {
+            "description": "Whether the line's dot pulses: a session of the run holding it, a work item's or the job's after one of their turns, queued or held, starting or running (F13.7)",
+            "title": "Pulse",
+            "type": "boolean"
+          },
+          "work": {
+            "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.WorkLinkSchema",
+            "description": "The work item its standing claim or research names, which its line's button goes to (DB 260, 292)"
+          }
+        },
+        "required": [
+          "doing",
+          "work",
+          "pulse",
+          "asked_in"
+        ],
+        "title": "HoldSchema",
+        "type": "object"
       },
       "TimelineSchema.1fdd8ae.LineAgentSchema": {
         "description": "The sub-agent a current line waits on, from its `Task` call.",
@@ -8412,6 +8822,50 @@
           "recommended"
         ],
         "title": "OptionSchema",
+        "type": "object"
+      },
+      "TimelineSchema.1fdd8ae.PilotsWorkSchema": {
+        "description": "What Pilot does on an item that is Pilot's (F13.7; DB 296), which its\nline shows in its kind's place and its strip says once opened (F28.9):\nread at every read, never stored.",
+        "properties": {
+          "asked_in": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.DocumentLinkSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "While `waiting_on_answer`: the run's open document the person answers, the first on the timeline, which the strip links; null otherwise"
+          },
+          "doing": {
+            "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.Doing",
+            "description": "What Pilot does on it: `awaiting_run`, it or another document of the run that registered it awaiting its read; `pre_ruling`, its pass in flight, or the pass after the writer's reply; `asking_writer`, its pass asked the writer, the clarification run in flight; with every open block held, `doing` or `researching` while something of the run holding them is in flight, and `waiting_on_answer` while that run waits on the person's answer to a document it registered"
+          },
+          "pulse": {
+            "description": "Whether the line's dot pulses: the session doing Pilot's work on it queued or held, starting or running; never while `awaiting_run` or `waiting_on_answer` (F13.7)",
+            "title": "Pulse",
+            "type": "boolean"
+          },
+          "work": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.WorkLinkSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The work its line's button goes to: the work item that registered it, while `awaiting_run`; the pass's job, whose session log it opens, while `pre_ruling`; the work item the standing claim or research of its first held block names, while `doing`, `researching` or `waiting_on_answer`; null while `asking_writer`, the words standing still"
+          }
+        },
+        "required": [
+          "doing",
+          "work",
+          "pulse",
+          "asked_in"
+        ],
+        "title": "PilotsWorkSchema",
         "type": "object"
       },
       "TimelineSchema.1fdd8ae.ProgressState": {
@@ -8594,6 +9048,56 @@
         "title": "StopCause",
         "type": "string"
       },
+      "TimelineSchema.1fdd8ae.TakenBackSchema": {
+        "description": "A block a Cancel gives back, which its button names (F28.9; DB 297).",
+        "properties": {
+          "block": {
+            "description": "The block's local id",
+            "examples": [
+              "A1"
+            ],
+            "title": "Block",
+            "type": "string"
+          },
+          "document": {
+            "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.DocumentLinkSchema",
+            "description": "The document the block is on, which the label names"
+          },
+          "heading": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The heading of the block's own section, as its line names it (F30.9); null where it has none",
+            "examples": [
+              "Push the tag"
+            ],
+            "title": "Heading"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.BlockKind",
+            "description": "The block's kind"
+          },
+          "research": {
+            "description": "Whether the run holds it as a research, checking a fact its answer rests on; else as a claimed action it does",
+            "title": "Research",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "document",
+          "block",
+          "heading",
+          "kind",
+          "research"
+        ],
+        "title": "TakenBackSchema",
+        "type": "object"
+      },
       "TimelineSchema.1fdd8ae.TimelineItemSchema": {
         "description": "An entry on the timeline, with what its line and its open form show.",
         "properties": {
@@ -8649,6 +9153,17 @@
             ],
             "description": "A prose item's text but the opening's, as drawn: its prose parts and blocks in order, split at each block's own section's edges, without the front matter and a first heading that is its title; null for the opening, work and waits",
             "title": "Body"
+          },
+          "cancel": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.CancelSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The Cancel it offers while it is an open registered document of a run that holds a block of another document, it is the person's, and nothing of the run is in flight (DB 297); null otherwise"
           },
           "clarifications": {
             "description": "Pilot's questions to a registered document's writer and the writer's reply (F52.2): one per pre-ruling pass that asked about its blocks, in the order first asked; empty for every other item",
@@ -8753,6 +9268,17 @@
             ],
             "title": "Kind",
             "type": "string"
+          },
+          "pilots_work": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.PilotsWorkSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What Pilot does on it while it is Pilot's (F13.7; DB 296): a registered document awaiting its read, under its pass or its clarification, or with every open block held; it waits on no person. Null while it is the person's or done, and for every other item"
           },
           "read_minutes": {
             "anyOf": [
@@ -8903,7 +9429,9 @@
           "attachments",
           "clarifications",
           "work",
-          "wait"
+          "wait",
+          "pilots_work",
+          "cancel"
         ],
         "title": "TimelineItemSchema",
         "type": "object"
@@ -9172,6 +9700,31 @@
           "note"
         ],
         "title": "WaitSchema",
+        "type": "object"
+      },
+      "TimelineSchema.1fdd8ae.WorkLinkSchema": {
+        "description": "A work item a line goes to, a job among them: its id and its title.",
+        "properties": {
+          "id": {
+            "description": "The work item's id, its line's address",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "description": "The work item's title, as its line shows it",
+            "examples": [
+              "Rotating the CI token"
+            ],
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title"
+        ],
+        "title": "WorkLinkSchema",
         "type": "object"
       },
       "TimelineSchema.1fdd8ae.WorkSchema": {
@@ -10552,6 +11105,87 @@
           }
         ],
         "summary": "Mark an action without options Done as the signed-in person, now, with the paste-back as its note.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/items/{item_id}/cancel": {
+      "post": {
+        "description": "Returns:     204: The run's documents are done     401: No one is signed in     403: The caller lacks the editor role     404: No item has the id, or it has no document     409: The caller has not chosen a handle; the item is done, or no         document a work item's run registered; Pilot is working on it;         its run holds no block of another document, or something of it         is in flight; or the project is archived",
+        "operationId": "post__api_items_{item_id}_cancel",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Cancel a document of a run that holds a block of another document, as the signed-in person, while the document is theirs and nothing of the run is in flight: every open document of the run is done at once, `cancelled`, by them, with no Undo, no write-back and no continuation, so that the run is ended and the blocks it held are theirs again.",
         "tags": [],
         "x-required-role": "editor"
       }

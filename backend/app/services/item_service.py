@@ -22,8 +22,8 @@ from app.schemas.timeline import Doing
 from app.services.auth_service import AuthContext
 from app.services.people_service import PeopleService
 from app.services.project_service import ProjectService
-from app.services.wait_service import WaitService
 from app.services.session_start_service import SessionStartService
+from app.services.wait_service import WaitService
 from app.services.working_on import (
     cancels,
     held,
@@ -202,6 +202,7 @@ class ItemService:
             auth, f"request a firing of item {item_id}"
         )
         self.wait_service.request(item, person)
+
     def take_over(self, auth: AuthContext, item_id: uuid.UUID) -> None:
         """The caller's Stop and take over of a document that is Pilot's
         (F28.9, F26.3), under its project's row: what of Pilot's work holds

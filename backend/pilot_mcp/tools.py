@@ -235,7 +235,7 @@ def register_store_tools(mcp: FastMCP, api: PilotStoreApi) -> None:
         answered or not in an open registered document of your project, or a
         start the project refuses is refused with the reason, each fault with
         its line, and nothing is added. Answers `{id, path, state, held,
-        effect}`.
+        effect}`."""
         return await api.add_item(_authorization(ctx), _tool_use_id(ctx), item)
 
     @mcp.tool()

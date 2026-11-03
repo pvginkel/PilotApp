@@ -64,7 +64,6 @@ interface DocumentOverlayProps {
 }
 
 export function DocumentOverlay({ projectId, project, documentId, block, attachment, box }: DocumentOverlayProps) {
-  const navigate = useNavigate();
   const clarification = useClarificationBox(box && attachment === null ? documentId : null);
   const { handle } = usePerson();
   const close = useOverlayClose(projectId);
