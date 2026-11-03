@@ -315,11 +315,16 @@ class TestSetup:
     def test_with_no_controller_configured_it_is_refused(
         self,
         container: ServiceContainer,
+        supervise: Supervise,
         opened: Project,
         opening: Item,
     ) -> None:
+        unconfigured = configured_starts(
+            container, supervise, controller_configured=False
+        )
+
         with pytest.raises(InvalidOperationException) as raised:
-            container.job_service().setup(opened, AT, OPERATION)
+            _jobs(container, unconfigured).setup(opened, AT, OPERATION)
 
         assert raised.value.message == (
             "Cannot create Soup club because no controller is configured"
@@ -1745,14 +1750,18 @@ class TestRetryRefused:
         self,
         container: ServiceContainer,
         session: DbSession,
+        supervise: Supervise,
         starts: SessionStartService,
         opened: Project,
         opening: Item,
     ) -> None:
         failed = _ended(session, container, _setup(container, starts, opened))
+        unconfigured = configured_starts(
+            container, supervise, controller_configured=False
+        )
 
         with pytest.raises(InvalidOperationException) as raised:
-            container.job_service().retry(failed.id)
+            _jobs(container, unconfigured).retry(failed.id)
 
         assert raised.value.message == (
             f"Cannot retry {SETUP_TITLE} because no controller is configured"

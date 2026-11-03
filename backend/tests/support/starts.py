@@ -1,6 +1,6 @@
-"""The session start on a supervisor of its own, a controller configured, for
-the tests that place work items through a surface of Pilot's: its loops never
-run, and its creates hand no MCP server."""
+"""The session start on a supervisor of its own, a controller configured unless
+a test says otherwise, for the tests that place work items through a surface
+of Pilot's: its loops never run, and its creates hand no MCP server."""
 
 from app.services.chat_close_service import ChatCloseService
 from app.services.container import ServiceContainer
@@ -15,10 +15,19 @@ from tests.support.supervisor import Supervise
 
 
 def configured_starts(
-    container: ServiceContainer, supervise: Supervise, *, project_max: int = 3
+    container: ServiceContainer,
+    supervise: Supervise,
+    *,
+    project_max: int = 3,
+    controller_configured: bool = True,
 ) -> SessionStartService:
     """The start on the container's outage and a slot of its own, of
-    `project_max` work items per project."""
+    `project_max` work items per project.
+
+    A test of the start with no controller builds its own with
+    `controller_configured` false: the container's start is a singleton that
+    keeps the `controller_url` it was first built under, a test's override
+    included."""
     supervisor, _ = supervise(container)
     environments = EnvironmentService(
         container=container,
@@ -57,6 +66,6 @@ def configured_starts(
         work_slots=slots,
         usage_halts=container.usage_halts(),
         pilot_server=pilot_server,
-        controller_configured=True,
+        controller_configured=controller_configured,
         store_environment_id=STORE_ENVIRONMENT_ID,
     )
