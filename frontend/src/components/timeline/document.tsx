@@ -18,9 +18,8 @@
  * run's end, nor after a read that failed: awaiting its read, it is Pilot's line (item.tsx, F13.7);
  * its read failed, its card titles it by its file's name, a warning chip beside it, *Did not load*,
  * since only then does it wait on the person's Reviewed (F85.1, ruling D1); published, it is any
- * review's card. Where Pilot asked a registered
- * document's writer about its blocks, its line under the title, or on a card under the summary,
- * says so: "Pilot asked the writer about D2 and D4" (F86.8).
+ * review's card. Where Pilot asked a registered document's writer about a block, the block's head
+ * says so, inline and in the overlay (F52.2; writer-asked.tsx); a card says nothing of it.
  */
 
 import { useContext, useState } from 'react';
@@ -39,7 +38,6 @@ import { LockedContext } from '@/components/timeline/locked';
 import { autopilotMayTake } from '@/components/timeline/may-take';
 import { isSettled, piecesOf, SectionsContext } from '@/components/timeline/sections';
 import { SettledLines } from '@/components/timeline/settled';
-import { WriterAsked } from '@/components/timeline/writer-asked';
 import { PilotWriting } from '@/components/timeline/writing';
 import { useReviewed, useSend } from '@/hooks/use-marks';
 import { useArchived, useAutopilotOff } from '@/hooks/use-projects';
@@ -62,7 +60,6 @@ export function InlineDocument({ item }: { item: TimelineItem }) {
       <div className="item-title" data-testid="timeline.item.title">
         <LinkedText text={titleOf(item)} />
       </div>
-      <WriterAsked item={item} />
       <div className="inline-doc" data-testid="timeline.item.document">
         <DocumentParts item={item} />
       </div>
@@ -101,7 +98,6 @@ export function DocumentCard({ item }: { item: TimelineItem }) {
             <LinkedText text={item.summary} />
           </p>
         )}
-        <WriterAsked item={item} />
         <CountChips counts={countsOf(item)} autopilot={blocks.filter((block) => autopilotMayTake(item, block, autopilotOff)).length} />
         {item.body !== null && (
           <div className="progress">

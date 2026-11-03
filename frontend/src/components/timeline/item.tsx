@@ -4,7 +4,8 @@
  * item's block answered in its place (F19.1, F20, F21) and a notice's Read under its text (F23),
  * and Pilot's dots at its end while Pilot writes it (F35); a confirmation is a card of its own
  * (F22), a short document stands inline (F24.1), and a larger one and a review leave a card
- * (F24.2, F25.1); the archive question is its two buttons (F5.6). A registered document whose writer Pilot asked says so under its title (F86.8).
+ * (F24.2, F25.1); the archive question is its two buttons (F5.6). A one-ask item whose writer Pilot
+ * asked about its block carries the block's mark in its head (F52.2; writer-asked.tsx).
  * Its attachments follow its text (F17.5). An urgent one is tinted (F10.1), and one
  * whose latest save is held shows its last published text with a dashed border, a concept (F78). A
  * work item open is its session's (work.tsx, F26). An item Pilot is working on is one line in its
@@ -40,7 +41,6 @@ import { PilotsButton } from '@/components/timeline/pilots';
 import { UserAvatar } from '@/components/timeline/user-avatar';
 import { WaitItem } from '@/components/timeline/wait';
 import { WorkItem } from '@/components/timeline/work';
-import { WriterAsked } from '@/components/timeline/writer-asked';
 import { PilotWriting } from '@/components/timeline/writing';
 import { useDiscuss } from '@/hooks/use-discuss';
 import { useDismiss } from '@/hooks/use-dismiss';
@@ -98,11 +98,10 @@ function OpenItem({ item }: { item: TimelineItem }) {
   if (item.kind === 'document') return <InlineDocument item={item} />;
   return (
     <div className="item-body">
-      <ItemHead item={item} />
+      <ItemHead item={item} asked={blocksOf(item).some((block) => block.writer_asked)} />
       <div className="item-title" data-testid="timeline.item.title">
         <LinkedText text={titleOf(item)} />
       </div>
-      <WriterAsked item={item} />
       {/* The API gives every prose item but the opening its text. */}
       <ItemText body={item.body!} ask={askOf(item)} />
       <Attachments item={item} />

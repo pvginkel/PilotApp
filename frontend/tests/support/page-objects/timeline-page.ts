@@ -144,7 +144,10 @@ export class TimelinePage {
       edited: root.getByTestId('timeline.item.edited'),
       editedTime: root.getByTestId('timeline.item.edited.time'),
       unsent: root.getByTestId('timeline.item.unsent'),
-      /** "Pilot asked the writer about D2 and D4", under an inline document's title or a card's summary. */
+      /**
+       * "Pilot asked the writer" in a one-ask item's or a confirmation's head, whose head is its
+       * block's: a button to the questions and the reply (F52.2).
+       */
       writerAsked: root.getByTestId('timeline.item.writer-asked'),
       writing: root.getByTestId('timeline.writing'),
       document: root.getByTestId('timeline.item.document'),
@@ -312,7 +315,10 @@ export function blockParts(page: Page, root: Locator) {
     kind: root.getByTestId('timeline.block.kind'),
     /** A confirmation block's auto pilot mark (F4.4). */
     autopilotMark: root.getByTestId('timeline.block.autopilot-mark'),
-    /** "Pilot asked the writer", in the head of a block Pilot asked a registered document's writer about (F52.2). */
+    /**
+     * "Pilot asked the writer", in the head of a block Pilot asked a registered document's writer
+     * about: a button to the questions and the reply (F52.2).
+     */
     writerAsked: root.getByTestId('timeline.block.writer-asked'),
     /** An action Pilot claimed: "Pilot does it", its note, and the work item that does it (F21.6). */
     claim: root.getByTestId('timeline.block.claim'),

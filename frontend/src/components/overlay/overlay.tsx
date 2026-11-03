@@ -17,6 +17,7 @@
 import { useContext, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
 import { ArrowLeft, Maximize2, Minimize2, X } from 'lucide-react';
+import { scrollToIn } from '@/components/overlay/scroll-to';
 import { blockKey, FlashContext, GoToContext, useFlashes } from '@/components/timeline/flash';
 import { SectionsContext, useSections } from '@/components/timeline/sections';
 import { PhoneViewContext } from '@/hooks/use-phone-tab';
@@ -67,15 +68,7 @@ export function Overlay({ showing, at = null, back = null, titles, discuss = nul
   const blockIn = (blockId: string) => body.current!.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(blockId)}"]`);
   // The block is drawn in the body.
   const goTo = (itemId: string, blockId: string, behavior: ScrollBehavior = 'smooth') => {
-    const element = body.current!;
-    const block = blockIn(blockId)!;
-    const top =
-      block.getBoundingClientRect().top -
-      element.getBoundingClientRect().top -
-      element.clientTop +
-      element.scrollTop -
-      parseFloat(getComputedStyle(block).scrollMarginTop);
-    element.scrollTo({ top, behavior });
+    scrollToIn(body.current!, blockIn(blockId)!, behavior);
     flash(blockKey(itemId, blockId));
   };
   const goToSegment = (itemId: string, blockId: string) => {

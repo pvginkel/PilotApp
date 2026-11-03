@@ -3,7 +3,8 @@
  * remembers it as the current project, which the bare address opens. Under it an item's address,
  * and under that a block's, open the timeline at the item or the block, and a document's opens
  * the document in the overlay over the timeline (F97), as a block's does where its document is a
- * card, at the block (F33). An attachment's address under an item's opens it in the overlay over
+ * card, at the block (F33), and the address under a document's of the box of Pilot's questions to
+ * its writer at the box (F52.2). An attachment's address under an item's opens it in the overlay over
  * the timeline where the timeline stands, and under a document's in the document's overlay
  * (F28.5), and under the project's, wherever it hangs, a draft's material hung on nothing
  * (F36.6). The handbook's address, and the project document's, open it in the overlay over the
@@ -62,8 +63,9 @@ function Project() {
   useEffect(() => rememberInBrowser({ project: projectId }), [projectId]);
   const { data } = useProjectHead(projectId);
   const addressed = useTimelineItem(projectId, blockId === undefined ? undefined : itemId);
+  const box = useMatch({ from: '/_shell/projects/$projectId/documents/$documentId/clarification', shouldThrow: false }) !== undefined;
   const overlaid =
-    documentId !== undefined ? { documentId, block: null, attachment: attachmentId ?? null } : cardAt(addressed, blockId);
+    documentId !== undefined ? { documentId, block: null, attachment: attachmentId ?? null, box } : cardAt(addressed, blockId);
   const attached = itemId !== undefined && attachmentId !== undefined ? { itemId, attachmentId } : null;
   const loose = itemId === undefined && documentId === undefined ? (attachmentId ?? null) : null;
   const goneTo = itemId === undefined || attached !== null ? null : { item: itemId, block: blockId ?? null };
@@ -200,6 +202,6 @@ function DeskProject({ projectId, project: data, overlay, goneTo, toItem, childr
 /** The document a block's address opens in the overlay, at the block: its item, where it is a card. */
 function cardAt(item: TimelineItem | null | undefined, blockId: string | undefined) {
   return item !== undefined && item !== null && blockId !== undefined && isCard(item)
-    ? { documentId: item.id, block: blockId, attachment: null }
+    ? { documentId: item.id, block: blockId, attachment: null, box: false }
     : null;
 }

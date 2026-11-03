@@ -1287,52 +1287,6 @@ class TestTimeline:
         assert [line[key] for key in facts] == [None] * 5
         assert (line["done"], line["concept"], line["writing"]) == (None, False, False)
 
-    def test_a_registered_documents_line_names_the_blocks_its_writer_is_asked_about(
-        self,
-        container: ServiceContainer,
-        session: DbSession,
-        environment: Environment,
-    ) -> None:
-        project = _make(container)
-        run = _run(session, project, environment)
-        documents = container.document_service()
-        item = documents.register(project, run, "/work/Camp/docs/refinement.md").item
-        documents.publish_read(
-            session.get_one(Document, item.id),
-            "```question id=Q1\n```\n\n```question id=Q2\n```\n\n"
-            "```question id=Q3\n```\n",
-            run.id,
-        )
-        job = models.Session(
-            project_id=project.id,
-            kind_code="job",
-            cwd="/work/PilotProjects",
-            token_hash="9" * 64,
-            state_code=SessionState.RUNNING,
-        )
-        session.add(job)
-        session.flush()
-        turn = Turn(
-            session_id=job.id, seq=1, message="Pre-rule.", started_at=datetime.now(UTC)
-        )
-        session.add(turn)
-        session.flush()
-        for local_id in ("Q3", "Q1"):
-            block = session.scalars(
-                select(Block).where(
-                    Block.document_id == item.id, Block.local_id == local_id
-                )
-            ).one()
-            session.add(
-                WriterQuestion(turn_id=turn.id, block_id=block.id, question="Which?")
-            )
-        session.flush()
-
-        opening, line = _items(container, project)
-
-        assert line["asked_writer_about"] == ["Q1", "Q3"]
-        assert opening["asked_writer_about"] == []
-
     def _questioned(
         self, container: ServiceContainer, db: DbSession, environment: Environment
     ) -> tuple[Project, Item, models.Session]:

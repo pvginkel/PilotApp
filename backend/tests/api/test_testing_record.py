@@ -2281,7 +2281,7 @@ class TestCreateWriterQuestions:
         session.commit()
         return item
 
-    def test_a_passs_questions_are_asked_in_one_job_turn_and_its_line_says_so(
+    def test_a_passs_questions_are_asked_in_one_job_turn_and_its_blocks_say_so(
         self,
         client: FlaskClient,
         session: Session,
@@ -2313,7 +2313,11 @@ class TestCreateWriterQuestions:
             )
         ] == [(turn.id, "Which lake?"), (turn.id, "Which site?")]
         line = _timeline_item(client, str(project.id), str(document.id))
-        assert line["asked_writer_about"] == ["Q1", "Q2"]
+        assert [
+            part["block"]["id"]
+            for part in line["body"]
+            if part["type"] == "block" and part["block"]["writer_asked"]
+        ] == ["Q1", "Q2"]
 
     def test_an_unknown_item_or_block_is_not_found(
         self, client: FlaskClient, document: Item

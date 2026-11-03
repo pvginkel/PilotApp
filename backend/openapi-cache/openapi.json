@@ -2560,20 +2560,6 @@
       "ItemDocumentSchema.1fdd8ae": {
         "description": "An item's document read on its own, as the overlay draws it (F28): its\ntimeline entry, but that a document done by Done reads as Done fixed it\n(F13.3), its `title`, `summary`, `body`, `word_count` and `read_minutes`\nfrom the text of its `done` Version.",
         "properties": {
-          "asked_writer_about": {
-            "description": "The local ids of the blocks Pilot asked a registered document's writer about, in their order, which its line names: \"Pilot asked the writer about D2 and D4\" (F86.8); empty for every other item",
-            "examples": [
-              [
-                "D2",
-                "D4"
-              ]
-            ],
-            "items": {
-              "type": "string"
-            },
-            "title": "Asked Writer About",
-            "type": "array"
-          },
           "attachments": {
             "description": "The files hung on the item, in their order, on every kind (F17.5)",
             "items": {
@@ -2884,7 +2870,6 @@
           "awaiting_read",
           "edited_at",
           "attachments",
-          "asked_writer_about",
           "clarifications",
           "work",
           "wait",
@@ -3209,7 +3194,7 @@
             "description": "How the answer reached the record: `app` for a person's unless the text names another; null for Pilot's unless it names one, and while unanswered"
           },
           "writer_asked": {
-            "description": "Whether Pilot asked the registered document's writer about the block (F52.2), which its line says; false for every other block",
+            "description": "Whether Pilot asked the registered document's writer about the block (F52.2), which its head's mark says, opening the document at the questions and the reply; false for every other block",
             "title": "Writer Asked",
             "type": "boolean"
           }
@@ -5030,7 +5015,7 @@
             "description": "How the answer reached the record: `app` for a person's unless the text names another; null for Pilot's unless it names one, and while unanswered"
           },
           "writer_asked": {
-            "description": "Whether Pilot asked the registered document's writer about the block (F52.2), which its line says; false for every other block",
+            "description": "Whether Pilot asked the registered document's writer about the block (F52.2), which its head's mark says, opening the document at the questions and the reply; false for every other block",
             "title": "Writer Asked",
             "type": "boolean"
           }
@@ -7842,7 +7827,7 @@
             "description": "How the answer reached the record: `app` for a person's unless the text names another; null for Pilot's unless it names one, and while unanswered"
           },
           "writer_asked": {
-            "description": "Whether Pilot asked the registered document's writer about the block (F52.2), which its line says; false for every other block",
+            "description": "Whether Pilot asked the registered document's writer about the block (F52.2), which its head's mark says, opening the document at the questions and the reply; false for every other block",
             "title": "Writer Asked",
             "type": "boolean"
           }
@@ -8612,20 +8597,6 @@
       "TimelineSchema.1fdd8ae.TimelineItemSchema": {
         "description": "An entry on the timeline, with what its line and its open form show.",
         "properties": {
-          "asked_writer_about": {
-            "description": "The local ids of the blocks Pilot asked a registered document's writer about, in their order, which its line names: \"Pilot asked the writer about D2 and D4\" (F86.8); empty for every other item",
-            "examples": [
-              [
-                "D2",
-                "D4"
-              ]
-            ],
-            "items": {
-              "type": "string"
-            },
-            "title": "Asked Writer About",
-            "type": "array"
-          },
           "attachments": {
             "description": "The files hung on the item, in their order, on every kind (F17.5)",
             "items": {
@@ -8930,7 +8901,6 @@
           "awaiting_read",
           "edited_at",
           "attachments",
-          "asked_writer_about",
           "clarifications",
           "work",
           "wait"

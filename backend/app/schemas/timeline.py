@@ -454,7 +454,8 @@ class BlockSchema(BaseModel):
     writer_asked: bool = Field(
         description=(
             "Whether Pilot asked the registered document's writer about the block "
-            "(F52.2), which its line says; false for every other block"
+            "(F52.2), which its head's mark says, opening the document at the "
+            "questions and the reply; false for every other block"
         )
     )
     section: SectionSchema | None = Field(
@@ -956,14 +957,6 @@ class TimelineItemSchema(BaseModel):
     )
     attachments: list[AttachmentSchema] = Field(
         description="The files hung on the item, in their order, on every kind (F17.5)"
-    )
-    asked_writer_about: list[str] = Field(
-        description=(
-            "The local ids of the blocks Pilot asked a registered document's "
-            'writer about, in their order, which its line names: "Pilot asked the '
-            'writer about D2 and D4" (F86.8); empty for every other item'
-        ),
-        examples=[["D2", "D4"]],
     )
     clarifications: list[ClarificationSchema] = Field(
         description=(

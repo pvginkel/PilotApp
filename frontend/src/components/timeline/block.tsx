@@ -3,7 +3,8 @@
  * document alike: a decision's options, a question's field, an action's paste-back and buttons, a
  * confirmation's check and cross. Its head names its kind in a document, where the item's head does
  * not, the auto pilot mark beside it on a confirmation the switch would answer (F4.4), then, where
- * Pilot asked the registered document's writer about it, "Pilot asked the writer" (F52.2); answered,
+ * Pilot asked the registered document's writer about it, "Pilot asked the writer", a button that
+ * opens the document at the questions and the reply (F52.2; writer-asked.tsx); answered,
  * the head has a chevron where it opens, Answered, and when and by whom, Pilot's mark on a block
  * Pilot settled (F31.1, F31.3), *In the chat* before them on an answer given in the
  * chat, going to its message (F42.3). An answer that is not a person's, and every
@@ -48,6 +49,7 @@ import { QuestionAnswer } from '@/components/timeline/question';
 import { Deferral, DEFERRED } from '@/components/timeline/said';
 import { SectionsContext } from '@/components/timeline/sections';
 import { UserAvatar } from '@/components/timeline/user-avatar';
+import { WriterAsked } from '@/components/timeline/writer-asked';
 import { useAnswer, useDraftAnswer, type Answering } from '@/hooks/use-answer';
 import { useArchived, useAutopilotOff } from '@/hooks/use-projects';
 import { isAnswered, type Block as BlockData, type BodyPart, type TimelineItem } from '@/hooks/use-timeline';
@@ -96,6 +98,7 @@ export function Block({ item, block, solo = false, section = [{ type: 'block', b
       settled={item.done !== null}
       disabled={archived || locked || block.held !== null}
       quote={solo ? null : quoteOfBlock(item, block)}
+      asked={block.writer_asked && !solo ? item.id : null}
       flash={flash}
       held={held}
     />
@@ -117,6 +120,7 @@ export function DocumentBlock({ document, block }: { document: string; block: Bl
       settled={false}
       disabled
       quote={null}
+      asked={null}
       flash={null}
       held={null}
     />
@@ -145,6 +149,7 @@ export function DraftBlock({ projectId, block, title, flash }: DraftBlockProps) 
       settled={false}
       disabled={archived}
       quote={quoteOfDraftBlock(block, title)}
+      asked={null}
       flash={flash}
       held={null}
     />
@@ -181,12 +186,14 @@ interface BlockPanelProps {
   disabled: boolean;
   /** What its head's Discuss quotes; none where its head has no Discuss. */
   quote: QuoteRef | null;
+  /** The document its head's mark opens at the questions to its writer; none where it carries no mark. */
+  asked: string | null;
   flash: Flash | null;
   /** Its line, where Pilot's work holds it inside a document that is the person's; none otherwise. */
   held: Held | null;
 }
 
-function BlockPanel({ field, block, solo, mayTake, answering, settled, disabled, quote, flash, held }: BlockPanelProps) {
+function BlockPanel({ field, block, solo, mayTake, answering, settled, disabled, quote, asked, flash, held }: BlockPanelProps) {
   const [opened, setOpened] = useState(false);
   const saving = answering?.saving ?? null;
   const answer = answering?.answer ?? unanswerable;
@@ -278,7 +285,7 @@ function BlockPanel({ field, block, solo, mayTake, answering, settled, disabled,
         <BlockHead
           block={block}
           mayTake={mayTake}
-          writerAsked={block.writer_asked && !solo}
+          asked={asked}
           undone={undone}
           answered={answered}
           closed={closed}
@@ -297,8 +304,8 @@ function BlockPanel({ field, block, solo, mayTake, answering, settled, disabled,
 interface BlockHeadProps {
   block: BlockData;
   mayTake: boolean;
-  /** Pilot asked the writer about it; a one-ask item's line says so instead (writer-asked.tsx). */
-  writerAsked: boolean;
+  /** The document its mark opens at the questions to its writer, where Pilot asked the writer about it. */
+  asked: string | null;
   /** Pilot's work on its claim left it undone (F21.6). */
   undone: boolean;
   answered: boolean;
@@ -308,7 +315,7 @@ interface BlockHeadProps {
   quote: QuoteRef | null;
 }
 
-function BlockHead({ block, mayTake, writerAsked, undone, answered, closed, onToggle, quote }: BlockHeadProps) {
+function BlockHead({ block, mayTake, asked, undone, answered, closed, onToggle, quote }: BlockHeadProps) {
   const { icon: Icon, label } = blockKindOf(block);
   const toggle = closed ? 'Show every option' : 'Show only the answer';
   return (
@@ -318,12 +325,7 @@ function BlockHead({ block, mayTake, writerAsked, undone, answered, closed, onTo
         {label}
       </span>
       {mayTake && <AutopilotMark testId="timeline.block.autopilot-mark" />}
-      {writerAsked && (
-        <span className="asked" data-testid="timeline.block.writer-asked">
-          <Avatar who="pilot" size="xs" />
-          Pilot asked the writer
-        </span>
-      )}
+      {asked !== null && <WriterAsked documentId={asked} testId="timeline.block.writer-asked" />}
       {/* The API names the work item of every claim it hands back. */}
       {undone && (
         <span

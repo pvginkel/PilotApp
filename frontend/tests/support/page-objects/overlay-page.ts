@@ -8,8 +8,8 @@ import { blockParts, settledParts } from './timeline-page';
  * address (F97); its head with the title, the project, the step, the segment bar, *Unsent* or
  * *Done* and *Edited <time>*; its body with the summary, the prose and the blocks, the sections
  * Pilot settled as their lines, its attachments, Pilot's dots, or "The document did not load"; its
- * foot; maximize, the cross and the backdrop; over the text, Pilot's questions to a registered
- * document's writer and the reply (F52.2). A document that is Pilot's has the strip under its head,
+ * foot; maximize, the cross and the backdrop; over the text, the box of Pilot's questions to a
+ * registered document's writer and the reply (F52.2), which its own address opens it at. A document that is Pilot's has the strip under its head,
  * what Pilot does on it in `data-doing`, its words, its link and *Stop and take over* (F28.9), and
  * one awaiting its read says that its text comes once it is read; one a run of Pilot's put to the
  * person while it holds a block of another document has the Cancel in its foot. Showing an attachment (F28.5), its head is its title
@@ -67,7 +67,9 @@ export class OverlayPage {
   readonly reviewed: Locator;
   /** The body's attachments' chips. */
   readonly attachments: Locator;
-  /** Pilot's questions to the writer and the reply, a section per pass that asked (F52.2). */
+  /** The box of Pilot's questions to the writer and the reply (F52.2), which flashes when gone to. */
+  readonly clarificationBox: Locator;
+  /** Its sections, one per pass that asked. */
   readonly clarifications: Locator;
   /** An open archive question's Archive and Keep, in its block's place (F5.6). */
   readonly archiveQuestion: { archive: Locator; keep: Locator };
@@ -130,6 +132,7 @@ export class OverlayPage {
     this.send = this.foot.getByTestId('timeline.item.send');
     this.reviewed = this.root.getByTestId('overlay.reviewed');
     this.attachments = this.body.getByTestId('timeline.attachment');
+    this.clarificationBox = this.body.getByTestId('overlay.clarification-box');
     this.clarifications = this.body.getByTestId('overlay.clarification');
     this.archiveQuestion = {
       archive: this.body.getByTestId('timeline.archive-question.archive'),
@@ -181,8 +184,9 @@ export class OverlayPage {
   }
 
   /**
-   * The section of the pass that asked the writer `nth` (F52.2): its head and its stamp, its
-   * questions, each by its block's id with its words and its part of the reply, and the reply whole.
+   * The section of the pass that asked the writer `nth` (F52.2): its head, its stamp and the reply's,
+   * its questions, each by its block's id with its words, its part of the reply and that the reply
+   * is awaited, and the reply whole.
    */
   clarification(nth = 0) {
     const root = this.clarifications.nth(nth);
@@ -191,6 +195,7 @@ export class OverlayPage {
       root,
       head: root.getByTestId('overlay.clarification.head'),
       time: root.getByTestId('overlay.clarification.time'),
+      replied: root.getByTestId('overlay.clarification.replied'),
       questions,
       question: (blockId: string) => {
         const question = root.locator(`[data-testid="overlay.clarification.question"][data-block="${blockId}"]`);
@@ -199,6 +204,7 @@ export class OverlayPage {
           block: question.getByTestId('overlay.clarification.block'),
           text: question.getByTestId('overlay.clarification.text'),
           reply: question.getByTestId('overlay.clarification.reply'),
+          awaited: question.getByTestId('overlay.clarification.awaited'),
         };
       },
       /** The reply whole, under the questions, where it did not keep the headings asked for. */
@@ -231,6 +237,11 @@ export function documentAttachmentAddress(projectId: string, documentId: string,
 /** A document's address under its project's (F97). */
 export function documentAddress(projectId: string, documentId: string): string {
   return `/projects/${projectId}/documents/${documentId}`;
+}
+
+/** The address under a document's of the box of Pilot's questions to its writer and the reply (F52.2). */
+export function clarificationAddress(projectId: string, documentId: string): string {
+  return `${documentAddress(projectId, documentId)}/clarification`;
 }
 
 /** The project's handbook's address under its project's (F129.4). */

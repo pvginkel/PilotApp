@@ -6,7 +6,8 @@
  * lead, then its prose with every block answered in place, an open archive question's Archive and
  * Keep in its block's place (F5.6), then Pilot's dots while it writes
  * (F28.3), and over the text, where Pilot asked a registered document's writer about its blocks,
- * the questions and the writer's reply (F52.2). *Edited* and the dots tell of the text as it
+ * the box of the questions and the writer's reply (F52.2), which an asked block's mark goes to, as
+ * the box's address opens the document at it. *Edited* and the dots tell of the text as it
  * stands, so a document read as Done fixed it has neither; its foot "Done · <stamp> · <who>", naming who did it unless it was the person, or
  * Reviewed on an open review, or *Send answers* on an open document, which closes the overlay
  * (F28.4), after the Cancel of a document a run of Pilot's put to the person while the run holds a
@@ -27,6 +28,7 @@ import { DiscussButton } from '@/components/chat/discuss-button';
 import { quoteOfAttachment, quoteOfItem } from '@/components/chat/discuss-quotes';
 import { AttachmentBody, AttachmentTitles } from '@/components/overlay/attachment-overlay';
 import { Clarifications } from '@/components/overlay/clarification';
+import { useClarificationBox } from '@/components/overlay/clarification-box';
 import { DidNotLoad, Overlay } from '@/components/overlay/overlay';
 import { PilotStrip } from '@/components/overlay/pilot-strip';
 import { RunCancel } from '@/components/overlay/run-cancel';
@@ -38,6 +40,7 @@ import { DocumentParts, SegmentBar, SendAnswers, UnsentChip } from '@/components
 import { isUnsent } from '@/components/timeline/document-state';
 import { Edited } from '@/components/timeline/item-head';
 import { LockedContext } from '@/components/timeline/locked';
+import { ToClarificationContext } from '@/components/timeline/to-clarification';
 import { PilotWriting } from '@/components/timeline/writing';
 import { useItemDocument, type ItemDocument } from '@/hooks/use-document';
 import { useReviewed } from '@/hooks/use-marks';
@@ -56,9 +59,13 @@ interface DocumentOverlayProps {
   block: string | null;
   /** Its attachment, shown in its place. */
   attachment: string | null;
+  /** It opens at the box of Pilot's questions to its writer and the reply. */
+  box: boolean;
 }
 
-export function DocumentOverlay({ projectId, project, documentId, block, attachment }: DocumentOverlayProps) {
+export function DocumentOverlay({ projectId, project, documentId, block, attachment, box }: DocumentOverlayProps) {
+  const navigate = useNavigate();
+  const clarification = useClarificationBox(box && attachment === null ? documentId : null);
   const { handle } = usePerson();
   const close = useOverlayClose(projectId);
   const { data, error } = useItemDocument(documentId);
@@ -92,8 +99,15 @@ export function DocumentOverlay({ projectId, project, documentId, block, attachm
       strip={headed?.pilots_work && <PilotStrip itemId={headed.id} pilots={headed.pilots_work} read={item !== undefined} />}
       foot={headed && footOf(headed, handle, close)}
       onClose={close}
+      bodyRef={clarification.body}
     >
-      {failed ? <DidNotLoad /> : textless !== undefined ? <Unread item={textless} /> : item && <Body item={item} />}
+      {failed ? (
+        <DidNotLoad />
+      ) : textless !== undefined ? (
+        <Unread item={textless} />
+      ) : (
+        item && <Body item={item} box={clarification} />
+      )}
     </Overlay>
   );
 }
@@ -159,22 +173,25 @@ function Unread({ item }: { item: ItemDocument }) {
   );
 }
 
-function Body({ item }: { item: ItemDocument }) {
+/** `box` goes to the box of Pilot's questions to the writer, which an asked block's mark does in the overlay. */
+function Body({ item, box }: { item: ItemDocument; box: ReturnType<typeof useClarificationBox> }) {
   const locked = item.pilots_work !== null;
   return (
     <LockedContext.Provider value={locked}>
-      {item.summary !== null && (
-        <div className="lead" data-testid="overlay.summary">
-          <LinkedText text={item.summary} />
+      <ToClarificationContext.Provider value={box.goTo}>
+        {item.summary !== null && (
+          <div className="lead" data-testid="overlay.summary">
+            <LinkedText text={item.summary} />
+          </div>
+        )}
+        <Attachments item={item} inDocument />
+        <Clarifications item={item} boxRef={box.box} flashing={box.flashing} onFlashed={box.onFlashed} />
+        <div className={cn('sheet-doc', locked && 'locked')} data-testid="overlay.document">
+          {/* An open archive question is answered Archive or Keep alone, as the timeline draws it (F5.6). */}
+          {item.kind === 'archive_question' && item.done === null ? <ArchiveAnswers item={item} /> : <DocumentParts item={item} />}
         </div>
-      )}
-      <Attachments item={item} inDocument />
-      <Clarifications item={item} />
-      <div className={cn('sheet-doc', locked && 'locked')} data-testid="overlay.document">
-        {/* An open archive question is answered Archive or Keep alone, as the timeline draws it (F5.6). */}
-        {item.kind === 'archive_question' && item.done === null ? <ArchiveAnswers item={item} /> : <DocumentParts item={item} />}
-      </div>
-      {item.writing && !asDone(item) && <PilotWriting />}
+        {item.writing && !asDone(item) && <PilotWriting />}
+      </ToClarificationContext.Provider>
     </LockedContext.Provider>
   );
 }

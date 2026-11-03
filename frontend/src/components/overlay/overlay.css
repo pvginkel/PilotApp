@@ -97,13 +97,20 @@
   .lead { margin-bottom: 18px; padding: 10px 14px; border-radius: var(--radius); background: hsl(var(--primary-muted) / 0.6); font-size: var(--text-base); }
 
   /* Pilot's questions to a registered document's writer and the reply, over its text
-     (clarification.tsx): each question after its block's id, the writer's words set in under it. */
-  .clarification { margin: 0 0 18px; padding: 10px 14px 12px; border: 1px solid hsl(var(--border)); border-radius: var(--radius); background: hsl(var(--muted) / 0.35); font-size: var(--text-base); }
-  .clarification h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font-size: var(--text-sm); font-weight: 600; color: hsl(var(--muted-foreground)); }
+     (clarification.tsx): the head Pilot's mark, its words and the stamps, each question muted after
+     its block's id, the writer's words set in under it. Gone to, it stands clear of the body's top
+     and every section flashes. */
+  .clarifications { scroll-margin-top: 20px; }
+  .clarifications.flash .clarification { animation: fresh 1.6s ease-out; }
+  .clarification { margin: 0 0 18px; padding: 10px 14px 12px; border: 1px solid hsl(var(--border)); border-radius: var(--radius); font-size: var(--text-base); }
+  .clarification h3 { display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; margin: 0 0 8px; font-size: var(--text-base); font-weight: 400; }
+  .clarification h3 b { font-weight: 600; }
+  .clarification .when { color: hsl(var(--muted-foreground)); font-size: var(--text-sm); }
   .clarification-questions { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; }
-  .clarification .asked { display: flex; align-items: baseline; gap: 8px; margin: 0; }
-  .clarification .block-id { flex: none; font-weight: 600; color: hsl(var(--primary-muted-foreground)); }
+  .clarification .asked { display: flex; align-items: baseline; gap: 8px; margin: 0; color: hsl(var(--muted-foreground)); }
+  .clarification .block-id { flex: none; font-weight: 600; color: hsl(var(--foreground)); }
   .clarification .reply { margin-top: 6px; padding-left: 12px; border-left: 2px solid hsl(var(--border)); }
+  .clarification .reply.awaited { color: hsl(var(--muted-foreground)); font-style: italic; }
   .clarification .reply .prose { font-size: var(--text-base); }
   .clarification .reply .prose :is(h1, h2, h3, h4, h5, h6) { margin: 0.6em 0 0.3em; font-size: 1em; }
   .clarification-questions + .reply { margin-top: 12px; }

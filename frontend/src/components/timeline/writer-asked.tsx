@@ -1,20 +1,43 @@
 /**
- * That Pilot asked a registered document's writer about its blocks (F86.8), on the open item:
- * "Pilot asked the writer about D2 and D4", the blocks by their local ids in the document's order.
+ * That Pilot asked a registered document's writer about a block (F52.2): Pilot's mark and "Pilot
+ * asked the writer" in the block's head, or in the item's where the item's head is the block's (a
+ * one-ask item's, a confirmation's). It is a button that opens the document at the box over its
+ * prose holding the questions and the writer's reply (clarification.tsx), at the box's own address;
+ * in the overlay showing the document, it goes to the box there.
  */
 
+import { useContext } from 'react';
+import { Link, useParams } from '@tanstack/react-router';
 import { Avatar } from '@/components/shared/avatar';
-import type { TimelineItem } from '@/hooks/use-timeline';
+import { ToClarificationContext } from '@/components/timeline/to-clarification';
 
-/** The blocks by their local ids: "D2", "D2 and D4", "D1, D2 and D4". */
-const listed = (ids: readonly string[]) => (ids.length < 2 ? ids.join('') : `${ids.slice(0, -1).join(', ')} and ${ids.at(-1)!}`);
+const TITLE = 'Show Pilot’s question to the writer and the reply';
 
-export function WriterAsked({ item }: { item: TimelineItem }) {
-  if (item.asked_writer_about.length === 0) return null;
-  return (
-    <p className="item-sub writer-asked" data-testid="timeline.item.writer-asked">
+export function WriterAsked({ documentId, testId }: { documentId: string; testId: string }) {
+  const { projectId } = useParams({ from: '/_shell/projects/$projectId' });
+  const toBox = useContext(ToClarificationContext);
+  const words = (
+    <>
       <Avatar who="pilot" size="xs" />
-      <span>Pilot asked the writer about {listed(item.asked_writer_about)}</span>
-    </p>
+      <span>Pilot asked the writer</span>
+    </>
+  );
+  if (toBox !== null) {
+    return (
+      <button type="button" className="pilot-mark asked" onClick={toBox} title={TITLE} data-testid={testId}>
+        {words}
+      </button>
+    );
+  }
+  return (
+    <Link
+      to="/projects/$projectId/documents/$documentId/clarification"
+      params={{ projectId, documentId }}
+      className="pilot-mark asked"
+      title={TITLE}
+      data-testid={testId}
+    >
+      {words}
+    </Link>
   );
 }

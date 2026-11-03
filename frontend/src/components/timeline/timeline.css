@@ -226,8 +226,10 @@
   .in-chat:hover { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
   .in-chat .icon { position: relative; top: calc(0.5em - 0.5cap); }
   .block-head .who .in-chat { margin-right: 4px; }
-  /* That Pilot asked the writer about the block (F52.2), Pilot's mark before the words. */
-  .block-head .asked { display: inline-flex; align-self: center; align-items: center; gap: 6px; line-height: 20px; }
+  /* That Pilot asked the writer about the block (F52.2), Pilot's mark before the words, in its
+     head or the item's: a button to the questions and the reply, its words underlined on hover. */
+  .pilot-mark.asked { display: inline-flex; align-self: center; align-items: center; gap: 6px; padding: 0; border: 0; background: none; color: inherit; font: inherit; line-height: 20px; white-space: nowrap; text-decoration: none; cursor: pointer; }
+  .pilot-mark.asked:hover span { text-decoration: underline; }
   /* That Pilot's work left a claimed action undone (F21.6), Pilot's mark before the words. */
   .block-head .undone { display: inline-flex; align-self: center; align-items: center; gap: 6px; line-height: 20px; color: hsl(var(--warning-text)); white-space: nowrap; }
   .block-controls { padding: 6px 14px 12px; }
@@ -356,8 +358,6 @@
   .item-head .edited .avatar { align-self: center; }
   /* Edited's pencil, in the item's head and the overlay's, stands in for its word on a phone. */
   .edited .edited-icon { display: none; position: relative; top: calc(0.5em - 0.5cap); }
-  /* That Pilot asked a registered document's writer (F86.8), Pilot's mark before the words. */
-  .writer-asked { display: flex; align-items: center; gap: 6px; font-size: var(--text-sm); }
   /* Pilot's line under a new project's setup while Create's pause holds its work (D083). */
   .project-ready { display: flex; align-items: center; gap: 6px; margin: 10px 0; font-size: var(--text-sm); color: hsl(var(--muted-foreground)); }
 

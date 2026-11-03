@@ -1,7 +1,9 @@
 /**
  * An open item's head (F12): its kind's icon and label, its time with the full stamp as tooltip, a
  * confirmation's auto pilot mark (F4.4) and its reason line with its tooltip (F22.1), and the
- * Urgent and "for <user>" chips (F10.1, F107); after them what a document's head adds; at its end
+ * Urgent and "for <user>" chips (F10.1, F107); the mark of Pilot's question to a registered
+ * document's writer, where the head is its one block's (F52.2); after them what a document's head
+ * adds; at its end
  * Discuss, quoting the item (F39.1). A document Pilot changed in a turn after the text it was first
  * shown with says so, *Edited <time>* beside Pilot's mark (F28.7). On a phone Urgent is its
  * triangle and *Edited* a pencil, their words left to a screen reader; the kind never wraps, and
@@ -16,6 +18,7 @@ import { Avatar } from '@/components/shared/avatar';
 import { Time } from '@/components/shared/time';
 import { AutopilotMark } from '@/components/timeline/autopilot-mark';
 import { kindOf } from '@/components/timeline/kinds';
+import { WriterAsked } from '@/components/timeline/writer-asked';
 import type { Block, TimelineItem } from '@/hooks/use-timeline';
 
 type Reason = NonNullable<Block['because']>;
@@ -62,11 +65,13 @@ interface ItemHeadProps {
   because?: Block['because'];
   /** A confirmation's auto pilot mark stands after the time (autopilot-mark.tsx). */
   mayTake?: boolean;
+  /** Pilot asked the writer about its one block, a one-ask item's or a confirmation's, whose head this is. */
+  asked?: boolean;
   /** What a document's head adds after the chips. */
   children?: ReactNode;
 }
 
-export function ItemHead({ item, because = null, mayTake = false, children }: ItemHeadProps) {
+export function ItemHead({ item, because = null, mayTake = false, asked = false, children }: ItemHeadProps) {
   const { icon: Icon, label } = kindOf(item);
   const why = because === null ? null : whyOf(because);
   return (
@@ -102,6 +107,7 @@ export function ItemHead({ item, because = null, mayTake = false, children }: It
           for {item.for_user.name}
         </span>
       )}
+      {asked && <WriterAsked documentId={item.id} testId="timeline.item.writer-asked" />}
       {children}
       <DiscussButton quote={quoteOfItem(item)} className="item-discuss" testId="timeline.item.discuss" />
     </div>

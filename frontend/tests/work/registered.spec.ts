@@ -13,8 +13,9 @@
  * is written back to its file, and the close that leaves none of the run's documents open
  * continues the conversation as a new work item after the answered ones, from when Undo is gone
  * from every document of the run (review 1); a write-back the controller refuses is in the run's
- * session log, live, and fails that continuation's start with its reason (F125). One whose writer
- * Pilot asked about its blocks says so on the timeline, live (F86.8).
+ * session log, live, and fails that continuation's start with its reason (F125). A block whose
+ * writer Pilot asked about it carries the mark in its head on the timeline, live, a one-ask item's
+ * and a confirmation's in the item's head, and the mark opens the document at the questions (F52.2).
  */
 
 import { test, expect } from '../support/fixtures';
@@ -24,7 +25,7 @@ import type { Controller } from '../support/controller';
 import { makeUnique } from '../support/helpers';
 import type { People } from '../support/people';
 import type { Projects } from '../support/projects';
-import { documentAddress } from '../support/page-objects/overlay-page';
+import { clarificationAddress, documentAddress } from '../support/page-objects/overlay-page';
 import { sessionLogAddress } from '../support/page-objects/session-log-page';
 import { addressOf } from '../support/page-objects/timeline-page';
 
@@ -198,13 +199,15 @@ test.describe('A registered document', () => {
     await expect(item.card.reviewed).toBeVisible();
   });
 
-  test('whose writer Pilot asked about its blocks says so, live: “Pilot asked the writer about D2 and D4” under an inline document’s title, under a card’s summary, under a one-ask item’s title and under a confirmation’s row', async ({
+  test('whose writer Pilot asked about a block carries the mark, live, in the block’s head inline, in the item’s head of a one-ask item and a confirmation, and none on a card nor any line under a title; the mark opens the document at the questions', async ({
     people,
     projects,
     controller,
     chats,
     timeline,
+    overlay,
     deploymentSse,
+    page,
   }) => {
     const { project, work, environment } = await running({ people, projects });
     const kit = await registered(controller, projects, environment, work, KIT_PATH, KIT);
@@ -221,26 +224,37 @@ test.describe('A registered document', () => {
     await expect(inline.title).toHaveText('The kit');
     await expect(inline.document).toBeVisible();
     await expect(card.card.root).toBeVisible();
-    await expect(inline.writerAsked).toHaveCount(0);
-    await expect(card.writerAsked).toHaveCount(0);
+    await expect(inline.blockAt('D2').writerAsked).toHaveCount(0);
 
     await projects.askWriter(kit, [
       { block: 'D4', question: 'Does “chain” mean the lock or the tow chain?' },
       { block: 'D2', question: 'Which stove does “gas” mean?' },
     ]);
-    await expect(inline.writerAsked).toHaveText('Pilot asked the writer about D2 and D4');
-    await expect(card.writerAsked).toHaveCount(0);
+    await expect(inline.blockAt('D2').writerAsked).toHaveText('Pilot asked the writer');
+    await expect(inline.blockAt('D4').writerAsked).toHaveText('Pilot asked the writer');
+    await expect(inline.blockAt('D1').writerAsked).toHaveCount(0);
+    await expect(inline.writerAsked).toHaveCount(0);
 
     await projects.askWriter(route, [{ block: 'D1', question: 'Is the shore path open in spring?' }]);
-    await expect(card.card.root.getByTestId('timeline.item.writer-asked')).toHaveText('Pilot asked the writer about D1');
-    await expect(inline.writerAsked).toHaveText('Pilot asked the writer about D2 and D4');
-
     await projects.askWriter(pitch, [{ block: 'Q1', question: 'Is the hill the one past the lake?' }]);
     await projects.askWriter(push, [{ block: 'C1', question: 'Which camp list does it push?' }]);
-    await expect(timeline.item(pitch).title).toHaveText('Where do we pitch?');
-    await expect(timeline.item(pitch).writerAsked).toHaveText('Pilot asked the writer about Q1');
-    await expect(timeline.item(push).root).toHaveAttribute('data-kind', 'confirmation');
-    await expect(timeline.item(push).writerAsked).toHaveText('Pilot asked the writer about C1');
+    const one = timeline.item(pitch);
+    await expect(one.title).toHaveText('Where do we pitch?');
+    await expect(one.head.getByTestId('timeline.item.writer-asked')).toHaveText('Pilot asked the writer');
+    await expect(one.writerAsked).toHaveAttribute('href', clarificationAddress(project, pitch));
+    await expect(one.block.writerAsked).toHaveCount(0);
+    const confirmation = timeline.item(push);
+    await expect(confirmation.root).toHaveAttribute('data-kind', 'confirmation');
+    await expect(confirmation.head.getByTestId('timeline.item.writer-asked')).toHaveText('Pilot asked the writer');
+    // Asked before the one-ask item, whose mark has come.
+    await expect(card.root.getByText('Pilot asked the writer')).toHaveCount(0);
+    for (const item of [inline, card, one, confirmation]) await expect(item.root).not.toContainText('Pilot asked the writer about');
+
+    await one.writerAsked.click();
+    await expect(page).toHaveURL(clarificationAddress(project, pitch));
+    await expect(overlay.clarification().question('Q1').text).toHaveText('Is the hill the one past the lake?');
+    await expect(overlay.clarificationBox).toBeInViewport();
+    await expect(overlay.blockAt('Q1').writerAsked).toHaveText('Pilot asked the writer');
   });
 
   test('opened while its pass pre-rules it reads only, under the gold strip: what Pilot does and Stop and take over, every control drawn and taking nothing, no foot; Stop and take over stops the pass, shown stopped with Retry, and every document the pass covers is the person’s, live', async ({

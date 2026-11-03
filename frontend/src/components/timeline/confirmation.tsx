@@ -6,8 +6,9 @@
  * empty and is the note (F22.3); the prose folded under Details, which Less folds again (F22.4).
  * The check and the cross, with No's console, are the block's controls inside a document too
  * (F22.7). The answer given, or being saved, stays coloured. On the card the row is the block, and
- * gone to at its address, it flashes (F97). A registered one whose writer Pilot asked says so under
- * the row (F86.8). Its attachments follow (F17.5), and Pilot's dots end
+ * gone to at its address, it flashes (F97). A registered one whose writer Pilot asked about its
+ * block carries the block's mark in its head (F52.2; writer-asked.tsx). Its attachments follow
+ * (F17.5), and Pilot's dots end
  * the card while Pilot writes it (F35). In an archived project the check and the cross stand
  * disabled, which the API refuses until Bring back (D012).
  */
@@ -24,7 +25,6 @@ import { ItemHead } from '@/components/timeline/item-head';
 import { autopilotMayTake } from '@/components/timeline/may-take';
 import { Note } from '@/components/timeline/note';
 import { Deferral, DEFERRED } from '@/components/timeline/said';
-import { WriterAsked } from '@/components/timeline/writer-asked';
 import { PilotWriting } from '@/components/timeline/writing';
 import { useAnswer, type Answer } from '@/hooks/use-answer';
 import { useArchived, useAutopilotOff } from '@/hooks/use-projects';
@@ -48,7 +48,7 @@ export function Confirmation({ item }: { item: TimelineItem }) {
   const deferred = saving === null && block.answer === DEFERRED;
   return (
     <div className="item-body">
-      <ItemHead item={item} because={block.because} mayTake={autopilotMayTake(item, block, autopilotOff)} />
+      <ItemHead item={item} because={block.because} mayTake={autopilotMayTake(item, block, autopilotOff)} asked={block.writer_asked} />
       <ConfirmControls
         field={blockKey(item.id, block.id)}
         block={block}
@@ -64,7 +64,6 @@ export function Confirmation({ item }: { item: TimelineItem }) {
         <Proposal block={block} />
         {deferred ? <Deferral block={block} /> : saving === null && block.note !== null && <Note text={block.note} />}
       </ConfirmControls>
-      <WriterAsked item={item} />
       {prose.length > 0 && (
         <div className="confirm-foot">
           <button

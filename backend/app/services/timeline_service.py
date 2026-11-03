@@ -777,7 +777,6 @@ class TimelineService:
                 awaiting_read=document is not None and awaits_read(item, document),
                 edited_at=edited.get(item.id),
                 attachments=attachments.get(item.id, []),
-                asked_writer_about=asked.get(item.id, []),
                 clarifications=[
                     _clarification(clarification)
                     for clarification in clarified.get(item.id, [])
