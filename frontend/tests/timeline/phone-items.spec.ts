@@ -22,6 +22,18 @@ const DECISION = `Which shelter do we take?\n\n\`\`\`decision id=D1\noptions:\n$
 const WORDS = Array.from({ length: 160 }, (_, index) => `word${index}`).join(' ');
 // A document of two asks, long enough to stand on the timeline as a card.
 const TRIP = `---\nsummary: Where we go.\n---\n\n${WORDS}\n\n## Book the van\n\n\`\`\`action id=A1\n\`\`\`\n\n## Pack the stove\n\n\`\`\`action id=A2\n\`\`\`\n`;
+const AT = 'at: 2026-10-20T09:00:00Z';
+const STOPS = Array.from({ length: 30 }, (_, index) => `Stop ${index + 1}.`).join('\n\n');
+// A short document of three asks, drawn inline: two sections Pilot settled, each folded to its line, the last far below the view's fold.
+const ROUTE = [
+  '## Which tent?\n',
+  `\`\`\`decision id=D1\noptions:\n  - Dome\n  - Tunnel\nanswer: Dome\nby: agent\n${AT}\n\`\`\`\n`,
+  '## Book the van\n',
+  '```action id=A1\n```\n',
+  `${STOPS}\n`,
+  '## Where do we pitch?\n',
+  `\`\`\`question id=Q1\nanswer: Lake Garda\nby: agent\n${AT}\n\`\`\`\n`,
+].join('\n');
 const ROTATING = 'Rotating the CI token';
 const CUT_OVER_PATH = '/work/Example/cut-over.md';
 const CUT_OVER = '# The cut-over\n\n```action id=A1\nanswer: Pilot does it\nby: agent\nat: 2026-10-20T09:00:00Z\n```\n';
@@ -126,11 +138,18 @@ test.describe('The item alone on a phone', () => {
   }) => {
     const me = await people.signIn();
     const id = await projects.makeWithSession({ name: makeUnique('Blocks'), members: [me.handle!] });
-    const decision = await projects.place(id, { kind: 'decision', title: 'Which shelter?', text: DECISION });
+    const route = await projects.place(id, { kind: 'document', title: 'The route', text: ROUTE });
     const trip = await projects.place(id, { kind: 'document', title: 'The trip', text: TRIP });
 
-    await timeline.openAt(id, decision, 'D1');
-    await expect(timeline.item(decision, overlay.alone).blockAt('D1').root).toBeInViewport();
+    // Its folded section opens, the view scrolled down to the block, which flashes; the other stays its line.
+    await timeline.openAt(id, route, 'Q1');
+    const alone = timeline.item(route, overlay.alone);
+    const pitch = alone.blockAt('Q1');
+    await expect(pitch.root).toHaveClass(/\bflash\b/);
+    await expect(pitch.root).toBeInViewport();
+    expect(await overlay.scrollTop()).toBeGreaterThan(0);
+    await expect(alone.settledLine('Q1').root).toHaveCount(0);
+    await expect(alone.settledLine('D1').root).toHaveCount(1);
 
     await page.goto(addressOf(id, trip, 'A1'));
     await expect(overlay.document).toBeVisible();
