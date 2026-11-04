@@ -241,6 +241,15 @@ writes their connection details into the namespace's Secret `pilot-db` (keys `da
 at `postgres-pooler-rw.postgres-pas-prd.svc.cluster.local`. Nothing about the database is made by
 hand.
 
+Production's database also has a read-only login role, `pilot_prd_readonly`, which the backend
+never uses: it reads every table and sequence of `pilot_prd_db`, those a later migration creates
+included, and writes nothing. The same Terraform makes it, in prd alone, with its credentials in
+the Secret `pilot-db-readonly` (PilotDeploy's README has its grants). A copy of its password in
+KubeCoder's prd catalog, key `pilot-prd-db-readonly-password`, reaches this repository's
+environment as `PILOTAPP_PRD_DB_PASSWORD`, beside `PILOTAPP_PRD_DB_HOST`, `PILOTAPP_PRD_DB_NAME`
+and `PILOTAPP_PRD_DB_USER` (`.kubecoder/config.yaml`), for the ad-hoc tools that read production,
+the cost dashboard among them.
+
 Production's state also owns PilotDeploy's GitHub webhook, which delivers the repository's pushes
 to Argo CD (`terraform/webhook.tf`): the webhook is one per repository, so `manage_webhook` is true
 in `config/prd/terraform.tfvars` alone.

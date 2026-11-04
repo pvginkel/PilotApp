@@ -43,6 +43,21 @@ secrets:
   # sign in to pilot-dev.home with it.
   PILOT_DEV_TEST_USERNAME: pilot-dev-test-username
   PILOT_DEV_TEST_PASSWORD: pilot-dev-test-password
+  # The password of production's read-only database role, pilot_prd_readonly
+  # (PilotDeploy terraform/, the Secret pilot-prd/pilot-db-readonly), copied
+  # into the catalog; the role and database are in env: below. It reads every
+  # table of pilot_prd_db and writes nothing.
+  PILOTAPP_PRD_DB_PASSWORD: pilot-prd-db-readonly-password
+
+# Production's database, as the read-only role above reaches it, for the
+# ad-hoc tools that read it: the substrate's pooler, which this pod reaches.
+env:
+  - name: PILOTAPP_PRD_DB_HOST
+    value: postgres-pooler-rw.postgres-pas-prd.svc.cluster.local
+  - name: PILOTAPP_PRD_DB_NAME
+    value: pilot_prd_db
+  - name: PILOTAPP_PRD_DB_USER
+    value: pilot_prd_readonly
 
 tools:
   # Over the catalog's 5Gi: each Playwright worker runs its own backend, Vite
@@ -102,6 +117,13 @@ ports:
   # `sslOffload` for the phone, as the timeline mockup's.
   - name: chat-mockup
     port: 8081
+    sslOffload: true
+  # The cost dashboard (PilotAppSpecs tools/cost-dashboard/), started from
+  # PilotAppSpecs' VS Code task; it reads production's database with the
+  # PILOTAPP_PRD_DB_* above. `sslOffload` gives it
+  # https://cost-dashboard.<env-id>.home, as the mockups have theirs.
+  - name: cost-dashboard
+    port: 8082
     sslOffload: true
 
 preamble:
