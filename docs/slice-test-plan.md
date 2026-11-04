@@ -974,8 +974,8 @@ production then shows its users is the operator's to see; nothing here signs in 
 `https://pilot.ginbov.nl`.
 
 A slice whose change to PilotProjects needs the store reset ends its close-out with an `action`
-entry that names the store's update ([`store-update.md`](store-update.md)) on production as the
-operator's to run:
+entry that names the store's update ([`store-update.md`](store-update.md)) on production, which an
+agent runs on the operator's standing word (D135, 2026-11-04):
 
 ```bash
 kubectl --context prd -n pilot-prd exec deploy/pilot -c backend -- python -m app.cli update-store
@@ -983,7 +983,8 @@ kubectl --context prd -n pilot-prd exec deploy/pilot -c backend -- python -m app
 
 It holds the store's work, stops, resets and starts production's store onto PilotProjects' `main`,
 which carries what the slice pushed, retries the jobs it stopped and lifts the hold, printing each
-phase until the lift. The entry says that no PilotApp environment can run it: none can `exec` into
-`pilot-prd`, and PilotApp takes no `kubePrdWrite`, the run being the operator's (D116). Where the promotion's action is due too, it comes
+phase until the lift. The entry says how: no PilotApp environment can `exec` into `pilot-prd`, and
+PilotApp takes no `kubePrdWrite`, so the agent hands the command to a session in an Ansible
+environment, which has production's write, and reads its output back. Where the promotion's action is due too, it comes
 after that one, since production's store runs against production's build. Its Consequence:
 production's store runs the brain's skills as before the slice.

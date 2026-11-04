@@ -10,7 +10,7 @@ route. The gate it holds starts at is [`sessions.md`](sessions.md)'s, the store'
 
 | Piece | Does |
 |---|---|
-| `update-store` (`backend/app/store_update_cli.py`) | the operator's command: makes an update or asks its lift, and prints each phase |
+| `update-store` (`backend/app/store_update_cli.py`) | the command, run as D135 says ([`slice-test-plan.md`](slice-test-plan.md)): makes an update or asks its lift, and prints each phase |
 | `StoreUpdateService` (`store_update_service.py`) | makes an update and asks its lift, writing the row and nothing else; `unlifted(db)`, the hold |
 | `StoreUpdater` (`store_updater.py`) | the job and the timer `store-update`, which run the update's sequence from its row |
 
