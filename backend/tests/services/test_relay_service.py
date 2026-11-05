@@ -1571,8 +1571,8 @@ def _tokens(
 class TestRelayTokens:
     """Each Turn keeps the tokens its run used per kind and the cost it
     reports, from `claude`'s `result` line, written as the line is recorded:
-    `modelUsage` summed over every model, sub-agents included (F135.9; DB
-    272, 273, 275; V17)."""
+    `modelUsage` summed over every model, sub-agents included, less what the
+    conversation reported before the Turn (F135.9; DB 272, 273, 275; V17)."""
 
     @pytest.mark.parametrize("kind", ["work", "job", "chat"])
     def test_every_session_kinds_turn_keeps_its_result_lines_counts_and_cost(
@@ -1611,7 +1611,7 @@ class TestRelayTokens:
             Decimal("0.0043"),
         )
 
-    def test_each_turn_keeps_its_own_runs_alone(
+    def test_a_resumed_turn_keeps_its_own_figures(
         self,
         session: DbSession,
         relays: RelayService,
@@ -1619,16 +1619,44 @@ class TestRelayTokens:
         controller_session: str,
         idle: models.Session,
     ) -> None:
+        """The second turn's run resumes the conversation, so its `result`
+        line reports the conversation's figures so far (V08)."""
         first = _send(relays, session, idle)
         _turn_of(fake_controller, controller_session, raw_turn("turn_text"))
         _relay(relays, idle)
         second = _send(relays, session, idle)
-        _turn_of(fake_controller, controller_session, raw_turn("turn_tool"))
+        _turn_of(fake_controller, controller_session, raw_turn("turn_resumed"))
 
         _relay(relays, idle)
 
         assert _spent(session, first) == (_tokens(3, 350, 1200, 11), Decimal("0.0021"))
-        assert _spent(session, second) == (_tokens(6, 350, 2400, 35), Decimal("0.0034"))
+        assert _spent(session, second) == (_tokens(3, 120, 1550, 9), Decimal("0.0008"))
+
+    def test_a_turn_carrying_the_conversation_on_in_a_new_session_keeps_its_own(
+        self,
+        session: DbSession,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        controller_client: ControllerClient,
+        project: Project,
+        idle: models.Session,
+    ) -> None:
+        """A continuation, a wait's later run: the conversation spans its
+        Sessions."""
+        _send(relays, session, idle)
+        _turn_of(fake_controller, controller_session, raw_turn("turn_text"))
+        _relay(relays, idle)
+        carrying_on = _carrying_on(controller_client, CAMP)
+        continuation = _agent_session(session, project, carrying_on)
+        continuation.conversation_id = CAMP
+        session.flush()
+        turn = _send(relays, session, continuation)
+        _turn_of(fake_controller, carrying_on, raw_turn("turn_resumed"))
+
+        _relay(relays, continuation)
+
+        assert _spent(session, turn) == (_tokens(3, 120, 1550, 9), Decimal("0.0008"))
 
     def test_a_runs_last_result_line_stands(
         self,

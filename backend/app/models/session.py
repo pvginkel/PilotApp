@@ -141,13 +141,15 @@ class Turn(db.Model):  # type: ignore[name-defined]
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     error: Mapped[str | None] = mapped_column(Text)
     cost: Mapped[Decimal | None] = mapped_column(Numeric)
-    """US dollars, as the turn's `result` line reports them, notional on a
+    """US dollars, the turn's own as its `result` line reports them, less what
+    its conversation reported before it (`token_counts`), notional on a
     subscription; none without one (DB 275)."""
 
 
 class TokenCount(db.Model):  # type: ignore[name-defined]
-    """The tokens of one kind one Turn used, as the turn's `result` line
-    reports them, summed over every model it called (DB 272, 273, 275)."""
+    """The tokens of one kind one Turn used, the turn's own as its `result`
+    line reports them, less what its conversation reported before it
+    (`token_counts`), summed over every model it called (DB 272, 273, 275)."""
 
     __tablename__ = "token_counts"
     __table_args__ = (
