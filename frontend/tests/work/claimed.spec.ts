@@ -30,8 +30,20 @@ const CUT_OVER_PATH = '/work/Example/cut-over.md';
 const CUT_OVER_TITLE = 'The cut-over';
 // A1's own section's heading, which a Cancel's button names it by.
 const TOKEN = 'The CI token';
-// The pass's claim, as it writes it on the action (design 3 §6.4).
-const cutOver = (heading: string) => `# ${CUT_OVER_TITLE}
+// A decision with a recommendation that no work item holds.
+const THE_HOUR = `
+## The hour
+
+\`\`\`decision id=D2
+options:
+  - Morning
+  - Evening
+recommend: Morning
+\`\`\`
+`;
+// The pass's claim, as it writes it on the action (design 3 §6.4); `recommended`, D1 recommends a day
+// and a second decision after it, which recommends an hour, waits on the person too.
+const cutOver = (heading: string, recommended = false) => `# ${CUT_OVER_TITLE}
 
 ## ${heading}
 
@@ -48,8 +60,8 @@ note: ${CLAIM_NOTE}
 options:
   - Friday
   - Monday
-\`\`\`
-`;
+${recommended ? 'recommend: Friday\n' : ''}\`\`\`
+${recommended ? THE_HOUR : ''}`;
 const ASK_PATH = '/work/Example/which-token.md';
 const ASK_TITLE = 'Which token goes first?';
 // What the work doing the action asks the person before it goes on.
@@ -63,17 +75,17 @@ interface Fixtures {
 }
 
 /**
- * The cut-over, A1 under `heading`, registered by a work item's run in a project of the signed-in
- * person's, read at the run's end, and the pass after it ended, its action A1 claimed; answers their
- * ids.
+ * The cut-over, A1 under `heading`, its decisions recommended where `recommended` says so, registered
+ * by a work item's run in a project of the signed-in person's, read at the run's end, and the pass
+ * after it ended, its action A1 claimed; answers their ids.
  */
-async function registered({ people, projects, controller, chats }: Fixtures, heading: string) {
+async function registered({ people, projects, controller, chats }: Fixtures, heading: string, recommended = false) {
   const me = await people.signIn();
   const project = await projects.make({ name: makeUnique('Claimed'), members: [me.handle!] });
   const work = await projects.startWork(project, { title: 'Planning the cut-over', brief: 'Plan the cut-over.', cwd: '/work/Example' });
   await expect.poll(async () => (await projects.work(project, work)).state).toBe('running');
   const { id: environment } = await projects.environment(project, work);
-  await controller.putFile(environment, CUT_OVER_PATH, cutOver(heading));
+  await controller.putFile(environment, CUT_OVER_PATH, cutOver(heading, recommended));
   const document = await projects.register(work, CUT_OVER_PATH);
   const passed = await chats.passing(project);
   await controller.finish(environment, 'claude-1');
@@ -375,14 +387,14 @@ test.describe('A claimed action', () => {
 });
 
 test.describe('A researched block', () => {
-  test('is its section’s held line, “Researching” going to the work item that checks its fact, its segment in progress and its controls taking nothing once opened, beside an action claimed for no work item, the person’s', async ({
+  test('is its section’s held line, “Researching” going to the work item that checks its fact, its segment in progress and its controls taking nothing once opened, beside an action claimed for no work item, the person’s; with that action done and every other block recommended, Send answers waits on it', async ({
     people,
     projects,
     controller,
     chats,
     timeline,
   }) => {
-    const { project, document } = await registered({ people, projects, controller, chats }, TOKEN);
+    const { project, document } = await registered({ people, projects, controller, chats }, TOKEN, true);
     const checking = await projects.startWork(project, {
       title: 'Checking the release calendar',
       brief: 'Check which day the release calendar leaves free.',
@@ -407,6 +419,13 @@ test.describe('A researched block', () => {
     await expect(action.undone).toHaveCount(0);
     await expect(action.claim).toContainText('Pilot does it');
     await expect(action.done).toBeEnabled();
+
+    // D1 and D2 recommended and A1 done, only D1's hold keeps Send from sending.
+    await action.paste.fill('Rotated by hand.');
+    await action.done.click();
+    await expect(action.answered).toBeVisible();
+    await expect(item.send).toBeDisabled();
+    await expect(item.send).toHaveAttribute('title', 'Pilot is working on a block of it: send once Pilot is done');
   });
 });
 
