@@ -523,7 +523,7 @@
   .pilots .line .kind-icon { color: hsl(var(--muted-foreground)); }
   .pilots .line .title { min-width: 6ch; }
   .pilots-slot { display: contents; }
-  .pilots-btn { flex: none; align-self: center; align-items: center; gap: 6px; padding: 0 10px 0 7px; font-weight: 400; text-decoration: none; }
+  .pilots-btn { flex: none; align-self: center; align-items: center; gap: 6px; padding: 0 10px 0 7px; font-weight: 400; }
   .pilots-btn .pulse { top: 0; margin-right: 1px; }
   .pilots-btn .avatar { width: 16px; height: 16px; }
   .pilots-btn.still { cursor: default; }
