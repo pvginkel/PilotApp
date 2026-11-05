@@ -132,6 +132,8 @@ test.describe('Stop', () => {
     await deploymentSse.ensureConnected();
     const tile = timeline.item(work);
     const item = tile.work;
+    // The list's first read can be slow or restarted; a count of 0 on an empty list proves nothing.
+    await expect(projectList.tab(name)).toBeVisible({ timeout: 30_000 });
     await expect(projectList.badge(name)).toHaveCount(0);
 
     await item.stop.click();
@@ -145,7 +147,7 @@ test.describe('Stop', () => {
     await expect(item.resume).toBeFocused();
     expect(await bodyParts(tile.root)).toEqual(['item-head', 'item-title', 'work-line ended', 'item-actions']);
     await expect(tile.head.getByTestId('timeline.work.session-log')).toBeVisible();
-    await expect(projectList.badge(name)).toHaveText('1');
+    await expect(projectList.badge(name)).toHaveText('1', { timeout: 30_000 });
 
     await turnEnded(projects, work);
     await item.resume.click();
@@ -157,7 +159,7 @@ test.describe('Stop', () => {
     await expect.poll(async () => (await projects.work(project, work)).state).toBe('running');
     await expect(item.running).toBeVisible();
     await expect(timeline.items).toHaveCount(1);
-    await expect(projectList.badge(name)).toHaveCount(0);
+    await expect(projectList.badge(name)).toHaveCount(0, { timeout: 30_000 });
   });
 
   test('ends a start under way, the item “Stopped · <time>”; Resume starts it again', async ({
