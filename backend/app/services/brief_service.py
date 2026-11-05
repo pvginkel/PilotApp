@@ -1,8 +1,9 @@
 """The brief a brain session's first Turn carries (design 3 §5): one frame,
 the server's, Markdown, in one order (§5.2), and a renderer per kind (§5.3);
-the server's trailer on the brief the brain writes a worker (§5.4); and the
+the server's trailer on the brief the brain writes a worker (§5.4); the
 follow-up turn of a brain session whose turn ended with a save of its own
-still held (§5.1; F79).
+still held (§5.1; F79); and the turn that carries a work item on after its
+environment's restart cut its turn (§9.6; F71).
 
 A line that does not hold is left out, never written as "none", so that a
 brief reads as the facts of its session. A brain's carries what the tree does
@@ -16,7 +17,7 @@ from collections.abc import Collection, Sequence
 from datetime import datetime
 
 import pilot_dsl as dsl
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, literal, select
 from sqlalchemy.orm import Session, aliased
 
 from app.engine import claims, researches
@@ -63,7 +64,7 @@ from app.services.session_record_service import read_records
 from app.services.session_scope import project_folder
 from app.services.turn_end_read_service import READ_FAILED
 from app.services.wait_service import CARD_WAIT, REQUESTS
-from app.services.working_on import holds
+from app.services.working_on import holds, run_of
 
 CHAT_SKILL = "/chat"
 CREATE_SKILL = "/create"
@@ -79,6 +80,13 @@ TRAILER_HEADING = "From Pilot:"
 
 FOLLOW_UP_END = "Fix it and end your turn."
 """The last line of the server's follow-up turn, which marks it as one."""
+
+RESTARTED = (
+    "Your environment restarted under your last turn, and this conversation"
+    " goes on in a new session."
+)
+"""How the server's turn after a work item's restart begins, which marks it
+as one (`BriefService.restarted`)."""
 
 HOMELESS_HEADING = (
     "Deferrals without a home (a note names none of these blocks — write one,"
@@ -701,6 +709,48 @@ class BriefService:
         lines.append(FOLLOW_UP_END)
         return "\n".join(lines)
 
+    def restarted(self, session: AgentSession) -> str:
+        """The server's turn that carries on the work item `session`, its turn
+        cut by its environment's restart (§9.6; F71): one line saying so and
+        naming each document its run registered (`working_on.run_of`), in the
+        order registered, with where it stands, then the run's brief again,
+        whole, its first work item's first Turn as sent. A continuation's own
+        first Turn is no brief."""
+        run = run_of(literal(session.id))
+        documents = [
+            f"{path} ({item_id}) — "
+            + _where_it_stands(done=done, failed=failed, read=read, written_back=back)
+            for item_id, path, done, failed, read, back in self.db.execute(
+                select(
+                    Item.id,
+                    Document.path,
+                    Item.done_at.is_not(None),
+                    Document.read_failed_at.is_not(None),
+                    Document.published_hash.is_not(None),
+                    Document.written_back_at.is_not(None),
+                )
+                .join(Document, Document.id == Item.id)
+                .where(
+                    Item.created_by_session_id.in_(run),
+                    Document.source_path.is_not(None),
+                )
+                .order_by(Item.seq)
+            )
+        ]
+        registered = (
+            f"The documents you registered: {'; '.join(documents)}."
+            if documents
+            else "You registered no documents."
+        )
+        brief = self.db.scalars(
+            select(Turn.message)
+            .join(Item, Item.id == Turn.session_id)
+            .where(Item.id.in_(run), Turn.seq == 1)
+            .order_by(Item.seq)
+            .limit(1)
+        ).one()
+        return f"{RESTARTED} {registered} Your brief again, whole:\n\n{brief}"
+
     def work_item(self, project: Project, brief: str, task: PlanTask | None) -> str:
         """A work item's first Turn (§5.4): `brief`, the brain's own text, then
         the server's trailer under one heading — the plan's task `task` it
@@ -889,6 +939,23 @@ def _frame(
 def is_follow_up(turn: Turn) -> bool:
     """Whether the Turn is the server's follow-up (`BriefService.follow_up`)."""
     return turn.author_user_id is None and turn.message.endswith(FOLLOW_UP_END)
+
+
+def is_restarted(turn: Turn) -> bool:
+    """Whether the Turn is the server's after a work item's restart
+    (`BriefService.restarted`)."""
+    return turn.author_user_id is None and turn.message.startswith(RESTARTED)
+
+
+def _where_it_stands(
+    *, done: bool, failed: bool, read: bool, written_back: bool
+) -> str:
+    """Where a registered document stands, as the restart's line names it."""
+    if done:
+        return "closed and written back in place" if written_back else "closed"
+    if failed:
+        return "open, its read failed"
+    return "published, open" if read else "registered, not read yet"
 
 
 def _answered(block: dsl.Block, when: str) -> str:

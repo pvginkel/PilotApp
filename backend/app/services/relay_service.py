@@ -36,6 +36,9 @@ holds then, or its project's pause: the halt file's holders
 clarification run's reply recorded; the nudge carries it on once nothing
 holds it (`SessionStartService.send_nudges`), and it is done at its first
 normal turn end with neither holding (F135.3, F135.6, F141.3; DB 232).
+The turn a work item's environment's restart left it, ended with no text and
+no tool call in its records, fails it instead, its documents unread until its
+Resume's run ends.
 A work item's or a job's turn that ends in error with its stream showing the
 quota wall (`quota_wall`) is `failed` with its nudge owed from its end, and a
 job's pass puts no question to the writer then: a reading decides the wall,
@@ -60,9 +63,12 @@ holding another is the controller session gone, as a `404` is (F59.2). A
 controller session that is gone is resumed (§9.6, F71): re-created with the
 Session's conversation in the same environment, Pilot's MCP server handed to it
 with a token minted for it (`PilotServer`), and carried on by a server-own
-"continue" Turn, or the ended Turn's message again when the Session has no
-conversation. An environment that is not running is waited for, the running
-Session's line saying it restarts while it reads `provisioning` or `starting`.
+Turn: a work item's names each document its run registered and where it
+stands, then gives its brief again (`BriefService.restarted`); a job's and a
+chat's is "continue"; and the ended Turn's message goes again while no Turn of
+the Session went out. An environment that is not running is waited for, the
+running Session's line saying it restarts while it reads `provisioning` or
+`starting`.
 One that settles `stopped` or `deleting`, or is gone, was stopped elsewhere,
 which no restart reads as: the Turn ends with a `server` record naming the
 cause, and a running Session is `stopped` as Stop stops it, by no one. At
@@ -91,7 +97,7 @@ from app.models import Environment, Project, Turn, Work
 from app.models import Session as AgentSession
 from app.models.reference import RecordKind, SessionState, WorkTrigger
 from app.schemas.timeline import StopCause
-from app.services.brief_service import is_follow_up
+from app.services.brief_service import is_follow_up, is_restarted
 from app.services.chat_close_service import ChatCloseService
 from app.services.controller_client import (
     ControllerClient,
@@ -156,7 +162,8 @@ STARTING = "starting"
 one is written before each create of its controller session."""
 
 CONTINUE = "continue"
-"""The message of the server's own Turn that carries a resumed session on (F71)."""
+"""The message of the server's own Turn that carries a resumed job or chat on
+(F71), and of a person's Resume (D037)."""
 
 _NEW_CONTROLLER_SESSION = (SESSION_GONE, STARTING)
 """The `type`s of the `server` records a new controller session's lines follow:
@@ -178,6 +185,12 @@ _STOPS: dict[str, tuple[StopCause, str]] = {
 of its reason."""
 
 _TURN_FAILED = "The turn ended in an error"
+
+_RESTART_EMPTY = (
+    "The turn after the environment's restart ended with no text and no tool call"
+)
+
+_PAGE = 64
 
 # What jsonb refuses in a string: a NUL, and a surrogate no pair completes.
 _REFUSED = re.compile(r"[\x00\ud800-\udfff]")
@@ -617,12 +630,9 @@ class RelayService:
     def _resume(self, opening: _Opening, problem: ControllerProblem) -> None:
         """The relay's resume of a controller session that is gone (§9.6): it
         is re-created, and a server-own Turn, which the run sends next, carries
-        the Session on: "continue", or the ended Turn's message while no Turn
-        of the Session went out — it has no conversation yet, or a
-        continuation's from its placement — which the new session would not
-        know. An environment the create does not find is gone, and stops the
-        Session. Nothing is done when another process resumed it first, or the
-        Session has moved on."""
+        the Session on (`_carrying_on`). An environment the create does not
+        find is gone, and stops the Session. Nothing is done when another
+        process resumed it first, or the Session has moved on."""
         with scoped_session(self._container) as db:
             session = self._records(db).lock_session(opening.session_id)
             if session.state_code != SessionState.RUNNING or _moved_on(
@@ -643,17 +653,26 @@ class RelayService:
                     str(missing),
                 )
                 return
-            message = (
-                opening.message
-                if session.conversation_id is None
-                or stream_position(db, session.id) is None
-                else CONTINUE
-            )
+            message = self._carrying_on(db, session, opening)
             turn = self._new_turn(db, session.id, message, None)
             session.state_code = SessionState.RUNNING
             session.current_line = at_send(None, turn.started_at)
             _refresh_turns(db, session, turn)
             self._moved(session)
+
+    def _carrying_on(
+        self, db: Session, session: AgentSession, opening: _Opening
+    ) -> str:
+        """The message of the resume's Turn: the ended Turn's while no Turn of
+        the Session went out — it has no conversation yet, or a
+        continuation's from its placement — which the new session would not
+        know; a work item's the restart's line and its run's brief again
+        (`BriefService.restarted`); else "continue"."""
+        if session.conversation_id is None or stream_position(db, session.id) is None:
+            return opening.message
+        if session.kind_code == WORK_KIND and db.get(Work, session.id) is not None:
+            return self._container.brief_service().restarted(session)
+        return CONTINUE
 
     def _recreate(
         self, db: Session, session: AgentSession, problem: ControllerProblem
@@ -1031,10 +1050,11 @@ class RelayService:
         offset of the stream's last raw frame, the Turn ended, the Session
         `idle` (`stopped` when interrupted, by no one) with no current line,
         and the engine's turn end. A work item's Session whose turn ended in
-        error is `failed` instead, the error the Turn's (F125), and one that
-        ended neither interrupted nor in error makes the work item done
-        (decision 44), or, under a cooperative usage halt or its project's
-        pause, leaves it open with its nudge owed (`_ended`). A Session
+        error is `failed` instead, the error the Turn's (F125), as is one
+        whose restart's turn came back empty, and one that ended otherwise,
+        neither interrupted nor in error, makes the work item done (decision
+        44), or, under a cooperative usage halt or its project's pause, leaves
+        it open with its nudge owed (`_ended`). A Session
         stopped under the turn stays as its stop left it. A brain session left `idle` with a save of its own still held
         stays `running` with the follow-up turn (`_follow_up`), a job's work
         item done at that turn's end, not this one's. A worker's done run
@@ -1114,7 +1134,9 @@ class RelayService:
     ) -> None:
         """The Session's state at its `turn`'s end with no later Turn in
         flight: `stopped` when interrupted, by no one, `failed` for a work
-        item's turn ended in error, else `idle`, its work item done (§9.2; DB
+        item's turn ended in error, or for the turn its environment's restart
+        left it that ended with no text and no tool call (`_came_back_empty`),
+        the Turn's error saying so, else `idle`, its work item done (§9.2; DB
         Session State; decision 44) unless the follow-up turn `follows_up`: a
         job's is done at its last turn's end (design 3 §5.1). A worker's done
         run has its documents read, the job after its turn following them,
@@ -1143,6 +1165,12 @@ class RelayService:
                 )
             elif session.kind_code == JOB_KIND:
                 self._container.clarification_service().pass_ended(session)
+        elif work and _came_back_empty(db, session, turn, frame):
+            session.state_code = SessionState.FAILED
+            turn.error = _RESTART_EMPTY
+            logger.info(
+                "Session %s came back empty from its restart: it fails", session.id
+            )
         else:
             session.state_code = SessionState.IDLE
             if work and not follows_up:
@@ -1330,6 +1358,50 @@ def _recorded_turn(db: Session, session_id: uuid.UUID, controller_session: str) 
         return 0
     turn = last.record.payload.get("turn")
     return turn if isinstance(turn, int) else 0
+
+
+def _came_back_empty(
+    db: Session, session: AgentSession, turn: Turn, frame: ResultFrame
+) -> bool:
+    """Whether the `turn` the Session's environment's restart left it
+    (`is_restarted`) ended with no text, in its result or in its recorded
+    stream, and no tool call there."""
+    if not is_restarted(turn) or (frame.result or "").strip():
+        return False
+    after = 0
+    while True:
+        page = read_records(
+            db,
+            session.id,
+            after=after,
+            turn_id=turn.id,
+            kind=RecordKind.CLAUDE,
+            payload_type="assistant",
+            limit=_PAGE,
+        )
+        if any(_says_or_calls(stored.record.payload) for stored in page):
+            return False
+        if len(page) < _PAGE:
+            return True
+        after = page[-1].record.seq
+
+
+def _says_or_calls(line: dict[str, Any]) -> bool:
+    """Whether an `assistant` line holds text or a tool call."""
+    message = line.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    return isinstance(content, list) and any(
+        isinstance(block, dict)
+        and (
+            block.get("type") == "tool_use"
+            or (
+                block.get("type") == "text"
+                and isinstance(block.get("text"), str)
+                and bool(block["text"].strip())
+            )
+        )
+        for block in content
+    )
 
 
 def _has_turn(snapshot: SessionSnapshot, recorded_turn: int) -> bool:

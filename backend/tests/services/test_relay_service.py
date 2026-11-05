@@ -56,6 +56,7 @@ from app.models.reference import (
     WorkTrigger,
 )
 from app.schemas.timeline import StopCause
+from app.services.brief_service import RESTARTED
 from app.services.chat_close_service import CLOSED, ChatCloseService
 from app.services.container import ServiceContainer
 from app.services.controller_client import (
@@ -85,6 +86,7 @@ from app.services.session_record_service import (
     StoredRecord,
     read_records,
 )
+from app.services.session_scope import project_folder
 from app.services.sse_connection_manager import SSEConnection
 from app.services.start_gate import WorkSlots
 from app.services.supervisor import TIMER_RUNS_TOTAL, LoopHandle
@@ -1786,6 +1788,32 @@ class _Replaying(ServedFakeController):
         return super()._response(Request(environ), env_id, name)
 
 
+def _turn_saying(*kinds: str) -> list[str]:
+    """An invented turn of `claude`'s `system` lines, the `assistant` lines of
+    `turn_tool` whose content is of one of `kinds` — `text`, `tool_use` —
+    with the tool call's result, and its `result` line, its result empty."""
+    lines = [json.loads(line) for line in raw_turn("turn_tool")]
+    kept = [
+        line
+        for line in lines
+        if line["type"] == "system"
+        or (
+            line["type"] == "assistant"
+            and line["message"]["content"][0]["type"] in kinds
+        )
+        or (line["type"] == "user" and "tool_use" in kinds)
+    ]
+    [result] = [line for line in lines if line["type"] == "result"]
+    return [json.dumps(line) for line in [*kept, {**result, "result": ""}]]
+
+
+RESTART_BRIEF = "/dev:run-slice 012\n\nRename the badge."
+"""A work item's brief, its stage's command first."""
+TURN_CAME_BACK_EMPTY = (
+    "The turn after the environment's restart ended with no text and no tool call"
+)
+
+
 @pytest.fixture
 def work_item(
     session: DbSession,
@@ -2419,6 +2447,63 @@ class TestRelayWorkItem:
             WorkMoved(project.id, work_item.id),
             ProjectChanged(project.id),
         ]
+
+    @pytest.mark.parametrize(
+        ("restart", "kinds", "result", "done"),
+        [
+            pytest.param(True, (), "", False, id="restart-empty"),
+            pytest.param(True, (), "Carrying on.", True, id="restart-result-text"),
+            pytest.param(True, ("text",), "", True, id="restart-text"),
+            pytest.param(True, ("tool_use",), "", True, id="restart-tool-call"),
+            pytest.param(False, (), "", True, id="resume-empty"),
+        ],
+    )
+    def test_the_turn_its_restart_left_it_fails_it_only_when_it_came_back_empty(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        relays: RelayService,
+        fake_controller: ServedFakeController,
+        controller_session: str,
+        project: Project,
+        work_item: models.Session,
+        restart: bool,
+        kinds: tuple[str, ...],
+        result: str,
+        done: bool,
+    ) -> None:
+        """A person's Resume, "continue", ends as any turn ends (F67.2); the
+        restart's turn that said nothing and called nothing fails the item,
+        its documents unread until its Resume's run ends (F71)."""
+        container.document_service().register(project, work_item, NOTES)
+        message = (
+            f"{RESTARTED} You registered no documents. Your brief again, whole:"
+            f"\n\n{RESTART_BRIEF}"
+            if restart
+            else CONTINUE
+        )
+        turn = _send(relays, session, work_item, message)
+        _turn_of(
+            fake_controller, controller_session, _turn_saying(*kinds), result=result
+        )
+
+        _relay(relays, work_item)
+
+        requested = not relays._supervisor.start_loop(
+            READ_JOB, lambda handle: None, key=str(work_item.id)
+        )
+        assert requested is done
+        if done:
+            assert (work_item.state_code, turn.error) == (SessionState.IDLE, None)
+            assert _item_done(session, work_item) == (turn.ended_at, "turn_ended", None)
+        else:
+            assert (work_item.state_code, turn.error) == (
+                SessionState.FAILED,
+                TURN_CAME_BACK_EMPTY,
+            )
+            assert work_item.error is None
+            assert _item_done(session, work_item) == (None, None, None)
+            assert _jobs_after(session, work_item.id) == []
 
     def test_a_send_to_a_stopped_item_moves_its_state(
         self,
@@ -4448,6 +4533,183 @@ class TestEnvironmentRestartUnderARun:
         assert _claude_committed(container, run_id) == _recorded(lines[:11], offsets)
         assert fake_controller.sessions(ENV) == []
         assert relay_log.matching(rf"Session {run_id} stopped under its turn: .*")
+
+
+class TestEnvironmentRestartUnderAWorkItem:
+    """A work item its environment's restart cut is carried on by one line
+    naming each document its run registered and where it stands, then its
+    brief again, whole; that turn, come back with no text and no tool call,
+    fails it (§9.6; F71; decision 44). A job keeps "continue"."""
+
+    @pytest.fixture
+    def relay_log(self) -> Iterator[LogWaiter]:
+        with listening(SUPERVISOR_LOGGER, RELAY_LOGGER) as waiter:
+            yield waiter
+
+    def _cut(
+        self,
+        container: ServiceContainer,
+        fake: ServedFakeController,
+        client: ControllerClient,
+        supervise: Supervise,
+        relay_log: LogWaiter,
+        kind: Literal["work", "job"],
+    ) -> tuple[str, uuid.UUID, str | None]:
+        """A work item or a job, its brief's first lines recorded by its relay,
+        a work item's document registered in that turn, then its environment
+        restarted under the turn and running again, and its resumed turn
+        sent: the controller session's name, the Session's id, and the
+        document's path and id as a line names them."""
+        relays, coordinator = _relay_service(container, supervise)
+        name = _headless(fake, client)
+        run_id, _ = _committed_session(container, name)
+        with scoped_session(container) as db:
+            run = db.get_one(models.Session, run_id)
+            run.kind_code = kind
+            db.flush()
+            project = db.get_one(Project, run.project_id)
+            container.record_service().place_work(
+                project,
+                run,
+                "Renaming the badge",
+                trigger=WorkTrigger.SETUP if kind == "job" else None,
+            )
+            # A job's create is boxed to its cwd and its project's folder.
+            for folder in (run.cwd, project_folder(project)):
+                fake.put_file(ENV, f"{folder}/README.md", b"An invented file.\n")
+        coordinator.fire_startup()
+        with scoped_session(container) as db:
+            relays.send(db, run_id, RESTART_BRIEF)
+        lines = raw_turn("turn_tool")
+        offsets = fake.play(ENV, name, lines[:11])
+        wait_until(
+            lambda: (
+                _claude_committed(container, run_id) == _recorded(lines[:11], offsets)
+            ),
+            "the first lines recorded",
+        )
+        named = None
+        if kind == "work":
+            with scoped_session(container) as db:
+                run = db.get_one(models.Session, run_id)
+                registered = (
+                    container.document_service()
+                    .register(db.get_one(Project, run.project_id), run, NOTES)
+                    .item.id
+                )
+                named = f"{db.get_one(Document, registered).path} ({registered})"
+
+        fake.restart(ENV)
+
+        relay_log.wait_for(
+            rf"Environment {ENV} is not running: waiting for it to settle"
+        )
+        fake.set_status(ENV, "running")
+        relay_log.wait_for(rf"Session {run_id} lost controller session {name}; .*")
+        wait_until(
+            lambda: fake.session(ENV, name).status == "busy",
+            "the resumed turn sent",
+        )
+        return name, run_id, named
+
+    def test_its_resumed_turn_carries_the_line_and_its_brief_again(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        supervise: Supervise,
+        relay_log: LogWaiter,
+    ) -> None:
+        container = committed_app.container
+        name, run_id, named = self._cut(
+            container,
+            fake_controller,
+            committed_controller_client,
+            supervise,
+            relay_log,
+            "work",
+        )
+
+        [brief, resumed] = _committed_turns(container, run_id)
+        assert (brief.message, brief.ended_at is not None) == (RESTART_BRIEF, True)
+        assert (resumed.message, resumed.author_user_id) == (
+            f"{RESTARTED} The documents you registered: {named} — registered,"
+            f" not read yet. Your brief again, whole:\n\n{RESTART_BRIEF}",
+            None,
+        )
+        _turn_of(fake_controller, name, raw_turn("turn_text"))
+        _idle(container, run_id)
+        with scoped_session(container) as db:
+            assert _item_done(db, db.get_one(models.Session, run_id))[1] == (
+                "turn_ended"
+            )
+
+    def test_an_empty_resumed_turn_fails_it_and_keeps_its_hand_back(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        supervise: Supervise,
+        relay_log: LogWaiter,
+    ) -> None:
+        container = committed_app.container
+        name, run_id, _ = self._cut(
+            container,
+            fake_controller,
+            committed_controller_client,
+            supervise,
+            relay_log,
+            "work",
+        )
+
+        _turn_of(fake_controller, name, _turn_saying(), result="")
+
+        wait_until(
+            lambda: _read(container, run_id).state_code == SessionState.FAILED,
+            "the item failed",
+        )
+        [_, resumed] = _committed_turns(container, run_id)
+        assert resumed.error == TURN_CAME_BACK_EMPTY
+        # Its lines were read: the new controller session's own, from its start.
+        assert [
+            s.record.payload["type"]
+            for s in _committed_records(container, run_id)
+            if s.turn == 2 and s.record.kind_code == RecordKind.CLAUDE
+        ] == [json.loads(line)["type"] for line in _turn_saying()]
+        with scoped_session(container) as db:
+            run = db.get_one(models.Session, run_id)
+            assert _item_done(db, run) == (None, None, None)
+            assert _jobs_after(db, run_id) == []
+            # Its document awaits its read until its Resume's run ends.
+            [document] = db.scalars(
+                select(Document)
+                .join(Item, Item.id == Document.id)
+                .where(Item.created_by_session_id == run_id)
+            )
+            assert (document.published_text, document.read_failed_at) == (None, None)
+
+    def test_a_jobs_resumed_turn_is_continue(
+        self,
+        committed_app: Flask,
+        committed_controller_client: ControllerClient,
+        fake_controller: ServedFakeController,
+        supervise: Supervise,
+        relay_log: LogWaiter,
+    ) -> None:
+        container = committed_app.container
+        name, run_id, _ = self._cut(
+            container,
+            fake_controller,
+            committed_controller_client,
+            supervise,
+            relay_log,
+            "job",
+        )
+
+        [_, resumed] = _committed_turns(container, run_id)
+        assert (resumed.message, resumed.author_user_id) == (CONTINUE, None)
+        _turn_of(fake_controller, name, _turn_saying(), result="")
+        _idle(container, run_id)
 
 
 def _line_text(container: ServiceContainer, run_id: uuid.UUID) -> str | None:

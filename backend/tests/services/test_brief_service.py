@@ -52,7 +52,13 @@ from app.models.reference import (
     UserKind,
     WorkTrigger,
 )
-from app.services.brief_service import FOLLOW_UP_END, BriefService, is_follow_up
+from app.services.brief_service import (
+    FOLLOW_UP_END,
+    RESTARTED,
+    BriefService,
+    is_follow_up,
+    is_restarted,
+)
 from app.services.container import ServiceContainer
 from app.services.session_record_service import SessionRecordService
 from app.services.turn_end_read_service import READ_FAILED
@@ -2017,6 +2023,163 @@ class TestFollowUp:
         )
         assert not is_follow_up(turn("continue"))
         assert not is_follow_up(turn(f"Quoting you: {FOLLOW_UP_END}", person))
+
+
+RUN_BRIEF = (
+    "/dev:plan-slice 012\n\nPlan the stock's slice.\n\nFrom Pilot:\n"
+    "- Auto pilot is off: the grants above ask the operator first for this"
+    " session."
+)
+"""A worker's brief as its first Turn carries it, its stage's command first."""
+SOUP = "5b0e7c2a-9d41-4f36-8a1e-3c7d6f2b9e10"
+"""The worker's run's conversation."""
+
+
+def _briefed(db: DbSession, run: models.Session, message: str) -> None:
+    """The run's first Turn, `message`, on the run's conversation."""
+    run.conversation_id = SOUP
+    db.add(Turn(session_id=run.id, seq=1, message=message, started_at=ENDED))
+    db.flush()
+
+
+def _registered(
+    db: DbSession, container: ServiceContainer, project: Project, run: models.Session
+) -> tuple[Document, Document, Document, Document]:
+    """Four documents the run registered: one not read yet, one whose read
+    failed, one published and open, and one closed with its answers written
+    back."""
+    documents = container.document_service()
+    unread, failed, published, closed = (
+        db.get_one(
+            Document, documents.register(project, run, f"/work/Soup/{name}.md").item.id
+        )
+        for name in ("stock", "suppliers", "prices", "rota")
+    )
+    documents.fail_read(failed)
+    documents.publish_read(published, "# Prices\n\nThey hold.\n", run.id)
+    documents.publish_read(closed, "# Rota\n\nTwo cooks.\n", run.id)
+    item = db.get_one(Item, closed.id)
+    item.done_at = ENDED
+    item.done_cause_code = "marked"
+    documents.wrote_back(closed)
+    return unread, failed, published, closed
+
+
+class TestRestarted:
+    """The server's turn that carries on a work item its environment's
+    restart cut (§9.6; F71)."""
+
+    def test_it_names_each_document_where_it_stands_then_gives_the_brief_whole(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        project: Project,
+    ) -> None:
+        run = _worker_run(session, container, project, None)
+        _briefed(session, run, RUN_BRIEF)
+        unread, failed, published, closed = _registered(
+            session, container, project, run
+        )
+
+        restarted = briefs.restarted(run)
+
+        line, brief = restarted.split("\n\n", 1)
+        assert line == (
+            f"{RESTARTED} The documents you registered:"
+            f" {unread.path} ({unread.id}) — registered, not read yet;"
+            f" {failed.path} ({failed.id}) — open, its read failed;"
+            f" {published.path} ({published.id}) — published, open;"
+            f" {closed.path} ({closed.id}) — closed and written back in place."
+            " Your brief again, whole:"
+        )
+        assert brief == RUN_BRIEF
+
+    def test_a_run_that_registered_nothing_says_so(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        project: Project,
+    ) -> None:
+        run = _worker_run(session, container, project, None)
+        _briefed(session, run, RUN_BRIEF)
+
+        assert briefs.restarted(run) == (
+            f"{RESTARTED} You registered no documents. Your brief again, whole:"
+            f"\n\n{RUN_BRIEF}"
+        )
+
+    def test_a_continuation_gives_its_runs_brief_and_names_the_runs_documents(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        project: Project,
+    ) -> None:
+        """A continuation's own first Turn is no brief: the one its run's
+        first work item was sent is, and the documents of every work item on
+        the conversation are named, in the order registered."""
+        run = _worker_run(session, container, project, None)
+        _briefed(session, run, RUN_BRIEF)
+        documents = container.document_service()
+        answered = session.get_one(
+            Document, documents.register(project, run, "/work/Soup/stock.md").item.id
+        )
+        documents.publish_read(answered, "# Stock\n\nLow.\n", run.id)
+        item = session.get_one(Item, answered.id)
+        item.done_at = ENDED
+        item.done_cause_code = "marked"
+        container.record_service().work_done(run.id, ENDED)
+        continuation = models.Session(
+            project_id=project.id,
+            environment_id=WORKER_ENV,
+            kind_code="work",
+            cwd="/work/Soup",
+            controller_session="claude-8",
+            token_hash="8" * 64,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(continuation)
+        session.flush()
+        container.record_service().place_work(
+            project, continuation, "Fixing the stock", repo="example/Soup"
+        )
+        _briefed(
+            session,
+            continuation,
+            f"Your documents were answered and written back in place: {answered.path}.",
+        )
+        unread = session.get_one(
+            Document,
+            documents.register(project, continuation, "/work/Soup/order.md").item.id,
+        )
+
+        line, brief = briefs.restarted(continuation).split("\n\n", 1)
+
+        assert line == (
+            f"{RESTARTED} The documents you registered:"
+            f" {answered.path} ({answered.id}) — closed;"
+            f" {unread.path} ({unread.id}) — registered, not read yet."
+            " Your brief again, whole:"
+        )
+        assert brief == RUN_BRIEF
+
+    def test_it_is_known_by_its_first_words_on_a_turn_with_no_author(
+        self, person: User, project_session: models.Session
+    ) -> None:
+        def turn(message: str, author: User | None = None) -> Turn:
+            return Turn(
+                session_id=project_session.id,
+                seq=2,
+                message=message,
+                author_user_id=None if author is None else author.id,
+            )
+
+        assert is_restarted(turn(f"{RESTARTED} You registered no documents."))
+        assert not is_restarted(turn("continue"))
+        assert not is_restarted(turn(RUN_BRIEF))
+        assert not is_restarted(turn(RESTARTED, person))
 
 
 def _task(db: DbSession, project: Project) -> PlanTask:
