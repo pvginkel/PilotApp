@@ -713,9 +713,10 @@ class BriefService:
         """The server's turn that carries on the work item `session`, its turn
         cut by its environment's restart (§9.6; F71): one line saying so and
         naming each document its run registered (`working_on.run_of`), in the
-        order registered, with where it stands, then the run's brief again,
-        whole, its first work item's first Turn as sent. A continuation's own
-        first Turn is no brief."""
+        order registered, with where it stands, then its brief again, whole: a
+        clarification run's own first Turn, the questions it was placed with
+        (DB 254), else its run's first work item's first Turn as sent, a
+        continuation's own first Turn being no brief."""
         run = run_of(literal(session.id))
         documents = [
             f"{path} ({item_id}) — "
@@ -742,12 +743,15 @@ class BriefService:
             if documents
             else "You registered no documents."
         )
-        brief = self.db.scalars(
+        first = (
             select(Turn.message)
             .join(Item, Item.id == Turn.session_id)
-            .where(Item.id.in_(run), Turn.seq == 1)
-            .order_by(Item.seq)
-            .limit(1)
+            .where(Turn.seq == 1)
+        )
+        brief = self.db.scalars(
+            first.where(Item.id == session.id)
+            if self.db.get(ClarificationRun, session.id) is not None
+            else first.where(Item.id.in_(run)).order_by(Item.seq).limit(1)
         ).one()
         return f"{RESTARTED} {registered} Your brief again, whole:\n\n{brief}"
 

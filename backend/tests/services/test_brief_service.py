@@ -2165,6 +2165,67 @@ class TestRestarted:
         )
         assert brief == RUN_BRIEF
 
+    def test_a_clarification_run_gives_its_own_questions_as_its_brief(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        briefs: BriefService,
+        project: Project,
+    ) -> None:
+        """A clarification run's first Turn is the questions its pass asked,
+        the brief it was placed with (DB 254); its run's documents are named
+        as any work item's."""
+        run = _worker_run(session, container, project, None)
+        _briefed(session, run, RUN_BRIEF)
+        documents = container.document_service()
+        asked = session.get_one(
+            Document, documents.register(project, run, "/work/Soup/stock.md").item.id
+        )
+        documents.publish_read(asked, "# Stock\n\nLow.\n", run.id)
+        container.record_service().work_done(run.id, ENDED)
+        job = models.Session(
+            project_id=project.id,
+            environment_id=STORE_ENVIRONMENT_ID,
+            kind_code="job",
+            cwd="/work/PilotProjects",
+            token_hash="9" * 64,
+            state_code=SessionState.IDLE,
+        )
+        session.add_all(
+            [Environment(id=STORE_ENVIRONMENT_ID, name="Store-1", exempt=False), job]
+        )
+        session.flush()
+        container.record_service().place_work(
+            project,
+            job,
+            "Pre-ruling stock.md",
+            trigger=WorkTrigger.WORKER_TURN_ENDED,
+            trigger_item_id=run.id,
+        )
+        clarifying = models.Session(
+            project_id=project.id,
+            environment_id=WORKER_ENV,
+            kind_code="work",
+            cwd="/work/Soup",
+            controller_session="claude-8",
+            token_hash="8" * 64,
+            state_code=SessionState.RUNNING,
+        )
+        session.add(clarifying)
+        session.flush()
+        container.record_service().place_work(
+            project, clarifying, "Clarify stock.md", repo="example/Soup"
+        )
+        session.add(ClarificationRun(id=clarifying.id, pass_id=job.id))
+        questions = "Pilot asks about stock.md:\n- Q1: Low by how much?"
+        _briefed(session, clarifying, questions)
+
+        assert briefs.restarted(clarifying) == (
+            f"{RESTARTED} The documents you registered:"
+            f" {asked.path} ({asked.id}) — published, open."
+            f" Your brief again, whole:\n\n{questions}"
+        )
+
     def test_it_is_known_by_its_first_words_on_a_turn_with_no_author(
         self, person: User, project_session: models.Session
     ) -> None:
