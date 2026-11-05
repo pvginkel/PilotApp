@@ -4287,6 +4287,48 @@ class TestRecordServiceDoneByItsSave:
 
         assert item.done_at is None
 
+    def test_it_opens_as_its_closing_save_left_it_after_an_undone_done(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        opened: Project,
+    ) -> None:
+        settled = _done_by_pilot(CUT_OVER).replace(
+            "  - Tunnel\n",
+            "  - Tunnel\nanswer: Dome\nby: agent\nat: 2026-11-05T10:00:00Z\n",
+        )
+        item, document = _bear(
+            session,
+            container,
+            opened,
+            _brain(session, opened),
+            "document",
+            "Cut-over",
+            settled,
+        )
+        container.record_service().done(item, _agent(session))
+        container.record_service().undo(item)
+        widened = settled.replace(
+            "title: Cut-over\n", "title: Cut-over, both halves\n"
+        ) + "\n```action id=A2\n```\n"
+        _saved(container, opened, item, document, widened)
+        assert item.done_at is None
+
+        _saved(
+            container,
+            opened,
+            item,
+            document,
+            widened.replace(
+                "```action id=A2\n",
+                "```action id=A2\ndone: 2026-11-05T11:00:00Z\nby: agent\n",
+            ),
+        )
+
+        assert item.done_cause_code == "settled"
+        opens = container.timeline_service().item_document(item.id)
+        assert opens.title == "Cut-over, both halves"
+
     def test_an_item_done_already_or_of_an_archived_project_stays_as_it_is(
         self,
         session: DbSession,

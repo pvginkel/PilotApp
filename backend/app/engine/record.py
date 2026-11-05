@@ -776,9 +776,10 @@ class RecordService:
         """An agent's save of `item`, an item of Pilot's own (`pilots_own`),
         merged and published under the project's row and the document's, its
         published text before the save `before`: where the save wrote the
-        `done` of its last open block, the item done at the save by Pilot, its
-        Done Cause `settled` (DB 163), and no job after it. An item done
-        already, or of an archived project (D012), stays as it is."""
+        `done` of its last open block, a `done` Document Version of the
+        published text and the item done at the save by Pilot, its Done Cause
+        `settled` (DB 163), and no job after it. An item done already, or of
+        an archived project (D012), stays as it is."""
         if item.done_at is not None or project.archived:
             return
         if not _wrote_last_done(before, _published(document)):
@@ -786,6 +787,7 @@ class RecordService:
         pilot = self.db.scalars(
             select(User).where(User.kind_code == UserKind.AGENT)
         ).one()
+        self.document_service.cut_version(document, VersionCause.DONE)
         self._mark(project, item, document, SETTLED, pilot, _now())
 
     def in_the_plan(self, project: Project, task_id: str) -> bool:
