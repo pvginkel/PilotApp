@@ -146,11 +146,11 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   Turn has exactly when it has an author, its `message` ending with them; the item or the block it
   quotes (one at most, only on a Turn with words; a quoted block's removal clears the key;
   `ck_turns_words`; a file quoted by its path stays in the words alone), `started_at`, `ended_at`,
-  the `error` of a turn that failed, and the `cost` its `result` line reports, `numeric`, in US
+  the `error` of a turn that failed, and its own `cost`, from its `result` line, `numeric`, in US
   dollars ([`usage.md`](usage.md)).
 - `token_counts`: the tokens of one Token Kind a Turn used, `tokens`, summed over every model its
-  run called: one per turn and kind, never negative (`ck_token_counts_tokens`), written as the
-  turn's `result` line is recorded.
+  run called, the turn's own: one per turn and kind, never negative (`ck_token_counts_tokens`),
+  written as the turn's `result` line is recorded ([`usage.md`](usage.md)).
 - `chats`: a project's chat, sharing its id with its Session, one of kind `chat` of the same project
   (`session_kind_code`, held `chat`): its kind, `definition` or `project`, and its close,
   `closed_at` and `close_cause_code` (`timeout`, `created`, `finished`, `reopened`, `archived`) set

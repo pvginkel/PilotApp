@@ -270,12 +270,19 @@ transaction that records it: its `modelUsage`, each model the run called with it
 over the models from `inputTokens`, `cacheCreationInputTokens`, `cacheReadInputTokens` and
 `outputTokens`, a count it leaves out being 0, and its `total_cost_usd`. `modelUsage` counts every
 call of the run, a sub-agent's included, where the line's `usage` counts the main thread's alone.
-KubeCoder runs a fresh `claude` for each turn, so a turn's figures are its own and never include
-the turns before it.
+
+A turn's figures are its own, never the turns' before it (D140). A run that resumes a conversation
+starts from the figures its last run left, so its `result` line reports the conversation's figures
+so far, the conversation, `sessions.conversation_id`, spanning its Sessions. So a turn's figures
+are its line's less the last `result` line of the conversation's latest earlier Turn that has
+Token Counts (`reported_before`); a line with any count or its cost below that one's is a fresh
+total, kept as it is, and where either line lacks a cost the cost is the line's. Revision `0027`
+rewrote the rows written before it by the same rule, from the figures they held, and left the
+session records as they are, so the running totals stay in the `result` lines.
 
 One run can print several `result` lines, a backgrounded task waking it again among the causes, each
-carrying the run's figures so far: each line recorded writes the counts and the cost in place of an
-earlier line's, so the last one's stand. A turn whose run ends by answering KubeCoder's nudge, the
+carrying the run's figures so far: each line recorded writes the turn's own counts and cost in place
+of an earlier line's, so the last one's stand. A turn whose run ends by answering KubeCoder's nudge, the
 worker's word to a run that left a background task running at its result, keeps the figures from
 before that nudge: the worker leaves the nudge turn's lines, its `result` line included, out of the
 raw file the relay reads, and the controller's result frame carries no usage, so its calls are not
@@ -293,10 +300,12 @@ overrule's ends in `test_usage_halts.py`; the overrule in `test_quota_overrule_s
 `backend/tests/api/test_quota_overrules.py` and `backend/tests/models/test_quota_overrule.py`; the
 halt file in `test_halt_file_service.py`; the wall in `test_quota_wall.py`; the hard stop, the nudge
 and the wall's nudge in `test_session_start_service.py`; a halted end, the wall's end and the tokens
-in `test_relay_service.py`, with `test_token_counts.py`; and the gate's halts in
+in `test_relay_service.py`, with `test_token_counts.py`, and revision `0027` in
+`backend/tests/migrations/test_0027_turns_own_figures.py`; and the gate's halts in
 `test_start_gate.py`. The fake controller serves the reading as a test sets it
-([`controller.md`](controller.md)), and `backend/tests/fixtures/raw/turn_wall.jsonl` is an invented
-turn at the wall.
+([`controller.md`](controller.md)), `backend/tests/fixtures/raw/turn_wall.jsonl` is an invented
+turn at the wall, and `turn_resumed.jsonl` beside it an invented turn that carries
+`turn_text.jsonl`'s conversation on.
 
 The browser suites are `frontend/tests/shell/gold-bar.spec.ts` and `quota-overrule.spec.ts`, and
 `frontend/tests/work/usage-halts.spec.ts`, `hard-stop.spec.ts` and `nudge.spec.ts`; a setup at the

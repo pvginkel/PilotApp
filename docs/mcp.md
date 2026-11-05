@@ -264,13 +264,14 @@ record unchanged, and a controller that does not answer or refuses for a reason 
 - **`answer(block, value, for, note?, to?)`**, `POST …/answers`, answers `200` `{effect}`: the
   person's answer to the block, `<item id>/<local id>`, recorded on their behalf as the record's own
   answer, `via` `chat`, with `note`, and `to` the task or `plan` a `deferred` returns at
-  ([`engine.md`](engine.md)). "Answered · <local id> · <title>". A block of a draft's `project.md`
-  is `project.md/<local id>`, which only that draft's definition chat answers, its title the
-  draft's, else `project.md`; anywhere else it is a `409`. Its answer takes no Undo, the draft
-  having no item.
+  ([`engine.md`](engine.md)). "Answered · <local id> · <title>". An answer that closes an item of
+  Pilot's own places no job after it: the chat's own turn carries the ruling out (D139). A block of
+  a draft's `project.md` is `project.md/<local id>`, which only that draft's definition chat
+  answers, its title the draft's, else `project.md`; anywhere else it is a `409`. Its answer takes
+  no Undo, the draft having no item.
 - **`mark(item, mark, for?, note?)`**, `POST …/marks`, answers `200` `{effect}`: `done` on a
   document, with its recommendations, `read` on a notice, `reviewed` on a review, for the person
-  `for` names; without `for`, Pilot's own Done on a document it settled whole, and on a registered
+  `for` names, given through the chat as `answer` is, so that no job follows it; without `for`, Pilot's own Done on a document it settled whole, and on a registered
   document of one block, whatever its kind, once that block is answered or deferred, a claimed
   action counting once its `done` is written; `read` and `reviewed` refused. A registered
   document's Done writes its answers back and continues its run once none of the run's documents is

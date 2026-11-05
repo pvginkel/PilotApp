@@ -28,8 +28,8 @@ All are in `backend/app/services/`. The brain's `add_item` places a work item ([
 and so does the record's testing route (below); the close that leaves none of a run's registered
 documents open places the run's continuation, and a pre-ruling pass's end its clarification run
 ([`round-trip.md`](round-trip.md)); Create project
-places the setup, a job of Pilot's own, a worker's turn end and a person's close of an item of
-Pilot's own place the jobs after them, and the waits' batcher a wait's run ([`work.md`](work.md),
+places the setup, a job of Pilot's own, a worker's turn end and a person's close in the app of an
+item of Pilot's own place the jobs after them, and the waits' batcher a wait's run ([`work.md`](work.md),
 [`waits.md`](waits.md)). A person's Resume carries a stopped
 or failed worker's run on, a person's Retry places a fresh job for a failed or stopped one, a nudge
 carries on a run the usage limits or the pause halted ([`usage.md`](usage.md)), and Stop, the
@@ -178,7 +178,9 @@ chat's or a job's, whose kind's surface is `pilot-store`, is boxed: `sandboxRead
 the store repo's root, read-only; `sandboxWritableDirs` its project's folder,
 `/work/Projects/<folder>`, the one folder under `/work` it writes; and in its `env`
 `PILOT_PROJECT=<that folder>`, which the brain's `pilot.py` reads, and `PILOT_SESSION=<its Session's
-id>`, which the store's hooks send `pilot-sync` as the write lock's holder ([`sync.md`](sync.md)).
+id>`, which the store's hooks send `pilot-sync` as the write lock's holder ([`sync.md`](sync.md)),
+then, for a job of trigger `setup`, `worker_turn_ended` or `item_done`,
+`CLAUDE_CODE_PROMPT_CACHE_TTL=5m` ([`work.md`](work.md)).
 While its Project is finished it is boxed with no folder writable and no surface, so it is handed no
 server, its `PILOT_PROJECT` and `PILOT_SESSION` kept
 ([`chats.md`](chats.md)). The Project's state is read afresh at each create; a chat closes whenever
@@ -264,10 +266,16 @@ first, and on its `202`, under the Session row's lock:
 - the environment's shutdown timer cleared;
 - the Session's relay started once the transaction commits.
 
-A send the controller fails before its `202` writes the Turn ended, with `error` the failure's
-text, its `send` record when it has an author, and a `server` record `{"type": "send-failed",
-"reason": <error>}` in the Turn; the Session's state stays as it was. Two answers are not failures.
-A controller session that is gone (`404`) is created again first, under the Session's lock (below),
+The send first reads the controller session (`ControllerClient.get_session_holding`,
+[`controller.md`](controller.md)): KubeCoder gives a name its session's end or its environment's
+restart freed to the next create, and a send names no conversation, so a name that holds another
+conversation than the Session's, or none where the Session has one, is the controller session
+gone, and a message sent to it would reach whichever conversation holds the name then. A send the
+controller fails before its `202`, that read included, writes the Turn ended, with `error` the
+failure's text, its `send` record when it has an author, and a `server` record `{"type":
+"send-failed", "reason": <error>}` in the Turn; the Session's state stays as it was. Two answers
+are not failures. A controller session that is gone (`404`, or its name holding another
+conversation) is created again first, under the Session's lock (below),
 and the Turn written in flight as on a `202`, unsent: the relay sends it to the new session once the
 caller's transaction commits, which commits that session's token's hash with it, so that its first
 tool call is admitted; where another process created it again first, the message goes to that one.
@@ -289,8 +297,10 @@ has it: its relay records it, and its turn is interrupted.
 The loop `relay:<session id>` relays the Session's turn in flight. Its run reads the Session
 `running`, or `stopped` under its turn, and its latest Turn with no `ended_at`, and returns at once
 when there is none. It opens the response stream at the raw offset of the Session's last `claude`
-or `result` record when that record is of the Session's current controller session, and at 0
-otherwise, and takes each frame in order:
+or `result` record when that record is of the Session's current controller session and no
+`server` record of type `session-gone` or `starting` follows it, either of which says the
+controller session was created anew, under whatever name; and at 0 otherwise. It takes each frame
+in order:
 
 - **A `stream_event` line is never a record.** A main-thread `content_block_start`, or a
   `content_block_delta` whose delta is a `text_delta`, is forwarded to the Session's hub as a
@@ -300,8 +310,8 @@ otherwise, and takes each frame in order:
   its own that rebuilds a running Session's current line. A line that is not a JSON object is
   stored as its text, and so is one that jsonb refuses: a string holding a `\u0000`, or a lone
   surrogate such as a truncated emoji's `\ud83d`, the line kept whole rather than scrubbed. A line
-  at or below the last recorded offset of the same controller session is one the record has, and
-  is skipped. While the Session's `conversation_id` is null, a recorded line's `session_id` sets it.
+  at or below the last recorded offset of the same controller session, not created anew since, is
+  one the record has, and is skipped. While the Session's `conversation_id` is null, a recorded line's `session_id` sets it.
   A `result` line of `claude`'s own writes its Turn's tokens and cost in the same transaction
   ([`usage.md`](usage.md)).
 - **The `result` frame ends the Turn**, and nothing else does (D004). In one transaction: the
@@ -322,7 +332,12 @@ The Session's state at its turn's end: `stopped` when the turn was interrupted, 
 (`stopped_at` the end, `stopped_by_user_id` none), even when the frame also says `isError`; a work
 item's Session `failed` when its turn ended in error, the error its Turn's (D036), its nudge owed
 from the turn's end when its stream shows the quota wall (D098), and a pass then asking the writer
-nothing yet (D099); else `idle`, and a work item done, as the engine's `work_done` makes it: cause `turn_ended`, by
+nothing yet (D099); a work item's Session `failed` too when the turn its environment's restart left
+it (below) ends neither interrupted nor in error with a blank result and no `assistant` record of
+the turn holding non-blank text or a `tool_use`, its Turn's `error` "The turn after the
+environment's restart ended with no text and no tool call": its work item stays open to a
+Resume, its documents unread and no job placed, so that a run that lost its hand-back is never
+taken as done (D137); a person's Resume ends as any turn ends; else `idle`, and a work item done, as the engine's `work_done` makes it: cause `turn_ended`, by
 no one, at the turn's end, which a Finish that closed it first leaves as Finish closed it. A
 worker's run whose turn ends so while a usage halt whose setting is the cooperative stop holds, or
 its project is paused, is not done: it stays open, `idle`, its nudge owed, and nothing of a done
@@ -346,20 +361,34 @@ A stream that drops, or is silent for 60 s, raises, and the supervisor runs the 
 backoff, reopening at the last committed offset.
 
 **Resuming a controller session that is gone.** A `404` on the stream or the send is the
-controller session gone, as a pod restart leaves it. Under the Session's lock, and only while the
-Session still has that controller session: a headless session is created in the same
-environment as its scope gives it (above), `resume` its `conversation_id` and a token minted for
-it, whose hash is the Session's from then; then the `server`
-record `{"type": "session-gone", "reason": <error>}` in no Turn, every Turn in flight ended with no
-`result`, and `controller_session` the new name. The log says `Session <id> lost controller session
-<name>; resumed as <name> in environment <id>`. The relay carries the turn on with a Turn of the
-server's own, with no author, which its next round sends: `continue`, or, while the Session has no
-conversation, or no Turn of it has gone out, as a continuation's from its placement, the ended
-Turn's message again, which the new session would not otherwise know (D037), as Resume picks it
-(below). A send that met the `404` has its own Turn sent instead (above). A create that fails
-writes nothing of the resume: the relay is run again with backoff, and a send writes its Turn as
-failed. In the
-relay, a create answered `404` is the environment gone, a stop made elsewhere (below).
+controller session gone, as a pod restart leaves it, and so is its name holding another
+conversation (above). Under the Session's lock, and only while the Session still has that
+controller session, its name and the token its create minted: a headless session is created in
+the same environment as its scope gives it (above), `resume` its `conversation_id` and a token
+minted for it, whose hash is the Session's from then; then the `server` record `{"type":
+"session-gone", "reason": <error>}` in no Turn, every Turn in flight ended with no `result`, and
+`controller_session` the new name, which may be the old one. The log says `Session <id> lost
+controller session <name>; resumed as <name> in environment <id>`. A send that met the `404` has
+its own Turn sent instead (above). In the relay, the turn is carried on with a Turn of the
+server's own, with no author, which its next round sends (`RelayService._carrying_on`), its lines
+read from offset 0 of the new controller session:
+
+- while the Session has no conversation, or no Turn of it has gone out, as a continuation's from
+  its placement, the ended Turn's message again, which the new session would not otherwise know
+  (D037), as Resume picks it (below);
+- a work item's, the restart's turn (`BriefService.restarted`, D136): one line, "Your environment
+  restarted under your last turn, and this conversation goes on in a new session.", then "The
+  documents you registered: " and each document its run registered, the work items on its
+  conversation, in the order registered, as `<path> (<id>) — ` and where it stands, `registered,
+  not read yet`, `open, its read failed`, `published, open`, `closed` or `closed and written back
+  in place`, or "You registered no documents."; then "Your brief again, whole:", a blank line and
+  the brief: the run's first work item's Turn 1, a continuation's run included, or a
+  clarification run's own Turn 1, the questions it was placed with;
+- a job's and a chat's, `continue`.
+
+A create that fails writes nothing of the resume: the relay is run again with backoff, and a send
+writes its Turn as failed. In the relay, a create answered `404` is the environment gone, a stop
+made elsewhere (below).
 
 ## An environment restarted or stopped under the turn
 
@@ -403,7 +432,8 @@ transaction. A running Session's Turn stays in flight: once the stop
 commits, the loop `interrupt:<id>` asks the controller's interrupt, and the relay records the turn
 to the `result` the interrupt brings, its lines arriving, its line and state unmoved, its work item
 not done. A controller that does not answer the interrupt lets the turn run out; a controller
-session or an environment that is gone has no turn to interrupt, and the relay ends that Turn with
+session or an environment that is gone, a name holding another conversation among them, has no
+turn to interrupt, and the relay ends that Turn with
 no `result` (a `session-gone` record where its controller session is gone), as it does a turn the
 controller never got. A held or starting Session's Turn ends at the stop, unsent, and its start
 sends nothing more, unless its send was already going out: that Turn is put back in flight and
@@ -426,8 +456,8 @@ A stopped or failed work item keeps its environment meanwhile: no other start ta
 nothing resets or deletes it (D042, [`controller.md`](controller.md)).
 
 - **With a conversation to continue**, its start loop sends the Turn to the controller session it
-  has; one that is gone, ended, or whose environment is not running (`404`, `409 conflict`) is given
-  up first, with a `session-gone` record, and the start goes on from the environment's start, one in
+  has; one that is gone, ended, its name holding another conversation, or whose environment is not
+  running (`404`, `409 conflict`) is given up first, with a `session-gone` record, and the start goes on from the environment's start, one in
   `error` among them, and a create resuming the conversation. Its environment is never reset, so the
   conversation carries on in the tree as the session left it.
 - **With none**, a start that failed before its first line or a held start stopped before it took
@@ -576,8 +606,9 @@ registered documents owe ([`round-trip.md`](round-trip.md)); and the job `store-
 an update left unlifted ([`store-update.md`](store-update.md)). Each run resumes from the rows:
 
 - **Sent or not.** Before it opens the stream, a relay's run reads the controller session's status
-  snapshot. The controller has the turn when the session is `busy` or `interrupting`, or its `turn`
-  is past the one in the Session's last `result` record of that controller session; otherwise the
+  snapshot, a name holding another conversation read as the session gone. The controller has the
+  turn when the session is `busy` or `interrupting`, or its `turn` is past the one in the Session's
+  last `result` record of that controller session, not created anew since; otherwise the
   Turn, one written before its send, is sent now, unless the Session was stopped under it, when the
   Turn ends with no `result`. A `409 session-busy` on that send that a second snapshot shows sent is
   another process's send.

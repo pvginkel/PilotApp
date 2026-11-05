@@ -35,6 +35,7 @@ against `CONTROLLER_CA_FILE` when that is set, and against requests' own trust o
 | `interrupt(env_id, name)` | `POST /environments/<id>/sessions/headless/<name>/interrupt` |
 | `end_session(env_id, name)` | `DELETE /environments/<id>/sessions/<name>`; ending one already gone does nothing |
 | `get_session(env_id, name)` | `GET /environments/<id>/sessions/<name>`: the status snapshot, its `status`, `turn` and `session_id` |
+| `get_session_holding(env_id, name, conversation_id)` | `get_session`, answered only while the name holds a headless session of the conversation `conversation_id`, any headless one for None; one holding another conversation or none, or an interactive session, raises `ControllerProblem` `not-found`, as a session gone does: KubeCoder gives a name its session's end or its environment's restart freed to the next create, and a send names no conversation |
 | `list_sessions(env_id)` | `GET /environments/<id>/sessions` |
 | `read_log(env_id, name, head=None, tail=None)` | `GET /environments/<id>/sessions/headless/<name>/log`: the condensed log's lines |
 | `open_response_stream(env_id, name, offset, wait_ms=None)` | `GET /environments/<id>/sessions/headless/<name>/response?format=raw&offset=<n>` |
@@ -316,9 +317,13 @@ stops, in whole seconds and later than every pod's before it. It serves the crea
 the rename and the delete with the controller's refusals in its order, and the list filtered by
 `managedBy`, `repo` and `status`. An environment a create makes has an id minted from its
 repository, lowercased, each run of other characters than letters and digits a `-`, then `-` and 6
-hex digits, and `managedBy` `pilot`, the client its one credential authenticates as. Where it is simpler than the controller: a headless
-session's conversation id is minted by its first send, an environment that is not `running` holds
-no headless session, `wait=settled` is `wait=ready`, the create and the reset answer at once and
+hex digits, and `managedBy` `pilot`, the client its one credential authenticates as. A headless session takes the lowest free name, as
+KubeCoder's do, from `claude-1` where KubeCoder's first is `claude`: a session's end, its
+environment's restart and the loss of its pod free its name for the next create, so that a name
+can come back holding another conversation. A session's conversation is the one its create
+resumed, else the first one a line it plays names. Where it is simpler than the controller: a
+session keeps the first conversation it is bound to, where the worker takes the last one a turn's
+stream reports; an environment that is not `running` holds no headless session, `wait=settled` is `wait=ready`, the create and the reset answer at once and
 take no `wait`, a delete's teardown ends as it is answered, `deleting` then `gone`, and the node's
 cap is a flag, not a count. An environment's `/work` holds files alone, with no link, a folder being
 there while a file is under it; a write takes no `expectedSha256` (`422`), and a write or a
@@ -334,7 +339,7 @@ folder. Its tree being `/work` alone, the fake checks no `$HOME` or `/tmp` root,
 link. So a boxed create needs its cwd on the tree, a file under it, as well as each listed folder.
 A send to a boxed session one of whose roots is no longer a folder there is answered `202` and its
 turn resolves at once, in error, its result "spawn failed: sandbox: scope root <root>: lstat
-<root>: no such file or directory", with no conversation id minted. A session's `box` holds its
+<root>: no such file or directory". A session's `box` holds its
 roots, none unboxed, and its `create_body` the create's fields as sent.
 
 - **Under pytest**, the fixture `fake_controller` serves it on a free port of 127.0.0.1
@@ -386,8 +391,9 @@ controller's reset route. `environment()` (its `resets` counting the resets that
 folder, its `files` the bytes by path), `session()`, `sessions()` and `calls` read its state.
 
 The turns a test plays are invented, in `backend/tests/fixtures/raw/turn_text.jsonl`,
-`turn_tool.jsonl` and `turn_subagent.jsonl`, and `turn_wall.jsonl`, a turn at the quota wall, read
-by `raw_turn(name)`: bare `claude` lines in the shapes of its stream-json, which the fake frames as
+`turn_tool.jsonl` and `turn_subagent.jsonl`, `turn_wall.jsonl`, a turn at the quota wall, and
+`turn_resumed.jsonl`, a turn that carries `turn_text.jsonl`'s conversation on, read by
+`raw_turn(name)`: bare `claude` lines in the shapes of its stream-json, which the fake frames as
 the controller does, each `result` line with its `modelUsage` and each `rate_limit_event` with its
 `unifiedWindows` ([`usage.md`](usage.md)). No line of them is a real
 session's.

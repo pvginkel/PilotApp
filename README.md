@@ -21,7 +21,8 @@ a donut, Stop and Resume, and its session log, and Pilot's own background jobs a
 the brain's, fresh but for a wait's run: the setup, the pre-ruling pass after every worker's turn,
 which may ask the worker's writer, or claim an action or research a fact for a work item of
 Pilot's, the blocks held through its run, the plan's next
-step after every item of Pilot's a person closes, and a wait's run, with Retry on one that failed
+step after every item of Pilot's a person closes in the app, the chat carrying out a ruling it
+records itself, and a wait's run, with Retry on one that failed
 ([`docs/work.md`](docs/work.md)); each
 project's status as one icon on its tab, which pauses it, and the gold bar, a badge in the top bar
 or a line on a phone, while the controller does not answer, Pilot updates its store or a usage

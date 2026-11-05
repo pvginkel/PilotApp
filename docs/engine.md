@@ -11,7 +11,7 @@ commits.
 | Service | Does |
 |---|---|
 | `DocumentService` (`documents.py`) | the births, a worker's registration and its read, `publish()`, the document's row lock, versions, the turn's end |
-| `IngestService` (`ingest.py`) | an agent's save of a path of the tree; the faults of a text Pilot's own item is to be born with |
+| `IngestService` (`ingest.py`) | an agent's save of a path of the tree, an item of Pilot's own closed by the save that writes its last open block's `done`; the faults of a text Pilot's own item is to be born with |
 | `RecordService` (`record.py`) | a person's answer, Done, undo, Read, Reviewed; Finish's close and the archive question's; the switch's Yes; a work item placed and done, and named for the claimed actions it does; a run's continuation released; the job after a close of an item of Pilot's own placed, and withdrawn by its Undo |
 | `PlanService` (`plan.py`) | `plan.json`, rendered and saved; the deferrals without a home |
 | `TreeService` (`tree.py`) | what a path names, the bytes it must hold, its tree hash; the manifest |
@@ -135,7 +135,9 @@ brain session that held the project folder's write lock as the sidecar read the 
 
 A save of a document runs in one transaction, under the row lock of the session it is credited to,
 when it is one's, then the document's, the order a turn's end takes them in, so that a save and its
-session's turn end are taken one after the other:
+session's turn end are taken one after the other. A save of an item of Pilot's own takes its
+project's row `FOR UPDATE` before both, as a close takes it, since the save may close the item
+(step 6):
 
 1. The bytes are decoded. Bytes that are not UTF-8, and NUL, which PostgreSQL's `text` cannot
    hold, are replaced by U+FFFD with a fault at the line of the first; the answer carries the
@@ -152,7 +154,13 @@ session's turn end are taken one after the other:
    environment. The published text stays as it was, and the tree keeps the agent's save.
 6. With none, the save is merged by ownership against the published text and the result
    published, with a `reverted` Save Error per fault the merge reports; the answer carries the
-   merged text where it differs from the save. The `reverted` rows of earlier saves stand.
+   merged text where it differs from the save. The `reverted` rows of earlier saves stand. A save
+   of an item of Pilot's own, one a chat or a job added (`RecordService.pilots_own`) and no
+   registered document, that writes the `done` of its last open block, every block answered after
+   it and one open before it now `done`, closes the item (`RecordService.done_by_its_save`,
+   D138): a `done` version cut, as Pilot's Done cuts one, and the item done at the save by Pilot,
+   cause `settled`, with no job after it. An answer of Pilot's alone closes nothing, and an item
+   done already or of an archived project stays as it is.
 7. A late save not held cuts its session's `turn` version at once, where the published text moved
    since the last version (`cut_turn_version`, below), and raises `ProjectChanged`: no turn's end
    is left to cut it, and the document's *Edited* time is the save's (D113). A held one cuts
@@ -213,16 +221,18 @@ merge carries the write to the file.
   never interleave with it, and locks that job's Session before it reads the item again, so that the
   job's brief, which consumes the item under that lock, and the Undo never both take effect.
   `offers_undo(item)` says whether `undo` would take the item now, by the same rule.
-- `done(item, user)`: Done on a document. A person's first answers every unanswered block that
-  has a recommendation with it, `via: recommended`, and is refused while a block has neither an
-  answer nor a recommendation, a claimed action not yet done among them; its cause is `marked`.
+- `done(item, user, *, via=AnswerChannel.APP)`: Done on a document. A person's first answers
+  every unanswered block that has a recommendation with it, `via: recommended`, and is refused
+  while a block has neither an answer nor a recommendation, a claimed action not yet done among
+  them; its cause is `marked`.
   Pilot's is refused while any block is unanswered, a claim counting only once its action is done
   ([`block-dsl.md`](block-dsl.md)); its cause is `settled`. Pilot's also takes a registered
   document of one block, whose item has its block's kind, once that block is answered, deferred, or
   claimed and done; a person's Done on one, and Pilot's on a one-block item of its own, stay refused
-  by its kind. Then a `done` version is cut and the item marked done.
-- `read(item, user)` on a notice and `reviewed(item, user)` on a review: the item's mark, cause
-  `marked`, the text untouched.
+  by its kind, an action of its own closing at its block's `done` instead (step 6 of the
+  ingest). Then a `done` version is cut and the item marked done.
+- `read(item, user, *, via=AnswerChannel.APP)` on a notice and `reviewed(item, user, *,
+  via=AnswerChannel.APP)` on a review: the item's mark, cause `marked`, the text untouched.
 - `cancel(project, document_ids, user, operation)`: a person's Cancel on a run's documents
   ([`round-trip.md`](round-trip.md)). Each open one of `document_ids`, locked in id order, is marked
   done by `user`, cause `cancelled`, which offers no undo; the texts are untouched, no Version is
@@ -307,8 +317,11 @@ again with its `WriteBackOwed`.
 added, one whose Session Kind's surface is `pilot-store` (a chat's or a job's), places the job after
 it in the close's transaction, through the port `Jobs` (`JobService.item_done`,
 [`work.md`](work.md)): an answer that marks a one-ask item done, an action's Done that does, Done
-and Reviewed. A notice's Read, Pilot's own Done, Finish's close, a registered document's close, an
-item a worker's session added and the archive question, which no session added, place none. Every
+and Reviewed. A close given `via` `chat`, which `pilot-store`'s `answer` and its `mark` with `for`
+record on a person's behalf ([`mcp.md`](mcp.md)), places none: the chat's own turn carries the
+ruling out (D139). Neither do a notice's Read, Pilot's own Done, its close at a save (above),
+Finish's close, a registered document's close, an item a worker's session added and the archive
+question, which no session added. Every
 close of an item holds its project's row `FOR UPDATE`, a close in the draft alone holding it shared.
 The job's brief consumes the item, which takes its Undo ([`sessions.md`](sessions.md)). An Undo
 before that, while the job is held behind the project's other jobs or by the pause, withdraws it

@@ -406,8 +406,8 @@ kept whole however the answer is cut ([`chats.md`](chats.md)).
 Undo ("Undo, until a session has taken it") opens the item again, and a one-ask item's block
 unanswered. A worker's registered documents lose it together, as the close of the last of their run
 places the continuation that takes their answers ([`round-trip.md`](round-trip.md)). An item of
-Pilot's own loses it once the brief of the job its close placed goes out, at once in an idle
-project, and an Undo before then withdraws that job ([`work.md`](work.md)).
+Pilot's own whose close placed the job after it loses it once that job's brief goes out, at once in
+an idle project, and an Undo before then withdraws that job ([`work.md`](work.md)).
 
 - **Open**, on every done line but a wait's, opens the item's document in the overlay at its
   address, as Done fixed it ([`documents.md`](documents.md)).

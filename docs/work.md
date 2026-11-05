@@ -13,8 +13,8 @@ the close that leaves none of the documents a work item's run registered open pl
 that continues its conversation, titled as the run, on its plan task while the plan still has it,
 after the answered items, and the end of a pre-ruling pass that asked the writer places the
 clarification run that puts its questions to the run's writer, on that run's conversation
-([`round-trip.md`](round-trip.md)). Create project, a worker's turn end, a person's close of an
-item of Pilot's own and a wait's firings place the jobs of Pilot's own
+([`round-trip.md`](round-trip.md)). Create project, a worker's turn end, a person's close in the
+app of an item of Pilot's own and a wait's firings place the jobs of Pilot's own
 ([below](#pilots-own-work)).
 
 ## Its status
@@ -66,8 +66,10 @@ for the live event:
 
 A work item waits on you while `stopped` or `failed`, a job only until it is retried, and neither
 while its nudge is owed, which its project's badge counts ([`projects.md`](projects.md)). It is
-done at the end of a turn neither interrupted nor in error ([`sessions.md`](sessions.md)), unless a
-cooperative usage halt or its project's pause holds then ([`usage.md`](usage.md)), cause
+done at the end of a turn neither interrupted nor in error ([`sessions.md`](sessions.md)), but for
+the turn its environment's restart left it that came back with no text and no tool call, which
+fails it (D137), and unless a cooperative usage halt or its project's pause holds then
+([`usage.md`](usage.md)), cause
 `turn_ended`, by no one, or by
 Finish's close, and a job withdrawn before its brief by an Undo or its wait's close, cause
 `withdrawn` ([below](#pilots-own-work)); it then draws as its done line ([`timeline.md`](timeline.md)).
@@ -188,7 +190,8 @@ with its turn, fresh but for a wait's run that resumes its previous run's conver
 at its trigger's instant:
 
 - its Session is kind `job`, in the store repo's root, on the brain's model and effort
-  ([`chats.md`](chats.md)), `held`, with no Turn, its `created_at` the trigger's instant;
+  ([`chats.md`](chats.md)), `held`, with no Turn, its `created_at` the trigger's instant; on the
+  5-minute prompt cache, but for a wait's run (below);
 - its Work has the trigger that started it, the Item that set it off as its trigger item where it
   has one, and no repository;
 - its Item is next on the timeline.
@@ -206,6 +209,15 @@ nor the brain's `stop_work` takes it ([`sessions.md`](sessions.md)); Finish and 
 they stop every session, and the store's update while it runs or starts. One job is placed per
 trigger, never one for several; a wait's run is one trigger, however many firings it takes.
 
+**The prompt cache.** A job of trigger `setup`, `worker_turn_ended` or `item_done` runs on Claude
+Code's 5-minute prompt cache (D141): its create's `env` carries `CLAUDE_CODE_PROMPT_CACHE_TTL=5m`
+after `PILOT_SESSION`, at its start and at the relay's create of it anew alike, a finished
+project's job's too (`FIVE_MINUTE_JOBS`, `backend/app/services/session_scope.py`). Such a job
+starts fresh and ends in one turn, so an hour's cache, whose writes cost more than the 5-minute
+cache's, buys it nothing. A wait's run, which may resume its previous run's conversation within
+`CACHE_EXPIRATION_TTL` (below), a chat and a work item's run carry no such entry and keep Claude
+Code's own, the hour on a subscription within its usage limits.
+
 **The triggers.** Four place a job:
 
 - **The setup**: Create project places it after the opening, titled "Setting up the project",
@@ -222,10 +234,13 @@ trigger, never one for several; a wait's run is one trigger, however many firing
   finished or archived project; a Stop, a failed turn or an environment stopped under the session
   places none.
 - **An item of Pilot's own is done**, trigger `item_done`, its trigger item the item, titled
-  "Deciding what is next": a person's close of an item a session of Pilot's own added, a chat's or a
-  job's, in the close's transaction ([`engine.md`](engine.md)): answered, Done, an action's Done,
-  Reviewed. A notice's Read, Pilot's own Done, Finish's close, a registered document's close, an
-  item a worker's session added and the archive question, which no session added, place none.
+  "Deciding what is next": a person's close in the app of an item a session of Pilot's own added, a
+  chat's or a job's, in the close's transaction ([`engine.md`](engine.md)): answered, Done, an
+  action's Done, Reviewed. A close the chat records on a person's behalf places none, the chat's own
+  turn carrying the ruling out (D139), and neither do a notice's Read, Pilot's own Done, Pilot's
+  close of an item of its own at the save that writes its last open block's `done` (D138), Finish's
+  close, a registered document's close, an item a worker's session added and the archive question,
+  which no session added.
 - **A wait's firings**, trigger `wait_fired`, its trigger item the wait, titled `Checking "<wait
   title>"`: placed by the batcher once the wait's oldest pending firing is the quiet window old and
   no run of the wait is in flight, taking at its brief every firing still pending
@@ -434,8 +449,9 @@ read its headless sessions; and the files of an environment as a process in it w
 `putFile(env, path, content)`, `removeFile(env, path)` and `fileText(env, path)`, null where there
 is none. The fake's verbs that act on every environment hold across a worker's specs, so the
 fixture's teardown (`restore()`) undoes an outage, the node's cap and held creates that a spec left.
-Pilot's headless sessions in an environment are `claude-1`, `claude-2`, … in the order it creates
-them, a Resume that re-creates its session making the next. `rawTurn(name)` reads the backend
+A headless session in an environment takes the lowest free name of `claude-1`, `claude-2`, …, as
+KubeCoder's do, so a session created anew, by a Resume or after a restart, can get the old one's
+name back. `rawTurn(name)` reads the backend
 suite's invented turns. The worker's `conditions` fixture reads what the gold bar reads, and waits
 at the worker's start for the backend's first outage, its fleet stream's refused first open, to end.
 The fleet stream reconnects on the supervisor's backoff, up to 30 s, so a spec whose outage must end

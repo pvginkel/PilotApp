@@ -21,7 +21,7 @@ tables are [`record.md`](record.md)'s. The skill the brief opens with is PilotPr
 | `BriefService` (`brief_service.py`) | the chat's brief, the definition chat's and each job's ([`work.md`](work.md)), the follow-up turn, a resumed wait's run's first turn ([`waits.md`](waits.md)), and the server's lines after a worker's brief ([`mcp.md`](mcp.md)) |
 | `ChatCloseService` (`chat_close_service.py`) | a chat's close: at Create project, Finish, Reopen and Archive, and on the timer `chat-close` |
 | `ChatReadService` (`chat_read_service.py`) | a project's chats in their order, and a person's place in them |
-| `session_scope.py` | what a brain session's create is handed: its box, its surface, its `PILOT_PROJECT` and its `PILOT_SESSION` ([`sessions.md`](sessions.md)) |
+| `session_scope.py` | what a brain session's create is handed: its box, its surface, its `PILOT_PROJECT` and its `PILOT_SESSION`, and a job's prompt cache ([`sessions.md`](sessions.md)) |
 
 All are in `backend/app/services/`; `chat.md` is the engine's `ViewService.chat`
 (`backend/app/engine/views.py`).
@@ -69,7 +69,9 @@ Which way a message goes is the project's open chat's to say, read with its Sess
   Session starts through the gate (below). A project has one chat open at a time.
 - **Open and up**, its Session `idle`, `running`, `ended`, or `stopped` with a conversation: the
   words go to it as a Turn through the relay's send, which first creates the controller session
-  again where it is gone ([`sessions.md`](sessions.md)). The chat's Session is locked from before
+  again where it is gone, its name holding another conversation among it, so that the words reach
+  the chat's conversation, never a job's that took the name meanwhile
+  ([`sessions.md`](sessions.md)). The chat's Session is locked from before
   the send to the commit, so no close and no stop comes between them: a message that finds the chat
   closed meanwhile starts the project's next chat, and one that finds its project archived is
   refused.
@@ -243,7 +245,9 @@ is never sent to again: the next message starts a chat of its own.
   closes every open project chat whose Session's last turn ended `CHAT_CLOSE_TIMEOUT` ago or more,
   with no Turn in flight. Each in a transaction of its own under its Session's lock, skipping one
   another transaction holds, a message's send among them: its controller session, where it has one,
-  ended first, a `404` or a `409` counting as ended, and its Session `ended`, then the chat closed.
+  ended first, a `404` or a `409` counting as ended, and so does its name holding another
+  conversation than the chat's, another session's, which the close leaves as it is; and its Session
+  `ended`, then the chat closed.
   A controller that does not answer leaves the chat open for the next round. A definition chat
   never closes by timeout.
 - **`created`**: Create project closes the draft's definition chat in its transaction, once the
