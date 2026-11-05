@@ -42,6 +42,9 @@ const decision = (id: string, ...options: string[]) =>
   ['```decision id=' + id, 'options:', ...options.map((option) => `  - ${option}`), '```', ''].join('\n');
 const KIT_PATH = '/work/Example/kit.md';
 const KIT = `# The kit\n\n${decision('D1', 'Dome', 'Tunnel')}\n${decision('D2', 'Gas', 'Wood')}\n${decision('D3', 'Two', 'Four')}\n${decision('D4', 'Rope', 'Chain')}`;
+// The kit under a summary long enough to run past the overlay's body in a short window, so that
+// only the go-to puts the box under it in view; a summary is none of a document's own words.
+const KIT_SUMMED = `---\nsummary: ${'We pack for four nights by the lake, the stove and its gas, the tent and its pegs, the rope for the boat. '.repeat(12).trim()}\n---\n${KIT}`;
 // Over 150 words of its own, so that it leaves a card.
 const ROUTE_PATH = '/work/Example/route.md';
 const ROUTE = `# The route\n\n${'We walk the north shore to the ridge and camp below it. '.repeat(16)}\n\n${decision('D1', 'Shore', 'Ridge')}\n${decision('D2', 'Day', 'Night')}`;
@@ -109,7 +112,7 @@ test.describe('Pilot asking the writer', () => {
       project,
       documents: [kit, route],
     } = await written({ people, projects, controller, chats }, [
-      [KIT_PATH, KIT],
+      [KIT_PATH, KIT_SUMMED],
       [ROUTE_PATH, ROUTE],
     ]);
     await projects.askWriter(kit, [
@@ -131,6 +134,8 @@ test.describe('Pilot asking the writer', () => {
     await expect(inline.root).not.toContainText('Pilot asked the writer about');
 
     const [asked] = (await projects.item(project, kit)).clarifications;
+    // Short enough a window that the kit's summary and the route's text run past the overlay's body.
+    await page.setViewportSize({ width: 1280, height: 480 });
     await inline.blockAt('D4').writerAsked.click();
     await expect(page).toHaveURL(clarificationAddress(project, kit));
     await expect(overlay.clarificationBox).toHaveClass(/\bflash\b/);
@@ -148,8 +153,6 @@ test.describe('Pilot asking the writer', () => {
     await expect(overlay.blockAt('D2').writerAsked).toHaveText('Pilot asked the writer');
     await expect(overlay.blockAt('D1').writerAsked).toHaveCount(0);
 
-    // Short enough a window that the route's text runs past the overlay's body.
-    await page.setViewportSize({ width: 1280, height: 480 });
     await overlay.open(project, route);
     const whole = overlay.clarification();
     await expect(whole.question('D1').text).toHaveText(SHORE);
