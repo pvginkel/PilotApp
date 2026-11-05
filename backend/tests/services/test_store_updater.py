@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.database import scoped_session
+from app.engine.bus import EngineEvent, ProjectChanged
 from app.models import Chat, Environment, Item, Project, StoreUpdate, Turn, User, Work
 from app.models.reference import (
     ChatKind,
@@ -651,6 +652,25 @@ class TestLift:
             "Retry: Cannot retry Setting up the project because its project is "
             "archived"
         )
+
+    def test_a_job_its_retry_refuses_has_its_project_changed_at_the_lift(
+        self,
+        container: ServiceContainer,
+        updater: StoreUpdater,
+        session: DbSession,
+        camp: Project,
+        engine_events: list[EngineEvent],
+    ) -> None:
+        # Its pass's documents are the person's from the lift on: the badge,
+        # the status and the phone hear of it then (DB 296).
+        _at_lift(session)
+        camp.archived = True
+        stopped_job(container, session, camp, datetime.now(UTC))
+        clear_after_commit_callbacks()
+
+        _run(updater)
+
+        assert ProjectChanged(camp.id) in engine_events
 
     def test_a_stopped_turn_still_ending_holds_the_lift_to_a_later_run(
         self,

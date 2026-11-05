@@ -29,8 +29,10 @@ is asked (`lift_requested_at`):
    lock (DB 281): its retry placed held behind its project's held jobs, a
    refusal logged and the job's Retry left to a person. A stopped turn still
    ending, which that Retry refuses too, holds the lift to a later run. Once
-   `lifted_at` commits, the held starts are released, the nudges sent and the
-   conditions told. The server retries no other job (D078).
+   `lifted_at` commits, the held starts are released, the nudges sent, the
+   conditions told, and each project of a job left to a person's Retry
+   changed, its pass's documents the person's. The server retries no other
+   job (D078).
 
 A lift asked goes to 4 from wherever the sequence stands. The job's reconcile
 at STARTUP and the timer `store-update`, on every tick, run the loop while an
@@ -56,6 +58,7 @@ from sqlalchemy.orm import Session
 
 from app.core_exceptions import ExternalServiceException
 from app.database import scoped_session
+from app.engine.bus import ProjectChanged
 from app.exceptions import InvalidOperationException
 from app.models import Item, StoreUpdate, Work
 from app.models import Session as AgentSession
@@ -285,7 +288,15 @@ class StoreUpdater:
             update = _locked(db, update_id)
             if update.lifted_at is not None:
                 return
+            left = db.scalars(
+                _retriable(update).with_only_columns(AgentSession.project_id)
+            ).all()
             update.lifted_at = datetime.now(UTC)
+            # A job left to a person's Retry is in flight no more from this
+            # commit on, and its pass's documents are the person's (DB 296).
+            bus = self._container.engine_bus()
+            for project_id in left:
+                bus.emit(ProjectChanged(project_id))
             after_commit(self._lifted)
             logger.info("The store's update %s: lifted", update_id)
 
