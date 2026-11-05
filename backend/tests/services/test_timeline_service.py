@@ -4,6 +4,7 @@ person (F8, F12, F13, F18, F31, F78, F1.4)."""
 import base64
 import uuid
 from datetime import UTC, datetime, timedelta
+from pathlib import PurePosixPath
 from typing import Any, get_args
 
 import pytest
@@ -3309,6 +3310,35 @@ class TestPilotsWork:
             "asked_in": asked_in,
         }
         assert _entry(camp, question)["pilots_work"] is None
+
+    def test_the_document_it_carries_untitled_is_named_by_its_file(
+        self, camp: Camp
+    ) -> None:
+        # A document whose read failed keeps no title (`fail_read`), and is
+        # the run's first open document when the same turn registered one
+        # with a block after it.
+        writer = camp.worker()
+        cut_over = camp.registered(writer, _CUT_OVER)
+        camp.ended(writer)
+        camp.ended(camp.job_after(writer))
+        doing = camp.worker(conversation="conversation-2")
+        camp.claim(cut_over, "A1", doing)
+        unread = camp.registered(doing, read=False)
+        camp.container.document_service().fail_read(
+            camp.session.get_one(Document, unread.id)
+        )
+        camp.registered(doing, _PITCH)
+        camp.ended(doing)
+        camp.ended(camp.job_after(doing))
+        source_path = camp.session.get_one(Document, unread.id).source_path
+        assert source_path is not None
+
+        assert _entry(camp, cut_over)["pilots_work"] == _pilots(
+            "waiting_on_answer",
+            _link(doing, "Building the camp"),
+            False,
+            _link(unread, PurePosixPath(source_path).name),
+        )
 
     def test_a_researched_block_is_held_in_a_document_that_is_the_persons(
         self, camp: Camp
