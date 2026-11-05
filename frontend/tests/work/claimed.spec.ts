@@ -62,8 +62,10 @@ options:
   - Monday
 ${recommended ? 'recommend: Friday\n' : ''}\`\`\`
 ${recommended ? THE_HOUR : ''}`;
+const ROLL_OUT_PATH = '/work/Example/roll-out.md';
+const ROLL_OUT_TITLE = 'The roll-out';
 // A one-ask document: its one action, under the title alone, claimed by the pass.
-const ROLL_OUT = `# The roll-out
+const ROLL_OUT = `# ${ROLL_OUT_TITLE}
 
 \`\`\`action id=A1
 answer: Pilot does it
@@ -86,10 +88,10 @@ interface Fixtures {
 
 /**
  * A document of `text`, the cut-over or another whose action A1 the pass claimed, registered by a work
- * item's run in a project of the signed-in person's, read at the run's end, and the pass after it
- * ended; answers their ids.
+ * item's run in a project of the signed-in person's, with the roll-out after it where `rollOut` says
+ * so, read at the run's end, and the pass after it ended; answers their ids.
  */
-async function registered({ people, projects, controller, chats }: Fixtures, text: string) {
+async function registered({ people, projects, controller, chats }: Fixtures, text: string, rollOut = false) {
   const me = await people.signIn();
   const project = await projects.make({ name: makeUnique('Claimed'), members: [me.handle!] });
   const work = await projects.startWork(project, { title: 'Planning the cut-over', brief: 'Plan the cut-over.', cwd: '/work/Example' });
@@ -97,29 +99,36 @@ async function registered({ people, projects, controller, chats }: Fixtures, tex
   const { id: environment } = await projects.environment(project, work);
   await controller.putFile(environment, CUT_OVER_PATH, text);
   const document = await projects.register(work, CUT_OVER_PATH);
+  const others: string[] = [];
+  if (rollOut) {
+    await controller.putFile(environment, ROLL_OUT_PATH, ROLL_OUT);
+    others.push(await projects.register(work, ROLL_OUT_PATH));
+  }
   const passed = await chats.passing(project);
   await controller.finish(environment, 'claude-1');
-  await expect.poll(async () => (await projects.item(project, document)).awaiting_read).toBe(false);
+  for (const each of [document, ...others]) {
+    await expect.poll(async () => (await projects.item(project, each)).awaiting_read).toBe(false);
+  }
   await passed();
-  return { project, document };
+  return { project, document, others };
 }
 
 /**
- * The cut-over, A1 under `heading`, or the document of `text`, registered, and the work item that
- * does A1 placed, the project paused first where `paused` says so, which holds that work at the gate;
- * answers their ids.
+ * The cut-over, A1 under `heading`, or the document of `text`, registered, the roll-out with it where
+ * `rollOut` says so, and the work item that does A1 of each placed, the project paused first where
+ * `paused` says so, which holds that work at the gate; answers their ids.
  */
-async function claimed(fixtures: Fixtures, { heading = TOKEN, paused = false, text = cutOver(heading) } = {}) {
+async function claimed(fixtures: Fixtures, { heading = TOKEN, paused = false, text = cutOver(heading), rollOut = false } = {}) {
   const { projects } = fixtures;
-  const { project, document } = await registered(fixtures, text);
+  const { project, document, others } = await registered(fixtures, text, rollOut);
   if (paused) await projects.transition(project, 'paused');
   const rotating = await projects.startWork(project, {
     title: ROTATING,
     brief: 'Rotate the CI token.',
     cwd: '/work/Example',
-    claims: [`${document}/A1`],
+    claims: [document, ...others].map((each) => `${each}/A1`),
   });
-  return { project, document, rotating };
+  return { project, document, rotating, others };
 }
 
 /** The environment of a work item's running session, and that session's name. */
@@ -140,13 +149,13 @@ async function turnOf({ projects, controller }: Fixtures, project: string, work:
 const colourOf = (segment: Locator) => segment.evaluate((each) => getComputedStyle(each).backgroundColor);
 
 /**
- * The cut-over claimed, D1 answered, and the work doing A1 registering a question to the person at
- * its turn's end, read, the pass after it ended, so that the run waits on their answer; answers the
- * ids, the question's `asking`.
+ * The cut-over claimed, the roll-out with it where `rollOut` says so, D1 answered, and the work doing
+ * A1 registering a question to the person at its turn's end, read, the pass after it ended, so that
+ * the run waits on their answer; answers the ids, the question's `asking`.
  */
-async function waiting(fixtures: Fixtures, heading = TOKEN) {
+async function waiting(fixtures: Fixtures, heading = TOKEN, rollOut = false) {
   const { projects, controller, chats } = fixtures;
-  const { project, document, rotating } = await claimed(fixtures, { heading });
+  const { project, document, rotating, others } = await claimed(fixtures, { heading, rollOut });
   await projects.answer(document, 'D1', 'Friday');
   const { environment, session } = await turnOf(fixtures, project, rotating);
   await controller.putFile(environment, ASK_PATH, ASK);
@@ -156,7 +165,7 @@ async function waiting(fixtures: Fixtures, heading = TOKEN) {
   await expect.poll(async () => (await projects.item(project, asking)).awaiting_read).toBe(false);
   await passed();
   await expect.poll(async () => (await projects.item(project, document)).pilots_work?.doing).toBe('waiting_on_answer');
-  return { project, document, asking };
+  return { project, document, asking, others };
 }
 
 test.describe('A claimed action', () => {
@@ -359,6 +368,23 @@ test.describe('A claimed action', () => {
     await action.done.click();
     await expect(action.answered).toBeVisible();
     await expect(action.claim).toHaveCount(0);
+  });
+
+  test('held with the action of a one-ask document by a run that waits on the person, that run’s Cancel links both documents and names each action, the one with no section of its own by its document’s title', async ({
+    people,
+    projects,
+    controller,
+    chats,
+    overlay,
+  }) => {
+    const { project, document, asking, others } = await waiting({ people, projects, controller, chats }, TOKEN, true);
+
+    await overlay.open(project, asking);
+    await expect(overlay.cancel.line).toHaveText(`Pilot asks this as part of its work on ${CUT_OVER_TITLE} and ${ROLL_OUT_TITLE}.`);
+    await expect(overlay.cancel.links).toHaveCount(2);
+    await expect(overlay.cancel.links.nth(0)).toHaveAttribute('href', documentAddress(project, document));
+    await expect(overlay.cancel.links.nth(1)).toHaveAttribute('href', documentAddress(project, others[0]));
+    await expect(overlay.cancel.button).toHaveText(`Cancel and take back “${TOKEN}” and “${ROLL_OUT_TITLE}”`);
   });
 
   test('once the work doing it is stopped, it unfolds with its controls, its head saying Pilot’s work left it undone, and a person’s Done marks it done as any action’s, the claim gone, and the document’s answers can be sent', async ({
