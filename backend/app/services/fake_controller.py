@@ -21,10 +21,11 @@ A headless session takes the lowest free name, as KubeCoder's do, a name freed
 when its session ends or its environment restarts or loses its pod, so that a
 name may come back holding another conversation; the fake numbers its names
 from `claude-1`, where KubeCoder's first is `claude`. A session's conversation
-is the one its create resumed, else the first its lines name, as the worker
-reads it from `claude`'s output.
+is the one its create resumed, else the first its lines name.
 
-Simplifications of the real controller: an environment that is not `running` holds no
+Simplifications of the real controller: a session keeps the first conversation
+it is bound to, where the worker takes the last id a turn's stream reports, so
+no suite meets a conversation bound anew; an environment that is not `running` holds no
 headless session; `wait=settled` is `wait=ready`, since no setup runs here; the
 create and the reset answer at once, taking no `wait`; a delete's teardown ends
 as it is answered; the node's cap is a flag, of the node or of one environment,
