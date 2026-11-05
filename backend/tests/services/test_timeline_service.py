@@ -3442,6 +3442,64 @@ class TestPilotsWork:
         assert _entry(camp, survey)["cancel"] is None
 
 
+class TestJobsOnItems:
+    """Pilot's job on each item it follows from, and the job after a worker's
+    run's turn, with the job's session as its own line shows it (F59.1), as
+    the reading places them (`working_on.jobs_on`)."""
+
+    @pytest.fixture
+    def camp(
+        self, container: ServiceContainer, session: DbSession, person: User
+    ) -> Camp:
+        return Camp(container, session)
+
+    def test_a_documents_entry_carries_its_pass_and_its_runs_the_job_after_its_turn(
+        self, camp: Camp
+    ) -> None:
+        run = camp.worker()
+        survey = camp.registered(run, _SURVEY)
+        camp.ended(run)
+        job = camp.job_after(run, SessionState.FAILED)
+
+        entries = {entry["id"]: entry for entry in _items(camp.container, camp.project)}
+
+        own = entries[str(job.id)]
+        assert own["work"]["state"] == "failed"
+        shown = {"id": str(job.id), "title": "Pre-ruling", "work": own["work"]}
+        document, line = entries[str(survey.id)], entries[str(run.id)]
+        assert (document["job"], document["after_turn"]) == (shown, None)
+        assert (line["job"], line["after_turn"]) == (None, shown)
+        assert (own["job"], own["after_turn"]) == (None, None)
+
+    def test_a_runs_entry_that_registered_nothing_carries_its_job_both_ways(
+        self, camp: Camp
+    ) -> None:
+        run = camp.worker()
+        camp.ended(run)
+        job = camp.job_after(run, SessionState.FAILED)
+        retry = camp.retried(job, SessionState.RUNNING)
+
+        entry = _entry(camp, camp.line(run))
+
+        shown = {
+            "id": str(retry.id),
+            "title": "Pre-ruling",
+            "work": _entry(camp, camp.line(retry))["work"],
+        }
+        assert shown["work"]["state"] == "running"
+        assert (entry["job"], entry["after_turn"]) == (shown, shown)
+
+    def test_a_document_read_on_its_own_carries_the_job_on_it(self, camp: Camp) -> None:
+        run = camp.worker()
+        survey = camp.registered(run, _SURVEY)
+        camp.ended(run)
+        camp.job_after(run, SessionState.HELD)
+
+        shown = _read(camp.container, survey)["job"]
+        assert shown is not None
+        assert shown == _entry(camp, survey)["job"]
+
+
 @pytest.mark.usefixtures("person")
 class TestInTheChat:
     """Where a block's answer given in the chat was recorded, which *In the

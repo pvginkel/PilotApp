@@ -24,6 +24,7 @@ from app.services.pilot_work_service import Worker
 from app.services.project_event_service import ProjectEventService
 from app.services.sse_connection_manager import SSEConnection, SSEConnectionManager
 from app.utils.after_commit import clear_after_commit_callbacks
+from tests.support.working_on import Camp
 
 DECISION = """---
 title: Which tent?
@@ -297,6 +298,39 @@ class TestProjectEventService:
             },
         }
         assert (frames(ada_tab), frames(ben_tab)) == ([moved], [moved])
+
+    def test_a_jobs_move_carries_its_status_as_the_items_it_shows_on_hold_it(
+        self,
+        container: ServiceContainer,
+        session: DbSession,
+        connect: Connect,
+        person: User,
+    ) -> None:
+        """F59.1: the job's move reaches each item it shows on, whose `job`
+        holds the job's id and its status as the event carries them."""
+        camp = Camp(container, session)
+        run = camp.worker()
+        survey = camp.registered(run, "# The survey\n\nNine of ten want the lake.\n")
+        camp.ended(run)
+        job = camp.job_after(run, SessionState.HELD)
+        clear_after_commit_callbacks()
+        tab = connect("ada-1", person.subject)
+
+        with scoped_session(container):
+            container.engine_bus().emit(WorkMoved(camp.project.id, job.id))
+
+        shown = container.timeline_service().item_document(survey.id).job
+        assert shown is not None
+        assert frames(tab) == [
+            {
+                "type": "work_moved",
+                "payload": {
+                    "project_id": str(camp.project.id),
+                    "item_id": str(shown.id),
+                    "work": shown.work.model_dump(mode="json"),
+                },
+            }
+        ]
 
     def test_a_change_of_a_work_items_steps_carries_its_list_and_nothing_else(
         self,

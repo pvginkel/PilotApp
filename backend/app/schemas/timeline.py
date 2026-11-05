@@ -703,6 +703,25 @@ class WorkSchema(BaseModel):
     )
 
 
+class JobSchema(BaseModel):
+    """One of Pilot's jobs on an item it follows from (F59.1), as that
+    item's line and its opened head show it: read at every read, never
+    stored."""
+
+    id: uuid.UUID = Field(description="The job's work item, its session log's address")
+    title: str = Field(
+        description="The job's title, as its own line shows it",
+        examples=["Pre-ruling docs/3"],
+    )
+    work: WorkSchema = Field(
+        description=(
+            "The job's session, as its own line's `work` shows it: queued or "
+            "running, ended, or failed or stopped and whether it offers Retry; "
+            "the SSE event `work_moved` carries it for the job's id as it moves"
+        )
+    )
+
+
 class WriterQuestionSchema(BaseModel):
     """A question Pilot asked a registered document's writer about one of its
     blocks (F52.2), with the writer's answer to it."""
@@ -988,6 +1007,26 @@ class TimelineItemSchema(BaseModel):
             "The Cancel it offers while it is an open registered document of a "
             "run that holds a block of another document, it is the person's, "
             "and nothing of the run is in flight (DB 297); null otherwise"
+        )
+    )
+    job: JobSchema | None = Field(
+        description=(
+            "Pilot's job that shows on it, whatever the job's state (F59.1): on a "
+            "registered document, the pass over what its run registered, or the "
+            "pass after its writer's reply; on any other item, the job it "
+            "triggered: the job after a worker's run's turn that registered no "
+            "document, the job after a close of an item of Pilot's, a wait's "
+            "run. The latest placed where several stand on it, a Retry over the "
+            "job it retries, a wait's latest run; never a withdrawn job, nor "
+            "the setup. Null where none shows"
+        )
+    )
+    after_turn: JobSchema | None = Field(
+        description=(
+            "A worker's run's: the job after its turn, its latest Retry where "
+            "it was retried, which its session log's head carries, wherever "
+            "the job shows (F59.1); null until it is placed, and for every "
+            "other item"
         )
     )
 

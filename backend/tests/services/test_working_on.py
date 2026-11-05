@@ -20,7 +20,7 @@ from app.models import (
     Turn,
     User,
 )
-from app.models.reference import SessionState
+from app.models.reference import SessionState, WorkTrigger
 from app.schemas.projects import ProjectStatus
 from app.services.auth_service import AuthContext
 from app.services.container import ServiceContainer
@@ -28,6 +28,7 @@ from app.services.timeline_service import Badge
 from app.services.working_on import (
     Cancel,
     Doing,
+    JobsOn,
     PilotsWork,
     TakenBack,
     cancels,
@@ -891,3 +892,142 @@ class TestHoldingWork:
         camp.ended(run)
 
         assert holding_work(camp.session, pitch.id) == []
+
+
+class TestJobsOn:
+    """Which of Pilot's jobs shows on an item, whatever its state, and the
+    job after a worker's run's turn (F59.1)."""
+
+    @pytest.mark.parametrize("ending", ["queued", "running", "ended", "failed"])
+    def test_a_pass_shows_on_every_document_its_run_registered_not_on_the_run(
+        self, camp: Camp, ending: str
+    ) -> None:
+        run = camp.worker()
+        survey, pitch = camp.registered(run, REPORT), camp.registered(run, QUESTION)
+        camp.ended(run)
+        job = camp.job_after(run, SessionState.HELD)
+
+        if ending == "running":
+            job.state_code = SessionState.RUNNING
+        elif ending == "ended":
+            camp.ended(job)
+        elif ending == "failed":
+            job.state_code = SessionState.FAILED
+        camp.session.flush()
+
+        assert camp.jobs(camp.line(run), survey, pitch, camp.line(job)) == JobsOn(
+            {survey.id: job.id, pitch.id: job.id}, {run.id: job.id}
+        )
+
+    def test_the_job_after_a_turn_that_registered_nothing_shows_on_the_run(
+        self, camp: Camp
+    ) -> None:
+        run = camp.worker()
+        camp.ended(run)
+        job = camp.job_after(run)
+
+        assert camp.jobs(camp.line(run)) == JobsOn({run.id: job.id}, {run.id: job.id})
+
+    def test_a_pass_shows_on_a_document_read_alone(self, camp: Camp) -> None:
+        run = camp.worker()
+        pitch = camp.registered(run, QUESTION)
+        camp.ended(run)
+        job = camp.job_after(run)
+
+        assert camp.jobs(pitch) == JobsOn({pitch.id: job.id}, {})
+
+    def test_a_retry_stands_on_the_same_items_the_latest_showing(
+        self, camp: Camp, person: User
+    ) -> None:
+        writer = camp.worker()
+        pitch = camp.registered(writer, QUESTION)
+        camp.ended(writer)
+        failed = camp.job_after(writer, SessionState.FAILED)
+        quiet = camp.worker()
+        camp.ended(quiet)
+        stopped = camp.job_after(quiet)
+        camp.stopped(stopped, by=person)
+
+        pitch_retry = camp.retried(failed, SessionState.HELD)
+        quiet_retry = camp.retried(stopped, SessionState.HELD)
+
+        assert camp.jobs(camp.line(writer), pitch, camp.line(quiet)) == JobsOn(
+            {pitch.id: pitch_retry.id, quiet.id: quiet_retry.id},
+            {writer.id: pitch_retry.id, quiet.id: quiet_retry.id},
+        )
+
+    def test_the_pass_after_the_writers_reply_shows_on_the_documents_it_pre_rules(
+        self, camp: Camp
+    ) -> None:
+        run = camp.worker(conversation="conversation-1")
+        pitch, survey = camp.registered(run, QUESTION), camp.registered(run, REPORT)
+        camp.ended(run)
+        pass_ = camp.job_after(run)
+        camp.ask_writer(pass_, pitch, "Q1")
+        camp.ended(pass_)
+        asking = camp.clarification(pass_, run)
+        lines = (camp.line(run), pitch, survey, camp.line(asking))
+
+        assert camp.jobs(*lines) == JobsOn(
+            {pitch.id: pass_.id, survey.id: pass_.id}, {run.id: pass_.id}
+        )
+
+        camp.ended(asking)
+        after = camp.job_after(asking)
+
+        assert camp.jobs(*lines) == JobsOn(
+            {pitch.id: after.id, survey.id: pass_.id},
+            {run.id: pass_.id, asking.id: after.id},
+        )
+
+    def test_the_job_after_a_close_shows_on_the_item_closed_a_withdrawn_one_nowhere(
+        self, camp: Camp
+    ) -> None:
+        notice = camp.registered(camp.worker(), REPORT)
+        first = camp.job_on(notice, WorkTrigger.ITEM_DONE, SessionState.HELD)
+
+        assert camp.jobs(notice) == JobsOn({notice.id: first.id}, {})
+
+        camp.container.job_service().withdraw(first, AT)
+
+        assert camp.jobs(notice) == JobsOn({}, {})
+
+    def test_a_wait_shows_its_latest_run_a_withdrawn_one_never(
+        self, camp: Camp
+    ) -> None:
+        wait = camp.wait(camp.worker())
+        first = camp.job_on(wait, WorkTrigger.WAIT_FIRED)
+        camp.ended(first)
+        second = camp.job_on(wait, WorkTrigger.WAIT_FIRED, SessionState.HELD)
+
+        assert camp.jobs(wait) == JobsOn({wait.id: second.id}, {})
+
+        camp.container.job_service().withdraw(second, AT)
+
+        assert camp.jobs(wait) == JobsOn({wait.id: first.id}, {})
+
+    def test_the_setup_shows_on_no_item(self, camp: Camp) -> None:
+        setup = camp.job_on(None, WorkTrigger.SETUP, SessionState.IDLE)
+        opening = camp.session.scalars(
+            select(Item).where(Item.project_id == camp.project.id, Item.seq == 1)
+        ).one()
+
+        assert camp.jobs(opening, camp.line(setup)) == JobsOn({}, {})
+
+    def test_a_run_that_continues_a_conversation_is_no_job_on_what_released_it(
+        self, camp: Camp
+    ) -> None:
+        # A run that continues a conversation after Done names the item whose
+        # close released it (DB decision 44), and is a worker's run.
+        run = camp.worker(SessionState.IDLE, conversation="conversation-1")
+        pitch = camp.registered(run, QUESTION)
+        camp.ended(run)
+        pass_ = camp.job_after(run)
+        camp.ended(pass_)
+        continuing = camp.worker(conversation="conversation-1")
+        camp.session.get_one(models.Work, continuing.id).trigger_item_id = pitch.id
+        camp.session.flush()
+
+        assert camp.jobs(pitch, camp.line(continuing)) == JobsOn(
+            {pitch.id: pass_.id}, {}
+        )

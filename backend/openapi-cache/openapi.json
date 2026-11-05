@@ -2560,6 +2560,17 @@
       "ItemDocumentSchema.1fdd8ae": {
         "description": "An item's document read on its own, as the overlay draws it (F28): its\ntimeline entry, but that a document done by Done reads as Done fixed it\n(F13.3), its `title`, `summary`, `body`, `word_count` and `read_minutes`\nfrom the text of its `done` Version.",
         "properties": {
+          "after_turn": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.JobSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A worker's run's: the job after its turn, its latest Retry where it was retried, which its session log's head carries, wherever the job shows (F59.1); null until it is placed, and for every other item"
+          },
           "attachments": {
             "description": "The files hung on the item, in their order, on every kind (F17.5)",
             "items": {
@@ -2708,6 +2719,17 @@
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "job": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.JobSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pilot's job that shows on it, whatever the job's state (F59.1): on a registered document, the pass over what its run registered, or the pass after its writer's reply; on any other item, the job it triggered: the job after a worker's run's turn that registered no document, the job after a close of an item of Pilot's, a wait's run. The latest placed where several stand on it, a Retry over the job it retries, a wait's latest run; never a withdrawn job, nor the setup. Null where none shows"
           },
           "kind": {
             "description": "The item's kind",
@@ -2897,6 +2919,8 @@
           "wait",
           "pilots_work",
           "cancel",
+          "job",
+          "after_turn",
           "project_id"
         ],
         "title": "ItemDocumentSchema",
@@ -3775,6 +3799,36 @@
           "asked_in"
         ],
         "title": "HoldSchema",
+        "type": "object"
+      },
+      "ItemDocumentSchema.1fdd8ae.JobSchema": {
+        "description": "One of Pilot's jobs on an item it follows from (F59.1), as that\nitem's line and its opened head show it: read at every read, never\nstored.",
+        "properties": {
+          "id": {
+            "description": "The job's work item, its session log's address",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "description": "The job's title, as its own line shows it",
+            "examples": [
+              "Pre-ruling docs/3"
+            ],
+            "title": "Title",
+            "type": "string"
+          },
+          "work": {
+            "$ref": "#/components/schemas/ItemDocumentSchema.1fdd8ae.WorkSchema",
+            "description": "The job's session, as its own line's `work` shows it: queued or running, ended, or failed or stopped and whether it offers Retry; the SSE event `work_moved` carries it for the job's id as it moves"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "work"
+        ],
+        "title": "JobSchema",
         "type": "object"
       },
       "ItemDocumentSchema.1fdd8ae.LineAgentSchema": {
@@ -8709,6 +8763,36 @@
         "title": "HoldSchema",
         "type": "object"
       },
+      "TimelineSchema.1fdd8ae.JobSchema": {
+        "description": "One of Pilot's jobs on an item it follows from (F59.1), as that\nitem's line and its opened head show it: read at every read, never\nstored.",
+        "properties": {
+          "id": {
+            "description": "The job's work item, its session log's address",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "title": {
+            "description": "The job's title, as its own line shows it",
+            "examples": [
+              "Pre-ruling docs/3"
+            ],
+            "title": "Title",
+            "type": "string"
+          },
+          "work": {
+            "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.WorkSchema",
+            "description": "The job's session, as its own line's `work` shows it: queued or running, ended, or failed or stopped and whether it offers Retry; the SSE event `work_moved` carries it for the job's id as it moves"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "work"
+        ],
+        "title": "JobSchema",
+        "type": "object"
+      },
       "TimelineSchema.1fdd8ae.LineAgentSchema": {
         "description": "The sub-agent a current line waits on, from its `Task` call.",
         "properties": {
@@ -9101,6 +9185,17 @@
       "TimelineSchema.1fdd8ae.TimelineItemSchema": {
         "description": "An entry on the timeline, with what its line and its open form show.",
         "properties": {
+          "after_turn": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.JobSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A worker's run's: the job after its turn, its latest Retry where it was retried, which its session log's head carries, wherever the job shows (F59.1); null until it is placed, and for every other item"
+          },
           "attachments": {
             "description": "The files hung on the item, in their order, on every kind (F17.5)",
             "items": {
@@ -9249,6 +9344,17 @@
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "job": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TimelineSchema.1fdd8ae.JobSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pilot's job that shows on it, whatever the job's state (F59.1): on a registered document, the pass over what its run registered, or the pass after its writer's reply; on any other item, the job it triggered: the job after a worker's run's turn that registered no document, the job after a close of an item of Pilot's, a wait's run. The latest placed where several stand on it, a Retry over the job it retries, a wait's latest run; never a withdrawn job, nor the setup. Null where none shows"
           },
           "kind": {
             "description": "The item's kind",
@@ -9431,7 +9537,9 @@
           "work",
           "wait",
           "pilots_work",
-          "cancel"
+          "cancel",
+          "job",
+          "after_turn"
         ],
         "title": "TimelineItemSchema",
         "type": "object"

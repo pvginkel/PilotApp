@@ -83,6 +83,7 @@ from app.schemas.timeline import (
     ItemDocumentSchema,
     ItemForm,
     ItemKindCode,
+    JobSchema,
     OptionSchema,
     PilotsWorkSchema,
     ProjectDocumentSchema,
@@ -119,7 +120,14 @@ from app.services.start_gate import (
 from app.services.store_update_service import stopped_for_update, unlifted
 from app.services.usage_halts import UsageHalts
 from app.services.wait_service import REQUESTS, ShownFiring, WaitService
-from app.services.working_on import TakenBack, cancels, holds, pilots, pilots_work
+from app.services.working_on import (
+    TakenBack,
+    cancels,
+    holds,
+    jobs_on,
+    pilots,
+    pilots_work,
+)
 
 WORK = "work"
 WAIT = "wait"
@@ -668,13 +676,22 @@ class TimelineService:
         asked = writer_asked(self.db, documents)
         clarified = on_documents(self.db, documents)
         pilots = self._pilots(documents, list(bodies))
+        on = jobs_on(self.db, [item.id for item, _, _ in rows])
+        job_ids = set(on.shown.values()) | set(on.after_turn.values())
         works = work_status(
             self.db,
-            [item.id for item, _, form in rows if form == WORK],
+            {item.id for item, _, form in rows if form == WORK} | job_ids,
             unreachable=self.controller_outage.holds,
             halts=self.usage_halts,
             slots=self.work_slots,
         )
+        job_titles = self._titles(job_ids)
+
+        def job(job_id: uuid.UUID | None) -> JobSchema | None:
+            if job_id is None:
+                return None
+            return JobSchema(id=job_id, title=job_titles[job_id], work=works[job_id])
+
         waits = [item for item, _, form in rows if form == WAIT]
         fields = {
             wait.id: wait
@@ -795,9 +812,21 @@ class TimelineService:
                 ),
                 pilots_work=pilots.items.get(item.id),
                 cancel=pilots.cancels.get(item.id),
+                job=job(on.shown.get(item.id)),
+                after_turn=job(on.after_turn.get(item.id)),
             )
             for item, document, form in rows
         ]
+
+    def _titles(self, item_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, str]:
+        """The titles of the work items `item_ids`, each of which has one."""
+        titles: dict[uuid.UUID, str] = {}
+        for item_id, title in self.db.execute(
+            select(Item.id, Item.title).where(Item.id.in_(list(item_ids)))
+        ):
+            assert title is not None
+            titles[item_id] = title
+        return titles
 
     def _fixed_at_done(self, item: Item) -> str | None:
         """The text Done fixed of an item it marked done (F13.3), from its

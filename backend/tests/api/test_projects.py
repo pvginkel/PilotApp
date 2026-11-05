@@ -538,6 +538,8 @@ class TestGetTimeline:
                     "wait": None,
                     "pilots_work": None,
                     "cancel": None,
+                    "job": None,
+                    "after_turn": None,
                 },
                 {
                     "id": str(decision.id),
@@ -614,6 +616,8 @@ class TestGetTimeline:
                     "wait": None,
                     "pilots_work": None,
                     "cancel": None,
+                    "job": None,
+                    "after_turn": None,
                 },
                 {
                     "id": str(notice.id),
@@ -651,6 +655,8 @@ class TestGetTimeline:
                     "wait": None,
                     "pilots_work": None,
                     "cancel": None,
+                    "job": None,
+                    "after_turn": None,
                 },
             ],
             "ready_after": None,

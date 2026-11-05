@@ -4,7 +4,7 @@ documents made as the server makes them."""
 
 import itertools
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
@@ -21,13 +21,14 @@ from app.models import (
     ResearchAssignment,
     Turn,
     User,
+    Wait,
     Work,
     WriterQuestion,
 )
 from app.models.reference import SessionState, UserKind, WorkTrigger
 from app.schemas.testing_record import InventedProjectCreateSchema
 from app.services.container import ServiceContainer
-from app.services.working_on import PilotsWork, pilots, pilots_work
+from app.services.working_on import JobsOn, PilotsWork, jobs_on, pilots, pilots_work
 
 AT = datetime(2026, 11, 2, 9, 0, tzinfo=UTC)
 
@@ -91,23 +92,63 @@ class Camp:
         )
         return job
 
+    def job_on(
+        self,
+        item: Item | None,
+        trigger: WorkTrigger,
+        state: SessionState = SessionState.RUNNING,
+    ) -> models.Session:
+        """A job of `trigger` that `item` triggered: the job after a close
+        of an item of Pilot's, a wait's run; the setup with no item."""
+        job = self._session("job", state, None)
+        self.container.record_service().place_work(
+            self.project,
+            job,
+            f"Job of {trigger.value}",
+            trigger=trigger,
+            trigger_item_id=None if item is None else item.id,
+        )
+        return job
+
     def retried(
         self, job: models.Session, state: SessionState = SessionState.RUNNING
     ) -> models.Session:
         """A Retry of the job: a fresh one for its trigger, marking it
         retried."""
-        trigger = self.session.get_one(Work, job.id).trigger_item_id
+        work = self.session.get_one(Work, job.id)
+        assert work.trigger_code is not None
         retry = self._session("job", state, None)
         self.container.record_service().place_work(
             self.project,
             retry,
             "Pre-ruling",
-            trigger=WorkTrigger.WORKER_TURN_ENDED,
-            trigger_item_id=trigger,
+            trigger=work.trigger_code,
+            trigger_item_id=work.trigger_item_id,
         )
         self.session.get_one(Work, job.id).retried_by_id = retry.id
         self.session.flush()
         return retry
+
+    def wait(self, run: models.Session) -> Item:
+        """An open timed wait the run placed."""
+        wait = Item(
+            project_id=self.project.id,
+            seq=self.container.document_service().next_seq(self.project),
+            kind_code="timed_wait",
+            title="The site opens",
+            created_by_session_id=run.id,
+        )
+        self.session.add(wait)
+        self.session.flush()
+        self.session.add(
+            Wait(id=wait.id, kind_code="timed_wait", due_at=AT + timedelta(hours=1))
+        )
+        self.session.flush()
+        return wait
+
+    def line(self, run: models.Session) -> Item:
+        """The work item's Item, its line."""
+        return self.session.get_one(Item, run.id)
 
     def ended(self, run: models.Session) -> None:
         """The run's turn ended well: its Session idle, its work item done."""
@@ -225,3 +266,8 @@ class Camp:
 
     def of(self, document: Item) -> PilotsWork | None:
         return self.reading(document).get(document.id)
+
+    def jobs(self, *items: Item) -> JobsOn:
+        """Which of Pilot's jobs each item shows, and the job after each
+        worker's run's turn among them."""
+        return jobs_on(self.session, [item.id for item in items])

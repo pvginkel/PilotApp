@@ -1,10 +1,11 @@
-"""What Pilot is working on (F13.7, F21.6, F28.9, F52.3, F94.5; DB 294 to
-296), read from the rows at every read and never stored: whether a Work is in
-flight, whether a Block is held and by which run, and whether a registered
+"""What Pilot is working on (F13.7, F21.6, F28.9, F52.3, F59.1, F94.5; DB 294
+to 296), read from the rows at every read and never stored: whether a Work is
+in flight, whether a Block is held and by which run, whether a registered
 document is Pilot's, with what Pilot does on it, the work item to link and
-whether its line pulses. `waiting()`, and through it the badge, the project's
-status and the standing notification, reads it from here, and so does every
-other reader of what Pilot does on an item.
+whether its line pulses, and which of Pilot's jobs shows on an item.
+`waiting()`, and through it the badge, the project's status and the standing
+notification, reads it from here, and so does every other reader of what
+Pilot does on an item.
 
 A hold lasts through the run (the rulings of slice 036's planning, over DB 262
 and 295): the Work a Block's standing Claim Assignment or Research Assignment
@@ -49,7 +50,7 @@ from sqlalchemy.orm import QueryableAttribute, Session, aliased
 from app.engine import claims, researches
 from app.engine.claims import claimed
 from app.engine.documents import awaiting_read
-from app.engine.record import CANCELLED, TURN_ENDED
+from app.engine.record import CANCELLED, TURN_ENDED, WITHDRAWN
 from app.models import (
     Block,
     ClarificationRun,
@@ -398,17 +399,22 @@ def _awaiting(document: type[Item]) -> ColumnElement[bool]:
     )
 
 
-def _passing(document: type[Item], job: _Rows) -> Select[uuid.UUID]:
-    """The jobs `job` of the pass over the registered document `document`
-    in flight: the job after the turn of the run that registered it, a Retry
-    of it included (DB 296). Never a work item: its own Session creates its
-    Item too, which the job after its turn would otherwise find."""
+def _pass_over(document: type[Item], job: _Rows) -> Select[uuid.UUID]:
+    """The jobs `job` of the pass over the registered document `document`:
+    the job after the turn of the run that registered it, a Retry of it
+    included (DB 296). Never a work item: its own Session creates its Item
+    too, which the job after its turn would otherwise find."""
     return job.select(
         job.work.trigger_code == WorkTrigger.WORKER_TURN_ENDED,
         job.work.trigger_item_id == document.created_by_session_id,
         _registered(document),
-        job.in_flight(),
     )
+
+
+def _passing(document: type[Item], job: _Rows) -> Select[uuid.UUID]:
+    """The jobs `job` of the pass over the registered document `document`
+    in flight."""
+    return _pass_over(document, job).where(job.in_flight())
 
 
 def _asked_about(
@@ -438,17 +444,20 @@ def _asking(document: type[Item], run: _Rows) -> Select[uuid.UUID]:
     return _asked_about(run.select(run.in_flight()), run.work.id, document)
 
 
-def _after_reply(document: type[Item], job: _Rows) -> Select[uuid.UUID]:
-    """The jobs `job` in flight after the turn of a clarification run that
-    asked the writer about `document`, a Retry of one included (DB 256,
-    296)."""
+def _replied(document: type[Item], job: _Rows) -> Select[uuid.UUID]:
+    """The jobs `job` after the turn of a clarification run that asked the
+    writer about `document`, a Retry of one included (DB 256, 296): the pass
+    after the writer's reply."""
     return _asked_about(
-        job.select(
-            job.work.trigger_code == WorkTrigger.WORKER_TURN_ENDED, job.in_flight()
-        ),
+        job.select(job.work.trigger_code == WorkTrigger.WORKER_TURN_ENDED),
         job.work.trigger_item_id,
         document,
     )
+
+
+def _after_reply(document: type[Item], job: _Rows) -> Select[uuid.UUID]:
+    """The jobs `job` after the writer's reply about `document` in flight."""
+    return _replied(document, job).where(job.in_flight())
 
 
 @cache
@@ -586,6 +595,81 @@ def pilots_work(
                 PilotsWork(first.doing, first.work_id, first.pulse, first.asked_in),
             )
     return found
+
+
+@dataclass(frozen=True)
+class JobsOn:
+    """Pilot's jobs on items (F59.1), by the jobs' ids."""
+
+    shown: Mapping[uuid.UUID, uuid.UUID]
+    """The job each item shows, by the item's id."""
+    after_turn: Mapping[uuid.UUID, uuid.UUID]
+    """The job after each worker's run's turn, by the run's id."""
+
+
+def _not_withdrawn(job: _Rows) -> ColumnElement[bool]:
+    """The job `job` was not withdrawn before its brief (`JobService.withdraw`)."""
+    return job.item.done_cause_code.is_distinct_from(WITHDRAWN)
+
+
+def jobs_on(db: Session, item_ids: Collection[uuid.UUID]) -> JobsOn:
+    """Which of Pilot's jobs each of the Items `item_ids` shows (F59.1),
+    whatever its state: a pass on every registered document its trigger run
+    registered, and the pass after the writer's reply on every document the
+    pass before it asked the writer about, as `pilots()` reads them; any
+    other job on its trigger item, the worker's run whose turn ended, the
+    item of Pilot's that was closed or the wait that fired; the setup, which
+    has none, on no item. Where several stand on one item, the latest placed
+    shows, a Retry over the job it retries; a withdrawn job shows nowhere.
+    And for each worker's run among them, the job after its turn, the latest
+    of it and its Retries, wherever it shows."""
+    wanted = list(item_ids)
+    among = set(wanted)
+    shown: dict[uuid.UUID, tuple[int, uuid.UUID]] = {}
+    after_turn: dict[uuid.UUID, tuple[int, uuid.UUID]] = {}
+
+    def latest(
+        found: dict[uuid.UUID, tuple[int, uuid.UUID]],
+        item_id: uuid.UUID,
+        seq: int,
+        job_id: uuid.UUID,
+    ) -> None:
+        if item_id not in found or found[item_id][0] < seq:
+            found[item_id] = (seq, job_id)
+
+    passes: set[uuid.UUID] = set()
+    for over in (_pass_over, _replied):
+        rows = _Rows.new()
+        for document_id, job_id, seq in db.execute(
+            over(Item, rows)
+            .with_only_columns(Item.id, rows.work.id, rows.item.seq)
+            .where(
+                or_(Item.id.in_(wanted), rows.work.trigger_item_id.in_(wanted)),
+                _not_withdrawn(rows),
+            )
+        ):
+            passes.add(job_id)
+            if document_id in among:
+                latest(shown, document_id, seq, job_id)
+    job = _Rows.new()
+    for trigger_id, trigger, job_id, seq in db.execute(
+        job.select(
+            job.work.trigger_code.is_not(None),
+            job.work.trigger_item_id.in_(wanted),
+            _not_withdrawn(job),
+        ).with_only_columns(
+            job.work.trigger_item_id, job.work.trigger_code, job.work.id, job.item.seq
+        )
+    ):
+        assert trigger_id is not None
+        if trigger is WorkTrigger.WORKER_TURN_ENDED:
+            latest(after_turn, trigger_id, seq, job_id)
+        if job_id not in passes:
+            latest(shown, trigger_id, seq, job_id)
+    return JobsOn(
+        {item_id: job_id for item_id, (_, job_id) in shown.items()},
+        {run_id: job_id for run_id, (_, job_id) in after_turn.items()},
+    )
 
 
 def flying(db: Session, work_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
