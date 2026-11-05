@@ -586,7 +586,9 @@ class TestNudgeWiring:
         )
         client = client_of(container, fake_controller)
         fake_controller.add_environment("env-a", status="running")
-        name = client.create_headless_session("env-a", HeadlessCreateRequest()).name
+        name = client.create_headless_session(
+            "env-a", HeadlessCreateRequest(resume="conv-1")
+        ).name
         now = datetime.now(UTC)
         with scoped_session(container) as db:
             person = User(
